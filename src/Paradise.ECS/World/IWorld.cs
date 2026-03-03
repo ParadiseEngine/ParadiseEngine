@@ -113,6 +113,15 @@ public interface IWorld<TMask, TConfig>
     Entity AddComponents<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
 
     /// <summary>
+    /// Materializes a reserved entity by registering it in the entity manager
+    /// and placing it in the empty archetype. Used by <see cref="EntityCommandBuffer"/>
+    /// during playback for entities reserved via <see cref="EntityIdAllocator.Reserve"/>.
+    /// Idempotent — no-op if the entity is already materialized.
+    /// </summary>
+    /// <param name="entity">The reserved entity to materialize.</param>
+    void MaterializeEntity(Entity entity);
+
+    /// <summary>
     /// Removes all entities from this world.
     /// </summary>
     void Clear();

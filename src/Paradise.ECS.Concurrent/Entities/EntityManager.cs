@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS.Concurrent;
@@ -13,10 +12,9 @@ namespace Paradise.ECS.Concurrent;
 public sealed class EntityManager : IEntityManager, IDisposable
 {
     private ulong[] _packedLocations; // Uses packed EntityLocation format for lock-free CAS
-    private readonly ConcurrentStack<int> _freeSlots = new();
+    private readonly EntityIdAllocator _allocator;
     private readonly Lock _growLock = new();
     private readonly OperationGuard _operationGuard = new();
-    private int _nextEntityId; // Next fresh entity ID to allocate (atomic)
     private int _disposed; // 0 = not disposed, 1 = disposed
     private int _aliveCount; // Number of currently alive entities (atomic)
 
@@ -24,10 +22,12 @@ public sealed class EntityManager : IEntityManager, IDisposable
     /// Creates a new EntityManager.
     /// </summary>
     /// <param name="initialCapacity">Initial capacity for entity storage.</param>
-    public EntityManager(int initialCapacity)
+    /// <param name="maxEntityId">The maximum entity ID that can be allocated.</param>
+    public EntityManager(int initialCapacity, int maxEntityId = int.MaxValue)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(initialCapacity, 0);
         _packedLocations = new ulong[initialCapacity];
+        _allocator = new EntityIdAllocator(maxEntityId);
     }
 
     /// <summary>
@@ -41,6 +41,16 @@ public sealed class EntityManager : IEntityManager, IDisposable
     public int Capacity => Volatile.Read(ref _packedLocations).Length;
 
     /// <summary>
+    /// Gets the thread-safe entity ID allocator used by this manager.
+    /// Can be shared with <see cref="EntityCommandBuffer"/> for real ID reservation.
+    /// </summary>
+    public EntityIdAllocator Allocator
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _allocator;
+    }
+
+    /// <summary>
     /// Returns the ID that would be assigned to the next created entity,
     /// without actually creating it. Used for validation before creation.
     /// Note: In concurrent scenarios, another thread may allocate this ID
@@ -51,12 +61,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int PeekNextId()
     {
-        // If there's a free slot, that ID will be reused
-        if (_freeSlots.TryPeek(out int id))
-            return id;
-
-        // Otherwise, a new ID will be allocated
-        return Volatile.Read(ref _nextEntityId);
+        return _allocator.PeekNextId();
     }
 
     /// <summary>
@@ -70,40 +75,43 @@ public sealed class EntityManager : IEntityManager, IDisposable
         using var _ = _operationGuard.EnterScope();
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        if (_freeSlots.TryPop(out int id))
-        {
-            // Reuse a freed entity slot - version was already incremented on destroy
-            var locations = Volatile.Read(ref _packedLocations);
-            var current = EntityLocation.FromPacked(Volatile.Read(ref locations[id]));
-            // Reset archetype info (already -1 from destroy, but ensure consistency)
-            Volatile.Write(ref locations[id], new EntityLocation(current.Version, -1, -1).Packed);
-            Interlocked.Increment(ref _aliveCount);
-            return new Entity(id, current.Version);
-        }
+        var entity = _allocator.Reserve();
+        WriteReservedLocation(entity);
+        Interlocked.Increment(ref _aliveCount);
+        return entity;
+    }
 
-        // Allocate a new entity ID
-        id = Interlocked.Increment(ref _nextEntityId) - 1;
+    /// <summary>
+    /// Registers a previously reserved entity (from <see cref="EntityIdAllocator.Reserve"/>)
+    /// into the entity manager. Called during ECB playback to make reserved entities alive.
+    /// </summary>
+    /// <param name="entity">The reserved entity to register.</param>
+    public void RegisterReserved(Entity entity)
+    {
+        using var _ = _operationGuard.EnterScope();
+        ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        // Ensure capacity (thread-safe array growth)
-        EnsureCapacity(id);
+        WriteReservedLocation(entity);
+        Interlocked.Increment(ref _aliveCount);
+    }
 
-        // Initialize location with retry in case array grows while we're writing.
-        // If another thread grows the array after we read _packedLocations but before we write,
-        // our write goes to a stale array. Retry ensures we write to the current array.
+    /// <summary>
+    /// Ensures capacity and writes the initial location for a reserved entity.
+    /// </summary>
+    private void WriteReservedLocation(Entity entity)
+    {
+        EnsureCapacity(entity.Id);
+
+        // Write location with retry in case array grows while we're writing.
         while (true)
         {
             var locations = Volatile.Read(ref _packedLocations);
-            Volatile.Write(ref locations[id], new EntityLocation(1, -1, -1).Packed);
+            Volatile.Write(ref locations[entity.Id], new EntityLocation(entity.Version, -1, -1).Packed);
 
             // Check if array was replaced while we were writing
             if (Volatile.Read(ref _packedLocations) == locations)
                 break;
-
-            // Array was replaced, retry write to new array
         }
-
-        Interlocked.Increment(ref _aliveCount);
-        return new Entity(id, 1);
     }
 
     /// <summary>
@@ -121,7 +129,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         using var _ = _operationGuard.EnterScope();
         if (_disposed != 0) return;
 
-        if (entity.Id >= Volatile.Read(ref _nextEntityId))
+        if (entity.Id >= Volatile.Read(ref _packedLocations).Length)
             return;
 
         // Lock-free CAS loop for atomic read-modify-write
@@ -136,7 +144,8 @@ public sealed class EntityManager : IEntityManager, IDisposable
                 return;
 
             // Prepare new location with incremented version and invalid archetype
-            var newLocation = new EntityLocation(current.Version + 1, -1, -1);
+            uint nextVersion = EntityLocation.NextVersion(current.Version);
+            var newLocation = new EntityLocation(nextVersion, -1, -1);
 
             // Atomic compare-and-swap
             ulong original = Interlocked.CompareExchange(
@@ -146,21 +155,14 @@ public sealed class EntityManager : IEntityManager, IDisposable
 
             if (original == currentPacked)
             {
-                // Successfully destroyed
-                _freeSlots.Push(entity.Id);
+                // Successfully destroyed — release to allocator's free pool
+                _allocator.Release(entity.Id, nextVersion);
                 Interlocked.Decrement(ref _aliveCount);
                 return;
             }
 
-            // CAS failed - check if array was replaced during our operation
-            if (Volatile.Read(ref _packedLocations) != locations)
-            {
-                // Array was replaced, retry with new array
-                continue;
-            }
-
-            // Another thread modified this slot - re-read and check version
-            // (likely already destroyed by another thread)
+            // CAS failed — either array was replaced or another thread modified this slot.
+            // Re-loop to retry with fresh reads.
         }
     }
 
@@ -177,10 +179,10 @@ public sealed class EntityManager : IEntityManager, IDisposable
 
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        if (entity.Id >= Volatile.Read(ref _nextEntityId))
+        var locations = Volatile.Read(ref _packedLocations);
+        if (entity.Id >= locations.Length)
             return false;
 
-        var locations = Volatile.Read(ref _packedLocations);
         var packed = EntityLocation.FromPacked(Volatile.Read(ref locations[entity.Id]));
         return packed.Version == entity.Version;
     }
@@ -246,13 +248,13 @@ public sealed class EntityManager : IEntityManager, IDisposable
 
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        if (entity.Id >= Volatile.Read(ref _nextEntityId))
+        var locations = Volatile.Read(ref _packedLocations);
+        if (entity.Id >= locations.Length)
         {
             location = EntityLocation.Invalid;
             return false;
         }
 
-        var locations = Volatile.Read(ref _packedLocations);
         location = EntityLocation.FromPacked(Volatile.Read(ref locations[entity.Id]));
         if (location.Version != entity.Version)
         {
@@ -297,9 +299,8 @@ public sealed class EntityManager : IEntityManager, IDisposable
         // Wait for all in-flight operations to complete
         _operationGuard.WaitForCompletion();
 
-        _freeSlots.Clear();
+        _allocator.Clear();
         _packedLocations = [];
-        _nextEntityId = 0;
         _aliveCount = 0;
     }
 }

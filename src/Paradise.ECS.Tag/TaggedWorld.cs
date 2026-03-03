@@ -162,6 +162,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return true;
     }
 
+    /// <inheritdoc/>
+    public void MaterializeEntity(Entity entity) => _world.MaterializeEntity(entity);
+
     /// <summary>
     /// Clears all entities from the world.
     /// Also clears all chunk tag masks.

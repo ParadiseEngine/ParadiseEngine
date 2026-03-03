@@ -12,18 +12,19 @@ namespace Paradise.ECS;
 public sealed class EntityManager : IEntityManager
 {
     private readonly List<ulong> _packedLocations; // Uses packed EntityLocation format for memory efficiency
-    private readonly List<int> _freeSlots = new();
-    private int _nextEntityId; // Next fresh entity ID to allocate
+    private readonly EntityIdAllocator _allocator;
     private int _aliveCount; // Number of currently alive entities
 
     /// <summary>
     /// Creates a new EntityManager.
     /// </summary>
     /// <param name="initialCapacity">Initial capacity for entity storage.</param>
-    public EntityManager(int initialCapacity)
+    /// <param name="maxEntityId">The maximum entity ID that can be allocated.</param>
+    public EntityManager(int initialCapacity, int maxEntityId = int.MaxValue)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(initialCapacity, 0);
         _packedLocations = new List<ulong>(initialCapacity);
+        _allocator = new EntityIdAllocator(maxEntityId);
     }
 
     /// <summary>
@@ -45,6 +46,16 @@ public sealed class EntityManager : IEntityManager
     }
 
     /// <summary>
+    /// Gets the thread-safe entity ID allocator used by this manager.
+    /// Can be shared with <see cref="EntityCommandBuffer"/> for real ID reservation.
+    /// </summary>
+    public EntityIdAllocator Allocator
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _allocator;
+    }
+
+    /// <summary>
     /// Returns the ID that would be assigned to the next created entity,
     /// without actually creating it. Used for validation before creation.
     /// </summary>
@@ -52,12 +63,7 @@ public sealed class EntityManager : IEntityManager
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int PeekNextId()
     {
-        // If there's a free slot, that ID will be reused
-        if (_freeSlots.Count > 0)
-            return _freeSlots[^1];
-
-        // Otherwise, a new ID will be allocated
-        return _nextEntityId;
+        return _allocator.PeekNextId();
     }
 
     /// <summary>
@@ -67,30 +73,23 @@ public sealed class EntityManager : IEntityManager
     /// <returns>A valid entity handle.</returns>
     public Entity Create()
     {
-        int id;
-        if (_freeSlots.Count > 0)
-        {
-            // Reuse a freed entity slot - version was already incremented on destroy
-            id = _freeSlots[^1];
-            _freeSlots.RemoveAt(_freeSlots.Count - 1);
-            uint version = EntityLocation.FromPacked(_packedLocations[id]).Version;
-            _packedLocations[id] = new EntityLocation(version, -1, -1).Packed;
-            _aliveCount++;
-            return new Entity(id, version);
-        }
-
-        // Allocate a new entity ID
-        id = _nextEntityId;
-        _nextEntityId++;
-
-        // Ensure capacity - adds default entries to grow the list
-        EnsureCapacity(id);
-
-        // Initialize location with version 1 and no archetype
-        _packedLocations[id] = new EntityLocation(1, -1, -1).Packed;
-
+        var entity = _allocator.Reserve();
+        EnsureCapacity(entity.Id);
+        _packedLocations[entity.Id] = new EntityLocation(entity.Version, -1, -1).Packed;
         _aliveCount++;
-        return new Entity(id, 1);
+        return entity;
+    }
+
+    /// <summary>
+    /// Registers a previously reserved entity (from <see cref="EntityIdAllocator.Reserve"/>)
+    /// into the entity manager. Called during ECB playback to make reserved entities alive.
+    /// </summary>
+    /// <param name="entity">The reserved entity to register.</param>
+    public void RegisterReserved(Entity entity)
+    {
+        EnsureCapacity(entity.Id);
+        _packedLocations[entity.Id] = new EntityLocation(entity.Version, -1, -1).Packed;
+        _aliveCount++;
     }
 
     /// <summary>
@@ -104,7 +103,7 @@ public sealed class EntityManager : IEntityManager
         if (!entity.IsValid)
             return;
 
-        if (entity.Id >= _nextEntityId)
+        if (entity.Id >= _packedLocations.Count)
             return;
 
         var location = EntityLocation.FromPacked(_packedLocations[entity.Id]);
@@ -114,10 +113,11 @@ public sealed class EntityManager : IEntityManager
             return;
 
         // Increment version to invalidate all existing handles, clear archetype info
-        _packedLocations[entity.Id] = new EntityLocation(location.Version + 1, -1, -1).Packed;
+        uint nextVersion = EntityLocation.NextVersion(location.Version);
+        _packedLocations[entity.Id] = new EntityLocation(nextVersion, -1, -1).Packed;
 
-        // Add to free list
-        _freeSlots.Add(entity.Id);
+        // Release to allocator's free pool
+        _allocator.Release(entity.Id, nextVersion);
         _aliveCount--;
     }
 
@@ -132,7 +132,7 @@ public sealed class EntityManager : IEntityManager
         if (!entity.IsValid)
             return false;
 
-        if (entity.Id >= _nextEntityId)
+        if (entity.Id >= _packedLocations.Count)
             return false;
 
         return EntityLocation.FromPacked(_packedLocations[entity.Id]).Version == entity.Version;
@@ -182,9 +182,8 @@ public sealed class EntityManager : IEntityManager
     /// </summary>
     public void Clear()
     {
-        _freeSlots.Clear();
+        _allocator.Clear();
         _packedLocations.Clear();
-        _nextEntityId = 0;
         _aliveCount = 0;
     }
 
@@ -200,12 +199,10 @@ public sealed class EntityManager : IEntityManager
         CollectionsMarshal.SetCount(_packedLocations, source._packedLocations.Count);
         CollectionsMarshal.AsSpan(source._packedLocations).CopyTo(CollectionsMarshal.AsSpan(_packedLocations));
 
-        // Copy free slots (direct memory copy)
-        CollectionsMarshal.SetCount(_freeSlots, source._freeSlots.Count);
-        CollectionsMarshal.AsSpan(source._freeSlots).CopyTo(CollectionsMarshal.AsSpan(_freeSlots));
+        // Copy allocator state
+        _allocator.CopyFrom(source._allocator);
 
-        // Copy counters
-        _nextEntityId = source._nextEntityId;
+        // Copy counter
         _aliveCount = source._aliveCount;
     }
 }

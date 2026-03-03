@@ -61,7 +61,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         _sharedMetadata = sharedMetadata;
         _chunkManager = chunkManager;
         _archetypeRegistry = new ArchetypeRegistry<TMask, TConfig>(sharedMetadata, _typeInfos, chunkManager);
-        _entityManager = new EntityManager(config.DefaultEntityCapacity);
+        _entityManager = new EntityManager(config.DefaultEntityCapacity, Config<TConfig>.MaxEntityId);
     }
 
     /// <summary>

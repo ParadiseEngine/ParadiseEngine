@@ -1,6 +1,6 @@
 # Paradise.ECS Roadmap
 
-> Last updated: 2026-02-11
+> Last updated: 2026-03-03
 
 ## Vision
 
@@ -130,7 +130,15 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
   - Access mask generation for read/write conflict detection
   - Optional and QueryOnly component support in access masks
 
+- [x] **EntityCommandBuffer with Real Entity ID Reservation** ([#51](https://github.com/quabug/ParadiseECS/pull/51))
+  - EntityCommandBuffer for deferred structural changes (spawn, despawn, add/remove/set component)
+  - EntityIdAllocator for thread-safe real entity ID reservation (Bevy/Flecs style)
+  - World.MaterializeEntity() for registering reserved entities during ECB playback
+  - Type-erased raw component methods (AddComponentRaw, RemoveComponentRaw, SetComponentRaw)
+  - Version overflow protection with EntityLocation.NextVersion()
+
 ### In Progress
+
 
 ### Planned
 
@@ -139,13 +147,6 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
     - Work stealing for load balancing
     - Parallel query iteration
     - Safety rails for data races
-
-- [ ] **Query with Structural Change Strategies** ([#18](https://github.com/quabug/ParadiseECS/issues/18))
-    - Investigate safe iteration patterns when entities are added/removed during query
-    - Deferred structural changes (command buffers) vs immediate changes
-    - Archetype stability guarantees during iteration
-    - Chunk invalidation and iterator invalidation detection
-    - Consider: Unity DOTS EntityCommandBuffer, Bevy Commands, Flecs defer patterns
 
 - [ ] **Extensible Metadata Interface**
     - Define interface for world/archetype metadata (e.g., `IWorldMetadata`)
@@ -319,6 +320,7 @@ Minor TODOs in codebase:
 
 ### Recent Activity
 
+- **2026-03-03**: Merged [#51](https://github.com/quabug/ParadiseECS/pull/51) - Add EntityCommandBuffer with real entity ID reservation
 - **2026-02-11**: Merged [#49](https://github.com/quabug/ParadiseECS/pull/49) - Add system scheduling with runtime DAG resolution
 - **2026-01-26**: Merged [#47](https://github.com/quabug/ParadiseECS/pull/47) - Refactor queryable pattern with generic QueryResult and simplified APIs
 - **2026-01-24**: Merged [#45](https://github.com/quabug/ParadiseECS/pull/45) - Add World.CopyFrom() for cloning world state between shared worlds

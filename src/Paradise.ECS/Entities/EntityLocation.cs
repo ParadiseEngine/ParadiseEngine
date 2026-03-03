@@ -132,6 +132,18 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
     public static EntityLocation FromPacked(ulong packed) => new(packed);
 
     /// <summary>
+    /// Computes the next version, wrapping around to 1 at <see cref="MaxVersion"/>
+    /// (version 0 is reserved for invalid entities).
+    /// </summary>
+    /// <param name="currentVersion">The current version.</param>
+    /// <returns>The next version value.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint NextVersion(uint currentVersion)
+    {
+        return currentVersion < MaxVersion ? currentVersion + 1 : 1;
+    }
+
+    /// <summary>
     /// An invalid/empty entity location.
     /// </summary>
     public static readonly EntityLocation Invalid = new(0, -1, -1);

@@ -51,7 +51,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         _chunkManager = chunkManager;
         _typeInfos = sharedMetadata.TypeInfos;
         _archetypeRegistry = new ArchetypeRegistry<TMask, TConfig>(sharedMetadata, chunkManager);
-        _entityManager = new EntityManager(config.DefaultEntityCapacity);
+        _entityManager = new EntityManager(config.DefaultEntityCapacity, Config<TConfig>.MaxEntityId);
 
         // Create the empty archetype for componentless entities
         _emptyArchetype = _archetypeRegistry.GetOrCreate(
@@ -203,6 +203,46 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         }
     }
 
+    /// <inheritdoc/>
+    public void MaterializeEntity(Entity entity)
+    {
+        // Validate entity ID fits within configured byte-size limits
+        ThrowHelper.ThrowIfEntityIdExceedsLimit(entity.Id, Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
+
+        if (entity.Id < _entityManager.Capacity)
+        {
+            var location = _entityManager.GetLocation(entity.Id);
+            if (location.Version == entity.Version)
+            {
+                if (location.ArchetypeId >= 0)
+                {
+                    // Already materialized, no-op
+                    return;
+                }
+                // Registered but not yet placed in an archetype — fall through to allocate
+            }
+            else if (location.Version > entity.Version)
+            {
+                // Slot is occupied by a newer generation — the reserved entity is stale
+                throw new InvalidOperationException(
+                    $"Cannot materialize entity {entity.Id} v{entity.Version}: slot already at v{location.Version}.");
+            }
+            else
+            {
+                // Entity was reserved but not yet registered
+                _entityManager.RegisterReserved(entity);
+            }
+        }
+        else
+        {
+            // Entity ID beyond current capacity — reserved but not yet registered
+            _entityManager.RegisterReserved(entity);
+        }
+
+        int globalIndex = _emptyArchetype.AllocateEntity(entity);
+        _entityManager.SetLocation(entity.Id, new EntityLocation(entity.Version, _emptyArchetype.Id, globalIndex));
+    }
+
     /// <summary>
     /// Destroys an entity and removes it from its archetype.
     /// </summary>
@@ -214,7 +254,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
             return false;
 
         var location = _entityManager.GetLocation(entity.Id);
-        if (location.MatchesEntity(entity))
+        if (location.MatchesEntity(entity) && location.ArchetypeId >= 0)
         {
             RemoveFromCurrentArchetype(location);
         }
@@ -384,6 +424,15 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     }
 
     /// <summary>
+    /// Gets the thread-safe entity ID allocator for constructing <see cref="EntityCommandBuffer"/> instances.
+    /// </summary>
+    public EntityIdAllocator EntityIdAllocator
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _entityManager.Allocator;
+    }
+
+    /// <summary>
     /// Gets the Entity handle for a given entity ID.
     /// </summary>
     /// <param name="entityId">The entity ID.</param>
@@ -491,6 +540,86 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
             var dstData = DstBytes.GetBytesAt(dstOffset, info.Size);
             srcData.CopyTo(dstData);
         }
+    }
+
+    /// <summary>
+    /// Adds a component to an entity using raw bytes. This is a structural change that may move the entity.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    /// <param name="data">The raw component data bytes. Must match the component's size exactly, or be empty for tag components.</param>
+    /// <exception cref="InvalidOperationException">Entity is not alive or already has the component.</exception>
+    public void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
+    {
+        int expectedSize = _typeInfos[componentId].Size;
+        if (data.Length != expectedSize)
+            throw new ArgumentException($"Data size {data.Length} does not match component {componentId} size {expectedSize}.", nameof(data));
+
+        var location = GetValidatedLocation(entity);
+        var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
+
+        if (sourceArchetype.Layout.HasComponent(componentId))
+            throw new InvalidOperationException($"Entity {entity} already has component {componentId}.");
+
+        var targetArchetype = _archetypeRegistry.GetOrCreateWithAdd(sourceArchetype, componentId);
+        MoveEntity(entity, location, sourceArchetype, targetArchetype);
+
+        // Write raw component data if non-empty (skip for tag components)
+        if (data.Length > 0)
+        {
+            var updatedLocation = _entityManager.GetLocation(entity.Id);
+            var (newChunkIndex, newIndexInChunk) = targetArchetype.GetChunkLocation(updatedLocation.GlobalIndex);
+            var newChunkHandle = targetArchetype.GetChunk(newChunkIndex);
+            int newOffset = targetArchetype.Layout.GetBaseOffset(componentId) + newIndexInChunk * expectedSize;
+            data.CopyTo(_chunkManager.GetBytes(newChunkHandle).GetBytesAt(newOffset, expectedSize));
+        }
+    }
+
+    /// <summary>
+    /// Removes a component from an entity using a raw component ID. This is a structural change that may move the entity.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
+    public void RemoveComponentRaw(Entity entity, ComponentId componentId)
+    {
+        var location = GetValidatedLocation(entity);
+        var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
+
+        if (!sourceArchetype.Layout.HasComponent(componentId))
+            throw new InvalidOperationException($"Entity {entity} does not have component {componentId}.");
+
+        var targetArchetype = _archetypeRegistry.GetOrCreateWithRemove(sourceArchetype, componentId);
+        MoveEntity(entity, location, sourceArchetype, targetArchetype);
+    }
+
+    /// <summary>
+    /// Sets a component value on an entity using raw bytes. This is NOT a structural change.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    /// <param name="data">The raw component data bytes. Must match the component's size exactly.</param>
+    /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
+    public void SetComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
+    {
+        int expectedSize = _typeInfos[componentId].Size;
+        if (data.Length != expectedSize)
+            throw new ArgumentException($"Data size {data.Length} does not match component {componentId} size {expectedSize}.", nameof(data));
+
+        var location = GetValidatedLocation(entity);
+        var archetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
+
+        if (!archetype.Layout.HasComponent(componentId))
+            throw new InvalidOperationException($"Entity {entity} does not have component {componentId}.");
+
+        // Skip write for tag components (size 0)
+        if (data.Length == 0)
+            return;
+
+        var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(location.GlobalIndex);
+        var chunkHandle = archetype.GetChunk(chunkIndex);
+        int offset = archetype.Layout.GetBaseOffset(componentId) + indexInChunk * expectedSize;
+        data.CopyTo(_chunkManager.GetBytes(chunkHandle).GetBytesAt(offset, expectedSize));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

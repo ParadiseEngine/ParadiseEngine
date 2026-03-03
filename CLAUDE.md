@@ -6,6 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Paradise.ECS is a high-performance Entity Component System library for .NET 10, designed for Native AOT compilation. Part of the Paradise Engine ecosystem targeting game development with Pure C# + WebGPU + Slang.
 
+## Workflow Rules
+- Always run unit tests (`dotnet test`) before pushing to remote
+
 ## Build Commands
 
 ```bash
@@ -176,3 +179,11 @@ public async Task MethodName_Scenario_ExpectedBehavior()
 ```
 
 Note: When using `stackalloc`, capture values before `await` boundaries.
+
+## Multi-Agents
+- gemini
+- codex
+- opencode: bailian-coding-plan/glm-5
+- opencode: bailian-coding-plan/kimi-k2.5
+- opencode: bailian-coding-plan/MiniMax-M2.5
+- opencode: bailian-coding-plan/qwen3.5-plus
