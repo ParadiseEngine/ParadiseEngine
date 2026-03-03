@@ -133,3 +133,64 @@ public ref partial struct QueryableGravityBatchSystem : IChunkSystem
             velocities[i] = new(velocities[i].X, velocities[i].Y - 9.8f);
     }
 }
+
+// ---- Entity Handle Injection Systems ----
+
+/// <summary>
+/// Despawns entities with zero or negative health using the injected Entity handle.
+/// Demonstrates entity handle injection in IEntitySystem for targeted ECB operations.
+/// </summary>
+public ref partial struct DespawnDeadSystem : IEntitySystem
+{
+    public Entity Entity;
+    public ref readonly Health Health;
+    public EntityCommandBuffer Commands;
+
+    public void Execute()
+    {
+        if (Health.Current <= 0)
+            Commands.Despawn(Entity);
+    }
+}
+
+/// <summary>
+/// Spawns a clone entity at the same position when health is low.
+/// Demonstrates reading the current Entity handle alongside component data.
+/// </summary>
+public ref partial struct SpawnCloneWhenLowHealthSystem : IEntitySystem
+{
+    public Entity Entity;
+    public ref readonly Position Position;
+    public ref readonly Health Health;
+    public EntityCommandBuffer Commands;
+
+    public void Execute()
+    {
+        if (Health.Current > 0 && Health.Current <= 20)
+        {
+            var clone = Commands.Spawn();
+            Commands.AddComponent(clone, new Position(Position.X, Position.Y));
+            Commands.AddComponent(clone, new Health(Health.Max));
+        }
+    }
+}
+
+/// <summary>
+/// Chunk system that despawns entities with zero health using ReadOnlySpan&lt;Entity&gt;.
+/// Demonstrates entity span injection in IChunkSystem for batch ECB operations.
+/// </summary>
+public ref partial struct ChunkDespawnDeadSystem : IChunkSystem
+{
+    public ReadOnlySpan<Entity> Entities;
+    public ReadOnlySpan<Health> Healths;
+    public EntityCommandBuffer Commands;
+
+    public void ExecuteChunk()
+    {
+        for (int i = 0; i < Entities.Length; i++)
+        {
+            if (Healths[i].Current <= 0)
+                Commands.Despawn(Entities[i]);
+        }
+    }
+}

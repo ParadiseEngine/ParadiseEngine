@@ -282,14 +282,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
     public int GetEntityId(ChunkHandle chunkHandle, int indexInChunk)
     {
         var bytes = _chunkManager.GetBytes(chunkHandle);
-        int offset = ImmutableArchetypeLayout<TMask, TConfig>.GetEntityIdOffset(indexInChunk);
-        return TConfig.EntityIdByteSize switch
-        {
-            1 => bytes.GetRef<byte>(offset),
-            2 => bytes.GetRef<ushort>(offset),
-            4 => bytes.GetRef<int>(offset),
-            _ => ThrowHelper.ThrowInvalidEntityIdByteSize<int>(TConfig.EntityIdByteSize)
-        };
+        return ImmutableArchetypeLayout<TMask, TConfig>.ReadEntityId(bytes, indexInChunk);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -350,10 +350,35 @@ public class SystemGenerator : IIncrementalGenerator
                 ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
         }
 
+        // Entity field → EntityHandle (for entity systems)
+        if (!isRef && fieldType is INamedTypeSymbol entityType &&
+            entityType.ToDisplayString() == "Paradise.ECS.Entity")
+        {
+            return new SystemFieldInfo(
+                field.Name, FieldKind.EntityHandle, false,
+                "global::Paradise.ECS.Entity",
+                null, ImmutableArray<QueryableComponentAccess>.Empty,
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+        }
+
         // Span<T> / ReadOnlySpan<T> where T has [Component] attribute → InlineSpan
+        // ReadOnlySpan<Entity> → EntitySpan (for chunk systems)
         if (!isRef && fieldType is INamedTypeSymbol spanType && spanType.IsGenericType)
         {
             var origDef = spanType.OriginalDefinition;
+
+            if (origDef.Name == "ReadOnlySpan" &&
+                origDef.ContainingNamespace?.ToDisplayString() == "System" &&
+                spanType.TypeArguments[0] is INamedTypeSymbol entitySpanArg &&
+                entitySpanArg.ToDisplayString() == "Paradise.ECS.Entity")
+            {
+                return new SystemFieldInfo(
+                    field.Name, FieldKind.EntitySpan, true,
+                    "global::System.ReadOnlySpan<global::Paradise.ECS.Entity>",
+                    null, ImmutableArray<QueryableComponentAccess>.Empty,
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+            }
+
             if (origDef.Name == "Span" &&
                 origDef.ContainingNamespace?.ToDisplayString() == "System" &&
                 spanType.TypeArguments[0] is INamedTypeSymbol spanArg &&
@@ -466,11 +491,11 @@ public class SystemGenerator : IIncrementalGenerator
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SystemInvalidFieldType, sys.Location, field.FieldName, sys.FullyQualifiedName, field.TypeFQN));
 
                 // IChunkSystem with entity-mode fields
-                if (sys.Kind == SystemKind.Chunk && field.Kind is FieldKind.InlineComponent or FieldKind.CompositionData)
+                if (sys.Kind == SystemKind.Chunk && IsEntityModeField(field.Kind))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.ChunkSystemHasEntityFields, sys.Location, field.FieldName, sys.FullyQualifiedName));
 
                 // IEntitySystem with chunk-mode fields
-                if (sys.Kind == SystemKind.Entity && field.Kind is FieldKind.InlineSpan or FieldKind.CompositionChunkData)
+                if (sys.Kind == SystemKind.Entity && IsChunkModeField(field.Kind))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.EntitySystemHasChunkFields, sys.Location, field.FieldName, sys.FullyQualifiedName));
             }
         }
@@ -481,8 +506,8 @@ public class SystemGenerator : IIncrementalGenerator
         {
             foreach (var f in s.Fields)
             {
-                if (s.Kind == SystemKind.Chunk && f.Kind is FieldKind.InlineComponent or FieldKind.CompositionData) return false;
-                if (s.Kind == SystemKind.Entity && f.Kind is FieldKind.InlineSpan or FieldKind.CompositionChunkData) return false;
+                if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
+                if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
             }
             return true;
         }).ToList();
@@ -537,7 +562,7 @@ public class SystemGenerator : IIncrementalGenerator
 
         foreach (var field in sys.Fields)
         {
-            if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer) continue;
+            if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer or FieldKind.EntityHandle or FieldKind.EntitySpan) continue;
 
             if (field.Kind is FieldKind.InlineComponent or FieldKind.InlineSpan)
             {
@@ -736,6 +761,12 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.CommandBuffer:
                     sb.Append($"global::Paradise.ECS.EntityCommandBuffer {ToCamelCase(field.FieldName)}");
                     break;
+                case FieldKind.EntityHandle:
+                    sb.Append($"global::Paradise.ECS.Entity {ToCamelCase(field.FieldName)}");
+                    break;
+                case FieldKind.EntitySpan:
+                    sb.Append($"global::System.ReadOnlySpan<global::Paradise.ECS.Entity> {ToCamelCase(field.FieldName)}");
+                    break;
             }
         }
 
@@ -778,8 +809,10 @@ public class SystemGenerator : IIncrementalGenerator
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
         var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionData).ToList();
+        bool hasEntityHandle = sys.Fields.Any(f => f.Kind == FieldKind.EntityHandle);
+        bool needsBytes = inlineFields.Count > 0 || hasEntityHandle;
 
-        if (inlineFields.Count > 0)
+        if (needsBytes)
         {
             sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
             foreach (var field in inlineFields)
@@ -791,6 +824,13 @@ public class SystemGenerator : IIncrementalGenerator
 
         sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
         sb.AppendLine($"{indent}{{");
+
+        // Extract entity handle if needed
+        if (hasEntityHandle)
+        {
+            sb.AppendLine($"{indent}    int __entityId = global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}>.ReadEntityId(bytes, __i);");
+            sb.AppendLine($"{indent}    var __entity = new global::Paradise.ECS.Entity(__entityId, world.EntityManager.GetLocation(__entityId).Version);");
+        }
 
         // Create composition Data instances inside loop
         foreach (var field in compositionFields)
@@ -815,6 +855,8 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"{ToCamelCase(field.FieldName)}Data");
             else if (field.Kind == FieldKind.CommandBuffer)
                 sb.Append("commands");
+            else if (field.Kind == FieldKind.EntityHandle)
+                sb.Append("__entity");
         }
         sb.AppendLine(");");
         sb.AppendLine($"{indent}    __system.Execute();");
@@ -825,8 +867,10 @@ public class SystemGenerator : IIncrementalGenerator
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineSpan).ToList();
         var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionChunkData).ToList();
+        bool hasEntitySpan = sys.Fields.Any(f => f.Kind == FieldKind.EntitySpan);
+        bool needsBytes = inlineFields.Count > 0 || hasEntitySpan;
 
-        if (inlineFields.Count > 0)
+        if (needsBytes)
         {
             sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
             foreach (var field in inlineFields)
@@ -835,6 +879,17 @@ public class SystemGenerator : IIncrementalGenerator
                 var varName = ToCamelCase(field.FieldName) + "Span";
                 sb.AppendLine($"{indent}var {varName} = bytes.GetSpan<{compFQN}>(layout.GetBaseOffset({compFQN}.TypeId), entityCount);");
             }
+        }
+
+        // Build entity span if needed
+        if (hasEntitySpan)
+        {
+            sb.AppendLine($"{indent}global::System.Span<global::Paradise.ECS.Entity> __entitySpan = entityCount <= 256 ? stackalloc global::Paradise.ECS.Entity[entityCount] : new global::Paradise.ECS.Entity[entityCount];");
+            sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
+            sb.AppendLine($"{indent}{{");
+            sb.AppendLine($"{indent}    int __eid = global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}>.ReadEntityId(bytes, __i);");
+            sb.AppendLine($"{indent}    __entitySpan[__i] = new global::Paradise.ECS.Entity(__eid, world.EntityManager.GetLocation(__eid).Version);");
+            sb.AppendLine($"{indent}}}");
         }
 
         // Create composition ChunkData instances
@@ -868,6 +923,10 @@ public class SystemGenerator : IIncrementalGenerator
             else if (field.Kind == FieldKind.CommandBuffer)
             {
                 sb.Append("commands");
+            }
+            else if (field.Kind == FieldKind.EntitySpan)
+            {
+                sb.Append("(global::System.ReadOnlySpan<global::Paradise.ECS.Entity>)__entitySpan");
             }
         }
         sb.AppendLine(");");
@@ -1087,7 +1146,13 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CommandBuffer, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CommandBuffer, EntityHandle, EntitySpan, Invalid }
+
+    private static bool IsEntityModeField(FieldKind kind) =>
+        kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;
+
+    private static bool IsChunkModeField(FieldKind kind) =>
+        kind is FieldKind.InlineSpan or FieldKind.CompositionChunkData or FieldKind.EntitySpan;
 
     private readonly struct QueryableComponentAccess
     {

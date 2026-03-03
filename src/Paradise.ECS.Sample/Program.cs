@@ -29,6 +29,7 @@ GeneratedTypesSample.Run();
 QueryableSample.Run(world);
 SystemSample.Run(world);
 WorldClearSample.Run(world, playerEntity);
+EntityInjectionSample.Run(world);
 
 Console.WriteLine("=== Sample Application Complete ===");
 Console.WriteLine("All operations executed successfully!");

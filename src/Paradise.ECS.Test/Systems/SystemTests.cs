@@ -115,23 +115,55 @@ public ref partial struct TestSpawnOnUpdateSystem : IEntitySystem
 }
 
 /// <summary>
-/// Test entity system with an ECB field that conditionally records commands.
-/// Used to verify the "no commands recorded" path (health > 0 → no-op).
+/// Test entity system with an ECB field that conditionally despawns entities with health &lt;= 0.
+/// Uses injected Entity handle for targeted despawn.
 /// </summary>
-/// <remarks>
-/// Note: This system cannot despawn the current entity because <see cref="IEntitySystem"/>
-/// does not yet inject the current entity handle. Once entity handle injection is supported,
-/// this can be updated to despawn the actual entity.
-/// </remarks>
 public ref partial struct TestDespawnDeadSystem : IEntitySystem
 {
+    public Entity Entity;
     public ref readonly TestHealth Health;
     public EntityCommandBuffer Commands;
 
     public void Execute()
     {
-        // Intentionally no-op: entity handle injection is not yet supported.
-        // This system is used to test the "no commands recorded" path.
+        if (Health.Current <= 0)
+            Commands.Despawn(Entity);
+    }
+}
+
+/// <summary>
+/// Test entity system that records its Entity handle via ECB AddComponent.
+/// Used to verify entity handle correctness.
+/// </summary>
+public ref partial struct TestRecordEntitySystem : IEntitySystem
+{
+    public Entity Entity;
+    public ref readonly TestHealth Health;
+    public EntityCommandBuffer Commands;
+
+    public void Execute()
+    {
+        Commands.AddComponent(Entity, new TestDamage { Amount = Entity.Id });
+    }
+}
+
+/// <summary>
+/// Test chunk system with entity span injection.
+/// Used to verify ReadOnlySpan&lt;Entity&gt; injection in chunk systems.
+/// </summary>
+public ref partial struct TestChunkEntitySpanSystem : IChunkSystem
+{
+    public ReadOnlySpan<Entity> Entities;
+    public ReadOnlySpan<TestHealth> Healths;
+    public EntityCommandBuffer Commands;
+
+    public void ExecuteChunk()
+    {
+        for (int i = 0; i < Entities.Length; i++)
+        {
+            if (Healths[i].Current <= 0)
+                Commands.Despawn(Entities[i]);
+        }
     }
 }
 
@@ -631,24 +663,6 @@ public sealed class SystemTests : IDisposable
         await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 1);
     }
 
-    [Test]
-    public async Task ECB_NoCommandsRecorded_NoEntitiesCreated()
-    {
-        // Entity has TestHealth but TestDespawnDeadSystem only despawns if health <= 0
-        var e = _world.Spawn();
-        _world.AddComponent(e, new TestHealth { Current = 100, Max = 100 });
-
-        var schedule = SystemSchedule.Create(_world)
-            .Add<TestDespawnDeadSystem>()
-            .Build<SequentialWaveScheduler>();
-
-        int countBefore = _world.EntityCount;
-        schedule.Run();
-
-        // No despawns since health > 0
-        await Assert.That(_world.EntityCount).IsEqualTo(countBefore);
-    }
-
     // ---- ECB Playback Tests (end-of-run playback) ----
 
     [Test]
@@ -710,5 +724,96 @@ public sealed class SystemTests : IDisposable
         // SpawnOnUpdateSystem queries Position, so only original triggers a spawn.
         schedule.Run();
         await Assert.That(_world.EntityCount).IsEqualTo(3); // +1 more spawned
+    }
+
+    // ---- Entity Handle Injection Tests ----
+
+    [Test]
+    public async Task ECB_EntityInjection_DespawnsCorrectEntity()
+    {
+        // Spawn entities with varying health
+        var alive1 = _world.Spawn();
+        _world.AddComponent(alive1, new TestHealth { Current = 100, Max = 100 });
+
+        var dead1 = _world.Spawn();
+        _world.AddComponent(dead1, new TestHealth { Current = 0, Max = 100 });
+
+        var alive2 = _world.Spawn();
+        _world.AddComponent(alive2, new TestHealth { Current = 50, Max = 100 });
+
+        var dead2 = _world.Spawn();
+        _world.AddComponent(dead2, new TestHealth { Current = -10, Max = 100 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestDespawnDeadSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        // Only entities with health <= 0 should be despawned
+        await Assert.That(_world.IsAlive(alive1)).IsTrue();
+        await Assert.That(_world.IsAlive(alive2)).IsTrue();
+        await Assert.That(_world.IsAlive(dead1)).IsFalse();
+        await Assert.That(_world.IsAlive(dead2)).IsFalse();
+        await Assert.That(_world.EntityCount).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task ECB_EntityInjection_EntityHandleIsCorrect()
+    {
+        // Spawn entity with Health, run TestRecordEntitySystem which adds TestDamage with Entity.Id
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestHealth { Current = 42, Max = 100 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestRecordEntitySystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        // The system should have recorded the entity's ID in TestDamage.Amount
+        await Assert.That(_world.HasComponent<TestDamage>(e)).IsTrue();
+        var dmg = _world.GetComponent<TestDamage>(e);
+        await Assert.That(dmg.Amount).IsEqualTo(e.Id);
+    }
+
+    [Test]
+    public async Task ECB_ChunkEntitySpan_DespawnsCorrectEntities()
+    {
+        // Spawn entities with varying health
+        var alive = _world.Spawn();
+        _world.AddComponent(alive, new TestHealth { Current = 100, Max = 100 });
+
+        var dead = _world.Spawn();
+        _world.AddComponent(dead, new TestHealth { Current = 0, Max = 100 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestChunkEntitySpanSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        // Only entity with health <= 0 should be despawned
+        await Assert.That(_world.IsAlive(alive)).IsTrue();
+        await Assert.That(_world.IsAlive(dead)).IsFalse();
+        await Assert.That(_world.EntityCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ECB_NoCommandsRecorded_HealthyEntitiesNotDespawned()
+    {
+        // Entity has TestHealth with health > 0 — TestDespawnDeadSystem should not despawn
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestHealth { Current = 100, Max = 100 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestDespawnDeadSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        int countBefore = _world.EntityCount;
+        schedule.Run();
+
+        // No despawns since health > 0
+        await Assert.That(_world.EntityCount).IsEqualTo(countBefore);
     }
 }

@@ -355,6 +355,26 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
     }
 
     /// <summary>
+    /// Reads the entity ID at the specified index from a chunk's raw bytes.
+    /// Handles variable entity ID byte sizes (1, 2, or 4 bytes).
+    /// </summary>
+    /// <param name="bytes">The chunk's raw byte span.</param>
+    /// <param name="entityIndex">The entity's index within the chunk.</param>
+    /// <returns>The entity ID.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int ReadEntityId(Span<byte> bytes, int entityIndex)
+    {
+        int offset = entityIndex * TConfig.EntityIdByteSize;
+        return TConfig.EntityIdByteSize switch
+        {
+            1 => bytes.GetRef<byte>(offset),
+            2 => bytes.GetRef<ushort>(offset),
+            4 => bytes.GetRef<int>(offset),
+            _ => ThrowHelper.ThrowInvalidEntityIdByteSize<int>(TConfig.EntityIdByteSize)
+        };
+    }
+
+    /// <summary>
     /// Frees the memory allocated for an archetype layout.
     /// </summary>
     /// <param name="allocator">The allocator that was used to create the layout.</param>
