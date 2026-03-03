@@ -144,6 +144,13 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
   - End-of-run playback: structural changes applied after all waves complete
   - IWaveScheduler strategy interface with SequentialWaveScheduler and ParallelWaveScheduler
 
+- [x] **Entity Handle Injection in Systems** ([#54](https://github.com/quabug/ParadiseECS/pull/54))
+  - `Entity` field injection for `IEntitySystem` — per-entity handle access during iteration
+  - `ReadOnlySpan<Entity>` injection for `IChunkSystem` — chunk-level entity span access
+  - `ReadEntityId` helper in `ImmutableArchetypeLayout` for variable byte-size entity ID reading
+  - Source generator detects Entity/ReadOnlySpan<Entity> fields and emits extraction code
+  - Validation diagnostics (PECS3006/PECS3007) for mismatched field kinds across system types
+
 ### In Progress
 
 
@@ -327,6 +334,7 @@ Minor TODOs in codebase:
 
 ### Recent Activity
 
+- **2026-03-04**: Merged [#54](https://github.com/quabug/ParadiseECS/pull/54) - Add entity handle injection in systems
 - **2026-03-04**: Merged [#53](https://github.com/quabug/ParadiseECS/pull/53) - Integrate ECB with system scheduler
 - **2026-03-03**: Merged [#51](https://github.com/quabug/ParadiseECS/pull/51) - Add EntityCommandBuffer with real entity ID reservation
 - **2026-02-11**: Merged [#49](https://github.com/quabug/ParadiseECS/pull/49) - Add system scheduling with runtime DAG resolution
