@@ -131,9 +131,11 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <param name="chunk">The chunk handle to process.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
+    /// <param name="commands">The entity command buffer for deferred structural changes.</param>
     static abstract void RunChunk(
         IWorld<TMask, TConfig> world,
         ChunkHandle chunk,
         ImmutableArchetypeLayout<TMask, TConfig> layout,
-        int entityCount);
+        int entityCount,
+        EntityCommandBuffer commands);
 }

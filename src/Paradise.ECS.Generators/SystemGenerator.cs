@@ -339,6 +339,17 @@ public class SystemGenerator : IIncrementalGenerator
             }
         }
 
+        // IEntityCommandBuffer field → CommandBuffer
+        if (!isRef && fieldType is INamedTypeSymbol namedType &&
+            namedType.ToDisplayString() == "Paradise.ECS.EntityCommandBuffer")
+        {
+            return new SystemFieldInfo(
+                field.Name, FieldKind.CommandBuffer, false,
+                "global::Paradise.ECS.EntityCommandBuffer",
+                null, ImmutableArray<QueryableComponentAccess>.Empty,
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+        }
+
         // Span<T> / ReadOnlySpan<T> where T has [Component] attribute → InlineSpan
         if (!isRef && fieldType is INamedTypeSymbol spanType && spanType.IsGenericType)
         {
@@ -526,7 +537,7 @@ public class SystemGenerator : IIncrementalGenerator
 
         foreach (var field in sys.Fields)
         {
-            if (field.Kind == FieldKind.Invalid) continue;
+            if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer) continue;
 
             if (field.Kind is FieldKind.InlineComponent or FieldKind.InlineSpan)
             {
@@ -722,6 +733,9 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.CompositionChunkData:
                     sb.Append($"global::{field.ComponentFQN!.Replace("+", ".")}.ChunkData<{maskType}, {configType}> {ToCamelCase(field.FieldName)}");
                     break;
+                case FieldKind.CommandBuffer:
+                    sb.Append($"global::Paradise.ECS.EntityCommandBuffer {ToCamelCase(field.FieldName)}");
+                    break;
             }
         }
 
@@ -748,7 +762,8 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkHandle chunk,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}> layout,");
-        sb.AppendLine($"{indent}    int entityCount)");
+        sb.AppendLine($"{indent}    int entityCount,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
         sb.AppendLine($"{indent}{{");
 
         if (sys.Kind == SystemKind.Entity)
@@ -798,6 +813,8 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"ref {ToCamelCase(field.FieldName)}Span[__i]");
             else if (field.Kind == FieldKind.CompositionData)
                 sb.Append($"{ToCamelCase(field.FieldName)}Data");
+            else if (field.Kind == FieldKind.CommandBuffer)
+                sb.Append("commands");
         }
         sb.AppendLine(");");
         sb.AppendLine($"{indent}    __system.Execute();");
@@ -847,6 +864,10 @@ public class SystemGenerator : IIncrementalGenerator
             else if (field.Kind == FieldKind.CompositionChunkData)
             {
                 sb.Append($"{ToCamelCase(field.FieldName)}ChunkData");
+            }
+            else if (field.Kind == FieldKind.CommandBuffer)
+            {
+                sb.Append("commands");
             }
         }
         sb.AppendLine(");");
@@ -1066,7 +1087,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CommandBuffer, Invalid }
 
     private readonly struct QueryableComponentAccess
     {

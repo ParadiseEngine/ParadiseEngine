@@ -179,7 +179,7 @@ public sealed class EntityCommandBuffer : IDisposable
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <param name="world">The world to replay commands against.</param>
     /// <exception cref="InvalidOperationException">Thrown if Playback has already been called without a Clear.</exception>
-    public void Playback<TMask, TConfig>(World<TMask, TConfig> world)
+    public void Playback<TMask, TConfig>(IWorld<TMask, TConfig> world)
         where TMask : unmanaged, IBitSet<TMask>
         where TConfig : IConfig, new()
     {

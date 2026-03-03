@@ -96,6 +96,79 @@ public ref partial struct TestReadOnlyHealthSystem : IEntitySystem
 }
 
 // ============================================================================
+// ECB-Enabled System Definitions
+// ============================================================================
+
+/// <summary>
+/// Test entity system that spawns a new entity per processed entity using an ECB.
+/// </summary>
+public ref partial struct TestSpawnOnUpdateSystem : IEntitySystem
+{
+    public ref readonly TestPosition Position;
+    public EntityCommandBuffer Commands;
+
+    public void Execute()
+    {
+        var spawned = Commands.Spawn();
+        Commands.AddComponent(spawned, new TestVelocity { X = Position.X, Y = 0, Z = 0 });
+    }
+}
+
+/// <summary>
+/// Test entity system with an ECB field that conditionally records commands.
+/// Used to verify the "no commands recorded" path (health > 0 → no-op).
+/// </summary>
+/// <remarks>
+/// Note: This system cannot despawn the current entity because <see cref="IEntitySystem"/>
+/// does not yet inject the current entity handle. Once entity handle injection is supported,
+/// this can be updated to despawn the actual entity.
+/// </remarks>
+public ref partial struct TestDespawnDeadSystem : IEntitySystem
+{
+    public ref readonly TestHealth Health;
+    public EntityCommandBuffer Commands;
+
+    public void Execute()
+    {
+        // Intentionally no-op: entity handle injection is not yet supported.
+        // This system is used to test the "no commands recorded" path.
+    }
+}
+
+/// <summary>
+/// Test system that doubles velocity. Runs after TestSpawnOnUpdateSystem to verify
+/// cross-wave playback: spawned entities from the earlier wave become visible.
+/// </summary>
+[After<TestSpawnOnUpdateSystem>]
+public ref partial struct TestDoubleVelocityAfterSpawnSystem : IEntitySystem
+{
+    public ref TestVelocity Velocity;
+
+    public void Execute()
+    {
+        Velocity = new TestVelocity { X = Velocity.X * 2, Y = Velocity.Y * 2, Z = Velocity.Z * 2 };
+    }
+}
+
+/// <summary>
+/// Test chunk system with an ECB field to verify chunk-mode ECB support.
+/// </summary>
+public ref partial struct TestChunkSpawnSystem : IChunkSystem
+{
+    public ReadOnlySpan<TestVelocity> Velocities;
+    public EntityCommandBuffer Commands;
+
+    public void ExecuteChunk()
+    {
+        for (int i = 0; i < Velocities.Length; i++)
+        {
+            var spawned = Commands.Spawn();
+            Commands.AddComponent(spawned, new TestPosition { X = Velocities[i].X, Y = 0, Z = 0 });
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -445,5 +518,197 @@ public sealed class SystemTests : IDisposable
         await Assert.That(found).IsTrue();
         await Assert.That(movementId).IsGreaterThanOrEqualTo(0);
         await Assert.That(boundsAfterIds).Contains(movementId);
+    }
+
+    // ---- ECB Integration Tests ----
+
+    [Test]
+    public async Task ECB_SpawnOnUpdate_SpawnsEntitiesAfterRun()
+    {
+        // Arrange: two entities with Position+Velocity (matches TestSpawnOnUpdateSystem)
+        var e1 = _world.Spawn();
+        _world.AddComponent(e1, new TestPosition { X = 10, Y = 0, Z = 0 });
+        _world.AddComponent(e1, new TestVelocity());
+
+        var e2 = _world.Spawn();
+        _world.AddComponent(e2, new TestPosition { X = 20, Y = 0, Z = 0 });
+        _world.AddComponent(e2, new TestVelocity());
+
+        // TestSpawnOnUpdateSystem only queries Position, but we add Velocity so
+        // the existing TestMovementSystem doesn't interfere if AddAll is used.
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestSpawnOnUpdateSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        int countBefore = _world.EntityCount;
+
+        // Act
+        schedule.Run();
+
+        // Assert: two new entities spawned (one per original entity)
+        await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 2);
+    }
+
+    [Test]
+    public async Task ECB_SpawnOnUpdate_SpawnedEntitiesHaveCorrectComponents()
+    {
+        var e1 = _world.Spawn();
+        _world.AddComponent(e1, new TestPosition { X = 42, Y = 0, Z = 0 });
+        _world.AddComponent(e1, new TestVelocity());
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestSpawnOnUpdateSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        // The spawned entity has TestVelocity with X = 42 (copied from Position.X)
+        // Find it by querying all entities — spawned entity has a higher ID
+        // Entity IDs are 0 and 1; spawned entity is ID 1
+        // Original entity is e1 (ID 0)
+        var spawnedId = 1; // next available ID
+        var spawnedEntity = new Entity(spawnedId, 1);
+        await Assert.That(_world.IsAlive(spawnedEntity)).IsTrue();
+        await Assert.That(_world.HasComponent<TestVelocity>(spawnedEntity)).IsTrue();
+        var vel = _world.GetComponent<TestVelocity>(spawnedEntity);
+        await Assert.That(vel.X).IsEqualTo(42f);
+    }
+
+    [Test]
+    public async Task ECB_ChunkSystemWithECB_SpawnsEntities()
+    {
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestVelocity { X = 7, Y = 0, Z = 0 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestChunkSpawnSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        int countBefore = _world.EntityCount;
+        schedule.Run();
+
+        // TestChunkSpawnSystem spawns one entity per entity in chunk
+        await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 1);
+    }
+
+    [Test]
+    public async Task ECB_SystemWithoutECB_StillWorks()
+    {
+        // Existing systems without ECB fields should work unchanged
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
+        _world.AddComponent(e, new TestVelocity { X = 1, Y = 2, Z = 0 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestMovementSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        var pos = _world.GetComponent<TestPosition>(e);
+        await Assert.That(pos.X).IsEqualTo(11f);
+        await Assert.That(pos.Y).IsEqualTo(22f);
+    }
+
+    [Test]
+    public async Task ECB_MixedSchedule_ECBAndNonECBSystemsTogether()
+    {
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestPosition { X = 5, Y = 0, Z = 0 });
+        _world.AddComponent(e, new TestVelocity { X = 1, Y = 0, Z = 0 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestMovementSystem>()
+            .Add<TestSpawnOnUpdateSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        int countBefore = _world.EntityCount;
+        schedule.Run();
+
+        // MovementSystem updated position, SpawnOnUpdateSystem spawned an entity
+        var pos = _world.GetComponent<TestPosition>(e);
+        await Assert.That(pos.X).IsNotEqualTo(5f); // position was updated
+        await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 1);
+    }
+
+    [Test]
+    public async Task ECB_NoCommandsRecorded_NoEntitiesCreated()
+    {
+        // Entity has TestHealth but TestDespawnDeadSystem only despawns if health <= 0
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestHealth { Current = 100, Max = 100 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestDespawnDeadSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        int countBefore = _world.EntityCount;
+        schedule.Run();
+
+        // No despawns since health > 0
+        await Assert.That(_world.EntityCount).IsEqualTo(countBefore);
+    }
+
+    // ---- ECB Playback Tests (end-of-run playback) ----
+
+    [Test]
+    public async Task ECB_SpawnedEntitiesNotVisibleDuringExecution()
+    {
+        // ECB playback happens after all waves complete, so spawned entities
+        // are NOT visible to any work items within the same Run() call.
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestPosition { X = 1, Y = 0, Z = 0 });
+        _world.AddComponent(e, new TestVelocity());
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestSpawnOnUpdateSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        // Only 1 entity should be spawned (from the original entity), not more
+        await Assert.That(_world.EntityCount).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task ECB_SpawnedEntitiesNotVisibleToLaterWaves()
+    {
+        // TestSpawnOnUpdateSystem (wave 1): spawns entity with Velocity{X=10}
+        // TestDoubleVelocityAfterSpawnSystem [After<SpawnOnUpdate>] (wave 2): doubles Velocity
+        // ECB playback is end-of-run, so spawned entity is NOT processed by wave 2.
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestPosition { X = 10, Y = 0, Z = 0 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestSpawnOnUpdateSystem>()
+            .Add<TestDoubleVelocityAfterSpawnSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+
+        var spawnedEntity = new Entity(1, 1);
+        await Assert.That(_world.IsAlive(spawnedEntity)).IsTrue();
+        var vel = _world.GetComponent<TestVelocity>(spawnedEntity);
+        // Velocity is NOT doubled: spawned entity wasn't visible during execution.
+        await Assert.That(vel.X).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task ECB_MultipleRunsWorkCorrectly()
+    {
+        var e = _world.Spawn();
+        _world.AddComponent(e, new TestPosition { X = 5, Y = 0, Z = 0 });
+
+        var schedule = SystemSchedule.Create(_world)
+            .Add<TestSpawnOnUpdateSystem>()
+            .Build<SequentialWaveScheduler>();
+
+        schedule.Run();
+        await Assert.That(_world.EntityCount).IsEqualTo(2); // original + 1 spawned
+
+        // Second run: original has Position, spawned has Velocity.
+        // SpawnOnUpdateSystem queries Position, so only original triggers a spawn.
+        schedule.Run();
+        await Assert.That(_world.EntityCount).IsEqualTo(3); // +1 more spawned
     }
 }

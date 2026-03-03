@@ -41,4 +41,5 @@ public readonly struct SystemMetadata<TMask>
     /// Normalized from both <c>[After&lt;T&gt;]</c> and <c>[Before&lt;T&gt;]</c> attributes.
     /// </summary>
     public ImmutableArray<int> AfterSystemIds { get; init; }
+
 }

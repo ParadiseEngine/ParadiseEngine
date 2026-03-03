@@ -122,6 +122,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// </summary>
     public ChunkManager ChunkManager => _world.ChunkManager;
 
+    /// <inheritdoc/>
+    public EntityIdAllocator EntityIdAllocator => _world.EntityIdAllocator;
+
     /// <summary>
     /// Gets the chunk tag registry for per-chunk tag filtering.
     /// </summary>
@@ -385,6 +388,18 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
         => _world.RemoveComponent<T>(entity);
+
+    /// <inheritdoc/>
+    public void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
+        => _world.AddComponentRaw(entity, componentId, data);
+
+    /// <inheritdoc/>
+    public void RemoveComponentRaw(Entity entity, ComponentId componentId)
+        => _world.RemoveComponentRaw(entity, componentId);
+
+    /// <inheritdoc/>
+    public void SetComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
+        => _world.SetComponentRaw(entity, componentId, data);
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

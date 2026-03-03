@@ -20,6 +20,7 @@ public readonly struct WorkItem<TMask, TConfig>
     private readonly IWorld<TMask, TConfig> _world;
     private readonly nint _layoutPtr;
     private readonly int _entityCount;
+    private readonly EntityCommandBufferPool _commandPool;
 
     internal WorkItem(
         int systemId,
@@ -27,7 +28,8 @@ public readonly struct WorkItem<TMask, TConfig>
         SystemRunChunkAction<TMask, TConfig> dispatcher,
         IWorld<TMask, TConfig> world,
         nint layoutPtr,
-        int entityCount)
+        int entityCount,
+        EntityCommandBufferPool commandPool)
     {
         SystemId = systemId;
         Chunk = chunk;
@@ -35,30 +37,41 @@ public readonly struct WorkItem<TMask, TConfig>
         _world = world;
         _layoutPtr = layoutPtr;
         _entityCount = entityCount;
+        _commandPool = commandPool;
     }
 
-    /// <summary>Executes this work item.</summary>
-    public void Invoke() =>
-        _dispatcher(_world, Chunk, new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount);
+    /// <summary>
+    /// Executes this work item, resolving the thread-local ECB at invocation time.
+    /// </summary>
+    public void Invoke()
+    {
+        _dispatcher(_world, Chunk, new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
+    }
 }
 
 /// <summary>
-/// Strategy interface for scheduling work items within an execution wave.
-/// Implement this to provide custom parallel execution strategies (e.g., job systems,
+/// Strategy interface for executing work items.
+/// Implement this to provide custom execution strategies (e.g., job systems,
 /// thread pools with data affinity, or custom work-stealing schedulers).
+/// ECB playback is managed by <see cref="SystemSchedule{TMask,TConfig}"/> after execution completes.
 /// </summary>
 public interface IWaveScheduler
 {
-    /// <summary>Executes all work items for a single wave. Must complete before returning.</summary>
+    /// <summary>
+    /// Executes all work items for a single wave. Must complete before returning.
+    /// </summary>
     /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
-    /// <param name="items">The work items to execute.</param>
+    /// <param name="items">The work items for a single wave to execute.</param>
     void Execute<TMask, TConfig>(IReadOnlyList<WorkItem<TMask, TConfig>> items)
         where TMask : unmanaged, IBitSet<TMask>
         where TConfig : IConfig, new();
 }
 
-/// <summary>Executes work items sequentially on the calling thread.</summary>
+/// <summary>
+/// Executes work items sequentially on the calling thread, respecting wave boundaries.
+/// Single-threaded equivalent of <see cref="ParallelWaveScheduler"/>.
+/// </summary>
 public sealed class SequentialWaveScheduler : IWaveScheduler
 {
     /// <inheritdoc/>
@@ -73,7 +86,11 @@ public sealed class SequentialWaveScheduler : IWaveScheduler
     }
 }
 
-/// <summary>Executes work items in parallel using the .NET ThreadPool via <see cref="System.Threading.Tasks.Parallel"/>.</summary>
+/// <summary>
+/// Executes work items in parallel using the .NET ThreadPool via <see cref="System.Threading.Tasks.Parallel"/>.
+/// Items within the same wave run in parallel; wave boundaries are respected so
+/// all items in wave N complete before wave N+1 begins.
+/// </summary>
 public sealed class ParallelWaveScheduler : IWaveScheduler
 {
     /// <inheritdoc/>

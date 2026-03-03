@@ -13,21 +13,25 @@ namespace Paradise.ECS;
 /// <param name="chunk">The chunk handle to process.</param>
 /// <param name="layout">The archetype layout describing component offsets.</param>
 /// <param name="entityCount">The number of entities in the chunk.</param>
+/// <param name="commands">The entity command buffer for deferred structural changes.</param>
 public delegate void SystemRunChunkAction<TMask, TConfig>(
     IWorld<TMask, TConfig> world,
     ChunkHandle chunk,
     ImmutableArchetypeLayout<TMask, TConfig> layout,
-    int entityCount)
+    int entityCount,
+    EntityCommandBuffer commands)
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new();
 
 /// <summary>
 /// Pre-built execution schedule for systems. The scheduling strategy is determined at build time
 /// via the <see cref="IWaveScheduler"/> provided to the builder.
+/// ECB playback happens once after all waves complete, so structural changes from commands
+/// are NOT visible within the same <see cref="Run"/> call.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
-public sealed class SystemSchedule<TMask, TConfig>
+public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
@@ -36,6 +40,7 @@ public sealed class SystemSchedule<TMask, TConfig>
     private readonly ImmutableArray<SystemRunChunkAction<TMask, TConfig>> _dispatchers;
     private readonly ImmutableArray<SystemMetadata<TMask>> _metadata;
     private readonly IWaveScheduler _scheduler;
+    private readonly EntityCommandBufferPool _ecbPool;
     private readonly List<WorkItem<TMask, TConfig>> _workItems = new();
 
     internal SystemSchedule(
@@ -50,6 +55,7 @@ public sealed class SystemSchedule<TMask, TConfig>
         _dispatchers = dispatchers;
         _metadata = metadata;
         _scheduler = scheduler;
+        _ecbPool = new EntityCommandBufferPool(world.EntityIdAllocator);
     }
 
     /// <summary>
@@ -60,7 +66,12 @@ public sealed class SystemSchedule<TMask, TConfig>
     public static SystemScheduleBuilder<TMask, TConfig> Create(IWorld<TMask, TConfig> world)
         => new(world);
 
-    /// <summary>Runs all enabled systems using the scheduler provided at build time.</summary>
+    /// <summary>
+    /// Runs all enabled systems using the scheduler provided at build time.
+    /// Work items are built for all waves upfront, then handed to
+    /// <see cref="IWaveScheduler.Execute{TMask,TConfig}"/> for execution.
+    /// ECB playback happens once after all execution completes.
+    /// </summary>
     public void Run()
     {
         foreach (var wave in _waves)
@@ -78,12 +89,19 @@ public sealed class SystemSchedule<TMask, TConfig>
                         dispatcher,
                         _world,
                         ci.Archetype.Layout.DataPointer,
-                        ci.EntityCount));
+                        ci.EntityCount,
+                        _ecbPool));
                 }
             }
             _scheduler.Execute(_workItems);
         }
+
+        _ecbPool.PlaybackAll(_world);
+        _ecbPool.ClearAll();
     }
+
+    /// <inheritdoc/>
+    public void Dispose() => _ecbPool.Dispose();
 }
 
 /// <summary>

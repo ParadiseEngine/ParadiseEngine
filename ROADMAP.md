@@ -1,6 +1,6 @@
 # Paradise.ECS Roadmap
 
-> Last updated: 2026-03-03
+> Last updated: 2026-03-04
 
 ## Vision
 
@@ -136,6 +136,13 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
   - World.MaterializeEntity() for registering reserved entities during ECB playback
   - Type-erased raw component methods (AddComponentRaw, RemoveComponentRaw, SetComponentRaw)
   - Version overflow protection with EntityLocation.NextVersion()
+
+- [x] **ECB for Scheduler** ([#53](https://github.com/quabug/ParadiseECS/pull/53))
+  - Integrate EntityCommandBuffer with the system scheduler for deferred structural changes during system execution
+  - Thread-safe EntityCommandBufferPool with thread-local ECB instances
+  - Source generator auto-detects EntityCommandBuffer fields and generates constructor binding + RunChunk dispatch
+  - End-of-run playback: structural changes applied after all waves complete
+  - IWaveScheduler strategy interface with SequentialWaveScheduler and ParallelWaveScheduler
 
 ### In Progress
 
@@ -320,6 +327,7 @@ Minor TODOs in codebase:
 
 ### Recent Activity
 
+- **2026-03-04**: Merged [#53](https://github.com/quabug/ParadiseECS/pull/53) - Integrate ECB with system scheduler
 - **2026-03-03**: Merged [#51](https://github.com/quabug/ParadiseECS/pull/51) - Add EntityCommandBuffer with real entity ID reservation
 - **2026-02-11**: Merged [#49](https://github.com/quabug/ParadiseECS/pull/49) - Add system scheduling with runtime DAG resolution
 - **2026-01-26**: Merged [#47](https://github.com/quabug/ParadiseECS/pull/47) - Refactor queryable pattern with generic QueryResult and simplified APIs

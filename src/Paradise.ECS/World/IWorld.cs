@@ -85,6 +85,11 @@ public interface IWorld<TMask, TConfig>
     ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry { get; }
 
     /// <summary>
+    /// Gets the thread-safe entity ID allocator for constructing <see cref="EntityCommandBuffer"/> instances.
+    /// </summary>
+    EntityIdAllocator EntityIdAllocator { get; }
+
+    /// <summary>
     /// Creates a new entity using the provided builder.
     /// </summary>
     /// <typeparam name="TBuilder">The builder type.</typeparam>
@@ -120,6 +125,29 @@ public interface IWorld<TMask, TConfig>
     /// </summary>
     /// <param name="entity">The reserved entity to materialize.</param>
     void MaterializeEntity(Entity entity);
+
+    /// <summary>
+    /// Adds a component to an entity using raw bytes. This is a structural change that may move the entity.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    /// <param name="data">The raw component data bytes.</param>
+    void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data);
+
+    /// <summary>
+    /// Removes a component from an entity using a raw component ID.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    void RemoveComponentRaw(Entity entity, ComponentId componentId);
+
+    /// <summary>
+    /// Sets a component value on an entity using raw bytes. This is NOT a structural change.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="componentId">The component type ID.</param>
+    /// <param name="data">The raw component data bytes.</param>
+    void SetComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data);
 
     /// <summary>
     /// Removes all entities from this world.
