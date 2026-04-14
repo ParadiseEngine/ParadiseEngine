@@ -1,0 +1,35 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Pp]ublish/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+*.sln.iml
+
+# NuGet and packages
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Test and coverage
+TestResults/
+coverage/
+coverage.cobertura.xml
+BenchmarkDotNet.Artifacts/
+
+# Generated
+**/Generated/
+*.binlog

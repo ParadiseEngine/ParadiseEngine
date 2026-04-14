@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.BLOB</AssemblyName>
+    <RootNamespace>Paradise.BLOB</RootNamespace>
+    <PackageId>Paradise.BLOB</PackageId>
+    <Title>Paradise.BLOB</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Standalone binary blob builder library for Paradise Engine.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseBLOB</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.BLOB.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="README.md">
+      <Pack>true</Pack>
+      <PackagePath>README.md</PackagePath>
+    </None>
+  </ItemGroup>
+</Project>
