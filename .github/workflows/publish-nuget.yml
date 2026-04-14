@@ -11,9 +11,6 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-
 env:
   DOTNET_NOLOGO: true
   CONFIGURATION: Release
@@ -23,6 +20,9 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -50,6 +50,19 @@ jobs:
           fi
 
           echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Resolve NuGet user
+        id: nuget-user
+        shell: bash
+        run: |
+          user="${{ vars.NUGET_USER || github.repository_owner }}"
+
+          if [[ -z "$user" ]]; then
+            echo "::error::Set the NUGET_USER repository variable to your nuget.org username."
+            exit 1
+          fi
+
+          echo "value=$user" >> "$GITHUB_OUTPUT"
 
       - name: Restore packable projects
         run: |
@@ -92,11 +105,15 @@ jobs:
           -p:ContinuousIntegrationBuild=true
           -p:Version=${{ env.PACKAGE_VERSION }}
 
+      - name: NuGet login (OIDC -> temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ steps.nuget-user.outputs.value }}
+
       - name: Publish to NuGet
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: >
           dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIR }}/*.nupkg"
-          --api-key "$NUGET_API_KEY"
+          --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source "${{ env.NUGET_SOURCE_URL }}"
           --skip-duplicate
