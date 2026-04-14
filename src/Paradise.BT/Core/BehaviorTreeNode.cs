@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using System.Reflection;
+using System.Runtime.InteropServices;
 using Paradise.BLOB;
 
 namespace Paradise.BT;
@@ -35,20 +35,6 @@ internal interface IRuntimeNodeFactory
 internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
     where TNodeData : struct, INodeData
 {
-    private static readonly MethodInfo s_setAnyValueMethodDefinition = typeof(AnyValueBuilder)
-        .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-        .Single(method => method.Name == nameof(AnyValueBuilder.SetValue)
-            && method.IsGenericMethodDefinition
-            && method.GetGenericArguments().Length == 1
-            && method.GetParameters().Length == 1);
-
-    private static readonly MethodInfo s_alignOfMethodDefinition = typeof(Utilities)
-        .GetMethods(BindingFlags.Public | BindingFlags.Static)
-        .Single(method => method.Name == nameof(Utilities.AlignOf)
-            && method.IsGenericMethodDefinition
-            && method.GetGenericArguments().Length == 1
-            && method.GetParameters().Length == 0);
-
     private readonly TNodeData _nodeData;
     private readonly BehaviorNodeMetadata _metadata;
 
@@ -76,10 +62,26 @@ internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
                 $"Node '{typeof(TNodeData).FullName}' cannot be serialized with Paradise.BLOB because it contains managed references.");
         }
 
+        TNodeData nodeData = _nodeData;
         var builder = new AnyValueBuilder();
-        s_setAnyValueMethodDefinition.MakeGenericMethod(typeof(TNodeData)).Invoke(builder, [_nodeData]);
-        builder.Alignment = (int)(s_alignOfMethodDefinition.MakeGenericMethod(typeof(TNodeData)).Invoke(null, null)
-            ?? throw new InvalidOperationException($"Unable to determine alignment for node '{typeof(TNodeData).FullName}'."));
+        builder.SetBytes(
+            MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref nodeData, 1)),
+            GetAlignment<TNodeData>());
         return builder;
+    }
+
+    private static int GetAlignment<T>() where T : struct
+        => Unsafe.SizeOf<AlignmentHelper<T>>() - Unsafe.SizeOf<T>();
+
+    private struct AlignmentHelper<T> where T : struct
+    {
+        public byte Padding;
+        public T Value;
+
+        public AlignmentHelper(byte padding, T value)
+        {
+            Padding = padding;
+            Value = value;
+        }
     }
 }

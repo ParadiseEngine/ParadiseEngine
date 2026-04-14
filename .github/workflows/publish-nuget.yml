@@ -1,0 +1,102 @@
+name: Publish NuGet packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to publish, for example v1.2.3 or 1.2.3-beta.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  CONFIGURATION: Release
+  PACKAGE_OUTPUT_DIR: artifacts/nuget
+  NUGET_SOURCE_URL: https://api.nuget.org/v3/index.json
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve package version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME}"
+          fi
+
+          version="${version#v}"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Version must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+
+          echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Restore packable projects
+        run: |
+          dotnet restore src/Paradise.BLOB/Paradise.BLOB.csproj
+          dotnet restore src/Paradise.BT/Paradise.BT.csproj
+
+      - name: Build Paradise.BLOB
+        run: >
+          dotnet build src/Paradise.BLOB/Paradise.BLOB.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-restore
+          -p:ContinuousIntegrationBuild=true
+          -p:Version=${{ env.PACKAGE_VERSION }}
+
+      - name: Build Paradise.BT
+        run: >
+          dotnet build src/Paradise.BT/Paradise.BT.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-restore
+          -p:ContinuousIntegrationBuild=true
+          -p:Version=${{ env.PACKAGE_VERSION }}
+
+      - name: Pack Paradise.BLOB
+        run: >
+          dotnet pack src/Paradise.BLOB/Paradise.BLOB.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --no-restore
+          -o ${{ env.PACKAGE_OUTPUT_DIR }}
+          -p:ContinuousIntegrationBuild=true
+          -p:Version=${{ env.PACKAGE_VERSION }}
+
+      - name: Pack Paradise.BT
+        run: >
+          dotnet pack src/Paradise.BT/Paradise.BT.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --no-restore
+          -o ${{ env.PACKAGE_OUTPUT_DIR }}
+          -p:ContinuousIntegrationBuild=true
+          -p:Version=${{ env.PACKAGE_VERSION }}
+
+      - name: Publish to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: >
+          dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIR }}/*.nupkg"
+          --api-key "$NUGET_API_KEY"
+          --source "${{ env.NUGET_SOURCE_URL }}"
+          --skip-duplicate

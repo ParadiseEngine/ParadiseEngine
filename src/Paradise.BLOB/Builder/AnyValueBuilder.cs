@@ -20,9 +20,14 @@ public class AnyValueBuilder : IBuilder
 
     public void SetValue<T>(T value, int alignment) where T : unmanaged
     {
+        SetBytes(ToBytes(value), alignment);
+    }
+
+    public void SetBytes(ReadOnlySpan<byte> data, int alignment)
+    {
         if (!Utilities.IsPowerOfTwo(alignment)) throw new ArgumentException($"{nameof(alignment)} must be a power of two number");
         Alignment = alignment;
-        _data = ToBytes(value);
+        _data = data.ToArray();
     }
 
     public void Build(IBlobStream stream)
