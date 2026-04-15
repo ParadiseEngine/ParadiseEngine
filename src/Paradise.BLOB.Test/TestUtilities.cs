@@ -79,11 +79,13 @@ public class TestUtilities
     }
 
 
+    #pragma warning disable CS0169, CA1823
     struct Tuple<T1, T2>
     {
         private T1 _;
         private T2 __;
     }
+    #pragma warning restore CS0169, CA1823
 
     [Test]
     public void should_align_by_type()
