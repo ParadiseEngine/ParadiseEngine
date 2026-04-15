@@ -183,6 +183,24 @@ public sealed class BehaviorTreeTests
     }
 
     [Test]
+    public async Task Sequence_Returns_Success_On_Retick_When_All_Children_Already_Succeeded()
+    {
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Sequence(
+                BehaviorNodes.Success(),
+                BehaviorNodes.Success()));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+        instance.AutoResetOnCompletion = false;
+
+        // First tick: both children succeed, sequence returns Success
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+
+        // Second tick: all children already completed (no break triggered), should return Success not 0
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+    }
+
+    [Test]
     public async Task Custom_Reset_Action_Runs_When_Tree_Resets()
     {
         var blackboard = new Blackboard();
