@@ -22,7 +22,11 @@ public struct RepeatTimesNode : INodeData
             return childState;
         }
 
-        TickTimes--;
+        if (childState.IsCompleted())
+        {
+            TickTimes--;
+        }
+
         return TickTimes <= 0 ? NodeState.Success : NodeState.Running;
     }
 }
