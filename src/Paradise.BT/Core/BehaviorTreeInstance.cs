@@ -20,7 +20,7 @@ public sealed class BehaviorTreeInstance
 
     public bool AutoResetOnCompletion { get; set; }
 
-    public Blackboard Blackboard => _blackboard;
+    public ref Blackboard Blackboard => ref _blackboard;
 
     public NodeState Status => _blob.GetState(0);
 

@@ -7,6 +7,23 @@ public sealed class BehaviorTreeTests
         public int Value;
     }
 
+    private struct PreTickData
+    {
+        public int Value;
+    }
+
+    [System.Runtime.InteropServices.Guid("F4E3D2C1-B0A9-4867-8765-432109FEDCBA")]
+    private struct ReadBlackboardNode : INodeData
+    {
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+            where TNodeBlob : struct, INodeBlob
+            where TBlackboard : struct, IBlackboard
+        {
+            var data = bb.GetData<PreTickData>();
+            return data.Value == 42 ? NodeState.Success : NodeState.Failure;
+        }
+    }
+
     [System.Runtime.InteropServices.Guid("A1523157-2737-48A0-8F1D-14D07B5F4D77")]
     private struct CountingNode : INodeData
     {
@@ -161,5 +178,18 @@ public sealed class BehaviorTreeTests
         await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(1);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Blackboard_Mutations_Before_First_Tick_Are_Preserved()
+    {
+        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ReadBlackboardNode()));
+        BehaviorTreeInstance instance = tree.CreateInstance();
+
+        // Set data BEFORE first tick — this is the bug scenario
+        instance.Blackboard.SetData(new PreTickData { Value = 42 });
+
+        // The node returns Success only if it reads Value == 42 from the blackboard
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 }
