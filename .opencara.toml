@@ -1,0 +1,33 @@
+version = 1
+
+# ──────────────────────────────────────────────
+# PR Review (only OpenCara feature in use)
+# ──────────────────────────────────────────────
+[review]
+prompt = """Review this pull request for Paradise Engine — a pure .NET behavior tree runtime and binary blob serialization library.
+
+Tech stack: C# 14 (.NET Standard 2.1 + .NET 10), unsafe/unmanaged code,
+NativeAOT compatible, TUnit tests.
+
+Focus on:
+- Logic and correctness errors in unsafe pointer arithmetic (self-relative offsets, BlobPtr/BlobArray)
+- Memory safety (GCHandle leaks, dangling pointers, pinning correctness)
+- Builder pattern correctness (stream positioning, patch area integrity)
+- Behavior tree node semantics (Tick/Reset contracts, NodeState transitions)
+- Serialization round-trip correctness (BLOB binary format, alignment)
+- Dual-target compatibility (netstandard2.1 + net10.0)
+- Test coverage for modified systems
+
+Be concise. Flag real issues, skip nitpicks.
+"""
+agent_count = 5
+timeout = "30m"
+preferred_models = ["claude-sonnet-4-6", "gpt-5.4", "minimax-m2.7", "glm-5", "kimi-k2.5", "qwen3.5-plus"]
+
+[review.trigger]
+events = ["opened"]
+comment = "/opencara review"
+skip = ["draft", "label:no-review"]
+
+[review.summarizer]
+preferred_models = ["claude-opus-4-6"]
