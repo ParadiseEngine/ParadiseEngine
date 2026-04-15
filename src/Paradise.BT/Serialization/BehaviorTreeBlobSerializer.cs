@@ -65,7 +65,6 @@ public static class BehaviorTreeBlobSerializer
     {
         var builder = new StructBuilder<BehaviorTreeBlobNode>();
         builder.SetValue(ref builder.Value.NodeGuid, node.Factory.NodeGuid);
-        builder.SetValue(ref builder.Value.NodeType, node.Factory.NodeTypeKind);
 
         var defaultDataBuilder = new AnyPtrBuilder();
         defaultDataBuilder.SetValue(node.Factory.CreateSerializedDefaultDataBuilder());

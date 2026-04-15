@@ -270,21 +270,6 @@ public sealed class BehaviorTreeSerializationTests
     }
 
     [Test]
-    public async Task Round_Trip_Preserves_Behavior_Types()
-    {
-        var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Selector(
-                BehaviorNodes.Succeeder(BehaviorNodes.Failure())));
-
-        using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
-
-        await Assert.That(roundTripped.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Composite);
-        await Assert.That(roundTripped.GetNodeBehaviorType(1)).IsEqualTo(BehaviorNodeType.Decorate);
-        await Assert.That(roundTripped.GetNodeBehaviorType(2)).IsEqualTo(BehaviorNodeType.Action);
-    }
-
-    [Test]
     public async Task Custom_Node_Default_Data_Preserved_Through_Round_Trip()
     {
         var tree = BehaviorTreeBuilder.Build(

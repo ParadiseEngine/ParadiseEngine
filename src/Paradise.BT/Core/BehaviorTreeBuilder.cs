@@ -12,8 +12,6 @@ public sealed class BehaviorTreeBuilder
 
     public BehaviorTree Build()
     {
-        ValidateDefinition(_root);
-
         var nodes = new List<BehaviorTreeNode>();
         CompileNode(_root, nodes);
         return new BehaviorTree(nodes.ToArray());
@@ -35,22 +33,4 @@ public sealed class BehaviorTreeBuilder
         nodes[index] = new BehaviorTreeNode(definition.Factory, nodes.Count);
     }
 
-    private static void ValidateDefinition(BehaviorNodeDefinition definition)
-    {
-        int childCount = definition.Children.Count;
-        switch (definition.NodeTypeKind)
-        {
-            case BehaviorNodeType.Action when childCount != 0:
-                ThrowHelper.ThrowInvalidNodeDefinition(definition.NodeType, definition.NodeTypeKind, childCount);
-                break;
-            case BehaviorNodeType.Decorate when childCount != 1:
-                ThrowHelper.ThrowInvalidNodeDefinition(definition.NodeType, definition.NodeTypeKind, childCount);
-                break;
-        }
-
-        foreach (BehaviorNodeDefinition child in definition.Children)
-        {
-            ValidateDefinition(child);
-        }
-    }
 }

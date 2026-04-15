@@ -35,12 +35,6 @@ public sealed class BehaviorTree
         return _nodes[nodeIndex].Factory.NodeType;
     }
 
-    public BehaviorNodeType GetNodeBehaviorType(int nodeIndex)
-    {
-        ThrowHelper.ThrowIfNodeIndexOutOfRange(nodeIndex, Count);
-        return _nodes[nodeIndex].Factory.NodeTypeKind;
-    }
-
     public int GetEndIndex(int nodeIndex)
     {
         ThrowHelper.ThrowIfNodeIndexOutOfRange(nodeIndex, Count);

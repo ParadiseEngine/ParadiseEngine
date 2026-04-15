@@ -16,6 +16,5 @@ public struct BehaviorTreeBlob
 public struct BehaviorTreeBlobNode
 {
     public Guid NodeGuid;
-    public BehaviorNodeType NodeType;
     public BlobPtrAny DefaultData;
 }

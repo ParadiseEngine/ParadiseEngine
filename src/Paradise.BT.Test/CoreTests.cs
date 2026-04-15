@@ -7,88 +7,13 @@ public sealed class CoreTests
     // ============================
 
     [Test]
-    public async Task Builder_Rejects_Action_Node_With_Children()
+    public async Task Builder_Accepts_Node_With_Any_Children_Count()
     {
-        InvalidOperationException? ex = null;
-        try
-        {
-            BehaviorTreeBuilder.Build(
-                BehaviorNodes.Node(new SuccessNode(), BehaviorNodeType.Action, BehaviorNodes.Success()));
-        }
-        catch (InvalidOperationException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
-        await Assert.That(ex!.Message.Contains("Action", StringComparison.Ordinal)).IsTrue();
-    }
-
-    [Test]
-    public async Task Builder_Rejects_Decorator_With_Zero_Children()
-    {
-        InvalidOperationException? ex = null;
-        try
-        {
-            BehaviorTreeBuilder.Build(
-                BehaviorNodes.Node(new InverterNode(), BehaviorNodeType.Decorate));
-        }
-        catch (InvalidOperationException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
-        await Assert.That(ex!.Message.Contains("Decorator", StringComparison.Ordinal)).IsTrue();
-    }
-
-    [Test]
-    public async Task Builder_Rejects_Decorator_With_Two_Children()
-    {
-        InvalidOperationException? ex = null;
-        try
-        {
-            BehaviorTreeBuilder.Build(
-                BehaviorNodes.Node(new InverterNode(), BehaviorNodeType.Decorate,
-                    BehaviorNodes.Success(),
-                    BehaviorNodes.Failure()));
-        }
-        catch (InvalidOperationException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
-        await Assert.That(ex!.Message.Contains("Decorator", StringComparison.Ordinal)).IsTrue();
-    }
-
-    [Test]
-    public async Task Builder_Accepts_Composite_With_Any_Number_Of_Children()
-    {
-        // Composite with 0 children should also be valid (no constraint)
+        // Node with 0 children
         BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new SequenceNode(), BehaviorNodeType.Composite));
+            BehaviorNodes.Node(new SequenceNode()));
 
         await Assert.That(tree.Count).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task Builder_Validates_Nested_Nodes()
-    {
-        // Invalid nested decorator (0 children) inside a valid sequence
-        InvalidOperationException? ex = null;
-        try
-        {
-            BehaviorTreeBuilder.Build(
-                BehaviorNodes.Sequence(
-                    BehaviorNodes.Node(new InverterNode(), BehaviorNodeType.Decorate)));
-        }
-        catch (InvalidOperationException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
     }
 
     [Test]
@@ -144,18 +69,6 @@ public sealed class CoreTests
 
         await Assert.That(tree.GetNodeType(0)).IsEqualTo(typeof(SequenceNode));
         await Assert.That(tree.GetNodeType(1)).IsEqualTo(typeof(SuccessNode));
-    }
-
-    [Test]
-    public async Task BehaviorTree_GetNodeBehaviorType_Returns_Correct_Kinds()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Sequence(
-                BehaviorNodes.Inverter(BehaviorNodes.Success())));
-
-        await Assert.That(tree.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Composite);
-        await Assert.That(tree.GetNodeBehaviorType(1)).IsEqualTo(BehaviorNodeType.Decorate);
-        await Assert.That(tree.GetNodeBehaviorType(2)).IsEqualTo(BehaviorNodeType.Action);
     }
 
     [Test]
@@ -361,34 +274,4 @@ public sealed class CoreTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
-    // ============================
-    // BehaviorNodes factory inference
-    // ============================
-
-    [Test]
-    public async Task BehaviorNodes_Node_Infers_Action_Type_With_No_Children()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new SuccessNode()));
-
-        await Assert.That(tree.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Action);
-    }
-
-    [Test]
-    public async Task BehaviorNodes_Node_Infers_Decorate_Type_With_One_Child()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new InverterNode(), BehaviorNodes.Success()));
-
-        await Assert.That(tree.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Decorate);
-    }
-
-    [Test]
-    public async Task BehaviorNodes_Node_Infers_Composite_Type_With_Multiple_Children()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new SequenceNode(), BehaviorNodes.Success(), BehaviorNodes.Success()));
-
-        await Assert.That(tree.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Composite);
-    }
 }

@@ -17,8 +17,6 @@ public sealed class BehaviorNodeDefinition
 
     public Type NodeType => Factory.NodeType;
 
-    public BehaviorNodeType NodeTypeKind => Factory.NodeTypeKind;
-
     internal IRuntimeNodeFactory Factory { get; }
 
     internal static BehaviorNodeDefinition Create<TNodeData>(TNodeData nodeData, BehaviorNodeMetadata metadata, IEnumerable<BehaviorNodeDefinition>? children)

@@ -5,18 +5,15 @@ namespace Paradise.BT;
 
 internal readonly struct BehaviorNodeMetadata
 {
-    public BehaviorNodeMetadata(Guid guid, BehaviorNodeType type)
+    public BehaviorNodeMetadata(Guid guid)
     {
         Guid = guid;
         Id = guid.GetHashCode();
-        Type = type;
     }
 
     public Guid Guid { get; }
 
     public int Id { get; }
-
-    public BehaviorNodeType Type { get; }
 }
 
 internal static class GuidAttributeExtensions
