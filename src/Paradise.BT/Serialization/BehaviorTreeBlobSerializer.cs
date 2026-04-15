@@ -36,6 +36,13 @@ public static class BehaviorTreeBlobSerializer
         registry ??= BehaviorTreeSerializationRegistry.CreateBuiltIn();
 
         ref BehaviorTreeBlob serializedTree = ref blob.Value;
+
+        if (serializedTree.FormatVersion != BehaviorTreeBlob.CurrentFormatVersion)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported blob format version {serializedTree.FormatVersion}. Expected {BehaviorTreeBlob.CurrentFormatVersion}.");
+        }
+
         int count = serializedTree.Nodes.Length;
         if (count == 0)
         {
@@ -57,6 +64,7 @@ public static class BehaviorTreeBlobSerializer
         ThrowHelper.ThrowIfNull(tree, nameof(tree));
 
         var builder = new StructBuilder<BehaviorTreeBlob>();
+        builder.SetValue(ref builder.Value.FormatVersion, BehaviorTreeBlob.CurrentFormatVersion);
         builder.SetBuilder(ref builder.Value.Nodes, new TreeBuilder<BehaviorTreeBlobNode>(CreateTreeNode(tree, 0, out _)));
         return builder.CreateBlob();
     }

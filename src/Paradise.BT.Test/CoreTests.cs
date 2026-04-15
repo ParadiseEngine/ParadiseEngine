@@ -7,13 +7,30 @@ public sealed class CoreTests
     // ============================
 
     [Test]
-    public async Task Builder_Accepts_Node_With_Any_Children_Count()
+    public async Task Builder_Accepts_Node_With_Zero_Children()
     {
-        // Node with 0 children
         BehaviorTree tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Node(new SequenceNode()));
 
         await Assert.That(tree.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Builder_Accepts_Node_With_One_Child()
+    {
+        BehaviorTree tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Node(new InverterNode(), BehaviorNodes.Success()));
+
+        await Assert.That(tree.Count).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Builder_Accepts_Node_With_Multiple_Children()
+    {
+        BehaviorTree tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Node(new SequenceNode(), BehaviorNodes.Success(), BehaviorNodes.Failure()));
+
+        await Assert.That(tree.Count).IsEqualTo(3);
     }
 
     [Test]

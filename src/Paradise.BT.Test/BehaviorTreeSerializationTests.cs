@@ -270,6 +270,30 @@ public sealed class BehaviorTreeSerializationTests
     }
 
     [Test]
+    public async Task Deserialize_Rejects_Wrong_Format_Version()
+    {
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Sequence(BehaviorNodes.Success()));
+
+        byte[] blob = tree.SerializeToBytes();
+        // Corrupt the format version (first 4 bytes of the blob struct)
+        blob[0] = 0xFF;
+
+        InvalidOperationException? ex = null;
+        try
+        {
+            BehaviorTreeBlobSerializer.Deserialize(blob);
+        }
+        catch (InvalidOperationException e)
+        {
+            ex = e;
+        }
+
+        await Assert.That(ex).IsNotNull();
+        await Assert.That(ex!.Message.Contains("format version", StringComparison.OrdinalIgnoreCase)).IsTrue();
+    }
+
+    [Test]
     public async Task Custom_Node_Default_Data_Preserved_Through_Round_Trip()
     {
         var tree = BehaviorTreeBuilder.Build(
