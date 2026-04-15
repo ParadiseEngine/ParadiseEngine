@@ -3,15 +3,17 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BLOB;
 
-public unsafe class ManagedBlobAssetReference
+public unsafe class ManagedBlobAssetReference : IDisposable
 {
     private readonly byte[] _blob;
+    private GCHandle _handle;
+    private bool _disposed;
 
     public ref T GetValue<T>() where T : unmanaged => ref *GetUnsafePtr<T>();
     public T* GetUnsafePtr<T>() where T : unmanaged
     {
         if (_blob.Length < sizeof(T)) throw new ArgumentException("invalid generic parameter");
-        fixed (void* ptr = &_blob[0]) return (T*)ptr;
+        return (T*)_handle.AddrOfPinnedObject().ToPointer();
     }
 
     public int Length => _blob.Length;
@@ -21,6 +23,22 @@ public unsafe class ManagedBlobAssetReference
     {
         if (blob.Length == 0) throw new ArgumentException("BLOB cannot be empty");
         _blob = blob;
+        _handle = GCHandle.Alloc(_blob, GCHandleType.Pinned);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _handle.Free();
+        GC.SuppressFinalize(this);
+    }
+
+    ~ManagedBlobAssetReference()
+    {
+        if (_disposed || !_handle.IsAllocated) return;
+        _disposed = true;
+        _handle.Free();
     }
 }
 
