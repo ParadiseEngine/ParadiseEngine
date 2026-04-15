@@ -13,13 +13,13 @@ public struct ParallelNode : INodeData
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            flags |= previousState.IsCompleted() ? 0 : VirtualMachine.Tick(childIndex, ref blob, ref bb);
+            flags |= previousState.IsCompleted() ? previousState : VirtualMachine.Tick(childIndex, ref blob, ref bb);
             childIndex = blob.GetEndIndex(childIndex);
         }
 
         if (flags.HasFlagFast(NodeState.Running)) return NodeState.Running;
         if (flags.HasFlagFast(NodeState.Failure)) return NodeState.Failure;
         if (flags.HasFlagFast(NodeState.Success)) return NodeState.Success;
-        return 0;
+        return NodeState.Success;
     }
 }
