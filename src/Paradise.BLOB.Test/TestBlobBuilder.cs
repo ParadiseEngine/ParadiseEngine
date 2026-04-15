@@ -256,7 +256,7 @@ public class TestBlobBuilder
         MemCmp(ref value, SubBlob(blob.Blob, sizeof(BlobPtr<T>), sizeof(T)));
     }
 
-    unsafe void AssertStringEqual<TEncoding>(string str) where TEncoding : Encoding, new()
+    static unsafe void AssertStringEqual<TEncoding>(string str) where TEncoding : Encoding, new()
     {
         var builder = new StringBuilder<TEncoding>(str);
         var blob = builder.CreateManagedBlobAssetReference();
@@ -268,14 +268,14 @@ public class TestBlobBuilder
 #endif
     }
 
-    byte[] SubBlob(byte[] blob, int startIndex, int length)
+    static byte[] SubBlob(byte[] blob, int startIndex, int length)
     {
         var sub = new byte[length];
         Array.Copy(blob, startIndex, sub, 0, sub.Length);
         return sub;
     }
 
-    byte[] SubBlob(byte[] blob, int startIndex)
+    static byte[] SubBlob(byte[] blob, int startIndex)
     {
         return SubBlob(blob, startIndex, blob.Length - startIndex);
     }
@@ -298,7 +298,7 @@ public class TestBlobBuilder
 
     unsafe byte[] ToBinary<T>(ref T value, int size) where T : unmanaged
     {
-        if (size < 1) throw new ArgumentOutOfRangeException();
+        ArgumentOutOfRangeException.ThrowIfLessThan(size, 1);
 
         var binary = new byte[size];
         fixed(void* source = &value)

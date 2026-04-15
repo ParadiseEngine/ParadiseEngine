@@ -5,15 +5,15 @@ namespace Paradise.BLOB.Test;
 
 public static class Assert
 {
-    public static void AreEqual<T>(T expected, T actual, string message = null)
+    public static void AreEqual<T>(T expected, T actual, string? message = null)
     {
-        if (!ConstraintHelpers.AreEqual(expected, actual))
+        if (!ConstraintHelpers.AreEqual(expected!, actual!))
         {
-            Fail(message ?? $"Expected: {ConstraintHelpers.Format(expected)} Actual: {ConstraintHelpers.Format(actual)}");
+            Fail(message ?? $"Expected: {ConstraintHelpers.Format(expected!)} Actual: {ConstraintHelpers.Format(actual!)}");
         }
     }
 
-    public static void IsNotNull(object value, string message = null)
+    public static void IsNotNull(object? value, string? message = null)
     {
         if (value is null)
         {
@@ -21,15 +21,15 @@ public static class Assert
         }
     }
 
-    public static void GreaterOrEqual<T>(T actual, T expected, string message = null) where T : IComparable<T>
+    public static void GreaterOrEqual<T>(T actual, T expected, string? message = null) where T : IComparable<T>
     {
         if (actual.CompareTo(expected) < 0)
         {
-            Fail(message ?? $"Expected {ConstraintHelpers.Format(actual)} to be greater than or equal to {ConstraintHelpers.Format(expected)}.");
+            Fail(message ?? $"Expected {ConstraintHelpers.Format(actual!)} to be greater than or equal to {ConstraintHelpers.Format(expected!)}.");
         }
     }
 
-    public static void That(object actual, IConstraint constraint, string message = null)
+    public static void That(object actual, IConstraint constraint, string? message = null)
     {
         if (!constraint.Matches(actual, out string failure))
         {
@@ -53,7 +53,7 @@ public static class Assert
         }
 
         Fail($"Expected exception of type {typeof(TException).Name} but no exception was thrown.");
-        return null;
+        return null!;
     }
 
     private static void Fail(string message)
@@ -146,7 +146,7 @@ internal sealed class EquivalentConstraint : IConstraint
 
 internal static class ConstraintHelpers
 {
-    public static bool AreEqual(object expected, object actual)
+    public static bool AreEqual(object? expected, object? actual)
     {
         if (ReferenceEquals(expected, actual))
         {
@@ -163,10 +163,10 @@ internal static class ConstraintHelpers
             return expectedString == actualString;
         }
 
-        if (TryGetEnumerable(expected, out IEnumerable expectedEnumerable) &&
-            TryGetEnumerable(actual, out IEnumerable actualEnumerable))
+        if (TryGetEnumerable(expected, out var expectedEnumerable) &&
+            TryGetEnumerable(actual, out var actualEnumerable))
         {
-            return AreSequencesEqual(expectedEnumerable, actualEnumerable);
+            return AreSequencesEqual(expectedEnumerable!, actualEnumerable!);
         }
 
         if (IsNumeric(expected) && IsNumeric(actual))
@@ -177,7 +177,7 @@ internal static class ConstraintHelpers
         return expected.Equals(actual);
     }
 
-    public static string Format(object value)
+    public static string Format(object? value)
     {
         if (value is null)
         {
@@ -189,15 +189,15 @@ internal static class ConstraintHelpers
             return $"\"{s}\"";
         }
 
-        if (TryGetEnumerable(value, out IEnumerable enumerable))
+        if (TryGetEnumerable(value, out var enumerable))
         {
-            return "[" + string.Join(", ", enumerable.Cast<object>().Select(Format)) + "]";
+            return "[" + string.Join(", ", enumerable!.Cast<object>().Select(Format)) + "]";
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? value.ToString() ?? value.GetType().Name;
     }
 
-    private static bool TryGetEnumerable(object value, out IEnumerable enumerable)
+    private static bool TryGetEnumerable(object value, out IEnumerable? enumerable)
     {
         if (value is string)
         {

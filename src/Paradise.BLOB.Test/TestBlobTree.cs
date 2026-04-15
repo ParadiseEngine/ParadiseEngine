@@ -17,23 +17,23 @@ public class TestBlobTree
         return Enumerable.Range(0, 10);
     }
 
-    class TreeNode<T> : ITreeNode<T> where T : unmanaged
+    sealed class TreeNode<T> : ITreeNode<T> where T : unmanaged
     {
         internal readonly List<TreeNode<T>> InternalChildren = new List<TreeNode<T>>();
-        private TreeNode<T> _parent;
+        private TreeNode<T>? _parent;
 
         public IBuilder<T> ValueBuilder { get; }
         public int BlobIndex { get; set; } = -1;
         public IReadOnlyList<ITreeNode<T>> Children => InternalChildren;
 
-        public TreeNode<T> Parent
+        public TreeNode<T>? Parent
         {
             get => _parent;
             set
             {
                 _parent?.InternalChildren.Remove(this);
                 _parent = value;
-                _parent.InternalChildren.Add(this);
+                _parent!.InternalChildren.Add(this);
             }
         }
 
@@ -69,7 +69,7 @@ public class TestBlobTree
         return RandomTree(tree, seed);
     }
 
-    void CompareTree<T>(ref BlobTree<T> blobTree, IReadOnlyList<TreeNode<T>> tree) where T : unmanaged
+    static void CompareTree<T>(ref BlobTree<T> blobTree, IReadOnlyList<TreeNode<T>> tree) where T : unmanaged
     {
         Assert.That(blobTree.Length, Is.EqualTo(tree.Count));
         foreach (var node in tree)
@@ -79,7 +79,7 @@ public class TestBlobTree
         }
     }
 
-    void CompareBlobNodeWithBuildNode<T>(in BlobTree<T>.Node blobNode, TreeNode<T> buildNode) where T : unmanaged
+    static void CompareBlobNodeWithBuildNode<T>(in BlobTree<T>.Node blobNode, TreeNode<T> buildNode) where T : unmanaged
     {
         // Assert.That(blobNode.ValueBuilder, Is.EqualTo(buildNode.ValueBuilder));
         Assert.That(blobNode.FindParentIndex(), Is.EqualTo(buildNode.ParentIndex));

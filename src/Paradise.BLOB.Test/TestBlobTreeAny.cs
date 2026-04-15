@@ -17,24 +17,24 @@ public class TestBlobTreeAny
         return Enumerable.Range(0, 10);
     }
 
-    class TreeNode : ITreeNode
+    sealed class TreeNode : ITreeNode
     {
         internal readonly List<TreeNode> InternalChildren = new List<TreeNode>();
-        private TreeNode _parent;
+        private TreeNode? _parent;
 
         public int BlobIndex { get; set; }
         public IBuilder ValueBuilder { get; set; }
 
         IReadOnlyList<ITreeNode> ITreeNode.Children => InternalChildren;
 
-        public TreeNode Parent
+        public TreeNode? Parent
         {
             get => _parent;
             set
             {
                 _parent?.InternalChildren.Remove(this);
                 _parent = value;
-                _parent.InternalChildren.Add(this);
+                _parent!.InternalChildren.Add(this);
             }
         }
 
@@ -62,13 +62,13 @@ public class TestBlobTreeAny
         }
     }
 
-    IReadOnlyList<TreeNode> CreateRandomIntTree(int count, int seed)
+    static IReadOnlyList<TreeNode> CreateRandomIntTree(int count, int seed)
     {
         var tree = Enumerable.Range(0, count).Select(value => new TreeNode(new ValueBuilder<int>((value + 1) * 100))).ToArray();
         return RandomTree(tree, seed);
     }
 
-    void CompareTree(ref BlobTreeAny blobTree, IReadOnlyList<TreeNode> tree)
+    static void CompareTree(ref BlobTreeAny blobTree, IReadOnlyList<TreeNode> tree)
     {
         Assert.That(blobTree.Length, Is.EqualTo(tree.Count));
         foreach (var node in tree)
@@ -78,7 +78,7 @@ public class TestBlobTreeAny
         }
     }
 
-    void CompareBlobNodeWithBuildNode(in BlobTreeAny.Node blobNode, TreeNode buildNode)
+    static void CompareBlobNodeWithBuildNode(in BlobTreeAny.Node blobNode, TreeNode buildNode)
     {
         // Assert.That(blobNode.ValueBuilder, Is.EqualTo(buildNode.ValueBuilder));
         Assert.That(blobNode.FindParentIndex(), Is.EqualTo(buildNode.ParentIndex));
@@ -183,12 +183,12 @@ public class TestBlobTreeAny
         }
     }
 
-    IReadOnlyList<TreeNode> RandomTree(IReadOnlyList<TreeNode> nodes)
+    static IReadOnlyList<TreeNode> RandomTree(IReadOnlyList<TreeNode> nodes)
     {
         return RandomTree(nodes, Environment.TickCount);
     }
 
-    IReadOnlyList<TreeNode> RandomTree(IReadOnlyList<TreeNode> nodes, int seed)
+    static IReadOnlyList<TreeNode> RandomTree(IReadOnlyList<TreeNode> nodes, int seed)
     {
         var random = new Random(seed);
         for (var i = 1; i < nodes.Count; i++)
@@ -200,7 +200,7 @@ public class TestBlobTreeAny
         return nodes;
     }
 
-    int SetBlobIndex(TreeNode root, int index = 0)
+    static int SetBlobIndex(TreeNode root, int index = 0)
     {
         root.BlobIndex = index;
         foreach (var child in root.InternalChildren) index = SetBlobIndex(child, index + 1);
