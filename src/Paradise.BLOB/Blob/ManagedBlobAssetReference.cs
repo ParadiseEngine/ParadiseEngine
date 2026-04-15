@@ -46,6 +46,7 @@ public unsafe class ManagedBlobAssetReference<T> : IDisposable where T : unmanag
 {
     private readonly byte[] _blob;
     private GCHandle _handle;
+    private bool _disposed;
 
     public ref T Value => ref *UnsafePtr;
     public T* UnsafePtr => (T*)_handle.AddrOfPinnedObject().ToPointer();
@@ -60,8 +61,16 @@ public unsafe class ManagedBlobAssetReference<T> : IDisposable where T : unmanag
         _handle = GCHandle.Alloc(_blob, GCHandleType.Pinned);
     }
 
+    ~ManagedBlobAssetReference()
+    {
+        Dispose();
+    }
+
     public void Dispose()
     {
-        _handle.Free();
+        if (_disposed) return;
+        _disposed = true;
+        if (_handle.IsAllocated) _handle.Free();
+        GC.SuppressFinalize(this);
     }
 }
