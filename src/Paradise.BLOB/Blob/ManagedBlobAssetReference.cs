@@ -36,7 +36,7 @@ public unsafe class ManagedBlobAssetReference : IDisposable
 
     ~ManagedBlobAssetReference()
     {
-        if (_disposed) return;
+        if (_disposed || !_handle.IsAllocated) return;
         _disposed = true;
         _handle.Free();
     }
