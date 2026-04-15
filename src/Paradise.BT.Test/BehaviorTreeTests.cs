@@ -147,6 +147,60 @@ public sealed class BehaviorTreeTests
     }
 
     [Test]
+    public async Task Sequence_Returns_Failure_Not_Zero_When_Child_Already_Failed()
+    {
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Sequence(
+                BehaviorNodes.Failure(),
+                BehaviorNodes.Success()));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+        instance.AutoResetOnCompletion = false;
+
+        // First tick: Failure child breaks the sequence -> returns Failure
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
+
+        // Second tick: child is already completed (Failure), should still return Failure not 0
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
+    }
+
+    [Test]
+    public async Task Selector_Returns_Success_Not_Zero_When_Child_Already_Succeeded()
+    {
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Selector(
+                BehaviorNodes.Success(),
+                BehaviorNodes.Failure()));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+        instance.AutoResetOnCompletion = false;
+
+        // First tick: Success child breaks the selector -> returns Success
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+
+        // Second tick: child is already completed (Success), should still return Success not 0
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+    }
+
+    [Test]
+    public async Task Sequence_Returns_Success_On_Retick_When_All_Children_Already_Succeeded()
+    {
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Sequence(
+                BehaviorNodes.Success(),
+                BehaviorNodes.Success()));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+        instance.AutoResetOnCompletion = false;
+
+        // First tick: both children succeed, sequence returns Success
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+
+        // Second tick: all children already completed (no break triggered), should return Success not 0
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+    }
+
+    [Test]
     public async Task Custom_Reset_Action_Runs_When_Tree_Resets()
     {
         var blackboard = new Blackboard();
