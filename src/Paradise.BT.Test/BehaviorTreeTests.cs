@@ -124,6 +124,45 @@ public sealed class BehaviorTreeTests
     }
 
     [Test]
+    public async Task Repeat_With_MultiTick_Child_Completes_Correct_Number_Of_Times()
+    {
+        int completions = 0;
+        int tickCount = 0;
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Repeat(
+                3,
+                BehaviorNodes.Action(_ =>
+                {
+                    tickCount++;
+                    if (tickCount % 2 == 0)
+                    {
+                        completions++;
+                        return NodeState.Success;
+                    }
+
+                    return NodeState.Running;
+                })));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+
+        // Each child completion takes 2 ticks, 3 completions = 6 ticks minimum
+        // Tick 1: child Running (tick 1 of completion 1)
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Tick 2: child Success (completion 1), TickTimes 3->2
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Tick 3: child reset + re-tick -> Running (tick 1 of completion 2)
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Tick 4: child Success (completion 2), TickTimes 2->1
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Tick 5: child reset + re-tick -> Running (tick 1 of completion 3)
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Tick 6: child Success (completion 3), TickTimes 1->0 -> Success
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+
+        await Assert.That(completions).IsEqualTo(3);
+    }
+
+    [Test]
     public async Task Parallel_Returns_Failure_When_Any_Child_Fails_And_None_Are_Running()
     {
         var tree = BehaviorTreeBuilder.Build(
