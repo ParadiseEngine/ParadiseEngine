@@ -53,14 +53,15 @@ public static class NodeExtensions
         where TNodeBlob : struct, INodeBlob
         where TBlackboard : struct, IBlackboard
     {
-        NodeState currentState = 0;
+        NodeState lastState = 0;
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            currentState = tickCheck(previousState) ? VirtualMachine.Tick(childIndex, ref blob, ref bb) : 0;
-            if (breakCheck(currentState == 0 ? previousState : currentState))
+            NodeState currentState = tickCheck(previousState) ? VirtualMachine.Tick(childIndex, ref blob, ref bb) : 0;
+            lastState = currentState == 0 ? previousState : currentState;
+            if (breakCheck(lastState))
             {
                 break;
             }
@@ -68,6 +69,6 @@ public static class NodeExtensions
             childIndex = blob.GetEndIndex(childIndex);
         }
 
-        return currentState;
+        return lastState;
     }
 }
