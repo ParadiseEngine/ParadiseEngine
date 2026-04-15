@@ -221,10 +221,9 @@ public class TestBlobBuilder
     }
 
     [Test]
-    public void should_use_latest_builder_when_set_ptr_twice_for_same_field()
+    public void should_use_latest_builder_when_set_value_twice_for_same_field()
     {
         var builder = new StructBuilder<BlobWithArray>();
-        builder.SetValue(ref builder.Value.Value, 100);
 
         // Set value field first time
         builder.SetValue(ref builder.Value.Value, 100);
