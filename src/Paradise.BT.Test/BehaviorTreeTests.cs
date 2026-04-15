@@ -174,6 +174,24 @@ public sealed class BehaviorTreeTests
     }
 
     [Test]
+    public async Task Parallel_Preserves_Failed_Child_State_Alongside_Running_Child()
+    {
+        // Child 1: instant Failure. Child 2: Running on tick 1, Success on tick 2.
+        var tree = BehaviorTreeBuilder.Build(
+            BehaviorNodes.Parallel(
+                BehaviorNodes.Failure(),
+                BehaviorNodes.Node(new CountingNode())));
+
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
+
+        // Tick 1: child1 Failure + child2 Running → Running (Running takes priority)
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+
+        // Tick 2: child1 already completed (Failure preserved), child2 completes (Success) → Failure
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
+    }
+
+    [Test]
     public async Task Custom_Struct_Node_Can_Be_Authored_Through_Interface_Constraints()
     {
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new CountingNode()));
