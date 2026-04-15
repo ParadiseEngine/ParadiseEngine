@@ -52,7 +52,7 @@ public unsafe class ManagedBlobAssetReference<T> : IDisposable where T : unmanag
     {
         if (_disposed) return;
         _disposed = true;
-        _handle.Free();
+        if (_handle.IsAllocated) _handle.Free();
         GC.SuppressFinalize(this);
     }
 }
