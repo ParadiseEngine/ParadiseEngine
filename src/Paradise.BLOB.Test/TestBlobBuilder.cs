@@ -194,6 +194,48 @@ public class TestBlobBuilder
         Assert.AreEqual(unicodeString, blob.Value.UnicodeStringPtr.Value.ToString());
     }
 
+    struct BlobWithArray
+    {
+        public int Value;
+        public BlobArray<int> Array;
+    }
+
+    [Test]
+    public void should_use_latest_builder_when_set_twice_for_same_field()
+    {
+        var builder = new StructBuilder<BlobWithArray>();
+        builder.SetValue(ref builder.Value.Value, 42);
+
+        // Set array field first time with [1, 2, 3]
+        builder.SetArray(ref builder.Value.Array, new int[] { 1, 2, 3 });
+
+        // Set array field second time with [10, 20, 30, 40, 50]
+        builder.SetArray(ref builder.Value.Array, new int[] { 10, 20, 30, 40, 50 });
+
+        var blob = builder.CreateManagedBlobAssetReference();
+
+        // Only the second builder's result should be present
+        Assert.AreEqual(42, blob.Value.Value);
+        Assert.AreEqual(5, blob.Value.Array.Length);
+        Assert.That(blob.Value.Array.ToArray(), Is.EquivalentTo(new int[] { 10, 20, 30, 40, 50 }));
+    }
+
+    [Test]
+    public void should_use_latest_builder_when_set_value_twice_for_same_field()
+    {
+        var builder = new StructBuilder<BlobWithArray>();
+
+        // Set value field first time
+        builder.SetValue(ref builder.Value.Value, 100);
+
+        // Set value field second time with different value
+        builder.SetValue(ref builder.Value.Value, 999);
+
+        var blob = builder.CreateManagedBlobAssetReference();
+
+        Assert.AreEqual(999, blob.Value.Value);
+    }
+
     void AssertArrayEqual<T>(T[] array) where T : unmanaged
     {
         var builder = new ArrayBuilder<T>(array);

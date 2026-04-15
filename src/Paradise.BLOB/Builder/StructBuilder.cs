@@ -15,6 +15,7 @@ public class StructBuilder<T> : Builder<T> where T : unmanaged
         where TBuilder : IBuilder<TField>
     {
         var fieldOffset = _value.GetFieldOffset(ref field);
+        _builders.RemoveAll(entry => entry.offset == fieldOffset);
         _fieldBuilderMap[fieldOffset] = builder;
         _builders.Add((fieldOffset, builder));
         return builder;
