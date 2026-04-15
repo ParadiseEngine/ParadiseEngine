@@ -23,8 +23,6 @@ internal interface IRuntimeNodeFactory
 
     Type NodeType { get; }
 
-    BehaviorNodeType NodeTypeKind { get; }
-
     Guid NodeGuid { get; }
 
     IRuntimeNode CreateRuntimeNode();
@@ -47,8 +45,6 @@ internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
     public int TypeId => _metadata.Id;
 
     public Type NodeType => typeof(TNodeData);
-
-    public BehaviorNodeType NodeTypeKind => _metadata.Type;
 
     public Guid NodeGuid => _metadata.Guid;
 

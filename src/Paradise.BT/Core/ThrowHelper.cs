@@ -38,15 +38,4 @@ internal static class ThrowHelper
         }
     }
 
-    public static void ThrowInvalidNodeDefinition(Type nodeType, BehaviorNodeType nodeTypeKind, int childCount)
-    {
-        string message = nodeTypeKind switch
-        {
-            BehaviorNodeType.Action => $"Action node '{nodeType.Name}' cannot have children.",
-            BehaviorNodeType.Decorate => $"Decorator node '{nodeType.Name}' must have exactly one child, but had {childCount}.",
-            _ => $"Invalid node definition for '{nodeType.Name}'.",
-        };
-
-        throw new InvalidOperationException(message);
-    }
 }

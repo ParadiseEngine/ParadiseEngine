@@ -270,18 +270,27 @@ public sealed class BehaviorTreeSerializationTests
     }
 
     [Test]
-    public async Task Round_Trip_Preserves_Behavior_Types()
+    public async Task Deserialize_Rejects_Wrong_Format_Version()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Selector(
-                BehaviorNodes.Succeeder(BehaviorNodes.Failure())));
+            BehaviorNodes.Sequence(BehaviorNodes.Success()));
 
-        using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
+        byte[] blob = tree.SerializeToBytes();
+        // Corrupt the format version (first 4 bytes of the blob struct)
+        blob[0] = 0xFF;
 
-        await Assert.That(roundTripped.GetNodeBehaviorType(0)).IsEqualTo(BehaviorNodeType.Composite);
-        await Assert.That(roundTripped.GetNodeBehaviorType(1)).IsEqualTo(BehaviorNodeType.Decorate);
-        await Assert.That(roundTripped.GetNodeBehaviorType(2)).IsEqualTo(BehaviorNodeType.Action);
+        InvalidOperationException? ex = null;
+        try
+        {
+            BehaviorTreeBlobSerializer.Deserialize(blob);
+        }
+        catch (InvalidOperationException e)
+        {
+            ex = e;
+        }
+
+        await Assert.That(ex).IsNotNull();
+        await Assert.That(ex!.Message.Contains("format version", StringComparison.OrdinalIgnoreCase)).IsTrue();
     }
 
     [Test]
