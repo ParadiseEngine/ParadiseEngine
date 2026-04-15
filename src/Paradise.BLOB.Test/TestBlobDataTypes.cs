@@ -270,14 +270,15 @@ public class TestBlobNullTerminatedString
     }
 
     [Test]
-    public void should_have_null_terminator_in_data()
+    public unsafe void should_have_null_terminator_in_data()
     {
         const string text = "ABC";
         var builder = new NullTerminatedStringBuilder<UTF8Encoding>(text);
         var blob = builder.CreateManagedBlobAssetReference();
-        // Data.Length should include the null terminator
-        // Length property should exclude it
+        // Length property should exclude the null terminator
         Assert.AreEqual(3, blob.Value.Length);
+        // Verify the null byte actually exists at position Length
+        Assert.AreEqual(0, blob.Value.UnsafePtr[blob.Value.Length]);
     }
 
     [Test]

@@ -541,15 +541,23 @@ public class TestPtrBuilderVariants
         Assert.IsNotNull(builder.ValueBuilder);
     }
 
-    [Test]
-    public void should_build_ref_ptr()
+    struct StructWithRefPtr
     {
-        var structBuilder = new ValueBuilder<int>(100);
-        var ptrBuilder = new PtrBuilderWithRefBuilder<int>(structBuilder);
-        // PtrBuilderWithRefBuilder references existing data position
-        var blob = ptrBuilder.CreateManagedBlobAssetReference();
-        // This tests the pointer resolution mechanics
-        Assert.IsNotNull(blob);
+        public int Value;
+        public BlobPtr<int> Ptr;
+    }
+
+    [Test]
+    public void should_build_ref_ptr_in_struct_context()
+    {
+        // PtrBuilderWithRefBuilder requires composition inside a StructBuilder
+        // because it resolves a self-relative offset to another builder's data position
+        var builder = new StructBuilder<StructWithRefPtr>();
+        var valueBuilder = builder.SetValue(ref builder.Value.Value, 100);
+        builder.SetPointer(ref builder.Value.Ptr, valueBuilder);
+        var blob = builder.CreateManagedBlobAssetReference();
+        Assert.AreEqual(100, blob.Value.Value);
+        Assert.AreEqual(100, blob.Value.Ptr.Value);
     }
 
     [Test]

@@ -33,7 +33,7 @@ public class TestBlobTree
             {
                 _parent?.InternalChildren.Remove(this);
                 _parent = value;
-                _parent!.InternalChildren.Add(this);
+                _parent?.InternalChildren.Add(this);
             }
         }
 
