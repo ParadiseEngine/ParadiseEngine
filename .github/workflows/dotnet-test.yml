@@ -17,10 +17,10 @@ jobs:
           global-json-file: global.json
 
       - name: Restore dependencies
-        run: dotnet restore --solution ParadiseEngine.slnx
+        run: dotnet restore ParadiseEngine.slnx
 
       - name: Build
-        run: dotnet build --solution ParadiseEngine.slnx --no-restore -p:TreatWarningsAsErrors=true
+        run: dotnet build ParadiseEngine.slnx --no-restore -p:TreatWarningsAsErrors=true
 
       - name: Test
-        run: dotnet test --solution ParadiseEngine.slnx --no-build -p:PublishAot=false --output normal
+        run: dotnet test ParadiseEngine.slnx --no-build -p:PublishAot=false --output normal
