@@ -65,7 +65,7 @@ public sealed class BehaviorTreeTests
     {
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
-                BehaviorNodes.Delay(0.5f),
+                TestBehaviorNodes.Delay(0.5f),
                 BehaviorNodes.Success()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
@@ -80,7 +80,7 @@ public sealed class BehaviorTreeTests
     {
         int runs = 0;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ =>
+            TestBehaviorNodes.Action(_ =>
             {
                 runs++;
                 return NodeState.Success;
@@ -100,12 +100,12 @@ public sealed class BehaviorTreeTests
         int rightRuns = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Selector(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     leftRuns++;
                     return NodeState.Success;
                 }),
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     rightRuns++;
                     return NodeState.Success;
@@ -126,7 +126,7 @@ public sealed class BehaviorTreeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Repeat(
                 3,
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     executions++;
                     return NodeState.Success;
@@ -148,7 +148,7 @@ public sealed class BehaviorTreeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Repeat(
                 3,
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     tickCount++;
                     if (tickCount % 2 == 0)

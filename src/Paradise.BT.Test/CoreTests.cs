@@ -161,7 +161,7 @@ public sealed class CoreTests
     {
         int executions = 0;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ =>
+            TestBehaviorNodes.Action(_ =>
             {
                 executions++;
                 return NodeState.Success;
@@ -183,7 +183,7 @@ public sealed class CoreTests
     {
         int executions = 0;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ =>
+            TestBehaviorNodes.Action(_ =>
             {
                 executions++;
                 return NodeState.Success;
@@ -217,7 +217,7 @@ public sealed class CoreTests
     {
         float capturedDeltaTime = 0f;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(bb =>
+            TestBehaviorNodes.Action(bb =>
             {
                 capturedDeltaTime = bb.GetData<BehaviorTreeTickDeltaTime>().Value;
                 return NodeState.Success;
@@ -276,7 +276,7 @@ public sealed class CoreTests
         int tickCount = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Selector(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     tickCount++;
                     return tickCount == 1 ? NodeState.Running : NodeState.Failure;

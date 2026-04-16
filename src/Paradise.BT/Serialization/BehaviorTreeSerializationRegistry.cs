@@ -40,7 +40,6 @@ public sealed class BehaviorTreeSerializationRegistry
             .Register<RepeatForeverNode>()
             .Register<InverterNode>()
             .Register<SucceederNode>()
-            .Register<DelayTimerNode>()
             .Register<SuccessNode>()
             .Register<FailedNode>()
             .Register<RunningNode>();

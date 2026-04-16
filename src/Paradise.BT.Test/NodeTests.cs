@@ -27,7 +27,7 @@ public sealed class NodeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
                 BehaviorNodes.Failure(),
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     secondChildTicked++;
                     return NodeState.Success;
@@ -45,7 +45,7 @@ public sealed class NodeTests
         int tickCount = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     tickCount++;
                     return tickCount >= 2 ? NodeState.Success : NodeState.Running;
@@ -65,12 +65,12 @@ public sealed class NodeTests
         int secondChildTicks = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     firstChildTicks++;
                     return NodeState.Success;
                 }),
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     secondChildTicks++;
                     return secondChildTicks >= 2 ? NodeState.Success : NodeState.Running;
@@ -114,7 +114,7 @@ public sealed class NodeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Selector(
                 BehaviorNodes.Success(),
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     secondChildTicked++;
                     return NodeState.Failure;
@@ -132,7 +132,7 @@ public sealed class NodeTests
         int tickCount = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Selector(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     tickCount++;
                     return tickCount >= 2 ? NodeState.Success : NodeState.Running;
@@ -215,7 +215,7 @@ public sealed class NodeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Repeat(
                 0,
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     executions++;
                     return NodeState.Success;
@@ -234,7 +234,7 @@ public sealed class NodeTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Repeat(
                 5,
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     executions++;
                     return executions == 2 ? NodeState.Failure : NodeState.Success;
@@ -302,7 +302,7 @@ public sealed class NodeTests
         int executions = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.RepeatForever(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     executions++;
                     return executions == 3 ? NodeState.Failure : NodeState.Success;
@@ -322,7 +322,7 @@ public sealed class NodeTests
         int executions = 0;
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.RepeatForever(
-                BehaviorNodes.Action(_ =>
+                TestBehaviorNodes.Action(_ =>
                 {
                     executions++;
                     return executions == 2 ? NodeState.Success : NodeState.Failure;
@@ -416,7 +416,7 @@ public sealed class NodeTests
     [Test]
     public async Task Delay_Zero_Seconds_Succeeds_Immediately()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Delay(0f));
+        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Delay(0f));
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
@@ -425,7 +425,7 @@ public sealed class NodeTests
     [Test]
     public async Task Delay_Exact_Boundary_Succeeds()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Delay(1.0f));
+        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Delay(1.0f));
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(0.5f)).IsEqualTo(NodeState.Running);
@@ -435,7 +435,7 @@ public sealed class NodeTests
     [Test]
     public async Task Delay_Overshoot_Still_Succeeds()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Delay(0.3f));
+        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Delay(0.3f));
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(1.0f)).IsEqualTo(NodeState.Success);
@@ -449,7 +449,7 @@ public sealed class NodeTests
     public async Task DelegateAction_Returns_Success()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ => NodeState.Success));
+            TestBehaviorNodes.Action(_ => NodeState.Success));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -460,7 +460,7 @@ public sealed class NodeTests
     public async Task DelegateAction_Returns_Failure()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ => NodeState.Failure));
+            TestBehaviorNodes.Action(_ => NodeState.Failure));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -471,7 +471,7 @@ public sealed class NodeTests
     public async Task DelegateAction_Returns_Running()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(_ => NodeState.Running));
+            TestBehaviorNodes.Action(_ => NodeState.Running));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -483,7 +483,7 @@ public sealed class NodeTests
     {
         int receivedIndex = -1;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action((_, index) =>
+            TestBehaviorNodes.Action((_, index) =>
             {
                 receivedIndex = index;
                 return NodeState.Success;
@@ -500,7 +500,7 @@ public sealed class NodeTests
     public async Task DelegateAction_Receives_Blackboard()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Action(bb =>
+            TestBehaviorNodes.Action(bb =>
             {
                 int value = bb.GetData<int>();
                 return value == 42 ? NodeState.Success : NodeState.Failure;
@@ -521,7 +521,7 @@ public sealed class NodeTests
     public async Task DelegateCondition_True_Returns_Success()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Condition(_ => true));
+            TestBehaviorNodes.Condition(_ => true));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -532,7 +532,7 @@ public sealed class NodeTests
     public async Task DelegateCondition_False_Returns_Failure()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Condition(_ => false));
+            TestBehaviorNodes.Condition(_ => false));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -544,7 +544,7 @@ public sealed class NodeTests
     {
         int receivedIndex = -1;
         var tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Condition((_, index) =>
+            TestBehaviorNodes.Condition((_, index) =>
             {
                 receivedIndex = index;
                 return true;

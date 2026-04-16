@@ -30,21 +30,6 @@ public static class BehaviorNodes
     public static BehaviorNodeDefinition Succeeder(BehaviorNodeDefinition child)
         => Node(new SucceederNode(), child);
 
-    public static BehaviorNodeDefinition Delay(float seconds)
-        => Node(new DelayTimerNode { TimerSeconds = seconds });
-
-    public static BehaviorNodeDefinition Action(Func<IBlackboard, NodeState> action)
-        => Action((bb, _) => action(bb));
-
-    public static BehaviorNodeDefinition Action(Func<IBlackboard, int, NodeState> action)
-        => Node(new DelegateActionNode(action));
-
-    public static BehaviorNodeDefinition Condition(Func<IBlackboard, bool> predicate)
-        => Condition((bb, _) => predicate(bb));
-
-    public static BehaviorNodeDefinition Condition(Func<IBlackboard, int, bool> predicate)
-        => Node(new DelegateConditionNode(predicate));
-
     public static BehaviorNodeDefinition Success() => Node(new SuccessNode());
 
     public static BehaviorNodeDefinition Failure() => Node(new FailedNode());

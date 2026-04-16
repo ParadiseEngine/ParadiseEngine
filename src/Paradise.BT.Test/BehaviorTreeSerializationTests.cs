@@ -22,11 +22,12 @@ public sealed class BehaviorTreeSerializationTests
     {
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
-                BehaviorNodes.Delay(0.5f),
+                TestBehaviorNodes.Delay(0.5f),
                 BehaviorNodes.Repeat(2, BehaviorNodes.Success())));
 
         using var serializedTree = tree.Serialize();
-        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree);
+        var registry = new BehaviorTreeSerializationRegistry().Register<DelayTimerNode>();
+        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, registry);
         BehaviorTreeInstance instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(0.25f)).IsEqualTo(NodeState.Running);
@@ -52,7 +53,7 @@ public sealed class BehaviorTreeSerializationTests
     [Test]
     public async Task Delegate_Backed_Nodes_Are_Rejected_By_Blob_Serialization()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Action(_ => NodeState.Success));
+        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Action(_ => NodeState.Success));
 
         Exception? exception = null;
         IDisposable? serializedTree = null;
@@ -142,7 +143,7 @@ public sealed class BehaviorTreeSerializationTests
     [Test]
     public async Task Delegate_Condition_Nodes_Are_Rejected_By_Blob_Serialization()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Condition(_ => true));
+        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Condition(_ => true));
 
         Exception? exception = null;
         IDisposable? serializedTree = null;
@@ -203,11 +204,12 @@ public sealed class BehaviorTreeSerializationTests
                 BehaviorNodes.RepeatForever(BehaviorNodes.Failure(), breakStates: NodeState.Failure),
                 BehaviorNodes.Inverter(BehaviorNodes.Success()),
                 BehaviorNodes.Succeeder(BehaviorNodes.Failure()),
-                BehaviorNodes.Delay(0.1f)));
+                TestBehaviorNodes.Delay(0.1f)));
 
-        // Should not throw - all node types are registered by default
+        // Should not throw - all node types are registered (DelayTimerNode is now external)
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
+        var registry = new BehaviorTreeSerializationRegistry().Register<DelayTimerNode>();
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, registry);
 
         await Assert.That(roundTripped.Count).IsEqualTo(tree.Count);
     }
@@ -238,10 +240,11 @@ public sealed class BehaviorTreeSerializationTests
         var tree = BehaviorTreeBuilder.Build(
             BehaviorNodes.Sequence(
                 BehaviorNodes.Inverter(BehaviorNodes.Failure()),
-                BehaviorNodes.Repeat(2, BehaviorNodes.Delay(0.1f))));
+                BehaviorNodes.Repeat(2, TestBehaviorNodes.Delay(0.1f))));
 
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
+        var registry = new BehaviorTreeSerializationRegistry().Register<DelayTimerNode>();
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, registry);
         BehaviorTreeInstance instance = roundTripped.CreateInstance(new Blackboard());
 
         // Inverter(Failure) -> Success
