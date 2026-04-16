@@ -20,6 +20,15 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
+    private static readonly DiagnosticDescriptor s_notUnmanagedDiagnostic = new(
+        id: "PBT0002",
+        title: "Builder struct is not unmanaged",
+        messageFormat: "Struct '{0}' has [Builder] but contains managed references and cannot be used as an INodeData builder",
+        category: "Paradise.BT.Generators",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true
+    );
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var provider = context.SyntaxProvider.CreateSyntaxProvider(
@@ -41,7 +50,14 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             }
 
             if (!info.IsUnmanaged)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    s_notUnmanagedDiagnostic,
+                    info.Location,
+                    info.StructName
+                ));
                 return;
+            }
 
             var source = GenerateWrapper(info);
             spc.AddSource($"{info.GeneratedClassName}.g.cs", source);
@@ -50,9 +66,12 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
     private static NodeInfo? GetNodeInfo(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         var structDecl = (StructDeclarationSyntax)ctx.Node;
         if (ctx.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not INamedTypeSymbol structSymbol)
             return null;
+
+        ct.ThrowIfCancellationRequested();
 
         // Get [Builder] attribute data
         AttributeData? builderAttr = null;
@@ -284,7 +303,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         return char.ToLowerInvariant(name[0]) + name.Substring(1);
     }
 
-    private readonly struct NodeInfo
+    private readonly struct NodeInfo : System.IEquatable<NodeInfo>
     {
         public readonly string StructName;
         public readonly string FullyQualifiedStructName;
@@ -317,9 +336,33 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             Fields = fields;
             Location = location;
         }
+
+        public bool Equals(NodeInfo other) =>
+            StructName == other.StructName
+            && FullyQualifiedStructName == other.FullyQualifiedStructName
+            && GeneratedClassName == other.GeneratedClassName
+            && Namespace == other.Namespace
+            && Cardinality == other.Cardinality
+            && HasGuid == other.HasGuid
+            && IsUnmanaged == other.IsUnmanaged
+            && Fields.SequenceEqual(other.Fields);
+
+        public override bool Equals(object? obj) => obj is NodeInfo other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = FullyQualifiedStructName.GetHashCode();
+                hash = hash * 31 + Cardinality;
+                hash = hash * 31 + (HasGuid ? 1 : 0);
+                hash = hash * 31 + (IsUnmanaged ? 1 : 0);
+                return hash;
+            }
+        }
     }
 
-    private readonly struct FieldInfo
+    private readonly struct FieldInfo : System.IEquatable<FieldInfo>
     {
         public readonly string Name;
         public readonly string TypeName;
@@ -329,5 +372,11 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             Name = name;
             TypeName = typeName;
         }
+
+        public bool Equals(FieldInfo other) => Name == other.Name && TypeName == other.TypeName;
+
+        public override bool Equals(object? obj) => obj is FieldInfo other && Equals(other);
+
+        public override int GetHashCode() => Name.GetHashCode() ^ TypeName.GetHashCode();
     }
 }
