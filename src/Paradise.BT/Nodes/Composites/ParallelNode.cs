@@ -1,6 +1,7 @@
 namespace Paradise.BT;
 
 [System.Runtime.InteropServices.Guid("A316D182-7D8C-4075-A46D-FEE08CAEEEAF")]
+[Builder(NodeCardinality.Composite)]
 public struct ParallelNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)

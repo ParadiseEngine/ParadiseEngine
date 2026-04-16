@@ -1,29 +1,31 @@
 using Paradise.BT;
+using Paradise.BT.Builder;
 
 var blackboard = new Blackboard();
 blackboard.SetData(new HasTargetData { Value = true });
 blackboard.SetData(new ShotsFiredData());
 
-var tree = BehaviorTreeBuilder.Build(
-    BehaviorNodes.Selector(
-        BehaviorNodes.Sequence(
-            BehaviorNodes.Condition(static bb => bb.GetData<HasTargetData>().Value),
-            BehaviorNodes.Repeat(
-                3,
-                BehaviorNodes.Sequence(
-                    BehaviorNodes.Delay(0.5f),
-                    BehaviorNodes.Action(static bb =>
-                    {
-                        ref ShotsFiredData shots = ref bb.GetDataRef<ShotsFiredData>();
-                        shots.Value++;
-                        Console.WriteLine($"Fired shot #{shots.Value}");
-                        return NodeState.Success;
-                    })))),
-        BehaviorNodes.Action(static _ =>
-        {
-            Console.WriteLine("Idling...");
-            return NodeState.Success;
-        })));
+// Builder DSL syntax
+var tree = new Selector(
+    new Sequence(
+        new CheckCondition(static bb => bb.GetData<HasTargetData>().Value),
+        new Repeat(
+            3,
+            new Sequence(
+                new Delay(0.5f),
+                new RunAction(static bb =>
+                {
+                    ref ShotsFiredData shots = ref bb.GetDataRef<ShotsFiredData>();
+                    shots.Value++;
+                    Console.WriteLine($"Fired shot #{shots.Value}");
+                    return NodeState.Success;
+                })))),
+    new RunAction(static _ =>
+    {
+        Console.WriteLine("Idling...");
+        return NodeState.Success;
+    })
+).Build();
 
 BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
 

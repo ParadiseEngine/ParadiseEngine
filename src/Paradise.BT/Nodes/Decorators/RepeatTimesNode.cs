@@ -1,6 +1,7 @@
 namespace Paradise.BT;
 
 [System.Runtime.InteropServices.Guid("76E27039-91C1-4DEF-AFEF-1EDDBAAE8CCE")]
+[Builder("Repeat", NodeCardinality.Decorator)]
 public struct RepeatTimesNode : INodeData
 {
     public int TickTimes;

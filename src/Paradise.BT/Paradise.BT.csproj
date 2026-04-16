@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.BLOB\Paradise.BLOB.csproj" />
+    <ProjectReference Include="..\Paradise.BT.Generators\Paradise.BT.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" />
   </ItemGroup>
 
@@ -31,6 +32,7 @@
       <Pack>true</Pack>
       <PackagePath>README.md</PackagePath>
     </None>
+    <None Include="$(OutputPath)\..\..\..\Paradise.BT.Generators\$(Configuration)\netstandard2.0\Paradise.BT.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>
