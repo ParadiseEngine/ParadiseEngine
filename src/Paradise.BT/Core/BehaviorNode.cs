@@ -10,16 +10,12 @@ public interface INodeData
     NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob
         where TBlackboard : struct, IBlackboard;
-}
 
-/// <summary>
-/// Optional reset callback used by nodes with custom reset behavior.
-/// </summary>
-public interface ICustomResetAction
-{
     void Reset<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard;
+        where TBlackboard : struct, IBlackboard
+    {
+    }
 }
 
 internal interface IRuntimeNode
@@ -83,11 +79,8 @@ internal sealed class RuntimeNode<TNodeData> : IRuntimeNode
         where TNodeBlob : struct, INodeBlob
         where TBlackboard : struct, IBlackboard
     {
-        if (_runtimeData is ICustomResetAction resetAction)
-        {
-            resetAction.Reset(index, ref blob, ref bb);
-            _runtimeData = (TNodeData)resetAction;
-        }
+        ref TNodeData runtimeData = ref _runtimeData;
+        runtimeData.Reset(index, ref blob, ref bb);
     }
 
     ref T IRuntimeNodeDataAccess.GetRuntimeData<T>()

@@ -39,7 +39,7 @@ public sealed class BehaviorTreeTests
     }
 
     [System.Runtime.InteropServices.Guid("324C79B0-5CAB-4953-9A3F-9490C6361AE5")]
-    private struct ResetAwareNode : INodeData, ICustomResetAction
+    private struct ResetAwareNode : INodeData
     {
         public int Count;
 
