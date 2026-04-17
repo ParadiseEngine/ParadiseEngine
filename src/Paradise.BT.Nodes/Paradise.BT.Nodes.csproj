@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net10.0</TargetFrameworks>
+    <Title>Paradise.BT.Nodes</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Built-in node library for Paradise.BT behavior trees (Sequence, Selector, Parallel, decorators, delegate-backed actions, delay timer).</Description>
+    <PackageId>Paradise.BT.Nodes</PackageId>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>behavior-tree;ai;nativeaot;game-dev;nodes</PackageTags>
+    <Copyright>ParadiseEngine</Copyright>
+    <IsTrimmable Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsTrimmable>
+    <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.BT\Paradise.BT.csproj" />
+    <ProjectReference Include="..\Paradise.BT.Builder\Paradise.BT.Builder.csproj" />
+    <ProjectReference Include="..\Paradise.BT.Generators\Paradise.BT.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

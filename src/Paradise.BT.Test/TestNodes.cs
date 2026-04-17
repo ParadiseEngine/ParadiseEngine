@@ -1,55 +1,37 @@
-using System.Runtime.InteropServices;
-
 namespace Paradise.BT.Test;
-
-[Guid("B0E631D3-64E8-467F-B39A-1E4AF41E6A66")]
-public struct DelegateActionNode : INodeData
-{
-    private readonly Func<IBlackboard, int, NodeState> _action;
-
-    public DelegateActionNode(Func<IBlackboard, int, NodeState> action)
-    {
-        _action = action ?? throw new ArgumentNullException(nameof(action));
-    }
-
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
-        => _action(bb, index);
-}
-
-[Guid("55BF6D71-62B0-4AB8-9B51-B0B58B7AC76A")]
-public struct DelegateConditionNode : INodeData
-{
-    private readonly Func<IBlackboard, int, bool> _predicate;
-
-    public DelegateConditionNode(Func<IBlackboard, int, bool> predicate)
-    {
-        _predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
-    }
-
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
-        => _predicate(bb, index).ToNodeState();
-}
-
-[Guid("2F6009D3-1314-42E6-8E52-4AEB7CDDB4CD")]
-public struct DelayTimerNode : INodeData
-{
-    public float TimerSeconds;
-
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
-    {
-        TimerSeconds -= bb.GetData<BehaviorTreeTickDeltaTime>().Value;
-        return TimerSeconds <= 0f ? NodeState.Success : NodeState.Running;
-    }
-}
 
 public static class TestBehaviorNodes
 {
+    public static BehaviorNodeDefinition Success()
+        => BehaviorNodes.Node(new SuccessNode());
+
+    public static BehaviorNodeDefinition Failure()
+        => BehaviorNodes.Node(new FailedNode());
+
+    public static BehaviorNodeDefinition Running()
+        => BehaviorNodes.Node(new RunningNode());
+
+    public static BehaviorNodeDefinition Sequence(params BehaviorNodeDefinition[] children)
+        => BehaviorNodes.Node(new SequenceNode(), children);
+
+    public static BehaviorNodeDefinition Selector(params BehaviorNodeDefinition[] children)
+        => BehaviorNodes.Node(new SelectorNode(), children);
+
+    public static BehaviorNodeDefinition Parallel(params BehaviorNodeDefinition[] children)
+        => BehaviorNodes.Node(new ParallelNode(), children);
+
+    public static BehaviorNodeDefinition Inverter(BehaviorNodeDefinition child)
+        => BehaviorNodes.Node(new InverterNode(), child);
+
+    public static BehaviorNodeDefinition Succeeder(BehaviorNodeDefinition child)
+        => BehaviorNodes.Node(new SucceederNode(), child);
+
+    public static BehaviorNodeDefinition Repeat(int count, BehaviorNodeDefinition child, NodeState breakStates = 0)
+        => BehaviorNodes.Node(new RepeatTimesNode { TickTimes = count, BreakStates = breakStates }, child);
+
+    public static BehaviorNodeDefinition RepeatForever(BehaviorNodeDefinition child, NodeState breakStates = 0)
+        => BehaviorNodes.Node(new RepeatForeverNode { BreakStates = breakStates }, child);
+
     public static BehaviorNodeDefinition Delay(float seconds)
         => BehaviorNodes.Node(new DelayTimerNode { TimerSeconds = seconds });
 
@@ -64,4 +46,18 @@ public static class TestBehaviorNodes
 
     public static BehaviorNodeDefinition Condition(Func<IBlackboard, int, bool> predicate)
         => BehaviorNodes.Node(new DelegateConditionNode(predicate));
+
+    public static BehaviorTreeSerializationRegistry BuiltInRegistry()
+        => new BehaviorTreeSerializationRegistry()
+            .Register<SequenceNode>()
+            .Register<SelectorNode>()
+            .Register<ParallelNode>()
+            .Register<InverterNode>()
+            .Register<SucceederNode>()
+            .Register<RepeatTimesNode>()
+            .Register<RepeatForeverNode>()
+            .Register<SuccessNode>()
+            .Register<FailedNode>()
+            .Register<RunningNode>()
+            .Register<DelayTimerNode>();
 }

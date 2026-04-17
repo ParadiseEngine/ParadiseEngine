@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../Paradise.BT/Paradise.BT.csproj" />
+    <ProjectReference Include="../Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
+    <ProjectReference Include="../Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
   </ItemGroup>
 
 </Project>

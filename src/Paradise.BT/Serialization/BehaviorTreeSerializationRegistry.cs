@@ -9,12 +9,8 @@ public sealed class BehaviorTreeSerializationRegistry
 {
     private readonly Dictionary<Guid, IRegisteredNode> _nodes = new();
 
-    public BehaviorTreeSerializationRegistry(bool includeBuiltInNodes = true)
+    public BehaviorTreeSerializationRegistry()
     {
-        if (includeBuiltInNodes)
-        {
-            RegisterBuiltInNodes();
-        }
     }
 
     public BehaviorTreeSerializationRegistry Register<TNodeData>()
@@ -31,21 +27,6 @@ public sealed class BehaviorTreeSerializationRegistry
         _nodes[registeredNode.NodeGuid] = registeredNode;
         return this;
     }
-
-    public BehaviorTreeSerializationRegistry RegisterBuiltInNodes()
-        => Register<SequenceNode>()
-            .Register<SelectorNode>()
-            .Register<ParallelNode>()
-            .Register<RepeatTimesNode>()
-            .Register<RepeatForeverNode>()
-            .Register<InverterNode>()
-            .Register<SucceederNode>()
-            .Register<SuccessNode>()
-            .Register<FailedNode>()
-            .Register<RunningNode>();
-
-    public static BehaviorTreeSerializationRegistry CreateBuiltIn()
-        => new();
 
     internal IRuntimeNodeFactory CreateFactory(ref BehaviorTreeBlobNode node)
     {

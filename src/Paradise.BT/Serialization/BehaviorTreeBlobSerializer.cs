@@ -33,7 +33,7 @@ public static class BehaviorTreeBlobSerializer
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
 
-        registry ??= BehaviorTreeSerializationRegistry.CreateBuiltIn();
+        registry ??= new BehaviorTreeSerializationRegistry();
 
         ref BehaviorTreeBlob serializedTree = ref blob.Value;
 

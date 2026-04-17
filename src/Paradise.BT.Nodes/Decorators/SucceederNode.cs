@@ -1,4 +1,4 @@
-namespace Paradise.BT;
+namespace Paradise.BT.Nodes;
 
 [System.Runtime.InteropServices.Guid("8D789E4C-D4B8-41D9-A2CD-47C7024B1D51")]
 [Builder(NodeCardinality.Decorator)]

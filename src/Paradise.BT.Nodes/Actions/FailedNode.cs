@@ -1,11 +1,11 @@
-namespace Paradise.BT;
+namespace Paradise.BT.Nodes;
 
-[System.Runtime.InteropServices.Guid("A2E43D78-8993-4D0A-9CD0-70A98AAF9E8A")]
-[Builder]
-public struct SuccessNode : INodeData
+[System.Runtime.InteropServices.Guid("AC5CB763-5F7A-4301-9670-D4E38A5557CB")]
+[Builder("Failure")]
+public struct FailedNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob
         where TBlackboard : struct, IBlackboard
-        => NodeState.Success;
+        => NodeState.Failure;
 }
