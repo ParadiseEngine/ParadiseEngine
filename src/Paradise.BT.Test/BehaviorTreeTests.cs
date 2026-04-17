@@ -64,9 +64,9 @@ public sealed class BehaviorTreeTests
     public async Task Sequence_With_Delay_Completes_After_Enough_Time()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Sequence(
-                TestBehaviorNodes.Delay(0.5f),
-                TestBehaviorNodes.Success()));
+            BuiltInBehaviorNodes.Sequence(
+                BuiltInBehaviorNodes.Delay(0.5f),
+                BuiltInBehaviorNodes.Success()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -99,7 +99,7 @@ public sealed class BehaviorTreeTests
         int leftRuns = 0;
         int rightRuns = 0;
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Selector(
+            BuiltInBehaviorNodes.Selector(
                 TestBehaviorNodes.Action(_ =>
                 {
                     leftRuns++;
@@ -124,7 +124,7 @@ public sealed class BehaviorTreeTests
     {
         int executions = 0;
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Repeat(
+            BuiltInBehaviorNodes.Repeat(
                 3,
                 TestBehaviorNodes.Action(_ =>
                 {
@@ -146,7 +146,7 @@ public sealed class BehaviorTreeTests
         int completions = 0;
         int tickCount = 0;
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Repeat(
+            BuiltInBehaviorNodes.Repeat(
                 3,
                 TestBehaviorNodes.Action(_ =>
                 {
@@ -183,9 +183,9 @@ public sealed class BehaviorTreeTests
     public async Task Parallel_Returns_Failure_When_Any_Child_Fails_And_None_Are_Running()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Parallel(
-                TestBehaviorNodes.Success(),
-                TestBehaviorNodes.Failure()));
+            BuiltInBehaviorNodes.Parallel(
+                BuiltInBehaviorNodes.Success(),
+                BuiltInBehaviorNodes.Failure()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
@@ -197,8 +197,8 @@ public sealed class BehaviorTreeTests
     {
         // Child 1: instant Success. Child 2: Running on tick 1, Success on tick 2.
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Parallel(
-                TestBehaviorNodes.Success(),
+            BuiltInBehaviorNodes.Parallel(
+                BuiltInBehaviorNodes.Success(),
                 BehaviorNodes.Node(new CountingNode())));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
@@ -214,9 +214,9 @@ public sealed class BehaviorTreeTests
     public async Task Parallel_All_Children_Already_Completed_Returns_Valid_State()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Parallel(
-                TestBehaviorNodes.Success(),
-                TestBehaviorNodes.Failure()));
+            BuiltInBehaviorNodes.Parallel(
+                BuiltInBehaviorNodes.Success(),
+                BuiltInBehaviorNodes.Failure()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
@@ -234,8 +234,8 @@ public sealed class BehaviorTreeTests
     {
         // Child 1: instant Failure. Child 2: Running on tick 1, Success on tick 2.
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Parallel(
-                TestBehaviorNodes.Failure(),
+            BuiltInBehaviorNodes.Parallel(
+                BuiltInBehaviorNodes.Failure(),
                 BehaviorNodes.Node(new CountingNode())));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
@@ -261,9 +261,9 @@ public sealed class BehaviorTreeTests
     public async Task Sequence_Returns_Failure_Not_Zero_When_Child_Already_Failed()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Sequence(
-                TestBehaviorNodes.Failure(),
-                TestBehaviorNodes.Success()));
+            BuiltInBehaviorNodes.Sequence(
+                BuiltInBehaviorNodes.Failure(),
+                BuiltInBehaviorNodes.Success()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
@@ -279,9 +279,9 @@ public sealed class BehaviorTreeTests
     public async Task Selector_Returns_Success_Not_Zero_When_Child_Already_Succeeded()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Selector(
-                TestBehaviorNodes.Success(),
-                TestBehaviorNodes.Failure()));
+            BuiltInBehaviorNodes.Selector(
+                BuiltInBehaviorNodes.Success(),
+                BuiltInBehaviorNodes.Failure()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
@@ -297,9 +297,9 @@ public sealed class BehaviorTreeTests
     public async Task Sequence_Returns_Success_On_Retick_When_All_Children_Already_Succeeded()
     {
         var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Sequence(
-                TestBehaviorNodes.Success(),
-                TestBehaviorNodes.Success()));
+            BuiltInBehaviorNodes.Sequence(
+                BuiltInBehaviorNodes.Success(),
+                BuiltInBehaviorNodes.Success()));
 
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;

@@ -8,7 +8,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Success_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Success());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
         var builderTree = new Success().Build();
 
         var factoryInstance = factoryTree.CreateInstance(new Blackboard());
@@ -21,7 +21,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Failure_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Failure());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Failure());
         var builderTree = new Failure().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Failure);
@@ -30,7 +30,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Running_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Running());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Running());
         var builderTree = new Running().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Running);
@@ -112,11 +112,11 @@ public sealed class BuilderDslTests
     {
         // Build with factory
         var factoryTree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Selector(
-                TestBehaviorNodes.Sequence(
-                    TestBehaviorNodes.Success(),
-                    TestBehaviorNodes.Failure()),
-                TestBehaviorNodes.Success()));
+            BuiltInBehaviorNodes.Selector(
+                BuiltInBehaviorNodes.Sequence(
+                    BuiltInBehaviorNodes.Success(),
+                    BuiltInBehaviorNodes.Failure()),
+                BuiltInBehaviorNodes.Success()));
 
         // Build with DSL
         var dslTree = new Selector(

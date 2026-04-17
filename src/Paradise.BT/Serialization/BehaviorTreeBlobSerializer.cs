@@ -19,9 +19,10 @@ public static class BehaviorTreeBlobSerializer
     public static byte[] SerializeToBytes(BehaviorTree tree)
         => CreateBlob(tree);
 
-    public static BehaviorTree Deserialize(byte[] blob, BehaviorTreeSerializationRegistry? registry = null)
+    public static BehaviorTree Deserialize(byte[] blob, BehaviorTreeSerializationRegistry registry)
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
+        ThrowHelper.ThrowIfNull(registry, nameof(registry));
 
         using var serializedTree = new ManagedBlobAssetReference<BehaviorTreeBlob>(blob);
         return Deserialize(serializedTree, registry);
@@ -29,11 +30,10 @@ public static class BehaviorTreeBlobSerializer
 
     public static BehaviorTree Deserialize(
         ManagedBlobAssetReference<BehaviorTreeBlob> blob,
-        BehaviorTreeSerializationRegistry? registry = null)
+        BehaviorTreeSerializationRegistry registry)
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
-
-        registry ??= new BehaviorTreeSerializationRegistry();
+        ThrowHelper.ThrowIfNull(registry, nameof(registry));
 
         ref BehaviorTreeBlob serializedTree = ref blob.Value;
 
