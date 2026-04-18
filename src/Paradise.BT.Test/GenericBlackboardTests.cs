@@ -2,7 +2,7 @@ namespace Paradise.BT.Test;
 
 public sealed class GenericBlackboardTests
 {
-    private struct CountingBlackboard : IMutableBlackboard
+    private struct CountingBlackboard : IBlackboard
     {
         private Blackboard _inner;
         public int SetDataCount;
@@ -23,23 +23,20 @@ public sealed class GenericBlackboardTests
     }
 
     [Test]
-    public async Task Generic_CreateInstance_Uses_Custom_Blackboard_SetData_On_Tick()
+    public async Task Generic_CreateInstance_Exposes_Custom_Blackboard_By_Ref()
     {
         var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
         var instance = tree.CreateInstance(new CountingBlackboard());
 
-        // Tick must route BehaviorTreeTickDeltaTime through the custom SetData.
+        // Caller writes persist through the ref exposed by the instance.
         await Assert.That(instance.Blackboard.SetDataCount).IsEqualTo(0);
-        instance.Tick(0.016f);
+        instance.Blackboard.SetData(42);
         await Assert.That(instance.Blackboard.SetDataCount).IsEqualTo(1);
+        await Assert.That(instance.Blackboard.GetData<int>()).IsEqualTo(42);
 
-        int countBeforeReset = instance.Blackboard.SetDataCount;
-        instance.Reset();
-        await Assert.That(instance.Blackboard.SetDataCount).IsEqualTo(countBeforeReset);
-
-        instance.Tick(0.032f);
-        await Assert.That(instance.Blackboard.SetDataCount).IsEqualTo(countBeforeReset + 1);
-        await Assert.That(instance.Blackboard.GetData<BehaviorTreeTickDeltaTime>().Value).IsEqualTo(0.032f);
+        // Tick does not write to the blackboard — counter must stay put.
+        instance.Tick();
+        await Assert.That(instance.Blackboard.SetDataCount).IsEqualTo(1);
     }
 
     [Test]
@@ -52,8 +49,12 @@ public sealed class GenericBlackboardTests
 
         var instance = tree.CreateInstance(new CountingBlackboard());
 
-        await Assert.That(instance.Tick(0.2f)).IsEqualTo(NodeState.Running);
-        await Assert.That(instance.Tick(0.2f)).IsEqualTo(NodeState.Running);
-        await Assert.That(instance.Tick(0.2f)).IsEqualTo(NodeState.Success);
+        // Caller writes delta time before each tick — the library does not.
+        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 }

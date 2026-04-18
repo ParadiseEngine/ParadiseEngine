@@ -24,8 +24,7 @@ internal static class TestTickExtensions
     /// Test-only convenience: writes <see cref="BehaviorTreeTickDeltaTime"/> to the blackboard then ticks.
     /// The library intentionally does not expose this — delta-time propagation is a caller concern.
     /// </summary>
-    public static NodeState Tick<TBlackboard>(this BehaviorTreeInstance<TBlackboard> instance, float deltaTime)
-        where TBlackboard : struct, IMutableBlackboard
+    public static NodeState Tick(this BehaviorTreeInstance<Blackboard> instance, float deltaTime)
     {
         instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(deltaTime));
         return instance.Tick();
