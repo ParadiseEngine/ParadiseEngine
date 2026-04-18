@@ -3,7 +3,7 @@ namespace Paradise.BT;
 /// <summary>
 /// .NET-friendly blackboard that implements the exact EntitiesBT interface shape.
 /// </summary>
-public struct Blackboard : IBlackboard
+public struct Blackboard : IMutableBlackboard
 {
     private BlackboardStorage? _storage;
 

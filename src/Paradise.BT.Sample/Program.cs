@@ -27,7 +27,7 @@ var tree = new Selector(
     })
 ).Build();
 
-BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(blackboard);
+BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
 
 for (int i = 0; i < 10; i++)
 {

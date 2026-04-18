@@ -68,7 +68,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Delay(0.5f),
                 BuiltInBehaviorNodes.Success()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(0.2f)).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick(0.2f)).IsEqualTo(NodeState.Running);
@@ -86,7 +86,7 @@ public sealed class BehaviorTreeTests
                 return NodeState.Success;
             }));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
@@ -111,7 +111,7 @@ public sealed class BehaviorTreeTests
                     return NodeState.Success;
                 })));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         NodeState status = instance.Tick();
 
         await Assert.That(status).IsEqualTo(NodeState.Success);
@@ -132,7 +132,7 @@ public sealed class BehaviorTreeTests
                     return NodeState.Success;
                 })));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -160,7 +160,7 @@ public sealed class BehaviorTreeTests
                     return NodeState.Running;
                 })));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         // Each child completion takes 2 ticks, 3 completions = 6 ticks minimum
         // Tick 1: child Running (tick 1 of completion 1)
@@ -187,7 +187,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Success(),
                 BuiltInBehaviorNodes.Failure()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
@@ -201,7 +201,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Success(),
                 BehaviorNodes.Node(new CountingNode())));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         // Tick 1: child2 returns Running → Parallel returns Running
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -218,7 +218,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Success(),
                 BuiltInBehaviorNodes.Failure()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
 
         // Tick 1: both children complete → Failure (because one child failed)
@@ -238,7 +238,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Failure(),
                 BehaviorNodes.Node(new CountingNode())));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         // Tick 1: child1 Failure + child2 Running → Running (Running takes priority)
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -251,7 +251,7 @@ public sealed class BehaviorTreeTests
     public async Task Custom_Struct_Node_Can_Be_Authored_Through_Interface_Constraints()
     {
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new CountingNode()));
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
@@ -265,7 +265,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Failure(),
                 BuiltInBehaviorNodes.Success()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
 
         // First tick: Failure child breaks the sequence -> returns Failure
@@ -283,7 +283,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Success(),
                 BuiltInBehaviorNodes.Failure()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
 
         // First tick: Success child breaks the selector -> returns Success
@@ -301,7 +301,7 @@ public sealed class BehaviorTreeTests
                 BuiltInBehaviorNodes.Success(),
                 BuiltInBehaviorNodes.Success()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
         instance.AutoResetOnCompletion = false;
 
         // First tick: both children succeed, sequence returns Success
@@ -318,7 +318,7 @@ public sealed class BehaviorTreeTests
         blackboard.SetData(new ResetCallData());
 
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ResetAwareNode()));
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(blackboard);
+        BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
 
         await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(1);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -332,7 +332,7 @@ public sealed class BehaviorTreeTests
     public async Task Blackboard_Mutations_Before_First_Tick_Are_Preserved()
     {
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ReadBlackboardNode()));
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance();
+        BehaviorTreeInstance instance = tree.CreateInstance();
 
         // Set data BEFORE first tick — this is the bug scenario
         instance.Blackboard.SetData(new PreTickData { Value = 42 });

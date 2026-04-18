@@ -27,7 +27,7 @@ public sealed class BehaviorTreeSerializationTests
 
         using var serializedTree = tree.Serialize();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, TestBehaviorNodes.BuiltInRegistry());
-        BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(0.25f)).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick(0.25f)).IsEqualTo(NodeState.Running);
@@ -42,7 +42,7 @@ public sealed class BehaviorTreeSerializationTests
         using var serializedTree = tree.Serialize();
         var registry = new BehaviorTreeSerializationRegistry().Register<ThresholdNode>();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, registry);
-        BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -88,7 +88,7 @@ public sealed class BehaviorTreeSerializationTests
 
         byte[] bytes = tree.SerializeToBytes();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
-        BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -242,7 +242,7 @@ public sealed class BehaviorTreeSerializationTests
 
         using var serialized = tree.Serialize();
         BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
-        BehaviorTreeInstance<Blackboard> instance = roundTripped.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = roundTripped.CreateInstance(new Blackboard());
 
         // Inverter(Failure) -> Success
         // Repeat(2, Delay(0.1)) -> needs 2 completions of the delay
@@ -302,7 +302,7 @@ public sealed class BehaviorTreeSerializationTests
         using var serialized = tree.Serialize();
         var registry = new BehaviorTreeSerializationRegistry().Register<ThresholdNode>();
         BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, registry);
-        BehaviorTreeInstance<Blackboard> instance = roundTripped.CreateInstance(new Blackboard());
+        BehaviorTreeInstance instance = roundTripped.CreateInstance(new Blackboard());
 
         // Needs 5 ticks to complete
         for (int i = 0; i < 4; i++)

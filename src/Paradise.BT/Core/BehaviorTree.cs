@@ -21,17 +21,19 @@ public sealed class BehaviorTree
     public int Count => _nodes.Length;
 
     /// <summary>
-    /// Creates a new instance using the default <see cref="Blackboard"/> implementation.
+    /// Creates a new instance using the default <see cref="Blackboard"/> implementation. Returns the
+    /// non-generic <see cref="BehaviorTreeInstance"/> so existing consumers that reference the type by
+    /// name keep compiling.
     /// </summary>
-    public BehaviorTreeInstance<Blackboard> CreateInstance(Blackboard blackboard = default)
-        => new BehaviorTreeInstance<Blackboard>(this, blackboard);
+    public BehaviorTreeInstance CreateInstance(Blackboard blackboard = default)
+        => new BehaviorTreeInstance(this, blackboard);
 
     /// <summary>
     /// Creates a new instance backed by a caller-supplied <typeparamref name="TBlackboard"/>. The struct
     /// constraint keeps tick dispatch allocation-free and lets the JIT specialise per blackboard type.
     /// </summary>
     public BehaviorTreeInstance<TBlackboard> CreateInstance<TBlackboard>(TBlackboard blackboard)
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IMutableBlackboard
         => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
 
     public ManagedBlobAssetReference<BehaviorTreeBlob> Serialize()
