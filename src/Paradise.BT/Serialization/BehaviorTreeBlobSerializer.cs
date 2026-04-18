@@ -19,6 +19,16 @@ public static class BehaviorTreeBlobSerializer
     public static byte[] SerializeToBytes(BehaviorTree tree)
         => CreateBlob(tree);
 
+    /// <summary>
+    /// Deserializes a behavior tree from a raw Paradise.BLOB byte array.
+    /// </summary>
+    /// <param name="blob">The serialized behavior-tree blob.</param>
+    /// <param name="registry">
+    /// A <see cref="BehaviorTreeSerializationRegistry"/> populated with every node type used in <paramref name="blob"/>.
+    /// The registry is no longer auto-populated: callers needing the built-in node set shipped in the
+    /// <c>Paradise.BT.Nodes</c> package should call <c>BuiltInBehaviorNodes.CreateRegistry()</c> and register any
+    /// additional custom types on top.
+    /// </param>
     public static BehaviorTree Deserialize(byte[] blob, BehaviorTreeSerializationRegistry registry)
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
@@ -28,6 +38,16 @@ public static class BehaviorTreeBlobSerializer
         return Deserialize(serializedTree, registry);
     }
 
+    /// <summary>
+    /// Deserializes a behavior tree from a pinned Paradise.BLOB asset reference.
+    /// </summary>
+    /// <param name="blob">The pinned blob asset reference.</param>
+    /// <param name="registry">
+    /// A <see cref="BehaviorTreeSerializationRegistry"/> populated with every node type used in <paramref name="blob"/>.
+    /// The registry is no longer auto-populated: callers needing the built-in node set shipped in the
+    /// <c>Paradise.BT.Nodes</c> package should call <c>BuiltInBehaviorNodes.CreateRegistry()</c> and register any
+    /// additional custom types on top.
+    /// </param>
     public static BehaviorTree Deserialize(
         ManagedBlobAssetReference<BehaviorTreeBlob> blob,
         BehaviorTreeSerializationRegistry registry)
