@@ -17,3 +17,17 @@ public static class TestBehaviorNodes
     public static BehaviorTreeSerializationRegistry BuiltInRegistry()
         => BuiltInBehaviorNodes.CreateRegistry();
 }
+
+internal static class TestTickExtensions
+{
+    /// <summary>
+    /// Test-only convenience: writes <see cref="BehaviorTreeTickDeltaTime"/> to the blackboard then ticks.
+    /// The library intentionally does not expose this — delta-time propagation is a caller concern.
+    /// </summary>
+    public static NodeState Tick<TBlackboard>(this BehaviorTreeInstance<TBlackboard> instance, float deltaTime)
+        where TBlackboard : struct, IMutableBlackboard
+    {
+        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(deltaTime));
+        return instance.Tick();
+    }
+}

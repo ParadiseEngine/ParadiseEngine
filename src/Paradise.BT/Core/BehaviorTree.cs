@@ -33,7 +33,7 @@ public sealed class BehaviorTree
     /// constraint keeps tick dispatch allocation-free and lets the JIT specialise per blackboard type.
     /// </summary>
     public BehaviorTreeInstance<TBlackboard> CreateInstance<TBlackboard>(TBlackboard blackboard)
-        where TBlackboard : struct, IMutableBlackboard
+        where TBlackboard : struct, IBlackboard
         => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
 
     public ManagedBlobAssetReference<BehaviorTreeBlob> Serialize()

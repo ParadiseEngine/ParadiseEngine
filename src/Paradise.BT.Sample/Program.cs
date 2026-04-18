@@ -31,7 +31,8 @@ BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
 
 for (int i = 0; i < 10; i++)
 {
-    NodeState status = instance.Tick(0.25f);
+    instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.25f));
+    NodeState status = instance.Tick();
     Console.WriteLine($"Tick {i + 1}: {status}");
 }
 

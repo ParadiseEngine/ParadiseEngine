@@ -419,7 +419,7 @@ public sealed class NodeTests
         var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Delay(0f));
         BehaviorTreeInstance instance = tree.CreateInstance(new Blackboard());
 
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+        await Assert.That(instance.Tick(0f)).IsEqualTo(NodeState.Success);
     }
 
     [Test]
