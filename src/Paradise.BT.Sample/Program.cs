@@ -1,5 +1,5 @@
 using Paradise.BT;
-using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 
 var blackboard = new Blackboard();
 blackboard.SetData(new HasTargetData { Value = true });

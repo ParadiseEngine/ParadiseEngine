@@ -1,4 +1,5 @@
 using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 
 namespace Paradise.BT.Test;
 
@@ -7,7 +8,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Success_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(BehaviorNodes.Success());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
         var builderTree = new Success().Build();
 
         var factoryInstance = factoryTree.CreateInstance(new Blackboard());
@@ -20,7 +21,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Failure_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(BehaviorNodes.Failure());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Failure());
         var builderTree = new Failure().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Failure);
@@ -29,7 +30,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Running_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(BehaviorNodes.Running());
+        var factoryTree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Running());
         var builderTree = new Running().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Running);
@@ -111,11 +112,11 @@ public sealed class BuilderDslTests
     {
         // Build with factory
         var factoryTree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Selector(
-                BehaviorNodes.Sequence(
-                    BehaviorNodes.Success(),
-                    BehaviorNodes.Failure()),
-                BehaviorNodes.Success()));
+            BuiltInBehaviorNodes.Selector(
+                BuiltInBehaviorNodes.Sequence(
+                    BuiltInBehaviorNodes.Success(),
+                    BuiltInBehaviorNodes.Failure()),
+                BuiltInBehaviorNodes.Success()));
 
         // Build with DSL
         var dslTree = new Selector(
@@ -147,7 +148,7 @@ public sealed class BuilderDslTests
     public async Task Parallel_Runs_All_Children()
     {
         int count = 0;
-        var tree = new Paradise.BT.Builder.Parallel(
+        var tree = new Paradise.BT.Nodes.Builder.Parallel(
             new LeafNode<CounterNode>(new CounterNode { Callback = () => count++ }),
             new LeafNode<CounterNode>(new CounterNode { Callback = () => count++ })
         ).Build();

@@ -1,6 +1,6 @@
 using Paradise.BT;
-using Paradise.BT.Sample;
 using Paradise.BT.Builder;
+using Paradise.BT.Nodes;
 
 public sealed class CheckCondition : BTreeNode
 {

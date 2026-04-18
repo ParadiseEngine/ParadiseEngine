@@ -1,6 +1,8 @@
 <Solution>
   <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
+  <Project Path="src/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
   <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
+  <Project Path="src/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
   <Project Path="src/Paradise.BT.Sample/Paradise.BT.Sample.csproj" />
   <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
   <Project Path="src/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
