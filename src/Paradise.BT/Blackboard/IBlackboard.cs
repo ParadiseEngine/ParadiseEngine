@@ -11,6 +11,8 @@ public interface IBlackboard
 
     ref T GetDataRef<T>() where T : struct;
 
+    void SetData<T>(T value) where T : struct;
+
     bool HasData(Type type);
 
     IntPtr GetDataPtrRO(Type type);
