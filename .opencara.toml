@@ -22,7 +22,7 @@ Be concise. Flag real issues, skip nitpicks.
 """
 agent_count = 5
 timeout = "30m"
-preferred_models = ["claude-sonnet-4-6", "gpt-5.4", "minimax-m2.7", "glm-5", "kimi-k2.5", "qwen3.5-plus"]
+preferred_models = ["claude-sonnet", "gpt", "minimax", "glm", "kimi", "qwen"]
 
 [review.trigger]
 events = ["opened"]
@@ -30,4 +30,4 @@ comment = "/opencara review"
 skip = ["draft", "label:no-review"]
 
 [review.summarizer]
-preferred_models = ["claude-opus-4-6"]
+preferred_models = ["claude-opus"]
