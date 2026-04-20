@@ -20,8 +20,15 @@ public sealed class BehaviorTree
 
     public int Count => _nodes.Length;
 
-    public BehaviorTreeInstance CreateInstance(Blackboard blackboard = default)
-        => new BehaviorTreeInstance(this, blackboard);
+    /// <summary>
+    /// Creates a new instance backed by a caller-supplied <typeparamref name="TBlackboard"/>. The struct
+    /// constraint keeps tick dispatch allocation-free and lets the JIT specialise per blackboard type.
+    /// Concrete blackboard implementations (e.g. the reference <c>Blackboard</c> struct) live outside the
+    /// core package; consumers typically reach for the <c>Paradise.BT.Nodes</c> overload.
+    /// </summary>
+    public BehaviorTreeInstance<TBlackboard> CreateInstance<TBlackboard>(TBlackboard blackboard)
+        where TBlackboard : struct, IBlackboard
+        => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
 
     public ManagedBlobAssetReference<BehaviorTreeBlob> Serialize()
         => BehaviorTreeBlobSerializer.Serialize(this);
