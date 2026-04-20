@@ -45,16 +45,3 @@ public class BehaviorTreeInstance<TBlackboard>
 
     public void Reset() => VirtualMachine.Reset(ref _blob, ref _blackboard);
 }
-
-/// <summary>
-/// Non-generic <see cref="BehaviorTreeInstance{TBlackboard}"/> specialised over the default
-/// <see cref="Blackboard"/> struct. Preserves the pre-generic public API for consumers that reference
-/// <c>BehaviorTreeInstance</c> by name.
-/// </summary>
-public sealed class BehaviorTreeInstance : BehaviorTreeInstance<Blackboard>
-{
-    internal BehaviorTreeInstance(BehaviorTree tree, Blackboard blackboard)
-        : base(tree, blackboard)
-    {
-    }
-}

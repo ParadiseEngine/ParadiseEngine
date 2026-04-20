@@ -1,7 +1,8 @@
-namespace Paradise.BT;
+namespace Paradise.BT.Nodes;
 
 /// <summary>
-/// .NET-friendly blackboard that implements the exact EntitiesBT interface shape.
+/// .NET-friendly reference blackboard implementation. Shipped alongside the built-in node library so that
+/// Paradise.BT core stays free of concrete blackboard storage choices.
 /// </summary>
 public struct Blackboard : IBlackboard
 {

@@ -1,4 +1,5 @@
 using Paradise.BT;
+using Paradise.BT.Nodes;
 using Paradise.BT.Nodes.Builder;
 
 var blackboard = new Blackboard();
@@ -27,7 +28,7 @@ var tree = new Selector(
     })
 ).Build();
 
-BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
+BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(blackboard);
 
 for (int i = 0; i < 10; i++)
 {
