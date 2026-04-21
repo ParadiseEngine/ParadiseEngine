@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Allow underscore naming convention in test methods -->
+    <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Coyote.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Concurrent\Paradise.ECS.Concurrent.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Paradise.ECS" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="coyote-rewrite.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Coyote Rewriting: Rewrite binaries after build for systematic testing -->
+  <Target Name="CoyoteRewrite" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
+  </Target>
+
+</Project>
