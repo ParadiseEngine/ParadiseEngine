@@ -1,0 +1,13 @@
+{
+	"AssembliesPath": ".",
+	"Assemblies": [
+		"Paradise.ECS.CoyoteTest.dll",
+		"Paradise.ECS.Concurrent.dll",
+		"Paradise.ECS.dll"
+	],
+	"OutputPath": ".",
+	"IsRewritingConcurrentCollections": true,
+	"IsRewritingUnitTests": false,
+	"IsRewritingThreads": true,
+	"IsDataRaceCheckingEnabled": true
+}
