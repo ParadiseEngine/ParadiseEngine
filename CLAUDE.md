@@ -19,7 +19,7 @@ dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 ```
 
-AOT compatibility of the libraries is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`.
+AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
 
 ## Project Overview
 
