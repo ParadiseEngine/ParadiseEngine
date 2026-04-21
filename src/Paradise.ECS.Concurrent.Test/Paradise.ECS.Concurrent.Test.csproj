@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\Paradise.ECS.Common.props" />
+
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -8,8 +11,6 @@
     <!-- CA1515: Test classes need to be public for TUnit discovery -->
     <!-- PECS016: Allow testing empty components (zero-size marker types) -->
     <NoWarn>$(NoWarn);CA1707;CA1515;PECS016</NoWarn>
-    <!-- Native AOT support -->
-    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

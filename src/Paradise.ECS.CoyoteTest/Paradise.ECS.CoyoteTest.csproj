@@ -1,12 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\Paradise.ECS.Common.props" />
+
   <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <!-- Allow underscore naming convention in test methods -->
     <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
-    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,7 +29,7 @@
     <None Include="coyote-rewrite.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Coyote Rewriting: Rewrite binaries after build for systematic testing -->
+  <!-- Coyote Rewriting: Rewrite binaries after build for systematic testing (Release only; requires coyote CLI) -->
   <Target Name="CoyoteRewrite" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
   </Target>

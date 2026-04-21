@@ -33,3 +33,14 @@ BenchmarkDotNet.Artifacts/
 # Generated
 **/Generated/
 *.binlog
+
+# Native libraries (downloaded at build time by ECS)
+libs/*.dll
+libs/*.dylib
+libs/*.so
+
+# Debug symbols / AOT intermediates
+*.pdb
+*.dSYM/
+*.ilk
+*.exp

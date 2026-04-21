@@ -1,12 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\Paradise.ECS.Common.props" />
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <!-- Allow underscore naming convention in test methods -->
     <!-- CA1515: Test classes need to be public for TUnit discovery -->
     <!-- CA2007: ConfigureAwait is not relevant for test code -->
