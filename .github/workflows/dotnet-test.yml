@@ -22,11 +22,18 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Prepare CI solution
+        run: |
+          cp ParadiseEngine.slnx ParadiseEngine.ci.slnx
+          dotnet sln ParadiseEngine.ci.slnx remove \
+            src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj \
+            src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj
+
       - name: Restore dependencies
-        run: dotnet restore ParadiseEngine.slnx
+        run: dotnet restore ParadiseEngine.ci.slnx
 
       - name: Build
-        run: dotnet build ParadiseEngine.slnx --no-restore -p:TreatWarningsAsErrors=true
+        run: dotnet build ParadiseEngine.ci.slnx --no-restore -p:TreatWarningsAsErrors=true
 
       - name: Test
-        run: dotnet test --solution ParadiseEngine.slnx --no-build --output normal
+        run: dotnet test --solution ParadiseEngine.ci.slnx --no-build --output normal

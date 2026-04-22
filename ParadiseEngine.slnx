@@ -1,21 +1,31 @@
 <Solution>
-  <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
-  <Project Path="src/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
-  <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
-  <Project Path="src/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
-  <Project Path="src/Paradise.BT.Sample/Paradise.BT.Sample.csproj" />
-  <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
-  <Project Path="src/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
-  <Project Path="src/Paradise.BLOB/Paradise.BLOB.csproj" />
-  <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
-  <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
-  <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
-  <Project Path="src/Paradise.ECS.Sample/Paradise.ECS.Sample.csproj" />
-  <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
-  <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
-  <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
-  <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
-  <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
-  <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
-  <Project Path="src/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
+  <Folder Name="/benchmarks/">
+    <Project Path="src/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/generators/">
+    <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
+    <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="src/Paradise.BT.Sample/Paradise.BT.Sample.csproj" />
+    <Project Path="src/Paradise.ECS.Sample/Paradise.ECS.Sample.csproj" />
+  </Folder>
+  <Folder Name="/sources/">
+    <Project Path="src/Paradise.BLOB/Paradise.BLOB.csproj" />
+    <Project Path="src/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
+    <Project Path="src/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
+    <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
+    <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
+    <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
+    <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
+    <Project Path="src/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
+    <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
+    <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
+    <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
+    <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
+    <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
+  </Folder>
 </Solution>
