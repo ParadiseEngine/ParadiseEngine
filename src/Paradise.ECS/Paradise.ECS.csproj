@@ -11,6 +11,8 @@
     <InternalsVisibleTo Include="Paradise.ECS.Tag" />
     <InternalsVisibleTo Include="Paradise.ECS.Concurrent" />
     <InternalsVisibleTo Include="Paradise.ECS.Concurrent.Test" />
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs" />
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs.Test" />
   </ItemGroup>
 
   <ItemGroup>

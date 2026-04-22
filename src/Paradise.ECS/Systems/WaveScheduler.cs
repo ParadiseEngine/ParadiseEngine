@@ -1,12 +1,23 @@
 namespace Paradise.ECS;
 
 /// <summary>
+/// A self-contained unit of work that can be executed by a thread pool.
+/// </summary>
+public interface IWorkItem
+{
+    /// <summary>
+    /// Executes this work item.
+    /// </summary>
+    void Invoke();
+}
+
+/// <summary>
 /// Represents a unit of work within a system execution wave.
 /// Stores all invocation data inline to avoid closure allocations.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
-public readonly struct WorkItem<TMask, TConfig>
+public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
@@ -55,6 +66,13 @@ public readonly struct WorkItem<TMask, TConfig>
 /// thread pools with data affinity, or custom work-stealing schedulers).
 /// ECB playback is managed by <see cref="SystemSchedule{TMask,TConfig}"/> after execution completes.
 /// </summary>
+/// <remarks>
+/// The <c>items</c> parameter uses <see cref="IReadOnlyList{T}"/> rather than a concrete type
+/// (e.g., <c>List&lt;T&gt;</c>) or <c>Span&lt;T&gt;</c> to keep the interface decoupled from
+/// implementation details. The interface dispatch overhead is amortized: <c>Execute</c> is called
+/// once per wave (not per chunk), so the cost of virtual calls on <c>Count</c> and <c>this[int]</c>
+/// is dwarfed by the actual system execution work within each item.
+/// </remarks>
 public interface IWaveScheduler
 {
     /// <summary>
