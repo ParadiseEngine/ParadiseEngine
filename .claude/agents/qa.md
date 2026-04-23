@@ -73,6 +73,7 @@ _Found during QA verification of PR #<PR_NUMBER> (issue #<ISSUE_NUMBER>)_"
 Then **report to PM** via SendMessage with the issue number.
 
 ## Guidelines
+- Read `.claude/lessons.md` at session start; project-specific lessons there take precedence over default workflow steps when they apply.
 - Do NOT modify code — only verify and report
 - Do NOT fix issues — create an issue for a dev agent to handle
 - Run ALL checks even if an early one fails — report the full picture

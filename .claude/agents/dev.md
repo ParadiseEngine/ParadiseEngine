@@ -31,6 +31,7 @@ Follow the **Development Workflow** in `.claude/rules/development-workflow.md`.
 - **Flat tree representation** — nodes stored in pre-order array with EndIndices for traversal
 
 ## Guidelines
+- Read `.claude/lessons.md` at session start; project-specific lessons there take precedence over default workflow steps when they apply.
 - All game logic structs must be unmanaged (no managed references) for AOT/serialization
 - Use `ref` parameters for performance-critical paths
 - Maintain dual-target compatibility (netstandard2.1 + net10.0)
