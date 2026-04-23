@@ -57,6 +57,35 @@ var markerPath = Path.Combine(outDir, ".installed");
 var slangcName = OperatingSystem.IsWindows() ? "slangc.exe" : "slangc";
 var slangcPath = Path.Combine(outDir, "bin", slangcName);
 
+// Cross-process lock — two MSBuild Exec calls (e.g. Sample + WebGPU.Test invoking RestoreSlang
+// in parallel) will both reach this binary at once, both attempt to download `slang-archive.tar.gz`
+// to the same path, and one will throw IOException ("being used by another process"). Hold a
+// FileShare.None handle on a sentinel file in the cache root so the second invocation blocks
+// until the first completes; the second's marker check then short-circuits the work.
+var lockDir = Path.GetDirectoryName(outDir) ?? outDir;
+Directory.CreateDirectory(lockDir);
+var lockPath = Path.Combine(lockDir, ".bootstrap.lock");
+FileStream? lockHandle = null;
+var lockAcquireDeadline = DateTime.UtcNow.AddMinutes(15);
+while (true)
+{
+    try
+    {
+        lockHandle = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        break;
+    }
+    catch (IOException)
+    {
+        if (DateTime.UtcNow > lockAcquireDeadline)
+        {
+            Console.Error.WriteLine($"Timed out waiting on Slang bootstrap lock at '{lockPath}'.");
+            return 1;
+        }
+        await Task.Delay(250);
+    }
+}
+using var _lock = lockHandle;
+
 if (File.Exists(markerPath) && File.Exists(slangcPath))
 {
     var existing = File.ReadAllText(markerPath).Trim();
