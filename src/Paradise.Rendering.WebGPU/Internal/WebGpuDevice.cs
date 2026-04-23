@@ -21,7 +21,6 @@ using WgFragmentState = WebGpuSharp.FragmentState;
 using WgColorTargetState = WebGpuSharp.ColorTargetState;
 using WgPrimitiveState = WebGpuSharp.PrimitiveState;
 using WgMultisampleState = WebGpuSharp.MultisampleState;
-using WgWebGpuManagedSpan = WebGpuSharp.WebGpuManagedSpan<WebGpuSharp.VertexBufferLayout>;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -39,6 +38,14 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgShaderModule> Shaders { get; } = new();
     public SlotTable<WgBuffer> Buffers { get; } = new();
     public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
+
+    // Content-keyed shader-module dedupe. Identical (WGSL source + entry point + stage) tuples
+    // resolve to the same ShaderHandle so that Slang programs loaded twice produce a single
+    // backend module per stage — keeps the pipeline cache key stable and prevents shader-slot
+    // accumulation in the long-running CreatePipeline(ShaderProgramDesc, ...) path.
+    private readonly System.Collections.Generic.Dictionary<ShaderModuleCacheKey, ShaderHandle> _shaderModuleCache = new();
+
+    private readonly record struct ShaderModuleCacheKey(string Wgsl, string EntryPoint, ShaderStage Stage);
 
     private bool _disposed;
 
@@ -115,7 +122,18 @@ internal sealed class WebGpuDevice : IDisposable
         return module;
     }
 
-    public bool DestroyShader(ShaderHandle h) => Shaders.Remove(h.Index, h.Generation);
+    public bool DestroyShader(ShaderHandle h)
+    {
+        // Drop any cache entry that maps to this handle so a future CreateShaderModule with the
+        // same WGSL/entry-point/stage tuple compiles a fresh module instead of returning a stale one.
+        ShaderModuleCacheKey? toRemove = null;
+        foreach (var kvp in _shaderModuleCache)
+        {
+            if (kvp.Value.Equals(h)) { toRemove = kvp.Key; break; }
+        }
+        if (toRemove is { } key) _shaderModuleCache.Remove(key);
+        return Shaders.Remove(h.Index, h.Generation);
+    }
 
     public bool TryResolveShader(ShaderHandle h, out WgShaderModule module) =>
         Shaders.TryGet(h.Index, h.Generation, out module);
@@ -153,6 +171,15 @@ internal sealed class WebGpuDevice : IDisposable
 
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
     {
+        // Reject depth/stencil settings explicitly in M1 instead of accepting them and silently
+        // discarding — the descriptor field exists for M2 but the backend has no plumbing for it
+        // yet. NotSupportedException makes the gap visible at the call site instead of producing
+        // a pipeline that renders as if depth were never configured.
+        if (desc.DepthStencilFormat is not null)
+            throw new NotSupportedException(
+                "PipelineDesc.DepthStencilFormat is reserved for M2 (#43). The M1 backend does not " +
+                "configure depth-stencil state on the WebGPU pipeline; pass null until depth lands.");
+
         var vertex = ResolveShader(desc.VertexShader);
         var fragment = ResolveShader(desc.FragmentShader);
 
@@ -239,8 +266,18 @@ internal sealed class WebGpuDevice : IDisposable
 
     public bool DestroyPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
 
-    public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc) =>
-        CreateShader(moduleDesc.Wgsl, moduleDesc.EntryPoint);
+    public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc)
+    {
+        // Dedupe by (WGSL source, entry point, stage). Two ShaderProgramDesc loads of the same
+        // shader return the same ShaderHandle here, which keeps PipelineDesc.ContentHash stable
+        // across CreatePipeline(ShaderProgramDesc, ...) calls and lets the pipeline cache hit on
+        // logical shader identity rather than on per-call slot indices.
+        var key = new ShaderModuleCacheKey(moduleDesc.Wgsl, moduleDesc.EntryPoint, moduleDesc.Stage);
+        if (_shaderModuleCache.TryGetValue(key, out var cached)) return cached;
+        var handle = CreateShader(moduleDesc.Wgsl, moduleDesc.EntryPoint);
+        _shaderModuleCache[key] = handle;
+        return handle;
+    }
 
     public void Dispose()
     {
@@ -249,6 +286,7 @@ internal sealed class WebGpuDevice : IDisposable
         Pipelines.Clear();
         Buffers.Clear();
         Shaders.Clear();
+        _shaderModuleCache.Clear();
         // WebGPUSharp's safe wrappers release native handles via finalizers; explicit teardown
         // ordering here is mostly documentation. The instance must outlive surfaces and devices,
         // so the owning Renderer disposes those first.

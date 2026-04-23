@@ -187,7 +187,13 @@ public sealed class WebGpuRenderer : IDisposable
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _pipelineCache.GetOrCreate(in desc, d => _device.CreatePipeline(in d));
+        return _pipelineCache.GetOrCreate(
+            in desc,
+            factory: d => _device.CreatePipeline(in d),
+            // 32-bit hash collision with structurally-different descriptors evicts the older
+            // entry. Schedule the displaced pipeline for deferred destruction so the native
+            // resource doesn't leak (the cache would otherwise drop the reference on overwrite).
+            onEvict: evicted => _destructionQueue.Schedule(() => _device.DestroyPipeline(evicted)));
     }
 
     /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
@@ -262,6 +268,8 @@ public sealed class WebGpuRenderer : IDisposable
         var commands = stream.Commands.Span;
 
         WgRenderPassEncoder? activePass = null;
+        try
+        {
         for (var i = 0; i < commands.Length; i++)
         {
             ref readonly var cmd = ref commands[i];
@@ -269,6 +277,9 @@ public sealed class WebGpuRenderer : IDisposable
             {
                 case RenderCommandKind.BeginPass:
                 {
+                    if (activePass is not null)
+                        throw new InvalidOperationException(
+                            "Nested BeginPass — previous pass was not ended (missing EndPass).");
                     var passIndex = cmd.BeginPass.PassIndex;
                     if ((uint)passIndex >= (uint)passes.Length)
                         throw new InvalidOperationException(
@@ -325,6 +336,16 @@ public sealed class WebGpuRenderer : IDisposable
 
         if (activePass is not null)
             throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
+        activePass = null;
+        }
+        finally
+        {
+            // Defensive close on exception so a stale-handle / NotSupportedException mid-pass
+            // doesn't leave the native render-pass encoder un-Ended (Dawn requires every
+            // BeginRenderPass to be matched with End before the encoder is finished). On the
+            // happy path activePass was nulled before the try-block exited.
+            activePass?.End();
+        }
     }
 
     private static WgRenderPassEncoder RequireActivePass(WgRenderPassEncoder? pass) =>

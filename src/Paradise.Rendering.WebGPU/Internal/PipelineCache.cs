@@ -18,12 +18,16 @@ internal sealed class PipelineCache
         public Entry(in PipelineDesc desc, PipelineHandle handle) { Desc = desc; Handle = handle; }
     }
 
-    public PipelineHandle GetOrCreate(in PipelineDesc desc, Func<PipelineDesc, PipelineHandle> factory)
+    public PipelineHandle GetOrCreate(in PipelineDesc desc, Func<PipelineDesc, PipelineHandle> factory, Action<PipelineHandle>? onEvict = null)
     {
         var hash = desc.ContentHash();
-        if (_byHash.TryGetValue(hash, out var entry) && entry.Desc.Equals(desc))
+        if (_byHash.TryGetValue(hash, out var entry))
         {
-            return entry.Handle;
+            if (entry.Desc.Equals(desc)) return entry.Handle;
+            // Hash collision with a structurally-different descriptor: surface the displaced
+            // entry's handle so the caller can release the orphaned native pipeline. Without this
+            // hook the old handle becomes unreachable through Forget() once we overwrite below.
+            onEvict?.Invoke(entry.Handle);
         }
         var created = factory(desc);
         _byHash[hash] = new Entry(in desc, created);

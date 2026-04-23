@@ -1,4 +1,4 @@
-// File-based .NET app (`dotnet run --file SlangBootstrap.cs -- <args>`).
+// Console app built by tools/slang/SlangBootstrap.csproj and invoked from src/Slang.targets.
 // Resolves a slangc archive from tools/slang/slang.manifest.json for a given RID, verifies SHA256
 // against the manifest (hard fail on mismatch — supply chain trust anchor), extracts to the cache
 // directory passed by the caller, and writes a marker file so the second build is a no-op.
@@ -9,6 +9,12 @@
 //   --out <dir>         destination cache directory (parent of bin/slangc)
 //
 // Exit codes: 0 = success / already-installed, 1 = failure (SHA mismatch, missing RID, network).
+//
+// History: originally implemented as a `dotnet run --file SlangBootstrap.cs` script. CI's parallel
+// project scheduler raced on the dotnet-runfile shared cache (~/.local/share/dotnet/runfile/...)
+// when two consumer projects invoked RestoreSlang concurrently — surfaced as MSB3491 on
+// AssemblyInfoInputs.cache. Promoted to a real csproj so the build artifacts live in a
+// project-scoped obj/bin under tools/slang/, which MSBuild serializes naturally.
 
 using System.Formats.Tar;
 using System.IO.Compression;

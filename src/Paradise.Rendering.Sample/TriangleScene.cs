@@ -26,6 +26,9 @@ internal sealed class TriangleScene : IDisposable
     private readonly BufferHandle _vertexBuffer;
     private readonly PipelineHandle _pipeline;
     private readonly RenderPassDesc[] _passes;
+    // Reused per-frame so the sample's render loop is allocation-free at steady state. Cleared
+    // at the top of RenderFrame; capacity grows once and stays put across frames.
+    private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(8);
 
     public TriangleScene(WebGpuRenderer renderer)
     {
@@ -52,15 +55,15 @@ internal sealed class TriangleScene : IDisposable
 
     public void RenderFrame()
     {
-        var writer = new ArrayBufferWriter<RenderCommand>(8);
-        var encoder = new RenderCommandEncoder(writer);
+        _commandWriter.ResetWrittenCount();
+        var encoder = new RenderCommandEncoder(_commandWriter);
         encoder.BeginPass(0);
         encoder.SetPipeline(_pipeline);
         encoder.SetVertexBuffer(0, _vertexBuffer, 0, (ulong)(s_vertices.Length * sizeof(float)));
         encoder.Draw(new DrawCommand(VertexCount: 3, InstanceCount: 1, FirstVertex: 0, FirstInstance: 0));
         encoder.EndPass();
 
-        var stream = new RenderCommandStream(writer.WrittenMemory, _passes);
+        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes);
         _renderer.Submit(in stream);
     }
 

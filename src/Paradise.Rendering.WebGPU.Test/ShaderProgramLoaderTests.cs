@@ -54,4 +54,27 @@ public class ShaderProgramLoaderTests
         await Assert.That(program.Modules[0].Wgsl.Length).IsGreaterThan(0);
         await Assert.That(program.Modules[0].Wgsl).Contains("@vertex");
     }
+
+    [Test]
+    public async Task two_loads_produce_modules_with_identical_wgsl_and_distinct_records()
+    {
+        // Underpins the WebGpuDevice shader-module dedupe cache: two ShaderProgramLoader.Load()
+        // calls return distinct ShaderModuleDesc instances with byte-identical (Wgsl, EntryPoint,
+        // Stage) tuples. The device keys its cache on that tuple so the second
+        // CreatePipeline(ShaderProgramDesc, ...) on the same logical program hits the cache
+        // instead of compiling fresh modules (which was the primary OpenCara finding on PR #55).
+        // If a future loader change normalizes WGSL whitespace or mangles the entry point, this
+        // assertion breaks and the device cache starts missing → shader leak returns.
+        var assembly = typeof(ShaderProgramLoaderTests).Assembly;
+        var p1 = ShaderProgramLoader.Load(assembly, "Shaders.triangle");
+        var p2 = ShaderProgramLoader.Load(assembly, "Shaders.triangle");
+        await Assert.That(ReferenceEquals(p1, p2)).IsFalse();
+        await Assert.That(p1.Modules.Length).IsEqualTo(p2.Modules.Length);
+        for (var i = 0; i < p1.Modules.Length; i++)
+        {
+            await Assert.That(p1.Modules[i].Wgsl).IsEqualTo(p2.Modules[i].Wgsl);
+            await Assert.That(p1.Modules[i].EntryPoint).IsEqualTo(p2.Modules[i].EntryPoint);
+            await Assert.That(p1.Modules[i].Stage).IsEqualTo(p2.Modules[i].Stage);
+        }
+    }
 }
