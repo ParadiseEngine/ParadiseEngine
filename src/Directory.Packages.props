@@ -8,6 +8,9 @@
     <!-- Runtime helpers -->
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
+    <!-- Rendering -->
+    <PackageVersion Include="WebGPUSharp" Version="0.5.2" />
+    <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
     <!-- Testing (TUnit with Native AOT support) -->
     <PackageVersion Include="TUnit" Version="1.11.16" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />

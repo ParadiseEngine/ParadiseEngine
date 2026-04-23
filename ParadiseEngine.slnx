@@ -9,6 +9,7 @@
   <Folder Name="/samples/">
     <Project Path="src/Paradise.BT.Sample/Paradise.BT.Sample.csproj" />
     <Project Path="src/Paradise.ECS.Sample/Paradise.ECS.Sample.csproj" />
+    <Project Path="src/Paradise.Rendering.Sample/Paradise.Rendering.Sample.csproj" />
   </Folder>
   <Folder Name="/sources/">
     <Project Path="src/Paradise.BLOB/Paradise.BLOB.csproj" />
@@ -20,6 +21,7 @@
     <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
     <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
+    <Project Path="src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
@@ -31,5 +33,6 @@
     <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
     <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
     <Project Path="src/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
+    <Project Path="src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
   </Folder>
 </Solution>

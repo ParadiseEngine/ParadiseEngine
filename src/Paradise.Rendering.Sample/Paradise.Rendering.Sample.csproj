@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <RootNamespace>Paradise.Rendering.Sample</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+    <ProjectReference Include="../Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+
+</Project>
