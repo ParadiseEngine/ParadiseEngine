@@ -45,6 +45,14 @@ public sealed class JobWorkerPool : IDisposable
     private PaddedCounters _counters;
     private ConcurrentQueue<ExceptionDispatchInfo>? _exceptions;
 
+    // One-shot latch flipped by the single thread that performs end-of-wave
+    // bookkeeping (reset _workAvailable, then set _workComplete). Reset to 0 at
+    // the start of each wave. Multiple draining threads may observe
+    // RemainingItems <= 0 simultaneously; the latch ensures exactly one of them
+    // does the cleanup, preventing a stray late Reset() from clobbering the
+    // next wave's Set() on _workAvailable.
+    private int _waveCompleteLatch;
+
     // Synchronization
     private readonly ManualResetEventSlim _workAvailable = new(false);
     private readonly ManualResetEventSlim _workComplete = new(false);
@@ -152,19 +160,25 @@ public sealed class JobWorkerPool : IDisposable
         _counters.NextWorkIndex = 0;
         _counters.RemainingItems = count;
         _exceptions = null;
+        Volatile.Write(ref _waveCompleteLatch, 0);
 
-        // Reset completion signal, then wake workers (memory fence via Set)
+        // Reset completion signal, then wake workers. The Set publishes all the
+        // shared-state writes above (memory fence). _workAvailable is guaranteed
+        // to be in the reset state here: the previous wave's completer (whichever
+        // draining thread won the latch) called Reset() BEFORE Setting
+        // _workComplete, so by the time main returned from _workComplete.Wait()
+        // last wave, _workAvailable was already false.
         _workComplete.Reset();
         _workAvailable.Set();
 
         // Main thread participates in draining work
         DrainWork();
 
-        // Wait for all items to complete (may already be set if main finished last)
+        // Wait for all items to complete. The completer worker has already reset
+        // _workAvailable, so any worker looping back into WorkerLoop will block
+        // on Wait() until the next wave's Set() — no busy re-entry into DrainWork.
         _workComplete.Wait();
 
-        // Reset for next wave — workers will block on Wait() again
-        _workAvailable.Reset();
         _invoker = null;
 
         // Rethrow captured exceptions
@@ -205,7 +219,20 @@ public sealed class JobWorkerPool : IDisposable
 
             if (Interlocked.Add(ref _counters.RemainingItems, -batchCount) <= 0)
             {
-                _workComplete.Set();
+                // Multiple draining threads may observe RemainingItems <= 0 (the
+                // last batch may straddle batchSize boundaries, dropping the
+                // counter below zero from several threads at once). Use a
+                // one-shot latch so exactly one thread performs the wave-end
+                // bookkeeping. Otherwise a stray late Reset() from a slower
+                // completer could clobber the next wave's _workAvailable.Set().
+                if (Interlocked.Exchange(ref _waveCompleteLatch, 1) == 0)
+                {
+                    // Reset BEFORE signaling so workers looping back to
+                    // WorkerLoop.Wait() block until the next wave, instead of
+                    // re-entering DrainWork on a still-set _workAvailable.
+                    _workAvailable.Reset();
+                    _workComplete.Set();
+                }
                 return;
             }
         }

@@ -240,4 +240,87 @@ public sealed class WorkStealingDequeTests
         for (int i = 0; i < itemCount; i++)
             await Assert.That(seen.Contains(i)).IsTrue();
     }
+
+    /// <summary>
+    /// Stress test that forces many <c>Grow()</c> operations to run concurrently with
+    /// <c>Steal()</c> calls. Starts with a deliberately tiny initial capacity (2) and
+    /// pushes a large number of items so the deque grows repeatedly while several
+    /// stealer threads are actively racing the owner. With the canonical Chase-Lev
+    /// pre-CAS buffer read used by <see cref="WorkStealingDeque.Steal"/>, every pushed
+    /// item must be consumed exactly once — no duplicates and no losses, even though
+    /// the buffer reference can be swapped underneath the stealer arbitrarily often.
+    ///
+    /// This regression-tests the slot-stability guarantee documented in
+    /// <see cref="WorkStealingDeque.Steal"/>: the old buffer is never mutated after a
+    /// swap, and slot t is preserved across any Grow that happens before the stealer's
+    /// CAS. Repeats the workload many times to widen the race window across CI runs.
+    /// </summary>
+    [Test]
+    public async Task ConcurrentStealAcrossManyGrows_AllItemsAccountedForExactlyOnce()
+    {
+        const int iterations = 20;
+        const int itemCount = 20_000;
+        const int stealerCount = 4;
+        const int initialCapacity = 2; // Tiny so Grow() runs ~log2(itemCount) times per iteration.
+
+        for (int iter = 0; iter < iterations; iter++)
+        {
+            var deque = new WorkStealingDeque(initialCapacity);
+            var collected = new ConcurrentBag<int>();
+            using var startBarrier = new Barrier(stealerCount + 1);
+            var stealersDone = new bool[1];
+
+            var stealers = new Thread[stealerCount];
+            for (int s = 0; s < stealerCount; s++)
+            {
+                stealers[s] = new Thread(() =>
+                {
+                    startBarrier.SignalAndWait();
+                    while (!Volatile.Read(ref stealersDone[0]))
+                    {
+                        int item = deque.Steal();
+                        if (item >= 0)
+                            collected.Add(item);
+                    }
+                    int drained;
+                    while ((drained = deque.Steal()) >= 0)
+                        collected.Add(drained);
+                });
+                stealers[s].Start();
+            }
+
+            // Owner: push everything as fast as possible so Grow() is forced to run
+            // many times while stealers are actively contending for top.
+            startBarrier.SignalAndWait();
+            for (int i = 0; i < itemCount; i++)
+                deque.PushBottom(i);
+
+            // Drain owner's remaining items via PopBottom (LIFO). Stealers continue
+            // to race until we set the done flag.
+            int popped;
+            while ((popped = deque.PopBottom()) >= 0)
+                collected.Add(popped);
+
+            Volatile.Write(ref stealersDone[0], true);
+            foreach (var t in stealers)
+                t.Join();
+
+            // Final drain in case any item was pushed in the gap (defensive).
+            int last;
+            while ((last = deque.PopBottom()) >= 0)
+                collected.Add(last);
+            while ((last = deque.Steal()) >= 0)
+                collected.Add(last);
+
+            // Every pushed item must appear exactly once. Duplicates would indicate
+            // a stealer returned a stale value and the owner also popped the same
+            // logical slot; missing items would indicate a stealer overwrote a slot
+            // the owner needed (or returned garbage outside [0, itemCount)).
+            await Assert.That(collected.Count).IsEqualTo(itemCount).Because($"iter={iter}: total collected count");
+            var seen = new HashSet<int>(collected);
+            await Assert.That(seen.Count).IsEqualTo(itemCount).Because($"iter={iter}: distinct count");
+            await Assert.That(seen.Min()).IsEqualTo(0).Because($"iter={iter}: smallest collected");
+            await Assert.That(seen.Max()).IsEqualTo(itemCount - 1).Because($"iter={iter}: largest collected");
+        }
+    }
 }

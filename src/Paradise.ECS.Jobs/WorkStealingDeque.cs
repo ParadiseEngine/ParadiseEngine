@@ -97,12 +97,32 @@ internal sealed class WorkStealingDeque
         if (b - t <= 0)
             return -1; // Empty
 
-        // Cache buffer and length to avoid race with Grow()
+        // Read the buffer reference and the slot value BEFORE the CAS. This is the
+        // canonical Chase-Lev ordering (see Chase & Lev 2005; Lê et al. PPoPP'13)
+        // and it is required for correctness — NOT an optimization.
+        //
+        // Why pre-CAS:
+        //   Once our CAS succeeds, _top advances past index t. The owner is then
+        //   free to PushBottom new items, and after enough pushes the slot at
+        //   physical position (t & mask) — in either the current buffer or a
+        //   future grown buffer — can be overwritten by a wrap-around write.
+        //   Reading the slot AFTER the CAS would race that overwrite and could
+        //   return an unrelated item (corrupting work distribution).
+        //
+        // Why Grow does not break this:
+        //   Grow() allocates a new buffer, copies elements [top, bottom) into it,
+        //   then publishes _buffer = newBuf. It never mutates the old buffer.
+        //   - If we captured oldBuf before Grow(): oldBuf[t & oldMask] is frozen
+        //     (subsequent owner writes go to newBuf, not oldBuf) so our read is
+        //     valid forever.
+        //   - If we captured newBuf after Grow(): Grow ran while _top was still
+        //     t (we hadn't CAS'd), so it copied slot t into newBuf[t & newMask].
+        //     Our read is valid.
         var buffer = _buffer;
         int item = buffer[t & (buffer.Length - 1)];
 
         if (Interlocked.CompareExchange(ref _top, t + 1, t) != t)
-            return -1; // Lost race
+            return -1; // Lost race to a competing stealer or concurrent PopBottom.
 
         return item;
     }

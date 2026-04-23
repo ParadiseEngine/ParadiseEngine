@@ -171,6 +171,7 @@ public sealed class WorkStealingPool : IDisposable
     private void ProcessLane(int laneIndex)
     {
         var myDeque = _deques[laneIndex];
+        var spinner = new SpinWait();
 
         while (true)
         {
@@ -183,12 +184,22 @@ public sealed class WorkStealingPool : IDisposable
                 item = TrySteal(laneIndex);
                 if (item < 0)
                 {
-                    // No work anywhere — check if all done
+                    // No work anywhere — check if all done. Issue an explicit full
+                    // memory barrier before the read of _remainingItems: while
+                    // Interlocked.Decrement provides ordering on the writer side,
+                    // pairing it here with a barrier guarantees that on weakly
+                    // ordered architectures (notably ARM64) we observe the latest
+                    // decrement before deciding to exit. One barrier per idle spin
+                    // is acceptable cost.
+                    Thread.MemoryBarrier();
                     if (Volatile.Read(ref _remainingItems) <= 0)
                         return;
 
-                    // Yield and retry — work might still be in-flight
-                    Thread.Yield();
+                    // Adaptive backoff during true idle: SpinWait ramps from busy
+                    // spinning to Thread.Yield to Thread.Sleep(0)/Sleep(1) as the
+                    // count grows. Resets below whenever we successfully process
+                    // an item, so backoff only escalates during sustained idle.
+                    spinner.SpinOnce();
                     continue;
                 }
             }
@@ -208,6 +219,10 @@ public sealed class WorkStealingPool : IDisposable
                 }
                 queue!.Enqueue(ExceptionDispatchInfo.Capture(ex));
             }
+
+            // Reset SpinWait so backoff doesn't carry over from a prior idle stretch
+            // once we've found work again.
+            spinner.Reset();
 
             if (Interlocked.Decrement(ref _remainingItems) <= 0)
                 return;
