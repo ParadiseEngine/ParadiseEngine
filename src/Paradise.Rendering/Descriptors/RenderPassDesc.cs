@@ -1,0 +1,91 @@
+using System;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
+namespace Paradise.Rendering;
+
+/// <summary>Render pass descriptor with up to <see cref="MaxColorAttachments"/> color attachments
+/// and an optional depth attachment. Color attachments live inline (no heap allocation); use the
+/// <see cref="this[int]"/> indexer or <see cref="ColorAttachments"/> span — both honor
+/// <see cref="ColorAttachmentCount"/>.</summary>
+/// <remarks>This is a mutable struct: it must be passed by <c>ref</c> when mutated. Storing one in a
+/// <see cref="System.Collections.Generic.List{T}"/> field, capturing it as a property getter copy,
+/// or assigning to a local before writing through the indexer will silently lose writes to the copy.</remarks>
+public struct RenderPassDesc
+{
+    /// <summary>Maximum number of color attachments per pass. Matches WebGPU's required minimum (8).</summary>
+    public const int MaxColorAttachments = 8;
+
+    /// <summary>Raw inline storage for the eight color-attachment slots. Prefer the count-aware
+    /// <see cref="this[int]"/> indexer or <see cref="ColorAttachments"/> span — both bound writes
+    /// to <see cref="ColorAttachmentCount"/>. Direct field access is exposed for backends that
+    /// need uniform layout-based marshalling.</summary>
+    /// <remarks>Direct writes to slots <c>[<see cref="ColorAttachmentCount"/>, <see cref="MaxColorAttachments"/>)</c>
+    /// are silently invisible to <see cref="this[int]"/> and <see cref="ColorAttachments"/>; only
+    /// the count-aware paths are guaranteed to surface a written attachment to the backend. Treat
+    /// this field as a marshalling escape hatch, not as a general write surface.</remarks>
+    public ColorAttachmentBuffer Colors;
+
+    private int _colorAttachmentCount;
+
+    /// <summary>Number of valid entries in <see cref="Colors"/>. Setter validates against
+    /// <c>[0, <see cref="MaxColorAttachments"/>]</c> so the count cannot be raised to enable
+    /// out-of-bounds reads via <see cref="this[int]"/> or <see cref="ColorAttachments"/>.</summary>
+    public int ColorAttachmentCount
+    {
+        readonly get => _colorAttachmentCount;
+        set
+        {
+            if ((uint)value > (uint)MaxColorAttachments)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            _colorAttachmentCount = value;
+        }
+    }
+
+    public DepthAttachmentDesc? Depth;
+
+    public RenderPassDesc(int colorAttachmentCount, DepthAttachmentDesc? depth = null)
+    {
+        if ((uint)colorAttachmentCount > (uint)MaxColorAttachments)
+            throw new ArgumentOutOfRangeException(nameof(colorAttachmentCount));
+        Colors = default;
+        _colorAttachmentCount = colorAttachmentCount;
+        Depth = depth;
+    }
+
+    /// <summary>Count-aware color attachment accessor: bounds-checked against
+    /// <see cref="ColorAttachmentCount"/>, not just <see cref="MaxColorAttachments"/>. Writes via
+    /// this indexer are visible to <see cref="ColorAttachments"/>.</summary>
+    public ref ColorAttachmentDesc this[int index]
+    {
+        [UnscopedRef]
+        get
+        {
+            if ((uint)index >= (uint)_colorAttachmentCount)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            return ref Unsafe.Add(ref Unsafe.As<ColorAttachmentBuffer, ColorAttachmentDesc>(ref Colors), index);
+        }
+    }
+
+    /// <summary>Live span over the color attachment storage, sized by <see cref="ColorAttachmentCount"/>.</summary>
+    [UnscopedRef]
+    public Span<ColorAttachmentDesc> ColorAttachments =>
+        MemoryMarshal.CreateSpan(ref Unsafe.As<ColorAttachmentBuffer, ColorAttachmentDesc>(ref Colors), _colorAttachmentCount);
+}
+
+/// <summary>Inline storage for up to <see cref="RenderPassDesc.MaxColorAttachments"/> color
+/// attachments inside a <see cref="RenderPassDesc"/>. Sequential layout is required — the
+/// surrounding indexer and span use <see cref="Unsafe.Add{T}(ref T, int)"/> over <see cref="Slot0"/>.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct ColorAttachmentBuffer
+{
+    public ColorAttachmentDesc Slot0;
+    public ColorAttachmentDesc Slot1;
+    public ColorAttachmentDesc Slot2;
+    public ColorAttachmentDesc Slot3;
+    public ColorAttachmentDesc Slot4;
+    public ColorAttachmentDesc Slot5;
+    public ColorAttachmentDesc Slot6;
+    public ColorAttachmentDesc Slot7;
+}

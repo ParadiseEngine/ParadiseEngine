@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1;net10.0</TargetFrameworks>
+    <AssemblyName>Paradise.Rendering</AssemblyName>
+    <RootNamespace>Paradise.Rendering</RootNamespace>
+    <PackageId>Paradise.Rendering</PackageId>
+    <Title>Paradise.Rendering</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Backend-agnostic rendering data contract: handles, descriptors, and Slang-reflection-shaped records consumed by Paradise.Rendering.* backends.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>rendering;webgpu;graphics;nativeaot;game-dev</PackageTags>
+    <!-- Trimming and AOT are advertised only on the modern TFM; netstandard2.1 consumers are
+         expected to multi-target before publishing AOT, and the SDK rejects these properties
+         on netstandard. The library code itself is AOT-clean on both TFMs (no reflection,
+         source-gen-only JSON path) — the gating is purely about the SDK contract. -->
+    <IsTrimmable Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsTrimmable>
+    <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Rendering.Test" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+</Project>
