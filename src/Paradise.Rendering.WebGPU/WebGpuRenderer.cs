@@ -116,7 +116,10 @@ public sealed class WebGpuRenderer : IDisposable
                 default:
                     throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");
             }
-            view = current.Texture!.CreateView();
+            var surfaceTexture = current.Texture
+                ?? throw new InvalidOperationException(
+                    $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
+            view = surfaceTexture.CreateView();
         }
 
         var encoder = _device.Device.CreateCommandEncoder();
