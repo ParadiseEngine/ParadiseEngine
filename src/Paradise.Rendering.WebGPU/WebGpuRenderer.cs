@@ -108,8 +108,10 @@ public sealed class WebGpuRenderer : IDisposable
                     break;
                 case WgSurfaceGetCurrentTextureStatus.Outdated:
                 case WgSurfaceGetCurrentTextureStatus.Lost:
-                    // Surface needs reconfigure (window resized between events); skip this frame.
-                    _surface.Resize(_surface.Width, _surface.Height);
+                    // Surface needs reconfigure (window resized between events, GPU lost, etc.).
+                    // Skip this frame — caller will retry on the next tick. Force-reconfigure
+                    // even if dimensions match: the swapchain itself must be rebuilt.
+                    _surface.Reconfigure();
                     return;
                 default:
                     throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");

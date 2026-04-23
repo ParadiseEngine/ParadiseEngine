@@ -60,8 +60,8 @@ internal sealed class WebGpuDevice : IDisposable
         }
 
         if (adapter is null)
-            throw new InvalidOperationException(
-                "Failed to acquire a WebGPU adapter. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support.");
+            throw new AdapterUnavailableException(
+                "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support.");
 
         var deviceDesc = new WgDeviceDescriptor
         {
@@ -74,7 +74,7 @@ internal sealed class WebGpuDevice : IDisposable
         };
 
         var device = adapter.RequestDeviceSync(in deviceDesc, AdapterTimeoutNs)
-            ?? throw new InvalidOperationException("Failed to create a WebGPU device from the requested adapter.");
+            ?? throw new InvalidOperationException("WebGPU device creation failed.");
 
         var queue = device.GetQueue();
         return new WebGpuDevice(instance, adapter, device, queue);

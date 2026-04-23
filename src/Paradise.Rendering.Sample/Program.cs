@@ -148,12 +148,15 @@ internal static class Program
 
         if (OperatingSystem.IsMacOS())
         {
-            // SDL3 exposes the NSWindow*, not a CAMetalLayer*. The minimal sample passes the
-            // window pointer; full Cocoa hookup (creating CAMetalLayer on the main thread and
-            // attaching it to the content view) is documented as a known macOS constraint in
-            // the issue spec and is left to be exercised when M0b runs on macOS.
-            var nsWindow = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, IntPtr.Zero);
-            return new SurfaceDescriptor(SurfacePlatform.Cocoa, IntPtr.Zero, nsWindow, width, height);
+            // The Cocoa surface path expects a CAMetalLayer*, but SDL3 only exposes the
+            // NSWindow*. Wiring CAMetalLayer (creation on the main thread + attachment to the
+            // NSWindow content view) is out of scope for M0b per the issue spec. Refuse the
+            // windowed path explicitly rather than feeding the wrong pointer to Dawn — the
+            // headless adapter path (--headless N) covers macOS for now.
+            throw new PlatformNotSupportedException(
+                "Windowed macOS is not yet wired: SDL3 exposes NSWindow* but the Cocoa surface " +
+                "path requires a CAMetalLayer*. CAMetalLayer creation and attachment will land " +
+                "with full Cocoa support; use --headless N on macOS for now.");
         }
 
         if (OperatingSystem.IsLinux())

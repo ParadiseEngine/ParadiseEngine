@@ -47,6 +47,11 @@ internal sealed class SurfaceState : IDisposable
         Configure();
     }
 
+    /// <summary>Re-apply the current configuration without changing dimensions. Used by the
+    /// renderer when <c>GetCurrentTexture</c> reports <c>Outdated</c> / <c>Lost</c> — the
+    /// swapchain itself needs to be rebuilt even though the requested size hasn't changed.</summary>
+    public void Reconfigure() => Configure();
+
     private void Configure()
     {
         var config = new WgSurfaceConfiguration
