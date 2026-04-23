@@ -365,11 +365,24 @@ public sealed class WebGpuRenderer : IDisposable
 
         var src = pass.Colors.Slot0;
         var colors = new WgRenderPassColorAttachment[1];
+        // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
+        // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
+        // surfaces as a build break here rather than silently routing through Clear/Discard.
         colors[0] = new WgRenderPassColorAttachment
         {
             View = backbuffer,
-            LoadOp = src.Load == LoadOp.Load ? WgLoadOp.Load : WgLoadOp.Clear,
-            StoreOp = src.Store == StoreOp.Store ? WgStoreOp.Store : WgStoreOp.Discard,
+            LoadOp = src.Load switch
+            {
+                LoadOp.Load => WgLoadOp.Load,
+                LoadOp.Clear => WgLoadOp.Clear,
+                _ => throw new NotSupportedException($"LoadOp '{src.Load}' has no WebGPU mapping."),
+            },
+            StoreOp = src.Store switch
+            {
+                StoreOp.Store => WgStoreOp.Store,
+                StoreOp.Discard => WgStoreOp.Discard,
+                _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
+            },
             ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
             DepthSlice = null,
         };
