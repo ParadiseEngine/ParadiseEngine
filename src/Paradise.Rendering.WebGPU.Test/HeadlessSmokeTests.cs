@@ -3,26 +3,43 @@ using TUnit.Core;
 namespace Paradise.Rendering.WebGPU.Test;
 
 /// <summary>Smoke tests that exercise the headless adapter path. These hit live Dawn natives via
-/// WebGPUSharp; if no Vulkan/Metal/DX12 backend is available (no GPU, no lavapipe on Linux CI)
-/// the tests skip cleanly via <see cref="Skip.Test(string)"/> on <see cref="AdapterUnavailableException"/>
-/// rather than failing. Device-creation or any other backend failure surfaces as a real test
-/// failure — only adapter unavailability is treated as "not applicable on this host". The AOT
-/// publish in CI is the load-bearing M0 acceptance signal; these are belt-and-suspenders.</summary>
+/// WebGPUSharp; if WebGPU is not exercisable on this host the tests skip cleanly via
+/// <see cref="Skip.Test(string)"/> rather than failing. Two skip conditions:
+/// <list type="bullet">
+/// <item><see cref="AdapterUnavailableException"/> — Dawn loaded but returned no adapter (no
+/// Vulkan/Metal/DX12 backend, e.g. CI without lavapipe + libvulkan1).</item>
+/// <item><see cref="DllNotFoundException"/> — Dawn's <c>webgpu_dawn</c> native (or one of its
+/// transitive dependencies, notably <c>libc++.so.1</c> on Linux) cannot be loaded by the runtime.
+/// Equivalent "WebGPU not available on this host" condition.</item>
+/// </list>
+/// Device-creation or any other backend failure surfaces as a real test failure — only
+/// host-environment unavailability is treated as "not applicable here". The AOT publish in CI is
+/// the load-bearing M0 acceptance signal; these are belt-and-suspenders.</summary>
 public class HeadlessSmokeTests
 {
-    [Test]
-    public async Task headless_renderer_initializes_and_disposes()
+    private static WebGpuRenderer? TryCreateHeadlessOrSkip(uint width, uint height)
     {
-        WebGpuRenderer? renderer;
         try
         {
-            renderer = WebGpuRenderer.CreateHeadless(64, 64);
+            return WebGpuRenderer.CreateHeadless(width, height);
         }
         catch (AdapterUnavailableException ex)
         {
             Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
-            return;
+            return null;
         }
+        catch (DllNotFoundException ex)
+        {
+            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            return null;
+        }
+    }
+
+    [Test]
+    public async Task headless_renderer_initializes_and_disposes()
+    {
+        var renderer = TryCreateHeadlessOrSkip(64, 64);
+        if (renderer is null) return;
 
         try
         {
@@ -37,16 +54,8 @@ public class HeadlessSmokeTests
     [Test]
     public async Task headless_renderer_renders_clear_frames()
     {
-        WebGpuRenderer? renderer;
-        try
-        {
-            renderer = WebGpuRenderer.CreateHeadless(32, 32);
-        }
-        catch (AdapterUnavailableException ex)
-        {
-            Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
-            return;
-        }
+        var renderer = TryCreateHeadlessOrSkip(32, 32);
+        if (renderer is null) return;
 
         try
         {
@@ -63,16 +72,8 @@ public class HeadlessSmokeTests
     [Test]
     public async Task headless_renderer_resize_resizes_offscreen_target()
     {
-        WebGpuRenderer? renderer;
-        try
-        {
-            renderer = WebGpuRenderer.CreateHeadless(16, 16);
-        }
-        catch (AdapterUnavailableException ex)
-        {
-            Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
-            return;
-        }
+        var renderer = TryCreateHeadlessOrSkip(16, 16);
+        if (renderer is null) return;
 
         try
         {
