@@ -105,7 +105,19 @@ public sealed class WorkStealingPool : IDisposable
                 case <= 0:
                     return;
                 case 1:
-                    items[0].Invoke();
+                    // Wrap single-item exceptions in AggregateException so the
+                    // exception shape is consistent with the multi-item path
+                    // (documented in this method's <exception> tag). Otherwise
+                    // callers writing `catch (AggregateException)` would silently
+                    // miss exceptions thrown from one-item waves.
+                    try
+                    {
+                        items[0].Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new AggregateException(ex);
+                    }
                     return;
             }
 
@@ -184,14 +196,12 @@ public sealed class WorkStealingPool : IDisposable
                 item = TrySteal(laneIndex);
                 if (item < 0)
                 {
-                    // No work anywhere — check if all done. Issue an explicit full
-                    // memory barrier before the read of _remainingItems: while
-                    // Interlocked.Decrement provides ordering on the writer side,
-                    // pairing it here with a barrier guarantees that on weakly
-                    // ordered architectures (notably ARM64) we observe the latest
-                    // decrement before deciding to exit. One barrier per idle spin
-                    // is acceptable cost.
-                    Thread.MemoryBarrier();
+                    // No work anywhere — check if all done. Volatile.Read provides
+                    // the acquire fence that pairs with the Interlocked.Decrement
+                    // release on the writer side, so the observed value reflects
+                    // every decrement that happened-before any preceding empty
+                    // observation by PopBottom/TrySteal. No additional explicit
+                    // memory barrier is required.
                     if (Volatile.Read(ref _remainingItems) <= 0)
                         return;
 

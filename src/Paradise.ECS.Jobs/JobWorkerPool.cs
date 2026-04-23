@@ -124,7 +124,19 @@ public sealed class JobWorkerPool : IDisposable
                 case <= 0:
                     return;
                 case 1:
-                    items[0].Invoke();
+                    // Wrap single-item exceptions in AggregateException so the
+                    // exception shape is consistent with the multi-item path
+                    // (documented in this method's <exception> tag). Otherwise
+                    // callers writing `catch (AggregateException)` would silently
+                    // miss exceptions thrown from one-item waves.
+                    try
+                    {
+                        items[0].Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new AggregateException(ex);
+                    }
                     return;
             }
 

@@ -234,7 +234,11 @@ public sealed class WorkStealingDequeTests
         foreach (var t in stealers)
             t.Join();
 
-        // Verify every item retrieved exactly once
+        // Verify every item retrieved exactly once.
+        // Total count assertion comes BEFORE deduplication so a duplicate
+        // (same item delivered to two consumers) fails the test — without it,
+        // HashSet alone would still pass on duplicates.
+        await Assert.That(collected.Count).IsEqualTo(itemCount);
         var seen = new HashSet<int>(collected);
         await Assert.That(seen.Count).IsEqualTo(itemCount);
         for (int i = 0; i < itemCount; i++)

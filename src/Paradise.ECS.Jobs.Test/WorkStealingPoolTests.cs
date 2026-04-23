@@ -180,6 +180,32 @@ public sealed class WorkStealingPoolTests
     }
 
     [Test]
+    public async Task ExecuteWork_SingleItemException_ThrowsAggregateException()
+    {
+        // Single-item waves take a fast-path that bypasses the worker pool.
+        // The exception shape must still match the multi-item path (AggregateException
+        // wrapping the inner exception) so callers writing `catch (AggregateException)`
+        // do not silently miss exceptions thrown from one-item waves.
+        using var pool = new WorkStealingPool(2);
+
+        var threw = false;
+        try
+        {
+            pool.ExecuteWork(DelegateWorkItem.Create(1, _ =>
+                throw new InvalidOperationException("solo")));
+        }
+        catch (AggregateException ex)
+        {
+            threw = true;
+            await Assert.That(ex.InnerExceptions.Count).IsEqualTo(1);
+            await Assert.That(ex.InnerExceptions[0]).IsTypeOf<InvalidOperationException>();
+            await Assert.That(ex.InnerExceptions[0].Message).IsEqualTo("solo");
+        }
+
+        await Assert.That(threw).IsTrue();
+    }
+
+    [Test]
     public async Task ExecuteWork_MultipleExceptions_CapturesAll()
     {
         using var pool = new WorkStealingPool(2);

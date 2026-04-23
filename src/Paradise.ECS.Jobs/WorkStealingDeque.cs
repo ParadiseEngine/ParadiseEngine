@@ -111,14 +111,19 @@ internal sealed class WorkStealingDeque
         //
         // Why Grow does not break this:
         //   Grow() allocates a new buffer, copies elements [top, bottom) into it,
-        //   then publishes _buffer = newBuf. It never mutates the old buffer.
+        //   then publishes the new reference via Volatile.Write(ref _buffer, newBuf).
+        //   It never mutates the old buffer.
         //   - If we captured oldBuf before Grow(): oldBuf[t & oldMask] is frozen
         //     (subsequent owner writes go to newBuf, not oldBuf) so our read is
         //     valid forever.
         //   - If we captured newBuf after Grow(): Grow ran while _top was still
         //     t (we hadn't CAS'd), so it copied slot t into newBuf[t & newMask].
-        //     Our read is valid.
-        var buffer = _buffer;
+        //     The Volatile.Read here pairs with Grow's Volatile.Write so on
+        //     weakly ordered architectures (notably ARM64) we cannot observe the
+        //     new buffer reference before its initializing array writes are
+        //     committed — without the pairing we could read a zero from a
+        //     not-yet-published slot.
+        var buffer = Volatile.Read(ref _buffer);
         int item = buffer[t & (buffer.Length - 1)];
 
         if (Interlocked.CompareExchange(ref _top, t + 1, t) != t)
@@ -154,7 +159,14 @@ internal sealed class WorkStealingDeque
             int index = top + i;
             newBuf[index & (newLen - 1)] = _buffer[index & (oldLen - 1)];
         }
-        _buffer = newBuf;
+        // Volatile.Write provides release semantics so a concurrent Steal that
+        // observes the new _buffer reference is guaranteed to also observe the
+        // initializing slot writes above. Plain reference store would be racy on
+        // ARM64 (weakly ordered) — a stealer could read the new array reference
+        // while the slots still appear zero. Pairs with Volatile.Read in Steal().
+        // PushBottom only reads _buffer on the owner thread that just wrote it
+        // here, so it does not need a Volatile.Read.
+        Volatile.Write(ref _buffer, newBuf);
     }
 
     private static int RoundUpPowerOf2(int value)
