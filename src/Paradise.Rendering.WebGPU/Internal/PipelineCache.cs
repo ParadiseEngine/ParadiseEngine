@@ -18,16 +18,22 @@ internal sealed class PipelineCache
         public Entry(in PipelineDesc desc, PipelineHandle handle) { Desc = desc; Handle = handle; }
     }
 
-    public PipelineHandle GetOrCreate(in PipelineDesc desc, Func<PipelineDesc, PipelineHandle> factory, Action<PipelineHandle>? onEvict = null)
+    public PipelineHandle GetOrCreate(in PipelineDesc desc, Func<PipelineDesc, PipelineHandle> factory)
     {
         var hash = desc.ContentHash();
         if (_byHash.TryGetValue(hash, out var entry))
         {
             if (entry.Desc.Equals(desc)) return entry.Handle;
-            // Hash collision with a structurally-different descriptor: surface the displaced
-            // entry's handle so the caller can release the orphaned native pipeline. Without this
-            // hook the old handle becomes unreachable through Forget() once we overwrite below.
-            onEvict?.Invoke(entry.Handle);
+            // Insert-only semantics: a 32-bit hash collision with a structurally-different
+            // descriptor is treated as a programmer error. The cache is not authorized to
+            // silently overwrite (would orphan the displaced native pipeline) or to evict via
+            // callback (would leak a "caller must destroy displaced" contract into every consumer
+            // — see PR #55 review thread). On collision, throw and let the caller use Forget()
+            // first if they really intend to replace.
+            throw new InvalidOperationException(
+                $"PipelineCache: hash collision (0x{hash:X8}) between two structurally-different " +
+                $"PipelineDesc instances. The cache is insert-only — call Forget() on the existing " +
+                $"handle before re-inserting if replacement is intended.");
         }
         var created = factory(desc);
         _byHash[hash] = new Entry(in desc, created);

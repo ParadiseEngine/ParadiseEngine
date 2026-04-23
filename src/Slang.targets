@@ -104,7 +104,7 @@
           BeforeTargets="BeforeBuild;PrepareResources;PrepareResourceNames"
           Condition="@(SlangShader-&gt;Count()) &gt; 0"
           Inputs="@(SlangShader);$(SlangManifestPath)"
-          Outputs="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json')">
+          Outputs="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).raw-reflection.json')">
 
     <PropertyGroup>
       <_SlangOutputDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)shaders'))</_SlangOutputDir>
@@ -122,6 +122,19 @@
 
     <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
           ConsoleToMSBuild="true" />
+
+    <!--
+      Snapshot B (#45 regression suite): also embed the raw slangc -reflection-json output
+      under a distinct LogicalName so #45 can pin slangc's input contract independently of
+      the loader's records-shape contract. Today the runtime loader (ShaderProgramLoader)
+      transforms the same raw JSON at load time, so reflection.json IS the raw output and a
+      copy is byte-identical. When the transform moves to build-time (M2/M3), the copy step
+      here becomes a real transform pipeline and reflection.json diverges from the raw form;
+      #45 catches the divergence as a snapshot mismatch on every PR.
+    -->
+    <Copy SourceFiles="@(SlangShader-&gt;'$(_SlangOutputDir)/%(Filename).reflection.json')"
+          DestinationFiles="@(SlangShader-&gt;'$(_SlangOutputDir)/%(Filename).raw-reflection.json')"
+          SkipUnchangedFiles="true" />
   </Target>
 
   <!--
@@ -139,6 +152,9 @@
       </EmbeddedResource>
       <EmbeddedResource Include="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json')">
         <LogicalName>Shaders.%(Filename).reflection.json</LogicalName>
+      </EmbeddedResource>
+      <EmbeddedResource Include="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).raw-reflection.json')">
+        <LogicalName>Shaders.%(Filename).raw-reflection.json</LogicalName>
       </EmbeddedResource>
     </ItemGroup>
   </Target>

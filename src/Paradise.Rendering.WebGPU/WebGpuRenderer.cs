@@ -187,13 +187,7 @@ public sealed class WebGpuRenderer : IDisposable
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _pipelineCache.GetOrCreate(
-            in desc,
-            factory: d => _device.CreatePipeline(in d),
-            // 32-bit hash collision with structurally-different descriptors evicts the older
-            // entry. Schedule the displaced pipeline for deferred destruction so the native
-            // resource doesn't leak (the cache would otherwise drop the reference on overwrite).
-            onEvict: evicted => _destructionQueue.Schedule(() => _device.DestroyPipeline(evicted)));
+        return _pipelineCache.GetOrCreate(in desc, d => _device.CreatePipeline(in d));
     }
 
     /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
