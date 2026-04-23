@@ -9,10 +9,10 @@ public class SurfaceDescriptorTests
         {
             var desc = new SurfaceDescriptor(
                 platform,
-                displayHandle: new IntPtr(0xCAFE),
-                windowHandle: new IntPtr(0xBEEF),
-                width: 1920,
-                height: 1080);
+                DisplayHandle: new IntPtr(0xCAFE),
+                WindowHandle: new IntPtr(0xBEEF),
+                Width: 1920,
+                Height: 1080);
 
             await Assert.That(desc.Platform).IsEqualTo(platform);
             await Assert.That(desc.DisplayHandle).IsEqualTo(new IntPtr(0xCAFE));

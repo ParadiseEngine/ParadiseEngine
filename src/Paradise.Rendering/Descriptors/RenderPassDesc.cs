@@ -23,15 +23,30 @@ public struct RenderPassDesc
     /// need uniform layout-based marshalling.</summary>
     public ColorAttachmentBuffer Colors;
 
-    public int ColorAttachmentCount;
+    private int _colorAttachmentCount;
+
+    /// <summary>Number of valid entries in <see cref="Colors"/>. Setter validates against
+    /// <c>[0, <see cref="MaxColorAttachments"/>]</c> so the count cannot be raised to enable
+    /// out-of-bounds reads via <see cref="this[int]"/> or <see cref="ColorAttachments"/>.</summary>
+    public int ColorAttachmentCount
+    {
+        readonly get => _colorAttachmentCount;
+        set
+        {
+            if ((uint)value > (uint)MaxColorAttachments)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            _colorAttachmentCount = value;
+        }
+    }
+
     public DepthAttachmentDesc? Depth;
 
     public RenderPassDesc(int colorAttachmentCount, DepthAttachmentDesc? depth = null)
     {
-        if (colorAttachmentCount < 0 || colorAttachmentCount > MaxColorAttachments)
+        if ((uint)colorAttachmentCount > (uint)MaxColorAttachments)
             throw new ArgumentOutOfRangeException(nameof(colorAttachmentCount));
         Colors = default;
-        ColorAttachmentCount = colorAttachmentCount;
+        _colorAttachmentCount = colorAttachmentCount;
         Depth = depth;
     }
 
@@ -43,7 +58,7 @@ public struct RenderPassDesc
         [UnscopedRef]
         get
         {
-            if ((uint)index >= (uint)ColorAttachmentCount)
+            if ((uint)index >= (uint)_colorAttachmentCount)
                 throw new ArgumentOutOfRangeException(nameof(index));
             return ref Unsafe.Add(ref Unsafe.As<ColorAttachmentBuffer, ColorAttachmentDesc>(ref Colors), index);
         }
@@ -52,7 +67,7 @@ public struct RenderPassDesc
     /// <summary>Live span over the color attachment storage, sized by <see cref="ColorAttachmentCount"/>.</summary>
     [UnscopedRef]
     public Span<ColorAttachmentDesc> ColorAttachments =>
-        MemoryMarshal.CreateSpan(ref Unsafe.As<ColorAttachmentBuffer, ColorAttachmentDesc>(ref Colors), ColorAttachmentCount);
+        MemoryMarshal.CreateSpan(ref Unsafe.As<ColorAttachmentBuffer, ColorAttachmentDesc>(ref Colors), _colorAttachmentCount);
 }
 
 /// <summary>Inline storage for up to <see cref="RenderPassDesc.MaxColorAttachments"/> color

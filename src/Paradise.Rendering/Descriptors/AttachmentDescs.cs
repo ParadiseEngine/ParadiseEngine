@@ -1,35 +1,24 @@
+using System.Runtime.InteropServices;
+
 namespace Paradise.Rendering;
 
 /// <summary>Color attachment binding for a single render-pass color slot.</summary>
-public readonly struct ColorAttachmentDesc
-{
-    public readonly RenderViewHandle View;
-    public readonly LoadOp Load;
-    public readonly StoreOp Store;
-    public readonly ColorRgba ClearValue;
-
-    public ColorAttachmentDesc(RenderViewHandle view, LoadOp load, StoreOp store, ColorRgba clearValue)
-    {
-        View = view;
-        Load = load;
-        Store = store;
-        ClearValue = clearValue;
-    }
-}
+/// <remarks>Sequential layout is required: <see cref="ColorAttachmentBuffer"/> stores instances
+/// inline and <see cref="RenderPassDesc"/> walks them via <see cref="System.Runtime.CompilerServices.Unsafe.Add{T}(ref T, int)"/>.</remarks>
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct ColorAttachmentDesc(
+    RenderViewHandle View,
+    LoadOp Load,
+    StoreOp Store,
+    ColorRgba ClearValue);
 
 /// <summary>Depth attachment binding for a render pass.</summary>
-public readonly struct DepthAttachmentDesc
-{
-    public readonly TextureHandle DepthTexture;
-    public readonly LoadOp DepthLoad;
-    public readonly StoreOp DepthStore;
-    public readonly float ClearDepth;
-
-    public DepthAttachmentDesc(TextureHandle depthTexture, LoadOp depthLoad, StoreOp depthStore, float clearDepth)
-    {
-        DepthTexture = depthTexture;
-        DepthLoad = depthLoad;
-        DepthStore = depthStore;
-        ClearDepth = clearDepth;
-    }
-}
+// TODO(post-M0a): when the contract grows to express stencil load/store/clear, fold them in here
+//                 (or split into DepthStencilAttachmentDesc) so combined formats like
+//                 TextureFormat.Depth24PlusStencil8 round-trip without losing stencil intent.
+//                 Tracked alongside PipelineDesc placeholder expansion in #42 / #45.
+public readonly record struct DepthAttachmentDesc(
+    TextureHandle DepthTexture,
+    LoadOp DepthLoad,
+    StoreOp DepthStore,
+    float ClearDepth);

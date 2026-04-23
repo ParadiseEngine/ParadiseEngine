@@ -85,6 +85,56 @@ public class RenderPassDescTests
     }
 
     [Test]
+    public async Task color_attachment_count_setter_rejects_negative()
+    {
+        // Regression for OpenCara F1-prime: the prior public mutable field allowed
+        // pass.ColorAttachmentCount = -1, and (uint)(-1) == 0xFFFFFFFF made the count-aware
+        // indexer's `(uint)index >= (uint)Count` check vacuous. The validated setter closes that.
+        await Assert.That(() =>
+        {
+            var pass = new RenderPassDesc(colorAttachmentCount: 2);
+            pass.ColorAttachmentCount = -1;
+        }).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task color_attachment_count_setter_rejects_above_max()
+    {
+        // Regression for OpenCara F1-prime: the prior public mutable field allowed
+        // pass.ColorAttachmentCount = 100, after which MemoryMarshal.CreateSpan returned a
+        // 100-element span over the 8-slot inline buffer. The validated setter closes that.
+        await Assert.That(() =>
+        {
+            var pass = new RenderPassDesc(colorAttachmentCount: 2);
+            pass.ColorAttachmentCount = RenderPassDesc.MaxColorAttachments + 1;
+        }).Throws<ArgumentOutOfRangeException>();
+
+        await Assert.That(() =>
+        {
+            var pass = new RenderPassDesc(colorAttachmentCount: 2);
+            pass.ColorAttachmentCount = 100;
+        }).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task color_attachment_count_setter_grows_and_shrinks_within_bounds()
+    {
+        var pass = new RenderPassDesc(colorAttachmentCount: 2);
+        pass[0] = new ColorAttachmentDesc(new RenderViewHandle(1, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.White);
+        pass[1] = new ColorAttachmentDesc(new RenderViewHandle(2, 1), LoadOp.Load, StoreOp.Store, ColorRgba.Black);
+
+        pass.ColorAttachmentCount = RenderPassDesc.MaxColorAttachments;
+        await Assert.That(pass.ColorAttachmentCount).IsEqualTo(RenderPassDesc.MaxColorAttachments);
+        await Assert.That(GetSpanLength(ref pass)).IsEqualTo(RenderPassDesc.MaxColorAttachments);
+
+        pass.ColorAttachmentCount = 0;
+        await Assert.That(pass.ColorAttachmentCount).IsEqualTo(0);
+        await Assert.That(GetSpanLength(ref pass)).IsEqualTo(0);
+
+        static int GetSpanLength(ref RenderPassDesc pass) => pass.ColorAttachments.Length;
+    }
+
+    [Test]
     public async Task depth_attachment_is_optional()
     {
         var pass = new RenderPassDesc(colorAttachmentCount: 0);
