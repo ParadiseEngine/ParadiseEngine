@@ -1,70 +1,77 @@
 using System;
 using System.Collections.Generic;
+using WgRenderPipeline = WebGpuSharp.RenderPipeline;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>Caches <see cref="PipelineHandle"/>s keyed by <see cref="PipelineDesc.ContentHash"/>.
-/// A second <see cref="GetOrCreate"/> with the same content returns the cached handle instead of
-/// allocating a new pipeline. Removed handles drop their cache entry so a re-create with the same
-/// content compiles a fresh pipeline.</summary>
+/// <summary>Internal cache of native WebGPUSharp <see cref="WgRenderPipeline"/> instances keyed
+/// by <see cref="PipelineDesc.ContentHash"/>. Lives below the public <see cref="PipelineHandle"/>
+/// layer: each call to <see cref="GetOrCreateNative"/> returns a shared native pipeline reference,
+/// but the handle minting + slot-table allocation happens above this cache so that two
+/// <c>CreatePipeline</c> calls with structurally-equal descriptors get distinct
+/// <see cref="PipelineHandle"/> values. Destroying one of those handles never invalidates the
+/// other — the underlying native pipeline stays live until the renderer disposes.</summary>
+/// <remarks>M1 keeps cache entries for the renderer's lifetime (no refcount, no eviction). M2/M3
+/// will revisit when dynamic pipeline rebuilds become common; the cache will need a refcount or
+/// LRU eviction at that point. The current design intentionally trades a small amount of native
+/// memory for a clean public-handle contract that matches every other resource type.</remarks>
 internal sealed class PipelineCache
 {
     private readonly Dictionary<int, Entry> _byHash = new();
+    private readonly List<WgRenderPipeline> _all = new();
 
     private readonly struct Entry
     {
         public readonly PipelineDesc Desc;
-        public readonly PipelineHandle Handle;
-        public Entry(in PipelineDesc desc, PipelineHandle handle) { Desc = desc; Handle = handle; }
+        public readonly WgRenderPipeline Native;
+        public Entry(in PipelineDesc desc, WgRenderPipeline native) { Desc = desc; Native = native; }
     }
 
-    public PipelineHandle GetOrCreate(in PipelineDesc desc, Func<PipelineDesc, PipelineHandle> factory)
+    /// <summary>Get a cached native pipeline for <paramref name="desc"/>, or invoke
+    /// <paramref name="factory"/> to create one. Insert-only: a hash collision with a
+    /// structurally-different descriptor throws — the cache is the canonical store for native
+    /// pipelines, overwriting would orphan the displaced native resource.</summary>
+    public WgRenderPipeline GetOrCreateNative(in PipelineDesc desc, Func<PipelineDesc, WgRenderPipeline> factory)
     {
         var hash = desc.ContentHash();
         if (_byHash.TryGetValue(hash, out var entry))
         {
-            if (entry.Desc.Equals(desc)) return entry.Handle;
-            // Insert-only semantics: a 32-bit hash collision with a structurally-different
-            // descriptor is treated as a programmer error. The cache is not authorized to
-            // silently overwrite (would orphan the displaced native pipeline) or to evict via
-            // callback (would leak a "caller must destroy displaced" contract into every consumer
-            // — see PR #55 review thread). On collision, throw and let the caller use Forget()
-            // first if they really intend to replace.
+            if (entry.Desc.Equals(desc)) return entry.Native;
+            // Hash collision with a different desc — treated as programmer error. Cache cannot
+            // silently overwrite (orphans the displaced native pipeline) or evict via callback
+            // (leaks a "caller must release" contract into the public surface). M1's PipelineDesc
+            // surface is small enough that real collisions are vanishingly unlikely; if one occurs
+            // it warrants investigation, not silent fall-through.
             throw new InvalidOperationException(
                 $"PipelineCache: hash collision (0x{hash:X8}) between two structurally-different " +
-                $"PipelineDesc instances. The cache is insert-only — call Forget() on the existing " +
-                $"handle before re-inserting if replacement is intended.");
+                $"PipelineDesc instances. Investigate the descriptor difference rather than " +
+                $"replacing one transparently.");
         }
         var created = factory(desc);
         _byHash[hash] = new Entry(in desc, created);
+        _all.Add(created);
         return created;
     }
 
-    public bool TryGet(in PipelineDesc desc, out PipelineHandle handle)
+    public bool TryGetNative(in PipelineDesc desc, out WgRenderPipeline native)
     {
         var hash = desc.ContentHash();
         if (_byHash.TryGetValue(hash, out var entry) && entry.Desc.Equals(desc))
         {
-            handle = entry.Handle;
+            native = entry.Native;
             return true;
         }
-        handle = PipelineHandle.Invalid;
+        native = null!;
         return false;
-    }
-
-    public void Forget(PipelineHandle handle)
-    {
-        // Linear scan — pipelines are few; the cost beats holding a reverse map that has to stay
-        // consistent across hash collisions.
-        int? toRemove = null;
-        foreach (var kvp in _byHash)
-        {
-            if (kvp.Value.Handle.Equals(handle)) { toRemove = kvp.Key; break; }
-        }
-        if (toRemove is int key) _byHash.Remove(key);
     }
 
     public int Count => _byHash.Count;
 
-    public void Clear() => _byHash.Clear();
+    /// <summary>Drop every cached native pipeline reference. Called at renderer disposal so
+    /// finalizers can release the native handles in the next GC cycle.</summary>
+    public void Clear()
+    {
+        _byHash.Clear();
+        _all.Clear();
+    }
 }

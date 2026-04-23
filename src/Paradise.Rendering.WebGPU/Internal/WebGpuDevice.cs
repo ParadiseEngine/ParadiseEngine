@@ -122,16 +122,26 @@ internal sealed class WebGpuDevice : IDisposable
         return module;
     }
 
-    public bool DestroyShader(ShaderHandle h)
+    /// <summary>Evict the dedupe-cache entry for <paramref name="h"/> without touching the slot
+    /// table. Used by <see cref="WebGpuRenderer.DestroyShader"/> at schedule time so a re-create
+    /// with the same (Wgsl, EntryPoint, Stage) tuple between scheduling and the deferred
+    /// slot-table remove gets a fresh ShaderHandle instead of the dying one.</summary>
+    public void EvictShaderFromCache(ShaderHandle h)
     {
-        // Drop any cache entry that maps to this handle so a future CreateShaderModule with the
-        // same WGSL/entry-point/stage tuple compiles a fresh module instead of returning a stale one.
         ShaderModuleCacheKey? toRemove = null;
         foreach (var kvp in _shaderModuleCache)
         {
             if (kvp.Value.Equals(h)) { toRemove = kvp.Key; break; }
         }
         if (toRemove is { } key) _shaderModuleCache.Remove(key);
+    }
+
+    public bool DestroyShader(ShaderHandle h)
+    {
+        // Defensive: keep the cache eviction here too so direct callers (tests, future internal
+        // uses) get the consistent behavior. WebGpuRenderer.DestroyShader already evicts at
+        // schedule time, so when this runs deferred the cache entry is typically already gone.
+        EvictShaderFromCache(h);
         return Shaders.Remove(h.Index, h.Generation);
     }
 
@@ -169,7 +179,12 @@ internal sealed class WebGpuDevice : IDisposable
         return Buffers.Remove(h.Index, h.Generation);
     }
 
-    public PipelineHandle CreatePipeline(in PipelineDesc desc)
+    /// <summary>Build a native WebGPU pipeline from <paramref name="desc"/> without allocating a
+    /// slot-table entry. Used by <see cref="WebGpuRenderer.CreatePipeline"/> in conjunction with
+    /// the cache + <see cref="RegisterPipeline"/>: the cache stores the native pipeline once per
+    /// content hash, every CreatePipeline call mints its own public handle pointing at the
+    /// shared native pipeline.</summary>
+    public WgRenderPipeline BuildNativePipeline(in PipelineDesc desc)
     {
         // Reject depth/stencil settings explicitly in M1 instead of accepting them and silently
         // discarding — the descriptor field exists for M2 but the backend has no plumbing for it
@@ -250,10 +265,17 @@ internal sealed class WebGpuDevice : IDisposable
             },
         };
 
-        var pipeline = Device.CreateRenderPipelineSync(in pipelineDesc)
+        return Device.CreateRenderPipelineSync(in pipelineDesc)
             ?? throw new InvalidOperationException("RenderPipeline creation returned null.");
+    }
 
-        var (index, generation) = Pipelines.Add(pipeline);
+    /// <summary>Allocate a slot-table entry pointing at <paramref name="native"/> and return the
+    /// resulting public handle. Each call mints a fresh handle even when the same native pipeline
+    /// is registered repeatedly — that's the point of the split: shared cache below, distinct
+    /// public identity above.</summary>
+    public PipelineHandle RegisterPipeline(WgRenderPipeline native)
+    {
+        var (index, generation) = Pipelines.Add(native);
         return new PipelineHandle(index, generation);
     }
 

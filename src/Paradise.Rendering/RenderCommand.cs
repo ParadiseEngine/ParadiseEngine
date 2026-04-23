@@ -35,10 +35,13 @@ public readonly record struct SetBindGroupPayload(uint GroupIndex);
 /// <summary>Discriminated render command. Kind selects one of the payload fields below; reading
 /// any other field is undefined. Encode via <see cref="RenderCommandEncoder"/>.</summary>
 /// <remarks>The struct uses an explicit 8-byte aligned layout: 1 byte kind + 7 bytes padding +
-/// up to 32 bytes of payload (largest is <see cref="SetVertexBuffer"/>). Sequential layout makes
-/// the discriminator trivially testable and keeps the encoded stream small without forcing a
-/// pointer-indirection design that would compromise zero-allocation encoding.</remarks>
-[StructLayout(LayoutKind.Explicit, Size = 40)]
+/// up to 40 bytes of payload (largest is <see cref="SetVertexBuffer"/> at 4+4-pad+16+8+8 = 40
+/// bytes; <c>BufferHandle</c> is <c>Size = 16</c> via <see cref="StructLayoutAttribute"/>). The
+/// declared <c>Size = 48</c> matches what the CLR computes for the field extents, so
+/// <c>Unsafe.SizeOf&lt;RenderCommand&gt;()</c> returns 48 — verified by
+/// <c>RenderCommandLayoutTests</c>. Sequential layout keeps the encoded stream a flat array of
+/// 48-byte cells with no pointer indirection, preserving zero-allocation encoding.</remarks>
+[StructLayout(LayoutKind.Explicit, Size = 48)]
 public readonly struct RenderCommand
 {
     [FieldOffset(0)] public readonly RenderCommandKind Kind;

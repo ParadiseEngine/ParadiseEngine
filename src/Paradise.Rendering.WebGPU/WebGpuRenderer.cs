@@ -155,6 +155,11 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyShader(ShaderHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // Evict the dedupe cache entry SYNCHRONOUSLY so a CreateShaderModule call between this
+        // line and the deferred slot-table Remove (N frames later) compiles a fresh module
+        // instead of getting back the dying handle. The slot-table generation bump still happens
+        // deferred so any in-flight GPU work referencing the native module finishes safely.
+        _device.EvictShaderFromCache(handle);
         _destructionQueue.Schedule(() => _device.DestroyShader(handle));
     }
 
@@ -187,7 +192,12 @@ public sealed class WebGpuRenderer : IDisposable
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _pipelineCache.GetOrCreate(in desc, d => _device.CreatePipeline(in d));
+        // Cache the native WebGPU pipeline below the public handle layer so two calls with the
+        // same content share the GPU compile, but each caller gets a distinct PipelineHandle.
+        // First DestroyPipeline doesn't invalidate the second handle — matches the contract of
+        // every other resource type (BufferHandle, TextureHandle, ShaderHandle).
+        var native = _pipelineCache.GetOrCreateNative(in desc, d => _device.BuildNativePipeline(in d));
+        return _device.RegisterPipeline(native);
     }
 
     /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
@@ -208,10 +218,13 @@ public sealed class WebGpuRenderer : IDisposable
         if (vsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no vertex module.");
         if (fsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no fragment module.");
 
+        // CreateShaderModule dedupes by (Wgsl, EntryPoint, Stage), so calling it twice with
+        // distinct ShaderModuleDesc records that share content returns the same handle. The
+        // earlier ReferenceEquals(vsModule, fsModule) short-circuit is dead code — the loader
+        // always allocates distinct ShaderModuleDesc instances per entry point — and obscured
+        // the fact that the device's content-keyed cache is doing the actual dedupe.
         var vsHandle = _device.CreateShaderModule(vsModule);
-        var fsHandle = ReferenceEquals(vsModule, fsModule)
-            ? vsHandle
-            : _device.CreateShaderModule(fsModule);
+        var fsHandle = _device.CreateShaderModule(fsModule);
 
         var pipelineDesc = new PipelineDesc
         {
@@ -233,7 +246,10 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyPipeline(PipelineHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _pipelineCache.Forget(handle);
+        // The cache is intentionally untouched — multiple PipelineHandles can point at the same
+        // cached native pipeline, so destroying one handle must not yank the underlying resource
+        // out from under the others. The cache lives for the renderer's lifetime; revisit when
+        // M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
         _destructionQueue.Schedule(() => _device.DestroyPipeline(handle));
     }
 
@@ -356,6 +372,15 @@ public sealed class WebGpuRenderer : IDisposable
             throw new NotSupportedException(
                 $"M1 supports exactly one color attachment per pass (got {colorCount}). " +
                 "Multi-attachment + non-backbuffer rendering lands in M2.");
+
+        // Symmetric with WebGpuDevice.CreatePipeline's DepthStencilFormat guard: a non-null
+        // pass-level Depth would silently drop today because the M1 backend doesn't plumb the
+        // DepthAttachmentDesc through to the WebGPU render-pass descriptor. Reject explicitly so
+        // the gap is visible at submit time instead of producing a depth-less render.
+        if (pass.Depth is not null)
+            throw new NotSupportedException(
+                "RenderPassDesc.Depth is reserved for M2 (#43). The M1 backend does not configure " +
+                "depth-stencil attachments on the WebGPU render pass; leave Depth null until M2.");
 
         var src = pass.Colors.Slot0;
         var colors = new WgRenderPassColorAttachment[1];

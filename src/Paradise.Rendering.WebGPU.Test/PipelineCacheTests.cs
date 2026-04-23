@@ -1,17 +1,36 @@
+using System;
 using Paradise.Rendering.WebGPU.Internal;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
+/// <summary>The native-pipeline <see cref="PipelineCache"/> sits below the public handle layer
+/// (iteration 3 restructure): <c>GetOrCreateNative</c> returns a cached <c>WgRenderPipeline</c>
+/// reference; the public <see cref="PipelineHandle"/> minting happens in
+/// <see cref="WebGpuRenderer"/> via <c>WebGpuDevice.RegisterPipeline</c>. The cache type
+/// parameterizes on <c>WebGpuSharp.RenderPipeline</c> which has no public constructor — directly
+/// unit-testing the cache requires a live device. The handle-distinctness invariants the cache
+/// underpins are covered by <see cref="HandleDistinctnessTests"/> through the public renderer
+/// surface (skipped when no GPU available).</summary>
 public class PipelineCacheTests
 {
-    private static PipelineDesc MakeDesc(string? name = null, ShaderHandle? overrideVs = null)
+    [Test]
+    public async Task cache_starts_empty_and_clear_resets_state()
     {
+        var cache = new PipelineCache();
+        await Assert.That(cache.Count).IsEqualTo(0);
+        cache.Clear();
+        await Assert.That(cache.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task try_get_returns_false_for_uncached_desc()
+    {
+        var cache = new PipelineCache();
         var attrs = new[] { new VertexAttributeDesc(0, VertexFormat.Float32x2, 0) };
         var layouts = new[] { new VertexBufferLayoutDesc(8, VertexStepMode.Vertex, attrs) };
-        return new PipelineDesc
+        var desc = new PipelineDesc
         {
-            Name = name,
-            VertexShader = overrideVs ?? new ShaderHandle(1, 1),
+            VertexShader = new ShaderHandle(1, 1),
             VertexEntryPoint = "vs",
             FragmentShader = new ShaderHandle(2, 1),
             FragmentEntryPoint = "fs",
@@ -19,44 +38,6 @@ public class PipelineCacheTests
             Topology = PrimitiveTopology.TriangleList,
             ColorFormat = TextureFormat.Bgra8Unorm,
         };
-    }
-
-    [Test]
-    public async Task identical_desc_returns_cached_handle()
-    {
-        var cache = new PipelineCache();
-        var calls = 0;
-        var d1 = MakeDesc("a");
-        var d2 = MakeDesc("b"); // different name, same content
-        var h1 = cache.GetOrCreate(in d1, _ => { calls++; return new PipelineHandle(7, 1); });
-        var h2 = cache.GetOrCreate(in d2, _ => { calls++; return new PipelineHandle(99, 1); });
-        await Assert.That(h1).IsEqualTo(h2);
-        await Assert.That(calls).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task differing_desc_creates_distinct_handle()
-    {
-        var cache = new PipelineCache();
-        var calls = 0;
-        var d1 = MakeDesc(overrideVs: new ShaderHandle(1, 1));
-        var d2 = MakeDesc(overrideVs: new ShaderHandle(2, 1));
-        var h1 = cache.GetOrCreate(in d1, _ => { calls++; return new PipelineHandle(10, 1); });
-        var h2 = cache.GetOrCreate(in d2, _ => { calls++; return new PipelineHandle(11, 1); });
-        await Assert.That(h1).IsNotEqualTo(h2);
-        await Assert.That(calls).IsEqualTo(2);
-    }
-
-    [Test]
-    public async Task forget_removes_cache_entry()
-    {
-        var cache = new PipelineCache();
-        var d = MakeDesc();
-        var nextHandle = 100u;
-        var h = cache.GetOrCreate(in d, _ => new PipelineHandle(nextHandle++, 1));
-        cache.Forget(h);
-        await Assert.That(cache.TryGet(in d, out _)).IsFalse();
-        var h2 = cache.GetOrCreate(in d, _ => new PipelineHandle(nextHandle++, 1));
-        await Assert.That(h2).IsNotEqualTo(h);
+        await Assert.That(cache.TryGetNative(in desc, out _)).IsFalse();
     }
 }
