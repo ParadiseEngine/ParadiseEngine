@@ -135,6 +135,29 @@ public class RenderPassDescTests
     }
 
     [Test]
+    public async Task raw_colors_write_outside_count_is_invisible_to_count_aware_paths()
+    {
+        // Documented contract (RenderPassDesc.Colors XML doc): direct writes to slots
+        // [ColorAttachmentCount, MaxColorAttachments) are silently invisible to the indexer
+        // and span. Pin the invariant so a future refactor that "helpfully" widens the count
+        // or rebases the span breaks here instead of producing a debugging mystery.
+        var pass = new RenderPassDesc(colorAttachmentCount: 2);
+        var hidden = new ColorAttachmentDesc(new RenderViewHandle(77, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
+        pass.Colors.Slot7 = hidden;
+
+        await Assert.That(pass.ColorAttachmentCount).IsEqualTo(2);
+        await Assert.That(GetSpanLength(ref pass)).IsEqualTo(2);
+        await Assert.That(() =>
+        {
+            var p = new RenderPassDesc(colorAttachmentCount: 2);
+            p.Colors.Slot7 = new ColorAttachmentDesc(new RenderViewHandle(77, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
+            _ = p[7];
+        }).Throws<ArgumentOutOfRangeException>();
+
+        static int GetSpanLength(ref RenderPassDesc pass) => pass.ColorAttachments.Length;
+    }
+
+    [Test]
     public async Task depth_attachment_is_optional()
     {
         var pass = new RenderPassDesc(colorAttachmentCount: 0);

@@ -12,6 +12,11 @@ namespace Paradise.Rendering;
 /// members or changes the flag separator, the regression suite in #45 catches the drift before
 /// the slangc bump merges.
 /// </summary>
+/// <remarks>The round-trip behavior of this context is exercised by the test suite only on
+/// <c>net10.0</c> (the test project is single-TFM; TUnit's runner ships only for the modern
+/// runtime). On <c>netstandard2.1</c> the same source-gen and System.Text.Json 9.x package
+/// produce equivalent IL, but the equivalence is not asserted by a test. Treat <c>net10.0</c>
+/// as the authoritative consumer path until #45's regression suite widens coverage.</remarks>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

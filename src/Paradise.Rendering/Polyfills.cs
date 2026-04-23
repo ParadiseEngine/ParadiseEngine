@@ -3,8 +3,10 @@
 #if NETSTANDARD2_1
 namespace System.Diagnostics.CodeAnalysis
 {
+    // Targets mirror the BCL definition (.NET 7+) so this polyfill is a drop-in equivalent and
+    // a future netstandard2.1 path needing [UnscopedRef] on a constructor compiles cleanly.
     [AttributeUsage(
-        AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Parameter,
+        AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Constructor,
         AllowMultiple = false,
         Inherited = false)]
     internal sealed class UnscopedRefAttribute : Attribute { }

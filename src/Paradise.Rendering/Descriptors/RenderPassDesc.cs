@@ -21,6 +21,10 @@ public struct RenderPassDesc
     /// <see cref="this[int]"/> indexer or <see cref="ColorAttachments"/> span — both bound writes
     /// to <see cref="ColorAttachmentCount"/>. Direct field access is exposed for backends that
     /// need uniform layout-based marshalling.</summary>
+    /// <remarks>Direct writes to slots <c>[<see cref="ColorAttachmentCount"/>, <see cref="MaxColorAttachments"/>)</c>
+    /// are silently invisible to <see cref="this[int]"/> and <see cref="ColorAttachments"/>; only
+    /// the count-aware paths are guaranteed to surface a written attachment to the backend. Treat
+    /// this field as a marshalling escape hatch, not as a general write surface.</remarks>
     public ColorAttachmentBuffer Colors;
 
     private int _colorAttachmentCount;

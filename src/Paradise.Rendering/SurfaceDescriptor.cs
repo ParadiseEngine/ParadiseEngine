@@ -9,9 +9,14 @@ namespace Paradise.Rendering;
 /// <para>
 /// <see cref="DisplayHandle"/> meaning is platform-specific:
 /// Wayland — <c>wl_display*</c>; Xlib — <c>Display*</c>; otherwise unused.
+/// </para>
+/// <para>
 /// <see cref="WindowHandle"/> meaning is platform-specific:
 /// Win32 — <c>HWND</c>; Wayland — <c>wl_surface*</c>; Xlib — <c>Window</c> XID;
-/// Cocoa — <c>NSWindow*</c> or <c>CAMetalLayer*</c>.
+/// Cocoa — <c>CAMetalLayer*</c> (the consumer is responsible for creating the layer on the
+/// main thread and attaching it to <c>NSWindow.contentView.layer</c> before populating this
+/// descriptor; passing a raw <c>NSWindow*</c> is unsupported because it leaves the layer-creation
+/// thread/lifetime contract ambiguous to the backend).
 /// </para>
 /// </summary>
 public readonly record struct SurfaceDescriptor(
