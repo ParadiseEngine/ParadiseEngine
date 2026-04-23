@@ -17,4 +17,10 @@
     <PackageReference Include="ppy.SDL3-CS" />
   </ItemGroup>
 
+  <Import Project="../Slang.targets" />
+
+  <ItemGroup>
+    <SlangShader Include="Shaders/**/*.slang" />
+  </ItemGroup>
+
 </Project>

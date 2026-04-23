@@ -22,6 +22,17 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Cache the downloaded slangc toolchain across runs. Keyed on the manifest SHA so a Slang
+      # version bump invalidates the cache automatically; the cache root mirrors RestoreSlang's
+      # default ($(NuGetPackageRoot)_slang) which lives under ~/.nuget/packages on Linux runners.
+      - name: Cache slangc
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_slang
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
+          restore-keys: |
+            slang-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Prepare CI solution
         run: |
           cp ParadiseEngine.slnx ParadiseEngine.ci.slnx

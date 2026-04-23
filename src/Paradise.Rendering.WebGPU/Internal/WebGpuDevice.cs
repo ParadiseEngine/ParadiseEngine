@@ -8,18 +8,37 @@ using WgRequestAdapterOptions = WebGpuSharp.RequestAdapterOptions;
 using WgDeviceDescriptor = WebGpuSharp.DeviceDescriptor;
 using WgPowerPreference = WebGpuSharp.PowerPreference;
 using WgFeatureLevel = WebGpuSharp.FeatureLevel;
+using WgShaderModule = WebGpuSharp.ShaderModule;
+using WgShaderModuleWGSLDescriptor = WebGpuSharp.ShaderModuleWGSLDescriptor;
+using WgBuffer = WebGpuSharp.Buffer;
+using WgBufferDescriptor = WebGpuSharp.BufferDescriptor;
+using WgRenderPipeline = WebGpuSharp.RenderPipeline;
+using WgRenderPipelineDescriptor = WebGpuSharp.RenderPipelineDescriptor;
+using WgVertexState = WebGpuSharp.VertexState;
+using WgVertexBufferLayout = WebGpuSharp.VertexBufferLayout;
+using WgVertexAttribute = WebGpuSharp.VertexAttribute;
+using WgFragmentState = WebGpuSharp.FragmentState;
+using WgColorTargetState = WebGpuSharp.ColorTargetState;
+using WgPrimitiveState = WebGpuSharp.PrimitiveState;
+using WgMultisampleState = WebGpuSharp.MultisampleState;
+using WgWebGpuManagedSpan = WebGpuSharp.WebGpuManagedSpan<WebGpuSharp.VertexBufferLayout>;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>Owns the long-lived WebGPU instance/adapter/device/queue chain. Constructed once per
-/// <see cref="WebGpuRenderer"/>. Adapter selection takes an optional compatible <see cref="WgSurface"/>
-/// — pass <c>null</c> to drive the headless adapter path (no swapchain).</summary>
+/// <summary>Owns the long-lived WebGPU instance/adapter/device/queue chain plus the slot tables
+/// that map <see cref="Paradise.Rendering"/> handles to native WebGPUSharp objects. Constructed
+/// once per <see cref="WebGpuRenderer"/>. Adapter selection takes an optional compatible
+/// <see cref="WgSurface"/> — pass <c>null</c> to drive the headless adapter path (no swapchain).</summary>
 internal sealed class WebGpuDevice : IDisposable
 {
     public WgInstance Instance { get; }
     public WgAdapter Adapter { get; }
     public WgDevice Device { get; }
     public WgQueue Queue { get; }
+
+    public SlotTable<WgShaderModule> Shaders { get; } = new();
+    public SlotTable<WgBuffer> Buffers { get; } = new();
+    public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
 
     private bool _disposed;
 
@@ -80,12 +99,168 @@ internal sealed class WebGpuDevice : IDisposable
         return new WebGpuDevice(instance, adapter, device, queue);
     }
 
+    public ShaderHandle CreateShader(string wgsl, string label)
+    {
+        var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = wgsl };
+        var module = Device.CreateShaderModuleWGSL(label, in wgslDesc)
+            ?? throw new InvalidOperationException("ShaderModule creation returned null.");
+        var (index, generation) = Shaders.Add(module);
+        return new ShaderHandle(index, generation);
+    }
+
+    public WgShaderModule ResolveShader(ShaderHandle h)
+    {
+        if (!Shaders.TryGet(h.Index, h.Generation, out var module))
+            throw new StaleHandleException($"Shader handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return module;
+    }
+
+    public bool DestroyShader(ShaderHandle h) => Shaders.Remove(h.Index, h.Generation);
+
+    public bool TryResolveShader(ShaderHandle h, out WgShaderModule module) =>
+        Shaders.TryGet(h.Index, h.Generation, out module);
+
+    public BufferHandle CreateBuffer(in BufferDesc desc)
+    {
+        var bd = new WgBufferDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            Size = desc.Size,
+            Usage = FormatConversions.ToWgpu(desc.Usage),
+            MappedAtCreation = desc.MappedAtCreation,
+        };
+        var buffer = Device.CreateBuffer(ref bd)
+            ?? throw new InvalidOperationException("Buffer creation returned null.");
+        var (index, generation) = Buffers.Add(buffer);
+        return new BufferHandle(index, generation);
+    }
+
+    public WgBuffer ResolveBuffer(BufferHandle h)
+    {
+        if (!Buffers.TryGet(h.Index, h.Generation, out var buffer))
+            throw new StaleHandleException($"Buffer handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return buffer;
+    }
+
+    public bool DestroyBuffer(BufferHandle h)
+    {
+        if (Buffers.TryGet(h.Index, h.Generation, out var buffer))
+        {
+            buffer.Destroy();
+        }
+        return Buffers.Remove(h.Index, h.Generation);
+    }
+
+    public PipelineHandle CreatePipeline(in PipelineDesc desc)
+    {
+        var vertex = ResolveShader(desc.VertexShader);
+        var fragment = ResolveShader(desc.FragmentShader);
+
+        var vertexLayouts = new WgVertexBufferLayout[desc.VertexLayouts.Length];
+        var attributePool = new WgVertexAttribute[desc.VertexLayouts.Span.SumAttributes()];
+        var attrCursor = 0;
+
+        var src = desc.VertexLayouts.Span;
+        for (var i = 0; i < src.Length; i++)
+        {
+            var layout = src[i];
+            var attrCount = layout.Attributes.Length;
+            var attrStart = attrCursor;
+            for (var a = 0; a < attrCount; a++)
+            {
+                var attr = layout.Attributes[a];
+                attributePool[attrCursor++] = new WgVertexAttribute
+                {
+                    Format = FormatConversions.ToWgpu(attr.Format),
+                    Offset = attr.Offset,
+                    ShaderLocation = attr.ShaderLocation,
+                };
+            }
+            vertexLayouts[i] = new WgVertexBufferLayout
+            {
+                ArrayStride = layout.Stride,
+                StepMode = FormatConversions.ToWgpu(layout.StepMode),
+                Attributes = new WebGpuSharp.WebGpuManagedSpan<WgVertexAttribute>(attributePool, attrStart, attrCount),
+            };
+        }
+
+        var colorTargets = new WgColorTargetState[]
+        {
+            new WgColorTargetState
+            {
+                Format = FormatConversions.ToWgpu(desc.ColorFormat),
+                Blend = null,
+                WriteMask = WebGpuSharp.ColorWriteMask.All,
+            },
+        };
+
+        var pipelineDesc = new WgRenderPipelineDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            // M1 binds no resources beyond a vertex buffer; passing a null layout requests Dawn's
+            // "auto" layout from the shader module — appropriate for the empty-binding case. M2
+            // populates an explicit PipelineLayout when bind groups land.
+            Layout = null!,
+            Vertex = new WgVertexState
+            {
+                Module = vertex,
+                EntryPoint = string.IsNullOrEmpty(desc.VertexEntryPoint) ? "vs_main" : desc.VertexEntryPoint,
+                Buffers = new WebGpuSharp.WebGpuManagedSpan<WgVertexBufferLayout>(vertexLayouts),
+            },
+            Primitive = new WgPrimitiveState
+            {
+                Topology = FormatConversions.ToWgpu(desc.Topology),
+                StripIndexFormat = desc.Topology == PrimitiveTopology.LineStrip || desc.Topology == PrimitiveTopology.TriangleStrip
+                    ? FormatConversions.ToWgpu(desc.StripIndexFormat)
+                    : WebGpuSharp.IndexFormat.Undefined,
+            },
+            Multisample = new WgMultisampleState { Count = 1, Mask = uint.MaxValue },
+            Fragment = new WgFragmentState
+            {
+                Module = fragment,
+                EntryPoint = string.IsNullOrEmpty(desc.FragmentEntryPoint) ? "fs_main" : desc.FragmentEntryPoint,
+                Targets = new WebGpuSharp.WebGpuManagedSpan<WgColorTargetState>(colorTargets),
+            },
+        };
+
+        var pipeline = Device.CreateRenderPipelineSync(in pipelineDesc)
+            ?? throw new InvalidOperationException("RenderPipeline creation returned null.");
+
+        var (index, generation) = Pipelines.Add(pipeline);
+        return new PipelineHandle(index, generation);
+    }
+
+    public WgRenderPipeline ResolvePipeline(PipelineHandle h)
+    {
+        if (!Pipelines.TryGet(h.Index, h.Generation, out var pipeline))
+            throw new StaleHandleException($"Pipeline handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return pipeline;
+    }
+
+    public bool DestroyPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
+
+    public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc) =>
+        CreateShader(moduleDesc.Wgsl, moduleDesc.EntryPoint);
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        Pipelines.Clear();
+        Buffers.Clear();
+        Shaders.Clear();
         // WebGPUSharp's safe wrappers release native handles via finalizers; explicit teardown
         // ordering here is mostly documentation. The instance must outlive surfaces and devices,
         // so the owning Renderer disposes those first.
+    }
+}
+
+internal static class VertexLayoutExtensions
+{
+    public static int SumAttributes(this ReadOnlySpan<VertexBufferLayoutDesc> layouts)
+    {
+        var n = 0;
+        for (var i = 0; i < layouts.Length; i++) n += layouts[i].Attributes.Length;
+        return n;
     }
 }

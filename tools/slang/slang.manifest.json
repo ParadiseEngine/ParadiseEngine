@@ -1,0 +1,12 @@
+{
+  "$comment": "Pinned slangc toolchain. RID keys match the .NET RuntimeIdentifier values; URLs and SHA256 digests are taken verbatim from the GitHub release. To bump: download each archive, recompute SHA256, update version + entries here, and re-run any reflection-JSON fixtures (#40 / #45) against the new toolchain. Linux entries use the glibc-2.27 build to match the documented CI floor (Ubuntu 22.04+ already exceeds it).",
+  "version": "2026.7",
+  "rids": {
+    "linux-x64":   { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-linux-x86_64-glibc-2.27.tar.gz",  "sha256": "f4c494af743c351567694e8b5c210b45055c39f64f36e4ebc9951b0cfce37dab", "format": "tar.gz" },
+    "linux-arm64": { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-linux-aarch64-glibc-2.28.tar.gz", "sha256": "8c5c0185254742ca90c90ee47e9023ac927e57a5af9a82669db90f84ec4df764", "format": "tar.gz" },
+    "win-x64":     { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-windows-x86_64.zip",              "sha256": "41991aaac6bd84c61a59075f65cc3829a347dc9765879df346286c24f9623a8d", "format": "zip" },
+    "win-arm64":   { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-windows-aarch64.zip",             "sha256": "9a4612298947c1af534460f9a7393919541aa4c016f78a3d822003cb6c20de7c", "format": "zip" },
+    "osx-x64":     { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-macos-x86_64.tar.gz",             "sha256": "7ced142b2da784d2d5e9b0349cb0e891b5d6a25257548b945910c684797a3e90", "format": "tar.gz" },
+    "osx-arm64":   { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-macos-aarch64.tar.gz",            "sha256": "aa7e80475b3915d7f19fa75b929d47473efc1dcec55e705e5af962663d4f5778", "format": "tar.gz" }
+  }
+}

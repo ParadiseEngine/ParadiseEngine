@@ -1,0 +1,106 @@
+<Project>
+
+  <!--
+    Shared MSBuild targets for the Slang -> WGSL toolchain. Importable by any project that owns
+    .slang shader sources. Two phases:
+
+      RestoreSlang        invokes tools/slang/SlangBootstrap.cs (file-based .NET app) which reads
+                          tools/slang/slang.manifest.json, downloads slangc for the active RID,
+                          verifies SHA256, and extracts to a stable cache directory. Idempotent
+                          via a marker file: a second build is a no-op once the marker matches.
+
+      CompileSlangShaders globs Shaders/**/*.slang and produces $(IntermediateOutputPath)shaders/<name>.wgsl
+                          + .reflection.json, then ItemGroup-promotes both as <EmbeddedResource>
+                          with LogicalName="Shaders.<name>.wgsl" / ".reflection.json".
+
+    Cache layout: $(SlangDir) = $(NuGetPackageRoot)_slang/$(SlangVersion)/$(_SlangResolvedRid).
+    Falls back to <repo>/.slang-cache when NuGetPackageRoot is unset (rare). Survives `dotnet clean`.
+
+    The host RID falls back to host detection (via $([MSBuild]::*) intrinsics) when
+    $(RuntimeIdentifier) is unset, so library projects without an explicit RID still pick up a
+    working slangc for the developer's machine.
+  -->
+
+  <PropertyGroup>
+    <SlangManifestPath Condition="'$(SlangManifestPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/slang.manifest.json'))</SlangManifestPath>
+    <SlangBootstrapPath Condition="'$(SlangBootstrapPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/SlangBootstrap.cs'))</SlangBootstrapPath>
+
+    <!-- Manifest version is needed before RestoreSlang runs to compute the cache path. Read
+         it directly from the JSON via a regex group (XmlPeek isn't applicable to JSON, and
+         pulling System.Text.Json into MSBuild's task host is fragile — see SlangBootstrap.cs). -->
+    <_SlangManifestText>$([System.IO.File]::ReadAllText('$(SlangManifestPath)'))</_SlangManifestText>
+    <SlangVersion>$([System.Text.RegularExpressions.Regex]::Match($(_SlangManifestText), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</SlangVersion>
+  </PropertyGroup>
+
+  <Target Name="_ResolveSlangRid">
+    <PropertyGroup Condition="'$(_SlangResolvedRid)' == ''">
+      <_SlangResolvedRid>$(RuntimeIdentifier)</_SlangResolvedRid>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_SlangResolvedRid)' == ''">
+      <_SlangHostOs Condition="$([MSBuild]::IsOSPlatform('Windows'))">win</_SlangHostOs>
+      <_SlangHostOs Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx</_SlangHostOs>
+      <_SlangHostOs Condition="'$(_SlangHostOs)' == ''">linux</_SlangHostOs>
+      <_SlangHostArch>$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</_SlangHostArch>
+      <_SlangHostArch Condition="'$(_SlangHostArch)' == 'x64'">x64</_SlangHostArch>
+      <_SlangHostArch Condition="'$(_SlangHostArch)' == 'arm64'">arm64</_SlangHostArch>
+      <_SlangResolvedRid>$(_SlangHostOs)-$(_SlangHostArch)</_SlangResolvedRid>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="RestoreSlang"
+          DependsOnTargets="_ResolveSlangRid"
+          BeforeTargets="CollectPackageReferences;CompileSlangShaders;CoreCompile;PrepareResources">
+
+    <PropertyGroup>
+      <_SlangCacheRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)_slang</_SlangCacheRoot>
+      <_SlangCacheRoot Condition="'$(_SlangCacheRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../.slang-cache'))</_SlangCacheRoot>
+      <SlangDir>$([System.IO.Path]::GetFullPath('$(_SlangCacheRoot)/$(SlangVersion)/$(_SlangResolvedRid)'))</SlangDir>
+      <_SlangcExeName Condition="$(_SlangResolvedRid.StartsWith('win-'))">slangc.exe</_SlangcExeName>
+      <_SlangcExeName Condition="'$(_SlangcExeName)' == ''">slangc</_SlangcExeName>
+      <SlangcPath>$(SlangDir)/bin/$(_SlangcExeName)</SlangcPath>
+    </PropertyGroup>
+
+    <Exec Command="dotnet run --file &quot;$(SlangBootstrapPath)&quot; -- --manifest &quot;$(SlangManifestPath)&quot; --rid $(_SlangResolvedRid) --out &quot;$(SlangDir)&quot;"
+          ConsoleToMSBuild="true" />
+
+    <Error Condition="!Exists('$(SlangcPath)')"
+           Text="slangc not found at '$(SlangcPath)' after RestoreSlang. Check tools/slang/slang.manifest.json for RID '$(_SlangResolvedRid)'." />
+  </Target>
+
+  <Target Name="CompileSlangShaders"
+          DependsOnTargets="RestoreSlang"
+          BeforeTargets="BeforeBuild;PrepareResources;PrepareResourceNames"
+          Condition="@(SlangShader-&gt;Count()) &gt; 0"
+          Inputs="@(SlangShader);$(SlangManifestPath)"
+          Outputs="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json')">
+
+    <PropertyGroup>
+      <_SlangOutputDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)shaders'))</_SlangOutputDir>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(_SlangOutputDir)" />
+
+    <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
+          ConsoleToMSBuild="true" />
+  </Target>
+
+  <!--
+    Promote the compiled outputs to <EmbeddedResource>. Runs ahead of PrepareResourceNames so the
+    items are visible to the resource embedding pipeline. The Inputs/Outputs gate on
+    CompileSlangShaders keeps slangc itself incremental; this target is cheap on every build.
+  -->
+  <Target Name="_AddSlangEmbeddedResources"
+          DependsOnTargets="CompileSlangShaders"
+          BeforeTargets="PrepareResourceNames;AssignTargetPaths"
+          Condition="@(SlangShader-&gt;Count()) &gt; 0">
+    <ItemGroup>
+      <EmbeddedResource Include="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl')">
+        <LogicalName>Shaders.%(Filename).wgsl</LogicalName>
+      </EmbeddedResource>
+      <EmbeddedResource Include="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json')">
+        <LogicalName>Shaders.%(Filename).reflection.json</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+
+</Project>

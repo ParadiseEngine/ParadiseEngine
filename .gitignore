@@ -4,6 +4,10 @@
 [Oo]ut/
 [Pp]ublish/
 
+# Slang toolchain cache (RestoreSlang fallback path when NuGetPackageRoot is unset).
+# Production cache lives under ~/.nuget/packages/_slang and is shared across builds.
+.slang-cache/
+
 # IDE
 .vs/
 .vscode/
