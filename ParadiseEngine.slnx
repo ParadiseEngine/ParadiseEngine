@@ -18,6 +18,7 @@
     <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
     <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
+    <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
@@ -27,5 +28,6 @@
     <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
     <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
     <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
+    <Project Path="src/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
   </Folder>
 </Solution>

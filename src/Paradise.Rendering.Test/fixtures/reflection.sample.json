@@ -1,0 +1,54 @@
+{
+  "modules": [
+    {
+      "wgsl": "@vertex fn vs_main(@location(0) pos: vec2<f32>, @location(1) color: vec3<f32>) -> @builtin(position) vec4<f32> { return vec4<f32>(pos, 0.0, 1.0); }",
+      "entry_point": "vs_main",
+      "stage": "Vertex"
+    },
+    {
+      "wgsl": "@fragment fn fs_main(@location(0) color: vec3<f32>) -> @location(0) vec4<f32> { return vec4<f32>(color, 1.0); }",
+      "entry_point": "fs_main",
+      "stage": "Fragment"
+    }
+  ],
+  "layout": {
+    "groups": [
+      {
+        "group_index": 0,
+        "entries": [
+          {
+            "binding": 0,
+            "visibility": "Vertex, Fragment",
+            "type": "UniformBuffer",
+            "min_buffer_size": 64
+          }
+        ]
+      }
+    ],
+    "push_constants": [
+      {
+        "visibility": "Vertex",
+        "offset": 0,
+        "size": 16
+      }
+    ]
+  },
+  "vertex_buffers": [
+    {
+      "stride": 20,
+      "step_mode": "Vertex",
+      "attributes": [
+        {
+          "shader_location": 0,
+          "format": "Float32x2",
+          "offset": 0
+        },
+        {
+          "shader_location": 1,
+          "format": "Float32x3",
+          "offset": 8
+        }
+      ]
+    }
+  ]
+}
