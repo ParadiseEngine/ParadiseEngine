@@ -1,5 +1,11 @@
 namespace Paradise.Rendering;
 
+// TODO(post-M0a): switch the array-typed properties below to ImmutableArray<T> (or
+// IReadOnlyList<T>) before the contract is published. Held off in M0a because (a) the
+// fixtures + System.Text.Json source-gen pipeline both target T[] today and (b) #45's
+// Slang regression suite will exercise the contract end-to-end with real slangc output,
+// which is the right time to lock down immutability.
+
 /// <summary>One shader module within a <see cref="ShaderProgramDesc"/>: WGSL source plus stage + entry point.</summary>
 public sealed record ShaderModuleDesc(
     string Wgsl,

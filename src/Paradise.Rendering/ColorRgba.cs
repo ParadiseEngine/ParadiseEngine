@@ -2,7 +2,12 @@ using System;
 
 namespace Paradise.Rendering;
 
-/// <summary>Linear-space RGBA color with float components in [0,1]. Used for clear values and uniform inputs.</summary>
+/// <summary>RGBA color with float components in [0,1]. Used for clear values and uniform inputs.
+/// Color space is consumer-defined: backends interpret the components according to the bound
+/// render attachment's format (e.g. an <c>Rgba8UnormSrgb</c> attachment treats the value as sRGB,
+/// an <c>Rgba8Unorm</c> attachment treats it as linear). The named constants below use the
+/// canonical sRGB shorthand familiar from XNA / WPF — convert to linear at the call site if your
+/// pipeline requires it.</summary>
 public readonly struct ColorRgba : IEquatable<ColorRgba>
 {
     public readonly float R;

@@ -10,32 +10,31 @@ public class RenderPassDescTests
         var view1 = new RenderViewHandle(11, 1);
         var view2 = new RenderViewHandle(12, 1);
 
-        pass.Colors[0] = new ColorAttachmentDesc(view0, LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
-        pass.Colors[1] = new ColorAttachmentDesc(view1, LoadOp.Load, StoreOp.Store, ColorRgba.Green);
-        pass.Colors[2] = new ColorAttachmentDesc(view2, LoadOp.Clear, StoreOp.Discard, ColorRgba.Blue);
+        pass[0] = new ColorAttachmentDesc(view0, LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
+        pass[1] = new ColorAttachmentDesc(view1, LoadOp.Load, StoreOp.Store, ColorRgba.Green);
+        pass[2] = new ColorAttachmentDesc(view2, LoadOp.Clear, StoreOp.Discard, ColorRgba.Blue);
 
-        await Assert.That(pass.Colors[0].View).IsEqualTo(view0);
-        await Assert.That(pass.Colors[1].View).IsEqualTo(view1);
-        await Assert.That(pass.Colors[2].View).IsEqualTo(view2);
-        await Assert.That(pass.Colors[0].ClearValue).IsEqualTo(ColorRgba.Red);
-        await Assert.That(pass.Colors[2].Store).IsEqualTo(StoreOp.Discard);
+        await Assert.That(pass[0].View).IsEqualTo(view0);
+        await Assert.That(pass[1].View).IsEqualTo(view1);
+        await Assert.That(pass[2].View).IsEqualTo(view2);
+        await Assert.That(pass[0].ClearValue).IsEqualTo(ColorRgba.Red);
+        await Assert.That(pass[2].Store).IsEqualTo(StoreOp.Discard);
     }
 
     [Test]
     public async Task color_attachment_span_reflects_count()
     {
         var pass = new RenderPassDesc(colorAttachmentCount: 2);
-        pass.Colors[0] = new ColorAttachmentDesc(new RenderViewHandle(1, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.White);
-        pass.Colors[1] = new ColorAttachmentDesc(new RenderViewHandle(2, 1), LoadOp.Load, StoreOp.Store, ColorRgba.Black);
+        pass[0] = new ColorAttachmentDesc(new RenderViewHandle(1, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.White);
+        pass[1] = new ColorAttachmentDesc(new RenderViewHandle(2, 1), LoadOp.Load, StoreOp.Store, ColorRgba.Black);
 
-        // Capture span length before any further use, then exit unsafe span context before await.
         var (length, view0, view1) = ReadSpan(ref pass);
         await Assert.That(length).IsEqualTo(2);
         await Assert.That(view0).IsEqualTo(new RenderViewHandle(1, 1));
         await Assert.That(view1).IsEqualTo(new RenderViewHandle(2, 1));
 
         WriteSpanSlot0(ref pass, new ColorAttachmentDesc(new RenderViewHandle(99, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red));
-        await Assert.That(pass.Colors[0].View).IsEqualTo(new RenderViewHandle(99, 1));
+        await Assert.That(pass[0].View).IsEqualTo(new RenderViewHandle(99, 1));
 
         static (int length, RenderViewHandle view0, RenderViewHandle view1) ReadSpan(ref RenderPassDesc pass)
         {
@@ -57,12 +56,31 @@ public class RenderPassDescTests
     }
 
     [Test]
-    public async Task color_attachment_indexer_out_of_range_throws()
+    public async Task indexer_above_count_throws_even_within_max_storage()
+    {
+        // Regression: prior to OpenCara F1, writes at indices in [count, MaxColorAttachments)
+        // succeeded silently and were invisible to the count-aware span. The count-aware indexer
+        // now refuses such accesses.
+        await Assert.That(() =>
+        {
+            var pass = new RenderPassDesc(colorAttachmentCount: 2);
+            _ = pass[5];
+        }).Throws<ArgumentOutOfRangeException>();
+
+        await Assert.That(() =>
+        {
+            var pass = new RenderPassDesc(colorAttachmentCount: 2);
+            pass[5] = new ColorAttachmentDesc(new RenderViewHandle(99, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
+        }).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task indexer_at_or_above_max_throws()
     {
         await Assert.That(() =>
         {
-            var pass = new RenderPassDesc(colorAttachmentCount: 1);
-            _ = pass.Colors[RenderPassDesc.MaxColorAttachments];
+            var pass = new RenderPassDesc(colorAttachmentCount: RenderPassDesc.MaxColorAttachments);
+            _ = pass[RenderPassDesc.MaxColorAttachments];
         }).Throws<ArgumentOutOfRangeException>();
     }
 
