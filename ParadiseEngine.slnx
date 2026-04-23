@@ -16,6 +16,7 @@
     <Project Path="src/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
     <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
     <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
+    <Project Path="src/Paradise.ECS.Jobs/Paradise.ECS.Jobs.csproj" />
     <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
   </Folder>
@@ -25,6 +26,7 @@
     <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
     <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
     <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
+    <Project Path="src/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />
     <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
     <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
   </Folder>

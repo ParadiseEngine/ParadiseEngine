@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Jobs\Paradise.ECS.Jobs.csproj" />
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

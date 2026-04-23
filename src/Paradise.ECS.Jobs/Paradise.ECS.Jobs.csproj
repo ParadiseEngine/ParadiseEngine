@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\Paradise.ECS.Common.props" />
+
+  <PropertyGroup>
+    <!--
+      Single-target net10.0 is intentional. All Paradise.ECS.* runtime projects
+      target net10.0 only (see Paradise.ECS.Common.props for the rationale).
+      The netstandard2.1;net10.0 dual-target convention applies to Paradise.BT
+      and Paradise.BLOB but NOT to the ECS layer. Do not change to dual-target
+      without aligning every sibling Paradise.ECS.* project first.
+    -->
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Paradise.ECS" />
+  </ItemGroup>
+
+</Project>
