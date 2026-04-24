@@ -88,10 +88,12 @@ public class HandleDistinctnessTests
     [Test]
     public async Task destroy_shader_then_recreate_with_same_content_returns_distinct_handle()
     {
-        // (2) Use-after-free guard — DestroyShader must evict the (Wgsl, EntryPoint, Stage) cache
-        // entry SYNCHRONOUSLY at schedule time. If eviction were deferred (as it was pre-fix), a
-        // re-create within the deferred-destruction window would return the dying handle and the
-        // scheduled DestroyShader callback would invalidate it under the new caller.
+        // (2) Use-after-free guard — DestroyShader synchronously bumps the slot's generation so
+        // the old handle stops resolving immediately. A re-create with the same content re-uses
+        // the cached native module below the handle layer but mints a fresh slot entry, so h2
+        // always differs from h1 and h1 can never silently start resolving again. Iteration 5
+        // restructured the cache from "interned-handle" to "native-below-handle"; the contract
+        // surfaced by this test is unchanged.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -198,10 +200,19 @@ public class HandleDistinctnessTests
     [Test]
     public async Task two_create_pipeline_calls_return_distinct_handles_with_shared_native_cache()
     {
-        // (3) Pipeline cache below public handle layer — two CreatePipeline calls with structurally-
-        // equal descs share the underlying native pipeline (cache hit) but receive DISTINCT
-        // PipelineHandle values. This is the contract that lets one consumer destroy its handle
-        // without invalidating another consumer's handle to the same native resource.
+        // (3) Pipeline cache below public handle layer — two CreatePipeline(in PipelineDesc)
+        // calls with structurally-equal descs (same reused ShaderHandles) share the underlying
+        // native pipeline (cache hit) but receive DISTINCT PipelineHandle values. This is the
+        // contract that lets one consumer destroy its handle without invalidating another
+        // consumer's handle to the same native resource.
+        //
+        // Note: this test uses the high-level CreatePipeline(ShaderProgramDesc, TextureFormat)
+        // helper, which mints a fresh ShaderHandle per call under iter-5 (shader-module cache
+        // lives below the public handle layer, same as pipelines). As a result p1 and p2 are
+        // backed by DIFFERENT native pipelines here — the shared-native property is covered by
+        // PipelineCache unit tests and by any caller that reuses ShaderHandles across multiple
+        // CreatePipeline(in PipelineDesc) invocations. The crucial iter-5 invariant this test
+        // pins is the one the name asserts: destroying p1 must NOT invalidate p2's live handle.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -236,6 +247,117 @@ public class HandleDistinctnessTests
             var stream = new RenderCommandStream(writer.WrittenMemory, passes);
             // Submit must not throw — p2's slot still points at the cached native pipeline.
             renderer.Submit(in stream);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task two_create_shader_module_calls_return_distinct_handles_with_shared_native_cache()
+    {
+        // Iteration-5 fix (codex iteration-4 verdict): CreateShader(ShaderModuleDesc) used to
+        // intern the public ShaderHandle by (Wgsl, EntryPoint, Stage). Two callers with the same
+        // desc got the same handle, so Destroy* by either caller invalidated the other's live
+        // handle. The shader-module cache now lives BELOW the public handle layer — same pattern
+        // as PipelineCache: each call mints a fresh ShaderHandle, the native WgShaderModule is
+        // shared across slots via content-keyed dedupe.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var vsModule = program.Modules[0];
+
+            var h1 = renderer.CreateShader(in vsModule);
+            var h2 = renderer.CreateShader(in vsModule);
+
+            // Distinct public handles, both resolvable.
+            await Assert.That(h1.Equals(h2)).IsFalse();
+            await Assert.That(h1.IsValid).IsTrue();
+            await Assert.That(h2.IsValid).IsTrue();
+
+            // Destroying h1 must NOT invalidate h2 — the native module is cache-owned below the
+            // handle layer, so h2's slot still points at a live WgShaderModule. We can still
+            // build a pipeline that references h2.
+            renderer.DestroyShader(h1);
+            var fsModule = program.Modules[1];
+            var fs = renderer.CreateShader(in fsModule);
+
+            var pipelineDesc = new PipelineDesc
+            {
+                Name = "DistinctShaderProbe",
+                VertexShader = h2,
+                VertexEntryPoint = vsModule.EntryPoint,
+                FragmentShader = fs,
+                FragmentEntryPoint = fsModule.EntryPoint,
+                VertexLayouts = program.VertexBuffers,
+                Topology = PrimitiveTopology.TriangleList,
+                StripIndexFormat = IndexFormat.Uint16,
+                ColorFormat = renderer.ColorFormat,
+                DepthStencilFormat = null,
+                Layout = program.Layout,
+            };
+            // If h2 had been silently invalidated by DestroyShader(h1), ResolveShader(h2) inside
+            // BuildNativePipeline would throw StaleHandleException. A successful CreatePipeline
+            // confirms the native is still alive and h2's slot still resolves.
+            var pipeline = renderer.CreatePipeline(in pipelineDesc);
+            await Assert.That(pipeline.IsValid).IsTrue();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_pipeline_rejects_non_empty_layout()
+    {
+        // Iteration-5 fix (codex iteration-4 verdict): PipelineDesc.Layout was hashed into cache
+        // identity but silently dropped by the backend (which always requested Dawn's auto
+        // layout). Non-empty layouts now throw NotSupportedException with an M2-deferral message
+        // so callers find out at CreatePipeline time instead of getting a cache-fragmented
+        // pipeline whose bindings are never enforced. Empty layouts (the ShaderProgramLoader
+        // output for M1) are still accepted.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var vsModule = program.Modules[0];
+            var fsModule = program.Modules[1];
+            var vs = renderer.CreateShader(in vsModule);
+            var fs = renderer.CreateShader(in fsModule);
+
+            var nonEmptyLayout = new PipelineLayoutDesc(
+                Groups: new[]
+                {
+                    new BindGroupLayoutDesc(0, new[]
+                    {
+                        new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
+                    }),
+                },
+                PushConstants: Array.Empty<PushConstantRangeDesc>());
+
+            var desc = new PipelineDesc
+            {
+                Name = "NonEmptyLayoutProbe",
+                VertexShader = vs,
+                VertexEntryPoint = vsModule.EntryPoint,
+                FragmentShader = fs,
+                FragmentEntryPoint = fsModule.EntryPoint,
+                VertexLayouts = program.VertexBuffers,
+                Topology = PrimitiveTopology.TriangleList,
+                StripIndexFormat = IndexFormat.Uint16,
+                ColorFormat = renderer.ColorFormat,
+                DepthStencilFormat = null,
+                Layout = nonEmptyLayout,
+            };
+
+            await Assert.That(() => renderer.CreatePipeline(in desc)).Throws<NotSupportedException>();
         }
         finally
         {

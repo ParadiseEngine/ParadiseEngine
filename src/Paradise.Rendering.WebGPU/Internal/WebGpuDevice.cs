@@ -39,11 +39,15 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgBuffer> Buffers { get; } = new();
     public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
 
-    // Content-keyed shader-module dedupe. Identical (WGSL source + entry point + stage) tuples
-    // resolve to the same ShaderHandle so that Slang programs loaded twice produce a single
-    // backend module per stage — keeps the pipeline cache key stable and prevents shader-slot
-    // accumulation in the long-running CreatePipeline(ShaderProgramDesc, ...) path.
-    private readonly System.Collections.Generic.Dictionary<ShaderModuleCacheKey, ShaderHandle> _shaderModuleCache = new();
+    // Content-keyed native shader-module cache. Sits BELOW the public ShaderHandle layer so the
+    // renderer can hand out fresh handles per CreateShaderModule call while still deduping the
+    // underlying Dawn shader module by (WGSL source + entry point + stage). Mirrors
+    // PipelineCache's design: insert-only, renderer-lifetime, native survives as long as the
+    // renderer. Two callers that request the same shader-module content get distinct
+    // ShaderHandles that both resolve; destroying one never invalidates the other — same public
+    // contract as every other resource type. Revisited in M2/M3 if/when hot-reload or large
+    // shader libraries make retain/release or LRU eviction worthwhile.
+    private readonly System.Collections.Generic.Dictionary<ShaderModuleCacheKey, WgShaderModule> _shaderModuleCache = new();
 
     private readonly record struct ShaderModuleCacheKey(string Wgsl, string EntryPoint, ShaderStage Stage);
 
@@ -106,6 +110,11 @@ internal sealed class WebGpuDevice : IDisposable
         return new WebGpuDevice(instance, adapter, device, queue);
     }
 
+    /// <summary>Raw-WGSL shader creation. Each call compiles a fresh native <see cref="WgShaderModule"/>
+    /// and mints a fresh public <see cref="ShaderHandle"/>. Does NOT go through the content-keyed
+    /// dedupe cache — the raw path is intended for tests and consumers bringing their own WGSL
+    /// strings, and skipping the cache avoids pinning the module references past the caller's
+    /// DestroyShader call. Use <see cref="CreateShaderModule"/> for the cached Slang path.</summary>
     public ShaderHandle CreateShader(string wgsl, string label)
     {
         var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = wgsl };
@@ -122,28 +131,14 @@ internal sealed class WebGpuDevice : IDisposable
         return module;
     }
 
-    /// <summary>Evict the dedupe-cache entry for <paramref name="h"/> without touching the slot
-    /// table. Used by <see cref="DetachShader"/> so a re-create with the same (Wgsl, EntryPoint,
-    /// Stage) tuple after detach compiles a fresh module instead of returning the dying handle.</summary>
-    public void EvictShaderFromCache(ShaderHandle h)
-    {
-        ShaderModuleCacheKey? toRemove = null;
-        foreach (var kvp in _shaderModuleCache)
-        {
-            if (kvp.Value.Equals(h)) { toRemove = kvp.Key; break; }
-        }
-        if (toRemove is { } key) _shaderModuleCache.Remove(key);
-    }
-
-    /// <summary>Synchronously invalidate the slot for <paramref name="h"/>, evict the dedupe cache,
-    /// and hand the native module back to the caller. After this returns, <see cref="ResolveShader"/>
-    /// on <paramref name="h"/> throws <see cref="StaleHandleException"/>. The caller is responsible
-    /// for scheduling the native <c>Release</c> on the deferred-destruction queue.</summary>
-    public bool DetachShader(ShaderHandle h, out WgShaderModule native)
-    {
-        EvictShaderFromCache(h);
-        return Shaders.Detach(h.Index, h.Generation, out native);
-    }
+    /// <summary>Synchronously invalidate the slot for <paramref name="h"/> and hand the slot's
+    /// native-module reference back to the caller. Does NOT touch the content-keyed
+    /// <c>_shaderModuleCache</c>: multiple ShaderHandles can resolve to the same cached native
+    /// module, so destroying one handle must not yank the native out from under the others.
+    /// After this returns, <see cref="ResolveShader"/> on <paramref name="h"/> throws
+    /// <see cref="StaleHandleException"/>.</summary>
+    public bool DetachShader(ShaderHandle h, out WgShaderModule native) =>
+        Shaders.Detach(h.Index, h.Generation, out native);
 
     public bool TryResolveShader(ShaderHandle h, out WgShaderModule module) =>
         Shaders.TryGet(h.Index, h.Generation, out module);
@@ -196,6 +191,19 @@ internal sealed class WebGpuDevice : IDisposable
             throw new NotSupportedException(
                 "PipelineDesc.DepthStencilFormat is reserved for M2 (#43). The M1 backend does not " +
                 "configure depth-stencil state on the WebGPU pipeline; pass null until depth lands.");
+
+        // PipelineDesc.Layout is carried in the public descriptor and hashed into cache identity
+        // so the M2 API shape stays stable (no migration when bind groups land). In M1 the backend
+        // always requests Dawn's "auto" layout from the shader module, so a non-empty Layout would
+        // be silently dropped — reject explicitly. Empty Layout records (Groups=[], PushConstants=[])
+        // are accepted because ShaderProgramLoader.BuildProgramDesc constructs one for every Slang
+        // program; M1 just has no bindings yet. M2 (#43) will replace this guard with a real
+        // WebGPU PipelineLayout build.
+        if (desc.Layout is { } l && (l.Groups.Length > 0 || l.PushConstants.Length > 0))
+            throw new NotSupportedException(
+                "PipelineDesc.Layout with non-empty bind groups or push constants is reserved for M2 (#43). " +
+                "The M1 backend uses Dawn's auto layout from the shader module; explicit layouts are not " +
+                "plumbed through yet. Pass a layout with empty Groups and PushConstants (or null) until M2.");
 
         var vertex = ResolveShader(desc.VertexShader);
         var fragment = ResolveShader(desc.FragmentShader);
@@ -295,17 +303,24 @@ internal sealed class WebGpuDevice : IDisposable
     /// because there is nothing for the caller to release.</summary>
     public bool DetachPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
 
+    /// <summary>Slang-output shader creation. Dedupes the native <see cref="WgShaderModule"/> by
+    /// <c>(WGSL source, entry point, stage)</c> BELOW the public handle layer — the GPU compile
+    /// happens at most once per content key, but every call mints a fresh <see cref="ShaderHandle"/>.
+    /// Matches the <see cref="PipelineCache"/> pattern: structural content dedupe under the hood,
+    /// distinct public-handle identity above so two callers can independently destroy their
+    /// handles without invalidating each other's still-live references to the shared native.</summary>
     public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc)
     {
-        // Dedupe by (WGSL source, entry point, stage). Two ShaderProgramDesc loads of the same
-        // shader return the same ShaderHandle here, which keeps PipelineDesc.ContentHash stable
-        // across CreatePipeline(ShaderProgramDesc, ...) calls and lets the pipeline cache hit on
-        // logical shader identity rather than on per-call slot indices.
         var key = new ShaderModuleCacheKey(moduleDesc.Wgsl, moduleDesc.EntryPoint, moduleDesc.Stage);
-        if (_shaderModuleCache.TryGetValue(key, out var cached)) return cached;
-        var handle = CreateShader(moduleDesc.Wgsl, moduleDesc.EntryPoint);
-        _shaderModuleCache[key] = handle;
-        return handle;
+        if (!_shaderModuleCache.TryGetValue(key, out var native))
+        {
+            var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = moduleDesc.Wgsl };
+            native = Device.CreateShaderModuleWGSL(moduleDesc.EntryPoint, in wgslDesc)
+                ?? throw new InvalidOperationException("ShaderModule creation returned null.");
+            _shaderModuleCache[key] = native;
+        }
+        var (index, generation) = Shaders.Add(native);
+        return new ShaderHandle(index, generation);
     }
 
     public void Dispose()

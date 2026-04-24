@@ -49,4 +49,57 @@ public class SlotTableTests
         await Assert.That(table.Count).IsEqualTo(1);
         _ = g0;
     }
+
+    [Test]
+    public async Task detach_returns_value_and_invalidates_old_handle()
+    {
+        // Device-free coverage for the synchronous-detach contract. WebGpuRenderer.Destroy*()
+        // paths are exercised via HandleDistinctnessTests but those are Skip'd on GPU-less CI —
+        // this test pins the core invariant in the standard unit suite.
+        var table = new SlotTable<Probe>();
+        var p = new Probe { Tag = 7 };
+        var (i, g) = table.Add(p);
+
+        // Detach hands the value back atomically.
+        await Assert.That(table.Detach(i, g, out var detached)).IsTrue();
+        await Assert.That(ReferenceEquals(detached, p)).IsTrue();
+
+        // The old handle no longer resolves — same use-after-free guard as Remove.
+        await Assert.That(table.TryGet(i, g, out _)).IsFalse();
+
+        // Re-allocating in the freed slot produces a strictly newer generation.
+        var (i2, g2) = table.Add(new Probe { Tag = 8 });
+        await Assert.That(i2).IsEqualTo(i);
+        await Assert.That(g2).IsGreaterThan(g);
+        await Assert.That(table.TryGet(i, g, out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task detach_then_count_reports_zero()
+    {
+        // Regression for the iteration-4 OpenCara finding that claimed Detach forgot to decrement
+        // a _count field. SlotTable.Count is actually derived — `_slots.Count - _free.Count` —
+        // and both Remove and Detach push onto _free, so the counter is consistent across paths.
+        // This test pins that invariant so any future refactor that introduces a stored _count
+        // field won't reintroduce the drift the finding imagined.
+        var table = new SlotTable<Probe>();
+        var (i, g) = table.Add(new Probe());
+        await Assert.That(table.Count).IsEqualTo(1);
+        await Assert.That(table.Detach(i, g, out _)).IsTrue();
+        await Assert.That(table.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task detach_with_stale_handle_returns_false()
+    {
+        // Double-detach / wrong-generation / out-of-range handles all return false without
+        // mutating the table. Mirrors Remove's stale-handle semantics.
+        var table = new SlotTable<Probe>();
+        var (i, g) = table.Add(new Probe());
+
+        await Assert.That(table.Detach(i, g, out _)).IsTrue();
+        await Assert.That(table.Detach(i, g, out _)).IsFalse();
+        await Assert.That(table.Detach(i, g + 1u, out _)).IsFalse();
+        await Assert.That(table.Detach(99u, 1u, out _)).IsFalse();
+    }
 }

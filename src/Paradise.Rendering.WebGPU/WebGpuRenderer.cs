@@ -155,20 +155,22 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyShader(ShaderHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Stale-handle contract: the slot MUST stop resolving the instant DestroyShader returns,
-        // even if the native module is still referenced by in-flight GPU work. We therefore detach
-        // the slot entry synchronously (generation bump + dedupe-cache eviction) and defer ONLY the
-        // native WebGPU release to the DeferredDestructionQueue. A CreateShader call between this
-        // line and the deferred release sees a fresh slot + compiles a fresh module; a ResolveShader
-        // call sees StaleHandleException immediately instead of silently succeeding for N frames.
+        // Stale-handle contract: the public slot MUST stop resolving the instant DestroyShader
+        // returns. Detach is pure slot invalidation — it does NOT touch the content-keyed
+        // _shaderModuleCache because another live handle may still share the same native, and
+        // the cache is renderer-lifetime like PipelineCache. The native object is kept alive by
+        // (a) other slots that still reference it, (b) the module cache, and (c) the closure
+        // below for the N-frame deferred window so any in-flight GPU work referencing THIS
+        // handle's slot value finishes safely.
         if (!_device.DetachShader(handle, out var native))
             return;
-        // Retain the native reference in the scheduled closure so the GC can't reclaim the
-        // WebGPUSharp wrapper (and through it the Dawn shader module) until the deferred window
-        // elapses. WebGPUSharp releases the native module via its finalizer; there is no explicit
-        // Destroy() call on ShaderModule. Keeping the reference alive past N frames is the
-        // equivalent of calling Destroy() at that point.
-        _destructionQueue.Schedule(() => { GC.KeepAlive(native); });
+        // The closure captures `native` by reference — that capture alone roots the WebGPUSharp
+        // wrapper until the deferred frame fires and the closure is dequeued. `_ = native;` is
+        // a no-op that documents the intent: we want the capture, nothing more. Do NOT use
+        // GC.KeepAlive here — it only prevents elision of stack-allocated locals inside the
+        // enclosing method, and `native` is a field on the heap-allocated closure, not a stack
+        // local. Calling GC.KeepAlive inside the lambda is misleading (no runtime effect).
+        _destructionQueue.Schedule(() => { _ = native; });
     }
 
     public BufferHandle CreateBuffer(in BufferDesc desc)
