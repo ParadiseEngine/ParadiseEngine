@@ -84,4 +84,63 @@ public class PipelineDescTests
         await Assert.That(a == b).IsTrue();
         await Assert.That(a.GetHashCode()).IsEqualTo(b.GetHashCode());
     }
+
+    [Test]
+    public async Task layout_is_compared_structurally_not_by_reference()
+    {
+        // Regression: ShaderProgramLoader.BuildProgramDesc mints a fresh PipelineLayoutDesc per
+        // load, so two loads of the same shader produce distinct Layout references. Reference-
+        // equality Equals/ContentHash defeated the pipeline cache for that path — a cache miss
+        // retained a duplicate native pipeline for the renderer's lifetime. Structural equality
+        // (bind-group + push-constant deep walk) fixes the cache hit.
+        var layoutA = new PipelineLayoutDesc(
+            Groups: Array.Empty<BindGroupLayoutDesc>(),
+            PushConstants: Array.Empty<PushConstantRangeDesc>());
+        var layoutB = new PipelineLayoutDesc(
+            Groups: Array.Empty<BindGroupLayoutDesc>(),
+            PushConstants: Array.Empty<PushConstantRangeDesc>());
+        await Assert.That(ReferenceEquals(layoutA, layoutB)).IsFalse();
+
+        var a = BuildSample() with { };
+        a = new PipelineDesc
+        {
+            VertexShader = new ShaderHandle(1, 1),
+            VertexEntryPoint = "vs_main",
+            FragmentShader = new ShaderHandle(2, 1),
+            FragmentEntryPoint = "fs_main",
+            VertexLayouts = new[] { new VertexBufferLayoutDesc(20, VertexStepMode.Vertex, new[] { new VertexAttributeDesc(0, VertexFormat.Float32x2, 0), new VertexAttributeDesc(1, VertexFormat.Float32x3, 8) }) },
+            Topology = PrimitiveTopology.TriangleList,
+            StripIndexFormat = IndexFormat.Uint16,
+            ColorFormat = TextureFormat.Bgra8Unorm,
+            DepthStencilFormat = null,
+            Layout = layoutA,
+        };
+        var b = a with { Layout = layoutB };
+
+        await Assert.That(a).IsEqualTo(b);
+        await Assert.That(a.ContentHash()).IsEqualTo(b.ContentHash());
+    }
+
+    [Test]
+    public async Task layout_structural_inequality_is_detected()
+    {
+        var layoutEmpty = new PipelineLayoutDesc(
+            Groups: Array.Empty<BindGroupLayoutDesc>(),
+            PushConstants: Array.Empty<PushConstantRangeDesc>());
+        var layoutWithBinding = new PipelineLayoutDesc(
+            Groups: new[]
+            {
+                new BindGroupLayoutDesc(0, new[]
+                {
+                    new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
+                }),
+            },
+            PushConstants: Array.Empty<PushConstantRangeDesc>());
+
+        var a = BuildSample() with { Layout = layoutEmpty };
+        var b = a with { Layout = layoutWithBinding };
+
+        await Assert.That(a).IsNotEqualTo(b);
+        await Assert.That(a.ContentHash()).IsNotEqualTo(b.ContentHash());
+    }
 }

@@ -155,12 +155,20 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyShader(ShaderHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Evict the dedupe cache entry SYNCHRONOUSLY so a CreateShaderModule call between this
-        // line and the deferred slot-table Remove (N frames later) compiles a fresh module
-        // instead of getting back the dying handle. The slot-table generation bump still happens
-        // deferred so any in-flight GPU work referencing the native module finishes safely.
-        _device.EvictShaderFromCache(handle);
-        _destructionQueue.Schedule(() => _device.DestroyShader(handle));
+        // Stale-handle contract: the slot MUST stop resolving the instant DestroyShader returns,
+        // even if the native module is still referenced by in-flight GPU work. We therefore detach
+        // the slot entry synchronously (generation bump + dedupe-cache eviction) and defer ONLY the
+        // native WebGPU release to the DeferredDestructionQueue. A CreateShader call between this
+        // line and the deferred release sees a fresh slot + compiles a fresh module; a ResolveShader
+        // call sees StaleHandleException immediately instead of silently succeeding for N frames.
+        if (!_device.DetachShader(handle, out var native))
+            return;
+        // Retain the native reference in the scheduled closure so the GC can't reclaim the
+        // WebGPUSharp wrapper (and through it the Dawn shader module) until the deferred window
+        // elapses. WebGPUSharp releases the native module via its finalizer; there is no explicit
+        // Destroy() call on ShaderModule. Keeping the reference alive past N frames is the
+        // equivalent of calling Destroy() at that point.
+        _destructionQueue.Schedule(() => { GC.KeepAlive(native); });
     }
 
     public BufferHandle CreateBuffer(in BufferDesc desc)
@@ -176,7 +184,7 @@ public sealed class WebGpuRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var byteSize = (ulong)(data.Length * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
-        var sized = new BufferDesc(desc.Name, byteSize > desc.Size ? byteSize : desc.Size, desc.Usage | BufferUsage.CopyDst, desc.MappedAtCreation);
+        var sized = new BufferDesc(desc.Name, byteSize > desc.Size ? byteSize : desc.Size, desc.Usage | BufferUsage.CopyDst);
         var handle = _device.CreateBuffer(in sized);
         var native = _device.ResolveBuffer(handle);
         _device.Queue.WriteBuffer(native, 0, data);
@@ -186,7 +194,12 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyBuffer(BufferHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _destructionQueue.Schedule(() => _device.DestroyBuffer(handle));
+        // Stale-handle contract: invalidate the public slot synchronously, defer only the native
+        // Buffer.Destroy() call so in-flight GPU work referencing the native buffer finishes first.
+        // After this returns, ResolveBuffer throws StaleHandleException for the destroyed handle.
+        if (!_device.DetachBuffer(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => native.Destroy());
     }
 
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
@@ -246,11 +259,13 @@ public sealed class WebGpuRenderer : IDisposable
     public void DestroyPipeline(PipelineHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // The cache is intentionally untouched — multiple PipelineHandles can point at the same
-        // cached native pipeline, so destroying one handle must not yank the underlying resource
-        // out from under the others. The cache lives for the renderer's lifetime; revisit when
-        // M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
-        _destructionQueue.Schedule(() => _device.DestroyPipeline(handle));
+        // Stale-handle contract: invalidate the public slot synchronously. The native pipeline is
+        // owned by PipelineCache (shared across every handle that resolved to the same content-hash
+        // entry) and outlives individual DestroyPipeline calls — destroying one handle never yanks
+        // the underlying resource out from under another. The cache is renderer-lifetime; revisit
+        // when M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
+        // No native teardown to defer — detach is pure slot invalidation, so it happens inline.
+        _device.DetachPipeline(handle);
     }
 
     // -------- Command stream submission --------

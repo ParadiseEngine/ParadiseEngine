@@ -123,9 +123,8 @@ internal sealed class WebGpuDevice : IDisposable
     }
 
     /// <summary>Evict the dedupe-cache entry for <paramref name="h"/> without touching the slot
-    /// table. Used by <see cref="WebGpuRenderer.DestroyShader"/> at schedule time so a re-create
-    /// with the same (Wgsl, EntryPoint, Stage) tuple between scheduling and the deferred
-    /// slot-table remove gets a fresh ShaderHandle instead of the dying one.</summary>
+    /// table. Used by <see cref="DetachShader"/> so a re-create with the same (Wgsl, EntryPoint,
+    /// Stage) tuple after detach compiles a fresh module instead of returning the dying handle.</summary>
     public void EvictShaderFromCache(ShaderHandle h)
     {
         ShaderModuleCacheKey? toRemove = null;
@@ -136,13 +135,14 @@ internal sealed class WebGpuDevice : IDisposable
         if (toRemove is { } key) _shaderModuleCache.Remove(key);
     }
 
-    public bool DestroyShader(ShaderHandle h)
+    /// <summary>Synchronously invalidate the slot for <paramref name="h"/>, evict the dedupe cache,
+    /// and hand the native module back to the caller. After this returns, <see cref="ResolveShader"/>
+    /// on <paramref name="h"/> throws <see cref="StaleHandleException"/>. The caller is responsible
+    /// for scheduling the native <c>Release</c> on the deferred-destruction queue.</summary>
+    public bool DetachShader(ShaderHandle h, out WgShaderModule native)
     {
-        // Defensive: keep the cache eviction here too so direct callers (tests, future internal
-        // uses) get the consistent behavior. WebGpuRenderer.DestroyShader already evicts at
-        // schedule time, so when this runs deferred the cache entry is typically already gone.
         EvictShaderFromCache(h);
-        return Shaders.Remove(h.Index, h.Generation);
+        return Shaders.Detach(h.Index, h.Generation, out native);
     }
 
     public bool TryResolveShader(ShaderHandle h, out WgShaderModule module) =>
@@ -150,12 +150,15 @@ internal sealed class WebGpuDevice : IDisposable
 
     public BufferHandle CreateBuffer(in BufferDesc desc)
     {
+        // MappedAtCreation is intentionally unset — M1's public buffer surface is
+        // CreateBuffer + CreateBufferWithData (the latter initialises via Queue.WriteBuffer), and
+        // there is no public map/unmap API to pair with a mapped-at-creation flag. Exposing the
+        // flag without a map/unmap path was the iteration-3 defect.
         var bd = new WgBufferDescriptor
         {
             Label = desc.Name ?? string.Empty,
             Size = desc.Size,
             Usage = FormatConversions.ToWgpu(desc.Usage),
-            MappedAtCreation = desc.MappedAtCreation,
         };
         var buffer = Device.CreateBuffer(ref bd)
             ?? throw new InvalidOperationException("Buffer creation returned null.");
@@ -170,14 +173,13 @@ internal sealed class WebGpuDevice : IDisposable
         return buffer;
     }
 
-    public bool DestroyBuffer(BufferHandle h)
-    {
-        if (Buffers.TryGet(h.Index, h.Generation, out var buffer))
-        {
-            buffer.Destroy();
-        }
-        return Buffers.Remove(h.Index, h.Generation);
-    }
+    /// <summary>Synchronously invalidate the slot for <paramref name="h"/> and hand the native
+    /// buffer back to the caller. The native <c>Destroy()</c> is NOT called here — the caller
+    /// schedules it on the deferred-destruction queue so in-flight GPU work finishes safely. After
+    /// this returns, <see cref="ResolveBuffer"/> on <paramref name="h"/> throws
+    /// <see cref="StaleHandleException"/>.</summary>
+    public bool DetachBuffer(BufferHandle h, out WgBuffer native) =>
+        Buffers.Detach(h.Index, h.Generation, out native);
 
     /// <summary>Build a native WebGPU pipeline from <paramref name="desc"/> without allocating a
     /// slot-table entry. Used by <see cref="WebGpuRenderer.CreatePipeline"/> in conjunction with
@@ -286,7 +288,12 @@ internal sealed class WebGpuDevice : IDisposable
         return pipeline;
     }
 
-    public bool DestroyPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
+    /// <summary>Synchronously invalidate the slot for <paramref name="h"/>. The underlying native
+    /// <see cref="WgRenderPipeline"/> is owned by <see cref="PipelineCache"/> and outlives every
+    /// public handle, so no native teardown happens here — only the public handle stops resolving.
+    /// Mirrors <see cref="DetachBuffer"/>/<see cref="DetachShader"/> but without a native out-param
+    /// because there is nothing for the caller to release.</summary>
+    public bool DetachPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
 
     public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc)
     {

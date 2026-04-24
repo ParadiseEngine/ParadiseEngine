@@ -116,6 +116,86 @@ public class HandleDistinctnessTests
     }
 
     [Test]
+    public async Task destroy_buffer_invalidates_handle_synchronously()
+    {
+        // Iteration-4 stale-handle contract: DestroyBuffer must make the handle un-resolvable the
+        // instant it returns, not N frames later. A RenderCommandStream that uses the destroyed
+        // handle must fail with StaleHandleException on Submit — not silently succeed because the
+        // deferred destroy hasn't fired yet.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var desc = new BufferDesc("stale-probe", 64, BufferUsage.Vertex);
+            var h = renderer.CreateBuffer(in desc);
+            renderer.DestroyBuffer(h);
+
+            // Build a minimal command stream that references h after destroy.
+            var program = LoadTriangleProgram();
+            var pipeline = renderer.CreatePipeline(program, renderer.ColorFormat);
+            var passes = new RenderPassDesc[1];
+            passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
+            passes[0].Colors.Slot0 = new ColorAttachmentDesc(
+                View: RenderViewHandle.Invalid,
+                Load: LoadOp.Clear,
+                Store: StoreOp.Store,
+                ClearValue: ColorRgba.Black);
+            var writer = new System.Buffers.ArrayBufferWriter<RenderCommand>(4);
+            var encoder = new RenderCommandEncoder(writer);
+            encoder.BeginPass(0);
+            encoder.SetPipeline(pipeline);
+            encoder.SetVertexBuffer(0, h, 0, 64);
+            encoder.EndPass();
+            var stream = new RenderCommandStream(writer.WrittenMemory, passes);
+
+            await Assert.That(() => renderer.Submit(in stream)).Throws<StaleHandleException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task destroy_pipeline_invalidates_handle_synchronously()
+    {
+        // Companion of the buffer test: DestroyPipeline invalidates the public handle at once.
+        // The native RenderPipeline is cache-owned so a second live handle to the same native
+        // stays resolvable (already covered by
+        // two_create_pipeline_calls_return_distinct_handles_with_shared_native_cache).
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var p = renderer.CreatePipeline(program, renderer.ColorFormat);
+            renderer.DestroyPipeline(p);
+
+            var passes = new RenderPassDesc[1];
+            passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
+            passes[0].Colors.Slot0 = new ColorAttachmentDesc(
+                View: RenderViewHandle.Invalid,
+                Load: LoadOp.Clear,
+                Store: StoreOp.Store,
+                ClearValue: ColorRgba.Black);
+            var writer = new System.Buffers.ArrayBufferWriter<RenderCommand>(4);
+            var encoder = new RenderCommandEncoder(writer);
+            encoder.BeginPass(0);
+            encoder.SetPipeline(p);
+            encoder.EndPass();
+            var stream = new RenderCommandStream(writer.WrittenMemory, passes);
+
+            await Assert.That(() => renderer.Submit(in stream)).Throws<StaleHandleException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task two_create_pipeline_calls_return_distinct_handles_with_shared_native_cache()
     {
         // (3) Pipeline cache below public handle layer — two CreatePipeline calls with structurally-

@@ -32,7 +32,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         if (StripIndexFormat != other.StripIndexFormat) return false;
         if (ColorFormat != other.ColorFormat) return false;
         if (DepthStencilFormat != other.DepthStencilFormat) return false;
-        if (!ReferenceEquals(Layout, other.Layout)) return false;
+        if (!PipelineLayoutContentEquals(Layout, other.Layout)) return false;
         return VertexLayoutsContentEquals(VertexLayouts.Span, other.VertexLayouts.Span);
     }
 
@@ -51,10 +51,11 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         h.Add(StripIndexFormat);
         h.Add(ColorFormat);
         h.Add(DepthStencilFormat);
-        // Reference identity for Layout is intentional: two distinct PipelineLayoutDesc instances
-        // produce distinct WebGPU layouts even when structurally equal, because the backend caches
-        // BindGroupLayout objects per source record reference.
-        h.Add(Layout);
+        // Structural hash over PipelineLayoutDesc — `ShaderProgramLoader.BuildProgramDesc` mints a
+        // fresh PipelineLayoutDesc per load, so reference identity defeated the cache for callers
+        // that loaded the same shader twice (e.g. tests, future hot-reload). Walk the bind-group /
+        // push-constant tree so the hash mirrors the structural Equals below.
+        HashPipelineLayout(ref h, Layout);
         var vls = VertexLayouts.Span;
         h.Add(vls.Length);
         for (var i = 0; i < vls.Length; i++)
@@ -76,6 +77,95 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
             h.Add(attrs[i].ShaderLocation);
             h.Add(attrs[i].Format);
             h.Add(attrs[i].Offset);
+        }
+    }
+
+    // PipelineLayoutDesc is a record whose synthesized Equals uses reference identity on the
+    // BindGroupLayoutDesc[] and PushConstantRangeDesc[] properties — so two independently-built
+    // layouts with identical bindings would compare non-equal. Walk the arrays explicitly so the
+    // pipeline cache hits on structural identity instead of on allocation identity.
+    private static bool PipelineLayoutContentEquals(PipelineLayoutDesc? a, PipelineLayoutDesc? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return false;
+        if (!BindGroupsContentEquals(a.Groups, b.Groups)) return false;
+        return PushConstantsContentEquals(a.PushConstants, b.PushConstants);
+    }
+
+    private static bool BindGroupsContentEquals(BindGroupLayoutDesc[] a, BindGroupLayoutDesc[] b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++)
+        {
+            var x = a[i];
+            var y = b[i];
+            if (x.GroupIndex != y.GroupIndex) return false;
+            if (!BindGroupEntriesContentEquals(x.Entries, y.Entries)) return false;
+        }
+        return true;
+    }
+
+    private static bool BindGroupEntriesContentEquals(BindGroupLayoutEntryDesc[] a, BindGroupLayoutEntryDesc[] b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++)
+        {
+            var x = a[i];
+            var y = b[i];
+            if (x.Binding != y.Binding) return false;
+            if (x.Visibility != y.Visibility) return false;
+            if (x.Type != y.Type) return false;
+            if (x.MinBufferSize != y.MinBufferSize) return false;
+        }
+        return true;
+    }
+
+    private static bool PushConstantsContentEquals(PushConstantRangeDesc[] a, PushConstantRangeDesc[] b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++)
+        {
+            var x = a[i];
+            var y = b[i];
+            if (x.Visibility != y.Visibility) return false;
+            if (x.Offset != y.Offset) return false;
+            if (x.Size != y.Size) return false;
+        }
+        return true;
+    }
+
+    private static void HashPipelineLayout(ref HashCode h, PipelineLayoutDesc? layout)
+    {
+        if (layout is null)
+        {
+            h.Add(0);
+            return;
+        }
+        var groups = layout.Groups;
+        h.Add(groups.Length);
+        for (var i = 0; i < groups.Length; i++)
+        {
+            h.Add(groups[i].GroupIndex);
+            var entries = groups[i].Entries;
+            h.Add(entries.Length);
+            for (var j = 0; j < entries.Length; j++)
+            {
+                h.Add(entries[j].Binding);
+                h.Add(entries[j].Visibility);
+                h.Add(entries[j].Type);
+                h.Add(entries[j].MinBufferSize);
+            }
+        }
+        var push = layout.PushConstants;
+        h.Add(push.Length);
+        for (var i = 0; i < push.Length; i++)
+        {
+            h.Add(push[i].Visibility);
+            h.Add(push[i].Offset);
+            h.Add(push[i].Size);
         }
     }
 

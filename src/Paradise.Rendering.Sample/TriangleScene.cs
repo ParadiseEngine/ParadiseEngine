@@ -40,8 +40,7 @@ internal sealed class TriangleScene : IDisposable
         var bufferDesc = new BufferDesc(
             Name: "TriangleVertices",
             Size: (ulong)(s_vertices.Length * sizeof(float)),
-            Usage: BufferUsage.Vertex,
-            MappedAtCreation: false);
+            Usage: BufferUsage.Vertex);
         _vertexBuffer = renderer.CreateBufferWithData(in bufferDesc, (ReadOnlySpan<float>)s_vertices);
 
         _passes = new RenderPassDesc[1];
