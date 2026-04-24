@@ -218,8 +218,15 @@ public sealed class WebGpuRenderer : IDisposable
     /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
     /// color format, then route through <see cref="CreatePipeline(in PipelineDesc)"/> (and its
     /// pipeline cache). Vertex layout is taken verbatim from the program's reflection record —
-    /// the M1 design contract's "no hand-coded layout" rule lives in this method's body.</summary>
-    public PipelineHandle CreatePipeline(in ShaderProgramDesc program, TextureFormat colorFormat)
+    /// the M1 design contract's "no hand-coded layout" rule lives in this method's body. The
+    /// <paramref name="topology"/> and <paramref name="stripIndexFormat"/> parameters default to
+    /// triangle-list / uint16 (the M1 sample's triangle path); line / point / strip callers
+    /// pass their own values rather than getting silently wrong primitive assembly.</summary>
+    public PipelineHandle CreatePipeline(
+        in ShaderProgramDesc program,
+        TextureFormat colorFormat,
+        PrimitiveTopology topology = PrimitiveTopology.TriangleList,
+        IndexFormat stripIndexFormat = IndexFormat.Uint16)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -251,8 +258,8 @@ public sealed class WebGpuRenderer : IDisposable
             FragmentShader = fsHandle,
             FragmentEntryPoint = fsModule.EntryPoint,
             VertexLayouts = program.VertexBuffers,
-            Topology = PrimitiveTopology.TriangleList,
-            StripIndexFormat = IndexFormat.Uint16,
+            Topology = topology,
+            StripIndexFormat = stripIndexFormat,
             ColorFormat = colorFormat,
             DepthStencilFormat = null,
             Layout = program.Layout,

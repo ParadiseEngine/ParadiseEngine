@@ -1,3 +1,4 @@
+using System;
 using Paradise.Rendering.WebGPU.Internal;
 
 namespace Paradise.Rendering.WebGPU.Test;
@@ -76,5 +77,64 @@ public class ShaderProgramLoaderTests
             await Assert.That(p1.Modules[i].EntryPoint).IsEqualTo(p2.Modules[i].EntryPoint);
             await Assert.That(p1.Modules[i].Stage).IsEqualTo(p2.Modules[i].Stage);
         }
+    }
+
+    [Test]
+    public async Task build_program_desc_rejects_non_varying_bindings()
+    {
+        // Iter-7 fix for OpenCara's iter-6 Major A (codex): the loader used to silently emit an
+        // empty PipelineLayoutDesc even when Slang reflected uniform buffers, storage buffers,
+        // samplers, textures, or push constants — any shader with resource bindings loaded as
+        // if it had none. Now the loader rejects up-front with NotSupportedException + an
+        // M2 deferral message. Symmetric with the PipelineDesc.Layout NotSupportedException
+        // guard in WebGpuDevice.BuildNativePipeline.
+        var reflection = new SlangReflection(EntryPoints: new[]
+        {
+            new SlangEntryPoint(
+                Name: "vs_main",
+                Stage: "vertex",
+                Parameters: new[]
+                {
+                    new SlangParameter(
+                        Name: "uBuffer",
+                        Binding: new SlangBinding(Kind: "uniformBuffer", Index: 0, Count: 1),
+                        Type: new SlangTypeNode(Kind: "struct", Name: "Uniforms", Fields: null, ElementCount: null, ElementType: null, ScalarType: null),
+                        SemanticName: null),
+                }),
+        });
+
+        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
+            .Throws<NotSupportedException>();
+    }
+
+    [Test]
+    public async Task build_program_desc_accepts_varying_input_and_output()
+    {
+        // Sibling positive-case: an entry point whose parameters are pure varyingInput /
+        // varyingOutput (the triangle shape) loads cleanly without tripping the binding guard.
+        var reflection = new SlangReflection(EntryPoints: new[]
+        {
+            new SlangEntryPoint(
+                Name: "vs_main",
+                Stage: "vertex",
+                Parameters: new[]
+                {
+                    new SlangParameter(
+                        Name: "input",
+                        Binding: new SlangBinding(Kind: "varyingInput", Index: 0, Count: 1),
+                        Type: new SlangTypeNode(Kind: "struct", Name: "VsIn", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null),
+                        SemanticName: null),
+                    new SlangParameter(
+                        Name: "output",
+                        Binding: new SlangBinding(Kind: "varyingOutput", Index: 0, Count: 1),
+                        Type: new SlangTypeNode(Kind: "struct", Name: "VsOut", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null),
+                        SemanticName: null),
+                }),
+        });
+
+        var program = ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection);
+        await Assert.That(program.Modules.Length).IsEqualTo(1);
+        await Assert.That(program.Layout.Groups.Length).IsEqualTo(0);
+        await Assert.That(program.Layout.PushConstants.Length).IsEqualTo(0);
     }
 }

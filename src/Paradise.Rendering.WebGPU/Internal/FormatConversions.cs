@@ -97,6 +97,11 @@ internal static class FormatConversions
         WgTextureFormat.BGRA8UnormSrgb => TextureFormat.Bgra8UnormSrgb,
         WgTextureFormat.Depth32Float => TextureFormat.Depth32Float,
         WgTextureFormat.Depth24PlusStencil8 => TextureFormat.Depth24PlusStencil8,
-        _ => TextureFormat.Undefined,
+        // Symmetric with every sibling helper in this file — unknown values must throw, not
+        // silently map to Undefined. WebGpuRenderer.ColorFormat calls FromWgpu on the swapchain
+        // format, so an HDR-capable surface (RGBA16Float, etc.) or a future WebGPUSharp value we
+        // haven't mapped will surface here as a descriptive exception instead of producing an
+        // Undefined pipeline color format that Dawn later rejects with an opaque error.
+        _ => throw new NotSupportedException($"WebGPU texture format '{f}' has no Paradise.Rendering mapping."),
     };
 }

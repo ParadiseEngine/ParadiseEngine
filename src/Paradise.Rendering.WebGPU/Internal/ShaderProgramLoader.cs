@@ -46,6 +46,16 @@ internal static class ShaderProgramLoader
     internal static ShaderProgramDesc BuildProgramDesc(string wgsl, SlangReflection reflection)
     {
         var entryPoints = reflection.EntryPoints ?? Array.Empty<SlangEntryPoint>();
+
+        // M1 only wires varying (vertex) inputs and outputs. If Slang reflects any resource
+        // bindings — uniform buffers, storage buffers, samplers, textures, push constants — the
+        // loader previously dropped them silently and emitted an empty PipelineLayoutDesc,
+        // leaving the consumer with a shader whose bindings the engine can't validate or bind
+        // against. Reject up-front with a clear M2 deferral message (#43 lands the binding
+        // pipeline). Symmetric with the PipelineDesc.Layout NotSupportedException guard in
+        // WebGpuDevice.BuildNativePipeline.
+        RejectNonVaryingBindings(entryPoints);
+
         var modules = new ShaderModuleDesc[entryPoints.Length];
         for (var i = 0; i < entryPoints.Length; i++)
         {
@@ -65,6 +75,30 @@ internal static class ShaderProgramLoader
             PushConstants: Array.Empty<PushConstantRangeDesc>());
 
         return new ShaderProgramDesc(modules, layout, vertexBuffers);
+    }
+
+    private static void RejectNonVaryingBindings(SlangEntryPoint[] entryPoints)
+    {
+        foreach (var ep in entryPoints)
+        {
+            if (ep.Parameters is null) continue;
+            foreach (var p in ep.Parameters)
+            {
+                var kind = p.Binding?.Kind;
+                // Null Kind covers unbound top-level parameters (shouldn't happen in practice but
+                // we can't map them, so treat as unsupported). "varyingInput" / "varyingOutput"
+                // are the only two kinds M1's vertex-layout derivation handles.
+                if (kind is "varyingInput" or "varyingOutput") continue;
+
+                throw new NotSupportedException(
+                    $"Shader entry point '{ep.Name}' reflects parameter '{p.Name ?? "<unnamed>"}' " +
+                    $"with binding kind '{kind ?? "<null>"}', which Paradise.Rendering M1 does not yet " +
+                    $"plumb through to the backend (only varying vertex inputs/outputs are supported). " +
+                    $"Resource bindings — uniform buffers, storage buffers, samplers, textures, push " +
+                    $"constants — are reserved for M2 (#43). Use a shader without resource bindings " +
+                    $"until then, or wait for the binding pipeline to land.");
+            }
+        }
     }
 
     private static ShaderStage ParseStage(string stage) => stage switch

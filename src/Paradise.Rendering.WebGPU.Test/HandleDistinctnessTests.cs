@@ -404,4 +404,31 @@ public class HandleDistinctnessTests
             renderer.Dispose();
         }
     }
+
+    [Test]
+    public async Task create_pipeline_from_program_respects_custom_topology()
+    {
+        // Iter-7 fix for OpenCara's iter-6 Major B (codex): the helper used to hardcode
+        // PrimitiveTopology.TriangleList / IndexFormat.Uint16, so a point/line/strip caller got
+        // the wrong primitive assembly with no override. Iter-7 added topology + stripIndexFormat
+        // parameters with current-behavior defaults. This test exercises a non-default topology
+        // (PointList — the simplest non-triangle primitive) end-to-end through the helper: the
+        // pipeline must build and the returned handle must be valid.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var p = renderer.CreatePipeline(
+                program,
+                renderer.ColorFormat,
+                topology: PrimitiveTopology.PointList);
+            await Assert.That(p.IsValid).IsTrue();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
 }
