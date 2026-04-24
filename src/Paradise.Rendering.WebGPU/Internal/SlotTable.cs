@@ -70,6 +70,35 @@ internal sealed class SlotTable<T> where T : class
         return true;
     }
 
+    /// <summary>Atomically extract the slot's current value and invalidate the slot. Returns
+    /// <c>false</c> if the handle is already stale. The caller takes ownership of <paramref name="value"/>
+    /// and is responsible for releasing it (e.g., scheduling native <c>Destroy()</c> on a
+    /// deferred-destruction queue). Used to implement synchronous slot eviction with deferred
+    /// native teardown so public handles stop resolving immediately while in-flight GPU work
+    /// referencing the native object finishes safely.</summary>
+    public bool Detach(uint index, uint generation, out T value)
+    {
+        if (index >= (uint)_slots.Count)
+        {
+            value = null!;
+            return false;
+        }
+        ref var slot = ref System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_slots)[(int)index];
+        if (slot.Generation != generation || slot.Value is null)
+        {
+            value = null!;
+            return false;
+        }
+
+        value = slot.Value;
+        slot.Value = null;
+        unchecked { slot.Generation++; }
+        if (slot.Generation == 0) slot.Generation = 1;
+
+        _free.Push(index);
+        return true;
+    }
+
     public void Clear()
     {
         _slots.Clear();

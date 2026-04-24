@@ -61,9 +61,10 @@ internal static class Program
         try
         {
             using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight);
+            using var scene = new TriangleScene(renderer);
             for (var i = 0; i < frameCount; i++)
-                renderer.RenderClearFrame(ColorRgba.CornflowerBlue);
-            Console.WriteLine($"Headless mode: rendered {frameCount} clear frames against an offscreen target.");
+                scene.RenderFrame();
+            Console.WriteLine($"Headless mode: rendered {frameCount} triangle frames against an offscreen target.");
             return 0;
         }
         finally
@@ -93,6 +94,7 @@ internal static class Program
 
             var surfaceDesc = BuildSurfaceDescriptor(window);
             renderer = new WebGpuRenderer(in surfaceDesc);
+            using var scene = new TriangleScene(renderer);
 
             var quit = false;
             SDL_Event ev;
@@ -118,7 +120,7 @@ internal static class Program
                             renderer.Resize((uint)w, (uint)h);
                     }
                 }
-                renderer.RenderClearFrame(ColorRgba.CornflowerBlue);
+                scene.RenderFrame();
             }
 
             return 0;

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Standalone console app invoked by Slang.targets to download + SHA-verify + extract slangc.
+    Built as a normal csproj instead of `dotnet run` over the source file because the file-based
+    app runfile cache (~/.local/share/dotnet/runfile/scriptHash/obj/) races between parallel
+    project builds (Sample + WebGPU.Test invoking RestoreSlang concurrently). A real csproj
+    scopes its build artifacts to obj/bin under tools/slang/, with no shared runfile cache.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Paradise.Slang.Bootstrap</RootNamespace>
+    <AssemblyName>SlangBootstrap</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- Keep this isolated from the main solution: not registered in ParadiseEngine.slnx,
+         no central package versions, no Directory.Build.props inheritance. The empty
+         ManagePackageVersionsCentrally + the lack of any PackageReference keeps it portable. -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <!-- CA2007 (ConfigureAwait) is irrelevant for a console app entry point that has no
+         synchronization context to capture. Force-clear the inherited TreatWarningsAsErrors so
+         consumers building this project transitively (via Slang.targets MSBuild call) don't
+         turn analyzer noise into a build break. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
+  </PropertyGroup>
+
+</Project>

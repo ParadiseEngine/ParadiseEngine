@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;
 using WgWebGPU = WebGpuSharp.WebGPU;
 using WgTextureView = WebGpuSharp.TextureView;
@@ -14,18 +15,24 @@ using WgStoreOp = WebGpuSharp.StoreOp;
 using WgColor = WebGpuSharp.Color;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
+using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
+using WgCommandEncoder = WebGpuSharp.CommandEncoder;
 
 namespace Paradise.Rendering.WebGPU;
 
 /// <summary>WebGPU (Dawn) backend entry point. Constructed with a <see cref="SurfaceDescriptor"/>
 /// for windowed rendering, or via <see cref="CreateHeadless"/> for the offscreen adapter path
-/// used by CI smoke tests. M0 exposes only the clear-color present loop; the command-stream
-/// surface (<c>BeginFrame</c>/<c>Submit</c>/<c>EndFrame</c>) lands in M1.</summary>
+/// used by CI smoke tests. Exposes resource Create/Destroy plus the
+/// <see cref="Submit(in RenderCommandStream)"/> path that drives a real frame.</summary>
 public sealed class WebGpuRenderer : IDisposable
 {
+    private const int DefaultFramesInFlight = 2;
+
     private readonly WebGpuDevice _device;
     private readonly SurfaceState? _surface;
     private readonly bool _isHeadless;
+    private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
+    private readonly PipelineCache _pipelineCache = new();
     private WgTexture? _offscreenTarget;
     private uint _offscreenWidth;
     private uint _offscreenHeight;
@@ -66,6 +73,14 @@ public sealed class WebGpuRenderer : IDisposable
     /// this path with <c>SDL_VIDEODRIVER=dummy</c>.</summary>
     public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) => new(width, height);
 
+    /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
+    /// for the headless offscreen target. Pipeline color targets must match this format or the
+    /// backend will reject the pipeline at draw time.</summary>
+    public TextureFormat ColorFormat =>
+        _isHeadless
+            ? TextureFormat.Bgra8Unorm
+            : FormatConversions.FromWgpu(_surface!.Format);
+
     /// <summary>Resize the surface (or offscreen target) to <paramref name="width"/> x
     /// <paramref name="height"/>. Zero-sized requests are clamped to 1.</summary>
     public void Resize(uint width, uint height)
@@ -93,37 +108,9 @@ public sealed class WebGpuRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        WgTextureView view;
-        if (_isHeadless)
-        {
-            view = _offscreenTarget!.CreateView();
-        }
-        else
-        {
-            var current = _surface!.Native.GetCurrentTexture();
-            switch (current.Status)
-            {
-                case WgSurfaceGetCurrentTextureStatus.SuccessOptimal:
-                case WgSurfaceGetCurrentTextureStatus.SuccessSuboptimal:
-                    break;
-                case WgSurfaceGetCurrentTextureStatus.Outdated:
-                case WgSurfaceGetCurrentTextureStatus.Lost:
-                    // Surface needs reconfigure (window resized between events, GPU lost, etc.).
-                    // Skip this frame — caller will retry on the next tick. Force-reconfigure
-                    // even if dimensions match: the swapchain itself must be rebuilt.
-                    _surface.Reconfigure();
-                    return;
-                default:
-                    throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");
-            }
-            var surfaceTexture = current.Texture
-                ?? throw new InvalidOperationException(
-                    $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
-            view = surfaceTexture.CreateView();
-        }
+        if (!TryAcquireBackbufferView(out var view)) return;
 
         var encoder = _device.Device.CreateCommandEncoder();
-
         var colors = new WgRenderPassColorAttachment[1];
         colors[0] = new WgRenderPassColorAttachment
         {
@@ -133,7 +120,6 @@ public sealed class WebGpuRenderer : IDisposable
             ClearValue = new WgColor(clearColor.R, clearColor.G, clearColor.B, clearColor.A),
             DepthSlice = null,
         };
-
         var passDesc = new WgRenderPassDescriptor
         {
             ColorAttachments = colors,
@@ -141,14 +127,373 @@ public sealed class WebGpuRenderer : IDisposable
         };
         var pass = encoder.BeginRenderPass(in passDesc);
         pass.End();
-
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
+        if (!_isHeadless) _surface!.Native.Present();
+        _destructionQueue.AdvanceFrame();
+    }
 
-        if (!_isHeadless)
+    // -------- Resource creation / destruction --------
+
+    /// <summary>Raw-WGSL shader creation path. <see cref="ShaderDesc.Source"/> must be the WGSL
+    /// source bytes (UTF-8). Used by tests and consumers not going through Slang.</summary>
+    public ShaderHandle CreateShader(in ShaderDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var wgsl = System.Text.Encoding.UTF8.GetString(desc.Source);
+        return _device.CreateShader(wgsl, desc.Name ?? string.Empty);
+    }
+
+    /// <summary>Slang-output shader creation path. Carries the entry-point name forward so the
+    /// pipeline build can reference the right exported function on the WebGPU shader module.</summary>
+    public ShaderHandle CreateShader(in ShaderModuleDesc moduleDesc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateShaderModule(moduleDesc);
+    }
+
+    public void DestroyShader(ShaderHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Stale-handle contract: the public slot MUST stop resolving the instant DestroyShader
+        // returns. Detach is pure slot invalidation — it does NOT touch the content-keyed
+        // _shaderModuleCache because another live handle may still share the same native, and
+        // the cache is renderer-lifetime like PipelineCache. The native object is kept alive by
+        // (a) other slots that still reference it, (b) the module cache, and (c) the closure
+        // below for the N-frame deferred window so any in-flight GPU work referencing THIS
+        // handle's slot value finishes safely.
+        if (!_device.DetachShader(handle, out var native))
+            return;
+        // The closure captures `native` by reference — that capture alone roots the WebGPUSharp
+        // wrapper until the deferred frame fires and the closure is dequeued. `_ = native;` is
+        // a no-op that documents the intent: we want the capture, nothing more. Do NOT use
+        // GC.KeepAlive here — it only prevents elision of stack-allocated locals inside the
+        // enclosing method, and `native` is a field on the heap-allocated closure, not a stack
+        // local. Calling GC.KeepAlive inside the lambda is misleading (no runtime effect).
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
+    public BufferHandle CreateBuffer(in BufferDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateBuffer(in desc);
+    }
+
+    /// <summary>Create a buffer and immediately upload <paramref name="data"/> to it. The buffer
+    /// is created with <see cref="BufferUsage.CopyDst"/> implicitly added so the upload can
+    /// succeed.</summary>
+    public BufferHandle CreateBufferWithData<T>(in BufferDesc desc, ReadOnlySpan<T> data) where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Widen both operands BEFORE multiplying so the product stays in ulong precision.
+        // `data.Length * Unsafe.SizeOf<T>()` executes in int and silently wraps at 2^31 — for
+        // 16-byte elements that's ~134M entries, a sharp edge for M2/M3 staging buffers.
+        var byteSize = (ulong)data.Length * (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+        var sized = new BufferDesc(desc.Name, byteSize > desc.Size ? byteSize : desc.Size, desc.Usage | BufferUsage.CopyDst);
+        var handle = _device.CreateBuffer(in sized);
+        var native = _device.ResolveBuffer(handle);
+        _device.Queue.WriteBuffer(native, 0, data);
+        return handle;
+    }
+
+    public void DestroyBuffer(BufferHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Stale-handle contract: invalidate the public slot synchronously, defer only the native
+        // Buffer.Destroy() call so in-flight GPU work referencing the native buffer finishes first.
+        // After this returns, ResolveBuffer throws StaleHandleException for the destroyed handle.
+        if (!_device.DetachBuffer(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => native.Destroy());
+    }
+
+    public PipelineHandle CreatePipeline(in PipelineDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Cache the native WebGPU pipeline below the public handle layer so two calls with the
+        // same content share the GPU compile, but each caller gets a distinct PipelineHandle.
+        // First DestroyPipeline doesn't invalidate the second handle — matches the contract of
+        // every other resource type (BufferHandle, TextureHandle, ShaderHandle).
+        var native = _pipelineCache.GetOrCreateNative(in desc, d => _device.BuildNativePipeline(in d));
+        return _device.RegisterPipeline(native);
+    }
+
+    /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
+    /// color format, then route through <see cref="CreatePipeline(in PipelineDesc)"/> (and its
+    /// pipeline cache). Vertex layout is taken verbatim from the program's reflection record —
+    /// the M1 design contract's "no hand-coded layout" rule lives in this method's body. The
+    /// <paramref name="topology"/> and <paramref name="stripIndexFormat"/> parameters default to
+    /// triangle-list / uint16 (the M1 sample's triangle path); line / point / strip callers
+    /// pass their own values rather than getting silently wrong primitive assembly.</summary>
+    public PipelineHandle CreatePipeline(
+        in ShaderProgramDesc program,
+        TextureFormat colorFormat,
+        PrimitiveTopology topology = PrimitiveTopology.TriangleList,
+        IndexFormat stripIndexFormat = IndexFormat.Uint16)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ShaderModuleDesc? vsModule = null;
+        ShaderModuleDesc? fsModule = null;
+        foreach (var m in program.Modules)
         {
-            _surface!.Native.Present();
+            if ((m.Stage & ShaderStage.Vertex) != 0) vsModule = m;
+            if ((m.Stage & ShaderStage.Fragment) != 0) fsModule = m;
         }
+        if (vsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no vertex module.");
+        if (fsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no fragment module.");
+
+        // CreateShaderModule dedupes the underlying native WgShaderModule by (Wgsl, EntryPoint,
+        // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call (iter-5
+        // public-handle split — matches the pipeline and buffer contracts). These two handles
+        // are consumed locally by the PipelineDesc below and never reach the caller, so we must
+        // destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every call
+        // leaks two _device.Shaders slot entries for the renderer's lifetime (the native module
+        // is safe — the content cache AND the native WgRenderPipeline both retain it).
+        //
+        // Both CreateShaderModule calls AND the inner CreatePipeline live inside the try so the
+        // cleanup covers every exception site: the second CreateShaderModule can throw
+        // InvalidOperationException if Dawn fails to compile the WGSL, and the inner
+        // CreatePipeline can throw NotSupportedException from BuildNativePipeline's Layout /
+        // DepthStencilFormat guards. The finally guards each DestroyShader with IsValid so it
+        // skips handles that never got allocated (default(ShaderHandle).Generation == 0).
+        ShaderHandle vsHandle = default;
+        ShaderHandle fsHandle = default;
+        try
+        {
+            vsHandle = _device.CreateShaderModule(vsModule);
+            fsHandle = _device.CreateShaderModule(fsModule);
+
+            var pipelineDesc = new PipelineDesc
+            {
+                Name = "ShaderProgramPipeline",
+                VertexShader = vsHandle,
+                VertexEntryPoint = vsModule.EntryPoint,
+                FragmentShader = fsHandle,
+                FragmentEntryPoint = fsModule.EntryPoint,
+                VertexLayouts = program.VertexBuffers,
+                Topology = topology,
+                StripIndexFormat = stripIndexFormat,
+                ColorFormat = colorFormat,
+                DepthStencilFormat = null,
+                Layout = program.Layout,
+            };
+            return CreatePipeline(in pipelineDesc);
+        }
+        finally
+        {
+            if (vsHandle.IsValid) DestroyShader(vsHandle);
+            if (fsHandle.IsValid) DestroyShader(fsHandle);
+        }
+    }
+
+    public void DestroyPipeline(PipelineHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Stale-handle contract: invalidate the public slot synchronously. The native pipeline is
+        // owned by PipelineCache (shared across every handle that resolved to the same content-hash
+        // entry) and outlives individual DestroyPipeline calls — destroying one handle never yanks
+        // the underlying resource out from under another. The cache is renderer-lifetime; revisit
+        // when M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
+        // No native teardown to defer — detach is pure slot invalidation, so it happens inline.
+        _device.DetachPipeline(handle);
+    }
+
+    // -------- Command stream submission --------
+
+    /// <summary>Submit a recorded <see cref="RenderCommandStream"/>. Acquires the backbuffer view,
+    /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU, presents (when windowed),
+    /// and advances the frame counter so deferred destructions can drain.</summary>
+    public void Submit(in RenderCommandStream stream)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!TryAcquireBackbufferView(out var view)) return;
+
+        var encoder = _device.Device.CreateCommandEncoder();
+        ExecuteStream(in stream, encoder, view);
+        var commandBuffer = encoder.Finish();
+        _device.Queue.Submit(commandBuffer);
+        if (!_isHeadless) _surface!.Native.Present();
+        _destructionQueue.AdvanceFrame();
+    }
+
+    private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView backbuffer)
+    {
+        var passes = stream.Passes.Span;
+        var commands = stream.Commands.Span;
+
+        WgRenderPassEncoder? activePass = null;
+        try
+        {
+            for (var i = 0; i < commands.Length; i++)
+            {
+                ref readonly var cmd = ref commands[i];
+                switch (cmd.Kind)
+                {
+                    case RenderCommandKind.BeginPass:
+                    {
+                        if (activePass is not null)
+                            throw new InvalidOperationException(
+                                "Nested BeginPass — previous pass was not ended (missing EndPass).");
+                        var passIndex = cmd.BeginPass.PassIndex;
+                        if ((uint)passIndex >= (uint)passes.Length)
+                            throw new InvalidOperationException(
+                                $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
+                        activePass = BeginPass(encoder, passes[passIndex], backbuffer);
+                        break;
+                    }
+                    case RenderCommandKind.EndPass:
+                    {
+                        // Null activePass BEFORE calling End() so the finally-block safety net
+                        // becomes idempotent: if End() throws (Dawn validation error at pass end),
+                        // activePass is already null and the finally won't double-End the same
+                        // native encoder. Dawn considers calling End() twice on the same pass an
+                        // invariant violation and may trigger a native assertion.
+                        var passToEnd = activePass;
+                        activePass = null;
+                        passToEnd?.End();
+                        break;
+                    }
+                    case RenderCommandKind.SetPipeline:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        pass.SetPipeline(_device.ResolvePipeline(cmd.SetPipeline.Pipeline));
+                        break;
+                    }
+                    case RenderCommandKind.SetVertexBuffer:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetVertexBuffer;
+                        pass.SetVertexBuffer(p.Slot, _device.ResolveBuffer(p.Buffer), p.Offset, p.Size);
+                        break;
+                    }
+                    case RenderCommandKind.SetIndexBuffer:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetIndexBuffer;
+                        pass.SetIndexBuffer(_device.ResolveBuffer(p.Buffer), FormatConversions.ToWgpu(p.Format), p.Offset, p.Size);
+                        break;
+                    }
+                    case RenderCommandKind.SetBindGroup:
+                        // M1 reserves the command but the backend has nothing to bind. M2 will fill in
+                        // the resource payload + dispatch wgpuRenderPassEncoderSetBindGroup.
+                        break;
+                    case RenderCommandKind.Draw:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var d = cmd.Draw;
+                        pass.Draw(d.VertexCount, d.InstanceCount, d.FirstVertex, d.FirstInstance);
+                        break;
+                    }
+                    case RenderCommandKind.DrawIndexed:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var d = cmd.DrawIndexed;
+                        pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
+                        break;
+                    }
+                    default:
+                        throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
+                }
+            }
+
+            if (activePass is not null)
+                throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
+            activePass = null;
+        }
+        finally
+        {
+            // Defensive close on exception so a stale-handle / NotSupportedException mid-pass
+            // doesn't leave the native render-pass encoder un-Ended (Dawn requires every
+            // BeginRenderPass to be matched with End before the encoder is finished). On the
+            // happy path activePass was nulled before the try-block exited.
+            activePass?.End();
+        }
+    }
+
+    private static WgRenderPassEncoder RequireActivePass(WgRenderPassEncoder? pass) =>
+        pass ?? throw new InvalidOperationException("Render command issued outside of an active BeginPass/EndPass scope.");
+
+    private static WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
+    {
+        // M1 supports a single color attachment that always targets the backbuffer view (the
+        // RenderPassDesc.ColorAttachments[i].View slot is reserved for M2 when offscreen targets
+        // and multi-attachment passes land — for now the View handle is ignored and the backbuffer
+        // is bound, with an explicit unsupported throw for >1 attachments).
+        var colorCount = pass.ColorAttachmentCount;
+        if (colorCount != 1)
+            throw new NotSupportedException(
+                $"M1 supports exactly one color attachment per pass (got {colorCount}). " +
+                "Multi-attachment + non-backbuffer rendering lands in M2.");
+
+        // Symmetric with WebGpuDevice.CreatePipeline's DepthStencilFormat guard: a non-null
+        // pass-level Depth would silently drop today because the M1 backend doesn't plumb the
+        // DepthAttachmentDesc through to the WebGPU render-pass descriptor. Reject explicitly so
+        // the gap is visible at submit time instead of producing a depth-less render.
+        if (pass.Depth is not null)
+            throw new NotSupportedException(
+                "RenderPassDesc.Depth is reserved for M2 (#43). The M1 backend does not configure " +
+                "depth-stencil attachments on the WebGPU render pass; leave Depth null until M2.");
+
+        var src = pass.Colors.Slot0;
+        var colors = new WgRenderPassColorAttachment[1];
+        // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
+        // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
+        // surfaces as a build break here rather than silently routing through Clear/Discard.
+        colors[0] = new WgRenderPassColorAttachment
+        {
+            View = backbuffer,
+            LoadOp = src.Load switch
+            {
+                LoadOp.Load => WgLoadOp.Load,
+                LoadOp.Clear => WgLoadOp.Clear,
+                _ => throw new NotSupportedException($"LoadOp '{src.Load}' has no WebGPU mapping."),
+            },
+            StoreOp = src.Store switch
+            {
+                StoreOp.Store => WgStoreOp.Store,
+                StoreOp.Discard => WgStoreOp.Discard,
+                _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
+            },
+            ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
+            DepthSlice = null,
+        };
+        var desc = new WgRenderPassDescriptor
+        {
+            ColorAttachments = colors,
+            Label = "ParadiseRenderPass",
+        };
+        return encoder.BeginRenderPass(in desc);
+    }
+
+    private bool TryAcquireBackbufferView(out WgTextureView view)
+    {
+        if (_isHeadless)
+        {
+            view = _offscreenTarget!.CreateView();
+            return true;
+        }
+
+        var current = _surface!.Native.GetCurrentTexture();
+        switch (current.Status)
+        {
+            case WgSurfaceGetCurrentTextureStatus.SuccessOptimal:
+            case WgSurfaceGetCurrentTextureStatus.SuccessSuboptimal:
+                break;
+            case WgSurfaceGetCurrentTextureStatus.Outdated:
+            case WgSurfaceGetCurrentTextureStatus.Lost:
+                _surface.Reconfigure();
+                view = null!;
+                return false;
+            default:
+                throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");
+        }
+        var surfaceTexture = current.Texture
+            ?? throw new InvalidOperationException(
+                $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
+        view = surfaceTexture.CreateView();
+        return true;
     }
 
     private WgTexture CreateOffscreenTarget(uint width, uint height)
@@ -166,10 +511,27 @@ public sealed class WebGpuRenderer : IDisposable
         return _device.Device.CreateTexture(in desc);
     }
 
+    /// <summary>Internal helper for <see cref="Paradise.Rendering.Sample"/>: load a Slang-compiled
+    /// shader pair from an embedded resource pair (<paramref name="logicalNamePrefix"/>.wgsl +
+    /// .reflection.json) and return a <see cref="ShaderProgramDesc"/>. Wraps
+    /// <see cref="ShaderProgramLoader.Load"/> so the loader stays internal while the sample
+    /// (and tests) can drive it without InternalsVisibleTo to every consumer.</summary>
+    public static ShaderProgramDesc LoadShaderProgram(Assembly assembly, string logicalNamePrefix) =>
+        ShaderProgramLoader.Load(assembly, logicalNamePrefix);
+
+    /// <summary>Test-only accessor for the live-shader-slot count. Used by regression tests that
+    /// assert repeated high-level <see cref="CreatePipeline(in ShaderProgramDesc, TextureFormat)"/>
+    /// calls don't grow the shader slot table (iter-6 fix for the slot-leak OpenCara flagged on
+    /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
+    /// take a dependency on internal device counters.</summary>
+    internal int ShaderSlotCountForTest => _device.Shaders.Count;
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        _destructionQueue.DrainAll();
+        _pipelineCache.Clear();
         _offscreenTarget?.Destroy();
         _surface?.Dispose();
         _device.Dispose();
