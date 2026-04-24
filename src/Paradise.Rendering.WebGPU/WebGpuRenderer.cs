@@ -10,6 +10,7 @@ using WgTextureUsage = WebGpuSharp.TextureUsage;
 using WgTextureDimension = WebGpuSharp.TextureDimension;
 using WgRenderPassDescriptor = WebGpuSharp.RenderPassDescriptor;
 using WgRenderPassColorAttachment = WebGpuSharp.RenderPassColorAttachment;
+using WgRenderPassDepthStencilAttachment = WebGpuSharp.RenderPassDepthStencilAttachment;
 using WgLoadOp = WebGpuSharp.LoadOp;
 using WgStoreOp = WebGpuSharp.StoreOp;
 using WgColor = WebGpuSharp.Color;
@@ -17,6 +18,16 @@ using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
+using WgBindGroupLayout = WebGpuSharp.BindGroupLayout;
+using WgBindGroupLayoutDescriptor = WebGpuSharp.BindGroupLayoutDescriptor;
+using WgBindGroupLayoutEntry = WebGpuSharp.BindGroupLayoutEntry;
+using WgBufferBindingLayout = WebGpuSharp.BufferBindingLayout;
+using WgSamplerBindingLayout = WebGpuSharp.SamplerBindingLayout;
+using WgTextureBindingLayout = WebGpuSharp.TextureBindingLayout;
+using WgBufferBindingType = WebGpuSharp.BufferBindingType;
+using WgSamplerBindingType = WebGpuSharp.SamplerBindingType;
+using WgTextureSampleType = WebGpuSharp.TextureSampleType;
+using WgTextureViewDimension = WebGpuSharp.TextureViewDimension;
 
 namespace Paradise.Rendering.WebGPU;
 
@@ -33,6 +44,7 @@ public sealed class WebGpuRenderer : IDisposable
     private readonly bool _isHeadless;
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
+    private readonly BindGroupLayoutCache _bindGroupLayoutCache = new();
     private WgTexture? _offscreenTarget;
     private uint _offscreenWidth;
     private uint _offscreenHeight;
@@ -232,7 +244,45 @@ public sealed class WebGpuRenderer : IDisposable
         IndexFormat stripIndexFormat = IndexFormat.Uint16)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        return CreatePipelineInternal(
+            in program,
+            colorFormat,
+            depthStencilFormat: null,
+            depthStencil: null,
+            bindGroupLayouts: ReadOnlyMemory<BindGroupLayoutHandle>.Empty,
+            topology: topology,
+            stripIndexFormat: stripIndexFormat);
+    }
 
+    /// <summary>Overload that accepts a caller-authored <see cref="PipelineDesc"/> template whose
+    /// pipeline layout, bind group layouts, depth state, and color format override the defaults.
+    /// The shader module fields on the template are ignored — the loader derives them from
+    /// <paramref name="program"/> — so callers can build a single template that names the
+    /// non-shader pipeline parameters and reuse it across shader permutations.</summary>
+    public PipelineHandle CreatePipeline(in ShaderProgramDesc program, in PipelineDesc template)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return CreatePipelineInternal(
+            in program,
+            template.ColorFormat,
+            depthStencilFormat: template.DepthStencilFormat,
+            depthStencil: template.DepthStencil,
+            bindGroupLayouts: template.BindGroupLayouts,
+            topology: template.Topology,
+            stripIndexFormat: template.StripIndexFormat,
+            label: template.Name);
+    }
+
+    private PipelineHandle CreatePipelineInternal(
+        in ShaderProgramDesc program,
+        TextureFormat colorFormat,
+        TextureFormat? depthStencilFormat,
+        DepthStencilState? depthStencil,
+        ReadOnlyMemory<BindGroupLayoutHandle> bindGroupLayouts,
+        PrimitiveTopology topology,
+        IndexFormat stripIndexFormat,
+        string? label = null)
+    {
         ShaderModuleDesc? vsModule = null;
         ShaderModuleDesc? fsModule = null;
         foreach (var m in program.Modules)
@@ -244,19 +294,11 @@ public sealed class WebGpuRenderer : IDisposable
         if (fsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no fragment module.");
 
         // CreateShaderModule dedupes the underlying native WgShaderModule by (Wgsl, EntryPoint,
-        // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call (iter-5
-        // public-handle split — matches the pipeline and buffer contracts). These two handles
-        // are consumed locally by the PipelineDesc below and never reach the caller, so we must
-        // destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every call
-        // leaks two _device.Shaders slot entries for the renderer's lifetime (the native module
-        // is safe — the content cache AND the native WgRenderPipeline both retain it).
-        //
-        // Both CreateShaderModule calls AND the inner CreatePipeline live inside the try so the
-        // cleanup covers every exception site: the second CreateShaderModule can throw
-        // InvalidOperationException if Dawn fails to compile the WGSL, and the inner
-        // CreatePipeline can throw NotSupportedException from BuildNativePipeline's Layout /
-        // DepthStencilFormat guards. The finally guards each DestroyShader with IsValid so it
-        // skips handles that never got allocated (default(ShaderHandle).Generation == 0).
+        // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call. These two
+        // handles are consumed locally by the PipelineDesc below and never reach the caller, so
+        // we must destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every
+        // call leaks two _device.Shaders slot entries for the renderer's lifetime (the native
+        // module is safe — the content cache AND the native WgRenderPipeline both retain it).
         ShaderHandle vsHandle = default;
         ShaderHandle fsHandle = default;
         try
@@ -266,7 +308,7 @@ public sealed class WebGpuRenderer : IDisposable
 
             var pipelineDesc = new PipelineDesc
             {
-                Name = "ShaderProgramPipeline",
+                Name = label ?? "ShaderProgramPipeline",
                 VertexShader = vsHandle,
                 VertexEntryPoint = vsModule.EntryPoint,
                 FragmentShader = fsHandle,
@@ -275,8 +317,10 @@ public sealed class WebGpuRenderer : IDisposable
                 Topology = topology,
                 StripIndexFormat = stripIndexFormat,
                 ColorFormat = colorFormat,
-                DepthStencilFormat = null,
+                DepthStencilFormat = depthStencilFormat,
+                DepthStencil = depthStencil,
                 Layout = program.Layout,
+                BindGroupLayouts = bindGroupLayouts,
             };
             return CreatePipeline(in pipelineDesc);
         }
@@ -297,6 +341,191 @@ public sealed class WebGpuRenderer : IDisposable
         // when M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
         // No native teardown to defer — detach is pure slot invalidation, so it happens inline.
         _device.DetachPipeline(handle);
+    }
+
+    // -------- M2: textures, views, samplers, bind groups --------
+
+    /// <summary>Create an empty GPU texture. Storage only — upload via
+    /// <see cref="CreateTextureWithData{T}"/> or a command encoder copy.</summary>
+    public TextureHandle CreateTexture(in TextureDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateTexture(in desc);
+    }
+
+    /// <summary>Create a 2D texture and populate mip level 0 / layer 0 from <paramref name="pixels"/>.
+    /// Adds <see cref="TextureUsage.CopyDst"/> to the usage flags implicitly so the upload can
+    /// succeed even when the caller didn't include it.</summary>
+    public TextureHandle CreateTextureWithData<T>(in TextureDesc desc, ReadOnlySpan<T> pixels) where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (desc.Dimension != TextureDimension.D2)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 only supports CreateTextureWithData for 2D textures; 1D/3D uploads are reserved for a later milestone.");
+        var sized = desc with { Usage = desc.Usage | TextureUsage.CopyDst };
+        var handle = _device.CreateTexture(in sized);
+        var bpp = BytesPerPixel(desc.Format);
+        _device.WriteTexture2D(handle, desc.Width, desc.Height, bpp, pixels);
+        return handle;
+    }
+
+    private static uint BytesPerPixel(TextureFormat format) => format switch
+    {
+        TextureFormat.R8Unorm => 1,
+        TextureFormat.Rgba8Unorm => 4,
+        TextureFormat.Rgba8UnormSrgb => 4,
+        TextureFormat.Bgra8Unorm => 4,
+        TextureFormat.Bgra8UnormSrgb => 4,
+        _ => throw new NotSupportedException(
+            $"Paradise.Rendering M2 does not yet support CreateTextureWithData for texture format '{format}'; reserved for later milestone."),
+    };
+
+    public void DestroyTexture(TextureHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachTexture(handle, out var native))
+            return;
+        // Defer the native destroy so in-flight GPU work referencing the texture finishes first.
+        _destructionQueue.Schedule(() => native.Destroy());
+    }
+
+    public RenderViewHandle CreateTextureView(TextureHandle texture, in RenderViewDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateTextureView(texture, in desc);
+    }
+
+    public void DestroyTextureView(RenderViewHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // TextureView has no native Destroy() in WebGPUSharp — it's released via GC. Slot
+        // invalidation is synchronous; the captured native reference keeps the view alive for the
+        // deferred frame window so in-flight GPU work finishes.
+        if (!_device.DetachTextureView(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
+    public SamplerHandle CreateSampler(in SamplerDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateSampler(in desc);
+    }
+
+    public void DestroySampler(SamplerHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachSampler(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
+    /// <summary>Create a bind group layout. The record's structural content is content-keyed in a
+    /// cache below the public handle layer, so two calls with structurally-equal
+    /// <see cref="BindGroupLayoutDesc"/> values share the native Dawn layout while each caller
+    /// gets a distinct handle — matches the pipeline cache contract.</summary>
+    public BindGroupLayoutHandle CreateBindGroupLayout(BindGroupLayoutDesc layoutDesc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var native = _bindGroupLayoutCache.GetOrCreateNative(layoutDesc, BuildNativeBindGroupLayout);
+        return _device.CreateBindGroupLayout(native);
+    }
+
+    /// <summary>Test/inspection accessor for the content-keyed layout cache's entry count. Scoped
+    /// <c>internal</c> so tests can verify cache hits without production callers depending on
+    /// implementation details.</summary>
+    internal int BindGroupLayoutCacheCountForTest => _bindGroupLayoutCache.Count;
+
+    public void DestroyBindGroupLayout(BindGroupLayoutHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Mirrors DestroyPipeline: native layout is cache-owned, slot invalidation is synchronous.
+        _device.DetachBindGroupLayout(handle);
+    }
+
+    public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateBindGroup(in desc);
+    }
+
+    public void DestroyBindGroup(BindGroupHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachBindGroup(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
+    /// <summary>Upload <paramref name="data"/> to an existing buffer at <paramref name="offset"/>
+    /// via <c>Queue.WriteBuffer</c>. The buffer's creation usage must include
+    /// <see cref="BufferUsage.CopyDst"/>; the backend does not rewrite usage here.</summary>
+    public void WriteBuffer<T>(BufferHandle buffer, ulong offset, ReadOnlySpan<T> data) where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var native = _device.ResolveBuffer(buffer);
+        _device.Queue.WriteBuffer(native, offset, data);
+    }
+
+    private WgBindGroupLayout BuildNativeBindGroupLayout(BindGroupLayoutDesc layoutDesc)
+    {
+        var entries = new WgBindGroupLayoutEntry[layoutDesc.Entries.Length];
+        for (var i = 0; i < layoutDesc.Entries.Length; i++)
+        {
+            var e = layoutDesc.Entries[i];
+            var entry = new WgBindGroupLayoutEntry
+            {
+                Binding = e.Binding,
+                Visibility = FormatConversions.ToWgpu(e.Visibility),
+            };
+            switch (e.Type)
+            {
+                case BindingResourceType.UniformBuffer:
+                    entry.Buffer = new WgBufferBindingLayout { Type = WgBufferBindingType.Uniform, MinBindingSize = e.MinBufferSize };
+                    break;
+                case BindingResourceType.StorageBuffer:
+                    entry.Buffer = new WgBufferBindingLayout { Type = WgBufferBindingType.Storage, MinBindingSize = e.MinBufferSize };
+                    break;
+                case BindingResourceType.ReadonlyStorageBuffer:
+                    entry.Buffer = new WgBufferBindingLayout { Type = WgBufferBindingType.ReadOnlyStorage, MinBindingSize = e.MinBufferSize };
+                    break;
+                case BindingResourceType.Sampler:
+                    entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Filtering };
+                    break;
+                case BindingResourceType.ComparisonSampler:
+                    entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Comparison };
+                    break;
+                case BindingResourceType.SampledTexture:
+                    entry.Texture = new WgTextureBindingLayout
+                    {
+                        SampleType = WgTextureSampleType.Float,
+                        ViewDimension = WgTextureViewDimension.D2,
+                        Multisampled = false,
+                    };
+                    break;
+                case BindingResourceType.MultisampledTexture:
+                    entry.Texture = new WgTextureBindingLayout
+                    {
+                        SampleType = WgTextureSampleType.Float,
+                        ViewDimension = WgTextureViewDimension.D2,
+                        Multisampled = true,
+                    };
+                    break;
+                case BindingResourceType.StorageTexture:
+                    throw new NotSupportedException(
+                        "Paradise.Rendering M2 does not yet support StorageTexture bindings; reserved for a later milestone.");
+                default:
+                    throw new NotSupportedException($"Unknown BindingResourceType '{e.Type}'.");
+            }
+            entries[i] = entry;
+        }
+        var layoutWgDesc = new WgBindGroupLayoutDescriptor
+        {
+            Label = string.Empty,
+            Entries = entries,
+        };
+        return _device.Device.CreateBindGroupLayout(in layoutWgDesc)
+            ?? throw new InvalidOperationException("BindGroupLayout creation returned null.");
     }
 
     // -------- Command stream submission --------
@@ -322,6 +551,7 @@ public sealed class WebGpuRenderer : IDisposable
     {
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
+        var dynamicOffsets = stream.DynamicOffsets.Span;
 
         WgRenderPassEncoder? activePass = null;
         try
@@ -376,9 +606,25 @@ public sealed class WebGpuRenderer : IDisposable
                         break;
                     }
                     case RenderCommandKind.SetBindGroup:
-                        // M1 reserves the command but the backend has nothing to bind. M2 will fill in
-                        // the resource payload + dispatch wgpuRenderPassEncoderSetBindGroup.
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetBindGroup;
+                        var bindGroup = _device.ResolveBindGroup(p.BindGroup);
+                        if (p.DynamicOffsetsCount == 0)
+                        {
+                            pass.SetBindGroup(p.GroupIndex, bindGroup);
+                        }
+                        else
+                        {
+                            var start = (int)p.DynamicOffsetsStart;
+                            var count = (int)p.DynamicOffsetsCount;
+                            if ((uint)start + (uint)count > (uint)dynamicOffsets.Length)
+                                throw new InvalidOperationException(
+                                    $"SetBindGroup dynamic-offsets range [{start}, {start + count}) exceeds stream.DynamicOffsets length {dynamicOffsets.Length}.");
+                            pass.SetBindGroup(p.GroupIndex, bindGroup, dynamicOffsets.Slice(start, count));
+                        }
                         break;
+                    }
                     case RenderCommandKind.Draw:
                     {
                         var pass = RequireActivePass(activePass);
@@ -415,53 +661,59 @@ public sealed class WebGpuRenderer : IDisposable
     private static WgRenderPassEncoder RequireActivePass(WgRenderPassEncoder? pass) =>
         pass ?? throw new InvalidOperationException("Render command issued outside of an active BeginPass/EndPass scope.");
 
-    private static WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
+    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
     {
-        // M1 supports a single color attachment that always targets the backbuffer view (the
-        // RenderPassDesc.ColorAttachments[i].View slot is reserved for M2 when offscreen targets
-        // and multi-attachment passes land — for now the View handle is ignored and the backbuffer
-        // is bound, with an explicit unsupported throw for >1 attachments).
+        // M2 still supports a single color attachment that always targets the backbuffer view;
+        // multi-attachment passes land in a later milestone. Depth IS now honored.
         var colorCount = pass.ColorAttachmentCount;
         if (colorCount != 1)
             throw new NotSupportedException(
-                $"M1 supports exactly one color attachment per pass (got {colorCount}). " +
-                "Multi-attachment + non-backbuffer rendering lands in M2.");
-
-        // Symmetric with WebGpuDevice.CreatePipeline's DepthStencilFormat guard: a non-null
-        // pass-level Depth would silently drop today because the M1 backend doesn't plumb the
-        // DepthAttachmentDesc through to the WebGPU render-pass descriptor. Reject explicitly so
-        // the gap is visible at submit time instead of producing a depth-less render.
-        if (pass.Depth is not null)
-            throw new NotSupportedException(
-                "RenderPassDesc.Depth is reserved for M2 (#43). The M1 backend does not configure " +
-                "depth-stencil attachments on the WebGPU render pass; leave Depth null until M2.");
+                $"Paradise.Rendering M2 supports exactly one color attachment per pass (got {colorCount}). " +
+                "Multi-attachment rendering is reserved for a later milestone.");
 
         var src = pass.Colors.Slot0;
         var colors = new WgRenderPassColorAttachment[1];
-        // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
-        // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
-        // surfaces as a build break here rather than silently routing through Clear/Discard.
         colors[0] = new WgRenderPassColorAttachment
         {
             View = backbuffer,
-            LoadOp = src.Load switch
-            {
-                LoadOp.Load => WgLoadOp.Load,
-                LoadOp.Clear => WgLoadOp.Clear,
-                _ => throw new NotSupportedException($"LoadOp '{src.Load}' has no WebGPU mapping."),
-            },
-            StoreOp = src.Store switch
-            {
-                StoreOp.Store => WgStoreOp.Store,
-                StoreOp.Discard => WgStoreOp.Discard,
-                _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
-            },
+            LoadOp = FormatConversions.ToWgpu(src.Load),
+            StoreOp = FormatConversions.ToWgpu(src.Store),
             ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
             DepthSlice = null,
         };
+
+        WgRenderPassDepthStencilAttachment? depthAttachment = null;
+        if (pass.Depth is { } d)
+        {
+            var depthTexture = _device.ResolveTexture(d.DepthTexture);
+            // Create a view for the depth texture each frame. Cheap — the view is a WebGPUSharp
+            // wrapper, not a heavyweight resource — and avoids holding a RenderViewHandle just for
+            // this one internal consumer. If a future milestone exposes per-pass depth view reuse
+            // (different mip/layer per frame), this grows into a small cache keyed by texture.
+            var depthView = depthTexture.CreateView()
+                ?? throw new InvalidOperationException("Depth texture CreateView returned null.");
+            depthAttachment = new WgRenderPassDepthStencilAttachment
+            {
+                View = depthView,
+                DepthLoadOp = FormatConversions.ToWgpu(d.DepthLoad),
+                DepthStoreOp = FormatConversions.ToWgpu(d.DepthStore),
+                DepthClearValue = d.ClearDepth,
+                DepthReadOnly = false,
+                // Stencil defaults: M2 does not author stencil state. Leaving stencil load/store
+                // Undefined would trip Dawn's validation when the format is Depth24PlusStencil8;
+                // use Load/Discard as a safe neutral default for all depth formats (Dawn treats
+                // these as no-ops on depth-only formats like Depth32Float).
+                StencilLoadOp = WgLoadOp.Undefined,
+                StencilStoreOp = WgStoreOp.Undefined,
+                StencilClearValue = 0,
+                StencilReadOnly = false,
+            };
+        }
+
         var desc = new WgRenderPassDescriptor
         {
             ColorAttachments = colors,
+            DepthStencilAttachment = depthAttachment,
             Label = "ParadiseRenderPass",
         };
         return encoder.BeginRenderPass(in desc);
@@ -532,6 +784,7 @@ public sealed class WebGpuRenderer : IDisposable
         _disposed = true;
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();
+        _bindGroupLayoutCache.Clear();
         _offscreenTarget?.Destroy();
         _surface?.Dispose();
         _device.Dispose();

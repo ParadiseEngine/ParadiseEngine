@@ -14,12 +14,13 @@ public class RenderCommandEncoderTests
         var pipeline = new PipelineHandle(7, 3);
         var vbuf = new BufferHandle(11, 5);
         var ibuf = new BufferHandle(13, 5);
+        var bindGroup = new BindGroupHandle(17, 2);
 
         encoder.BeginPass(0);
         encoder.SetPipeline(pipeline);
         encoder.SetVertexBuffer(slot: 1, vbuf, offset: 32, size: 256);
         encoder.SetIndexBuffer(ibuf, IndexFormat.Uint32, offset: 0, size: 64);
-        encoder.SetBindGroup(2);
+        encoder.SetBindGroup(2, bindGroup);
         encoder.Draw(new DrawCommand(VertexCount: 3, InstanceCount: 1, FirstVertex: 0, FirstInstance: 0));
         encoder.DrawIndexed(new DrawIndexedCommand(IndexCount: 6, InstanceCount: 1, FirstIndex: 0, BaseVertex: 0, FirstInstance: 0));
         encoder.EndPass();
@@ -46,6 +47,8 @@ public class RenderCommandEncoderTests
 
         await Assert.That(commands[4].Kind).IsEqualTo(RenderCommandKind.SetBindGroup);
         await Assert.That(commands[4].SetBindGroup.GroupIndex).IsEqualTo(2u);
+        await Assert.That(commands[4].SetBindGroup.BindGroup).IsEqualTo(bindGroup);
+        await Assert.That(commands[4].SetBindGroup.DynamicOffsetsCount).IsEqualTo(0u);
 
         await Assert.That(commands[5].Kind).IsEqualTo(RenderCommandKind.Draw);
         await Assert.That(commands[5].Draw.VertexCount).IsEqualTo(3u);

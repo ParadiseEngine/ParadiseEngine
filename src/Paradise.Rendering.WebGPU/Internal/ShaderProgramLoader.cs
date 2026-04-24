@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -47,15 +48,6 @@ internal static class ShaderProgramLoader
     {
         var entryPoints = reflection.EntryPoints ?? Array.Empty<SlangEntryPoint>();
 
-        // M1 only wires varying (vertex) inputs and outputs. If Slang reflects any resource
-        // bindings — uniform buffers, storage buffers, samplers, textures, push constants — the
-        // loader previously dropped them silently and emitted an empty PipelineLayoutDesc,
-        // leaving the consumer with a shader whose bindings the engine can't validate or bind
-        // against. Reject up-front with a clear M2 deferral message (#43 lands the binding
-        // pipeline). Symmetric with the PipelineDesc.Layout NotSupportedException guard in
-        // WebGpuDevice.BuildNativePipeline.
-        RejectNonVaryingBindings(entryPoints);
-
         var modules = new ShaderModuleDesc[entryPoints.Length];
         for (var i = 0; i < entryPoints.Length; i++)
         {
@@ -63,41 +55,106 @@ internal static class ShaderProgramLoader
             modules[i] = new ShaderModuleDesc(wgsl, ep.Name, ParseStage(ep.Stage));
         }
 
-        // M1: derive a single vertex buffer layout from the vertex entry point's input parameter
-        // (a struct of fields with @location semantics). M2 will extend this to bind groups and
-        // push-constant ranges; #43 lands the binding pipeline.
         var vertexBuffers = ExtractVertexBuffers(entryPoints);
 
-        // M1 has no bind group entries. The Layout record is non-null with empty arrays so the
-        // backend can build an empty PipelineLayoutDescriptor uniformly.
-        var layout = new PipelineLayoutDesc(
-            Groups: Array.Empty<BindGroupLayoutDesc>(),
-            PushConstants: Array.Empty<PushConstantRangeDesc>());
+        // M2: build bind group layouts from module-level `parameters[]` (which carry
+        // binding.space + binding.index + the resource type) cross-referenced with
+        // entry-point-level `bindings[]` by name to derive per-binding visibility. Stage is
+        // inferred from the entry point that references the binding.
+        var layout = BuildPipelineLayout(reflection.Parameters ?? Array.Empty<SlangParameter>(), entryPoints);
 
         return new ShaderProgramDesc(modules, layout, vertexBuffers);
     }
 
-    private static void RejectNonVaryingBindings(SlangEntryPoint[] entryPoints)
+    private static PipelineLayoutDesc BuildPipelineLayout(SlangParameter[] parameters, SlangEntryPoint[] entryPoints)
     {
+        if (parameters.Length == 0)
+        {
+            return new PipelineLayoutDesc(
+                Groups: Array.Empty<BindGroupLayoutDesc>(),
+                PushConstants: Array.Empty<PushConstantRangeDesc>());
+        }
+
+        // Compute per-binding visibility from the entry points that reference it.
+        var visibilityByName = new Dictionary<string, ShaderStage>(StringComparer.Ordinal);
         foreach (var ep in entryPoints)
         {
-            if (ep.Parameters is null) continue;
-            foreach (var p in ep.Parameters)
+            if (ep.Bindings is null) continue;
+            var stage = ParseStage(ep.Stage);
+            foreach (var b in ep.Bindings)
             {
-                var kind = p.Binding?.Kind;
-                // Null Kind covers unbound top-level parameters (shouldn't happen in practice but
-                // we can't map them, so treat as unsupported). "varyingInput" / "varyingOutput"
-                // are the only two kinds M1's vertex-layout derivation handles.
-                if (kind is "varyingInput" or "varyingOutput") continue;
-
-                throw new NotSupportedException(
-                    $"Shader entry point '{ep.Name}' reflects parameter '{p.Name ?? "<unnamed>"}' " +
-                    $"with binding kind '{kind ?? "<null>"}', which Paradise.Rendering M1 does not yet " +
-                    $"plumb through to the backend (only varying vertex inputs/outputs are supported). " +
-                    $"Resource bindings — uniform buffers, storage buffers, samplers, textures, push " +
-                    $"constants — are reserved for M2 (#43). Use a shader without resource bindings " +
-                    $"until then, or wait for the binding pipeline to land.");
+                if (b.Name is null) continue;
+                visibilityByName.TryGetValue(b.Name, out var existing);
+                visibilityByName[b.Name] = existing | stage;
             }
+        }
+
+        var groupedByIndex = new SortedDictionary<uint, List<BindGroupLayoutEntryDesc>>();
+        foreach (var p in parameters)
+        {
+            if (p.Binding?.Kind is not "descriptorTableSlot") continue;
+            if (p.Type is null)
+                throw new InvalidOperationException($"Shader parameter '{p.Name ?? "<unnamed>"}' has no type node — Slang reflection schema may have changed.");
+
+            var space = p.Binding.Space ?? 0u;
+            var (type, minSize) = MapParameterType(p);
+            var visibility = p.Name is not null && visibilityByName.TryGetValue(p.Name, out var vis)
+                ? vis
+                : ShaderStage.Vertex | ShaderStage.Fragment;
+
+            if (!groupedByIndex.TryGetValue(space, out var list))
+            {
+                list = new List<BindGroupLayoutEntryDesc>();
+                groupedByIndex[space] = list;
+            }
+            list.Add(new BindGroupLayoutEntryDesc(p.Binding.Index, visibility, type, minSize));
+        }
+
+        var groups = new BindGroupLayoutDesc[groupedByIndex.Count];
+        var gi = 0;
+        foreach (var kv in groupedByIndex)
+        {
+            kv.Value.Sort(static (a, b) => a.Binding.CompareTo(b.Binding));
+            groups[gi++] = new BindGroupLayoutDesc(kv.Key, kv.Value.ToArray());
+        }
+
+        return new PipelineLayoutDesc(
+            Groups: groups,
+            PushConstants: Array.Empty<PushConstantRangeDesc>());
+    }
+
+    private static (BindingResourceType Type, ulong MinBufferSize) MapParameterType(SlangParameter p)
+    {
+        var t = p.Type!;
+        switch (t.Kind)
+        {
+            case "constantBuffer":
+            {
+                // std140-padded size lives in elementVarLayout.binding.size for uniform buffers.
+                // When absent (unusual), fall back to 0 meaning "no minimum" — Dawn validates
+                // size at bind time against the actual buffer.
+                ulong minSize = t.ElementVarLayout?.Binding?.Size ?? 0u;
+                return (BindingResourceType.UniformBuffer, minSize);
+            }
+            case "parameterBlock":
+                return (BindingResourceType.UniformBuffer, 0);
+            case "resource":
+            {
+                var shape = t.BaseShape ?? "<null>";
+                if (shape.StartsWith("texture", StringComparison.Ordinal))
+                    return (BindingResourceType.SampledTexture, 0);
+                throw new NotSupportedException(
+                    $"Paradise.Rendering M2 does not yet support Slang resource baseShape '{shape}'; reserved for later milestone.");
+            }
+            case "samplerState":
+                return (BindingResourceType.Sampler, 0);
+            case "structuredBuffer":
+                return (BindingResourceType.ReadonlyStorageBuffer, 0);
+            case "rwStructuredBuffer":
+                return (BindingResourceType.StorageBuffer, 0);
+            default:
+                throw new NotSupportedException(
+                    $"Paradise.Rendering M2 does not yet support Slang parameter type kind '{t.Kind}' (parameter '{p.Name ?? "<unnamed>"}'); reserved for later milestone.");
         }
     }
 

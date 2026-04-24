@@ -36,8 +36,15 @@ public ref struct RenderCommandEncoder
     public void SetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         Write(RenderCommand.FromSetIndexBuffer(buffer, format, offset, size));
 
-    public void SetBindGroup(uint groupIndex) =>
-        Write(RenderCommand.FromSetBindGroup(groupIndex));
+    /// <summary>Encode a <see cref="RenderCommandKind.SetBindGroup"/> with no dynamic offsets.</summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup) =>
+        Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, 0, 0));
+
+    /// <summary>Encode a <see cref="RenderCommandKind.SetBindGroup"/> referencing dynamic offsets
+    /// already written to the enclosing <see cref="RenderCommandStream.DynamicOffsets"/> buffer.
+    /// Host code owns the offset buffer; this encoder only records the index range.</summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup, uint dynamicOffsetsStart, uint dynamicOffsetsCount) =>
+        Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, dynamicOffsetsStart, dynamicOffsetsCount));
 
     public void Draw(in DrawCommand cmd) =>
         Write(RenderCommand.FromDraw(cmd));

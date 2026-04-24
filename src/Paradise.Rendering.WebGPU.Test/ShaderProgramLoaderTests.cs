@@ -80,61 +80,89 @@ public class ShaderProgramLoaderTests
     }
 
     [Test]
-    public async Task build_program_desc_rejects_non_varying_bindings()
-    {
-        // Iter-7 fix for OpenCara's iter-6 Major A (codex): the loader used to silently emit an
-        // empty PipelineLayoutDesc even when Slang reflected uniform buffers, storage buffers,
-        // samplers, textures, or push constants — any shader with resource bindings loaded as
-        // if it had none. Now the loader rejects up-front with NotSupportedException + an
-        // M2 deferral message. Symmetric with the PipelineDesc.Layout NotSupportedException
-        // guard in WebGpuDevice.BuildNativePipeline.
-        var reflection = new SlangReflection(EntryPoints: new[]
-        {
-            new SlangEntryPoint(
-                Name: "vs_main",
-                Stage: "vertex",
-                Parameters: new[]
-                {
-                    new SlangParameter(
-                        Name: "uBuffer",
-                        Binding: new SlangBinding(Kind: "uniformBuffer", Index: 0, Count: 1),
-                        Type: new SlangTypeNode(Kind: "struct", Name: "Uniforms", Fields: null, ElementCount: null, ElementType: null, ScalarType: null),
-                        SemanticName: null),
-                }),
-        });
-
-        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
-            .Throws<NotSupportedException>();
-    }
-
-    [Test]
     public async Task build_program_desc_accepts_varying_input_and_output()
     {
-        // Sibling positive-case: an entry point whose parameters are pure varyingInput /
-        // varyingOutput (the triangle shape) loads cleanly without tripping the binding guard.
-        var reflection = new SlangReflection(EntryPoints: new[]
-        {
-            new SlangEntryPoint(
-                Name: "vs_main",
-                Stage: "vertex",
-                Parameters: new[]
-                {
-                    new SlangParameter(
-                        Name: "input",
-                        Binding: new SlangBinding(Kind: "varyingInput", Index: 0, Count: 1),
-                        Type: new SlangTypeNode(Kind: "struct", Name: "VsIn", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null),
-                        SemanticName: null),
-                    new SlangParameter(
-                        Name: "output",
-                        Binding: new SlangBinding(Kind: "varyingOutput", Index: 0, Count: 1),
-                        Type: new SlangTypeNode(Kind: "struct", Name: "VsOut", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null),
-                        SemanticName: null),
-                }),
-        });
+        // Positive-case: an entry point whose parameters are pure varyingInput / varyingOutput
+        // (the triangle shape) loads cleanly and produces an empty pipeline layout (no bind groups,
+        // no push constants) — the M2 loader treats absent module-level `parameters` as "no
+        // resource bindings."
+        var reflection = new SlangReflection(
+            Parameters: Array.Empty<SlangParameter>(),
+            EntryPoints: new[]
+            {
+                new SlangEntryPoint(
+                    Name: "vs_main",
+                    Stage: "vertex",
+                    Parameters: new[]
+                    {
+                        new SlangParameter(
+                            Name: "input",
+                            Binding: new SlangBinding(Kind: "varyingInput", Space: null, Index: 0, Count: 1, Size: null),
+                            Type: new SlangTypeNode(Kind: "struct", Name: "VsIn", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null, BaseShape: null, ElementVarLayout: null),
+                            SemanticName: null),
+                        new SlangParameter(
+                            Name: "output",
+                            Binding: new SlangBinding(Kind: "varyingOutput", Space: null, Index: 0, Count: 1, Size: null),
+                            Type: new SlangTypeNode(Kind: "struct", Name: "VsOut", Fields: Array.Empty<SlangField>(), ElementCount: null, ElementType: null, ScalarType: null, BaseShape: null, ElementVarLayout: null),
+                            SemanticName: null),
+                    },
+                    Bindings: null),
+            });
 
         var program = ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection);
         await Assert.That(program.Modules.Length).IsEqualTo(1);
         await Assert.That(program.Layout.Groups.Length).IsEqualTo(0);
         await Assert.That(program.Layout.PushConstants.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task build_program_desc_builds_uniform_buffer_group_from_module_parameters()
+    {
+        // M2 binding path: a module-level parameter with `descriptorTableSlot` kind and a
+        // constantBuffer type produces a BindGroupLayoutEntryDesc at (space, index) — and the
+        // entry point's `bindings[]` list drives visibility inference. Mirrors the shape that
+        // slangc v2026.7 emits for `cbuffer FrameUniforms : register(b0, space0)`.
+        var reflection = new SlangReflection(
+            Parameters: new[]
+            {
+                new SlangParameter(
+                    Name: "FrameUniforms",
+                    Binding: new SlangBinding(Kind: "descriptorTableSlot", Space: 0, Index: 0, Count: null, Size: null),
+                    Type: new SlangTypeNode(
+                        Kind: "constantBuffer",
+                        Name: null,
+                        Fields: null,
+                        ElementCount: null,
+                        ElementType: null,
+                        ScalarType: null,
+                        BaseShape: null,
+                        ElementVarLayout: new SlangVarLayout(
+                            Type: null,
+                            Binding: new SlangBinding(Kind: "uniform", Space: null, Index: 0, Count: null, Size: 16))),
+                    SemanticName: null),
+            },
+            EntryPoints: new[]
+            {
+                new SlangEntryPoint(
+                    Name: "vs_main",
+                    Stage: "vertex",
+                    Parameters: Array.Empty<SlangParameter>(),
+                    Bindings: new[]
+                    {
+                        new SlangEntryPointBinding(
+                            Name: "FrameUniforms",
+                            Binding: new SlangBinding(Kind: "descriptorTableSlot", Space: null, Index: 0, Count: null, Size: null)),
+                    }),
+            });
+
+        var program = ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection);
+        await Assert.That(program.Layout.Groups.Length).IsEqualTo(1);
+        var g = program.Layout.Groups[0];
+        await Assert.That(g.GroupIndex).IsEqualTo(0u);
+        await Assert.That(g.Entries.Length).IsEqualTo(1);
+        await Assert.That(g.Entries[0].Binding).IsEqualTo(0u);
+        await Assert.That(g.Entries[0].Type).IsEqualTo(BindingResourceType.UniformBuffer);
+        await Assert.That(g.Entries[0].MinBufferSize).IsEqualTo(16ul);
+        await Assert.That(g.Entries[0].Visibility).IsEqualTo(ShaderStage.Vertex);
     }
 }

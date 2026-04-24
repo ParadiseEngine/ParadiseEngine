@@ -13,12 +13,14 @@ namespace Paradise.Rendering.WebGPU.Internal;
 // even if Slang's reflection schema evolves.
 
 internal sealed record SlangReflection(
+    [property: JsonPropertyName("parameters")] SlangParameter[]? Parameters,
     [property: JsonPropertyName("entryPoints")] SlangEntryPoint[]? EntryPoints);
 
 internal sealed record SlangEntryPoint(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("stage")] string Stage,
-    [property: JsonPropertyName("parameters")] SlangParameter[]? Parameters);
+    [property: JsonPropertyName("parameters")] SlangParameter[]? Parameters,
+    [property: JsonPropertyName("bindings")] SlangEntryPointBinding[]? Bindings);
 
 internal sealed record SlangParameter(
     [property: JsonPropertyName("name")] string? Name,
@@ -26,10 +28,16 @@ internal sealed record SlangParameter(
     [property: JsonPropertyName("type")] SlangTypeNode? Type,
     [property: JsonPropertyName("semanticName")] string? SemanticName);
 
+internal sealed record SlangEntryPointBinding(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("binding")] SlangBinding? Binding);
+
 internal sealed record SlangBinding(
     [property: JsonPropertyName("kind")] string? Kind,
+    [property: JsonPropertyName("space")] uint? Space,
     [property: JsonPropertyName("index")] uint Index,
-    [property: JsonPropertyName("count")] uint? Count);
+    [property: JsonPropertyName("count")] uint? Count,
+    [property: JsonPropertyName("size")] uint? Size);
 
 internal sealed record SlangTypeNode(
     [property: JsonPropertyName("kind")] string Kind,
@@ -37,7 +45,13 @@ internal sealed record SlangTypeNode(
     [property: JsonPropertyName("fields")] SlangField[]? Fields,
     [property: JsonPropertyName("elementCount")] uint? ElementCount,
     [property: JsonPropertyName("elementType")] SlangTypeNode? ElementType,
-    [property: JsonPropertyName("scalarType")] string? ScalarType);
+    [property: JsonPropertyName("scalarType")] string? ScalarType,
+    [property: JsonPropertyName("baseShape")] string? BaseShape,
+    [property: JsonPropertyName("elementVarLayout")] SlangVarLayout? ElementVarLayout);
+
+internal sealed record SlangVarLayout(
+    [property: JsonPropertyName("type")] SlangTypeNode? Type,
+    [property: JsonPropertyName("binding")] SlangBinding? Binding);
 
 internal sealed record SlangField(
     [property: JsonPropertyName("name")] string Name,

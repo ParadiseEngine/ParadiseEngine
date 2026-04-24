@@ -28,9 +28,16 @@ public readonly record struct SetVertexBufferPayload(uint Slot, BufferHandle Buf
 /// <summary>Payload for <see cref="RenderCommandKind.SetIndexBuffer"/>.</summary>
 public readonly record struct SetIndexBufferPayload(BufferHandle Buffer, IndexFormat Format, ulong Offset, ulong Size);
 
-/// <summary>Payload reserved for <see cref="RenderCommandKind.SetBindGroup"/>. M2 fills out the
-/// resource binding shape; M1 emits the command but the backend no-ops it.</summary>
-public readonly record struct SetBindGroupPayload(uint GroupIndex);
+/// <summary>Payload for <see cref="RenderCommandKind.SetBindGroup"/>. The bind group itself is
+/// referenced by handle; dynamic offsets (if any) live in the command stream's side
+/// <see cref="RenderCommandStream.DynamicOffsets"/> buffer starting at
+/// <see cref="DynamicOffsetsStart"/>, running for <see cref="DynamicOffsetsCount"/> entries.
+/// <see cref="DynamicOffsetsCount"/> of <c>0</c> means "no dynamic offsets".</summary>
+public readonly record struct SetBindGroupPayload(
+    uint GroupIndex,
+    BindGroupHandle BindGroup,
+    uint DynamicOffsetsStart,
+    uint DynamicOffsetsCount);
 
 /// <summary>Discriminated render command. Kind selects one of the payload fields below; reading
 /// any other field is undefined. Encode via <see cref="RenderCommandEncoder"/>.</summary>
@@ -116,8 +123,8 @@ public readonly struct RenderCommand
     public static RenderCommand FromSetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         new(RenderCommandKind.SetIndexBuffer, new SetIndexBufferPayload(buffer, format, offset, size));
 
-    public static RenderCommand FromSetBindGroup(uint groupIndex) =>
-        new(RenderCommandKind.SetBindGroup, new SetBindGroupPayload(groupIndex));
+    public static RenderCommand FromSetBindGroup(uint groupIndex, BindGroupHandle bindGroup, uint dynamicOffsetsStart, uint dynamicOffsetsCount) =>
+        new(RenderCommandKind.SetBindGroup, new SetBindGroupPayload(groupIndex, bindGroup, dynamicOffsetsStart, dynamicOffsetsCount));
 
     public static RenderCommand FromDraw(in DrawCommand cmd) =>
         new(RenderCommandKind.Draw, cmd);
@@ -126,8 +133,11 @@ public readonly struct RenderCommand
         new(RenderCommandKind.DrawIndexed, cmd);
 }
 
-/// <summary>Append-only sequence of <see cref="RenderCommand"/>s plus a side table of
-/// <see cref="RenderPassDesc"/> records referenced by <see cref="RenderCommandKind.BeginPass"/>.</summary>
+/// <summary>Append-only sequence of <see cref="RenderCommand"/>s plus side tables for payloads that
+/// don't fit in the fixed 48-byte command struct: <see cref="Passes"/> holds
+/// <see cref="RenderPassDesc"/> records referenced by <see cref="RenderCommandKind.BeginPass"/>, and
+/// <see cref="DynamicOffsets"/> holds the <c>uint[]</c> ranges referenced by
+/// <see cref="RenderCommandKind.SetBindGroup"/>.</summary>
 public readonly struct RenderCommandStream
 {
     public ReadOnlyMemory<RenderCommand> Commands { get; init; }
@@ -137,9 +147,21 @@ public readonly struct RenderCommandStream
     /// stream itself stays a flat list of small fixed-size commands.</summary>
     public ReadOnlyMemory<RenderPassDesc> Passes { get; init; }
 
+    /// <summary>Dynamic bind-group offsets referenced by <see cref="RenderCommandKind.SetBindGroup"/>
+    /// via the payload's <see cref="SetBindGroupPayload.DynamicOffsetsStart"/> +
+    /// <see cref="SetBindGroupPayload.DynamicOffsetsCount"/> range. Empty when no dynamic offsets are
+    /// in use.</summary>
+    public ReadOnlyMemory<uint> DynamicOffsets { get; init; }
+
     public RenderCommandStream(ReadOnlyMemory<RenderCommand> commands, ReadOnlyMemory<RenderPassDesc> passes)
+        : this(commands, passes, ReadOnlyMemory<uint>.Empty)
+    {
+    }
+
+    public RenderCommandStream(ReadOnlyMemory<RenderCommand> commands, ReadOnlyMemory<RenderPassDesc> passes, ReadOnlyMemory<uint> dynamicOffsets)
     {
         Commands = commands;
         Passes = passes;
+        DynamicOffsets = dynamicOffsets;
     }
 }

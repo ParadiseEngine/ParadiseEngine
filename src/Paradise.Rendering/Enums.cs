@@ -159,3 +159,36 @@ public enum BindingResourceType : byte
     MultisampledTexture,
     StorageTexture,
 }
+
+/// <summary>Dimensionality of a texture view. Mirrors WebGPU's GPUTextureViewDimension.</summary>
+public enum TextureViewDimension : byte
+{
+    Undefined = 0,
+    D1,
+    D2,
+    D2Array,
+    Cube,
+    CubeArray,
+    D3,
+}
+
+/// <summary>Which planes of a texture a view targets. Mirrors WebGPU's GPUTextureAspect.</summary>
+public enum TextureAspect : byte
+{
+    All = 0,
+    StencilOnly,
+    DepthOnly,
+}
+
+/// <summary>Depth/stencil comparison function. Mirrors WebGPU's GPUCompareFunction.</summary>
+public enum CompareFunction : byte
+{
+    Never = 0,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
+}

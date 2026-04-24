@@ -5,6 +5,17 @@ using WgIndexFormat = WebGpuSharp.IndexFormat;
 using WgVertexStepMode = WebGpuSharp.VertexStepMode;
 using WgBufferUsage = WebGpuSharp.BufferUsage;
 using WgTextureFormat = WebGpuSharp.TextureFormat;
+using WgTextureUsage = WebGpuSharp.TextureUsage;
+using WgTextureDimension = WebGpuSharp.TextureDimension;
+using WgTextureViewDimension = WebGpuSharp.TextureViewDimension;
+using WgTextureAspect = WebGpuSharp.TextureAspect;
+using WgAddressMode = WebGpuSharp.AddressMode;
+using WgFilterMode = WebGpuSharp.FilterMode;
+using WgMipmapFilterMode = WebGpuSharp.MipmapFilterMode;
+using WgCompareFunction = WebGpuSharp.CompareFunction;
+using WgLoadOp = WebGpuSharp.LoadOp;
+using WgStoreOp = WebGpuSharp.StoreOp;
+using WgShaderStage = WebGpuSharp.ShaderStage;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -104,4 +115,101 @@ internal static class FormatConversions
         // Undefined pipeline color format that Dawn later rejects with an opaque error.
         _ => throw new NotSupportedException($"WebGPU texture format '{f}' has no Paradise.Rendering mapping."),
     };
+
+    public static WgTextureUsage ToWgpu(TextureUsage u)
+    {
+        var w = WgTextureUsage.None;
+        if ((u & TextureUsage.CopySrc) != 0) w |= WgTextureUsage.CopySrc;
+        if ((u & TextureUsage.CopyDst) != 0) w |= WgTextureUsage.CopyDst;
+        if ((u & TextureUsage.TextureBinding) != 0) w |= WgTextureUsage.TextureBinding;
+        if ((u & TextureUsage.StorageBinding) != 0) w |= WgTextureUsage.StorageBinding;
+        if ((u & TextureUsage.RenderAttachment) != 0) w |= WgTextureUsage.RenderAttachment;
+        return w;
+    }
+
+    public static WgTextureDimension ToWgpu(TextureDimension d) => d switch
+    {
+        TextureDimension.D1 => WgTextureDimension.D1,
+        TextureDimension.D2 => WgTextureDimension.D2,
+        TextureDimension.D3 => WgTextureDimension.D3,
+        _ => throw new NotSupportedException($"Texture dimension '{d}' has no WebGPU mapping."),
+    };
+
+    public static WgTextureViewDimension ToWgpu(TextureViewDimension d) => d switch
+    {
+        TextureViewDimension.Undefined => WgTextureViewDimension.Undefined,
+        TextureViewDimension.D1 => WgTextureViewDimension.D1,
+        TextureViewDimension.D2 => WgTextureViewDimension.D2,
+        TextureViewDimension.D2Array => WgTextureViewDimension.D2Array,
+        TextureViewDimension.Cube => WgTextureViewDimension.Cube,
+        TextureViewDimension.CubeArray => WgTextureViewDimension.CubeArray,
+        TextureViewDimension.D3 => WgTextureViewDimension.D3,
+        _ => throw new NotSupportedException($"Texture view dimension '{d}' has no WebGPU mapping."),
+    };
+
+    public static WgTextureAspect ToWgpu(TextureAspect a) => a switch
+    {
+        TextureAspect.All => WgTextureAspect.All,
+        TextureAspect.StencilOnly => WgTextureAspect.StencilOnly,
+        TextureAspect.DepthOnly => WgTextureAspect.DepthOnly,
+        _ => throw new NotSupportedException($"Texture aspect '{a}' has no WebGPU mapping."),
+    };
+
+    public static WgAddressMode ToWgpu(SamplerAddressMode m) => m switch
+    {
+        SamplerAddressMode.Repeat => WgAddressMode.Repeat,
+        SamplerAddressMode.MirrorRepeat => WgAddressMode.MirrorRepeat,
+        SamplerAddressMode.ClampToEdge => WgAddressMode.ClampToEdge,
+        _ => throw new NotSupportedException($"Sampler address mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgFilterMode ToWgpuFilter(SamplerFilterMode m) => m switch
+    {
+        SamplerFilterMode.Nearest => WgFilterMode.Nearest,
+        SamplerFilterMode.Linear => WgFilterMode.Linear,
+        _ => throw new NotSupportedException($"Sampler filter mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgMipmapFilterMode ToWgpuMipmapFilter(SamplerFilterMode m) => m switch
+    {
+        SamplerFilterMode.Nearest => WgMipmapFilterMode.Nearest,
+        SamplerFilterMode.Linear => WgMipmapFilterMode.Linear,
+        _ => throw new NotSupportedException($"Sampler mipmap filter mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgCompareFunction ToWgpu(CompareFunction f) => f switch
+    {
+        CompareFunction.Never => WgCompareFunction.Never,
+        CompareFunction.Less => WgCompareFunction.Less,
+        CompareFunction.Equal => WgCompareFunction.Equal,
+        CompareFunction.LessEqual => WgCompareFunction.LessEqual,
+        CompareFunction.Greater => WgCompareFunction.Greater,
+        CompareFunction.NotEqual => WgCompareFunction.NotEqual,
+        CompareFunction.GreaterEqual => WgCompareFunction.GreaterEqual,
+        CompareFunction.Always => WgCompareFunction.Always,
+        _ => throw new NotSupportedException($"Compare function '{f}' has no WebGPU mapping."),
+    };
+
+    public static WgLoadOp ToWgpu(LoadOp o) => o switch
+    {
+        LoadOp.Load => WgLoadOp.Load,
+        LoadOp.Clear => WgLoadOp.Clear,
+        _ => throw new NotSupportedException($"LoadOp '{o}' has no WebGPU mapping."),
+    };
+
+    public static WgStoreOp ToWgpu(StoreOp o) => o switch
+    {
+        StoreOp.Store => WgStoreOp.Store,
+        StoreOp.Discard => WgStoreOp.Discard,
+        _ => throw new NotSupportedException($"StoreOp '{o}' has no WebGPU mapping."),
+    };
+
+    public static WgShaderStage ToWgpu(ShaderStage s)
+    {
+        var w = WgShaderStage.None;
+        if ((s & ShaderStage.Vertex) != 0) w |= WgShaderStage.Vertex;
+        if ((s & ShaderStage.Fragment) != 0) w |= WgShaderStage.Fragment;
+        if ((s & ShaderStage.Compute) != 0) w |= WgShaderStage.Compute;
+        return w;
+    }
 }

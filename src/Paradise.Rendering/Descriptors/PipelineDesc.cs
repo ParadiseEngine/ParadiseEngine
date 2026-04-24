@@ -22,6 +22,17 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
     public TextureFormat? DepthStencilFormat { get; init; }
     public PipelineLayoutDesc? Layout { get; init; }
 
+    /// <summary>Runtime bind group layout handles that back the <see cref="Layout"/>'s
+    /// <see cref="PipelineLayoutDesc.Groups"/>. One handle per group, in the same order as
+    /// <c>Layout.Groups</c>. Empty means "use Dawn's auto-layout from the shader module" (the
+    /// no-binding case).</summary>
+    public ReadOnlyMemory<BindGroupLayoutHandle> BindGroupLayouts { get; init; }
+
+    /// <summary>Depth/stencil state for the pipeline. When non-null, the pipeline's
+    /// <see cref="DepthStencilFormat"/> MUST match <see cref="DepthStencilState.Format"/>; the
+    /// backend validates this. Null disables depth-stencil (a color-only pipeline).</summary>
+    public DepthStencilState? DepthStencil { get; init; }
+
     public bool Equals(PipelineDesc other)
     {
         if (!VertexShader.Equals(other.VertexShader)) return false;
@@ -32,8 +43,18 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         if (StripIndexFormat != other.StripIndexFormat) return false;
         if (ColorFormat != other.ColorFormat) return false;
         if (DepthStencilFormat != other.DepthStencilFormat) return false;
+        if (!Nullable.Equals(DepthStencil, other.DepthStencil)) return false;
         if (!PipelineLayoutContentEquals(Layout, other.Layout)) return false;
+        if (!BindGroupLayoutHandlesEqual(BindGroupLayouts.Span, other.BindGroupLayouts.Span)) return false;
         return VertexLayoutsContentEquals(VertexLayouts.Span, other.VertexLayouts.Span);
+    }
+
+    private static bool BindGroupLayoutHandlesEqual(ReadOnlySpan<BindGroupLayoutHandle> a, ReadOnlySpan<BindGroupLayoutHandle> b)
+    {
+        if (a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++)
+            if (!a[i].Equals(b[i])) return false;
+        return true;
     }
 
     public override bool Equals(object? obj) => obj is PipelineDesc d && Equals(d);
@@ -51,11 +72,15 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         h.Add(StripIndexFormat);
         h.Add(ColorFormat);
         h.Add(DepthStencilFormat);
+        h.Add(DepthStencil);
         // Structural hash over PipelineLayoutDesc — `ShaderProgramLoader.BuildProgramDesc` mints a
         // fresh PipelineLayoutDesc per load, so reference identity defeated the cache for callers
         // that loaded the same shader twice (e.g. tests, future hot-reload). Walk the bind-group /
         // push-constant tree so the hash mirrors the structural Equals below.
         HashPipelineLayout(ref h, Layout);
+        var handles = BindGroupLayouts.Span;
+        h.Add(handles.Length);
+        for (var i = 0; i < handles.Length; i++) h.Add(handles[i]);
         var vls = VertexLayouts.Span;
         h.Add(vls.Length);
         for (var i = 0; i < vls.Length; i++)
