@@ -406,6 +406,75 @@ public class HandleDistinctnessTests
     }
 
     [Test]
+    public async Task create_pipeline_from_program_releases_vs_handle_when_fs_create_throws()
+    {
+        // Iter-9 fix for OpenCara's iter-8 finding: the iter-8 try/finally covered only the
+        // inner CreatePipeline(in PipelineDesc) call; both CreateShaderModule allocations sat
+        // OUTSIDE the try. If the second one (fs) threw — e.g. Dawn rejects invalid WGSL and
+        // WebGpuDevice.CreateShaderModule returns "ShaderModule creation returned null." — the
+        // already-allocated vs slot entry leaked. Iter-9 widens the try to cover both module
+        // allocations and guards each DestroyShader with `IsValid` so default(ShaderHandle)
+        // entries are safely skipped.
+        //
+        // Reproduce by constructing a ShaderProgramDesc whose FS module has deliberately invalid
+        // WGSL. Dawn rejects it, CreateShaderModule throws, the finally hits with vsHandle
+        // allocated and fsHandle still default — the IsValid guard destroys vs (closing the
+        // leak window) and skips fs.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var triangle = LoadTriangleProgram();
+            var vsReal = triangle.Modules[0];
+            var fsReal = triangle.Modules[1];
+
+            // Force the VS module into the content cache with a warm call so its slot count
+            // contribution is stable when the tampered call below runs (the tampered VS has a
+            // different WGSL string, so it takes a fresh slot — the leak window is exactly one
+            // slot entry if the fix regresses).
+            _ = renderer.CreatePipeline(triangle, renderer.ColorFormat);
+            var baseline = renderer.ShaderSlotCountForTest;
+
+            // Tampered program: valid VS WGSL paired with intentionally-broken FS WGSL. We reuse
+            // the real VS so Dawn accepts it, then feed Dawn garbage for FS so CreateShaderModule
+            // returns null → WebGpuDevice.CreateShaderModule throws InvalidOperationException.
+            var badFs = new ShaderModuleDesc(
+                Wgsl: "@fragment fn fs_main() -> @location(0) vec4<f32> { THIS IS NOT VALID WGSL }",
+                EntryPoint: fsReal.EntryPoint,
+                Stage: fsReal.Stage);
+            var tampered = new ShaderProgramDesc(
+                Modules: new[] { vsReal, badFs },
+                Layout: triangle.Layout,
+                VertexBuffers: triangle.VertexBuffers);
+
+            for (var i = 0; i < 4; i++)
+            {
+                try
+                {
+                    _ = renderer.CreatePipeline(tampered, renderer.ColorFormat);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Expected — Dawn rejects the bad WGSL, WebGpuDevice wraps as
+                    // "ShaderModule creation returned null." If Dawn happens to tolerate this
+                    // input on some implementation, the test simply exercises the happy path
+                    // and still passes — the finally is trivially valid then.
+                }
+            }
+
+            // Baseline holds if and only if the finally destroyed every allocated vs handle
+            // (the only ones that reach creation on the FS-throws path). Any regression to
+            // "allocations outside try" reappears here as baseline drift by N per call.
+            await Assert.That(renderer.ShaderSlotCountForTest).IsEqualTo(baseline);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task create_pipeline_from_program_releases_shader_handles_on_exception()
     {
         // Iter-8 fix for OpenCara's iter-7 minor finding: the helper's inner CreatePipeline(in

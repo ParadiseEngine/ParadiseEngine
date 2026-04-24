@@ -250,35 +250,40 @@ public sealed class WebGpuRenderer : IDisposable
         // destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every call
         // leaks two _device.Shaders slot entries for the renderer's lifetime (the native module
         // is safe — the content cache AND the native WgRenderPipeline both retain it).
-        var vsHandle = _device.CreateShaderModule(vsModule);
-        var fsHandle = _device.CreateShaderModule(fsModule);
-
-        var pipelineDesc = new PipelineDesc
-        {
-            Name = "ShaderProgramPipeline",
-            VertexShader = vsHandle,
-            VertexEntryPoint = vsModule.EntryPoint,
-            FragmentShader = fsHandle,
-            FragmentEntryPoint = fsModule.EntryPoint,
-            VertexLayouts = program.VertexBuffers,
-            Topology = topology,
-            StripIndexFormat = stripIndexFormat,
-            ColorFormat = colorFormat,
-            DepthStencilFormat = null,
-            Layout = program.Layout,
-        };
+        //
+        // Both CreateShaderModule calls AND the inner CreatePipeline live inside the try so the
+        // cleanup covers every exception site: the second CreateShaderModule can throw
+        // InvalidOperationException if Dawn fails to compile the WGSL, and the inner
+        // CreatePipeline can throw NotSupportedException from BuildNativePipeline's Layout /
+        // DepthStencilFormat guards. The finally guards each DestroyShader with IsValid so it
+        // skips handles that never got allocated (default(ShaderHandle).Generation == 0).
+        ShaderHandle vsHandle = default;
+        ShaderHandle fsHandle = default;
         try
         {
+            vsHandle = _device.CreateShaderModule(vsModule);
+            fsHandle = _device.CreateShaderModule(fsModule);
+
+            var pipelineDesc = new PipelineDesc
+            {
+                Name = "ShaderProgramPipeline",
+                VertexShader = vsHandle,
+                VertexEntryPoint = vsModule.EntryPoint,
+                FragmentShader = fsHandle,
+                FragmentEntryPoint = fsModule.EntryPoint,
+                VertexLayouts = program.VertexBuffers,
+                Topology = topology,
+                StripIndexFormat = stripIndexFormat,
+                ColorFormat = colorFormat,
+                DepthStencilFormat = null,
+                Layout = program.Layout,
+            };
             return CreatePipeline(in pipelineDesc);
         }
         finally
         {
-            // Always release the locally-minted shader handles — even if the inner CreatePipeline
-            // throws (e.g. NotSupportedException from the Layout/DepthStencilFormat guards in
-            // BuildNativePipeline). Without the try/finally the destroy pair was only reachable
-            // on the happy path, so exception paths leaked two slot entries per call.
-            DestroyShader(vsHandle);
-            DestroyShader(fsHandle);
+            if (vsHandle.IsValid) DestroyShader(vsHandle);
+            if (fsHandle.IsValid) DestroyShader(fsHandle);
         }
     }
 
@@ -321,81 +326,81 @@ public sealed class WebGpuRenderer : IDisposable
         WgRenderPassEncoder? activePass = null;
         try
         {
-        for (var i = 0; i < commands.Length; i++)
-        {
-            ref readonly var cmd = ref commands[i];
-            switch (cmd.Kind)
+            for (var i = 0; i < commands.Length; i++)
             {
-                case RenderCommandKind.BeginPass:
+                ref readonly var cmd = ref commands[i];
+                switch (cmd.Kind)
                 {
-                    if (activePass is not null)
-                        throw new InvalidOperationException(
-                            "Nested BeginPass — previous pass was not ended (missing EndPass).");
-                    var passIndex = cmd.BeginPass.PassIndex;
-                    if ((uint)passIndex >= (uint)passes.Length)
-                        throw new InvalidOperationException(
-                            $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
-                    activePass = BeginPass(encoder, passes[passIndex], backbuffer);
-                    break;
+                    case RenderCommandKind.BeginPass:
+                    {
+                        if (activePass is not null)
+                            throw new InvalidOperationException(
+                                "Nested BeginPass — previous pass was not ended (missing EndPass).");
+                        var passIndex = cmd.BeginPass.PassIndex;
+                        if ((uint)passIndex >= (uint)passes.Length)
+                            throw new InvalidOperationException(
+                                $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
+                        activePass = BeginPass(encoder, passes[passIndex], backbuffer);
+                        break;
+                    }
+                    case RenderCommandKind.EndPass:
+                    {
+                        // Null activePass BEFORE calling End() so the finally-block safety net
+                        // becomes idempotent: if End() throws (Dawn validation error at pass end),
+                        // activePass is already null and the finally won't double-End the same
+                        // native encoder. Dawn considers calling End() twice on the same pass an
+                        // invariant violation and may trigger a native assertion.
+                        var passToEnd = activePass;
+                        activePass = null;
+                        passToEnd?.End();
+                        break;
+                    }
+                    case RenderCommandKind.SetPipeline:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        pass.SetPipeline(_device.ResolvePipeline(cmd.SetPipeline.Pipeline));
+                        break;
+                    }
+                    case RenderCommandKind.SetVertexBuffer:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetVertexBuffer;
+                        pass.SetVertexBuffer(p.Slot, _device.ResolveBuffer(p.Buffer), p.Offset, p.Size);
+                        break;
+                    }
+                    case RenderCommandKind.SetIndexBuffer:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetIndexBuffer;
+                        pass.SetIndexBuffer(_device.ResolveBuffer(p.Buffer), FormatConversions.ToWgpu(p.Format), p.Offset, p.Size);
+                        break;
+                    }
+                    case RenderCommandKind.SetBindGroup:
+                        // M1 reserves the command but the backend has nothing to bind. M2 will fill in
+                        // the resource payload + dispatch wgpuRenderPassEncoderSetBindGroup.
+                        break;
+                    case RenderCommandKind.Draw:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var d = cmd.Draw;
+                        pass.Draw(d.VertexCount, d.InstanceCount, d.FirstVertex, d.FirstInstance);
+                        break;
+                    }
+                    case RenderCommandKind.DrawIndexed:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var d = cmd.DrawIndexed;
+                        pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
+                        break;
+                    }
+                    default:
+                        throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
                 }
-                case RenderCommandKind.EndPass:
-                {
-                    // Null activePass BEFORE calling End() so the finally-block safety net
-                    // becomes idempotent: if End() throws (Dawn validation error at pass end),
-                    // activePass is already null and the finally won't double-End the same
-                    // native encoder. Dawn considers calling End() twice on the same pass an
-                    // invariant violation and may trigger a native assertion.
-                    var passToEnd = activePass;
-                    activePass = null;
-                    passToEnd?.End();
-                    break;
-                }
-                case RenderCommandKind.SetPipeline:
-                {
-                    var pass = RequireActivePass(activePass);
-                    pass.SetPipeline(_device.ResolvePipeline(cmd.SetPipeline.Pipeline));
-                    break;
-                }
-                case RenderCommandKind.SetVertexBuffer:
-                {
-                    var pass = RequireActivePass(activePass);
-                    var p = cmd.SetVertexBuffer;
-                    pass.SetVertexBuffer(p.Slot, _device.ResolveBuffer(p.Buffer), p.Offset, p.Size);
-                    break;
-                }
-                case RenderCommandKind.SetIndexBuffer:
-                {
-                    var pass = RequireActivePass(activePass);
-                    var p = cmd.SetIndexBuffer;
-                    pass.SetIndexBuffer(_device.ResolveBuffer(p.Buffer), FormatConversions.ToWgpu(p.Format), p.Offset, p.Size);
-                    break;
-                }
-                case RenderCommandKind.SetBindGroup:
-                    // M1 reserves the command but the backend has nothing to bind. M2 will fill in
-                    // the resource payload + dispatch wgpuRenderPassEncoderSetBindGroup.
-                    break;
-                case RenderCommandKind.Draw:
-                {
-                    var pass = RequireActivePass(activePass);
-                    var d = cmd.Draw;
-                    pass.Draw(d.VertexCount, d.InstanceCount, d.FirstVertex, d.FirstInstance);
-                    break;
-                }
-                case RenderCommandKind.DrawIndexed:
-                {
-                    var pass = RequireActivePass(activePass);
-                    var d = cmd.DrawIndexed;
-                    pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
-                    break;
-                }
-                default:
-                    throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
             }
-        }
 
-        if (activePass is not null)
-            throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
-        activePass = null;
+            if (activePass is not null)
+                throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
+            activePass = null;
         }
         finally
         {
