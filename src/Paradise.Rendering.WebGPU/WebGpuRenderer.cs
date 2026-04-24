@@ -233,11 +233,13 @@ public sealed class WebGpuRenderer : IDisposable
         if (vsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no vertex module.");
         if (fsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no fragment module.");
 
-        // CreateShaderModule dedupes by (Wgsl, EntryPoint, Stage), so calling it twice with
-        // distinct ShaderModuleDesc records that share content returns the same handle. The
-        // earlier ReferenceEquals(vsModule, fsModule) short-circuit is dead code — the loader
-        // always allocates distinct ShaderModuleDesc instances per entry point — and obscured
-        // the fact that the device's content-keyed cache is doing the actual dedupe.
+        // CreateShaderModule dedupes the underlying native WgShaderModule by (Wgsl, EntryPoint,
+        // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call (iter-5
+        // public-handle split — matches the pipeline and buffer contracts). These two handles
+        // are consumed locally by the PipelineDesc below and never reach the caller, so we must
+        // destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every call
+        // leaks two _device.Shaders slot entries for the renderer's lifetime (the native module
+        // is safe — the content cache AND the native WgRenderPipeline both retain it).
         var vsHandle = _device.CreateShaderModule(vsModule);
         var fsHandle = _device.CreateShaderModule(fsModule);
 
@@ -255,7 +257,14 @@ public sealed class WebGpuRenderer : IDisposable
             DepthStencilFormat = null,
             Layout = program.Layout,
         };
-        return CreatePipeline(in pipelineDesc);
+        var pipeline = CreatePipeline(in pipelineDesc);
+        // Release the locally-minted shader handles now that the native pipeline has been built.
+        // The M2 better-fix is content-derived PipelineCache keys (so repeated calls with the
+        // same ShaderProgramDesc actually hit the cache regardless of slot churn); for M1 the
+        // destroy-after-build pattern keeps slot-table growth bounded without widening scope.
+        DestroyShader(vsHandle);
+        DestroyShader(fsHandle);
+        return pipeline;
     }
 
     public void DestroyPipeline(PipelineHandle handle)
@@ -481,6 +490,13 @@ public sealed class WebGpuRenderer : IDisposable
     /// (and tests) can drive it without InternalsVisibleTo to every consumer.</summary>
     public static ShaderProgramDesc LoadShaderProgram(Assembly assembly, string logicalNamePrefix) =>
         ShaderProgramLoader.Load(assembly, logicalNamePrefix);
+
+    /// <summary>Test-only accessor for the live-shader-slot count. Used by regression tests that
+    /// assert repeated high-level <see cref="CreatePipeline(in ShaderProgramDesc, TextureFormat)"/>
+    /// calls don't grow the shader slot table (iter-6 fix for the slot-leak OpenCara flagged on
+    /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
+    /// take a dependency on internal device counters.</summary>
+    internal int ShaderSlotCountForTest => _device.Shaders.Count;
 
     public void Dispose()
     {

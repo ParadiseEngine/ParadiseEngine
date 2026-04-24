@@ -364,4 +364,44 @@ public class HandleDistinctnessTests
             renderer.Dispose();
         }
     }
+
+    [Test]
+    public async Task create_pipeline_from_program_does_not_grow_shader_slot_table()
+    {
+        // Iter-6 fix for OpenCara's iter-5 minor finding: the high-level
+        // CreatePipeline(ShaderProgramDesc, TextureFormat) helper minted two ShaderHandles that
+        // were consumed locally by the PipelineDesc and never returned to the caller, so every
+        // call leaked two entries into _device.Shaders. Iter-6 destroys the locally-minted
+        // handles after the native pipeline is built — the content-keyed _shaderModuleCache and
+        // the native WgRenderPipeline both retain the WgShaderModule, so post-creation destroy
+        // only releases slot-table metadata.
+        //
+        // Assertion: N repeated CreatePipeline(program, fmt) calls leave
+        // renderer.ShaderSlotCountForTest at the same value as after the warm-up call. Any
+        // reappearance of the leak (e.g. a forgotten Destroy pair or an inline refactor that
+        // drops it) surfaces here as a hard failure regardless of GPU presence in CI.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+
+            // Warm: one call establishes the native modules in _shaderModuleCache and the
+            // pipeline in _pipelineCache. After this the slot count is the baseline we pin.
+            _ = renderer.CreatePipeline(program, renderer.ColorFormat);
+            var baseline = renderer.ShaderSlotCountForTest;
+
+            for (var i = 0; i < 8; i++)
+            {
+                _ = renderer.CreatePipeline(program, renderer.ColorFormat);
+            }
+
+            await Assert.That(renderer.ShaderSlotCountForTest).IsEqualTo(baseline);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
 }
