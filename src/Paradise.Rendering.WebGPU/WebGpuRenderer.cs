@@ -185,7 +185,10 @@ public sealed class WebGpuRenderer : IDisposable
     public BufferHandle CreateBufferWithData<T>(in BufferDesc desc, ReadOnlySpan<T> data) where T : unmanaged
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var byteSize = (ulong)(data.Length * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+        // Widen both operands BEFORE multiplying so the product stays in ulong precision.
+        // `data.Length * Unsafe.SizeOf<T>()` executes in int and silently wraps at 2^31 — for
+        // 16-byte elements that's ~134M entries, a sharp edge for M2/M3 staging buffers.
+        var byteSize = (ulong)data.Length * (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
         var sized = new BufferDesc(desc.Name, byteSize > desc.Size ? byteSize : desc.Size, desc.Usage | BufferUsage.CopyDst);
         var handle = _device.CreateBuffer(in sized);
         var native = _device.ResolveBuffer(handle);
@@ -264,14 +267,19 @@ public sealed class WebGpuRenderer : IDisposable
             DepthStencilFormat = null,
             Layout = program.Layout,
         };
-        var pipeline = CreatePipeline(in pipelineDesc);
-        // Release the locally-minted shader handles now that the native pipeline has been built.
-        // The M2 better-fix is content-derived PipelineCache keys (so repeated calls with the
-        // same ShaderProgramDesc actually hit the cache regardless of slot churn); for M1 the
-        // destroy-after-build pattern keeps slot-table growth bounded without widening scope.
-        DestroyShader(vsHandle);
-        DestroyShader(fsHandle);
-        return pipeline;
+        try
+        {
+            return CreatePipeline(in pipelineDesc);
+        }
+        finally
+        {
+            // Always release the locally-minted shader handles — even if the inner CreatePipeline
+            // throws (e.g. NotSupportedException from the Layout/DepthStencilFormat guards in
+            // BuildNativePipeline). Without the try/finally the destroy pair was only reachable
+            // on the happy path, so exception paths leaked two slot entries per call.
+            DestroyShader(vsHandle);
+            DestroyShader(fsHandle);
+        }
     }
 
     public void DestroyPipeline(PipelineHandle handle)
@@ -331,9 +339,17 @@ public sealed class WebGpuRenderer : IDisposable
                     break;
                 }
                 case RenderCommandKind.EndPass:
-                    activePass?.End();
+                {
+                    // Null activePass BEFORE calling End() so the finally-block safety net
+                    // becomes idempotent: if End() throws (Dawn validation error at pass end),
+                    // activePass is already null and the finally won't double-End the same
+                    // native encoder. Dawn considers calling End() twice on the same pass an
+                    // invariant violation and may trigger a native assertion.
+                    var passToEnd = activePass;
                     activePass = null;
+                    passToEnd?.End();
                     break;
+                }
                 case RenderCommandKind.SetPipeline:
                 {
                     var pass = RequireActivePass(activePass);

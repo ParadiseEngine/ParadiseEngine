@@ -406,6 +406,59 @@ public class HandleDistinctnessTests
     }
 
     [Test]
+    public async Task create_pipeline_from_program_releases_shader_handles_on_exception()
+    {
+        // Iter-8 fix for OpenCara's iter-7 minor finding: the helper's inner CreatePipeline(in
+        // PipelineDesc) can throw NotSupportedException from BuildNativePipeline's
+        // DepthStencilFormat / Layout guards. Pre-iter-8 the DestroyShader pair ran only on the
+        // happy path, so exception paths leaked two slot entries per call. Iter-8 wraps the
+        // inner call in try/finally so the destroy pair runs regardless.
+        //
+        // Reproduce by supplying a ShaderProgramDesc whose Layout has a non-empty Groups array —
+        // BuildNativePipeline's guard rejects that with NotSupportedException, and we assert
+        // the slot count didn't grow.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var triangle = LoadTriangleProgram();
+            // Build a tampered ShaderProgramDesc with the triangle's modules/VertexBuffers but a
+            // non-empty PipelineLayoutDesc — the BuildNativePipeline guard rejects this.
+            var tampered = new ShaderProgramDesc(
+                Modules: triangle.Modules,
+                Layout: new PipelineLayoutDesc(
+                    Groups: new[]
+                    {
+                        new BindGroupLayoutDesc(0, new[]
+                        {
+                            new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
+                        }),
+                    },
+                    PushConstants: Array.Empty<PushConstantRangeDesc>()),
+                VertexBuffers: triangle.VertexBuffers);
+
+            // Warm so the slot count has a settled baseline (the helper mints + destroys two
+            // handles per successful call; baseline after the warm call stays stable if the
+            // exception path is clean).
+            _ = renderer.CreatePipeline(triangle, renderer.ColorFormat);
+            var baseline = renderer.ShaderSlotCountForTest;
+
+            for (var i = 0; i < 4; i++)
+            {
+                try { _ = renderer.CreatePipeline(tampered, renderer.ColorFormat); }
+                catch (NotSupportedException) { /* expected — the Layout guard fires */ }
+            }
+
+            await Assert.That(renderer.ShaderSlotCountForTest).IsEqualTo(baseline);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task create_pipeline_from_program_respects_custom_topology()
     {
         // Iter-7 fix for OpenCara's iter-6 Major B (codex): the helper used to hardcode
