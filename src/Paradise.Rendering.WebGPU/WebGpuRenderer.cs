@@ -528,6 +528,22 @@ public sealed class WebGpuRenderer : IDisposable
 
     private WgBindGroupLayout BuildNativeBindGroupLayout(BindGroupLayoutDesc layoutDesc)
     {
+        // Validate uniqueness before assembling the Dawn entries — symmetric with the
+        // CreateBindGroup duplicate-binding check. WebGPU requires unique binding numbers per
+        // bind group layout, and Dawn's diagnostic when violated is opaque. Cheap O(N²) over
+        // typically <8 entries.
+        var srcEntries = layoutDesc.Entries;
+        for (var i = 0; i < srcEntries.Length; i++)
+        {
+            for (var j = i + 1; j < srcEntries.Length; j++)
+            {
+                if (srcEntries[i].Binding == srcEntries[j].Binding)
+                    throw new InvalidOperationException(
+                        $"BindGroupLayoutDesc has duplicate binding {srcEntries[i].Binding}. " +
+                        "WebGPU requires each binding number to appear at most once per bind group layout.");
+            }
+        }
+
         var entries = new WgBindGroupLayoutEntry[layoutDesc.Entries.Length];
         for (var i = 0; i < layoutDesc.Entries.Length; i++)
         {
