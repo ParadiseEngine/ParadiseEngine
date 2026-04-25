@@ -8,7 +8,14 @@ namespace Paradise.Rendering.WebGPU.Internal;
 /// public <see cref="BindGroupLayoutHandle"/> layer. Mirrors <see cref="PipelineCache"/>'s design:
 /// two callers with structurally-equal <see cref="BindGroupLayoutDesc"/> records share the native
 /// layout; each caller gets a distinct public handle whose destruction never yanks the shared
-/// native out from under the other.</summary>
+/// native out from under the other.
+/// <para>
+/// Append-only for the renderer's lifetime — by design, mirroring <see cref="PipelineCache"/>.
+/// Bind group layouts are typically built up-front and live to renderer shutdown; the small
+/// retained-native cost trades cleanly for a predictable handle-ownership contract. Revisit if
+/// hot-reload / dynamic-shader scenarios surface measurable layout churn (refcount or LRU
+/// eviction would land then).
+/// </para></summary>
 internal sealed class BindGroupLayoutCache
 {
     private readonly Dictionary<Key, WgBindGroupLayout> _byKey = new();

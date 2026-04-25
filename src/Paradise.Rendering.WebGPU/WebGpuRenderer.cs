@@ -244,6 +244,16 @@ public sealed class WebGpuRenderer : IDisposable
         IndexFormat stripIndexFormat = IndexFormat.Uint16)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // This convenience overload uses Dawn's auto-layout (no explicit BindGroupLayouts), so a
+        // shader that reflects bind groups would produce a pipeline whose layout is incompatible
+        // with externally-built BindGroupLayoutHandles for the same program. Reject explicitly so
+        // the caller routes through the (program, template) overload with explicit
+        // BindGroupLayouts instead. Mirrors the Option-A guard pattern.
+        if (program.Layout.Groups.Length > 0)
+            throw new InvalidOperationException(
+                "ShaderProgramDesc carries non-empty bind groups; use CreatePipeline(in ShaderProgramDesc, in PipelineDesc) " +
+                "with PipelineDesc.BindGroupLayouts populated. The convenience overload that takes only ColorFormat builds " +
+                "an auto-layout pipeline incompatible with external BindGroupLayout handles for the same program.");
         return CreatePipelineInternal(
             in program,
             colorFormat,
@@ -264,9 +274,10 @@ public sealed class WebGpuRenderer : IDisposable
     /// <see cref="PipelineDesc.Layout"/> is descriptor metadata used for cache identity and
     /// (eventually) push-constant validation; the **native** WebGPU pipeline layout is built
     /// exclusively from <see cref="PipelineDesc.BindGroupLayouts"/> (one runtime handle per group,
-    /// in order). The two must agree on group count and ordering — a Debug.Assert in
-    /// <see cref="WebGpuDevice.BuildNativePipeline"/> verifies this. <see cref="PipelineDesc.VertexLayouts"/>
-    /// is always taken from <paramref name="program"/>.
+    /// in order). The two must agree on group count — a runtime check in
+    /// <see cref="WebGpuDevice.BuildNativePipeline"/> throws <see cref="InvalidOperationException"/>
+    /// otherwise. <see cref="PipelineDesc.VertexLayouts"/> is always taken from
+    /// <paramref name="program"/>.
     /// </para></summary>
     public PipelineHandle CreatePipeline(in ShaderProgramDesc program, in PipelineDesc template)
     {
@@ -641,12 +652,20 @@ public sealed class WebGpuRenderer : IDisposable
                         }
                         else
                         {
-                            var start = (int)p.DynamicOffsetsStart;
-                            var count = (int)p.DynamicOffsetsCount;
-                            if ((uint)start + (uint)count > (uint)dynamicOffsets.Length)
+                            // Bounds-check in uint space — `(uint)start + (uint)count` would wrap
+                            // silently past uint.MaxValue and let the guard pass spuriously, after
+                            // which Span.Slice surfaces the malformed command as a generic
+                            // ArgumentOutOfRangeException. Subtraction-form check is overflow-safe
+                            // because lenU is bounded by ReadOnlyMemory<uint>.Length (int) and the
+                            // operands are unsigned; also catches Count > int.MaxValue, which would
+                            // otherwise sign-flip when cast to int for the Slice call below.
+                            var startU = p.DynamicOffsetsStart;
+                            var countU = p.DynamicOffsetsCount;
+                            var lenU = (uint)dynamicOffsets.Length;
+                            if (startU > lenU || countU > lenU - startU)
                                 throw new InvalidOperationException(
-                                    $"SetBindGroup dynamic-offsets range [{start}, {start + count}) exceeds stream.DynamicOffsets length {dynamicOffsets.Length}.");
-                            pass.SetBindGroup(p.GroupIndex, bindGroup, dynamicOffsets.Slice(start, count));
+                                    $"SetBindGroup dynamic-offsets range [start={startU}, count={countU}) exceeds stream.DynamicOffsets length {dynamicOffsets.Length}.");
+                            pass.SetBindGroup(p.GroupIndex, bindGroup, dynamicOffsets.Slice((int)startU, (int)countU));
                         }
                         break;
                     }
@@ -697,6 +716,16 @@ public sealed class WebGpuRenderer : IDisposable
                 "Multi-attachment rendering is reserved for a later milestone.");
 
         var src = pass.Colors.Slot0;
+        // Render-to-texture (a non-Invalid color attachment View) is reserved for a later
+        // milestone alongside multi-attachment rendering. Reject explicitly so a caller passing
+        // their own RenderViewHandle sees a clear scope-deferral message instead of silently
+        // rendering to the swapchain. Option-A guard-reject pattern, symmetric with the
+        // multi-attachment / push-constants / non-Texture2D guards.
+        if (src.View.IsValid)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 always renders the single color attachment to the swapchain (windowed) " +
+                "or the offscreen target (headless); supplying a non-Invalid ColorAttachmentDesc.View for render-to-texture " +
+                "is reserved for a later milestone. Pass RenderViewHandle.Invalid until then.");
         var colors = new WgRenderPassColorAttachment[1];
         colors[0] = new WgRenderPassColorAttachment
         {

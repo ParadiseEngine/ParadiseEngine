@@ -75,12 +75,17 @@ internal static class ShaderProgramLoader
                 PushConstants: Array.Empty<PushConstantRangeDesc>());
         }
 
-        // Compute per-binding visibility from the entry points that reference it.
+        // Compute per-binding visibility from the entry points that reference it. Slang's
+        // `entryPoints[].bindings[]` array conservatively lists every module-level parameter the
+        // entry point may touch (not just ones it actually reads), so this union closely tracks
+        // the real shader visibility.
         var visibilityByName = new Dictionary<string, ShaderStage>(StringComparer.Ordinal);
+        ShaderStage allStages = ShaderStage.None;
         foreach (var ep in entryPoints)
         {
-            if (ep.Bindings is null) continue;
             var stage = ParseStage(ep.Stage);
+            allStages |= stage;
+            if (ep.Bindings is null) continue;
             foreach (var b in ep.Bindings)
             {
                 if (b.Name is null) continue;
@@ -118,9 +123,13 @@ internal static class ShaderProgramLoader
             var binding = p.Binding!;
             var space = binding.Space ?? 0u;
             var (type, minSize) = MapParameterType(p);
+            // Visibility comes from the entry-point bindings table by name. If a parameter doesn't
+            // appear in any entry-point's bindings (unusual — Slang lists them conservatively),
+            // fall back to the union of every entry point's stage rather than hardcoding
+            // Vertex|Fragment, so a future compute-only program doesn't get over-permissioned.
             var visibility = p.Name is not null && visibilityByName.TryGetValue(p.Name, out var vis)
                 ? vis
-                : ShaderStage.Vertex | ShaderStage.Fragment;
+                : allStages;
 
             if (!groupedByIndex.TryGetValue(space, out var list))
             {
@@ -161,10 +170,17 @@ internal static class ShaderProgramLoader
             case "resource":
             {
                 var shape = t.BaseShape ?? "<null>";
-                if (shape.StartsWith("texture", StringComparison.Ordinal))
+                // M2 binds Texture2D only — the native bind-group-layout build hardcodes
+                // SampleType=Float / ViewDimension=D2 / Multisampled=false. Cube / D2Array /
+                // D3 / depth / integer-sampled textures need fanout in BindingResourceType
+                // before the layout build can route them correctly. Reject everything else
+                // here so a non-Texture2D shader fails at load-time instead of building a
+                // silently-incorrect WgBindGroupLayoutEntry downstream.
+                if (shape == "texture2D")
                     return (BindingResourceType.SampledTexture, 0);
                 throw new NotSupportedException(
-                    $"Paradise.Rendering M2 does not yet support Slang resource baseShape '{shape}'; reserved for later milestone.");
+                    $"Paradise.Rendering M2 only supports Texture2D bindings; Slang resource baseShape '{shape}' " +
+                    "(cube / array / 3D / depth / integer-sampled textures) is reserved for a later milestone.");
             }
             case "samplerState":
                 return (BindingResourceType.Sampler, 0);
