@@ -74,6 +74,23 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgBindGroupLayout> BindGroupLayouts { get; } = new();
     public SlotTable<WgBindGroup> BindGroups { get; } = new();
 
+    // Records the GroupIndex each BindGroupLayoutHandle was minted with. Lets
+    // BuildNativePipeline cross-check that the runtime BindGroupLayouts[i] handle's recorded
+    // GroupIndex matches the corresponding Layout.Groups[i].GroupIndex (and the dense pipeline-
+    // layout position i). Keyed on (Index, Generation) so a slot reuse after destroy doesn't
+    // resurrect the old mapping. Cleared in Dispose alongside BindGroupLayouts.
+    private readonly System.Collections.Generic.Dictionary<(uint, uint), uint> _bindGroupLayoutGroupIndex = new();
+
+    public void RecordBindGroupLayoutGroupIndex(BindGroupLayoutHandle h, uint groupIndex)
+    {
+        _bindGroupLayoutGroupIndex[(h.Index, h.Generation)] = groupIndex;
+    }
+
+    public uint? TryGetBindGroupLayoutGroupIndex(BindGroupLayoutHandle h)
+    {
+        return _bindGroupLayoutGroupIndex.TryGetValue((h.Index, h.Generation), out var v) ? v : null;
+    }
+
     // Content-keyed native shader-module cache. Sits BELOW the public ShaderHandle layer so the
     // renderer can hand out fresh handles per CreateShaderModule call while still deduping the
     // underlying Dawn shader module by (WGSL source + entry point + stage). Mirrors
@@ -347,6 +364,25 @@ internal sealed class WebGpuDevice : IDisposable
         var bglSpan = desc.BindGroupLayouts.Span;
         if (bglSpan.Length > 0)
         {
+            // Per-handle alignment: the runtime BindGroupLayouts[i] handle's recorded GroupIndex
+            // must equal i. Otherwise a caller could pass [_materialLayout, _frameLayout] reversed
+            // from the program's reflection (Group 0 is "frame"); the existing length + Groups[i]
+            // checks pass, but @group(0) ends up bound to the material layout. Closes the iter-9
+            // swapped-order bypass on the metadata-side checks.
+            for (var i = 0; i < bglSpan.Length; i++)
+            {
+                var recorded = TryGetBindGroupLayoutGroupIndex(bglSpan[i]);
+                if (recorded is null)
+                    throw new StaleHandleException(
+                        $"BindGroupLayoutHandle at PipelineDesc.BindGroupLayouts[{i}] is not recorded; " +
+                        "it may have been destroyed or never created through WebGpuRenderer.CreateBindGroupLayout.");
+                if (recorded.Value != (uint)i)
+                    throw new InvalidOperationException(
+                        $"PipelineDesc.BindGroupLayouts[{i}] was created with GroupIndex={recorded.Value} " +
+                        $"but the dense pipeline-layout packing expects @group({i}) at position {i}. " +
+                        "Reorder BindGroupLayouts so position i carries a layout created with GroupIndex == i.");
+            }
+
             var nativeLayouts = new WgBindGroupLayout[bglSpan.Length];
             for (var i = 0; i < bglSpan.Length; i++)
                 nativeLayouts[i] = ResolveBindGroupLayout(bglSpan[i]);
@@ -612,6 +648,21 @@ internal sealed class WebGpuDevice : IDisposable
                 Binding = e.Binding,
                 Sampler = ResolveSampler(e.Sampler),
             };
+        }
+
+        // Validate uniqueness across all three entry spans before handing to Dawn — WebGPU spec
+        // requires unique binding numbers per bind group, and Dawn's diagnostic when violated is
+        // opaque. Cheap O(N^2) over typically <8 entries; surface the colliding binding in the
+        // message so the caller can locate the duplicate without rebuilding from native logs.
+        for (var i = 0; i < entries.Length; i++)
+        {
+            for (var j = i + 1; j < entries.Length; j++)
+            {
+                if (entries[i].Binding == entries[j].Binding)
+                    throw new InvalidOperationException(
+                        $"BindGroupDesc has duplicate binding {entries[i].Binding} across the Buffers/Textures/Samplers spans. " +
+                        "WebGPU requires each binding number to appear at most once per bind group.");
+            }
         }
 
         var bgDesc = new WgBindGroupDescriptor

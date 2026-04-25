@@ -474,7 +474,12 @@ public sealed class WebGpuRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var native = _bindGroupLayoutCache.GetOrCreateNative(layoutDesc, BuildNativeBindGroupLayout);
-        return _device.CreateBindGroupLayout(native);
+        var handle = _device.CreateBindGroupLayout(native);
+        // Track the layout's GroupIndex on the public handle so BuildNativePipeline can validate
+        // BindGroupLayouts[i].GroupIndex == Layout.Groups[i].GroupIndex == i (closes the
+        // swapped-order bypass on the existing length+alignment cross-checks).
+        _device.RecordBindGroupLayoutGroupIndex(handle, layoutDesc.GroupIndex);
+        return handle;
     }
 
     /// <summary>Test/inspection accessor for the content-keyed layout cache's entry count. Scoped
@@ -664,27 +669,24 @@ public sealed class WebGpuRenderer : IDisposable
                         var pass = RequireActivePass(activePass);
                         var p = cmd.SetBindGroup;
                         var bindGroup = _device.ResolveBindGroup(p.BindGroup);
-                        if (p.DynamicOffsetsCount == 0)
+                        if (p.DynamicOffsetsCount > 0)
                         {
-                            pass.SetBindGroup(p.GroupIndex, bindGroup);
+                            // Submit-side mirror of the encoder's dynamic-offsets guard. The
+                            // encoder rejects DynamicOffsetsCount > 0, but a caller staging
+                            // RenderCommands directly via the public RenderCommand.FromSetBindGroup
+                            // factory bypasses that guard. Re-check at submit so the failure stays
+                            // inside our diagnostic surface (descriptive NotSupportedException)
+                            // instead of leaking through to a less-informative Dawn validation
+                            // error from missing HasDynamicOffset on the layout entry. Discard
+                            // unused dynamicOffsets/start (kept for the eventual M3 path that
+                            // restores the bounds-checked Slice + pass.SetBindGroup with offsets).
+                            _ = dynamicOffsets;
+                            throw new NotSupportedException(
+                                "Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone " +
+                                "(BindGroupLayoutEntryDesc has no HasDynamicOffset field). " +
+                                $"SetBindGroup with DynamicOffsetsCount={p.DynamicOffsetsCount} cannot be satisfied.");
                         }
-                        else
-                        {
-                            // Bounds-check in uint space — `(uint)start + (uint)count` would wrap
-                            // silently past uint.MaxValue and let the guard pass spuriously, after
-                            // which Span.Slice surfaces the malformed command as a generic
-                            // ArgumentOutOfRangeException. Subtraction-form check is overflow-safe
-                            // because lenU is bounded by ReadOnlyMemory<uint>.Length (int) and the
-                            // operands are unsigned; also catches Count > int.MaxValue, which would
-                            // otherwise sign-flip when cast to int for the Slice call below.
-                            var startU = p.DynamicOffsetsStart;
-                            var countU = p.DynamicOffsetsCount;
-                            var lenU = (uint)dynamicOffsets.Length;
-                            if (startU > lenU || countU > lenU - startU)
-                                throw new InvalidOperationException(
-                                    $"SetBindGroup dynamic-offsets range [start={startU}, count={countU}) exceeds stream.DynamicOffsets length {dynamicOffsets.Length}.");
-                            pass.SetBindGroup(p.GroupIndex, bindGroup, dynamicOffsets.Slice((int)startU, (int)countU));
-                        }
+                        pass.SetBindGroup(p.GroupIndex, bindGroup);
                         break;
                     }
                     case RenderCommandKind.Draw:
