@@ -42,10 +42,12 @@ public class BindGroupLayoutDescTests
     [Test]
     public async Task layout_entries_array_is_reference_compared_by_record_synthesis()
     {
-        // Record-struct synthesis uses reference equality on T[] properties. This is the *design*
-        // for the raw record; structural equality across distinct allocations is provided by the
-        // backend's BindGroupLayoutCache (WebGPU internal) which walks entries element-by-element.
-        // The test locks the raw semantic so a reader doesn't expect value-equality on the arrays.
+        // Record class synthesis uses reference equality on T[] properties. (BindGroupLayoutDesc
+        // is a sealed record class — see ShaderProgramDesc.cs for the declaration.) This is the
+        // *design* for the raw record; structural equality across distinct allocations is
+        // provided by the backend's BindGroupLayoutCache (WebGPU internal) which walks entries
+        // element-by-element. The test locks the raw semantic so a reader doesn't expect
+        // value-equality on the arrays.
         var entries1 = new[] { new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16) };
         var entries2 = new[] { new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16) };
         var a = new BindGroupLayoutDesc(0, entries1);

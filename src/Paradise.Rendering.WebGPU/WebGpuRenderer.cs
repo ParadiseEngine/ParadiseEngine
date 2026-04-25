@@ -718,7 +718,12 @@ public sealed class WebGpuRenderer : IDisposable
                     {
                         var pass = RequireActivePass(activePass);
                         var p = cmd.SetBindGroup;
-                        var bindGroup = _device.ResolveBindGroup(p.BindGroup);
+                        // Validate payload shape BEFORE resolving the handle, symmetric with the
+                        // encoder. A malformed payload should fail with a payload diagnostic
+                        // independent of handle lifecycle — and a stream-staged-via-factory test
+                        // can deliberately use a sentinel handle to verify the guard fires
+                        // without StaleHandleException (which inherits from
+                        // InvalidOperationException) masking the result.
                         if (p.DynamicOffsetsCount > 0)
                         {
                             // Submit-side mirror of the encoder's dynamic-offsets guard. The
@@ -746,6 +751,7 @@ public sealed class WebGpuRenderer : IDisposable
                                 $"SetBindGroup with DynamicOffsetsCount=0 must have DynamicOffsetsStart=0; " +
                                 $"got Start={p.DynamicOffsetsStart}. The value is unread at submit; surfacing the " +
                                 "API smell here rather than silently discarding it (matches the encoder-side ArgumentException).");
+                        var bindGroup = _device.ResolveBindGroup(p.BindGroup);
                         pass.SetBindGroup(p.GroupIndex, bindGroup);
                         break;
                     }
