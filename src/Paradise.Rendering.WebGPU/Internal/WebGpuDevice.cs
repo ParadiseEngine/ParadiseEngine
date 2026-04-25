@@ -502,6 +502,15 @@ internal sealed class WebGpuDevice : IDisposable
 
     public TextureHandle CreateTexture(in TextureDesc desc)
     {
+        // Reject Depth24PlusStencil8 at texture-create time as well as pipeline-build time, so a
+        // pipeline-less or pre-pipeline pass (e.g., clear-only) can't reach BeginPass with a
+        // combined-format depth texture and trip Dawn's stencil-ops-required validation. Iter-10
+        // companion to the existing pipeline-side guard in BuildNativePipeline.
+        if (desc.Format == TextureFormat.Depth24PlusStencil8)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 supports depth-only textures (Depth32Float). " +
+                "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
+                "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
         var td = new WgTextureDescriptor
         {
             Label = desc.Name ?? string.Empty,
@@ -607,8 +616,15 @@ internal sealed class WebGpuDevice : IDisposable
         return native;
     }
 
-    public bool DetachBindGroupLayout(BindGroupLayoutHandle h) =>
-        BindGroupLayouts.Remove(h.Index, h.Generation);
+    public bool DetachBindGroupLayout(BindGroupLayoutHandle h)
+    {
+        // Drop the GroupIndex side-mapping in lockstep with the slot table so a destroyed handle
+        // surfaces as "not recorded" (StaleHandleException) at BuildNativePipeline rather than
+        // the slot-table's generic "stale or invalid" message — iter-10 fix for the diagnostic
+        // lifetime mismatch between the dict and the slot table.
+        _bindGroupLayoutGroupIndex.Remove((h.Index, h.Generation));
+        return BindGroupLayouts.Remove(h.Index, h.Generation);
+    }
 
     public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
     {
@@ -718,6 +734,7 @@ internal sealed class WebGpuDevice : IDisposable
         if (_disposed) return;
         _disposed = true;
         BindGroups.Clear();
+        _bindGroupLayoutGroupIndex.Clear();
         BindGroupLayouts.Clear();
         Samplers.Clear();
         TextureViews.Clear();

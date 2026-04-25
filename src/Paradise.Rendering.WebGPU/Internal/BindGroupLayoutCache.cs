@@ -39,6 +39,11 @@ internal sealed class BindGroupLayoutCache
             var src = desc.Entries;
             var copy = new BindGroupLayoutEntryDesc[src.Length];
             Array.Copy(src, copy, src.Length);
+            // Sort by binding number so the cache hits regardless of caller-side entry order.
+            // The reflection loader sorts before insertion; the public CreateBindGroupLayout API
+            // doesn't, so unsorted callers would otherwise miss the cache on structurally-equal
+            // layouts. Snapshot + sort in the Key keeps comparison + hash uniform across paths.
+            Array.Sort(copy, static (a, b) => a.Binding.CompareTo(b.Binding));
             Entries = copy;
         }
 

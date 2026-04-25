@@ -57,6 +57,15 @@ public ref struct RenderCommandEncoder
                 "Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone " +
                 "(BindGroupLayoutEntryDesc has no HasDynamicOffset field; no public layout can satisfy the bind). " +
                 "Pass dynamicOffsetsCount = 0, or use the parameterless SetBindGroup overload.");
+        // When count is 0, start has no consumer (the submit path only reads it when count > 0).
+        // Rejecting non-zero starts here keeps the 4-arg overload from silently accepting a value
+        // that will never be honored, until M3 lifts the count guard and start becomes meaningful.
+        if (dynamicOffsetsStart != 0)
+            throw new ArgumentException(
+                "When dynamicOffsetsCount is 0, dynamicOffsetsStart must also be 0 — " +
+                "the value is unused at submit time and accepting non-zero would silently discard it. " +
+                "Use the parameterless SetBindGroup overload for the no-offsets case.",
+                nameof(dynamicOffsetsStart));
         Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, dynamicOffsetsStart, dynamicOffsetsCount));
     }
 
