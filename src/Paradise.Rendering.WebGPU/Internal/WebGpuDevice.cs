@@ -233,6 +233,16 @@ internal sealed class WebGpuDevice : IDisposable
             throw new InvalidOperationException(
                 $"PipelineDesc.DepthStencil.Format ({ds.Format}) does not match PipelineDesc.DepthStencilFormat ({dsf}).");
 
+        // Tighten asymmetric path: DepthStencilFormat set with DepthStencil null silently produces
+        // a color-only pipeline (the format hashes into PipelineDesc identity but BuildDepthStencilState
+        // returns null without DepthStencil). M2 requires explicit DepthStencilState authoring; fail
+        // loudly on the asymmetric case rather than building a depth-less pipeline that hashes as if
+        // depth were configured.
+        if (desc.DepthStencilFormat is not null && desc.DepthStencil is null)
+            throw new InvalidOperationException(
+                "PipelineDesc.DepthStencilFormat is set but DepthStencil is null. " +
+                "Paradise.Rendering M2 requires explicit DepthStencilState authoring; pass null for both, or populate both.");
+
         // M2 supports depth-only formats only — combined depth/stencil formats (Depth24PlusStencil8)
         // require valid stencil load/store/clear authoring at the pass attachment layer, which the
         // M2 surface does not yet expose (DepthAttachmentDesc has no stencil fields). Reject at

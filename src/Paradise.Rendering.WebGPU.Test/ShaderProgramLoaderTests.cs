@@ -166,6 +166,36 @@ public class ShaderProgramLoaderTests
     }
 
     [Test]
+    public async Task build_program_desc_rejects_sparse_register_spaces()
+    {
+        // Iter-6 fix: sparse Slang register spaces (e.g. space0 + space2 with a gap at 1) would
+        // misalign with the dense `BindGroupLayouts` array consumed by BuildNativePipeline (which
+        // packs by array position so position N becomes @group(N)). The loader rejects gaps at
+        // load time so the misalignment never reaches Dawn.
+        var reflection = new SlangReflection(
+            Parameters: new[]
+            {
+                new SlangParameter(
+                    Name: "Group0",
+                    Binding: new SlangBinding(Kind: "descriptorTableSlot", Space: 0, Index: 0, Count: null, Size: null),
+                    Type: new SlangTypeNode(Kind: "samplerState", Name: null, Fields: null, ElementCount: null, ElementType: null, ScalarType: null, BaseShape: null, ElementVarLayout: null),
+                    SemanticName: null),
+                new SlangParameter(
+                    Name: "Group2",
+                    Binding: new SlangBinding(Kind: "descriptorTableSlot", Space: 2, Index: 0, Count: null, Size: null),
+                    Type: new SlangTypeNode(Kind: "samplerState", Name: null, Fields: null, ElementCount: null, ElementType: null, ScalarType: null, BaseShape: null, ElementVarLayout: null),
+                    SemanticName: null),
+            },
+            EntryPoints: new[]
+            {
+                new SlangEntryPoint(Name: "vs_main", Stage: "vertex", Parameters: null, Bindings: null),
+            });
+
+        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
+            .Throws<NotSupportedException>();
+    }
+
+    [Test]
     public async Task build_program_desc_builds_uniform_buffer_group_from_module_parameters()
     {
         // M2 binding path: a module-level parameter with `descriptorTableSlot` kind and a

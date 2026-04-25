@@ -139,8 +139,26 @@ internal static class ShaderProgramLoader
             list.Add(new BindGroupLayoutEntryDesc(binding.Index, visibility, type, minSize));
         }
 
-        var groups = new BindGroupLayoutDesc[groupedByIndex.Count];
+        // M2 requires dense bind group spaces (0, 1, 2, ...) — `WebGpuDevice.BuildNativePipeline`
+        // packs the user-supplied `BindGroupLayouts` densely into the WebGPU pipeline-layout
+        // descriptor by array position (position N becomes @group(N)). Sparse Slang spaces (e.g.,
+        // space0 + space2 with a gap at 1) would silently misalign with `@group(2)` references in
+        // the WGSL output. Detect the gap at load time and surface a clear deferral message
+        // rather than building a misaligned pipeline; auto-padding with placeholder layouts is
+        // tracked as a follow-up.
         var gi = 0;
+        foreach (var kv in groupedByIndex)
+        {
+            if (kv.Key != (uint)gi)
+                throw new NotSupportedException(
+                    $"Paradise.Rendering M2 requires dense Slang register spaces starting at 0; " +
+                    $"shader has a gap at space {gi} (next reflected space is {kv.Key}). " +
+                    "Sparse spaces with auto-padding are reserved for a later milestone.");
+            gi++;
+        }
+
+        var groups = new BindGroupLayoutDesc[groupedByIndex.Count];
+        gi = 0;
         foreach (var kv in groupedByIndex)
         {
             kv.Value.Sort(static (a, b) => a.Binding.CompareTo(b.Binding));

@@ -529,8 +529,16 @@ public sealed class WebGpuRenderer : IDisposable
                     entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Filtering };
                     break;
                 case BindingResourceType.ComparisonSampler:
-                    entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Comparison };
-                    break;
+                    // The public SamplerDesc surface has no Compare field, so CreateSampler
+                    // produces non-comparison samplers exclusively (`Compare = WgCompareFunction.Undefined`).
+                    // Binding a non-comparison sampler against a Comparison-typed slot fails Dawn
+                    // validation, so accepting this binding type at layout-build time would build
+                    // a layout no public sampler can satisfy. Reject up-front; symmetric with
+                    // the StorageTexture guard. Lift when SamplerDesc grows a Compare field.
+                    throw new NotSupportedException(
+                        "Paradise.Rendering M2 does not yet support ComparisonSampler bindings — " +
+                        "the public SamplerDesc surface has no comparison-function field, so no public " +
+                        "sampler could satisfy the binding. Reserved for a later milestone.");
                 case BindingResourceType.SampledTexture:
                     entry.Texture = new WgTextureBindingLayout
                     {
