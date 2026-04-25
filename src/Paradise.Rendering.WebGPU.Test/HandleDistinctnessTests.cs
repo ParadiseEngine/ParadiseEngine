@@ -362,6 +362,48 @@ public class HandleDistinctnessTests
     }
 
     [Test]
+    public async Task submit_rejects_factory_built_set_bind_group_with_nonzero_dynamic_offsets_start()
+    {
+        // Iter-13/14 fix: the encoder rejects (start != 0, count == 0), but the public
+        // RenderCommand.FromSetBindGroup factory bypasses the encoder. The submit path mirrors
+        // the guard so a stream-staged caller still hits InvalidOperationException at submit
+        // instead of silently discarding the unread Start. Symmetric pair with the existing
+        // encoder-side ArgumentException test in RenderCommandEncoderTests.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var pipeline = renderer.CreatePipeline(program, renderer.ColorFormat);
+            // Build a stream that bypasses the encoder via the public factory and stages a
+            // SetBindGroup payload with start != 0 / count == 0.
+            var bindGroupHandle = new BindGroupHandle(0, 0);
+            var commands = new RenderCommand[]
+            {
+                RenderCommand.FromBeginPass(0),
+                RenderCommand.FromSetPipeline(pipeline),
+                RenderCommand.FromSetBindGroup(0, bindGroupHandle, dynamicOffsetsStart: 7, dynamicOffsetsCount: 0),
+                RenderCommand.FromEndPass(),
+            };
+            var passes = new RenderPassDesc[1];
+            passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
+            passes[0].Colors.Slot0 = new ColorAttachmentDesc(
+                View: RenderViewHandle.Invalid,
+                Load: LoadOp.Clear,
+                Store: StoreOp.Store,
+                ClearValue: ColorRgba.Black);
+            var stream = new RenderCommandStream(commands, passes);
+
+            await Assert.That(() => renderer.Submit(in stream)).Throws<InvalidOperationException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task create_pipeline_from_program_does_not_grow_shader_slot_table()
     {
         // Iter-6 fix for OpenCara's iter-5 minor finding: the high-level

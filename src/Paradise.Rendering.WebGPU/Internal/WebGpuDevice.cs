@@ -512,6 +512,17 @@ internal sealed class WebGpuDevice : IDisposable
                 "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
                 "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
 
+        // Depth-sampled textures are creatable with TextureBinding usage but the public
+        // BindingResourceType.SampledTexture layout entry hardcodes WgTextureSampleType.Float —
+        // no public layout can sample a depth texture. Reject up-front rather than letting Dawn
+        // surface the mismatch at bind time. Lift when BindingResourceType grows a depth-sampled
+        // variant or BuildNativeBindGroupLayout takes view-format into account.
+        if (desc.Format == TextureFormat.Depth32Float && (desc.Usage & TextureUsage.TextureBinding) != 0)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 does not yet support sampling depth textures: a Depth32Float texture " +
+                "with TextureUsage.TextureBinding cannot be bound through BindingResourceType.SampledTexture " +
+                "(the layout entry hardcodes WgTextureSampleType.Float). Reserved for a later milestone.");
+
         // Reject non-D2 dimensions and layered D2 at the parent-texture level — the SampledTexture
         // bind-group-layout build hardcodes ViewDimension=D2/Multisampled=false, and the
         // CreateTextureView D2-only guard has an Undefined-inherit hole. Closing the path at
