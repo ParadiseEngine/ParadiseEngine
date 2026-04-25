@@ -21,6 +21,36 @@ using WgFragmentState = WebGpuSharp.FragmentState;
 using WgColorTargetState = WebGpuSharp.ColorTargetState;
 using WgPrimitiveState = WebGpuSharp.PrimitiveState;
 using WgMultisampleState = WebGpuSharp.MultisampleState;
+using WgTexture = WebGpuSharp.Texture;
+using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
+using WgTextureView = WebGpuSharp.TextureView;
+using WgTextureViewDescriptor = WebGpuSharp.TextureViewDescriptor;
+using WgSampler = WebGpuSharp.Sampler;
+using WgSamplerDescriptor = WebGpuSharp.SamplerDescriptor;
+using WgExtent3D = WebGpuSharp.Extent3D;
+using WgOrigin3D = WebGpuSharp.Origin3D;
+using WgBindGroupLayout = WebGpuSharp.BindGroupLayout;
+using WgBindGroupLayoutDescriptor = WebGpuSharp.BindGroupLayoutDescriptor;
+using WgBindGroupLayoutEntry = WebGpuSharp.BindGroupLayoutEntry;
+using WgBufferBindingLayout = WebGpuSharp.BufferBindingLayout;
+using WgSamplerBindingLayout = WebGpuSharp.SamplerBindingLayout;
+using WgTextureBindingLayout = WebGpuSharp.TextureBindingLayout;
+using WgBufferBindingType = WebGpuSharp.BufferBindingType;
+using WgSamplerBindingType = WebGpuSharp.SamplerBindingType;
+using WgTextureSampleType = WebGpuSharp.TextureSampleType;
+using WgBindGroup = WebGpuSharp.BindGroup;
+using WgBindGroupDescriptor = WebGpuSharp.BindGroupDescriptor;
+using WgBindGroupEntry = WebGpuSharp.BindGroupEntry;
+using WgPipelineLayout = WebGpuSharp.PipelineLayout;
+using WgPipelineLayoutDescriptor = WebGpuSharp.PipelineLayoutDescriptor;
+using WgDepthStencilState = WebGpuSharp.DepthStencilState;
+using WgStencilFaceState = WebGpuSharp.StencilFaceState;
+using WgCompareFunction = WebGpuSharp.CompareFunction;
+using WgStencilOperation = WebGpuSharp.StencilOperation;
+using WgOptionalBool = WebGpuSharp.OptionalBool;
+using WgTexelCopyTextureInfo = WebGpuSharp.TexelCopyTextureInfo;
+using WgTexelCopyBufferLayout = WebGpuSharp.TexelCopyBufferLayout;
+using WgTextureViewDimension = WebGpuSharp.TextureViewDimension;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -38,6 +68,28 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgShaderModule> Shaders { get; } = new();
     public SlotTable<WgBuffer> Buffers { get; } = new();
     public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
+    public SlotTable<WgTexture> Textures { get; } = new();
+    public SlotTable<WgTextureView> TextureViews { get; } = new();
+    public SlotTable<WgSampler> Samplers { get; } = new();
+    public SlotTable<WgBindGroupLayout> BindGroupLayouts { get; } = new();
+    public SlotTable<WgBindGroup> BindGroups { get; } = new();
+
+    // Records the GroupIndex each BindGroupLayoutHandle was minted with. Lets
+    // BuildNativePipeline cross-check that the runtime BindGroupLayouts[i] handle's recorded
+    // GroupIndex matches the corresponding Layout.Groups[i].GroupIndex (and the dense pipeline-
+    // layout position i). Keyed on (Index, Generation) so a slot reuse after destroy doesn't
+    // resurrect the old mapping. Cleared in Dispose alongside BindGroupLayouts.
+    private readonly System.Collections.Generic.Dictionary<(uint, uint), uint> _bindGroupLayoutGroupIndex = new();
+
+    public void RecordBindGroupLayoutGroupIndex(BindGroupLayoutHandle h, uint groupIndex)
+    {
+        _bindGroupLayoutGroupIndex[(h.Index, h.Generation)] = groupIndex;
+    }
+
+    public uint? TryGetBindGroupLayoutGroupIndex(BindGroupLayoutHandle h)
+    {
+        return _bindGroupLayoutGroupIndex.TryGetValue((h.Index, h.Generation), out var v) ? v : null;
+    }
 
     // Content-keyed native shader-module cache. Sits BELOW the public ShaderHandle layer so the
     // renderer can hand out fresh handles per CreateShaderModule call while still deduping the
@@ -183,27 +235,48 @@ internal sealed class WebGpuDevice : IDisposable
     /// shared native pipeline.</summary>
     public WgRenderPipeline BuildNativePipeline(in PipelineDesc desc)
     {
-        // Reject depth/stencil settings explicitly in M1 instead of accepting them and silently
-        // discarding — the descriptor field exists for M2 but the backend has no plumbing for it
-        // yet. NotSupportedException makes the gap visible at the call site instead of producing
-        // a pipeline that renders as if depth were never configured.
-        if (desc.DepthStencilFormat is not null)
+        // M2 still reserves push constants for a later milestone — Dawn exposes them via
+        // chained structs only. Depth/stencil and bind group layouts land here.
+        if (desc.Layout is { } l && l.PushConstants.Length > 0)
             throw new NotSupportedException(
-                "PipelineDesc.DepthStencilFormat is reserved for M2 (#43). The M1 backend does not " +
-                "configure depth-stencil state on the WebGPU pipeline; pass null until depth lands.");
+                "Paradise.Rendering M2 does not yet support PipelineLayoutDesc.PushConstants; " +
+                "reserved for a later milestone. Pass an empty PushConstants array.");
 
-        // PipelineDesc.Layout is carried in the public descriptor and hashed into cache identity
-        // so the M2 API shape stays stable (no migration when bind groups land). In M1 the backend
-        // always requests Dawn's "auto" layout from the shader module, so a non-empty Layout would
-        // be silently dropped — reject explicitly. Empty Layout records (Groups=[], PushConstants=[])
-        // are accepted because ShaderProgramLoader.BuildProgramDesc constructs one for every Slang
-        // program; M1 just has no bindings yet. M2 (#43) will replace this guard with a real
-        // WebGPU PipelineLayout build.
-        if (desc.Layout is { } l && (l.Groups.Length > 0 || l.PushConstants.Length > 0))
+        // When DepthStencil is set, the DepthStencilFormat cap on the descriptor must agree. Two
+        // fields represent the same concept at different layers (the nullable format summary vs
+        // the structured state) so drift produces a confusing Dawn validation error downstream;
+        // cross-check up front.
+        if (desc.DepthStencil is { } ds && desc.DepthStencilFormat is { } dsf && ds.Format != dsf)
+            throw new InvalidOperationException(
+                $"PipelineDesc.DepthStencil.Format ({ds.Format}) does not match PipelineDesc.DepthStencilFormat ({dsf}).");
+
+        // Tighten BOTH asymmetries between DepthStencilFormat (descriptor metadata that hashes
+        // into pipeline cache identity) and DepthStencil (the structured state that BuildDepthStencilState
+        // consumes). They must be set together or both null, otherwise the cache key hashes as if
+        // depth were configured while the native pipeline behaves as if it weren't (or vice versa).
+        // Iter-5 closed the (Format-set, State-null) case; iter-7 closes the inverse.
+        if (desc.DepthStencilFormat is not null && desc.DepthStencil is null)
+            throw new InvalidOperationException(
+                "PipelineDesc.DepthStencilFormat is set but DepthStencil is null. " +
+                "Paradise.Rendering M2 requires explicit DepthStencilState authoring; pass null for both, or populate both.");
+        if (desc.DepthStencil is not null && desc.DepthStencilFormat is null)
+            throw new InvalidOperationException(
+                "PipelineDesc.DepthStencil is set but DepthStencilFormat is null. " +
+                "Both fields participate in pipeline cache identity; pass null for both, or populate both.");
+
+        // M2 supports depth-only formats only — combined depth/stencil formats (Depth24PlusStencil8)
+        // require valid stencil load/store/clear authoring at the pass attachment layer, which the
+        // M2 surface does not yet expose (DepthAttachmentDesc has no stencil fields). Reject at
+        // pipeline-build time so a caller doesn't get a Dawn validation error mid-frame on the
+        // BeginPass that follows. Symmetric with the multi-attachment / push-constants /
+        // non-Texture2D guards. Tracked as a follow-up alongside DepthAttachmentDesc stencil
+        // expansion.
+        var depthFormatToCheck = desc.DepthStencilFormat ?? desc.DepthStencil?.Format;
+        if (depthFormatToCheck == TextureFormat.Depth24PlusStencil8)
             throw new NotSupportedException(
-                "PipelineDesc.Layout with non-empty bind groups or push constants is reserved for M2 (#43). " +
-                "The M1 backend uses Dawn's auto layout from the shader module; explicit layouts are not " +
-                "plumbed through yet. Pass a layout with empty Groups and PushConstants (or null) until M2.");
+                "Paradise.Rendering M2 supports depth-only formats (Depth32Float). " +
+                "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
+                "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
 
         var vertex = ResolveShader(desc.VertexShader);
         var fragment = ResolveShader(desc.FragmentShader);
@@ -246,13 +319,86 @@ internal sealed class WebGpuDevice : IDisposable
             },
         };
 
+        // Resolve explicit pipeline layout from bind group layout handles when present. An empty
+        // span means "use Dawn's auto layout" — appropriate when the shader has no resource
+        // bindings (the M1 triangle path). A non-empty span implies the caller has an explicit
+        // layout we build into a WgPipelineLayout; the native layout reference is held via the
+        // descriptor capture for the duration of the Dawn call.
+        //
+        // Contract documented on `WebGpuRenderer.CreatePipeline(in ShaderProgramDesc, in PipelineDesc)`:
+        // PipelineDesc.Layout (descriptor metadata) and PipelineDesc.BindGroupLayouts (runtime
+        // handles, authoritative for the native build) must agree on group count. The Layout side
+        // exists for cache-identity hashing and future push-constant validation. Pipeline build is
+        // a one-shot cost (not per-frame) so this is a runtime check, not a Debug.Assert — drift
+        // must surface in shipped builds too. Symmetric: Layout.Groups.Length and
+        // BindGroupLayouts.Length must match unconditionally — Layout populated with
+        // BindGroupLayouts empty would silently fall through to Dawn's auto-layout and produce a
+        // pipeline whose bindings won't match the declared layout (iter-7 fix for the inverse
+        // asymmetry of the iter-5/6 fixes).
+        if (desc.Layout is { } expectedLayout
+            && expectedLayout.Groups.Length != desc.BindGroupLayouts.Length)
+        {
+            throw new InvalidOperationException(
+                $"PipelineDesc.Layout.Groups.Length ({expectedLayout.Groups.Length}) does not match " +
+                $"PipelineDesc.BindGroupLayouts.Length ({desc.BindGroupLayouts.Length}). The native pipeline " +
+                "is built from BindGroupLayouts; Layout is descriptor metadata. Both empty or both same length.");
+        }
+        // Per-position alignment: Layout.Groups[i].GroupIndex MUST equal i so the dense
+        // BindGroupLayouts[i] packing into WebGPU's pipeline-layout descriptor (where position N
+        // becomes @group(N)) lines up. The loader's BuildPipelineLayout already rejects sparse
+        // spaces, so this guard catches hand-authored PipelineDesc templates that pass groups out
+        // of order (e.g., [_materialLayout, _frameLayout] reversed from program.Layout.Groups).
+        if (desc.Layout is { } layoutForAlignment && layoutForAlignment.Groups.Length > 0)
+        {
+            for (var gi = 0; gi < layoutForAlignment.Groups.Length; gi++)
+            {
+                if (layoutForAlignment.Groups[gi].GroupIndex != (uint)gi)
+                    throw new InvalidOperationException(
+                        $"PipelineDesc.Layout.Groups[{gi}].GroupIndex is {layoutForAlignment.Groups[gi].GroupIndex} " +
+                        $"but the dense BindGroupLayouts packing expects @group({gi}) at position {gi}. " +
+                        "Reorder the Layout.Groups (and the matching BindGroupLayouts) so position i carries GroupIndex == i.");
+            }
+        }
+
+        WgPipelineLayout? pipelineLayoutNative = null;
+        var bglSpan = desc.BindGroupLayouts.Span;
+        if (bglSpan.Length > 0)
+        {
+            // Per-handle alignment: the runtime BindGroupLayouts[i] handle's recorded GroupIndex
+            // must equal i. Otherwise a caller could pass [_materialLayout, _frameLayout] reversed
+            // from the program's reflection (Group 0 is "frame"); the existing length + Groups[i]
+            // checks pass, but @group(0) ends up bound to the material layout. Closes the iter-9
+            // swapped-order bypass on the metadata-side checks.
+            for (var i = 0; i < bglSpan.Length; i++)
+            {
+                var recorded = TryGetBindGroupLayoutGroupIndex(bglSpan[i]);
+                if (recorded is null)
+                    throw new StaleHandleException(
+                        $"BindGroupLayoutHandle at PipelineDesc.BindGroupLayouts[{i}] is not recorded; " +
+                        "it may have been destroyed or never created through WebGpuRenderer.CreateBindGroupLayout.");
+                if (recorded.Value != (uint)i)
+                    throw new InvalidOperationException(
+                        $"PipelineDesc.BindGroupLayouts[{i}] was created with GroupIndex={recorded.Value} " +
+                        $"but the dense pipeline-layout packing expects @group({i}) at position {i}. " +
+                        "Reorder BindGroupLayouts so position i carries a layout created with GroupIndex == i.");
+            }
+
+            var nativeLayouts = new WgBindGroupLayout[bglSpan.Length];
+            for (var i = 0; i < bglSpan.Length; i++)
+                nativeLayouts[i] = ResolveBindGroupLayout(bglSpan[i]);
+            var layoutDesc = new WgPipelineLayoutDescriptor
+            {
+                Label = (desc.Name ?? string.Empty) + "_layout",
+                BindGroupLayouts = nativeLayouts,
+            };
+            pipelineLayoutNative = Device.CreatePipelineLayout(in layoutDesc)
+                ?? throw new InvalidOperationException("PipelineLayout creation returned null.");
+        }
+
         var pipelineDesc = new WgRenderPipelineDescriptor
         {
             Label = desc.Name ?? string.Empty,
-            // M1 binds no resources beyond a vertex buffer; passing a null layout requests Dawn's
-            // "auto" layout from the shader module — appropriate for the empty-binding case. M2
-            // populates an explicit PipelineLayout when bind groups land.
-            Layout = null!,
+            Layout = pipelineLayoutNative!,
             Vertex = new WgVertexState
             {
                 Module = vertex,
@@ -273,10 +419,39 @@ internal sealed class WebGpuDevice : IDisposable
                 EntryPoint = string.IsNullOrEmpty(desc.FragmentEntryPoint) ? "fs_main" : desc.FragmentEntryPoint,
                 Targets = new WebGpuSharp.WebGpuManagedSpan<WgColorTargetState>(colorTargets),
             },
+            DepthStencil = BuildDepthStencilState(desc),
         };
 
         return Device.CreateRenderPipelineSync(in pipelineDesc)
             ?? throw new InvalidOperationException("RenderPipeline creation returned null.");
+    }
+
+    private static WgDepthStencilState? BuildDepthStencilState(in PipelineDesc desc)
+    {
+        if (desc.DepthStencil is not { } ds) return null;
+        // M2 wires depth only; stencil face state defaults to "always pass, keep". StencilRead/
+        // WriteMask are carried through so a later milestone can author stencil without changing
+        // the descriptor shape.
+        var neverCare = new WgStencilFaceState
+        {
+            Compare = WgCompareFunction.Always,
+            FailOp = WgStencilOperation.Keep,
+            DepthFailOp = WgStencilOperation.Keep,
+            PassOp = WgStencilOperation.Keep,
+        };
+        return new WgDepthStencilState
+        {
+            Format = FormatConversions.ToWgpu(ds.Format),
+            DepthWriteEnabled = ds.DepthWriteEnabled ? WgOptionalBool.True : WgOptionalBool.False,
+            DepthCompare = FormatConversions.ToWgpu(ds.DepthCompare),
+            StencilFront = neverCare,
+            StencilBack = neverCare,
+            StencilReadMask = ds.StencilReadMask,
+            StencilWriteMask = ds.StencilWriteMask,
+            DepthBias = 0,
+            DepthBiasSlopeScale = 0f,
+            DepthBiasClamp = 0f,
+        };
     }
 
     /// <summary>Allocate a slot-table entry pointing at <paramref name="native"/> and return the
@@ -323,10 +498,272 @@ internal sealed class WebGpuDevice : IDisposable
         return new ShaderHandle(index, generation);
     }
 
+    // -------- Texture, view, sampler --------
+
+    public TextureHandle CreateTexture(in TextureDesc desc)
+    {
+        // Reject Depth24PlusStencil8 at texture-create time as well as pipeline-build time, so a
+        // pipeline-less or pre-pipeline pass (e.g., clear-only) can't reach BeginPass with a
+        // combined-format depth texture and trip Dawn's stencil-ops-required validation. Iter-10
+        // companion to the existing pipeline-side guard in BuildNativePipeline.
+        if (desc.Format == TextureFormat.Depth24PlusStencil8)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 supports depth-only textures (Depth32Float). " +
+                "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
+                "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
+
+        // Depth-sampled textures are creatable with TextureBinding usage but the public
+        // BindingResourceType.SampledTexture layout entry hardcodes WgTextureSampleType.Float —
+        // no public layout can sample a depth texture. Reject up-front rather than letting Dawn
+        // surface the mismatch at bind time. Lift when BindingResourceType grows a depth-sampled
+        // variant or BuildNativeBindGroupLayout takes view-format into account.
+        if (desc.Format == TextureFormat.Depth32Float && (desc.Usage & TextureUsage.TextureBinding) != 0)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 does not yet support sampling depth textures: a Depth32Float texture " +
+                "with TextureUsage.TextureBinding cannot be bound through BindingResourceType.SampledTexture " +
+                "(the layout entry hardcodes WgTextureSampleType.Float). Reserved for a later milestone.");
+
+        // Reject non-D2 dimensions and layered D2 at the parent-texture level — the SampledTexture
+        // bind-group-layout build hardcodes ViewDimension=D2/Multisampled=false, and the
+        // CreateTextureView D2-only guard has an Undefined-inherit hole. Closing the path at
+        // CreateTexture leaves no way for a layered/3D texture to reach the layout build via the
+        // Undefined-view inheritance escape hatch.
+        if (desc.Dimension != TextureDimension.D2)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports 2D textures (got Dimension={desc.Dimension}); " +
+                "1D/3D textures are reserved for a later milestone.");
+        if (desc.DepthOrArrayLayers > 1)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports single-layer textures (got DepthOrArrayLayers={desc.DepthOrArrayLayers}); " +
+                "array textures are reserved for a later milestone.");
+        var td = new WgTextureDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            Size = new WgExtent3D(desc.Width, desc.Height, desc.DepthOrArrayLayers == 0 ? 1 : desc.DepthOrArrayLayers),
+            MipLevelCount = desc.MipLevelCount == 0 ? 1 : desc.MipLevelCount,
+            SampleCount = desc.SampleCount == 0 ? 1 : desc.SampleCount,
+            Dimension = FormatConversions.ToWgpu(desc.Dimension),
+            Format = FormatConversions.ToWgpu(desc.Format),
+            Usage = FormatConversions.ToWgpu(desc.Usage),
+        };
+        var texture = Device.CreateTexture(in td)
+            ?? throw new InvalidOperationException("Texture creation returned null.");
+        var (index, generation) = Textures.Add(texture);
+        return new TextureHandle(index, generation);
+    }
+
+    public WgTexture ResolveTexture(TextureHandle h)
+    {
+        if (!Textures.TryGet(h.Index, h.Generation, out var native))
+            throw new StaleHandleException($"Texture handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return native;
+    }
+
+    public bool DetachTexture(TextureHandle h, out WgTexture native) =>
+        Textures.Detach(h.Index, h.Generation, out native);
+
+    public RenderViewHandle CreateTextureView(TextureHandle texture, in RenderViewDesc desc)
+    {
+        var tex = ResolveTexture(texture);
+        // Zero counts follow WebGPU's "remainder" convention: null MipLevelCount/ArrayLayerCount
+        // in the descriptor tells Dawn to cover all remaining levels/layers beyond the base.
+        var viewDesc = new WgTextureViewDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            Format = FormatConversions.ToWgpu(desc.Format),
+            Dimension = FormatConversions.ToWgpu(desc.Dimension),
+            Aspect = FormatConversions.ToWgpu(desc.Aspect),
+            BaseMipLevel = desc.BaseMipLevel,
+            MipLevelCount = desc.MipLevelCount == 0 ? null : desc.MipLevelCount,
+            BaseArrayLayer = desc.BaseArrayLayer,
+            ArrayLayerCount = desc.ArrayLayerCount == 0 ? null : desc.ArrayLayerCount,
+        };
+        var view = tex.CreateView(in viewDesc)
+            ?? throw new InvalidOperationException("TextureView creation returned null.");
+        var (index, generation) = TextureViews.Add(view);
+        return new RenderViewHandle(index, generation);
+    }
+
+    public WgTextureView ResolveTextureView(RenderViewHandle h)
+    {
+        if (!TextureViews.TryGet(h.Index, h.Generation, out var native))
+            throw new StaleHandleException($"RenderView handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return native;
+    }
+
+    public bool DetachTextureView(RenderViewHandle h, out WgTextureView native) =>
+        TextureViews.Detach(h.Index, h.Generation, out native);
+
+    public SamplerHandle CreateSampler(in SamplerDesc desc)
+    {
+        var sd = new WgSamplerDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            AddressModeU = FormatConversions.ToWgpu(desc.AddressU),
+            AddressModeV = FormatConversions.ToWgpu(desc.AddressV),
+            AddressModeW = FormatConversions.ToWgpu(desc.AddressW),
+            MagFilter = FormatConversions.ToWgpuFilter(desc.MagFilter),
+            MinFilter = FormatConversions.ToWgpuFilter(desc.MinFilter),
+            MipmapFilter = FormatConversions.ToWgpuMipmapFilter(desc.MipmapFilter),
+            LodMinClamp = 0f,
+            LodMaxClamp = 32f,
+            Compare = WgCompareFunction.Undefined,
+            MaxAnisotropy = 1,
+        };
+        var sampler = Device.CreateSampler(ref sd)
+            ?? throw new InvalidOperationException("Sampler creation returned null.");
+        var (index, generation) = Samplers.Add(sampler);
+        return new SamplerHandle(index, generation);
+    }
+
+    public WgSampler ResolveSampler(SamplerHandle h)
+    {
+        if (!Samplers.TryGet(h.Index, h.Generation, out var native))
+            throw new StaleHandleException($"Sampler handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return native;
+    }
+
+    public bool DetachSampler(SamplerHandle h, out WgSampler native) =>
+        Samplers.Detach(h.Index, h.Generation, out native);
+
+    // -------- Bind group layout / bind group --------
+
+    public BindGroupLayoutHandle CreateBindGroupLayout(WgBindGroupLayout native)
+    {
+        var (index, generation) = BindGroupLayouts.Add(native);
+        return new BindGroupLayoutHandle(index, generation);
+    }
+
+    public WgBindGroupLayout ResolveBindGroupLayout(BindGroupLayoutHandle h)
+    {
+        if (!BindGroupLayouts.TryGet(h.Index, h.Generation, out var native))
+            throw new StaleHandleException($"BindGroupLayout handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return native;
+    }
+
+    public bool DetachBindGroupLayout(BindGroupLayoutHandle h)
+    {
+        // Drop the GroupIndex side-mapping in lockstep with the slot table so a destroyed handle
+        // surfaces as "not recorded" (StaleHandleException) at BuildNativePipeline rather than
+        // the slot-table's generic "stale or invalid" message — iter-10 fix for the diagnostic
+        // lifetime mismatch between the dict and the slot table.
+        _bindGroupLayoutGroupIndex.Remove((h.Index, h.Generation));
+        return BindGroupLayouts.Remove(h.Index, h.Generation);
+    }
+
+    public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
+    {
+        var layout = ResolveBindGroupLayout(desc.Layout);
+
+        var buffers = desc.Buffers.Span;
+        var textures = desc.Textures.Span;
+        var samplers = desc.Samplers.Span;
+        var entries = new WgBindGroupEntry[buffers.Length + textures.Length + samplers.Length];
+        var idx = 0;
+        for (var i = 0; i < buffers.Length; i++)
+        {
+            var e = buffers[i];
+            var buf = ResolveBuffer(e.Buffer);
+            entries[idx++] = new WgBindGroupEntry
+            {
+                Binding = e.Binding,
+                Buffer = buf,
+                Offset = e.Offset,
+                Size = e.Size == 0 ? null : e.Size,
+            };
+        }
+        for (var i = 0; i < textures.Length; i++)
+        {
+            var e = textures[i];
+            entries[idx++] = new WgBindGroupEntry
+            {
+                Binding = e.Binding,
+                TextureView = ResolveTextureView(e.View),
+            };
+        }
+        for (var i = 0; i < samplers.Length; i++)
+        {
+            var e = samplers[i];
+            entries[idx++] = new WgBindGroupEntry
+            {
+                Binding = e.Binding,
+                Sampler = ResolveSampler(e.Sampler),
+            };
+        }
+
+        // Validate uniqueness across all three entry spans before handing to Dawn — WebGPU spec
+        // requires unique binding numbers per bind group, and Dawn's diagnostic when violated is
+        // opaque. Cheap O(N^2) over typically <8 entries; surface the colliding binding in the
+        // message so the caller can locate the duplicate without rebuilding from native logs.
+        for (var i = 0; i < entries.Length; i++)
+        {
+            for (var j = i + 1; j < entries.Length; j++)
+            {
+                if (entries[i].Binding == entries[j].Binding)
+                    throw new InvalidOperationException(
+                        $"BindGroupDesc has duplicate binding {entries[i].Binding} across the Buffers/Textures/Samplers spans. " +
+                        "WebGPU requires each binding number to appear at most once per bind group.");
+            }
+        }
+
+        var bgDesc = new WgBindGroupDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            Layout = layout,
+            Entries = entries,
+        };
+        var bindGroup = Device.CreateBindGroup(in bgDesc)
+            ?? throw new InvalidOperationException("BindGroup creation returned null.");
+        var (index, generation) = BindGroups.Add(bindGroup);
+        return new BindGroupHandle(index, generation);
+    }
+
+    public WgBindGroup ResolveBindGroup(BindGroupHandle h)
+    {
+        if (!BindGroups.TryGet(h.Index, h.Generation, out var native))
+            throw new StaleHandleException($"BindGroup handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return native;
+    }
+
+    public bool DetachBindGroup(BindGroupHandle h, out WgBindGroup native) =>
+        BindGroups.Detach(h.Index, h.Generation, out native);
+
+    // -------- Texture upload --------
+
+    /// <summary>Upload <paramref name="pixels"/> to <paramref name="texture"/> via
+    /// <c>Queue.WriteTexture</c>. Assumes a tightly-packed 2D source matching mip level 0 layer 0
+    /// (the M2 sample's path); broader mip/layer targeting is deferred to a later milestone.</summary>
+    public void WriteTexture2D<T>(TextureHandle texture, uint width, uint height, uint bytesPerPixel, ReadOnlySpan<T> pixels)
+        where T : unmanaged
+    {
+        var native = ResolveTexture(texture);
+        var destination = new WgTexelCopyTextureInfo
+        {
+            Texture = native,
+            MipLevel = 0,
+            Origin = new WgOrigin3D { X = 0, Y = 0, Z = 0 },
+            Aspect = WebGpuSharp.TextureAspect.All,
+        };
+        var layout = new WgTexelCopyBufferLayout
+        {
+            Offset = 0,
+            BytesPerRow = width * bytesPerPixel,
+            RowsPerImage = height,
+        };
+        var writeSize = new WgExtent3D(width, height, 1);
+        Queue.WriteTexture(in destination, pixels, in layout, in writeSize);
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        BindGroups.Clear();
+        _bindGroupLayoutGroupIndex.Clear();
+        BindGroupLayouts.Clear();
+        Samplers.Clear();
+        TextureViews.Clear();
+        Textures.Clear();
         Pipelines.Clear();
         Buffers.Clear();
         Shaders.Clear();

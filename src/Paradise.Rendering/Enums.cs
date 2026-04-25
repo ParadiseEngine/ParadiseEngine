@@ -147,7 +147,20 @@ public enum VertexStepMode : byte
     Instance,
 }
 
-/// <summary>Type of resource referenced by a bind group layout entry.</summary>
+/// <summary>Type of resource referenced by a bind group layout entry. The enum is intentionally
+/// shape-agnostic to avoid combinatorial fanout; the backend rejects unsupported variants at
+/// layout-build time. M2-scope limitations:
+/// <list type="bullet">
+/// <item><see cref="SampledTexture"/> / <see cref="MultisampledTexture"/> — backend wires
+/// <c>texture_2d&lt;f32&gt;</c> only. Cube / array / 3D / depth-comparison / integer-sampled
+/// textures are reserved for a later milestone; binding a non-Texture2D view here produces
+/// incorrect Dawn validation downstream rather than a clear up-front reject.</item>
+/// <item><see cref="ComparisonSampler"/> — public <see cref="SamplerDesc"/> has no compare-function
+/// field, so no sampler created through the backend can satisfy this binding; the WebGPU backend
+/// rejects it at layout-build time with a scope-deferral message.</item>
+/// <item><see cref="StorageTexture"/> — reserved for a later milestone; rejected at layout build.</item>
+/// </list>
+/// </summary>
 public enum BindingResourceType : byte
 {
     UniformBuffer = 0,
@@ -158,4 +171,37 @@ public enum BindingResourceType : byte
     SampledTexture,
     MultisampledTexture,
     StorageTexture,
+}
+
+/// <summary>Dimensionality of a texture view. Mirrors WebGPU's GPUTextureViewDimension.</summary>
+public enum TextureViewDimension : byte
+{
+    Undefined = 0,
+    D1,
+    D2,
+    D2Array,
+    Cube,
+    CubeArray,
+    D3,
+}
+
+/// <summary>Which planes of a texture a view targets. Mirrors WebGPU's GPUTextureAspect.</summary>
+public enum TextureAspect : byte
+{
+    All = 0,
+    StencilOnly,
+    DepthOnly,
+}
+
+/// <summary>Depth/stencil comparison function. Mirrors WebGPU's GPUCompareFunction.</summary>
+public enum CompareFunction : byte
+{
+    Never = 0,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
 }

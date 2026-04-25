@@ -36,8 +36,38 @@ public ref struct RenderCommandEncoder
     public void SetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         Write(RenderCommand.FromSetIndexBuffer(buffer, format, offset, size));
 
-    public void SetBindGroup(uint groupIndex) =>
-        Write(RenderCommand.FromSetBindGroup(groupIndex));
+    /// <summary>Encode a <see cref="RenderCommandKind.SetBindGroup"/> with no dynamic offsets.</summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup) =>
+        Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, 0, 0));
+
+    /// <summary>Encode a <see cref="RenderCommandKind.SetBindGroup"/> referencing dynamic offsets
+    /// already written to the enclosing <see cref="RenderCommandStream.DynamicOffsets"/> buffer.
+    /// Host code owns the offset buffer; this encoder only records the index range.
+    /// <para>
+    /// Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone —
+    /// <see cref="BindGroupLayoutEntryDesc"/> has no <c>HasDynamicOffset</c> field so no public
+    /// layout entry can satisfy a dynamic-offset bind. Passing <paramref name="dynamicOffsetsCount"/>
+    /// &gt; 0 throws <see cref="NotSupportedException"/>; use the parameterless overload until
+    /// the layout-entry record grows the field.
+    /// </para></summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup, uint dynamicOffsetsStart, uint dynamicOffsetsCount)
+    {
+        if (dynamicOffsetsCount > 0)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone " +
+                "(BindGroupLayoutEntryDesc has no HasDynamicOffset field; no public layout can satisfy the bind). " +
+                "Pass dynamicOffsetsCount = 0, or use the parameterless SetBindGroup overload.");
+        // When count is 0, start has no consumer (the submit path only reads it when count > 0).
+        // Rejecting non-zero starts here keeps the 4-arg overload from silently accepting a value
+        // that will never be honored, until M3 lifts the count guard and start becomes meaningful.
+        if (dynamicOffsetsStart != 0)
+            throw new ArgumentException(
+                "When dynamicOffsetsCount is 0, dynamicOffsetsStart must also be 0 — " +
+                "the value is unused at submit time and accepting non-zero would silently discard it. " +
+                "Use the parameterless SetBindGroup overload for the no-offsets case.",
+                nameof(dynamicOffsetsStart));
+        Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, dynamicOffsetsStart, dynamicOffsetsCount));
+    }
 
     public void Draw(in DrawCommand cmd) =>
         Write(RenderCommand.FromDraw(cmd));

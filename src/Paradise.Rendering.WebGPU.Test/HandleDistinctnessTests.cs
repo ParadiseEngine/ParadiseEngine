@@ -41,12 +41,13 @@ public class HandleDistinctnessTests
         WebGpuRenderer.LoadShaderProgram(typeof(HandleDistinctnessTests).Assembly, "Shaders.triangle");
 
     [Test]
-    public async Task begin_pass_rejects_non_null_depth_attachment()
+    public async Task begin_pass_rejects_invalid_depth_texture_handle()
     {
-        // (1) Symmetric guard — the M1 backend doesn't plumb depth-stencil into the pass
-        // descriptor; a caller setting pass.Depth must see NotSupportedException at submit time
-        // instead of a silently depth-less render pass. Companion to the existing
-        // CreatePipeline(DepthStencilFormat) guard test.
+        // M2 wires depth end-to-end; the M1-era "rejects non-null depth" guard is gone. What
+        // remains is a stale-handle contract: a pass that references a TextureHandle.Invalid as
+        // its depth target must fail loudly (StaleHandleException from ResolveTexture) instead of
+        // producing a silently depth-less render pass. Companion to the buffer/pipeline stale-
+        // handle tests above.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -77,7 +78,7 @@ public class HandleDistinctnessTests
             encoder.EndPass();
             var stream = new RenderCommandStream(writer.WrittenMemory, passes);
 
-            await Assert.That(() => renderer.Submit(in stream)).Throws<NotSupportedException>();
+            await Assert.That(() => renderer.Submit(in stream)).Throws<StaleHandleException>();
         }
         finally
         {
@@ -313,14 +314,12 @@ public class HandleDistinctnessTests
     }
 
     [Test]
-    public async Task create_pipeline_rejects_non_empty_layout()
+    public async Task create_pipeline_rejects_push_constants()
     {
-        // Iteration-5 fix (codex iteration-4 verdict): PipelineDesc.Layout was hashed into cache
-        // identity but silently dropped by the backend (which always requested Dawn's auto
-        // layout). Non-empty layouts now throw NotSupportedException with an M2-deferral message
-        // so callers find out at CreatePipeline time instead of getting a cache-fragmented
-        // pipeline whose bindings are never enforced. Empty layouts (the ShaderProgramLoader
-        // output for M1) are still accepted.
+        // M2 wires bind group layouts end-to-end, so the M1-era "rejects non-empty Groups" guard
+        // is gone. Push constants remain out of scope — Dawn exposes them only via chained struct
+        // overrides that Paradise.Rendering has no public surface for yet — and they still throw
+        // NotSupportedException with an "Option-A guard-reject" deferral message.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -332,19 +331,16 @@ public class HandleDistinctnessTests
             var vs = renderer.CreateShader(in vsModule);
             var fs = renderer.CreateShader(in fsModule);
 
-            var nonEmptyLayout = new PipelineLayoutDesc(
-                Groups: new[]
+            var layoutWithPushConstants = new PipelineLayoutDesc(
+                Groups: Array.Empty<BindGroupLayoutDesc>(),
+                PushConstants: new[]
                 {
-                    new BindGroupLayoutDesc(0, new[]
-                    {
-                        new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
-                    }),
-                },
-                PushConstants: Array.Empty<PushConstantRangeDesc>());
+                    new PushConstantRangeDesc(ShaderStage.Vertex, 0, 16),
+                });
 
             var desc = new PipelineDesc
             {
-                Name = "NonEmptyLayoutProbe",
+                Name = "PushConstantsProbe",
                 VertexShader = vs,
                 VertexEntryPoint = vsModule.EntryPoint,
                 FragmentShader = fs,
@@ -354,10 +350,52 @@ public class HandleDistinctnessTests
                 StripIndexFormat = IndexFormat.Uint16,
                 ColorFormat = renderer.ColorFormat,
                 DepthStencilFormat = null,
-                Layout = nonEmptyLayout,
+                Layout = layoutWithPushConstants,
             };
 
             await Assert.That(() => renderer.CreatePipeline(in desc)).Throws<NotSupportedException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task submit_rejects_factory_built_set_bind_group_with_nonzero_dynamic_offsets_start()
+    {
+        // Iter-13/14 fix: the encoder rejects (start != 0, count == 0), but the public
+        // RenderCommand.FromSetBindGroup factory bypasses the encoder. The submit path mirrors
+        // the guard so a stream-staged caller still hits InvalidOperationException at submit
+        // instead of silently discarding the unread Start. Symmetric pair with the existing
+        // encoder-side ArgumentException test in RenderCommandEncoderTests.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadTriangleProgram();
+            var pipeline = renderer.CreatePipeline(program, renderer.ColorFormat);
+            // Build a stream that bypasses the encoder via the public factory and stages a
+            // SetBindGroup payload with start != 0 / count == 0.
+            var bindGroupHandle = new BindGroupHandle(0, 0);
+            var commands = new RenderCommand[]
+            {
+                RenderCommand.FromBeginPass(0),
+                RenderCommand.FromSetPipeline(pipeline),
+                RenderCommand.FromSetBindGroup(0, bindGroupHandle, dynamicOffsetsStart: 7, dynamicOffsetsCount: 0),
+                RenderCommand.FromEndPass(),
+            };
+            var passes = new RenderPassDesc[1];
+            passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
+            passes[0].Colors.Slot0 = new ColorAttachmentDesc(
+                View: RenderViewHandle.Invalid,
+                Load: LoadOp.Clear,
+                Store: StoreOp.Store,
+                ClearValue: ColorRgba.Black);
+            var stream = new RenderCommandStream(commands, passes);
+
+            await Assert.That(() => renderer.Submit(in stream)).Throws<InvalidOperationException>();
         }
         finally
         {
@@ -493,18 +531,13 @@ public class HandleDistinctnessTests
         {
             var triangle = LoadTriangleProgram();
             // Build a tampered ShaderProgramDesc with the triangle's modules/VertexBuffers but a
-            // non-empty PipelineLayoutDesc — the BuildNativePipeline guard rejects this.
+            // PipelineLayoutDesc that carries push constants — the BuildNativePipeline guard
+            // rejects push constants (out of scope for M2).
             var tampered = new ShaderProgramDesc(
                 Modules: triangle.Modules,
                 Layout: new PipelineLayoutDesc(
-                    Groups: new[]
-                    {
-                        new BindGroupLayoutDesc(0, new[]
-                        {
-                            new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
-                        }),
-                    },
-                    PushConstants: Array.Empty<PushConstantRangeDesc>()),
+                    Groups: Array.Empty<BindGroupLayoutDesc>(),
+                    PushConstants: new[] { new PushConstantRangeDesc(ShaderStage.Vertex, 0, 16) }),
                 VertexBuffers: triangle.VertexBuffers);
 
             // Warm so the slot count has a settled baseline (the helper mints + destroys two

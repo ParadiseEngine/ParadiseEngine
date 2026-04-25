@@ -47,10 +47,29 @@ public readonly record struct ShaderHandle(uint Index, uint Generation)
     public static readonly ShaderHandle Invalid = default;
 }
 
-/// <summary>Opaque handle to a backend GPU texture view used as a render attachment. Default value is invalid.</summary>
+/// <summary>Opaque handle to a backend GPU texture view. M2 supports texture views as sampled
+/// texture bindings (consumed by <c>BindGroupTextureEntry.View</c>); render-attachment usage
+/// (render-to-texture) is reserved for a later milestone and the backend rejects a non-Invalid
+/// color attachment view at submit time. Default value is invalid.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly record struct RenderViewHandle(uint Index, uint Generation)
 {
     public bool IsValid => Generation != 0;
     public static readonly RenderViewHandle Invalid = default;
+}
+
+/// <summary>Opaque handle to a backend GPU bind group layout. Default value is invalid.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+public readonly record struct BindGroupLayoutHandle(uint Index, uint Generation)
+{
+    public bool IsValid => Generation != 0;
+    public static readonly BindGroupLayoutHandle Invalid = default;
+}
+
+/// <summary>Opaque handle to a backend GPU bind group (a resolved resource binding). Default value is invalid.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+public readonly record struct BindGroupHandle(uint Index, uint Generation)
+{
+    public bool IsValid => Generation != 0;
+    public static readonly BindGroupHandle Invalid = default;
 }

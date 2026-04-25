@@ -61,10 +61,11 @@ internal static class Program
         try
         {
             using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight);
-            using var scene = new TriangleScene(renderer);
+            using var scene = new MaterialScene(renderer, InitialWidth, InitialHeight);
+            const float FixedDt = 1f / 60f;
             for (var i = 0; i < frameCount; i++)
-                scene.RenderFrame();
-            Console.WriteLine($"Headless mode: rendered {frameCount} triangle frames against an offscreen target.");
+                scene.RenderFrame(FixedDt);
+            Console.WriteLine($"Headless mode: rendered {frameCount} textured-quad frames with depth against an offscreen target.");
             return 0;
         }
         finally
@@ -94,7 +95,8 @@ internal static class Program
 
             var surfaceDesc = BuildSurfaceDescriptor(window);
             renderer = new WebGpuRenderer(in surfaceDesc);
-            using var scene = new TriangleScene(renderer);
+            using var scene = new MaterialScene(renderer, surfaceDesc.Width, surfaceDesc.Height);
+            const float FixedDt = 1f / 60f;
 
             var quit = false;
             SDL_Event ev;
@@ -117,10 +119,13 @@ internal static class Program
                         var w = ev.window.data1;
                         var h = ev.window.data2;
                         if (w > 0 && h > 0)
+                        {
                             renderer.Resize((uint)w, (uint)h);
+                            scene.Resize((uint)w, (uint)h);
+                        }
                     }
                 }
-                scene.RenderFrame();
+                scene.RenderFrame(FixedDt);
             }
 
             return 0;
