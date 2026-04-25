@@ -511,6 +511,20 @@ internal sealed class WebGpuDevice : IDisposable
                 "Paradise.Rendering M2 supports depth-only textures (Depth32Float). " +
                 "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
                 "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
+
+        // Reject non-D2 dimensions and layered D2 at the parent-texture level — the SampledTexture
+        // bind-group-layout build hardcodes ViewDimension=D2/Multisampled=false, and the
+        // CreateTextureView D2-only guard has an Undefined-inherit hole. Closing the path at
+        // CreateTexture leaves no way for a layered/3D texture to reach the layout build via the
+        // Undefined-view inheritance escape hatch.
+        if (desc.Dimension != TextureDimension.D2)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports 2D textures (got Dimension={desc.Dimension}); " +
+                "1D/3D textures are reserved for a later milestone.");
+        if (desc.DepthOrArrayLayers > 1)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports single-layer textures (got DepthOrArrayLayers={desc.DepthOrArrayLayers}); " +
+                "array textures are reserved for a later milestone.");
         var td = new WgTextureDescriptor
         {
             Label = desc.Name ?? string.Empty,

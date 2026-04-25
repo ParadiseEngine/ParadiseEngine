@@ -384,6 +384,14 @@ public sealed class WebGpuRenderer : IDisposable
         if (desc.Dimension != TextureDimension.D2)
             throw new NotSupportedException(
                 "Paradise.Rendering M2 only supports CreateTextureWithData for 2D textures; 1D/3D uploads are reserved for a later milestone.");
+        if (desc.SampleCount > 1)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports CreateTextureWithData for single-sampled textures (got SampleCount={desc.SampleCount}). " +
+                "Queue.WriteTexture cannot populate multisampled textures per the WebGPU spec; multisampled upload is reserved for a later milestone.");
+        if (desc.DepthOrArrayLayers > 1)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports CreateTextureWithData for single-layer textures (got DepthOrArrayLayers={desc.DepthOrArrayLayers}); " +
+                "layered/array uploads are reserved for a later milestone.");
         // Resolve bytes-per-pixel BEFORE allocating the texture so an unsupported format throws
         // without leaking a slot-table entry + native texture (regression discovered on PR #58
         // iter-2). Symmetric with the leak-free shape of CreateBufferWithData.
