@@ -42,9 +42,23 @@ public ref struct RenderCommandEncoder
 
     /// <summary>Encode a <see cref="RenderCommandKind.SetBindGroup"/> referencing dynamic offsets
     /// already written to the enclosing <see cref="RenderCommandStream.DynamicOffsets"/> buffer.
-    /// Host code owns the offset buffer; this encoder only records the index range.</summary>
-    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup, uint dynamicOffsetsStart, uint dynamicOffsetsCount) =>
+    /// Host code owns the offset buffer; this encoder only records the index range.
+    /// <para>
+    /// Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone —
+    /// <see cref="BindGroupLayoutEntryDesc"/> has no <c>HasDynamicOffset</c> field so no public
+    /// layout entry can satisfy a dynamic-offset bind. Passing <paramref name="dynamicOffsetsCount"/>
+    /// &gt; 0 throws <see cref="NotSupportedException"/>; use the parameterless overload until
+    /// the layout-entry record grows the field.
+    /// </para></summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle bindGroup, uint dynamicOffsetsStart, uint dynamicOffsetsCount)
+    {
+        if (dynamicOffsetsCount > 0)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 reserves bind-group dynamic offsets for a later milestone " +
+                "(BindGroupLayoutEntryDesc has no HasDynamicOffset field; no public layout can satisfy the bind). " +
+                "Pass dynamicOffsetsCount = 0, or use the parameterless SetBindGroup overload.");
         Write(RenderCommand.FromSetBindGroup(groupIndex, bindGroup, dynamicOffsetsStart, dynamicOffsetsCount));
+    }
 
     public void Draw(in DrawCommand cmd) =>
         Write(RenderCommand.FromDraw(cmd));

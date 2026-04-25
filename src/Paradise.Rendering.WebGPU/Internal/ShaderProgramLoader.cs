@@ -121,6 +121,15 @@ internal static class ShaderProgramLoader
                 throw new InvalidOperationException($"Shader parameter '{p.Name ?? "<unnamed>"}' has no type node — Slang reflection schema may have changed.");
 
             var binding = p.Binding!;
+            // Binding arrays (Texture2D Tex[4], etc.) emit count > 1; the public
+            // BindGroupLayoutEntryDesc has no Count field so they would silently flatten to a
+            // single binding. Reject with a deferral message rather than building an
+            // under-described layout. M2 sample doesn't exercise this; lift when the entry
+            // record grows a Count field.
+            if (binding.Count is { } c && c > 1)
+                throw new NotSupportedException(
+                    $"Shader parameter '{p.Name ?? "<unnamed>"}' is a binding array (count={c}); " +
+                    "Paradise.Rendering M2 does not yet support binding arrays. Reserved for a later milestone.");
             var space = binding.Space ?? 0u;
             var (type, minSize) = MapParameterType(p);
             // Visibility comes from the entry-point bindings table by name. If a parameter doesn't

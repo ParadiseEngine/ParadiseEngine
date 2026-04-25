@@ -326,6 +326,22 @@ internal sealed class WebGpuDevice : IDisposable
                 $"PipelineDesc.BindGroupLayouts.Length ({desc.BindGroupLayouts.Length}). The native pipeline " +
                 "is built from BindGroupLayouts; Layout is descriptor metadata. Both empty or both same length.");
         }
+        // Per-position alignment: Layout.Groups[i].GroupIndex MUST equal i so the dense
+        // BindGroupLayouts[i] packing into WebGPU's pipeline-layout descriptor (where position N
+        // becomes @group(N)) lines up. The loader's BuildPipelineLayout already rejects sparse
+        // spaces, so this guard catches hand-authored PipelineDesc templates that pass groups out
+        // of order (e.g., [_materialLayout, _frameLayout] reversed from program.Layout.Groups).
+        if (desc.Layout is { } layoutForAlignment && layoutForAlignment.Groups.Length > 0)
+        {
+            for (var gi = 0; gi < layoutForAlignment.Groups.Length; gi++)
+            {
+                if (layoutForAlignment.Groups[gi].GroupIndex != (uint)gi)
+                    throw new InvalidOperationException(
+                        $"PipelineDesc.Layout.Groups[{gi}].GroupIndex is {layoutForAlignment.Groups[gi].GroupIndex} " +
+                        $"but the dense BindGroupLayouts packing expects @group({gi}) at position {gi}. " +
+                        "Reorder the Layout.Groups (and the matching BindGroupLayouts) so position i carries GroupIndex == i.");
+            }
+        }
 
         WgPipelineLayout? pipelineLayoutNative = null;
         var bglSpan = desc.BindGroupLayouts.Span;
