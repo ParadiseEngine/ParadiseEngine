@@ -428,6 +428,16 @@ public sealed class WebGpuRenderer : IDisposable
     public RenderViewHandle CreateTextureView(TextureHandle texture, in RenderViewDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // M2 wires Texture2D bindings only — the bind-group-layout build hardcodes
+        // SampleType=Float / ViewDimension=D2 / Multisampled=false in
+        // BuildNativeBindGroupLayout. Reject non-Texture2D dimensions here so a caller cannot
+        // construct a view whose underlying binding shape the backend can't honor. Symmetric
+        // with the loader-side reject in MapParameterType for non-`texture2D` Slang shapes.
+        // `Undefined` defers to the parent texture and is allowed.
+        if (desc.Dimension != TextureViewDimension.D2 && desc.Dimension != TextureViewDimension.Undefined)
+            throw new NotSupportedException(
+                $"Paradise.Rendering M2 only supports {nameof(TextureViewDimension)}.{nameof(TextureViewDimension.D2)} " +
+                $"texture views; '{desc.Dimension}' (cube / array / 3D) is reserved for a later milestone.");
         return _device.CreateTextureView(texture, in desc);
     }
 

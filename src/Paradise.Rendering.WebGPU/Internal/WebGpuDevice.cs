@@ -233,15 +233,19 @@ internal sealed class WebGpuDevice : IDisposable
             throw new InvalidOperationException(
                 $"PipelineDesc.DepthStencil.Format ({ds.Format}) does not match PipelineDesc.DepthStencilFormat ({dsf}).");
 
-        // Tighten asymmetric path: DepthStencilFormat set with DepthStencil null silently produces
-        // a color-only pipeline (the format hashes into PipelineDesc identity but BuildDepthStencilState
-        // returns null without DepthStencil). M2 requires explicit DepthStencilState authoring; fail
-        // loudly on the asymmetric case rather than building a depth-less pipeline that hashes as if
-        // depth were configured.
+        // Tighten BOTH asymmetries between DepthStencilFormat (descriptor metadata that hashes
+        // into pipeline cache identity) and DepthStencil (the structured state that BuildDepthStencilState
+        // consumes). They must be set together or both null, otherwise the cache key hashes as if
+        // depth were configured while the native pipeline behaves as if it weren't (or vice versa).
+        // Iter-5 closed the (Format-set, State-null) case; iter-7 closes the inverse.
         if (desc.DepthStencilFormat is not null && desc.DepthStencil is null)
             throw new InvalidOperationException(
                 "PipelineDesc.DepthStencilFormat is set but DepthStencil is null. " +
                 "Paradise.Rendering M2 requires explicit DepthStencilState authoring; pass null for both, or populate both.");
+        if (desc.DepthStencil is not null && desc.DepthStencilFormat is null)
+            throw new InvalidOperationException(
+                "PipelineDesc.DepthStencil is set but DepthStencilFormat is null. " +
+                "Both fields participate in pipeline cache identity; pass null for both, or populate both.");
 
         // M2 supports depth-only formats only — combined depth/stencil formats (Depth24PlusStencil8)
         // require valid stencil load/store/clear authoring at the pass attachment layer, which the
@@ -309,14 +313,18 @@ internal sealed class WebGpuDevice : IDisposable
         // handles, authoritative for the native build) must agree on group count. The Layout side
         // exists for cache-identity hashing and future push-constant validation. Pipeline build is
         // a one-shot cost (not per-frame) so this is a runtime check, not a Debug.Assert — drift
-        // must surface in shipped builds too.
-        if (desc.Layout is { } expectedLayout && desc.BindGroupLayouts.Length > 0
+        // must surface in shipped builds too. Symmetric: Layout.Groups.Length and
+        // BindGroupLayouts.Length must match unconditionally — Layout populated with
+        // BindGroupLayouts empty would silently fall through to Dawn's auto-layout and produce a
+        // pipeline whose bindings won't match the declared layout (iter-7 fix for the inverse
+        // asymmetry of the iter-5/6 fixes).
+        if (desc.Layout is { } expectedLayout
             && expectedLayout.Groups.Length != desc.BindGroupLayouts.Length)
         {
             throw new InvalidOperationException(
                 $"PipelineDesc.Layout.Groups.Length ({expectedLayout.Groups.Length}) does not match " +
                 $"PipelineDesc.BindGroupLayouts.Length ({desc.BindGroupLayouts.Length}). The native pipeline " +
-                "is built from BindGroupLayouts; Layout is descriptor metadata. The two must agree.");
+                "is built from BindGroupLayouts; Layout is descriptor metadata. Both empty or both same length.");
         }
 
         WgPipelineLayout? pipelineLayoutNative = null;

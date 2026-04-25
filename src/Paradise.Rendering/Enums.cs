@@ -147,7 +147,20 @@ public enum VertexStepMode : byte
     Instance,
 }
 
-/// <summary>Type of resource referenced by a bind group layout entry.</summary>
+/// <summary>Type of resource referenced by a bind group layout entry. The enum is intentionally
+/// shape-agnostic to avoid combinatorial fanout; the backend rejects unsupported variants at
+/// layout-build time. M2-scope limitations:
+/// <list type="bullet">
+/// <item><see cref="SampledTexture"/> / <see cref="MultisampledTexture"/> — backend wires
+/// <c>texture_2d&lt;f32&gt;</c> only. Cube / array / 3D / depth-comparison / integer-sampled
+/// textures are reserved for a later milestone; binding a non-Texture2D view here produces
+/// incorrect Dawn validation downstream rather than a clear up-front reject.</item>
+/// <item><see cref="ComparisonSampler"/> — public <see cref="SamplerDesc"/> has no compare-function
+/// field, so no sampler created through the backend can satisfy this binding; the WebGPU backend
+/// rejects it at layout-build time with a scope-deferral message.</item>
+/// <item><see cref="StorageTexture"/> — reserved for a later milestone; rejected at layout build.</item>
+/// </list>
+/// </summary>
 public enum BindingResourceType : byte
 {
     UniformBuffer = 0,
