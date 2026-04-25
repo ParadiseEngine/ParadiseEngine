@@ -47,6 +47,14 @@ internal sealed class BindGroupLayoutCache
             Entries = copy;
         }
 
+        // INVARIANT: Equals and GetHashCode below MUST enumerate every field on
+        // BindGroupLayoutEntryDesc. When the entry record gains new fields (likely candidates from
+        // prior iter findings: HasDynamicOffset, Count, shape variants), both methods MUST be
+        // updated in lockstep — otherwise the cache silently dedupes descriptors that differ only
+        // in the new field, sharing one native layout for two structurally-distinct descs and
+        // breaking validation downstream. The fragility is the price of avoiding a per-entry
+        // record-struct allocation hash; promote to BindGroupLayoutEntryDesc's own
+        // Equals/GetHashCode if it migrates to record struct.
         public bool Equals(Key other)
         {
             if (GroupIndex != other.GroupIndex) return false;
@@ -70,6 +78,7 @@ internal sealed class BindGroupLayoutCache
             h.Add(Entries.Length);
             for (var i = 0; i < Entries.Length; i++)
             {
+                // INVARIANT (mirrored from Equals above): walk every BindGroupLayoutEntryDesc field.
                 h.Add(Entries[i].Binding);
                 h.Add(Entries[i].Visibility);
                 h.Add(Entries[i].Type);

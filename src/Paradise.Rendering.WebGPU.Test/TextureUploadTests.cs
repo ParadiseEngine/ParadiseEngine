@@ -150,6 +150,178 @@ public class TextureUploadTests
     }
 
     [Test]
+    public async Task create_texture_rejects_combined_depth_stencil_format()
+    {
+        // Iter-10 fix: Depth24PlusStencil8 requires stencil load/store/clear authoring on
+        // DepthAttachmentDesc that the M2 surface doesn't expose. Reject at create time so a
+        // pipeline-less or pre-pipeline pass cannot reach BeginPass with a combined-format
+        // depth texture and trip Dawn's stencil-ops-required validation.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var desc = new TextureDesc(
+                Name: "BadCombined",
+                Width: 16, Height: 16,
+                DepthOrArrayLayers: 1, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.Depth24PlusStencil8,
+                Usage: TextureUsage.RenderAttachment);
+            await Assert.That(() => renderer.CreateTexture(in desc)).Throws<NotSupportedException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_texture_rejects_non_d2_dimension()
+    {
+        // Iter-11 fix: M2's SampledTexture binding-layout build hardcodes ViewDimension=D2.
+        // Reject non-D2 textures at parent-creation so the TextureViewDimension.Undefined
+        // inheritance path can't smuggle a layered/3D texture through into the layout build.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var desc = new TextureDesc(
+                Name: "Bad3D",
+                Width: 16, Height: 16,
+                DepthOrArrayLayers: 4, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D3,
+                Format: TextureFormat.Rgba8Unorm,
+                Usage: TextureUsage.TextureBinding);
+            await Assert.That(() => renderer.CreateTexture(in desc)).Throws<NotSupportedException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_texture_rejects_layered_d2()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var desc = new TextureDesc(
+                Name: "BadLayered",
+                Width: 16, Height: 16,
+                DepthOrArrayLayers: 2, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.Rgba8Unorm,
+                Usage: TextureUsage.TextureBinding);
+            await Assert.That(() => renderer.CreateTexture(in desc)).Throws<NotSupportedException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_texture_with_data_rejects_byte_volume_mismatch()
+    {
+        // Iter-13 fix: typed CreateTextureWithData<T> requires pixels.Length * sizeof(T) ==
+        // width * height * bpp exactly. A non-byte caller for an R8Unorm texture would otherwise
+        // mispack rows because the row-stride math derives BytesPerRow from bpp not sizeof(T).
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var desc = new TextureDesc(
+                Name: "BadByteVolume",
+                Width: 4, Height: 4,
+                DepthOrArrayLayers: 1, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.R8Unorm,
+                Usage: TextureUsage.TextureBinding);
+            // R8Unorm 4x4 = 16 bytes expected; passing 16 ints (= 64 bytes) is a 4x mismatch.
+            var ints = new int[16];
+            await Assert.That(() => renderer.CreateTextureWithData(in desc, (ReadOnlySpan<int>)ints))
+                .Throws<ArgumentException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_bind_group_rejects_duplicate_binding_across_spans()
+    {
+        // Iter-9 fix: WebGPU requires unique binding numbers per bind group. The buffer/texture/
+        // sampler split in BindGroupDesc could let a caller author two entries at the same
+        // binding number across spans; the engine rejects with a descriptive message before
+        // hitting Dawn's opaque diagnostic.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var layout = renderer.CreateBindGroupLayout(new BindGroupLayoutDesc(0, new[]
+            {
+                new BindGroupLayoutEntryDesc(0, ShaderStage.Fragment, BindingResourceType.SampledTexture, 0),
+                new BindGroupLayoutEntryDesc(1, ShaderStage.Fragment, BindingResourceType.Sampler, 0),
+            }));
+            var tex = renderer.CreateTexture(new TextureDesc(
+                Name: "Probe", Width: 2, Height: 2, DepthOrArrayLayers: 1, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2, Format: TextureFormat.Rgba8Unorm,
+                Usage: TextureUsage.TextureBinding));
+            var view = renderer.CreateTextureView(tex, new RenderViewDesc(
+                Name: null, Format: TextureFormat.Rgba8Unorm, Dimension: TextureViewDimension.D2,
+                Aspect: TextureAspect.All, BaseMipLevel: 0, MipLevelCount: 1, BaseArrayLayer: 0, ArrayLayerCount: 1));
+            var sampler = renderer.CreateSampler(new SamplerDesc(
+                Name: null,
+                AddressU: SamplerAddressMode.ClampToEdge, AddressV: SamplerAddressMode.ClampToEdge, AddressW: SamplerAddressMode.ClampToEdge,
+                MagFilter: SamplerFilterMode.Nearest, MinFilter: SamplerFilterMode.Nearest, MipmapFilter: SamplerFilterMode.Nearest));
+
+            // Both texture and sampler at binding 0 — duplicate across spans.
+            var desc = new BindGroupDesc
+            {
+                Name = "DupBindGroup",
+                Layout = layout,
+                Textures = new[] { new BindGroupTextureEntry(0, view) },
+                Samplers = new[] { new BindGroupSamplerEntry(0, sampler) },
+            };
+            await Assert.That(() => renderer.CreateBindGroup(in desc)).Throws<InvalidOperationException>();
+
+            renderer.DestroySampler(sampler);
+            renderer.DestroyTextureView(view);
+            renderer.DestroyTexture(tex);
+            renderer.DestroyBindGroupLayout(layout);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task create_bind_group_layout_rejects_duplicate_binding()
+    {
+        // Iter-12 fix: symmetric with CreateBindGroup uniqueness — a layout with two entries at
+        // the same binding number is rejected before reaching Dawn.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var dupLayout = new BindGroupLayoutDesc(0, new[]
+            {
+                new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16),
+                new BindGroupLayoutEntryDesc(0, ShaderStage.Fragment, BindingResourceType.Sampler, 0),
+            });
+            await Assert.That(() => renderer.CreateBindGroupLayout(dupLayout)).Throws<InvalidOperationException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task write_buffer_accepts_repeated_uniform_updates()
     {
         var renderer = TryCreateHeadlessOrSkip();

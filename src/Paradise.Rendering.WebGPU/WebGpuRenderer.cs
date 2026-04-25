@@ -378,6 +378,14 @@ public sealed class WebGpuRenderer : IDisposable
     /// <summary>Create a 2D texture and populate mip level 0 / layer 0 from <paramref name="pixels"/>.
     /// Adds <see cref="TextureUsage.CopyDst"/> to the usage flags implicitly so the upload can
     /// succeed even when the caller didn't include it.</summary>
+    /// <remarks>The generic constraint accepts any unmanaged element type, but the row-stride
+    /// math derives <c>BytesPerRow</c> from <c>desc.Format</c>'s bytes-per-pixel, not from
+    /// <c>Unsafe.SizeOf&lt;T&gt;()</c>. To prevent silent row mispacking when
+    /// <c>sizeof(T) != bpp</c>, the helper requires <c>pixels.Length * sizeof(T) == width *
+    /// height * bpp</c> exactly — typed callers using strides matching the format's bpp pass; a
+    /// non-byte caller for a <c>R8Unorm</c> texture (or any other mismatch) trips the assert
+    /// before reaching Dawn. Restricting the API to <c>ReadOnlySpan&lt;byte&gt;</c> would be
+    /// cleaner; the assert keeps the typed surface for callers staging interleaved data.</remarks>
     public TextureHandle CreateTextureWithData<T>(in TextureDesc desc, ReadOnlySpan<T> pixels) where T : unmanaged
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -396,6 +404,20 @@ public sealed class WebGpuRenderer : IDisposable
         // without leaking a slot-table entry + native texture (regression discovered on PR #58
         // iter-2). Symmetric with the leak-free shape of CreateBufferWithData.
         var bpp = BytesPerPixel(desc.Format);
+        // Caller-side byte-volume check: the row-stride math below uses bpp from the format, so
+        // sizeof(T) != bpp would silently mispack rows. Reject the mismatch up-front with a clear
+        // message rather than letting Queue.WriteTexture interpret the source span with the wrong
+        // stride (iter-13 fix for the typed-upload generic-vs-row-stride mismatch).
+        var sizeofT = (uint)System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+        var expectedBytes = (ulong)desc.Width * desc.Height * bpp;
+        var actualBytes = (ulong)pixels.Length * sizeofT;
+        if (actualBytes != expectedBytes)
+            throw new ArgumentException(
+                $"CreateTextureWithData<{typeof(T).Name}>: pixels span carries {actualBytes} bytes " +
+                $"({pixels.Length} elements x {sizeofT}B) but the texture requires exactly {expectedBytes} bytes " +
+                $"({desc.Width}x{desc.Height} x {bpp}B/pixel for format {desc.Format}). " +
+                "Pass a span sized to the texture exactly, or switch to ReadOnlySpan<byte>.",
+                nameof(pixels));
         var sized = desc with { Usage = desc.Usage | TextureUsage.CopyDst };
         var handle = _device.CreateTexture(in sized);
         try

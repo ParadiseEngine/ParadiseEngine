@@ -64,4 +64,35 @@ public class RenderCommandEncoderTests
     {
         await Assert.That(() => new RenderCommandEncoder(null!)).Throws<ArgumentNullException>();
     }
+
+    [Test]
+    public async Task set_bind_group_4arg_rejects_nonzero_dynamic_offsets_count()
+    {
+        // Iter-9 fix: M2 reserves bind-group dynamic offsets — BindGroupLayoutEntryDesc has no
+        // HasDynamicOffset field so no public layout can satisfy the bind. Encoder must reject
+        // count > 0 with a clear NotSupportedException at encode time.
+        var writer = new ArrayBufferWriter<RenderCommand>(2);
+        var bindGroup = new BindGroupHandle(1, 1);
+        await Assert.That(() =>
+        {
+            var encoder = new RenderCommandEncoder(writer);
+            encoder.SetBindGroup(0, bindGroup, dynamicOffsetsStart: 0, dynamicOffsetsCount: 1);
+        }).Throws<NotSupportedException>();
+    }
+
+    [Test]
+    public async Task set_bind_group_4arg_rejects_nonzero_start_when_count_is_zero()
+    {
+        // Iter-10 fix: when count == 0 the submit path never reads start, so accepting a
+        // non-zero value would silently discard it. Encoder rejects with ArgumentException to
+        // surface the API smell immediately rather than letting the unused value linger in the
+        // payload. Use the parameterless overload for the no-offsets case.
+        var writer = new ArrayBufferWriter<RenderCommand>(2);
+        var bindGroup = new BindGroupHandle(1, 1);
+        await Assert.That(() =>
+        {
+            var encoder = new RenderCommandEncoder(writer);
+            encoder.SetBindGroup(0, bindGroup, dynamicOffsetsStart: 7, dynamicOffsetsCount: 0);
+        }).Throws<ArgumentException>();
+    }
 }
