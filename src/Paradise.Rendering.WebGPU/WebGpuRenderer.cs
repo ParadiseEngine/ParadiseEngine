@@ -479,6 +479,8 @@ public sealed class WebGpuRenderer : IDisposable
         // deferred frame window so in-flight GPU work finishes.
         if (!_device.DetachTextureView(handle, out var native))
             return;
+        // load-bearing: the discard forces the closure to capture `native` as a class field so it
+        // outlives this stack frame until the deferred queue drains. Do NOT remove as dead code.
         _destructionQueue.Schedule(() => { _ = native; });
     }
 
@@ -493,6 +495,7 @@ public sealed class WebGpuRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_device.DetachSampler(handle, out var native))
             return;
+        // load-bearing discard — see DestroyTextureView for the closure-capture rationale.
         _destructionQueue.Schedule(() => { _ = native; });
     }
 
@@ -535,6 +538,7 @@ public sealed class WebGpuRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_device.DetachBindGroup(handle, out var native))
             return;
+        // load-bearing discard — see DestroyTextureView for the closure-capture rationale.
         _destructionQueue.Schedule(() => { _ = native; });
     }
 
@@ -732,6 +736,16 @@ public sealed class WebGpuRenderer : IDisposable
                                 "(BindGroupLayoutEntryDesc has no HasDynamicOffset field). " +
                                 $"SetBindGroup with DynamicOffsetsCount={p.DynamicOffsetsCount} cannot be satisfied.");
                         }
+                        // Submit-side mirror of the encoder's `start != 0 when count == 0` guard,
+                        // closing the iter-13 RenderCommand.FromSetBindGroup factory bypass. The
+                        // encoder rejects with ArgumentException; here a stream-staged caller hits
+                        // InvalidOperationException because the violation is now structurally in
+                        // the stream, not at the per-call API site.
+                        if (p.DynamicOffsetsStart != 0)
+                            throw new InvalidOperationException(
+                                $"SetBindGroup with DynamicOffsetsCount=0 must have DynamicOffsetsStart=0; " +
+                                $"got Start={p.DynamicOffsetsStart}. The value is unread at submit; surfacing the " +
+                                "API smell here rather than silently discarding it (matches the encoder-side ArgumentException).");
                         pass.SetBindGroup(p.GroupIndex, bindGroup);
                         break;
                     }
