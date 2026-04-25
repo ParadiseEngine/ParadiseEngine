@@ -279,6 +279,21 @@ internal sealed class WebGpuDevice : IDisposable
         // bindings (the M1 triangle path). A non-empty span implies the caller has an explicit
         // layout we build into a WgPipelineLayout; the native layout reference is held via the
         // descriptor capture for the duration of the Dawn call.
+        //
+        // Contract documented on `WebGpuRenderer.CreatePipeline(in ShaderProgramDesc, in PipelineDesc)`:
+        // PipelineDesc.Layout (descriptor metadata) and PipelineDesc.BindGroupLayouts (runtime
+        // handles, authoritative for the native build) must agree on group count. The Layout side
+        // exists for cache-identity hashing and future push-constant validation. Asserting at
+        // build time here surfaces drift before the native pipeline takes a divergent layout.
+        if (desc.Layout is { } expectedLayout && desc.BindGroupLayouts.Length > 0)
+        {
+            System.Diagnostics.Debug.Assert(
+                expectedLayout.Groups.Length == desc.BindGroupLayouts.Length,
+                $"PipelineDesc.Layout.Groups.Length ({expectedLayout.Groups.Length}) does not match " +
+                $"PipelineDesc.BindGroupLayouts.Length ({desc.BindGroupLayouts.Length}). The native pipeline " +
+                "is built from BindGroupLayouts; Layout is descriptor metadata. The two must agree.");
+        }
+
         WgPipelineLayout? pipelineLayoutNative = null;
         var bglSpan = desc.BindGroupLayouts.Span;
         if (bglSpan.Length > 0)

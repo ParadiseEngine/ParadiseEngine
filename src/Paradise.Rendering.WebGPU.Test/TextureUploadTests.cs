@@ -101,6 +101,55 @@ public class TextureUploadTests
     }
 
     [Test]
+    public async Task create_texture_with_data_does_not_leak_on_unsupported_format()
+    {
+        // Iter-3 regression: CreateTextureWithData previously allocated the texture BEFORE
+        // computing bytes-per-pixel, so an unsupported format threw NotSupportedException with
+        // the slot-table entry + native already in flight. Iter-3 resolves bpp first; this test
+        // pins the no-leak invariant by repeating the failing call N times and asserting the
+        // slot-table count holds steady at the baseline.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            // Baseline measured AFTER one warm valid create+destroy so the slot pool is stable.
+            var warmDesc = new TextureDesc(
+                Name: "WarmRgba",
+                Width: 2, Height: 2,
+                DepthOrArrayLayers: 1, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.Rgba8Unorm,
+                Usage: TextureUsage.TextureBinding);
+            var warmPixels = new byte[16];
+            var warm = renderer.CreateTextureWithData(in warmDesc, (ReadOnlySpan<byte>)warmPixels);
+            renderer.DestroyTexture(warm);
+            var baseline = renderer.TextureSlotCountForTest;
+
+            // Depth32Float is in BytesPerPixel's not-supported set — CreateTextureWithData throws
+            // before allocating now (post-iter-3). Pre-iter-3, each iteration leaked one slot.
+            var badDesc = new TextureDesc(
+                Name: "BadFormat",
+                Width: 2, Height: 2,
+                DepthOrArrayLayers: 1, MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.Depth32Float,
+                Usage: TextureUsage.TextureBinding);
+            var emptyPixels = new byte[16];
+            for (var i = 0; i < 4; i++)
+            {
+                try { _ = renderer.CreateTextureWithData(in badDesc, (ReadOnlySpan<byte>)emptyPixels); }
+                catch (NotSupportedException) { /* expected */ }
+            }
+
+            await Assert.That(renderer.TextureSlotCountForTest).IsEqualTo(baseline);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task write_buffer_accepts_repeated_uniform_updates()
     {
         var renderer = TryCreateHeadlessOrSkip();

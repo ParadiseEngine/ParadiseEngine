@@ -80,6 +80,43 @@ public class BindGroupLayoutCacheTests
     }
 
     [Test]
+    public async Task cache_key_snapshots_entries_so_caller_mutation_is_invisible()
+    {
+        // Iter-3 regression: the cache key originally captured the descriptor's Entries array
+        // by reference, so a caller mutating the array post-insertion could change the key's hash
+        // and break dictionary lookups. Iter-3 snapshots the entries into the Key. Mutating the
+        // original array between two creates with structurally-equal-at-call-time descriptors
+        // must NOT split the cache.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            var entries = new[] { new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16) };
+            var h1 = renderer.CreateBindGroupLayout(BuildDesc(0, entries));
+
+            // Mutate the array between the two creates. A non-snapshotting Key would now hash
+            // differently than the original insertion did, so lookups against the original
+            // content would miss; the second create below would make a new cache entry.
+            entries[0] = new BindGroupLayoutEntryDesc(7, ShaderStage.Fragment, BindingResourceType.Sampler, 0);
+
+            // Second call provides a fresh array with the ORIGINAL content. Snapshot Key behavior:
+            // hits the existing cache entry. Reference Key behavior: misses, makes a second entry.
+            var originalAgain = new[] { new BindGroupLayoutEntryDesc(0, ShaderStage.Vertex, BindingResourceType.UniformBuffer, 16) };
+            var h2 = renderer.CreateBindGroupLayout(BuildDesc(0, originalAgain));
+
+            await Assert.That(h1).IsNotEqualTo(h2);
+            await Assert.That(renderer.BindGroupLayoutCacheCountForTest).IsEqualTo(1);
+
+            renderer.DestroyBindGroupLayout(h1);
+            renderer.DestroyBindGroupLayout(h2);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task different_entry_visibility_produces_distinct_cache_entries()
     {
         var renderer = TryCreateHeadlessOrSkip();

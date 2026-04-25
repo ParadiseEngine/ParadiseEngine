@@ -13,23 +13,38 @@ internal sealed class BindGroupLayoutCache
 {
     private readonly Dictionary<Key, WgBindGroupLayout> _byKey = new();
 
+    /// <summary>Cache key — snapshots the descriptor's <see cref="BindGroupLayoutDesc.Entries"/>
+    /// array contents into an internal copy at construction so caller-side post-insertion
+    /// mutations cannot poison the dictionary's hash/equality contract. The original
+    /// <see cref="BindGroupLayoutDesc"/> is reference-typed and its <c>Entries</c> array is also
+    /// reference-typed; without snapshotting, a caller mutating the array between insert and
+    /// lookup would break dictionary lookups for every entry sharing that backing array.</summary>
     private readonly struct Key : IEquatable<Key>
     {
-        public readonly BindGroupLayoutDesc Desc;
-        public Key(BindGroupLayoutDesc desc) { Desc = desc; }
+        public readonly uint GroupIndex;
+        public readonly BindGroupLayoutEntryDesc[] Entries;
+
+        public Key(BindGroupLayoutDesc desc)
+        {
+            GroupIndex = desc.GroupIndex;
+            // Defensive copy. Entry records themselves are immutable (sealed records with init-only
+            // properties), so a shallow array copy is sufficient.
+            var src = desc.Entries;
+            var copy = new BindGroupLayoutEntryDesc[src.Length];
+            Array.Copy(src, copy, src.Length);
+            Entries = copy;
+        }
 
         public bool Equals(Key other)
         {
-            if (Desc.GroupIndex != other.Desc.GroupIndex) return false;
-            var a = Desc.Entries;
-            var b = other.Desc.Entries;
-            if (a.Length != b.Length) return false;
-            for (var i = 0; i < a.Length; i++)
+            if (GroupIndex != other.GroupIndex) return false;
+            if (Entries.Length != other.Entries.Length) return false;
+            for (var i = 0; i < Entries.Length; i++)
             {
-                if (a[i].Binding != b[i].Binding) return false;
-                if (a[i].Visibility != b[i].Visibility) return false;
-                if (a[i].Type != b[i].Type) return false;
-                if (a[i].MinBufferSize != b[i].MinBufferSize) return false;
+                if (Entries[i].Binding != other.Entries[i].Binding) return false;
+                if (Entries[i].Visibility != other.Entries[i].Visibility) return false;
+                if (Entries[i].Type != other.Entries[i].Type) return false;
+                if (Entries[i].MinBufferSize != other.Entries[i].MinBufferSize) return false;
             }
             return true;
         }
@@ -39,15 +54,14 @@ internal sealed class BindGroupLayoutCache
         public override int GetHashCode()
         {
             var h = new HashCode();
-            h.Add(Desc.GroupIndex);
-            var entries = Desc.Entries;
-            h.Add(entries.Length);
-            for (var i = 0; i < entries.Length; i++)
+            h.Add(GroupIndex);
+            h.Add(Entries.Length);
+            for (var i = 0; i < Entries.Length; i++)
             {
-                h.Add(entries[i].Binding);
-                h.Add(entries[i].Visibility);
-                h.Add(entries[i].Type);
-                h.Add(entries[i].MinBufferSize);
+                h.Add(Entries[i].Binding);
+                h.Add(Entries[i].Visibility);
+                h.Add(Entries[i].Type);
+                h.Add(Entries[i].MinBufferSize);
             }
             return h.ToHashCode();
         }

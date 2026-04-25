@@ -260,10 +260,14 @@ public sealed class WebGpuRenderer : IDisposable
     /// The shader module fields on the template are ignored — the loader derives them from
     /// <paramref name="program"/> — so callers can build a single template that names the
     /// non-shader pipeline parameters and reuse it across shader permutations.
-    /// <see cref="PipelineDesc.Layout"/>, when non-null, overrides
-    /// <see cref="ShaderProgramDesc.Layout"/>; pass <c>null</c> to use the program's reflection-
-    /// derived layout. <see cref="PipelineDesc.VertexLayouts"/> is always taken from
-    /// <paramref name="program"/>.</summary>
+    /// <para>
+    /// <see cref="PipelineDesc.Layout"/> is descriptor metadata used for cache identity and
+    /// (eventually) push-constant validation; the **native** WebGPU pipeline layout is built
+    /// exclusively from <see cref="PipelineDesc.BindGroupLayouts"/> (one runtime handle per group,
+    /// in order). The two must agree on group count and ordering — a Debug.Assert in
+    /// <see cref="WebGpuDevice.BuildNativePipeline"/> verifies this. <see cref="PipelineDesc.VertexLayouts"/>
+    /// is always taken from <paramref name="program"/>.
+    /// </para></summary>
     public PipelineHandle CreatePipeline(in ShaderProgramDesc program, in PipelineDesc template)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -369,10 +373,24 @@ public sealed class WebGpuRenderer : IDisposable
         if (desc.Dimension != TextureDimension.D2)
             throw new NotSupportedException(
                 "Paradise.Rendering M2 only supports CreateTextureWithData for 2D textures; 1D/3D uploads are reserved for a later milestone.");
+        // Resolve bytes-per-pixel BEFORE allocating the texture so an unsupported format throws
+        // without leaking a slot-table entry + native texture (regression discovered on PR #58
+        // iter-2). Symmetric with the leak-free shape of CreateBufferWithData.
+        var bpp = BytesPerPixel(desc.Format);
         var sized = desc with { Usage = desc.Usage | TextureUsage.CopyDst };
         var handle = _device.CreateTexture(in sized);
-        var bpp = BytesPerPixel(desc.Format);
-        _device.WriteTexture2D(handle, desc.Width, desc.Height, bpp, pixels);
+        try
+        {
+            _device.WriteTexture2D(handle, desc.Width, desc.Height, bpp, pixels);
+        }
+        catch
+        {
+            // If the upload throws (Dawn validation, marshalling failure) we still own `handle`,
+            // so release it through the public Destroy path so the slot is invalidated and the
+            // native is deferred-released. Re-throw the original exception to the caller.
+            DestroyTexture(handle);
+            throw;
+        }
         return handle;
     }
 
@@ -787,6 +805,10 @@ public sealed class WebGpuRenderer : IDisposable
     /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
     /// take a dependency on internal device counters.</summary>
     internal int ShaderSlotCountForTest => _device.Shaders.Count;
+
+    /// <summary>Test-only accessor for the live-texture-slot count. Used by the
+    /// CreateTextureWithData leak regression test added in iter-3.</summary>
+    internal int TextureSlotCountForTest => _device.Textures.Count;
 
     public void Dispose()
     {
