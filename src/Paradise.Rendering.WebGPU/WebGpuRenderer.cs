@@ -758,8 +758,9 @@ public sealed class WebGpuRenderer : IDisposable
                 // ops to be UNSET on depth-only formats — `WgLoadOp.Undefined` / `WgStoreOp.Undefined`
                 // map to "unset" and are correct here. For combined formats like
                 // Depth24PlusStencil8, valid stencil ops would be REQUIRED instead and Dawn would
-                // reject Undefined; combined formats are not yet supported (the Format guard
-                // upstream rejects pipelines that mix them with this attachment).
+                // reject Undefined; the pipeline-side guard in BuildNativePipeline rejects
+                // combined formats up-front so this attachment never sees Depth24PlusStencil8 in
+                // M2.
                 StencilLoadOp = WgLoadOp.Undefined,
                 StencilStoreOp = WgStoreOp.Undefined,
                 StencilClearValue = 0,

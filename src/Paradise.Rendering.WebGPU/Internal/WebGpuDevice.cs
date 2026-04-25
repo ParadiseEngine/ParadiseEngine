@@ -233,6 +233,20 @@ internal sealed class WebGpuDevice : IDisposable
             throw new InvalidOperationException(
                 $"PipelineDesc.DepthStencil.Format ({ds.Format}) does not match PipelineDesc.DepthStencilFormat ({dsf}).");
 
+        // M2 supports depth-only formats only — combined depth/stencil formats (Depth24PlusStencil8)
+        // require valid stencil load/store/clear authoring at the pass attachment layer, which the
+        // M2 surface does not yet expose (DepthAttachmentDesc has no stencil fields). Reject at
+        // pipeline-build time so a caller doesn't get a Dawn validation error mid-frame on the
+        // BeginPass that follows. Symmetric with the multi-attachment / push-constants /
+        // non-Texture2D guards. Tracked as a follow-up alongside DepthAttachmentDesc stencil
+        // expansion.
+        var depthFormatToCheck = desc.DepthStencilFormat ?? desc.DepthStencil?.Format;
+        if (depthFormatToCheck == TextureFormat.Depth24PlusStencil8)
+            throw new NotSupportedException(
+                "Paradise.Rendering M2 supports depth-only formats (Depth32Float). " +
+                "Combined depth/stencil formats (Depth24PlusStencil8) require stencil load/store/clear " +
+                "authoring on DepthAttachmentDesc and are reserved for a later milestone.");
+
         var vertex = ResolveShader(desc.VertexShader);
         var fragment = ResolveShader(desc.FragmentShader);
 
