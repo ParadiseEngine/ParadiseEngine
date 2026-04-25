@@ -116,6 +116,56 @@ public class ShaderProgramLoaderTests
     }
 
     [Test]
+    public async Task build_program_desc_rejects_push_constant_parameter()
+    {
+        // Empirically verified against slangc -reflection-json v2026.7: a [[vk::push_constant]]
+        // parameter emits `binding.kind = "pushConstantBuffer"`. The loader must fail-fast rather
+        // than silently dropping it (the M1 fail-fast was lost in the M2 binding rewrite — iter-2
+        // restores it for unrecognized kinds, with an explicit case for push constants since they
+        // have a clear-cut milestone deferral message).
+        var reflection = new SlangReflection(
+            Parameters: new[]
+            {
+                new SlangParameter(
+                    Name: "Push",
+                    Binding: new SlangBinding(Kind: "pushConstantBuffer", Space: null, Index: 0, Count: null, Size: null),
+                    Type: new SlangTypeNode(Kind: "constantBuffer", Name: "PushData", Fields: null, ElementCount: null, ElementType: null, ScalarType: null, BaseShape: null, ElementVarLayout: null),
+                    SemanticName: null),
+            },
+            EntryPoints: new[]
+            {
+                new SlangEntryPoint(Name: "vs_main", Stage: "vertex", Parameters: null, Bindings: null),
+            });
+
+        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
+            .Throws<NotSupportedException>();
+    }
+
+    [Test]
+    public async Task build_program_desc_rejects_unknown_binding_kind()
+    {
+        // Forward-compat guard: an unrecognized binding kind (slangc may add new ones in future
+        // versions) must surface as a clear failure rather than a silent drop. Symmetric to the
+        // unknown-type reject in MapParameterType.
+        var reflection = new SlangReflection(
+            Parameters: new[]
+            {
+                new SlangParameter(
+                    Name: "Mystery",
+                    Binding: new SlangBinding(Kind: "futureBindingKind", Space: null, Index: 0, Count: null, Size: null),
+                    Type: new SlangTypeNode(Kind: "scalar", Name: null, Fields: null, ElementCount: null, ElementType: null, ScalarType: "float32", BaseShape: null, ElementVarLayout: null),
+                    SemanticName: null),
+            },
+            EntryPoints: new[]
+            {
+                new SlangEntryPoint(Name: "vs_main", Stage: "vertex", Parameters: null, Bindings: null),
+            });
+
+        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
+            .Throws<NotSupportedException>();
+    }
+
+    [Test]
     public async Task build_program_desc_builds_uniform_buffer_group_from_module_parameters()
     {
         // M2 binding path: a module-level parameter with `descriptorTableSlot` kind and a

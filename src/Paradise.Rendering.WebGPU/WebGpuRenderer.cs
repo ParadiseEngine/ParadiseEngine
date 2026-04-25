@@ -250,6 +250,7 @@ public sealed class WebGpuRenderer : IDisposable
             depthStencilFormat: null,
             depthStencil: null,
             bindGroupLayouts: ReadOnlyMemory<BindGroupLayoutHandle>.Empty,
+            layoutOverride: null,
             topology: topology,
             stripIndexFormat: stripIndexFormat);
     }
@@ -258,7 +259,11 @@ public sealed class WebGpuRenderer : IDisposable
     /// pipeline layout, bind group layouts, depth state, and color format override the defaults.
     /// The shader module fields on the template are ignored — the loader derives them from
     /// <paramref name="program"/> — so callers can build a single template that names the
-    /// non-shader pipeline parameters and reuse it across shader permutations.</summary>
+    /// non-shader pipeline parameters and reuse it across shader permutations.
+    /// <see cref="PipelineDesc.Layout"/>, when non-null, overrides
+    /// <see cref="ShaderProgramDesc.Layout"/>; pass <c>null</c> to use the program's reflection-
+    /// derived layout. <see cref="PipelineDesc.VertexLayouts"/> is always taken from
+    /// <paramref name="program"/>.</summary>
     public PipelineHandle CreatePipeline(in ShaderProgramDesc program, in PipelineDesc template)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -268,6 +273,7 @@ public sealed class WebGpuRenderer : IDisposable
             depthStencilFormat: template.DepthStencilFormat,
             depthStencil: template.DepthStencil,
             bindGroupLayouts: template.BindGroupLayouts,
+            layoutOverride: template.Layout,
             topology: template.Topology,
             stripIndexFormat: template.StripIndexFormat,
             label: template.Name);
@@ -279,6 +285,7 @@ public sealed class WebGpuRenderer : IDisposable
         TextureFormat? depthStencilFormat,
         DepthStencilState? depthStencil,
         ReadOnlyMemory<BindGroupLayoutHandle> bindGroupLayouts,
+        PipelineLayoutDesc? layoutOverride,
         PrimitiveTopology topology,
         IndexFormat stripIndexFormat,
         string? label = null)
@@ -319,7 +326,7 @@ public sealed class WebGpuRenderer : IDisposable
                 ColorFormat = colorFormat,
                 DepthStencilFormat = depthStencilFormat,
                 DepthStencil = depthStencil,
-                Layout = program.Layout,
+                Layout = layoutOverride ?? program.Layout,
                 BindGroupLayouts = bindGroupLayouts,
             };
             return CreatePipeline(in pipelineDesc);
@@ -699,10 +706,13 @@ public sealed class WebGpuRenderer : IDisposable
                 DepthStoreOp = FormatConversions.ToWgpu(d.DepthStore),
                 DepthClearValue = d.ClearDepth,
                 DepthReadOnly = false,
-                // Stencil defaults: M2 does not author stencil state. Leaving stencil load/store
-                // Undefined would trip Dawn's validation when the format is Depth24PlusStencil8;
-                // use Load/Discard as a safe neutral default for all depth formats (Dawn treats
-                // these as no-ops on depth-only formats like Depth32Float).
+                // Stencil defaults: M2 does not author stencil state and only supports
+                // depth-only formats (Depth32Float). The WebGPU spec requires stencil load/store
+                // ops to be UNSET on depth-only formats — `WgLoadOp.Undefined` / `WgStoreOp.Undefined`
+                // map to "unset" and are correct here. For combined formats like
+                // Depth24PlusStencil8, valid stencil ops would be REQUIRED instead and Dawn would
+                // reject Undefined; combined formats are not yet supported (the Format guard
+                // upstream rejects pipelines that mix them with this attachment).
                 StencilLoadOp = WgLoadOp.Undefined,
                 StencilStoreOp = WgStoreOp.Undefined,
                 StencilClearValue = 0,

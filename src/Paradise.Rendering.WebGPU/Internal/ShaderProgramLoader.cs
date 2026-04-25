@@ -92,11 +92,31 @@ internal static class ShaderProgramLoader
         var groupedByIndex = new SortedDictionary<uint, List<BindGroupLayoutEntryDesc>>();
         foreach (var p in parameters)
         {
-            if (p.Binding?.Kind is not "descriptorTableSlot") continue;
+            var kind = p.Binding?.Kind;
+            // Fail-fast on bindings the loader recognizes but does not support yet — push constants
+            // (Slang `pushConstantBuffer`, empirically verified against slangc -reflection-json
+            // v2026.7) are reserved for a later milestone, and silently dropping them would leave
+            // the engine unable to validate the shader against its actual bindings. Symmetric with
+            // the BindingResourceType reject in MapParameterType and with the
+            // BuildNativePipeline push-constant guard.
+            if (kind == "pushConstantBuffer")
+                throw new NotSupportedException(
+                    $"Shader parameter '{p.Name ?? "<unnamed>"}' uses Slang binding kind 'pushConstantBuffer'; " +
+                    "push constants are reserved for a later milestone in Paradise.Rendering.");
+            // varyingInput / varyingOutput on top-level parameters are vertex-stage I/O, not bind
+            // group bindings — handled by ExtractVertexBuffers via entry-point parameters and not
+            // emitted at module scope by slangc, but tolerate them defensively.
+            if (kind is "varyingInput" or "varyingOutput") continue;
+            if (kind != "descriptorTableSlot")
+                throw new NotSupportedException(
+                    $"Shader parameter '{p.Name ?? "<unnamed>"}' uses unrecognized Slang binding kind '{kind ?? "<null>"}'. " +
+                    "Paradise.Rendering's reflection loader only handles 'descriptorTableSlot' for module-level " +
+                    "resource bindings; new Slang reflection kinds need explicit handling here.");
             if (p.Type is null)
                 throw new InvalidOperationException($"Shader parameter '{p.Name ?? "<unnamed>"}' has no type node — Slang reflection schema may have changed.");
 
-            var space = p.Binding.Space ?? 0u;
+            var binding = p.Binding!;
+            var space = binding.Space ?? 0u;
             var (type, minSize) = MapParameterType(p);
             var visibility = p.Name is not null && visibilityByName.TryGetValue(p.Name, out var vis)
                 ? vis
@@ -107,7 +127,7 @@ internal static class ShaderProgramLoader
                 list = new List<BindGroupLayoutEntryDesc>();
                 groupedByIndex[space] = list;
             }
-            list.Add(new BindGroupLayoutEntryDesc(p.Binding.Index, visibility, type, minSize));
+            list.Add(new BindGroupLayoutEntryDesc(binding.Index, visibility, type, minSize));
         }
 
         var groups = new BindGroupLayoutDesc[groupedByIndex.Count];

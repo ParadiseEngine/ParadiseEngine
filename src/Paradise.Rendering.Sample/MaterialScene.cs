@@ -42,7 +42,7 @@ internal sealed class MaterialScene : IDisposable
     private readonly TextureHandle _albedoTexture;
     private readonly RenderViewHandle _albedoView;
     private readonly SamplerHandle _albedoSampler;
-    private readonly TextureHandle _depthTexture;
+    private TextureHandle _depthTexture;
     private readonly BindGroupLayoutHandle _frameLayout;
     private readonly BindGroupLayoutHandle _materialLayout;
     private readonly BindGroupHandle _frameBindGroup;
@@ -50,8 +50,8 @@ internal sealed class MaterialScene : IDisposable
     private readonly PipelineHandle _pipeline;
     private readonly RenderPassDesc[] _passes;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(16);
-    private readonly uint _depthWidth;
-    private readonly uint _depthHeight;
+    private uint _depthWidth;
+    private uint _depthHeight;
     private float _timeSeconds;
 
     public MaterialScene(WebGpuRenderer renderer, uint width, uint height)
@@ -146,16 +146,7 @@ internal sealed class MaterialScene : IDisposable
             Samplers = matSamplers,
         });
 
-        _depthTexture = renderer.CreateTexture(new TextureDesc(
-            Name: "SceneDepth",
-            Width: width,
-            Height: height,
-            DepthOrArrayLayers: 1,
-            MipLevelCount: 1,
-            SampleCount: 1,
-            Dimension: TextureDimension.D2,
-            Format: DepthFormat,
-            Usage: TextureUsage.RenderAttachment));
+        _depthTexture = CreateDepthTexture(renderer, width, height);
 
         var pipelineDesc = new PipelineDesc
         {
@@ -195,13 +186,35 @@ internal sealed class MaterialScene : IDisposable
     {
         if (width == 0 || height == 0) return;
         if (width == _depthWidth && height == _depthHeight) return;
-        // Depth texture recreate on resize would be a natural M2 follow-up; keeping current texture
-        // means the depth attachment silently mismatches the color attachment after resize. Log and
-        // skip here; M3 (or whichever milestone owns window-resize-safe depth) handles this.
-        Console.Error.WriteLine(
-            $"[MaterialScene] Resize to {width}x{height} requested; depth texture stays at {_depthWidth}x{_depthHeight}. " +
-            "Resize-safe depth is a follow-up milestone.");
+
+        // WebGPU requires every attachment in a render pass to share dimensions with the color
+        // target. Recreate the depth texture at the new size and rewrite the pass descriptor's
+        // depth handle BEFORE the next BeginPass — otherwise Dawn rejects the pass with a
+        // dimension-mismatch validation error. The renderer's deferred-destruction queue makes
+        // releasing the old texture safe even if a frame referencing it is still in flight.
+        var oldDepth = _depthTexture;
+        _depthTexture = CreateDepthTexture(_renderer, width, height);
+        _depthWidth = width;
+        _depthHeight = height;
+        _passes[0].Depth = new DepthAttachmentDesc(
+            DepthTexture: _depthTexture,
+            DepthLoad: LoadOp.Clear,
+            DepthStore: StoreOp.Store,
+            ClearDepth: 1.0f);
+        _renderer.DestroyTexture(oldDepth);
     }
+
+    private static TextureHandle CreateDepthTexture(WebGpuRenderer renderer, uint width, uint height) =>
+        renderer.CreateTexture(new TextureDesc(
+            Name: "SceneDepth",
+            Width: width,
+            Height: height,
+            DepthOrArrayLayers: 1,
+            MipLevelCount: 1,
+            SampleCount: 1,
+            Dimension: TextureDimension.D2,
+            Format: DepthFormat,
+            Usage: TextureUsage.RenderAttachment));
 
     public void RenderFrame(float deltaTimeSeconds)
     {
