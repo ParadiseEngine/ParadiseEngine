@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\Paradise.ECS.Common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- CA1515: internal class warning suppressed — bridge library exposes types intentionally public -->
+    <NoWarn>$(NoWarn);CA1515</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
+    <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

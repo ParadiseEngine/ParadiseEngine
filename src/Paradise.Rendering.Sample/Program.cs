@@ -62,9 +62,18 @@ internal static class Program
         {
             using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight);
             using var scene = new TriangleScene(renderer);
+            using var ecs = new EcsScene();
+
             for (var i = 0; i < frameCount; i++)
+            {
+                var (renderables, cameras) = ecs.Extract();
                 scene.RenderFrame();
-            Console.WriteLine($"Headless mode: rendered {frameCount} triangle frames against an offscreen target.");
+
+                if (i == 0)
+                    Console.WriteLine($"ECS extraction (frame 0): {renderables} renderables, {cameras} cameras.");
+            }
+
+            Console.WriteLine($"Headless mode: rendered {frameCount} triangle frame(s) with ECS extraction active.");
             return 0;
         }
         finally

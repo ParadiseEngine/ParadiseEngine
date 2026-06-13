@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\Paradise.ECS.Common.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- CA1515: public test classes needed for TUnit discovery -->
+    <!-- CA1707: allow underscore in test method names -->
+    <NoWarn>$(NoWarn);CA1515;CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Rendering.ECS\Paradise.Rendering.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Paradise.ECS" />
+    <Using Include="Paradise.Rendering.ECS" />
+    <Using Include="Paradise.Rendering.ECS.Systems" />
+  </ItemGroup>
+
+</Project>
