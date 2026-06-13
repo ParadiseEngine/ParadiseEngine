@@ -23,4 +23,13 @@
   <ItemGroup>
     <SlangShader Include="Shaders/**/*.slang" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="fixtures/triangle.expected.json">
+      <LogicalName>Fixtures.triangle.expected.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="fixtures/triangle.raw.expected.json">
+      <LogicalName>Fixtures.triangle.raw.expected.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

@@ -1,0 +1,79 @@
+name: Rendering Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/Paradise.Rendering/**'
+      - 'src/Paradise.Rendering.WebGPU/**'
+      - 'src/Paradise.Rendering.WebGPU.Test/**'
+      - 'src/Paradise.Rendering.Sample/**'
+      - 'tools/slang/**'
+      - 'src/Slang.targets'
+      - '.github/workflows/rendering-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/Paradise.Rendering/**'
+      - 'src/Paradise.Rendering.WebGPU/**'
+      - 'src/Paradise.Rendering.WebGPU.Test/**'
+      - 'src/Paradise.Rendering.Sample/**'
+      - 'tools/slang/**'
+      - 'src/Slang.targets'
+      - '.github/workflows/rendering-smoke.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache slangc
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_slang
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
+          restore-keys: |
+            slang-${{ runner.os }}-${{ runner.arch }}-
+
+      # Install mesa-vulkan-drivers so the Dawn headless adapter can initialize on the runner.
+      # Without this, WebGPU GPU-touching tests skip cleanly via AdapterUnavailableException;
+      # installing it lets the GPU-backed snapshot and pipeline tests run in CI.
+      - name: Install mesa Vulkan drivers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj
+          dotnet restore src/Paradise.Rendering.Sample/Paradise.Rendering.Sample.csproj
+
+      - name: Build WebGPU test project
+        run: dotnet build src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Build sample
+        run: dotnet build src/Paradise.Rendering.Sample/Paradise.Rendering.Sample.csproj --no-restore -p:TreatWarningsAsErrors=true
+
+      # Run the CPU-only tests unconditionally; GPU tests skip gracefully when Dawn is absent.
+      # The snapshot tests (loader_output_snapshot_matches_golden_fixture,
+      # raw_slangc_reflection_snapshot_matches_golden_fixture) are CPU-only and always run.
+      - name: Run rendering tests
+        run: dotnet test src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj --no-build --output normal
+
+      # Headless sample smoke: N=10 frames through the offscreen render path confirms the sample
+      # binary links, initializes Dawn, and completes render passes without assertion failures.
+      - name: Sample headless smoke (10 frames)
+        run: |
+          dotnet run --project src/Paradise.Rendering.Sample/Paradise.Rendering.Sample.csproj \
+            --no-build -- --headless 10

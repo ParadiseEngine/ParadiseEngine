@@ -14,10 +14,13 @@ internal static class Program
 
     private static int Main(string[] args)
     {
-        var headlessFrames = ParseHeadless(args);
+        var headlessFrames = ParseFlag(args, "--headless");
+        var soakFrames = ParseFlag(args, "--soak");
         try
         {
-            return headlessFrames is int n ? RunHeadless(n) : RunWindowed();
+            if (headlessFrames is int h) return RunHeadless(h);
+            if (soakFrames is int s) return RunSoak(s);
+            return RunWindowed();
         }
         catch (Exception ex)
         {
@@ -26,14 +29,14 @@ internal static class Program
         }
     }
 
-    private static int? ParseHeadless(string[] args)
+    private static int? ParseFlag(string[] args, string flag)
     {
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] != "--headless") continue;
+            if (args[i] != flag) continue;
             if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out var n) || n <= 0)
             {
-                Console.Error.WriteLine("Usage: --headless <positive integer>");
+                Console.Error.WriteLine($"Usage: {flag} <positive integer>");
                 return -1;
             }
             return n;
@@ -69,6 +72,79 @@ internal static class Program
         }
         finally
         {
+            SDL_Quit();
+        }
+    }
+
+    // --soak N: create a real SDL3 window, render N frames, report per-frame timing stats.
+    // Exercises the full SDL3 → SurfaceDescriptor → WebGpuRenderer → TriangleScene path so
+    // surface mapping regressions surface in a live windowed session, not just in unit tests.
+    private static unsafe int RunSoak(int frameCount)
+    {
+        if (frameCount < 0) return 1;
+
+        if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
+        {
+            Console.Error.WriteLine($"SDL_Init failed: {SDL_GetError()}");
+            return 1;
+        }
+
+        SDL_Window* window = null;
+        WebGpuRenderer? renderer = null;
+        try
+        {
+            window = SDL_CreateWindow("Paradise.Rendering — Soak", InitialWidth, InitialHeight, SDL_WindowFlags.SDL_WINDOW_RESIZABLE);
+            if (window == null)
+            {
+                Console.Error.WriteLine($"SDL_CreateWindow failed: {SDL_GetError()}");
+                return 1;
+            }
+
+            var surfaceDesc = BuildSurfaceDescriptor(window);
+            renderer = new WebGpuRenderer(in surfaceDesc);
+            using var scene = new TriangleScene(renderer);
+
+            var frameTimes = new long[frameCount];
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            for (var i = 0; i < frameCount; i++)
+            {
+                // Drain pending window events so the OS doesn't mark the window as unresponsive.
+                SDL_Event ev;
+                while (SDL_PollEvent(&ev))
+                {
+                    var type = (SDL_EventType)ev.type;
+                    if (type == SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+                        type == SDL_EventType.SDL_EVENT_WINDOW_RESIZED)
+                    {
+                        var w = ev.window.data1;
+                        var h = ev.window.data2;
+                        if (w > 0 && h > 0)
+                            renderer.Resize((uint)w, (uint)h);
+                    }
+                }
+
+                var t0 = sw.ElapsedTicks;
+                scene.RenderFrame();
+                frameTimes[i] = sw.ElapsedTicks - t0;
+            }
+
+            // Report timing stats.
+            var ticksPerMs = System.Diagnostics.Stopwatch.Frequency / 1000.0;
+            Array.Sort(frameTimes);
+            var minMs = frameTimes[0] / ticksPerMs;
+            var maxMs = frameTimes[frameCount - 1] / ticksPerMs;
+            var avgMs = Array.ConvertAll(frameTimes, t => (double)t).Average() / ticksPerMs;
+            var p50Ms = frameTimes[frameCount / 2] / ticksPerMs;
+            var p99Ms = frameTimes[(int)(frameCount * 0.99)] / ticksPerMs;
+
+            Console.WriteLine($"Soak: {frameCount} frames  min={minMs:F2}ms  p50={p50Ms:F2}ms  p99={p99Ms:F2}ms  avg={avgMs:F2}ms  max={maxMs:F2}ms");
+            return 0;
+        }
+        finally
+        {
+            renderer?.Dispose();
+            if (window != null) SDL_DestroyWindow(window);
             SDL_Quit();
         }
     }

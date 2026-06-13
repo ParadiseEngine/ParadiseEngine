@@ -1,0 +1,1 @@
+{"modules":[{"entry_point":"vs_main","stage":"Vertex"},{"entry_point":"fs_main","stage":"Fragment"}],"layout":{"groups":[],"push_constants":[]},"vertex_buffers":[{"stride":20,"step_mode":"Vertex","attributes":[{"shader_location":0,"format":"Float32x2","offset":0},{"shader_location":1,"format":"Float32x3","offset":8}]}]}
