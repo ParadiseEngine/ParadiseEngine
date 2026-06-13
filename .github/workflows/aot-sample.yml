@@ -1,0 +1,36 @@
+name: AOT Sample
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  aot-publish-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install NativeAOT prerequisites
+        run: sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish Paradise.BT.Sample (NativeAOT)
+        run: >
+          dotnet publish src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
+          -c Release
+          -r linux-x64
+          -p:TreatWarningsAsErrors=true
+
+      - name: Run native binary
+        run: src/Paradise.BT.Sample/bin/Release/net10.0/linux-x64/publish/Paradise.BT.Sample
