@@ -31,7 +31,7 @@ public class AnyTreeBuilder : Builder<BlobTreeAny>
         builder.Build(stream);
     }
 
-    private (List<int> endIndices, List<IBuilder> builders) Flatten(ITreeNode root)
+    private static (List<int> endIndices, List<IBuilder> builders) Flatten(ITreeNode root)
     {
         var endIndices = new List<int>();
         var values = new List<IBuilder>();

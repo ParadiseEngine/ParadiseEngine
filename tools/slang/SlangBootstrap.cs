@@ -16,7 +16,7 @@
 // AssemblyInfoInputs.cache. Promoted to a real csproj so the build artifacts live in a
 // project-scoped obj/bin under tools/slang/, which MSBuild serializes naturally.
 
-using System.Formats.Tar;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -131,9 +131,30 @@ if (string.Equals(format, "zip", StringComparison.OrdinalIgnoreCase))
 }
 else if (string.Equals(format, "tar.gz", StringComparison.OrdinalIgnoreCase))
 {
-    await using var fs = File.OpenRead(archivePath);
-    await using var gz = new GZipStream(fs, CompressionMode.Decompress);
-    await TarFile.ExtractToDirectoryAsync(gz, stagingDir, overwriteFiles: true);
+    // Extract via the platform `tar` (libarchive on macOS/BSD, GNU tar on Linux) rather than
+    // System.Formats.Tar. macOS slang release tarballs are packed by Apple's bsdtar and carry PAX
+    // extended-header records for extended attributes (e.g. LIBARCHIVE.xattr.com.apple.cs.CodeSignature)
+    // whose values are raw binary. .NET's managed TarReader rejects those with "The extended header
+    // contains invalid records" and aborts the process (SIGABRT). The system tar reads them fine, and
+    // tar.gz is never the Windows archive format here (Windows uses the .zip branch above).
+    using var tar = Process.Start(new ProcessStartInfo("tar")
+    {
+        ArgumentList = { "-xzf", archivePath, "-C", stagingDir },
+        UseShellExecute = false,
+        RedirectStandardError = true,
+    });
+    if (tar is null)
+    {
+        Console.Error.WriteLine("Failed to start 'tar' to extract the Slang archive.");
+        return 1;
+    }
+    var tarErr = await tar.StandardError.ReadToEndAsync();
+    await tar.WaitForExitAsync();
+    if (tar.ExitCode != 0)
+    {
+        Console.Error.WriteLine($"'tar' failed to extract '{archivePath}' (exit {tar.ExitCode}): {tarErr}");
+        return 1;
+    }
 }
 else
 {

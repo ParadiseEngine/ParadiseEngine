@@ -17,7 +17,7 @@ public struct BlobSortedArray<TKey, TValue>
         get
         {
             var index = IndexOfKey(key);
-            if (index < 0) throw new ArgumentException(nameof(key));
+            if (index < 0) throw new ArgumentException($"Key not found: {key}", nameof(key));
             return ref Values[index];
         }
     }

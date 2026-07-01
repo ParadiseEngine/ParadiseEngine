@@ -3,8 +3,8 @@
   <!--
     Common settings for Paradise.ECS.* projects.
     Imported explicitly by each ECS csproj so its analyzer rules stay
-    scoped to ECS and do NOT leak into BT/BLOB (which are dual-target
-    netstandard2.1;net10.0 and tuned to a different analyzer baseline).
+    scoped to ECS and do NOT leak into BT/BLOB (which are tuned to a
+    different analyzer baseline).
 
     TargetFramework is intentionally NOT set here — each ECS csproj
     declares its own (most are net10.0; Generators is netstandard2.0).

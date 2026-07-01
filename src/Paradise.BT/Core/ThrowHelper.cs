@@ -4,14 +4,7 @@ internal static class ThrowHelper
 {
     public static void ThrowIfNull(object? value, string paramName)
     {
-#if NET6_0_OR_GREATER
         ArgumentNullException.ThrowIfNull(value, paramName);
-#else
-        if (value is null)
-        {
-            throw new ArgumentNullException(paramName);
-        }
-#endif
     }
 
     public static void ThrowIfNodeIndexOutOfRange(int nodeIndex, int count)

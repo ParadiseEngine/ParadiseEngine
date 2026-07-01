@@ -1,7 +1,3 @@
-#if UNITY_2021_2_OR_NEWER || NETCOREAPP2_1_OR_GREATER
-#define HAS_SPAN
-#endif
-
 using System;
 using System.Linq;
 using System.Text;
@@ -62,21 +58,6 @@ public class TestBlobBuilder
         AssertStringEqual<UTF8Encoding>(str);
         AssertStringEqual<UnicodeEncoding>(str);
         AssertStringEqual<UTF32Encoding>(str);
-    }
-
-    [Test]
-    [MethodDataSource(nameof(GetStringTestCases))]
-    public unsafe void should_build_unity_blob_from_string(string str)
-    {
-        var builder = new UnityStringBuilder(str);
-        var blob = builder.CreateManagedBlobAssetReference();
-        Assert.AreEqual(str, blob.Value.ToString());
-        var headerSize = sizeof(UnityBlobString);
-        var strBinary = new UTF8Encoding().GetBytes(str);
-        Assert.That(SubBlob(blob.Blob, headerSize, blob.Value.Length), Is.EquivalentTo(strBinary));
-#if HAS_SPAN
-        Assert.That(blob.Value.ToSpan().ToArray(), Is.EquivalentTo(strBinary));
-#endif
     }
 
     [Test]
@@ -174,7 +155,6 @@ public class TestBlobBuilder
                 index++;
             }
         }
-#if HAS_SPAN
         index = 0;
         for (var i = 0; i < blob.Value.StringArray2Ptr.Length; i++)
         {
@@ -185,7 +165,6 @@ public class TestBlobBuilder
                 index++;
             }
         }
-#endif
         Assert.AreEqual(utf8String, blob.Value.String.ToString());
         Assert.AreEqual(utf8String, blob.Value.StringPtr.Value.ToString());
         Assert.AreEqual(utf8String, blob.Value.StringPtrPtr.Value.Value.ToString());
@@ -243,9 +222,7 @@ public class TestBlobBuilder
         Assert.AreEqual(array.Length, blob.Value.Length);
         for (var i = 0; i < array.Length; i++) MemCmp(ref array[i], ref blob.Value[i]);
         Assert.That(array, Is.EquivalentTo(blob.Value.ToArray()));
-#if HAS_SPAN
         Assert.That(blob.Value.ToSpan().ToArray(), Is.EquivalentTo(blob.Value.ToArray()));
-#endif
     }
 
     unsafe void AssertPtrEqual<T>(T value) where T : unmanaged
@@ -263,9 +240,7 @@ public class TestBlobBuilder
         Assert.AreEqual(str, blob.Value.ToString());
         var headerSize = sizeof(BlobString<TEncoding>);
         Assert.That(SubBlob(blob.Blob, headerSize, blob.Value.Length), Is.EquivalentTo(new TEncoding().GetBytes(str)));
-#if HAS_SPAN
         Assert.That(blob.Value.ToSpan().ToArray(), Is.EquivalentTo(new TEncoding().GetBytes(str)));
-#endif
     }
 
     static byte[] SubBlob(byte[] blob, int startIndex, int length)

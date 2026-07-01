@@ -33,14 +33,7 @@ public class BlobMemoryStream : IBlobStream, IDisposable
     public unsafe void Write(byte* valuePtr, int size, int alignment)
     {
         PatchPosition = Math.Max(PatchPosition, (int)Utilities.Align(Position + size, this.GetAlignment(alignment)));
-#if UNITY_2021_2_OR_NEWER || NETSTANDARD2_1_OR_GREATER
         _stream.Write(new System.ReadOnlySpan<byte>(valuePtr, size));
-#else
-        // `WriteByte` is the fastest way to write binary into stream on small chunks (<8192bytes) based on my benchmark
-        // and BLOB intend to use on small chunks(? or maybe not?)
-        // so I decide just use this simple way here
-        for (var i = 0; i < size; i++) _stream.WriteByte(*(valuePtr + i));
-#endif
     }
 
     public void Dispose()

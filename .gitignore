@@ -48,3 +48,6 @@ libs/*.so
 *.dSYM/
 *.ilk
 *.exp
+
+# Unity asset uid files
+*.uid

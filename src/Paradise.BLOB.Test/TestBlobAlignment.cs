@@ -1,7 +1,3 @@
-#if UNITY_2021_2_OR_NEWER || NETCOREAPP2_1_OR_GREATER
-#define HAS_SPAN
-#endif
-
 using System;
 using System.Runtime.InteropServices;
 using System.Text;

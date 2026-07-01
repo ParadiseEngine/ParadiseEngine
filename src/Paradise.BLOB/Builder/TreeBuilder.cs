@@ -33,7 +33,7 @@ public class TreeBuilder<T> : Builder<BlobTree<T>> where T : unmanaged
         _builder.Build(stream);
     }
 
-    private (List<int> endIndices, List<IBuilder<T>> valueBuilders) Flatten(ITreeNode<T> root)
+    private static (List<int> endIndices, List<IBuilder<T>> valueBuilders) Flatten(ITreeNode<T> root)
     {
         var endIndices = new List<int>();
         var valueBuilders = new List<IBuilder<T>>();

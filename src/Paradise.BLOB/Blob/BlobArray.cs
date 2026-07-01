@@ -37,10 +37,8 @@ public unsafe struct BlobArray<T> where T : unmanaged
         return array;
     }
 
-#if UNITY_2021_2_OR_NEWER || NETSTANDARD2_1_OR_GREATER
     public Span<T> ToSpan()
     {
         return new Span<T>(UnsafePtr, Length);
     }
-#endif
 }
