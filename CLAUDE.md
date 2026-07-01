@@ -23,7 +23,16 @@ AOT compatibility of tree construction and ticking is verified via `Paradise.BT.
 
 ## Project Overview
 
-Paradise Engine is a .NET behavior tree runtime library inspired by EntitiesBT, with a companion binary blob serialization library. It targets `netstandard2.1` + `net10.0` (dual-target), uses C# 14, and is NativeAOT/trimming compatible.
+Paradise Engine is a .NET behavior tree runtime library inspired by EntitiesBT, with a companion binary blob serialization library. It targets `net10.0`, uses C# 14, and is NativeAOT/trimming compatible.
+
+### Coordinate convention
+
+The engine and its data contract are **right-handed: Y-up, −Z forward, +X right** (Godot / glTF
+standard), in meters, with **column-major** matrices. This matches what the editor tools
+(`ParadiseGodotEditor`) export — the exporter writes Godot values verbatim, with no handedness
+conversion. Any future scene/navmesh/level loader must consume right-handed data directly (no
+Z-mirror). The engine core (`Paradise.ECS`, `Paradise.Rendering`) is otherwise coordinate-agnostic;
+handedness only enters where transforms, camera/projection matrices, or navmesh geometry are built.
 
 ### Monorepo Layout
 
