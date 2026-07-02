@@ -1,4 +1,5 @@
 using System.Numerics;
+using Paradise.BLOB;
 
 namespace Paradise.Physics;
 
@@ -6,29 +7,46 @@ namespace Paradise.Physics;
 /// Immutable set of static colliders with closest-hit queries. Stateless by design
 /// (Unity Physics philosophy): <see cref="Build"/> is a pure function of its inputs, there are
 /// no caches and no incremental updates — rebuild when the set changes. Queries allocate
-/// nothing, are safe to run concurrently from any thread, and break fraction ties by the
-/// lowest body index so results are order-deterministic.
+/// nothing, are safe to run concurrently from any thread, and break fraction/distance ties by
+/// the lowest body index so results are order-deterministic.
+///
+/// Storage is a single Paradise.BLOB blob in unmanaged memory (NativeMemory — no GC-heap
+/// pinning): parallel <see cref="BlobArray{T}"/>s of colliders/transforms/AABBs plus a preorder
+/// <see cref="BlobTree{T}"/> BVH (median split on the longest axis of the node's AABB-union
+/// extent, deterministic construction). Disposing frees the allocation; the blob finalizer is
+/// the backstop if the owner never does.
 /// </summary>
-public sealed class CollisionWorld
+public sealed class CollisionWorld : IDisposable
 {
-    private readonly Collider[] _colliders;
-    private readonly RigidTransform[] _transforms;
-    private readonly Aabb[] _aabbs;
-
-    private CollisionWorld(Collider[] colliders, RigidTransform[] transforms, Aabb[] aabbs)
+    /// <summary>BVH node: internal nodes bound their subtree, leaves reference one body.</summary>
+    internal struct BvhNode
     {
-        _colliders = colliders;
-        _transforms = transforms;
-        _aabbs = aabbs;
+        public Aabb Bounds;
+        public int BodyIndex; // -1 for internal nodes
     }
 
-    public int NumBodies => _colliders.Length;
+    internal struct WorldData
+    {
+        public BlobArray<Collider> Colliders;
+        public BlobArray<RigidTransform> Transforms;
+        public BlobArray<Aabb> Aabbs;
+        public BlobTree<BvhNode> Bvh;
+    }
 
-    public Collider GetCollider(int bodyIndex) => _colliders[bodyIndex];
+    private readonly NativeBlobAssetReference<WorldData> _blob;
 
-    public RigidTransform GetTransform(int bodyIndex) => _transforms[bodyIndex];
+    private CollisionWorld(NativeBlobAssetReference<WorldData> blob) => _blob = blob;
 
-    /// <summary>Builds a world from parallel spans of colliders and poses. Inputs are copied.</summary>
+    public int NumBodies => _blob.Value.Colliders.Length;
+
+    public Collider GetCollider(int bodyIndex) => _blob.Value.Colliders[bodyIndex];
+
+    public RigidTransform GetTransform(int bodyIndex) => _blob.Value.Transforms[bodyIndex];
+
+    public void Dispose() => _blob.Dispose();
+
+    /// <summary>Builds a world from parallel spans of colliders and poses. Inputs are copied
+    /// into one contiguous blob; a BVH is built over the body AABBs.</summary>
     public static CollisionWorld Build(ReadOnlySpan<Collider> colliders, ReadOnlySpan<RigidTransform> transforms)
     {
         if (colliders.Length != transforms.Length)
@@ -39,33 +57,65 @@ public sealed class CollisionWorld
         var aabbs = new Aabb[colliderArray.Length];
         for (int i = 0; i < colliderArray.Length; i++)
             aabbs[i] = colliderArray[i].CalculateAabb(transformArray[i]);
-        return new CollisionWorld(colliderArray, transformArray, aabbs);
+
+        var builder = new StructBuilder<WorldData>();
+        builder.SetArray(ref builder.Value.Colliders, colliderArray);
+        builder.SetArray(ref builder.Value.Transforms, transformArray);
+        builder.SetArray(ref builder.Value.Aabbs, aabbs);
+        if (aabbs.Length > 0)
+        {
+            int[] indices = new int[aabbs.Length];
+            for (int i = 0; i < indices.Length; i++) indices[i] = i;
+            builder.SetTree(ref builder.Value.Bvh, BuildBvhNode(aabbs, indices.AsMemory()));
+        }
+        else
+        {
+            builder.SetBuilder(ref builder.Value.Bvh, new TreeBuilder<BvhNode>());
+        }
+
+        return new CollisionWorld(builder.CreateNativeBlobAssetReference());
     }
 
     /// <summary>Closest hit of the segment Start → End against all filtered bodies.</summary>
     public bool CastRay(in RaycastInput input, out RaycastHit closestHit)
     {
         closestHit = default;
+        ref WorldData data = ref _blob.Value;
         Vector3 displacement = input.End - input.Start;
         float best = float.PositiveInfinity;
+        int bestBody = int.MaxValue;
         bool found = false;
 
-        for (int i = 0; i < _colliders.Length; i++)
+        int node = 0;
+        int length = data.Bvh.Length;
+        while (node < length)
         {
-            if (!CollisionFilter.IsCollisionEnabled(input.Filter, _colliders[i].Filter)) continue;
-            if (!_aabbs[i].IntersectsSegment(input.Start, displacement, out float entry)) continue;
-            if (entry >= best) continue; // AABB entry lower-bounds the true fraction
-            if (!RaycastQueries.Raycast(_colliders[i], _transforms[i], input.Start, input.End, out float fraction, out Vector3 normal)) continue;
-            if (fraction >= best) continue; // strict '<': ties keep the lowest body index
+            ref BvhNode bvh = ref data.Bvh.GetValue(node);
+            // Entry fraction lower-bounds every fraction in the subtree; strictly-worse
+            // subtrees are skipped (ties are kept so the lowest-index rule holds).
+            if (!bvh.Bounds.IntersectsSegment(input.Start, displacement, out float entry) || entry > best)
+            {
+                node = data.Bvh.GetEndIndex(node);
+                continue;
+            }
+
+            int body = bvh.BodyIndex;
+            node++;
+            if (body < 0) continue;
+            if (!CollisionFilter.IsCollisionEnabled(input.Filter, data.Colliders[body].Filter)) continue;
+            if (!RaycastQueries.Raycast(data.Colliders[body], data.Transforms[body], input.Start, input.End,
+                    out float fraction, out Vector3 normal)) continue;
+            if (fraction > best || (fraction == best && body > bestBody)) continue;
 
             best = fraction;
+            bestBody = body;
             found = true;
             closestHit = new RaycastHit
             {
                 Fraction = fraction,
                 Position = input.Start + displacement * fraction,
                 SurfaceNormal = normal,
-                BodyIndex = i,
+                BodyIndex = body,
             };
         }
 
@@ -77,25 +127,39 @@ public sealed class CollisionWorld
     public bool CastCollider(in ColliderCastInput input, out ColliderCastHit closestHit)
     {
         closestHit = default;
+        ref WorldData data = ref _blob.Value;
         var startPose = new RigidTransform(input.Start, input.Orientation);
         var endPose = new RigidTransform(input.End, input.Orientation);
         Aabb sweptAabb = input.Collider.CalculateAabb(startPose);
         sweptAabb.Include(input.Collider.CalculateAabb(endPose));
 
         float best = float.PositiveInfinity;
+        int bestBody = int.MaxValue;
         bool found = false;
 
-        for (int i = 0; i < _colliders.Length; i++)
+        int node = 0;
+        int length = data.Bvh.Length;
+        while (node < length)
         {
-            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, _colliders[i].Filter)) continue;
-            if (!sweptAabb.Overlaps(_aabbs[i])) continue;
-            if (!ColliderCastQueries.Cast(input, _colliders[i], _transforms[i], out ColliderCastHit hit)) continue;
-            if (hit.Fraction >= best) continue;
+            ref BvhNode bvh = ref data.Bvh.GetValue(node);
+            if (!sweptAabb.Overlaps(bvh.Bounds))
+            {
+                node = data.Bvh.GetEndIndex(node);
+                continue;
+            }
+
+            int body = bvh.BodyIndex;
+            node++;
+            if (body < 0) continue;
+            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, data.Colliders[body].Filter)) continue;
+            if (!ColliderCastQueries.Cast(input, data.Colliders[body], data.Transforms[body], out ColliderCastHit hit)) continue;
+            if (hit.Fraction > best || (hit.Fraction == best && body > bestBody)) continue;
 
             best = hit.Fraction;
+            bestBody = body;
             found = true;
             closestHit = hit;
-            closestHit.BodyIndex = i;
+            closestHit.BodyIndex = body;
         }
 
         return found;
@@ -106,30 +170,101 @@ public sealed class CollisionWorld
     public bool CalculateDistance(in ColliderDistanceInput input, out DistanceHit closestHit)
     {
         closestHit = default;
+        ref WorldData data = ref _blob.Value;
         Aabb queryAabb = input.Collider.CalculateAabb(input.Transform).Expanded(new Vector3(input.MaxDistance));
 
         float best = float.PositiveInfinity;
+        int bestBody = int.MaxValue;
         bool found = false;
 
-        for (int i = 0; i < _colliders.Length; i++)
+        int node = 0;
+        int length = data.Bvh.Length;
+        while (node < length)
         {
-            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, _colliders[i].Filter)) continue;
-            if (!queryAabb.Overlaps(_aabbs[i])) continue;
+            ref BvhNode bvh = ref data.Bvh.GetValue(node);
+            if (!queryAabb.Overlaps(bvh.Bounds))
+            {
+                node = data.Bvh.GetEndIndex(node);
+                continue;
+            }
 
-            DistanceResult distance = ConvexConvexDistance.Distance(input.Collider, input.Transform, _colliders[i], _transforms[i]);
-            if (distance.Distance > input.MaxDistance || distance.Distance >= best) continue;
+            int body = bvh.BodyIndex;
+            node++;
+            if (body < 0) continue;
+            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, data.Colliders[body].Filter)) continue;
+
+            DistanceResult distance = ConvexConvexDistance.Distance(input.Collider, input.Transform,
+                data.Colliders[body], data.Transforms[body]);
+            if (distance.Distance > input.MaxDistance) continue;
+            if (distance.Distance > best || (distance.Distance == best && body > bestBody)) continue;
 
             best = distance.Distance;
+            bestBody = body;
             found = true;
             closestHit = new DistanceHit
             {
                 Distance = distance.Distance,
                 Position = distance.ClosestB,
                 SurfaceNormal = distance.NormalBToA,
-                BodyIndex = i,
+                BodyIndex = body,
             };
         }
 
         return found;
+    }
+
+    // ---- BVH construction (deterministic median split) -----------------------
+
+    private sealed class BuildNode : ITreeNode<BvhNode>
+    {
+        public required IBuilder<BvhNode> ValueBuilder { get; init; }
+        public required IReadOnlyList<ITreeNode<BvhNode>> Children { get; init; }
+    }
+
+    private static BuildNode BuildBvhNode(Aabb[] aabbs, Memory<int> indices)
+    {
+        Span<int> span = indices.Span;
+        Aabb bounds = aabbs[span[0]];
+        for (int i = 1; i < span.Length; i++) bounds.Include(aabbs[span[i]]);
+
+        if (span.Length == 1)
+        {
+            return new BuildNode
+            {
+                ValueBuilder = new ValueBuilder<BvhNode>(new BvhNode { Bounds = bounds, BodyIndex = span[0] }),
+                Children = [],
+            };
+        }
+
+        // Median split on the longest axis of this node's AABB-union extent; the split point
+        // itself sorts bodies by centroid on that axis, with ties falling back to the body
+        // index so construction is fully deterministic.
+        Vector3 extent = bounds.Max - bounds.Min;
+        int axis = extent.X >= extent.Y
+            ? (extent.X >= extent.Z ? 0 : 2)
+            : (extent.Y >= extent.Z ? 1 : 2);
+        int[] sorted = indices.ToArray();
+        Array.Sort(sorted, (a, b) =>
+        {
+            float ca = Centroid(aabbs[a], axis);
+            float cb = Centroid(aabbs[b], axis);
+            int compare = ca.CompareTo(cb);
+            return compare != 0 ? compare : a.CompareTo(b);
+        });
+        sorted.CopyTo(indices);
+
+        int mid = span.Length / 2;
+        return new BuildNode
+        {
+            ValueBuilder = new ValueBuilder<BvhNode>(new BvhNode { Bounds = bounds, BodyIndex = -1 }),
+            Children = [BuildBvhNode(aabbs, indices[..mid]), BuildBvhNode(aabbs, indices[mid..])],
+        };
+
+        static float Centroid(in Aabb aabb, int axis) => axis switch
+        {
+            0 => aabb.Min.X + aabb.Max.X,
+            1 => aabb.Min.Y + aabb.Max.Y,
+            _ => aabb.Min.Z + aabb.Max.Z,
+        };
     }
 }

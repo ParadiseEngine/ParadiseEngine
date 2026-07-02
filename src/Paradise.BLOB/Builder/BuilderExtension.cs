@@ -16,6 +16,16 @@ public static partial class BuilderExtension
         return new ManagedBlobAssetReference(builder.CreateBlob(alignment));
     }
 
+    public static NativeBlobAssetReference<T> CreateNativeBlobAssetReference<T>(this IBuilder<T> builder, int alignment = 16) where T : unmanaged
+    {
+        return new NativeBlobAssetReference<T>(builder.CreateBlob(alignment), alignment);
+    }
+
+    public static NativeBlobAssetReference CreateNativeBlobAssetReference(this IBuilder builder, int alignment = 16)
+    {
+        return new NativeBlobAssetReference(builder.CreateBlob(alignment), alignment);
+    }
+
     public static byte[] CreateBlob(this IBuilder builder, int alignment = 0)
     {
         using var stream = new BlobMemoryStream();

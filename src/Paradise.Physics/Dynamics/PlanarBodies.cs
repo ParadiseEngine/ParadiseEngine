@@ -52,6 +52,17 @@ public struct PlanarDynamicsSettings
     /// <summary>Filter used for sphere-vs-static casts and depenetration queries.</summary>
     public CollisionFilter StaticFilter;
 
+    /// <summary>When true, spheres are kept on supported ground: every push/integrate move is
+    /// clamped so a downward ray (<see cref="SupportFilter"/>, <see cref="SupportProbeDepth"/>)
+    /// from the new position still hits support geometry (see <see cref="PlanarGroundSupport"/>).</summary>
+    public bool RequireSupport;
+
+    /// <summary>Filter for the downward support probe (typically the floor layer only).</summary>
+    public CollisionFilter SupportFilter;
+
+    /// <summary>How far below a body's center the support probe reaches (meters).</summary>
+    public float SupportProbeDepth;
+
     public static PlanarDynamicsSettings Default => new()
     {
         LinearDamping = 1.5f,
@@ -61,5 +72,8 @@ public struct PlanarDynamicsSettings
         PushStrength = 1.2f,
         Skin = 0.02f,
         StaticFilter = CollisionFilter.Default,
+        RequireSupport = false,
+        SupportFilter = CollisionFilter.Default,
+        SupportProbeDepth = 10f,
     };
 }
