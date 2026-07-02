@@ -18,7 +18,7 @@ public static partial class BuilderExtension
 
     public static NativeBlobAssetReference<T> CreateNativeBlobAssetReference<T>(this IBuilder<T> builder, int alignment = 16) where T : unmanaged
     {
-        return new NativeBlobAssetReference<T>(builder.CreateBlob(), alignment);
+        return new NativeBlobAssetReference<T>(builder.CreateBlob(alignment), alignment);
     }
 
     public static NativeBlobAssetReference CreateNativeBlobAssetReference(this IBuilder builder, int alignment = 16)

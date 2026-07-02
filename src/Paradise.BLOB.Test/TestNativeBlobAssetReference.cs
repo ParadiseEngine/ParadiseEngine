@@ -51,15 +51,23 @@ public class TestNativeBlobAssetReference
     }
 
     [Test]
-    public unsafe void should_allocate_with_requested_alignment_and_stable_pointer()
+    public unsafe void should_allocate_with_requested_alignment_and_survive_gc()
     {
         using var reference = new NativeBlobAssetReference<SimpleData>(CreateBlob(1, 2f), alignment: 64);
 
-        Assert.AreEqual((nuint)0, (nuint)reference.UnsafePtr % 64);
-        long first = (long)reference.UnsafePtr;
-        reference.Value.X = 5; // touch the value between reads
-        long second = (long)reference.UnsafePtr;
-        Assert.AreEqual(first, second, "Pointer should be stable across calls");
+        long before = (long)reference.UnsafePtr;
+        Assert.AreEqual((nuint)0, (nuint)before % 64);
+
+        // Native allocations are invisible to the GC: the pointer must not move and the data
+        // must survive a full collection (a pinned-managed-array reference relies on pinning
+        // for the same guarantee — this one needs none).
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        Assert.AreEqual(before, (long)reference.UnsafePtr, "native allocation must not move under GC");
+        Assert.AreEqual(1, reference.Value.X);
+        Assert.AreEqual(2f, reference.Value.Y);
     }
 
     [Test]

@@ -75,6 +75,40 @@ public class GroundSupportTests
     }
 
     [Test]
+    public async Task sphere_bounced_toward_the_edge_stays_contained()
+    {
+        // A 45°-rotated box near the z = 0 edge deflects a fast +X sphere toward -Z within a
+        // single step's reflected remainder — only the post-bounce support clamp contains it.
+        Span<Collider> colliders =
+        [
+            Collider.CreateBox(new Vector3(10f, 0.5f, 10f)),
+            Collider.CreateBox(new Vector3(1f, 1.5f, 1f)),
+        ];
+        Span<RigidTransform> transforms =
+        [
+            new RigidTransform(new Vector3(10f, -0.5f, 10f), Quaternion.Identity),
+            new RigidTransform(new Vector3(6f, 1.5f, 0.9f), Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 4f)),
+        ];
+        using CollisionWorld statics = CollisionWorld.Build(colliders, transforms);
+
+        var settings = Supported with { LinearDamping = 0f };
+        DynamicSphere[] spheres = [new()
+        {
+            Position = new Vector3(4.2f, 0.85f, 0.35f),
+            Velocity = new Vector3(60f, 0f, 0f), // fast: the bounce redirects most of a tick's move
+            Radius = 0.35f,
+            Mass = 1f,
+        }];
+
+        for (int i = 0; i < 120; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics, settings, Dt);
+            await Assert.That(spheres[0].Position.Z).IsGreaterThanOrEqualTo(-1e-3f);
+            await Assert.That(spheres[0].Position.Y).IsEqualTo(0.85f);
+        }
+    }
+
+    [Test]
     public async Task sphere_slides_along_the_edge_on_a_diagonal_approach()
     {
         using CollisionWorld slab = Slab();
