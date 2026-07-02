@@ -44,6 +44,7 @@ public class BvhWorldTests
     public async Task world_raycasts_match_brute_force_over_200_random_bodies()
     {
         (CollisionWorld world, Collider[] colliders, RigidTransform[] transforms) = RandomWorld(200, seed: 9001);
+        using CollisionWorld _ = world;
         var random = new Random(4242);
 
         for (int query = 0; query < 300; query++)
@@ -86,6 +87,7 @@ public class BvhWorldTests
     public async Task world_collider_casts_match_brute_force_over_100_random_bodies()
     {
         (CollisionWorld world, Collider[] colliders, RigidTransform[] transforms) = RandomWorld(100, seed: 7007);
+        using CollisionWorld _ = world;
         var random = new Random(1313);
         var caster = Collider.CreateCapsule(0.35f, 0.45f);
 

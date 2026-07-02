@@ -12,9 +12,9 @@ namespace Paradise.Physics;
 ///
 /// Storage is a single Paradise.BLOB blob in unmanaged memory (NativeMemory — no GC-heap
 /// pinning): parallel <see cref="BlobArray{T}"/>s of colliders/transforms/AABBs plus a preorder
-/// <see cref="BlobTree{T}"/> BVH (median split on the longest centroid axis, deterministic
-/// construction). Disposing frees the allocation; the blob finalizer is the backstop if the
-/// owner never does.
+/// <see cref="BlobTree{T}"/> BVH (median split on the longest axis of the node's AABB-union
+/// extent, deterministic construction). Disposing frees the allocation; the blob finalizer is
+/// the backstop if the owner never does.
 /// </summary>
 public sealed class CollisionWorld : IDisposable
 {
@@ -236,8 +236,9 @@ public sealed class CollisionWorld : IDisposable
             };
         }
 
-        // Median split on the longest axis of the centroid extent; ties on centroid fall back
-        // to the body index so construction is fully deterministic.
+        // Median split on the longest axis of this node's AABB-union extent; the split point
+        // itself sorts bodies by centroid on that axis, with ties falling back to the body
+        // index so construction is fully deterministic.
         Vector3 extent = bounds.Max - bounds.Min;
         int axis = extent.X >= extent.Y
             ? (extent.X >= extent.Z ? 0 : 2)

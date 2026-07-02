@@ -56,7 +56,10 @@ public class TestNativeBlobAssetReference
         using var reference = new NativeBlobAssetReference<SimpleData>(CreateBlob(1, 2f), alignment: 64);
 
         Assert.AreEqual((nuint)0, (nuint)reference.UnsafePtr % 64);
-        Assert.AreEqual((long)reference.UnsafePtr, (long)reference.UnsafePtr, "Pointer should be stable across calls");
+        long first = (long)reference.UnsafePtr;
+        reference.Value.X = 5; // touch the value between reads
+        long second = (long)reference.UnsafePtr;
+        Assert.AreEqual(first, second, "Pointer should be stable across calls");
     }
 
     [Test]
