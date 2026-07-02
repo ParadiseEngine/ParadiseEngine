@@ -18,17 +18,27 @@ public static class PlanarSphereDynamics
     public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
         CollisionWorld? statics, in PlanarDynamicsSettings settings, float deltaSeconds)
     {
-        PushFromKinematics(spheres, pushers, settings);
+        PushFromKinematics(spheres, pushers, statics, settings);
         Integrate(spheres, statics, settings, deltaSeconds);
         ResolvePairs(spheres, settings);
         DepenetrateFromStatics(spheres, statics, settings);
+    }
+
+    /// <summary>Clamp a proposed move onto supported ground when the settings require it.
+    /// Pair-resolution and depenetration displacements are small and wall-adjacent, so support
+    /// is enforced only at the two large-displacement sites (push and integrate).</summary>
+    private static Vector3 ClampToSupport(CollisionWorld? statics, in PlanarDynamicsSettings settings,
+        Vector3 from, Vector3 to)
+    {
+        if (!settings.RequireSupport || statics is null) return to;
+        return PlanarGroundSupport.Clamp(statics, settings.SupportFilter, from, to, settings.SupportProbeDepth);
     }
 
     /// <summary>Kinematic pushers displace overlapped spheres and drive their contact-normal
     /// velocity up to pusherSpeed·PushStrength (a stable "carry along" rather than an
     /// accumulating impulse). Pushers are infinite-mass and never move.</summary>
     private static void PushFromKinematics(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
-        in PlanarDynamicsSettings settings)
+        CollisionWorld? statics, in PlanarDynamicsSettings settings)
     {
         foreach (ref readonly KinematicCapsule pusher in pushers)
         {
@@ -47,7 +57,8 @@ public static class PlanarSphereDynamics
                 if (!TryHorizontal(hit.SurfaceNormal, sphere.Position - pusher.Position, out Vector3 normal)) continue;
 
                 float depenetration = settings.Skin - hit.Distance;
-                sphere.Position += normal * depenetration; // horizontal (normal.Y == 0)
+                sphere.Position = ClampToSupport(statics, settings,
+                    sphere.Position, sphere.Position + normal * depenetration); // horizontal (normal.Y == 0)
 
                 float targetSpeed = MathF.Max(0f, Vector3.Dot(pusher.Velocity, normal)) * settings.PushStrength;
                 float currentSpeed = Vector3.Dot(sphere.Velocity, normal);
@@ -80,6 +91,19 @@ public static class PlanarSphereDynamics
                 sphere.Position += remaining;
                 sphere.Velocity = velocity;
                 continue;
+            }
+            if (settings.RequireSupport)
+            {
+                Vector3 clamped = ClampToSupport(statics, settings, sphere.Position, sphere.Position + remaining);
+                remaining = clamped - sphere.Position;
+                // Kill the velocity component the edge rejected so the sphere rests at the rim
+                // instead of grinding against it forever.
+                if (remaining.LengthSquared() < 1e-12f)
+                {
+                    sphere.Velocity = Vector3.Zero;
+                    continue;
+                }
+                velocity = remaining / deltaSeconds;
             }
 
             Collider ball = Collider.CreateSphere(sphere.Radius, settings.StaticFilter);

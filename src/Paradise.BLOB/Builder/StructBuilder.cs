@@ -29,6 +29,9 @@ public class StructBuilder<T> : Builder<T> where T : unmanaged
 
     protected override void BuildImpl(IBlobStream stream, ref T data)
     {
+        // Plain (non-builder) fields set through `Value` are written first, matching
+        // ValueBuilder semantics; field builders then overwrite their own regions.
+        data = _value;
         foreach (var (offset, builder) in _builders)
         {
             stream.Position = DataPosition + offset;
