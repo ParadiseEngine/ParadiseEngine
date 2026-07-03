@@ -372,6 +372,18 @@ internal static class DiagnosticDescriptors
         description: "IEntitySystem fields must use ref T/ref readonly T for inline mode or Data for composition mode.");
 
     /// <summary>
+    /// PECS3009: IWorldSystem has invalid fields.
+    /// </summary>
+    public static readonly DiagnosticDescriptor WorldSystemInvalidField = new(
+        id: "PECS3009",
+        title: "Invalid world-system field",
+        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments ({{Prefix}}Segments) or EntityCommandBuffer, and Segments fields are only valid on IWorldSystem",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "World systems access components exclusively through whole-query segment views; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
+
+    /// <summary>
     /// PECS3008: [SingleWriter] component is written by multiple systems.
     /// </summary>
     public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(

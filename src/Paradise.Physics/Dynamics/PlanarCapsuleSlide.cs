@@ -16,6 +16,12 @@ public static class PlanarCapsuleSlide
 
     public static Vector3 Move(CollisionWorld statics, in CollisionFilter filter,
         float radius, float halfLength, Vector3 position, Vector3 displacement, float skin)
+        => Move(statics.Handle, filter, radius, halfLength, position, displacement, skin);
+
+    /// <summary>Handle-based overload for use inside ECS systems. An invalid handle means no
+    /// statics: the move applies unobstructed.</summary>
+    public static Vector3 Move(CollisionWorldHandle statics, in CollisionFilter filter,
+        float radius, float halfLength, Vector3 position, Vector3 displacement, float skin)
     {
         var remaining = new Vector3(displacement.X, 0f, displacement.Z);
         float y = position.Y;

@@ -373,6 +373,7 @@ public class QueryableGenerator : IIncrementalGenerator
             var prefix = queryable.HelperStructPrefix;
             sb.AppendLine($"global using {prefix}Entity = {fqn}.Data<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine($"global using {prefix}Chunk = {fqn}.ChunkData<{maskTypeFullyQualified}, {configTypeFull}>;");
+            sb.AppendLine($"global using {prefix}Segments = {fqn}.Segments<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine();
         }
 
@@ -442,6 +443,9 @@ public class QueryableGenerator : IIncrementalGenerator
 
         // Generate nested ChunkData<TMask, TConfig> struct implementing IQueryChunkData
         GenerateNestedChunkDataStruct(sb, queryable, indent + "    ");
+
+        // Generate nested Segments<TMask, TConfig> struct for world systems
+        GenerateNestedSegmentsStruct(sb, queryable, indent + "    ");
 
         sb.AppendLine($"{indent}}}");
 
@@ -700,6 +704,84 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}            throw new global::System.InvalidOperationException(\"Optional component {opt.ComponentTypeName} is not present. Check Has{opt.PropertyName} before calling {spanMethodName}().\");");
             sb.AppendLine($"{indent}        return _chunkManager.GetBytes(_chunk).GetSpan<global::{opt.ComponentFullName}>(baseOffset, _entityCount);");
             sb.AppendLine($"{indent}    }}");
+        }
+
+        sb.AppendLine($"{indent}}}");
+    }
+
+    /// <summary>
+    /// Generates the nested Segments struct: whole-query flat component views for world systems
+    /// (<c>IWorldSystem</c>). Writable components bind to the WRITE segment table, read-only
+    /// components to the READ table (identical tables under classic execution; the read table
+    /// points at the snapshot world's paired chunks under snapshot-read execution).
+    /// </summary>
+    private static void GenerateNestedSegmentsStruct(StringBuilder sb, QueryableInfo queryable, string indent)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>");
+        sb.AppendLine($"{indent}/// Whole-query segment views for world systems: flat, index-correlated access to every");
+        sb.AppendLine($"{indent}/// matching entity across all chunks.");
+        sb.AppendLine($"{indent}/// </summary>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
+        sb.AppendLine($"{indent}public readonly ref struct Segments<TMask, TConfig>");
+        sb.AppendLine($"{indent}    where TMask : unmanaged, global::Paradise.ECS.IBitSet<TMask>");
+        sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
+        sb.AppendLine($"{indent}    private readonly global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> _writeSegments;");
+        sb.AppendLine($"{indent}    private readonly global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> _readSegments;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Creates segment views over pre-built chunk tables (write + read).</summary>");
+        sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}    public static Segments<TMask, TConfig> Create(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
+        sb.AppendLine($"{indent}        global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> writeSegments,");
+        sb.AppendLine($"{indent}        global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> readSegments)");
+        sb.AppendLine($"{indent}        => new(chunkManager, writeSegments, readSegments);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}    internal Segments(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
+        sb.AppendLine($"{indent}        global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> writeSegments,");
+        sb.AppendLine($"{indent}        global::System.ReadOnlySpan<global::Paradise.ECS.ComponentSegment> readSegments)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        _chunkManager = chunkManager;");
+        sb.AppendLine($"{indent}        _writeSegments = writeSegments;");
+        sb.AppendLine($"{indent}        _readSegments = readSegments;");
+        sb.AppendLine($"{indent}    }}");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Total entity count across all matching chunks.</summary>");
+        sb.AppendLine($"{indent}    public int Length");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}        get => _writeSegments.Length == 0 ? 0 : _writeSegments[^1].Start + _writeSegments[^1].Count;");
+        sb.AppendLine($"{indent}    }}");
+
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly)
+                continue;
+
+            sb.AppendLine();
+            if (comp.IsReadOnly)
+            {
+                sb.AppendLine($"{indent}    /// <summary>Read-only flat view over all {comp.ComponentTypeName} components (READ table).</summary>");
+                sb.AppendLine($"{indent}    public global::Paradise.ECS.ReadOnlyComponentSegments<global::{comp.ComponentFullName}, TMask, TConfig> {comp.PropertyName}");
+                sb.AppendLine($"{indent}    {{");
+                sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+                sb.AppendLine($"{indent}        get => new(_chunkManager, _readSegments);");
+                sb.AppendLine($"{indent}    }}");
+            }
+            else
+            {
+                sb.AppendLine($"{indent}    /// <summary>Writable flat view over all {comp.ComponentTypeName} components (WRITE table).</summary>");
+                sb.AppendLine($"{indent}    public global::Paradise.ECS.ComponentSegments<global::{comp.ComponentFullName}, TMask, TConfig> {comp.PropertyName}");
+                sb.AppendLine($"{indent}    {{");
+                sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+                sb.AppendLine($"{indent}        get => new(_chunkManager, _writeSegments);");
+                sb.AppendLine($"{indent}    }}");
+            }
         }
 
         sb.AppendLine($"{indent}}}");

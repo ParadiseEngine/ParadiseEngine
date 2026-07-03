@@ -125,6 +125,62 @@ public class BvhWorldTests
     }
 
     [Test]
+    public async Task handle_queries_are_bitwise_identical_to_the_class_api()
+    {
+        (CollisionWorld world, Collider[] _, RigidTransform[] _) = RandomWorld(150, seed: 3141);
+        using CollisionWorld disposeWorld = world;
+        CollisionWorldHandle handle = world.Handle;
+        var random = new Random(2718);
+        int hits = 0;
+
+        for (int query = 0; query < 200; query++)
+        {
+            var start = new Vector3(
+                (float)(random.NextDouble() * 2.0 - 1.0) * 40f,
+                (float)(random.NextDouble() * 2.0 - 1.0) * 8f,
+                (float)(random.NextDouble() * 2.0 - 1.0) * 40f);
+            var end = new Vector3(
+                (float)(random.NextDouble() * 2.0 - 1.0) * 40f,
+                (float)(random.NextDouble() * 2.0 - 1.0) * 8f,
+                (float)(random.NextDouble() * 2.0 - 1.0) * 40f);
+
+            var rayInput = new RaycastInput { Start = start, End = end, Filter = CollisionFilter.Default };
+            bool classHit = world.CastRay(rayInput, out RaycastHit classRay);
+            bool handleHit = handle.CastRay(rayInput, out RaycastHit handleRay);
+            await Assert.That(handleHit).IsEqualTo(classHit);
+            if (classHit)
+            {
+                hits++;
+                await Assert.That(handleRay.Fraction).IsEqualTo(classRay.Fraction);
+                await Assert.That(handleRay.BodyIndex).IsEqualTo(classRay.BodyIndex);
+            }
+
+            var castInput = new ColliderCastInput { Collider = Collider.CreateSphere(0.4f), Orientation = Quaternion.Identity, Start = start, End = end };
+            bool classCast = world.CastCollider(castInput, out ColliderCastHit classCastHit);
+            bool handleCast = handle.CastCollider(castInput, out ColliderCastHit handleCastHit);
+            await Assert.That(handleCast).IsEqualTo(classCast);
+            if (classCast)
+            {
+                await Assert.That(handleCastHit.Fraction).IsEqualTo(classCastHit.Fraction);
+                await Assert.That(handleCastHit.BodyIndex).IsEqualTo(classCastHit.BodyIndex);
+            }
+        }
+
+        await Assert.That(hits > 0).IsTrue();
+    }
+
+    [Test]
+    public async Task default_handle_is_invalid_and_misses_everything()
+    {
+        CollisionWorldHandle handle = default;
+        await Assert.That(handle.IsValid).IsFalse();
+        bool hit = handle.CastRay(new RaycastInput { Start = Vector3.Zero, End = Vector3.UnitX * 100f, Filter = CollisionFilter.Default }, out _);
+        await Assert.That(hit).IsFalse();
+        bool cast = handle.CastCollider(new ColliderCastInput { Collider = Collider.CreateSphere(1f), Orientation = Quaternion.Identity, Start = Vector3.Zero, End = Vector3.UnitX }, out _);
+        await Assert.That(cast).IsFalse();
+    }
+
+    [Test]
     public async Task empty_world_misses_everything_and_disposes_cleanly()
     {
         using CollisionWorld world = CollisionWorld.Build([], []);

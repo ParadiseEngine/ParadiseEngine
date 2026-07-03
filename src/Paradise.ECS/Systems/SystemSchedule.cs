@@ -33,6 +33,19 @@ public delegate void SystemRunChunkAction<TMask, TConfig>(
     where TConfig : IConfig, new();
 
 /// <summary>
+/// Delegate matching the <c>RunWorld</c> signature for whole-world system dispatch
+/// (<see cref="IWorldSystem"/>): one invocation per schedule run, not per chunk.
+/// </summary>
+/// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
+/// <typeparam name="TConfig">The world configuration type.</typeparam>
+public delegate void SystemRunWorldAction<TMask, TConfig>(
+    IWorld<TMask, TConfig> world,
+    IWorld<TMask, TConfig>? readWorld,
+    EntityCommandBuffer commands)
+    where TMask : unmanaged, IBitSet<TMask>
+    where TConfig : IConfig, new();
+
+/// <summary>
 /// Pre-built execution schedule for systems. The scheduling strategy is determined at build time
 /// via the <see cref="IWaveScheduler"/> provided to the builder.
 /// ECB playback happens once after all waves complete, so structural changes from commands
@@ -46,7 +59,8 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 {
     private readonly IWorld<TMask, TConfig> _world;
     private readonly ImmutableArray<ImmutableArray<int>> _waves;
-    private readonly ImmutableArray<SystemRunChunkAction<TMask, TConfig>> _dispatchers;
+    private readonly ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
+    private readonly ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
     private readonly ImmutableArray<SystemMetadata<TMask>> _metadata;
     private readonly IWaveScheduler _scheduler;
     private readonly EntityCommandBufferPool _ecbPool;
@@ -55,13 +69,15 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     internal SystemSchedule(
         IWorld<TMask, TConfig> world,
         ImmutableArray<ImmutableArray<int>> waves,
-        ImmutableArray<SystemRunChunkAction<TMask, TConfig>> dispatchers,
+        ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> dispatchers,
+        ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> worldDispatchers,
         ImmutableArray<SystemMetadata<TMask>> metadata,
         IWaveScheduler scheduler)
     {
         _world = world;
         _waves = waves;
         _dispatchers = dispatchers;
+        _worldDispatchers = worldDispatchers;
         _metadata = metadata;
         _scheduler = scheduler;
         _ecbPool = new EntityCommandBufferPool(world.EntityIdAllocator);
@@ -113,26 +129,20 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
             _workItems.Clear();
             foreach (var systemId in wave)
             {
-                var dispatcher = _dispatchers[systemId];
+                // World systems: one work item per run, dispatched with both worlds.
+                if (_worldDispatchers[systemId] is { } worldDispatcher)
+                {
+                    _workItems.Add(new WorkItem<TMask, TConfig>(
+                        systemId, worldDispatcher, _world, readWorld, _ecbPool));
+                    continue;
+                }
+
+                var dispatcher = _dispatchers[systemId]!;
                 var q = _world.ArchetypeRegistry.GetOrCreateQuery(_metadata[systemId].QueryDescription);
                 foreach (var ci in q.Chunks)
                 {
-                    ChunkManager readChunkManager = _world.ChunkManager;
-                    ChunkHandle readChunk = ci.Handle;
-                    if (readWorld is not null)
-                    {
-                        var readArchetype = readWorld.ArchetypeRegistry.GetById(ci.Archetype.Id);
-                        if (readArchetype is not null && ci.ChunkIndex < readArchetype.ChunkCount)
-                        {
-                            System.Diagnostics.Debug.Assert(
-                                ci.EntityCount <= ReadChunkEntityCount(readArchetype, ci.ChunkIndex),
-                                "Read world diverged structurally from the write world — structural changes between CopyFrom and Run(readWorld) violate the snapshot contract.");
-                            readChunkManager = readWorld.ChunkManager;
-                            readChunk = readArchetype.GetChunk(ci.ChunkIndex);
-                        }
-                        // else: archetype/chunk born after the copy — read-only fields fall back
-                        // to the write chunk (new entities have no previous-tick state).
-                    }
+                    SnapshotChunkPairing.Resolve(_world, readWorld, ci.Archetype.Id, ci.ChunkIndex,
+                        ci.Handle, ci.EntityCount, out ChunkManager readChunkManager, out ChunkHandle readChunk);
 
                     _workItems.Add(new WorkItem<TMask, TConfig>(
                         systemId,
@@ -153,12 +163,6 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         _ecbPool.ClearAll();
     }
 
-    private static int ReadChunkEntityCount(Archetype<TMask, TConfig> archetype, int chunkIndex)
-    {
-        int perChunk = archetype.Layout.EntitiesPerChunk;
-        return Math.Min(perChunk, archetype.EntityCount - chunkIndex * perChunk);
-    }
-
     /// <inheritdoc/>
     public void Dispose() => _ecbPool.Dispose();
 }
@@ -176,16 +180,18 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
 {
     private readonly IWorld<TMask, TConfig> _world;
     private readonly List<SystemMetadata<TMask>> _metadata;
-    private readonly List<SystemRunChunkAction<TMask, TConfig>> _dispatchers;
+    private readonly List<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
+    private readonly List<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
 
     internal SystemScheduleBuilder(IWorld<TMask, TConfig> world)
     {
         _world = world;
         _metadata = new List<SystemMetadata<TMask>>();
-        _dispatchers = new List<SystemRunChunkAction<TMask, TConfig>>();
+        _dispatchers = new List<SystemRunChunkAction<TMask, TConfig>?>();
+        _worldDispatchers = new List<SystemRunWorldAction<TMask, TConfig>?>();
     }
 
-    /// <summary>Adds a system to the schedule.</summary>
+    /// <summary>Adds a per-entity or per-chunk system to the schedule.</summary>
     /// <typeparam name="T">The system type implementing <see cref="ISystem{TMask,TConfig}"/>.</typeparam>
     /// <returns>This builder for chaining.</returns>
     public SystemScheduleBuilder<TMask, TConfig> Add<T>()
@@ -193,6 +199,19 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     {
         _metadata.Add(T.Metadata);
         _dispatchers.Add(T.RunChunk);
+        _worldDispatchers.Add(null);
+        return this;
+    }
+
+    /// <summary>Adds a whole-world system (<see cref="IWorldSystem"/>) to the schedule.</summary>
+    /// <typeparam name="T">The system type implementing <see cref="IWorldSystemRunner{TMask,TConfig}"/>.</typeparam>
+    /// <returns>This builder for chaining.</returns>
+    public SystemScheduleBuilder<TMask, TConfig> AddWorld<T>()
+        where T : IWorldSystemRunner<TMask, TConfig>, allows ref struct
+    {
+        _metadata.Add(T.Metadata);
+        _dispatchers.Add(null);
+        _worldDispatchers.Add(T.RunWorld);
         return this;
     }
 
@@ -224,6 +243,7 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
             _world,
             wavesBuilder.MoveToImmutable(),
             ImmutableArray.Create(_dispatchers.ToArray()),
+            ImmutableArray.Create(_worldDispatchers.ToArray()),
             ImmutableArray.Create(_metadata.ToArray()),
             scheduler);
     }
