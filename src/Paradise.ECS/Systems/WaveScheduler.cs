@@ -27,6 +27,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     /// <summary>The chunk this work item operates on.</summary>
     public ChunkHandle Chunk { get; }
 
+    private readonly ChunkManager _readChunkManager;
+    private readonly ChunkHandle _readChunk;
     private readonly SystemRunChunkAction<TMask, TConfig> _dispatcher;
     private readonly IWorld<TMask, TConfig> _world;
     private readonly nint _layoutPtr;
@@ -36,6 +38,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     internal WorkItem(
         int systemId,
         ChunkHandle chunk,
+        ChunkManager readChunkManager,
+        ChunkHandle readChunk,
         SystemRunChunkAction<TMask, TConfig> dispatcher,
         IWorld<TMask, TConfig> world,
         nint layoutPtr,
@@ -44,6 +48,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     {
         SystemId = systemId;
         Chunk = chunk;
+        _readChunkManager = readChunkManager;
+        _readChunk = readChunk;
         _dispatcher = dispatcher;
         _world = world;
         _layoutPtr = layoutPtr;
@@ -56,7 +62,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     /// </summary>
     public void Invoke()
     {
-        _dispatcher(_world, Chunk, new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
+        _dispatcher(_world, Chunk, _readChunkManager, _readChunk,
+            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
     }
 }
 

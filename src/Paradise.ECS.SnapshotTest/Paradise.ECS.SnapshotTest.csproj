@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\Paradise.ECS.Common.props" />
+
+  <PropertyGroup>
+    <AssemblyName>Paradise.ECS.SnapshotTest</AssemblyName>
+    <RootNamespace>Paradise.ECS.SnapshotTest</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- CA1707: underscore test names; CA1515: TUnit needs public test classes -->
+    <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <!-- NO Paradise.ECS.Tag reference: snapshot execution needs the plain World (CopyFrom). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Paradise.ECS" />
+  </ItemGroup>
+
+</Project>

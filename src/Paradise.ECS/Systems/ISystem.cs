@@ -127,14 +127,20 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <summary>
     /// Executes this system over a single chunk. Called by the scheduler.
     /// </summary>
-    /// <param name="world">The world containing the entities.</param>
+    /// <param name="world">The world containing the entities (the WRITE world).</param>
     /// <param name="chunk">The chunk handle to process.</param>
+    /// <param name="readChunkManager">Chunk memory source for read-only bindings; equals
+    /// <c>world.ChunkManager</c> in classic execution. Only snapshot-mode codegen
+    /// (<c>[assembly: SnapshotReadSystems]</c>) consumes it.</param>
+    /// <param name="readChunk">Chunk in the read source corresponding to <paramref name="chunk"/>.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
     static abstract void RunChunk(
         IWorld<TMask, TConfig> world,
         ChunkHandle chunk,
+        ChunkManager readChunkManager,
+        ChunkHandle readChunk,
         ImmutableArchetypeLayout<TMask, TConfig> layout,
         int entityCount,
         EntityCommandBuffer commands);

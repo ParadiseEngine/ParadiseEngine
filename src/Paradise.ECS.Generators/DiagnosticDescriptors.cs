@@ -370,4 +370,17 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "IEntitySystem fields must use ref T/ref readonly T for inline mode or Data for composition mode.");
+
+    /// <summary>
+    /// PECS3008: [SingleWriter] component is written by multiple systems.
+    /// </summary>
+    public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(
+        id: "PECS3008",
+        title: "Single-writer component is written by multiple systems",
+        messageFormat: "Component '{0}' is marked [SingleWriter] but is written by multiple systems: {1}. Keep one owner system and use 'ref readonly'/'ReadOnlySpan' for read access.",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A component marked with [SingleWriter] may have write access (ref T field, Span<T> field) from at most one system per compilation. Read access via ref readonly T or ReadOnlySpan<T> is unrestricted.",
+        customTags: WellKnownDiagnosticTags.CompilationEnd);
 }

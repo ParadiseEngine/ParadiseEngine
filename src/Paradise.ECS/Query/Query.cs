@@ -129,6 +129,19 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             init;
         }
+
+        /// <summary>
+        /// The index of this chunk within its archetype. Stable across <c>World.CopyFrom</c>
+        /// (chunks are copied in index order), so (Archetype.Id, ChunkIndex) identifies the
+        /// corresponding chunk in a structural twin world.
+        /// </summary>
+        public int ChunkIndex
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get;
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            init;
+        }
     }
 
     /// <summary>
@@ -201,7 +214,8 @@ public readonly struct Query<TMask, TConfig, TArchetype>
                     {
                         Archetype = archetype,
                         Handle = archetype.GetChunk(_chunkIndex),
-                        EntityCount = entitiesInThisChunk
+                        EntityCount = entitiesInThisChunk,
+                        ChunkIndex = _chunkIndex
                     };
                     return true;
                 }
