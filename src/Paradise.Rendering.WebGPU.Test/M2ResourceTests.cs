@@ -224,6 +224,62 @@ public class M2ResourceTests
     }
 
     [Test]
+    public async Task pipeline_and_pass_depth_mismatch_throws_synchronously_both_ways()
+    {
+        // Review follow-up on this PR: pipeline↔pass depth incompatibility used to surface only
+        // as an async Dawn validation error via the uncaptured-error callback. Submit now
+        // throws a descriptive InvalidOperationException at SetPipeline time, both directions.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+
+        try
+        {
+            var program = LoadBindingsProgram();
+            var (frameGroup, vertexBuffer) = BuildFrameGroupAndVertices(renderer, program);
+            _ = frameGroup;
+            _ = vertexBuffer;
+
+            // Depth pipeline into a depth-less pass.
+            var depthPipeline = renderer.CreatePipeline(
+                program, renderer.ColorFormat, depthStencilFormat: TextureFormat.Depth32Float);
+            var writer = new ArrayBufferWriter<RenderCommand>(4);
+            var encoder = new RenderCommandEncoder(writer);
+            encoder.BeginPass(0);
+            encoder.SetPipeline(depthPipeline);
+            encoder.EndPass();
+            var passes = new RenderPassDesc[1];
+            passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
+            passes[0].Colors.Slot0 = new ColorAttachmentDesc(RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, ColorRgba.Black);
+            var stream = new RenderCommandStream(writer.WrittenMemory, passes);
+            await Assert.That(() => renderer.Submit(in stream)).Throws<InvalidOperationException>();
+
+            // Depth-less pipeline into a depth pass.
+            var flatPipeline = renderer.CreatePipeline(program, renderer.ColorFormat);
+            var depthDesc = new TextureDesc(
+                "mismatch-depth", 32, 32, 1, 1, 1,
+                TextureDimension.D2, TextureFormat.Depth32Float, TextureUsage.RenderAttachment);
+            var depth = renderer.CreateTexture(in depthDesc);
+            var writer2 = new ArrayBufferWriter<RenderCommand>(4);
+            var encoder2 = new RenderCommandEncoder(writer2);
+            encoder2.BeginPass(0);
+            encoder2.SetPipeline(flatPipeline);
+            encoder2.EndPass();
+            var passes2 = new RenderPassDesc[1];
+            passes2[0] = new RenderPassDesc(colorAttachmentCount: 1)
+            {
+                Depth = new DepthAttachmentDesc(depth, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
+            };
+            passes2[0].Colors.Slot0 = new ColorAttachmentDesc(RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, ColorRgba.Black);
+            var stream2 = new RenderCommandStream(writer2.WrittenMemory, passes2);
+            await Assert.That(() => renderer.Submit(in stream2)).Throws<InvalidOperationException>();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task bc_support_flag_is_readable_and_gates_bc_texture_creation()
     {
         var renderer = TryCreateHeadlessOrSkip();

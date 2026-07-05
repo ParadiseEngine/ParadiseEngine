@@ -49,11 +49,15 @@ internal sealed class LitCubeScene : IDisposable
 
         var program = WebGpuRenderer.LoadShaderProgram(typeof(LitCubeScene).Assembly, "Shaders.cube");
 
-        // Reflection-validated uniforms: the CPU mirror must byte-match what slangc reflected.
+        // Reflection-validated uniforms: the CPU mirror must byte-match what slangc reflected —
+        // total size AND every field's offset/size, so the [FieldOffset] constants above are
+        // cross-checked rather than hand-trusted. This is the pattern the PBR renderer scales up.
         var drawBlock = program.UniformBlocks[0];
         if (drawBlock.SizeBytes != (uint)System.Runtime.CompilerServices.Unsafe.SizeOf<DrawParamsGpu>())
             throw new InvalidOperationException(
                 $"DrawParamsGpu is {System.Runtime.CompilerServices.Unsafe.SizeOf<DrawParamsGpu>()} bytes but the shader reflects {drawBlock.SizeBytes}.");
+        ValidateField(drawBlock, "mvp", expectedOffset: 0, expectedSize: 64);
+        ValidateField(drawBlock, "tint", expectedOffset: 64, expectedSize: 16);
 
         _pipeline = renderer.CreatePipeline(
             program, renderer.ColorFormat, depthStencilFormat: TextureFormat.Depth32Float);
@@ -143,6 +147,20 @@ internal sealed class LitCubeScene : IDisposable
 
         var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes);
         _renderer.Submit(in stream);
+    }
+
+    private static void ValidateField(UniformBlockDesc block, string name, uint expectedOffset, uint expectedSize)
+    {
+        foreach (var field in block.Fields)
+        {
+            if (!string.Equals(field.Name, name, StringComparison.Ordinal)) continue;
+            if (field.Offset != expectedOffset || field.Size != expectedSize)
+                throw new InvalidOperationException(
+                    $"Uniform field '{name}': CPU mirror expects offset {expectedOffset}/size {expectedSize} " +
+                    $"but the shader reflects offset {field.Offset}/size {field.Size}.");
+            return;
+        }
+        throw new InvalidOperationException($"Uniform block '{block.Name}' reflects no field named '{name}'.");
     }
 
     private TextureHandle CreateDepthTexture(uint width, uint height)
