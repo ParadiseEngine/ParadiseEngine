@@ -38,6 +38,39 @@ public enum TextureFormat : uint
     Bgra8UnormSrgb,
     Depth32Float,
     Depth24PlusStencil8,
+    // Block-compressed formats — exactly the set the KTX2 transcoder emits (BC7 color/ORM,
+    // BC5 normals, BC1/3/4 passthrough). Require the adapter's TextureCompressionBC feature.
+    Bc1RgbaUnorm,
+    Bc1RgbaUnormSrgb,
+    Bc3RgbaUnorm,
+    Bc3RgbaUnormSrgb,
+    Bc4RUnorm,
+    Bc5RgUnorm,
+    Bc7RgbaUnorm,
+    Bc7RgbaUnormSrgb,
+}
+
+/// <summary>Depth/stencil comparison function. Mirrors WebGPU's GPUCompareFunction.</summary>
+public enum CompareFunction : byte
+{
+    Never = 0,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
+}
+
+/// <summary>Color-target blend preset. The contract deliberately exposes presets, not raw blend
+/// factors — <see cref="AlphaBlend"/> is standard src-alpha / one-minus-src-alpha with additive
+/// alpha, which covers AlphaMode=Blend + transmission; grow to a full blend descriptor only when
+/// a real consumer needs one.</summary>
+public enum BlendMode : byte
+{
+    Opaque = 0,
+    AlphaBlend,
 }
 
 /// <summary>How a texture may be used by the GPU. Combine with bitwise OR.</summary>

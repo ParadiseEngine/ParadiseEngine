@@ -31,6 +31,14 @@ public readonly record struct SamplerHandle(uint Index, uint Generation)
     public static readonly SamplerHandle Invalid = default;
 }
 
+/// <summary>Opaque handle to a backend GPU bind group. Default value is invalid.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+public readonly record struct BindGroupHandle(uint Index, uint Generation)
+{
+    public bool IsValid => Generation != 0;
+    public static readonly BindGroupHandle Invalid = default;
+}
+
 /// <summary>Opaque handle to a backend GPU pipeline state object. Default value is invalid.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly record struct PipelineHandle(uint Index, uint Generation)

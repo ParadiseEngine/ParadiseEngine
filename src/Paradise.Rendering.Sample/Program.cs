@@ -15,9 +15,10 @@ internal static class Program
     private static int Main(string[] args)
     {
         var headlessFrames = ParseHeadless(args);
+        var cube = Array.IndexOf(args, "--cube") >= 0; // M2 demo: textured lit cube w/ depth
         try
         {
-            return headlessFrames is int n ? RunHeadless(n) : RunWindowed();
+            return headlessFrames is int n ? RunHeadless(n, cube) : RunWindowed(cube);
         }
         catch (Exception ex)
         {
@@ -41,7 +42,7 @@ internal static class Program
         return null;
     }
 
-    private static int RunHeadless(int frameCount)
+    private static int RunHeadless(int frameCount, bool cube)
     {
         if (frameCount < 0) return 1;
 
@@ -61,10 +62,19 @@ internal static class Program
         try
         {
             using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight);
-            using var scene = new TriangleScene(renderer);
-            for (var i = 0; i < frameCount; i++)
-                scene.RenderFrame();
-            Console.WriteLine($"Headless mode: rendered {frameCount} triangle frames against an offscreen target.");
+            if (cube)
+            {
+                using var scene = new LitCubeScene(renderer, InitialWidth, InitialHeight);
+                for (var i = 0; i < frameCount; i++)
+                    scene.RenderFrame();
+            }
+            else
+            {
+                using var scene = new TriangleScene(renderer);
+                for (var i = 0; i < frameCount; i++)
+                    scene.RenderFrame();
+            }
+            Console.WriteLine($"Headless mode: rendered {frameCount} {(cube ? "lit-cube" : "triangle")} frames against an offscreen target.");
             return 0;
         }
         finally
@@ -73,7 +83,7 @@ internal static class Program
         }
     }
 
-    private static unsafe int RunWindowed()
+    private static unsafe int RunWindowed(bool cube)
     {
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
         {
@@ -95,7 +105,8 @@ internal static class Program
 
             var surfaceDesc = BuildSurfaceDescriptor(window, out metalView);
             renderer = new WebGpuRenderer(in surfaceDesc);
-            using var scene = new TriangleScene(renderer);
+            using var triangleScene = cube ? null : new TriangleScene(renderer);
+            using var cubeScene = cube ? new LitCubeScene(renderer, surfaceDesc.Width, surfaceDesc.Height) : null;
 
             var quit = false;
             SDL_Event ev;
@@ -118,10 +129,14 @@ internal static class Program
                         var w = ev.window.data1;
                         var h = ev.window.data2;
                         if (w > 0 && h > 0)
+                        {
                             renderer.Resize((uint)w, (uint)h);
+                            cubeScene?.Resize((uint)w, (uint)h);
+                        }
                     }
                 }
-                scene.RenderFrame();
+                if (cubeScene is not null) cubeScene.RenderFrame();
+                else triangleScene!.RenderFrame();
             }
 
             return 0;

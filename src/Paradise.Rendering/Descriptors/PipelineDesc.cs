@@ -20,7 +20,28 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
     public IndexFormat StripIndexFormat { get; init; }
     public TextureFormat ColorFormat { get; init; }
     public TextureFormat? DepthStencilFormat { get; init; }
+
+    /// <summary>Depth write toggle — only meaningful when <see cref="DepthStencilFormat"/> is set.
+    /// Defaults on so opaque pipelines get depth writes without opting in; blend pipelines
+    /// typically set it false.</summary>
+    public bool DepthWriteEnabled { get; init; } = true;
+
+    /// <summary>Depth test — only meaningful when <see cref="DepthStencilFormat"/> is set.</summary>
+    public CompareFunction DepthCompare { get; init; } = CompareFunction.Less;
+
+    /// <summary>Color-target blend preset for attachment 0.</summary>
+    public BlendMode Blend { get; init; }
+
     public PipelineLayoutDesc? Layout { get; init; }
+
+    // Explicit parameterless ctor so the DepthWriteEnabled/DepthCompare property initializers
+    // run for object-initializer construction (struct field initializers require one). Entry
+    // points default to empty — the backend falls back to vs_main/fs_main for empty strings.
+    public PipelineDesc()
+    {
+        VertexEntryPoint = string.Empty;
+        FragmentEntryPoint = string.Empty;
+    }
 
     public bool Equals(PipelineDesc other)
     {
@@ -32,6 +53,9 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         if (StripIndexFormat != other.StripIndexFormat) return false;
         if (ColorFormat != other.ColorFormat) return false;
         if (DepthStencilFormat != other.DepthStencilFormat) return false;
+        if (DepthWriteEnabled != other.DepthWriteEnabled) return false;
+        if (DepthCompare != other.DepthCompare) return false;
+        if (Blend != other.Blend) return false;
         if (!PipelineLayoutContentEquals(Layout, other.Layout)) return false;
         return VertexLayoutsContentEquals(VertexLayouts.Span, other.VertexLayouts.Span);
     }
@@ -51,6 +75,9 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         h.Add(StripIndexFormat);
         h.Add(ColorFormat);
         h.Add(DepthStencilFormat);
+        h.Add(DepthWriteEnabled);
+        h.Add(DepthCompare);
+        h.Add(Blend);
         // Structural hash over PipelineLayoutDesc — `ShaderProgramLoader.BuildProgramDesc` mints a
         // fresh PipelineLayoutDesc per load, so reference identity defeated the cache for callers
         // that loaded the same shader twice (e.g. tests, future hot-reload). Walk the bind-group /
@@ -118,6 +145,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
             if (x.Visibility != y.Visibility) return false;
             if (x.Type != y.Type) return false;
             if (x.MinBufferSize != y.MinBufferSize) return false;
+            if (x.HasDynamicOffset != y.HasDynamicOffset) return false;
         }
         return true;
     }
@@ -157,6 +185,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
                 h.Add(entries[j].Visibility);
                 h.Add(entries[j].Type);
                 h.Add(entries[j].MinBufferSize);
+                h.Add(entries[j].HasDynamicOffset);
             }
         }
         var push = layout.PushConstants;

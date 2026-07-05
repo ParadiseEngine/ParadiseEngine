@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Collections.Generic;
 using System.Text.Json;
 
 namespace Paradise.Rendering.WebGPU.Internal;
@@ -47,15 +48,6 @@ internal static class ShaderProgramLoader
     {
         var entryPoints = reflection.EntryPoints ?? Array.Empty<SlangEntryPoint>();
 
-        // M1 only wires varying (vertex) inputs and outputs. If Slang reflects any resource
-        // bindings — uniform buffers, storage buffers, samplers, textures, push constants — the
-        // loader previously dropped them silently and emitted an empty PipelineLayoutDesc,
-        // leaving the consumer with a shader whose bindings the engine can't validate or bind
-        // against. Reject up-front with a clear M2 deferral message (#43 lands the binding
-        // pipeline). Symmetric with the PipelineDesc.Layout NotSupportedException guard in
-        // WebGpuDevice.BuildNativePipeline.
-        RejectNonVaryingBindings(entryPoints);
-
         var modules = new ShaderModuleDesc[entryPoints.Length];
         for (var i = 0; i < entryPoints.Length; i++)
         {
@@ -63,42 +55,129 @@ internal static class ShaderProgramLoader
             modules[i] = new ShaderModuleDesc(wgsl, ep.Name, ParseStage(ep.Stage));
         }
 
-        // M1: derive a single vertex buffer layout from the vertex entry point's input parameter
-        // (a struct of fields with @location semantics). M2 will extend this to bind groups and
-        // push-constant ranges; #43 lands the binding pipeline.
         var vertexBuffers = ExtractVertexBuffers(entryPoints);
+        var (layout, uniformBlocks) = BuildLayout(reflection.Parameters ?? Array.Empty<SlangParameter>());
 
-        // M1 has no bind group entries. The Layout record is non-null with empty arrays so the
-        // backend can build an empty PipelineLayoutDescriptor uniformly.
-        var layout = new PipelineLayoutDesc(
-            Groups: Array.Empty<BindGroupLayoutDesc>(),
-            PushConstants: Array.Empty<PushConstantRangeDesc>());
-
-        return new ShaderProgramDesc(modules, layout, vertexBuffers);
+        return new ShaderProgramDesc(modules, layout, vertexBuffers) { UniformBlocks = uniformBlocks };
     }
 
-    private static void RejectNonVaryingBindings(SlangEntryPoint[] entryPoints)
+    /// <summary>Build bind-group layouts + uniform-block byte layouts from the reflection's
+    /// top-level global parameters. Bindings are grouped by descriptor space (bind group),
+    /// ordered by binding index within each group. Visibility is Vertex|Fragment for every
+    /// entry: slangc's per-entry-point "bindings" lists ALL globals rather than per-stage usage
+    /// (verified against real output), and over-visible bindings are valid WebGPU.</summary>
+    private static (PipelineLayoutDesc Layout, UniformBlockDesc[] UniformBlocks) BuildLayout(SlangParameter[] parameters)
     {
-        foreach (var ep in entryPoints)
+        if (parameters.Length == 0)
         {
-            if (ep.Parameters is null) continue;
-            foreach (var p in ep.Parameters)
-            {
-                var kind = p.Binding?.Kind;
-                // Null Kind covers unbound top-level parameters (shouldn't happen in practice but
-                // we can't map them, so treat as unsupported). "varyingInput" / "varyingOutput"
-                // are the only two kinds M1's vertex-layout derivation handles.
-                if (kind is "varyingInput" or "varyingOutput") continue;
+            return (new PipelineLayoutDesc(
+                Groups: Array.Empty<BindGroupLayoutDesc>(),
+                PushConstants: Array.Empty<PushConstantRangeDesc>()), Array.Empty<UniformBlockDesc>());
+        }
 
+        var groups = new SortedDictionary<uint, List<BindGroupLayoutEntryDesc>>();
+        var uniformBlocks = new List<UniformBlockDesc>();
+
+        foreach (var p in parameters)
+        {
+            var binding = p.Binding ?? throw new InvalidOperationException(
+                $"Global shader parameter '{p.Name ?? "<unnamed>"}' has no binding — Slang reflection schema may have changed.");
+            if (binding.Kind != "descriptorTableSlot")
+            {
                 throw new NotSupportedException(
-                    $"Shader entry point '{ep.Name}' reflects parameter '{p.Name ?? "<unnamed>"}' " +
-                    $"with binding kind '{kind ?? "<null>"}', which Paradise.Rendering M1 does not yet " +
-                    $"plumb through to the backend (only varying vertex inputs/outputs are supported). " +
-                    $"Resource bindings — uniform buffers, storage buffers, samplers, textures, push " +
-                    $"constants — are reserved for M2 (#43). Use a shader without resource bindings " +
-                    $"until then, or wait for the binding pipeline to land.");
+                    $"Global shader parameter '{p.Name ?? "<unnamed>"}' has binding kind '{binding.Kind ?? "<null>"}'. " +
+                    "Only descriptor-table bindings (ConstantBuffer/Texture2D/SamplerState) are supported; " +
+                    "push constants and other binding kinds are not plumbed through.");
+            }
+
+            var group = binding.Space ?? 0; // slangc omits `space` for group 0
+            var type = p.Type ?? throw new InvalidOperationException(
+                $"Global shader parameter '{p.Name ?? "<unnamed>"}' has no type node.");
+
+            var entry = type.Kind switch
+            {
+                "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks),
+                "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
+                "samplerState" => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.Sampler),
+                _ => throw new NotSupportedException(
+                    $"Global shader parameter '{p.Name ?? "<unnamed>"}' has unsupported type kind " +
+                    $"'{type.Kind}'{(type.BaseShape is null ? "" : $" (baseShape '{type.BaseShape}')")}. " +
+                    "Supported: ConstantBuffer<T>, Texture2D, SamplerState."),
+            };
+
+            if (!groups.TryGetValue(group, out var entries))
+            {
+                entries = new List<BindGroupLayoutEntryDesc>();
+                groups[group] = entries;
+            }
+            entries.Add(entry);
+        }
+
+        var groupDescs = new BindGroupLayoutDesc[groups.Count];
+        var g = 0;
+        foreach (var (groupIndex, entries) in groups)
+        {
+            entries.Sort(static (a, b) => a.Binding.CompareTo(b.Binding));
+            groupDescs[g++] = new BindGroupLayoutDesc(groupIndex, entries.ToArray());
+        }
+
+        var layout = new PipelineLayoutDesc(groupDescs, Array.Empty<PushConstantRangeDesc>());
+        return (layout, uniformBlocks.ToArray());
+    }
+
+    private static BindGroupLayoutEntryDesc BuildConstantBufferEntry(
+        SlangParameter parameter,
+        SlangBinding binding,
+        SlangTypeNode type,
+        uint group,
+        List<UniformBlockDesc> uniformBlocks)
+    {
+        // Total GPU size of the buffer contents lives on the element var layout's uniform binding.
+        var sizeBytes = type.ElementVarLayout?.Binding is { Kind: "uniform" } elementBinding
+            ? elementBinding.Size ?? 0
+            : 0;
+        if (sizeBytes == 0)
+        {
+            throw new InvalidOperationException(
+                $"ConstantBuffer '{parameter.Name ?? "<unnamed>"}' has no elementVarLayout uniform size — " +
+                "Slang reflection schema may have changed.");
+        }
+
+        // One flat field list: struct members with their reflected offsets; array members appear
+        // once with Size = total (elementStride × count). Consumers validating mirror structs
+        // match on (name, offset, size).
+        var fields = Array.Empty<UniformFieldDesc>();
+        if (type.ElementType?.Fields is { Length: > 0 } srcFields)
+        {
+            fields = new UniformFieldDesc[srcFields.Length];
+            for (var i = 0; i < srcFields.Length; i++)
+            {
+                var f = srcFields[i];
+                var fb = f.Binding;
+                if (fb is not { Kind: "uniform" } || fb.Offset is null || fb.Size is null)
+                {
+                    throw new InvalidOperationException(
+                        $"ConstantBuffer '{parameter.Name}' field '{f.Name}' has no uniform offset/size — " +
+                        "Slang reflection schema may have changed.");
+                }
+                fields[i] = new UniformFieldDesc(f.Name, fb.Offset.Value, fb.Size.Value);
             }
         }
+
+        uniformBlocks.Add(new UniformBlockDesc(
+            parameter.Name ?? $"cbuffer_{group}_{binding.Index}",
+            group,
+            binding.Index,
+            sizeBytes,
+            fields));
+
+        return new BindGroupLayoutEntryDesc(
+            binding.Index,
+            ShaderStage.Vertex | ShaderStage.Fragment,
+            BindingResourceType.UniformBuffer,
+            MinBufferSize: sizeBytes);
     }
 
     private static ShaderStage ParseStage(string stage) => stage switch
