@@ -36,8 +36,13 @@ public ref struct RenderCommandEncoder
     public void SetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         Write(RenderCommand.FromSetIndexBuffer(buffer, format, offset, size));
 
-    public void SetBindGroup(uint groupIndex) =>
-        Write(RenderCommand.FromSetBindGroup(groupIndex));
+    public void SetBindGroup(uint groupIndex, BindGroupHandle group) =>
+        Write(RenderCommand.FromSetBindGroup(groupIndex, group));
+
+    /// <summary>Bind with a dynamic byte offset — the group's layout must carry exactly one
+    /// <c>HasDynamicOffset</c> buffer entry (the draw-UBO-ring pattern).</summary>
+    public void SetBindGroup(uint groupIndex, BindGroupHandle group, uint dynamicOffset) =>
+        Write(RenderCommand.FromSetBindGroup(groupIndex, group, dynamicOffset));
 
     public void Draw(in DrawCommand cmd) =>
         Write(RenderCommand.FromDraw(cmd));

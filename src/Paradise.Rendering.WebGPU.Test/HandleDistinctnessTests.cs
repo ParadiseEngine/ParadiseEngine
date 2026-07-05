@@ -41,25 +41,34 @@ public class HandleDistinctnessTests
         WebGpuRenderer.LoadShaderProgram(typeof(HandleDistinctnessTests).Assembly, "Shaders.triangle");
 
     [Test]
-    public async Task begin_pass_rejects_non_null_depth_attachment()
+    public async Task begin_pass_with_depth_attachment_submits_cleanly()
     {
-        // (1) Symmetric guard — the M1 backend doesn't plumb depth-stencil into the pass
-        // descriptor; a caller setting pass.Depth must see NotSupportedException at submit time
-        // instead of a silently depth-less render pass. Companion to the existing
-        // CreatePipeline(DepthStencilFormat) guard test.
+        // M2 flipped the old "reject pass.Depth" guard into real plumbing: a pass carrying a
+        // depth attachment (resolved from its TextureHandle) plus a pipeline with a matching
+        // DepthStencilFormat must submit without throwing.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
         try
         {
             var program = LoadTriangleProgram();
-            var pipeline = renderer.CreatePipeline(program, renderer.ColorFormat);
+            var pipeline = renderer.CreatePipeline(
+                program, renderer.ColorFormat, depthStencilFormat: TextureFormat.Depth32Float);
+
+            var depthDesc = new TextureDesc(
+                Name: "depth-probe",
+                Width: 16, Height: 16, DepthOrArrayLayers: 1,
+                MipLevelCount: 1, SampleCount: 1,
+                Dimension: TextureDimension.D2,
+                Format: TextureFormat.Depth32Float,
+                Usage: TextureUsage.RenderAttachment);
+            var depthTexture = renderer.CreateTexture(in depthDesc);
 
             var passes = new RenderPassDesc[1];
             passes[0] = new RenderPassDesc(colorAttachmentCount: 1)
             {
                 Depth = new DepthAttachmentDesc(
-                    DepthTexture: TextureHandle.Invalid,
+                    DepthTexture: depthTexture,
                     DepthLoad: LoadOp.Clear,
                     DepthStore: StoreOp.Store,
                     ClearDepth: 1f),
@@ -77,7 +86,8 @@ public class HandleDistinctnessTests
             encoder.EndPass();
             var stream = new RenderCommandStream(writer.WrittenMemory, passes);
 
-            await Assert.That(() => renderer.Submit(in stream)).Throws<NotSupportedException>();
+            renderer.Submit(in stream); // must not throw
+            renderer.DestroyTexture(depthTexture);
         }
         finally
         {
@@ -313,14 +323,11 @@ public class HandleDistinctnessTests
     }
 
     [Test]
-    public async Task create_pipeline_rejects_non_empty_layout()
+    public async Task create_pipeline_accepts_explicit_non_empty_layout()
     {
-        // Iteration-5 fix (codex iteration-4 verdict): PipelineDesc.Layout was hashed into cache
-        // identity but silently dropped by the backend (which always requested Dawn's auto
-        // layout). Non-empty layouts now throw NotSupportedException with an M2-deferral message
-        // so callers find out at CreatePipeline time instead of getting a cache-fragmented
-        // pipeline whose bindings are never enforced. Empty layouts (the ShaderProgramLoader
-        // output for M1) are still accepted.
+        // M2 flipped the old "reject non-empty Layout" guard into a real PipelineLayout build:
+        // a desc carrying bind groups produces an explicit native layout (WebGPU allows a layout
+        // superset of what the shader actually uses), and the pipeline builds cleanly.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -344,7 +351,7 @@ public class HandleDistinctnessTests
 
             var desc = new PipelineDesc
             {
-                Name = "NonEmptyLayoutProbe",
+                Name = "ExplicitLayoutProbe",
                 VertexShader = vs,
                 VertexEntryPoint = vsModule.EntryPoint,
                 FragmentShader = fs,
@@ -357,7 +364,8 @@ public class HandleDistinctnessTests
                 Layout = nonEmptyLayout,
             };
 
-            await Assert.That(() => renderer.CreatePipeline(in desc)).Throws<NotSupportedException>();
+            var pipeline = renderer.CreatePipeline(in desc);
+            await Assert.That(pipeline.IsValid).IsTrue();
         }
         finally
         {
@@ -478,14 +486,14 @@ public class HandleDistinctnessTests
     public async Task create_pipeline_from_program_releases_shader_handles_on_exception()
     {
         // Iter-8 fix for OpenCara's iter-7 minor finding: the helper's inner CreatePipeline(in
-        // PipelineDesc) can throw NotSupportedException from BuildNativePipeline's
-        // DepthStencilFormat / Layout guards. Pre-iter-8 the DestroyShader pair ran only on the
-        // happy path, so exception paths leaked two slot entries per call. Iter-8 wraps the
-        // inner call in try/finally so the destroy pair runs regardless.
+        // PipelineDesc) could throw from BuildNativePipeline guards, and pre-iter-8 the
+        // DestroyShader pair ran only on the happy path, so exception paths leaked two slot
+        // entries per call. Iter-8 wraps the inner call in try/finally.
         //
-        // Reproduce by supplying a ShaderProgramDesc whose Layout has a non-empty Groups array —
-        // BuildNativePipeline's guard rejects that with NotSupportedException, and we assert
-        // the slot count didn't grow.
+        // M2 note: the non-empty-Layout guard this test originally used to force the exception
+        // path is gone (explicit layouts now build). The tampered program below therefore
+        // builds successfully, and the assertion pins the same invariant on the happy path:
+        // repeated helper calls never grow the shader slot table, exception or not.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 

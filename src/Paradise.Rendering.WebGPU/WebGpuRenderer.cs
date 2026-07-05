@@ -207,6 +207,89 @@ public sealed class WebGpuRenderer : IDisposable
         _destructionQueue.Schedule(() => native.Destroy());
     }
 
+    /// <summary>Write <paramref name="data"/> into an existing buffer at <paramref name="offset"/>
+    /// — the per-frame uniform upload path (frame/draw UBO rings).</summary>
+    public void UpdateBuffer<T>(BufferHandle handle, ulong offset, ReadOnlySpan<T> data) where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var native = _device.ResolveBuffer(handle);
+        _device.Queue.WriteBuffer(native, offset, data);
+    }
+
+    /// <summary>True when the adapter granted BC texture compression — required before creating
+    /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
+    public bool SupportsBcTextureCompression => _device.SupportsBc;
+
+    /// <summary>Required stride alignment for dynamic uniform-buffer offsets (≥ 256).</summary>
+    public uint UniformBufferOffsetAlignment => _device.UniformBufferOffsetAlignment;
+
+    public TextureHandle CreateTexture(in TextureDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (IsBcFormat(desc.Format) && !_device.SupportsBc)
+            throw new NotSupportedException(
+                $"Texture format '{desc.Format}' requires the TextureCompressionBC adapter feature, " +
+                "which this adapter did not grant. Check SupportsBcTextureCompression and upload an " +
+                "RGBA fallback instead.");
+        return _device.CreateTexture(in desc);
+    }
+
+    private static bool IsBcFormat(TextureFormat f) => f is >= TextureFormat.Bc1RgbaUnorm and <= TextureFormat.Bc7RgbaUnormSrgb;
+
+    /// <summary>Upload one mip level. <paramref name="bytesPerRow"/> is the source row pitch in
+    /// bytes (for BC formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
+    /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
+    /// the mip's texel dimensions. Block-size math stays in the asset layer, as in the source
+    /// material's texture cache.</summary>
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var entry = _device.ResolveTexture(handle);
+        _device.Queue.WriteTexture(
+            new WebGpuSharp.TexelCopyTextureInfo { Texture = entry.Texture, MipLevel = mipLevel },
+            data,
+            new WebGpuSharp.TexelCopyBufferLayout { Offset = 0, BytesPerRow = bytesPerRow, RowsPerImage = rowsPerImage },
+            new WgExtent3D(width, height, 1));
+    }
+
+    public void DestroyTexture(TextureHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachTexture(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => native.Texture.Destroy());
+    }
+
+    public SamplerHandle CreateSampler(in SamplerDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateSampler(in desc);
+    }
+
+    public void DestroySampler(SamplerHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachSampler(handle, out var native))
+            return;
+        // Samplers have no native Destroy(); the closure capture keeps the wrapper alive through
+        // the deferred window (same pattern as DestroyShader).
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
+    public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateBindGroup(in desc);
+    }
+
+    public void DestroyBindGroup(BindGroupHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachBindGroup(handle, out var native))
+            return;
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -229,7 +312,12 @@ public sealed class WebGpuRenderer : IDisposable
         in ShaderProgramDesc program,
         TextureFormat colorFormat,
         PrimitiveTopology topology = PrimitiveTopology.TriangleList,
-        IndexFormat stripIndexFormat = IndexFormat.Uint16)
+        IndexFormat stripIndexFormat = IndexFormat.Uint16,
+        TextureFormat? depthStencilFormat = null,
+        BlendMode blend = BlendMode.Opaque,
+        bool depthWriteEnabled = true,
+        CompareFunction depthCompare = CompareFunction.Less,
+        string? fragmentEntryPoint = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -238,10 +326,19 @@ public sealed class WebGpuRenderer : IDisposable
         foreach (var m in program.Modules)
         {
             if ((m.Stage & ShaderStage.Vertex) != 0) vsModule = m;
-            if ((m.Stage & ShaderStage.Fragment) != 0) fsModule = m;
+            if ((m.Stage & ShaderStage.Fragment) != 0)
+            {
+                // Multi-fragment-entry programs (e.g. linear vs sRGB-encoding variants) select by
+                // name; without a selector the first fragment module wins.
+                if (fragmentEntryPoint is null && fsModule is null) fsModule = m;
+                else if (fragmentEntryPoint is not null && string.Equals(m.EntryPoint, fragmentEntryPoint, StringComparison.Ordinal)) fsModule = m;
+            }
         }
         if (vsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no vertex module.");
-        if (fsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no fragment module.");
+        if (fsModule is null)
+            throw new InvalidOperationException(fragmentEntryPoint is null
+                ? "ShaderProgramDesc has no fragment module."
+                : $"ShaderProgramDesc has no fragment module named '{fragmentEntryPoint}'.");
 
         // CreateShaderModule dedupes the underlying native WgShaderModule by (Wgsl, EntryPoint,
         // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call (iter-5
@@ -275,7 +372,10 @@ public sealed class WebGpuRenderer : IDisposable
                 Topology = topology,
                 StripIndexFormat = stripIndexFormat,
                 ColorFormat = colorFormat,
-                DepthStencilFormat = null,
+                DepthStencilFormat = depthStencilFormat,
+                DepthWriteEnabled = depthWriteEnabled,
+                DepthCompare = depthCompare,
+                Blend = blend,
                 Layout = program.Layout,
             };
             return CreatePipeline(in pipelineDesc);
@@ -376,9 +476,21 @@ public sealed class WebGpuRenderer : IDisposable
                         break;
                     }
                     case RenderCommandKind.SetBindGroup:
-                        // M1 reserves the command but the backend has nothing to bind. M2 will fill in
-                        // the resource payload + dispatch wgpuRenderPassEncoderSetBindGroup.
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var p = cmd.SetBindGroup;
+                        var native = _device.ResolveBindGroup(p.Group);
+                        if (p.HasDynamicOffset)
+                        {
+                            ReadOnlySpan<uint> offsets = [p.DynamicOffset];
+                            pass.SetBindGroup(p.GroupIndex, native, offsets);
+                        }
+                        else
+                        {
+                            pass.SetBindGroup(p.GroupIndex, native);
+                        }
                         break;
+                    }
                     case RenderCommandKind.Draw:
                     {
                         var pass = RequireActivePass(activePass);
@@ -415,26 +527,16 @@ public sealed class WebGpuRenderer : IDisposable
     private static WgRenderPassEncoder RequireActivePass(WgRenderPassEncoder? pass) =>
         pass ?? throw new InvalidOperationException("Render command issued outside of an active BeginPass/EndPass scope.");
 
-    private static WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
+    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
     {
-        // M1 supports a single color attachment that always targets the backbuffer view (the
-        // RenderPassDesc.ColorAttachments[i].View slot is reserved for M2 when offscreen targets
-        // and multi-attachment passes land — for now the View handle is ignored and the backbuffer
-        // is bound, with an explicit unsupported throw for >1 attachments).
+        // A single color attachment targeting the backbuffer view, plus an optional depth
+        // attachment resolved from its TextureHandle. Multi-attachment / offscreen color targets
+        // are still deferred (the ColorAttachments[i].View slot stays reserved for them).
         var colorCount = pass.ColorAttachmentCount;
         if (colorCount != 1)
             throw new NotSupportedException(
-                $"M1 supports exactly one color attachment per pass (got {colorCount}). " +
-                "Multi-attachment + non-backbuffer rendering lands in M2.");
-
-        // Symmetric with WebGpuDevice.CreatePipeline's DepthStencilFormat guard: a non-null
-        // pass-level Depth would silently drop today because the M1 backend doesn't plumb the
-        // DepthAttachmentDesc through to the WebGPU render-pass descriptor. Reject explicitly so
-        // the gap is visible at submit time instead of producing a depth-less render.
-        if (pass.Depth is not null)
-            throw new NotSupportedException(
-                "RenderPassDesc.Depth is reserved for M2 (#43). The M1 backend does not configure " +
-                "depth-stencil attachments on the WebGPU render pass; leave Depth null until M2.");
+                $"Exactly one color attachment per pass is supported (got {colorCount}). " +
+                "Multi-attachment + non-backbuffer color rendering is deferred to offscreen-target work.");
 
         var src = pass.Colors.Slot0;
         var colors = new WgRenderPassColorAttachment[1];
@@ -464,6 +566,27 @@ public sealed class WebGpuRenderer : IDisposable
             ColorAttachments = colors,
             Label = "ParadiseRenderPass",
         };
+        if (pass.Depth is { } depth)
+        {
+            var entry = _device.ResolveTexture(depth.DepthTexture);
+            desc.DepthStencilAttachment = new WebGpuSharp.RenderPassDepthStencilAttachment
+            {
+                View = entry.View,
+                DepthLoadOp = depth.DepthLoad switch
+                {
+                    LoadOp.Load => WgLoadOp.Load,
+                    LoadOp.Clear => WgLoadOp.Clear,
+                    _ => throw new NotSupportedException($"LoadOp '{depth.DepthLoad}' has no WebGPU mapping."),
+                },
+                DepthStoreOp = depth.DepthStore switch
+                {
+                    StoreOp.Store => WgStoreOp.Store,
+                    StoreOp.Discard => WgStoreOp.Discard,
+                    _ => throw new NotSupportedException($"StoreOp '{depth.DepthStore}' has no WebGPU mapping."),
+                },
+                DepthClearValue = depth.ClearDepth,
+            };
+        }
         return encoder.BeginRenderPass(in desc);
     }
 

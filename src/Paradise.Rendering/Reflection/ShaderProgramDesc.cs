@@ -12,12 +12,16 @@ public sealed record ShaderModuleDesc(
     string EntryPoint,
     ShaderStage Stage);
 
-/// <summary>One binding entry in a bind group layout — maps a binding slot to a resource type and visibility.</summary>
+/// <summary>One binding entry in a bind group layout — maps a binding slot to a resource type and
+/// visibility. <paramref name="HasDynamicOffset"/> marks a uniform/storage buffer whose byte
+/// offset is supplied per SetBindGroup (the draw-UBO-ring pattern); it is a LAYOUT property, so
+/// consumers opting in must rebuild the layout, not just pass an offset.</summary>
 public sealed record BindGroupLayoutEntryDesc(
     uint Binding,
     ShaderStage Visibility,
     BindingResourceType Type,
-    ulong MinBufferSize = 0);
+    ulong MinBufferSize = 0,
+    bool HasDynamicOffset = false);
 
 /// <summary>One bind group layout (group index + ordered binding entries).</summary>
 public sealed record BindGroupLayoutDesc(
@@ -47,8 +51,30 @@ public sealed record VertexBufferLayoutDesc(
     VertexStepMode StepMode,
     VertexAttributeDesc[] Attributes);
 
-/// <summary>Slang-reflection-shaped shader program: modules, pipeline layout, vertex inputs.</summary>
+/// <summary>One field inside a reflected uniform block: name plus byte offset/size in the GPU
+/// layout. Array fields appear once with Size = elementStride × count.</summary>
+public sealed record UniformFieldDesc(
+    string Name,
+    uint Offset,
+    uint Size);
+
+/// <summary>One reflected constant buffer: its bind point plus the GPU byte layout of its fields.
+/// Consumers validate their CPU mirror structs against this (never hand-trusted offsets).</summary>
+public sealed record UniformBlockDesc(
+    string Name,
+    uint Group,
+    uint Binding,
+    uint SizeBytes,
+    UniformFieldDesc[] Fields);
+
+/// <summary>Slang-reflection-shaped shader program: modules, pipeline layout, vertex inputs, and
+/// the uniform-block byte layouts backing the pipeline layout's buffer entries.</summary>
 public sealed record ShaderProgramDesc(
     ShaderModuleDesc[] Modules,
     PipelineLayoutDesc Layout,
-    VertexBufferLayoutDesc[] VertexBuffers);
+    VertexBufferLayoutDesc[] VertexBuffers)
+{
+    /// <summary>Reflected constant-buffer layouts, one per uniform-buffer binding in
+    /// <see cref="Layout"/>. Empty for programs without uniforms.</summary>
+    public UniformBlockDesc[] UniformBlocks { get; init; } = [];
+}

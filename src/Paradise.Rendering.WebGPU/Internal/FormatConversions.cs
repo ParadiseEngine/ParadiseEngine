@@ -5,6 +5,12 @@ using WgIndexFormat = WebGpuSharp.IndexFormat;
 using WgVertexStepMode = WebGpuSharp.VertexStepMode;
 using WgBufferUsage = WebGpuSharp.BufferUsage;
 using WgTextureFormat = WebGpuSharp.TextureFormat;
+using WgTextureUsage = WebGpuSharp.TextureUsage;
+using WgTextureDimension = WebGpuSharp.TextureDimension;
+using WgAddressMode = WebGpuSharp.AddressMode;
+using WgFilterMode = WebGpuSharp.FilterMode;
+using WgMipmapFilterMode = WebGpuSharp.MipmapFilterMode;
+using WgCompareFunction = WebGpuSharp.CompareFunction;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -84,7 +90,69 @@ internal static class FormatConversions
         TextureFormat.Bgra8UnormSrgb => WgTextureFormat.BGRA8UnormSrgb,
         TextureFormat.Depth32Float => WgTextureFormat.Depth32Float,
         TextureFormat.Depth24PlusStencil8 => WgTextureFormat.Depth24PlusStencil8,
+        TextureFormat.Bc1RgbaUnorm => WgTextureFormat.BC1RGBAUnorm,
+        TextureFormat.Bc1RgbaUnormSrgb => WgTextureFormat.BC1RGBAUnormSrgb,
+        TextureFormat.Bc3RgbaUnorm => WgTextureFormat.BC3RGBAUnorm,
+        TextureFormat.Bc3RgbaUnormSrgb => WgTextureFormat.BC3RGBAUnormSrgb,
+        TextureFormat.Bc4RUnorm => WgTextureFormat.BC4RUnorm,
+        TextureFormat.Bc5RgUnorm => WgTextureFormat.BC5RGUnorm,
+        TextureFormat.Bc7RgbaUnorm => WgTextureFormat.BC7RGBAUnorm,
+        TextureFormat.Bc7RgbaUnormSrgb => WgTextureFormat.BC7RGBAUnormSrgb,
         _ => throw new NotSupportedException($"Texture format '{f}' has no WebGPU mapping."),
+    };
+
+    public static WgTextureUsage ToWgpu(TextureUsage u)
+    {
+        var w = WgTextureUsage.None;
+        if ((u & TextureUsage.CopySrc) != 0) w |= WgTextureUsage.CopySrc;
+        if ((u & TextureUsage.CopyDst) != 0) w |= WgTextureUsage.CopyDst;
+        if ((u & TextureUsage.TextureBinding) != 0) w |= WgTextureUsage.TextureBinding;
+        if ((u & TextureUsage.StorageBinding) != 0) w |= WgTextureUsage.StorageBinding;
+        if ((u & TextureUsage.RenderAttachment) != 0) w |= WgTextureUsage.RenderAttachment;
+        return w;
+    }
+
+    public static WgTextureDimension ToWgpu(TextureDimension d) => d switch
+    {
+        TextureDimension.D1 => WgTextureDimension.D1,
+        TextureDimension.D2 => WgTextureDimension.D2,
+        TextureDimension.D3 => WgTextureDimension.D3,
+        _ => throw new NotSupportedException($"Texture dimension '{d}' has no WebGPU mapping."),
+    };
+
+    public static WgAddressMode ToWgpu(SamplerAddressMode m) => m switch
+    {
+        SamplerAddressMode.Repeat => WgAddressMode.Repeat,
+        SamplerAddressMode.MirrorRepeat => WgAddressMode.MirrorRepeat,
+        SamplerAddressMode.ClampToEdge => WgAddressMode.ClampToEdge,
+        _ => throw new NotSupportedException($"Address mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgFilterMode ToWgpu(SamplerFilterMode m) => m switch
+    {
+        SamplerFilterMode.Nearest => WgFilterMode.Nearest,
+        SamplerFilterMode.Linear => WgFilterMode.Linear,
+        _ => throw new NotSupportedException($"Filter mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgMipmapFilterMode ToWgpuMipmap(SamplerFilterMode m) => m switch
+    {
+        SamplerFilterMode.Nearest => WgMipmapFilterMode.Nearest,
+        SamplerFilterMode.Linear => WgMipmapFilterMode.Linear,
+        _ => throw new NotSupportedException($"Mipmap filter mode '{m}' has no WebGPU mapping."),
+    };
+
+    public static WgCompareFunction ToWgpu(CompareFunction f) => f switch
+    {
+        CompareFunction.Never => WgCompareFunction.Never,
+        CompareFunction.Less => WgCompareFunction.Less,
+        CompareFunction.Equal => WgCompareFunction.Equal,
+        CompareFunction.LessEqual => WgCompareFunction.LessEqual,
+        CompareFunction.Greater => WgCompareFunction.Greater,
+        CompareFunction.NotEqual => WgCompareFunction.NotEqual,
+        CompareFunction.GreaterEqual => WgCompareFunction.GreaterEqual,
+        CompareFunction.Always => WgCompareFunction.Always,
+        _ => throw new NotSupportedException($"Compare function '{f}' has no WebGPU mapping."),
     };
 
     public static TextureFormat FromWgpu(WgTextureFormat f) => f switch

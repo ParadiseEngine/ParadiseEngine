@@ -28,9 +28,12 @@ public readonly record struct SetVertexBufferPayload(uint Slot, BufferHandle Buf
 /// <summary>Payload for <see cref="RenderCommandKind.SetIndexBuffer"/>.</summary>
 public readonly record struct SetIndexBufferPayload(BufferHandle Buffer, IndexFormat Format, ulong Offset, ulong Size);
 
-/// <summary>Payload reserved for <see cref="RenderCommandKind.SetBindGroup"/>. M2 fills out the
-/// resource binding shape; M1 emits the command but the backend no-ops it.</summary>
-public readonly record struct SetBindGroupPayload(uint GroupIndex);
+/// <summary>Payload for <see cref="RenderCommandKind.SetBindGroup"/>: bind <paramref name="Group"/>
+/// at <paramref name="GroupIndex"/>. When <paramref name="HasDynamicOffset"/> is set, the group's
+/// dynamic-offset buffer entry is bound at <paramref name="DynamicOffset"/> bytes (layout must
+/// have exactly one <c>HasDynamicOffset</c> entry). 4+16+4+1(+pad) = 28 bytes ≤ the 40-byte
+/// payload budget.</summary>
+public readonly record struct SetBindGroupPayload(uint GroupIndex, BindGroupHandle Group, uint DynamicOffset, bool HasDynamicOffset);
 
 /// <summary>Discriminated render command. Kind selects one of the payload fields below; reading
 /// any other field is undefined. Encode via <see cref="RenderCommandEncoder"/>.</summary>
@@ -116,8 +119,11 @@ public readonly struct RenderCommand
     public static RenderCommand FromSetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         new(RenderCommandKind.SetIndexBuffer, new SetIndexBufferPayload(buffer, format, offset, size));
 
-    public static RenderCommand FromSetBindGroup(uint groupIndex) =>
-        new(RenderCommandKind.SetBindGroup, new SetBindGroupPayload(groupIndex));
+    public static RenderCommand FromSetBindGroup(uint groupIndex, BindGroupHandle group) =>
+        new(RenderCommandKind.SetBindGroup, new SetBindGroupPayload(groupIndex, group, 0, false));
+
+    public static RenderCommand FromSetBindGroup(uint groupIndex, BindGroupHandle group, uint dynamicOffset) =>
+        new(RenderCommandKind.SetBindGroup, new SetBindGroupPayload(groupIndex, group, dynamicOffset, true));
 
     public static RenderCommand FromDraw(in DrawCommand cmd) =>
         new(RenderCommandKind.Draw, cmd);
