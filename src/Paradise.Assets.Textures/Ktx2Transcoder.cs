@@ -212,6 +212,8 @@ public static class Ktx2Transcoder
             count++;
         }
 
+        // A base level smaller than 4×4 still needs one BC mip (BC pads up to a full block),
+        // so the floor of 1 covers that edge case even though the loop above found none.
         return Math.Max(1, count);
     }
 

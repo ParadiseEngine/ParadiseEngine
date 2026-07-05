@@ -11,8 +11,8 @@
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.2" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
-    <!-- Testing (TUnit with Native AOT support) -->
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
+    <!-- Testing (TUnit with Native AOT support) -->
     <PackageVersion Include="TUnit" Version="1.11.16" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
     <!-- Benchmarking -->
