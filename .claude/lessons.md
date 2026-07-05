@@ -44,3 +44,20 @@
   nested in a `[Queryable]` type — every `With<T>` without `IsReadOnly`/`QueryOnly` counts as a
   write). When adding a new generated field kind that can write components, extend
   `GetWrittenComponent`/`GetQueryableWrittenComponents` or the analyzer goes blind to it.
+
+## Paradise.Rendering
+
+- [hits: 1] **WebGPUSharp 0.5.2's type-specific `SurfaceDescriptor(ref SurfaceSource*FFI)`
+  constructors do NOT stamp `Chain.SType`** — Dawn then rejects the surface with
+  "Unexpected chained struct of type SType::0" and `Surface.GetCapabilities` returns null.
+  Every `SurfaceSource*FFI` must set
+  `Chain = new ChainedStruct { SType = SType.SurfaceSource<Kind> }` explicitly (all four
+  paths in `SurfaceFactory` now do). This was latent from M0b: the Win32/Xlib/Wayland paths
+  had never actually been executed windowed — the first real windowed run (macOS Metal,
+  PR "renderer-macos-windowed") exposed it. Symptom is at surface-capability query time,
+  not at CreateSurface (which succeeds).
+
+- [hits: 1] **SDL3 (ppy.SDL3-CS 2026.320.0) binds `SDL_Metal_CreateView/GetLayer/DestroyView`
+  with plain `IntPtr`** (no `SDL_MetalView` wrapper type). Windowed macOS = create the Metal
+  view AFTER `SDL_CreateWindow`, hand `SDL_Metal_GetLayer` to the Cocoa surface source, and
+  `SDL_Metal_DestroyView` only after the renderer/surface is disposed.
