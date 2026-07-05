@@ -23,12 +23,15 @@ public static class PbrMath
     public static Matrix4x4 ViewProjection(in Matrix4x4 view, in Matrix4x4 projection) =>
         view * projection;
 
-    /// <summary>The GPU normal matrix. WGSL needs the inverse-TRANSPOSE of the column-major
-    /// model matrix; because raw System.Numerics bytes read column-major ARE the transpose,
-    /// the value to upload is the plain numerics inverse — no transpose call anywhere.
-    /// Falls back to the model matrix itself when singular (degenerate scale).</summary>
+    /// <summary>The GPU normal matrix. WGSL needs the inverse-transpose of the column-major
+    /// model matrix. The raw-byte duality already supplies ONE transpose (numerics row-major
+    /// bytes read as a column-major matrix), so the value to upload is
+    /// <c>transpose(inverse(model))</c> on the numerics side — the explicit transpose here
+    /// cancels the duality's transpose, leaving the shader with the correct
+    /// inverse-transpose. Falls back to the model matrix itself when singular (degenerate
+    /// scale).</summary>
     public static Matrix4x4 NormalMatrix(in Matrix4x4 model) =>
-        Matrix4x4.Invert(model, out var inverse) ? inverse : model;
+        Matrix4x4.Invert(model, out var inverse) ? Matrix4x4.Transpose(inverse) : model;
 
     /// <summary>Unproject a screen pixel to a world-space ray. <paramref name="screen"/> is in
     /// pixels with the origin at the TOP-LEFT (window convention); the viewport maps to NDC

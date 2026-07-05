@@ -17,21 +17,28 @@ public class PbrMathTests
     }
 
     [Test]
-    public async Task normal_matrix_is_the_plain_numerics_inverse()
+    public async Task normal_matrix_keeps_a_transformed_tangent_and_normal_perpendicular()
     {
-        // The transpose half of "inverse-transpose" is absorbed by the raw-byte upload duality
-        // (see PbrUniforms) — so the CPU-side value must be exactly Matrix4x4.Invert(model).
+        // Independent invariant (does not pin the implementation against itself): a tangent
+        // transformed by the model's linear part and a normal transformed by NormalMatrix must
+        // stay perpendicular. The model mixes rotation with non-uniform scale so the linear
+        // part is non-orthogonal — a NormalMatrix missing its transpose (plain inverse) breaks
+        // this for exactly such shapes, even though it agrees with the correct value for pure
+        // rotations composed with uniform scale.
         var model = Matrix4x4.CreateScale(2f, 1f, 0.5f) * Matrix4x4.CreateRotationY(0.7f) *
                     Matrix4x4.CreateTranslation(3f, 4f, 5f);
-        Matrix4x4.Invert(model, out var expected);
-        var normal = PbrMath.NormalMatrix(model);
-        for (var r = 0; r < 4; r++)
-        {
-            for (var c = 0; c < 4; c++)
-            {
-                await Assert.That(MathF.Abs(normal[r, c] - expected[r, c])).IsLessThan(1e-6f);
-            }
-        }
+        // Both vectors lie in the XZ plane, where the non-uniform scale (x=2, z=0.5) combined
+        // with the Y-rotation actually distorts angles — an axis-aligned pair like (1,0,0)/(0,1,0)
+        // would pass even with a buggy plain-inverse NormalMatrix, since Y is untouched by both
+        // transforms here and would silently hide the bug.
+        var tangent = Vector3.Normalize(new Vector3(1f, 0f, 1f));
+        var normal = Vector3.Normalize(new Vector3(1f, 0f, -1f));
+        await Assert.That(Vector3.Dot(tangent, normal)).IsEqualTo(0f);
+
+        var transformedTangent = Vector3.TransformNormal(tangent, model);
+        var transformedNormal = Vector3.TransformNormal(normal, PbrMath.NormalMatrix(model));
+
+        await Assert.That(MathF.Abs(Vector3.Dot(transformedTangent, transformedNormal))).IsLessThan(1e-5f);
     }
 
     [Test]

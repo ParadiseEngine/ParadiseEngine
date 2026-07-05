@@ -12,8 +12,9 @@ namespace Paradise.Rendering.Pbr;
 //   convention read column-major by WGSL IS the transpose, which is exactly what mul(M, v)
 //   needs for numerics-convention (v·M) math. No element shuffling anywhere.
 // - Consequence for the normal matrix: WGSL wants inverse-transpose of the column-major model
-//   matrix, which after the raw-byte duality is plain inverse(model) on the numerics side —
-//   see PbrMath.NormalMatrix.
+//   matrix. The raw-byte duality already supplies one transpose, so the numerics-side value to
+//   upload needs an explicit second transpose to cancel it: transpose(inverse(model)) — see
+//   PbrMath.NormalMatrix.
 
 /// <summary>Mirror of pbr.slang <c>SceneLight</c> (64 B, array stride 64).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 64)]
