@@ -4,12 +4,14 @@
     libktx native-library staging. Ktx2.NET ships libktx natives only for win-x64 and
     linux-x64 inside its NuGet runtimes/ folder; on Apple Silicon the DllImport("ktx")
     resolves against the dylib vendored at third_party/ktx/osx-arm64 (KTX-Software 4.4.2,
-    Apache-2.0 — same binary bank-heist vendors). Import this file from any project that
-    calls the KTX2 transcoder at runtime (tests, samples, hosts):
+    Apache-2.0 — LICENSE/NOTICE alongside).
 
-      <Import Project="$(MSBuildThisFileDirectory)../Ktx.targets" />   from src/<Project>/
+    Imported by Paradise.Assets.Textures itself, and CopyToOutputDirectory content items
+    flow TRANSITIVELY across ProjectReference (GetCopyToOutputDirectoryItems) — so any
+    project that references the library gets libktx.dylib staged automatically; no
+    per-consumer import needed.
 
-    On platforms where no vendored/native libktx is present, consumers must treat
+    On platforms where no vendored/packaged native libktx is present, consumers must treat
     DllNotFoundException as "transcoding unavailable" (tests skip, not fail).
   -->
 

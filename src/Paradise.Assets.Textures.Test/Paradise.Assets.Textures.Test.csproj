@@ -9,8 +9,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <Import Project="$(MSBuildThisFileDirectory)../Ktx.targets" />
-
   <ItemGroup>
     <PackageReference Include="TUnit" />
   </ItemGroup>

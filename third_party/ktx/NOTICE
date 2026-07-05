@@ -1,0 +1,13 @@
+KTX-Software (libktx)
+Copyright 2015-2024 The Khronos Group Inc. and contributors
+
+osx-arm64/libktx.dylib is an unmodified binary of libktx 4.4.2 from the
+Khronos Group's KTX-Software project (https://github.com/KhronosGroup/KTX-Software),
+redistributed under the Apache License, Version 2.0 (see LICENSE in this
+directory). It provides KTX2 container reading and Basis Universal
+(BasisLZ/UASTC) transcoding for Paradise.Assets.Textures via the Ktx2.NET
+binding, which ships its own natives only for win-x64 and linux-x64.
+
+KTX-Software bundles third-party components under compatible licenses
+(notably Basis Universal, Apache-2.0, Copyright 2019-2024 Binomial LLC);
+see the upstream repository's LICENSES/ directory for the complete set.

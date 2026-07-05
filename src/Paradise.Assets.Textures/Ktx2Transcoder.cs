@@ -197,6 +197,9 @@ public static class Ktx2Transcoder
 
     private static int BlockCount(int pixels, int blockSize) => Math.Max(1, (pixels + blockSize - 1) / blockSize);
 
+    // The Math.Max(1, …) floor means a sub-4×4 BASE level (e.g. a 2×2 texture) still reports
+    // one mip: BC data for it exists as a single padded 4×4 block, which GPUs accept for
+    // textures smaller than the block. Only sub-4×4 TAIL mips of larger chains are dropped.
     private static int CountRenderableBcMipLevels(int width, int height, int sourceMipCount)
     {
         int count = 0;
