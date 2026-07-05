@@ -17,6 +17,12 @@ public static class PlanarSphereDynamics
 
     public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
         CollisionWorld? statics, in PlanarDynamicsSettings settings, float deltaSeconds)
+        => Step(spheres, pushers, statics?.Handle ?? default, settings, deltaSeconds);
+
+    /// <summary>Handle-based overload for use inside ECS systems. An invalid handle means no
+    /// statics: spheres integrate unobstructed (pushes and pair impulses still apply).</summary>
+    public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
+        CollisionWorldHandle statics, in PlanarDynamicsSettings settings, float deltaSeconds)
     {
         PushFromKinematics(spheres, pushers, statics, settings);
         Integrate(spheres, statics, settings, deltaSeconds);
@@ -28,10 +34,10 @@ public static class PlanarSphereDynamics
     /// Applied at EVERY position-mutating site (push, integrate — including wall-bounce
     /// deflections, pair resolution, static depenetration) so the "from is supported" invariant
     /// of <see cref="PlanarGroundSupport.Clamp"/> holds inductively across ticks.</summary>
-    private static Vector3 ClampToSupport(CollisionWorld? statics, in PlanarDynamicsSettings settings,
+    private static Vector3 ClampToSupport(CollisionWorldHandle statics, in PlanarDynamicsSettings settings,
         Vector3 from, Vector3 to)
     {
-        if (!settings.RequireSupport || statics is null) return to;
+        if (!settings.RequireSupport || !statics.IsValid) return to;
         return PlanarGroundSupport.Clamp(statics, settings.SupportFilter, from, to, settings.SupportProbeDepth);
     }
 
@@ -39,7 +45,7 @@ public static class PlanarSphereDynamics
     /// velocity up to pusherSpeed·PushStrength (a stable "carry along" rather than an
     /// accumulating impulse). Pushers are infinite-mass and never move.</summary>
     private static void PushFromKinematics(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
-        CollisionWorld? statics, in PlanarDynamicsSettings settings)
+        CollisionWorldHandle statics, in PlanarDynamicsSettings settings)
     {
         foreach (ref readonly KinematicCapsule pusher in pushers)
         {
@@ -71,7 +77,7 @@ public static class PlanarSphereDynamics
         }
     }
 
-    private static void Integrate(Span<DynamicSphere> spheres, CollisionWorld? statics,
+    private static void Integrate(Span<DynamicSphere> spheres, CollisionWorldHandle statics,
         in PlanarDynamicsSettings settings, float deltaSeconds)
     {
         for (int i = 0; i < spheres.Length; i++)
@@ -87,7 +93,7 @@ public static class PlanarSphereDynamics
             }
 
             Vector3 remaining = velocity * deltaSeconds;
-            if (statics is null)
+            if (!statics.IsValid)
             {
                 sphere.Position += remaining;
                 sphere.Velocity = velocity;
@@ -166,7 +172,7 @@ public static class PlanarSphereDynamics
 
     /// <summary>Pairwise sphere-sphere: split the depenetration half/half along the horizontal
     /// center axis and exchange the standard 1-D collision impulse.</summary>
-    private static void ResolvePairs(Span<DynamicSphere> spheres, CollisionWorld? statics, in PlanarDynamicsSettings settings)
+    private static void ResolvePairs(Span<DynamicSphere> spheres, CollisionWorldHandle statics, in PlanarDynamicsSettings settings)
     {
         for (int i = 0; i < spheres.Length; i++)
         {
@@ -199,10 +205,10 @@ public static class PlanarSphereDynamics
 
     /// <summary>Second static pass: pair resolution can shove a sphere into a wall; push it back
     /// out to skin clearance.</summary>
-    private static void DepenetrateFromStatics(Span<DynamicSphere> spheres, CollisionWorld? statics,
+    private static void DepenetrateFromStatics(Span<DynamicSphere> spheres, CollisionWorldHandle statics,
         in PlanarDynamicsSettings settings)
     {
-        if (statics is null) return;
+        if (!statics.IsValid) return;
 
         for (int i = 0; i < spheres.Length; i++)
         {

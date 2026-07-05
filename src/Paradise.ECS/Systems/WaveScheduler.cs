@@ -27,8 +27,12 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     /// <summary>The chunk this work item operates on.</summary>
     public ChunkHandle Chunk { get; }
 
-    private readonly SystemRunChunkAction<TMask, TConfig> _dispatcher;
+    private readonly ChunkManager _readChunkManager;
+    private readonly ChunkHandle _readChunk;
+    private readonly SystemRunChunkAction<TMask, TConfig>? _dispatcher;
+    private readonly SystemRunWorldAction<TMask, TConfig>? _worldDispatcher;
     private readonly IWorld<TMask, TConfig> _world;
+    private readonly IWorld<TMask, TConfig>? _readWorld;
     private readonly nint _layoutPtr;
     private readonly int _entityCount;
     private readonly EntityCommandBufferPool _commandPool;
@@ -36,6 +40,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     internal WorkItem(
         int systemId,
         ChunkHandle chunk,
+        ChunkManager readChunkManager,
+        ChunkHandle readChunk,
         SystemRunChunkAction<TMask, TConfig> dispatcher,
         IWorld<TMask, TConfig> world,
         nint layoutPtr,
@@ -44,10 +50,36 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     {
         SystemId = systemId;
         Chunk = chunk;
+        _readChunkManager = readChunkManager;
+        _readChunk = readChunk;
         _dispatcher = dispatcher;
+        _worldDispatcher = null;
         _world = world;
+        _readWorld = null;
         _layoutPtr = layoutPtr;
         _entityCount = entityCount;
+        _commandPool = commandPool;
+    }
+
+    /// <summary>Work item for a whole-world system (<see cref="IWorldSystem"/>): one invocation
+    /// per schedule run, carrying both worlds for snapshot-read binding.</summary>
+    internal WorkItem(
+        int systemId,
+        SystemRunWorldAction<TMask, TConfig> worldDispatcher,
+        IWorld<TMask, TConfig> world,
+        IWorld<TMask, TConfig>? readWorld,
+        EntityCommandBufferPool commandPool)
+    {
+        SystemId = systemId;
+        Chunk = default;
+        _readChunkManager = world.ChunkManager;
+        _readChunk = default;
+        _dispatcher = null;
+        _worldDispatcher = worldDispatcher;
+        _world = world;
+        _readWorld = readWorld;
+        _layoutPtr = 0;
+        _entityCount = 0;
         _commandPool = commandPool;
     }
 
@@ -56,7 +88,14 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     /// </summary>
     public void Invoke()
     {
-        _dispatcher(_world, Chunk, new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
+        if (_worldDispatcher is not null)
+        {
+            _worldDispatcher(_world, _readWorld, _commandPool.Get());
+            return;
+        }
+
+        _dispatcher!(_world, Chunk, _readChunkManager, _readChunk,
+            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
     }
 }
 

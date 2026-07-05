@@ -15,9 +15,11 @@ public class SystemGenerator : IIncrementalGenerator
 {
     private const string IEntitySystemFullName = "Paradise.ECS.IEntitySystem";
     private const string IChunkSystemFullName = "Paradise.ECS.IChunkSystem";
+    private const string IWorldSystemFullName = "Paradise.ECS.IWorldSystem";
     private const string ComponentAttributeFullName = "Paradise.ECS.ComponentAttribute";
     private const string DefaultConfigAttributeFullName = "Paradise.ECS.DefaultConfigAttribute";
     private const string SuppressGlobalUsingsAttributeFullName = "Paradise.ECS.SuppressGlobalUsingsAttribute";
+    private const string SnapshotReadSystemsAttributeFullName = "Paradise.ECS.SnapshotReadSystemsAttribute";
     private const string QueryableAttributeFullName = "Paradise.ECS.QueryableAttribute";
     private const string IConfigFullName = "Paradise.ECS.IConfig";
 
@@ -50,6 +52,13 @@ public class SystemGenerator : IIncrementalGenerator
                 compilation.Assembly.GetAttributes()
                     .Any(a => a.AttributeClass?.ToDisplayString() == SuppressGlobalUsingsAttributeFullName));
 
+        // [assembly: SnapshotReadSystems] switches to the snapshot codegen path: read-only fields
+        // bind to the read world passed to SystemSchedule.Run(readWorld).
+        var snapshotReadSystems = context.CompilationProvider
+            .Select(static (compilation, _) =>
+                compilation.Assembly.GetAttributes()
+                    .Any(a => a.AttributeClass?.ToDisplayString() == SnapshotReadSystemsAttributeFullName));
+
         // Collect [Queryable] types for resolving composition fields
         var queryableTypes = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -64,11 +73,13 @@ public class SystemGenerator : IIncrementalGenerator
             .Combine(componentCount)
             .Combine(defaultConfig)
             .Combine(suppressGlobalUsings)
-            .Combine(queryableTypes);
+            .Combine(queryableTypes)
+            .Combine(snapshotReadSystems);
 
         context.RegisterSourceOutput(collected, static (ctx, data) =>
             GenerateSystemCode(ctx,
-                data.Left.Left.Left.Left,
+                data.Left.Left.Left.Left.Left,
+                data.Left.Left.Left.Left.Right,
                 data.Left.Left.Left.Right,
                 data.Left.Left.Right,
                 data.Left.Right,
@@ -92,6 +103,7 @@ public class SystemGenerator : IIncrementalGenerator
             var fqn = iface.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
             if (fqn == "global::" + IEntitySystemFullName) kind = SystemKind.Entity;
             else if (fqn == "global::" + IChunkSystemFullName) kind = SystemKind.Chunk;
+            else if (fqn == "global::" + IWorldSystemFullName) kind = SystemKind.World;
         }
 
         if (kind == null) return null;
@@ -273,6 +285,16 @@ public class SystemGenerator : IIncrementalGenerator
                 {
                     matched = info;
                     resolvedKind = FieldKind.CompositionData;
+                }
+            }
+            // Try {prefix}Segments → CompositionSegments (world system)
+            else if (name.EndsWith("Segments", StringComparison.Ordinal) && name.Length > 8)
+            {
+                var prefix = name.Substring(0, name.Length - 8);
+                if (queryableLookup.TryGetValue(prefix, out var segInfo))
+                {
+                    matched = segInfo;
+                    resolvedKind = FieldKind.CompositionSegments;
                 }
             }
             // Try {prefix}Chunk → CompositionChunkData (chunk system)
@@ -457,7 +479,8 @@ public class SystemGenerator : IIncrementalGenerator
         int componentCount,
         ImmutableArray<string?> defaultConfigs,
         bool suppressGlobalUsings,
-        ImmutableArray<QueryableLookupInfo> queryableTypes)
+        ImmutableArray<QueryableLookupInfo> queryableTypes,
+        bool snapshotReadSystems)
     {
         if (systems.IsEmpty) return;
 
@@ -497,6 +520,14 @@ public class SystemGenerator : IIncrementalGenerator
                 // IEntitySystem with chunk-mode fields
                 if (sys.Kind == SystemKind.Entity && IsChunkModeField(field.Kind))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.EntitySystemHasChunkFields, sys.Location, field.FieldName, sys.FullyQualifiedName));
+
+                // IWorldSystem only accepts {Prefix}Segments + EntityCommandBuffer fields;
+                // segments fields are only valid on IWorldSystem.
+                bool worldFieldMismatch =
+                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CommandBuffer or FieldKind.Invalid)) ||
+                    (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
+                if (worldFieldMismatch)
+                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
             }
         }
 
@@ -508,6 +539,8 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
+                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CommandBuffer)) return false;
+                if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
             }
             return true;
         }).ToList();
@@ -540,7 +573,7 @@ public class SystemGenerator : IIncrementalGenerator
         // Generate per-system partials
         foreach (var (info, id) in systemsWithIds)
         {
-            GeneratePerSystemPartial(context, info, id, maskType, configTypeFull);
+            GeneratePerSystemPartial(context, info, id, maskType, configTypeFull, snapshotReadSystems);
         }
 
         // Generate SystemRegistry
@@ -572,7 +605,7 @@ public class SystemGenerator : IIncrementalGenerator
                 if (!field.IsReadOnly)
                     writeComponents.Add(field.ComponentFQN);
             }
-            else if (field.Kind is FieldKind.CompositionData or FieldKind.CompositionChunkData)
+            else if (field.Kind is FieldKind.CompositionData or FieldKind.CompositionChunkData or FieldKind.CompositionSegments)
             {
                 foreach (var comp in field.QueryableWithComponents)
                 {
@@ -672,7 +705,8 @@ public class SystemGenerator : IIncrementalGenerator
         SystemInfo sys,
         int systemId,
         string maskType,
-        string configType)
+        string configType,
+        bool snapshotReadSystems)
     {
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -697,7 +731,10 @@ public class SystemGenerator : IIncrementalGenerator
             indent += "    ";
         }
 
-        sb.AppendLine($"{indent}partial struct {sys.TypeName} : global::Paradise.ECS.ISystem<{maskType}, {configType}>");
+        string dispatchInterface = sys.Kind == SystemKind.World
+            ? $"global::Paradise.ECS.IWorldSystemRunner<{maskType}, {configType}>"
+            : $"global::Paradise.ECS.ISystem<{maskType}, {configType}>";
+        sb.AppendLine($"{indent}partial struct {sys.TypeName} : {dispatchInterface}");
         sb.AppendLine($"{indent}{{");
 
         // SystemId
@@ -707,7 +744,7 @@ public class SystemGenerator : IIncrementalGenerator
 
         // Metadata
         sb.AppendLine($"{indent}    /// <summary>The compile-time metadata for this system.</summary>");
-        sb.AppendLine($"{indent}    static global::Paradise.ECS.SystemMetadata<{maskType}> global::Paradise.ECS.ISystem<{maskType}, {configType}>.Metadata");
+        sb.AppendLine($"{indent}    static global::Paradise.ECS.SystemMetadata<{maskType}> {dispatchInterface}.Metadata");
         sb.AppendLine($"{indent}        => global::Paradise.ECS.SystemRegistry<{maskType}>.Metadata[{systemId}];");
         sb.AppendLine();
 
@@ -715,8 +752,11 @@ public class SystemGenerator : IIncrementalGenerator
         GenerateConstructor(sb, sys, indent + "    ", maskType, configType);
         sb.AppendLine();
 
-        // RunChunk
-        GenerateRunChunk(sb, sys, indent + "    ", maskType, configType);
+        // Dispatch method
+        if (sys.Kind == SystemKind.World)
+            GenerateRunWorld(sb, sys, indent + "    ", maskType, configType, snapshotReadSystems);
+        else
+            GenerateRunChunk(sb, sys, indent + "    ", maskType, configType, snapshotReadSystems);
 
         sb.AppendLine($"{indent}}}");
 
@@ -758,6 +798,9 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.CompositionChunkData:
                     sb.Append($"global::{field.ComponentFQN!.Replace("+", ".")}.ChunkData<{maskType}, {configType}> {ToCamelCase(field.FieldName)}");
                     break;
+                case FieldKind.CompositionSegments:
+                    sb.Append($"global::{field.ComponentFQN!.Replace("+", ".")}.Segments<{maskType}, {configType}> {ToCamelCase(field.FieldName)}");
+                    break;
                 case FieldKind.CommandBuffer:
                     sb.Append($"global::Paradise.ECS.EntityCommandBuffer {ToCamelCase(field.FieldName)}");
                     break;
@@ -786,21 +829,110 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}");
     }
 
-    private static void GenerateRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
+    /// <summary>Emits the world-system dispatcher: one RunWorld call per schedule run. Each
+    /// queryable Segments field gets a per-chunk table built from its query; under
+    /// [assembly: SnapshotReadSystems] a second table pairs chunks against the read world
+    /// (SnapshotChunkPairing) so read-only components observe the previous tick.</summary>
+    private static void GenerateRunWorld(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType, bool snapshotReadSystems)
+    {
+        sb.AppendLine($"{indent}/// <summary>Executes this system once over the whole world. Called by the scheduler.</summary>");
+        sb.AppendLine($"{indent}static void global::Paradise.ECS.IWorldSystemRunner<{maskType}, {configType}>.RunWorld(");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
+        sb.AppendLine($"{indent}{{");
+        var body = indent + "    ";
+
+        var segmentFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionSegments).ToList();
+        for (int k = 0; k < segmentFields.Count; k++)
+        {
+            var field = segmentFields[k];
+            var queryableFQN = $"global::{field.ComponentFQN!.Replace("+", ".")}";
+            var varName = ToCamelCase(field.FieldName) + "Segments";
+
+            sb.AppendLine($"{body}var __query{k} = world.ArchetypeRegistry.GetOrCreateQuery(global::Paradise.ECS.QueryableRegistry<{maskType}>.Descriptions[{queryableFQN}.QueryableId]);");
+            sb.AppendLine($"{body}int __chunkCount{k} = 0;");
+            sb.AppendLine($"{body}foreach (var __ci in __query{k}.Chunks) __chunkCount{k}++;");
+            sb.AppendLine($"{body}global::System.Span<global::Paradise.ECS.ComponentSegment> __write{k} = __chunkCount{k} <= 64 ? stackalloc global::Paradise.ECS.ComponentSegment[__chunkCount{k}] : new global::Paradise.ECS.ComponentSegment[__chunkCount{k}];");
+            if (snapshotReadSystems)
+            {
+                sb.AppendLine($"{body}global::System.Span<global::Paradise.ECS.ComponentSegment> __read{k} = __chunkCount{k} <= 64 ? stackalloc global::Paradise.ECS.ComponentSegment[__chunkCount{k}] : new global::Paradise.ECS.ComponentSegment[__chunkCount{k}];");
+            }
+            sb.AppendLine($"{body}{{");
+            sb.AppendLine($"{body}    int __i = 0;");
+            sb.AppendLine($"{body}    int __start = 0;");
+            sb.AppendLine($"{body}    foreach (var __ci in __query{k}.Chunks)");
+            sb.AppendLine($"{body}    {{");
+            sb.AppendLine($"{body}        __write{k}[__i] = new global::Paradise.ECS.ComponentSegment(__ci.Handle, __ci.Archetype.Layout.DataPointer, __ci.EntityCount, __start);");
+            if (snapshotReadSystems)
+            {
+                sb.AppendLine($"{body}        global::Paradise.ECS.SnapshotChunkPairing.Resolve(world, readWorld, __ci.Archetype.Id, __ci.ChunkIndex, __ci.Handle, __ci.EntityCount, out var __readManager, out var __readChunk);");
+                sb.AppendLine($"{body}        global::System.Diagnostics.Debug.Assert(ReferenceEquals(__readManager, world.ChunkManager), \"World-system snapshot reads require read/write worlds created from the same SharedWorld (shared ChunkManager).\");");
+                sb.AppendLine($"{body}        __read{k}[__i] = new global::Paradise.ECS.ComponentSegment(__readChunk, __ci.Archetype.Layout.DataPointer, __ci.EntityCount, __start);");
+            }
+            sb.AppendLine($"{body}        __start += __ci.EntityCount;");
+            sb.AppendLine($"{body}        __i++;");
+            sb.AppendLine($"{body}    }}");
+            sb.AppendLine($"{body}}}");
+            var readTable = snapshotReadSystems ? $"__read{k}" : $"__write{k}";
+            sb.AppendLine($"{body}var {varName} = {queryableFQN}.Segments<{maskType}, {configType}>.Create(world.ChunkManager, __write{k}, {readTable});");
+            sb.AppendLine();
+        }
+
+        sb.Append($"{body}var __system = new {GetGlobalFQN(sys)}(");
+        bool first = true;
+        int segmentIndex = 0;
+        foreach (var field in sys.Fields)
+        {
+            if (field.Kind == FieldKind.Invalid) continue;
+            if (!first) sb.Append(", ");
+            first = false;
+
+            if (field.Kind == FieldKind.CompositionSegments)
+            {
+                sb.Append($"{ToCamelCase(segmentFields[segmentIndex].FieldName)}Segments");
+                segmentIndex++;
+            }
+            else if (field.Kind == FieldKind.CommandBuffer)
+            {
+                sb.Append("commands");
+            }
+        }
+        sb.AppendLine(");");
+        sb.AppendLine($"{body}__system.Execute();");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType, bool snapshotReadSystems)
     {
         sb.AppendLine($"{indent}/// <summary>Executes this system over a single chunk. Called by the scheduler.</summary>");
         sb.AppendLine($"{indent}static void global::Paradise.ECS.ISystem<{maskType}, {configType}>.RunChunk(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager readChunkManager,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkHandle readChunk,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}> layout,");
         sb.AppendLine($"{indent}    int entityCount,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
         sb.AppendLine($"{indent}{{");
 
+        // Classic path: single-world binding, byte-identical bodies to the pre-snapshot codegen
+        // (the read params are ignored). Snapshot path ([assembly: SnapshotReadSystems]): read-only
+        // fields bind to (readChunkManager, readChunk).
         if (sys.Kind == SystemKind.Entity)
-            GenerateEntityModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+        {
+            if (snapshotReadSystems)
+                GenerateSnapshotEntityModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+            else
+                GenerateEntityModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+        }
         else
-            GenerateChunkModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+        {
+            if (snapshotReadSystems)
+                GenerateSnapshotChunkModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+            else
+                GenerateChunkModeRunChunk(sb, sys, indent + "    ", maskType, configType);
+        }
 
         sb.AppendLine($"{indent}}}");
     }
@@ -861,6 +993,144 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine(");");
         sb.AppendLine($"{indent}    __system.Execute();");
         sb.AppendLine($"{indent}}}");
+    }
+
+    /// <summary>Snapshot-mode entity dispatcher ([assembly: SnapshotReadSystems]): read-only
+    /// inline fields bind to (readChunkManager, readChunk) — the immutable read world — while
+    /// writable fields bind to the write world's chunk. Composition data binds PER COMPONENT
+    /// (via CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
+    private static void GenerateSnapshotEntityModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
+    {
+        var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
+        var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionData).ToList();
+        bool hasEntityHandle = sys.Fields.Any(f => f.Kind == FieldKind.EntityHandle);
+        // Entity-id column comes from the write chunk (identical in both worlds after CopyFrom).
+        bool needsBytes = inlineFields.Any(f => !f.IsReadOnly) || hasEntityHandle;
+        bool needsReadBytes = inlineFields.Any(f => f.IsReadOnly);
+
+        if (needsBytes)
+            sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
+        if (needsReadBytes)
+            sb.AppendLine($"{indent}var readBytes = readChunkManager.GetBytes(readChunk);");
+        foreach (var field in inlineFields)
+        {
+            var varName = ToCamelCase(field.FieldName) + "Span";
+            var source = field.IsReadOnly ? "readBytes" : "bytes";
+            sb.AppendLine($"{indent}var {varName} = {source}.GetSpan<{field.TypeFQN}>(layout.GetBaseOffset({field.TypeFQN}.TypeId), entityCount);");
+        }
+
+        sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
+        sb.AppendLine($"{indent}{{");
+
+        if (hasEntityHandle)
+        {
+            sb.AppendLine($"{indent}    int __entityId = global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}>.ReadEntityId(bytes, __i);");
+            sb.AppendLine($"{indent}    var __entity = new global::Paradise.ECS.Entity(__entityId, world.EntityManager.GetLocation(__entityId).Version);");
+        }
+
+        foreach (var field in compositionFields)
+        {
+            var varName = ToCamelCase(field.FieldName) + "Data";
+            var dataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
+            // Per-component binding: the Data struct routes each read-only member to the read
+            // chunk and each writable member to the write chunk (mixed compositions are safe).
+            sb.AppendLine($"{indent}    var {varName} = {dataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, __i);");
+        }
+
+        sb.Append($"{indent}    var __system = new {GetGlobalFQN(sys)}(");
+        bool first = true;
+        foreach (var field in sys.Fields)
+        {
+            if (field.Kind == FieldKind.Invalid) continue;
+            if (!first) sb.Append(", ");
+            first = false;
+
+            if (field.Kind == FieldKind.InlineComponent)
+                sb.Append($"ref {ToCamelCase(field.FieldName)}Span[__i]");
+            else if (field.Kind == FieldKind.CompositionData)
+                sb.Append($"{ToCamelCase(field.FieldName)}Data");
+            else if (field.Kind == FieldKind.CommandBuffer)
+                sb.Append("commands");
+            else if (field.Kind == FieldKind.EntityHandle)
+                sb.Append("__entity");
+        }
+        sb.AppendLine(");");
+        sb.AppendLine($"{indent}    __system.Execute();");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    /// <summary>Snapshot-mode chunk dispatcher: ReadOnlySpan fields bind to the read world;
+    /// Span fields bind to the write world. Composition chunk data binds PER COMPONENT (via
+    /// CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
+    private static void GenerateSnapshotChunkModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
+    {
+        var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineSpan).ToList();
+        var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionChunkData).ToList();
+        bool hasEntitySpan = sys.Fields.Any(f => f.Kind == FieldKind.EntitySpan);
+        bool needsBytes = inlineFields.Any(f => !f.IsReadOnly) || hasEntitySpan;
+        bool needsReadBytes = inlineFields.Any(f => f.IsReadOnly);
+
+        if (needsBytes)
+            sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
+        if (needsReadBytes)
+            sb.AppendLine($"{indent}var readBytes = readChunkManager.GetBytes(readChunk);");
+        foreach (var field in inlineFields)
+        {
+            var compFQN = "global::" + field.ComponentFQN;
+            var varName = ToCamelCase(field.FieldName) + "Span";
+            var source = field.IsReadOnly ? "readBytes" : "bytes";
+            sb.AppendLine($"{indent}var {varName} = {source}.GetSpan<{compFQN}>(layout.GetBaseOffset({compFQN}.TypeId), entityCount);");
+        }
+
+        if (hasEntitySpan)
+        {
+            sb.AppendLine($"{indent}global::System.Span<global::Paradise.ECS.Entity> __entitySpan = entityCount <= 256 ? stackalloc global::Paradise.ECS.Entity[entityCount] : new global::Paradise.ECS.Entity[entityCount];");
+            sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
+            sb.AppendLine($"{indent}{{");
+            sb.AppendLine($"{indent}    int __eid = global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}>.ReadEntityId(bytes, __i);");
+            sb.AppendLine($"{indent}    __entitySpan[__i] = new global::Paradise.ECS.Entity(__eid, world.EntityManager.GetLocation(__eid).Version);");
+            sb.AppendLine($"{indent}}}");
+        }
+
+        foreach (var field in compositionFields)
+        {
+            var varName = ToCamelCase(field.FieldName) + "ChunkData";
+            var chunkDataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.ChunkData<{maskType}, {configType}>";
+            // Per-component binding: read-only spans come from the read chunk, writable spans
+            // from the write chunk (mixed compositions are safe).
+            sb.AppendLine($"{indent}var {varName} = {chunkDataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, entityCount);");
+        }
+
+        sb.Append($"{indent}var __system = new {GetGlobalFQN(sys)}(");
+        bool first = true;
+        foreach (var field in sys.Fields)
+        {
+            if (field.Kind == FieldKind.Invalid) continue;
+            if (!first) sb.Append(", ");
+            first = false;
+
+            if (field.Kind == FieldKind.InlineSpan)
+            {
+                if (field.IsReadOnly)
+                    sb.Append($"(global::System.ReadOnlySpan<global::{field.ComponentFQN}>){ToCamelCase(field.FieldName)}Span");
+                else
+                    sb.Append($"{ToCamelCase(field.FieldName)}Span");
+            }
+            else if (field.Kind == FieldKind.CompositionChunkData)
+            {
+                sb.Append($"{ToCamelCase(field.FieldName)}ChunkData");
+            }
+            else if (field.Kind == FieldKind.CommandBuffer)
+            {
+                sb.Append("commands");
+            }
+            else if (field.Kind == FieldKind.EntitySpan)
+            {
+                sb.Append("(global::System.ReadOnlySpan<global::Paradise.ECS.Entity>)__entitySpan");
+            }
+        }
+        sb.AppendLine(");");
+        sb.AppendLine($"{indent}__system.ExecuteChunk();");
     }
 
     private static void GenerateChunkModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
@@ -1107,7 +1377,8 @@ public class SystemGenerator : IIncrementalGenerator
         foreach (var (info, _) in systems)
         {
             sb.AppendLine();
-            sb.Append($"            .Add<{GetGlobalFQN(info)}>()");
+            string addMethod = info.Kind == SystemKind.World ? "AddWorld" : "Add";
+            sb.Append($"            .{addMethod}<{GetGlobalFQN(info)}>()");
         }
         sb.AppendLine(";");
         sb.AppendLine("    }");
@@ -1144,15 +1415,18 @@ public class SystemGenerator : IIncrementalGenerator
 
     // ===================== Data Structures =====================
 
-    private enum SystemKind { Entity, Chunk }
+    private enum SystemKind { Entity, Chunk, World }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CommandBuffer, EntityHandle, EntitySpan, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CommandBuffer, EntityHandle, EntitySpan, Invalid }
 
     private static bool IsEntityModeField(FieldKind kind) =>
         kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;
 
     private static bool IsChunkModeField(FieldKind kind) =>
         kind is FieldKind.InlineSpan or FieldKind.CompositionChunkData or FieldKind.EntitySpan;
+
+    private static bool IsWorldModeField(FieldKind kind) =>
+        kind is FieldKind.CompositionSegments;
 
     private readonly struct QueryableComponentAccess
     {

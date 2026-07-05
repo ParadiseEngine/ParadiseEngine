@@ -76,142 +76,23 @@ public sealed class CollisionWorld : IDisposable
         return new CollisionWorld(builder.CreateNativeBlobAssetReference());
     }
 
+    /// <summary>Unmanaged handle for use inside ECS components/systems. Borrowed: valid while
+    /// this CollisionWorld is alive; <c>default(CollisionWorldHandle)</c> = no world.</summary>
+    public unsafe CollisionWorldHandle Handle => new((nint)_blob.UnsafePtr);
+
     /// <summary>Closest hit of the segment Start → End against all filtered bodies.</summary>
     public bool CastRay(in RaycastInput input, out RaycastHit closestHit)
-    {
-        closestHit = default;
-        ref WorldData data = ref _blob.Value;
-        Vector3 displacement = input.End - input.Start;
-        float best = float.PositiveInfinity;
-        int bestBody = int.MaxValue;
-        bool found = false;
-
-        int node = 0;
-        int length = data.Bvh.Length;
-        while (node < length)
-        {
-            ref BvhNode bvh = ref data.Bvh.GetValue(node);
-            // Entry fraction lower-bounds every fraction in the subtree; strictly-worse
-            // subtrees are skipped (ties are kept so the lowest-index rule holds).
-            if (!bvh.Bounds.IntersectsSegment(input.Start, displacement, out float entry) || entry > best)
-            {
-                node = data.Bvh.GetEndIndex(node);
-                continue;
-            }
-
-            int body = bvh.BodyIndex;
-            node++;
-            if (body < 0) continue;
-            if (!CollisionFilter.IsCollisionEnabled(input.Filter, data.Colliders[body].Filter)) continue;
-            if (!RaycastQueries.Raycast(data.Colliders[body], data.Transforms[body], input.Start, input.End,
-                    out float fraction, out Vector3 normal)) continue;
-            if (fraction > best || (fraction == best && body > bestBody)) continue;
-
-            best = fraction;
-            bestBody = body;
-            found = true;
-            closestHit = new RaycastHit
-            {
-                Fraction = fraction,
-                Position = input.Start + displacement * fraction,
-                SurfaceNormal = normal,
-                BodyIndex = body,
-            };
-        }
-
-        return found;
-    }
+        => Handle.CastRay(input, out closestHit);
 
     /// <summary>Closest hit of the swept collider against all filtered bodies.
     /// Filtering matches the cast collider's own <see cref="Collider.Filter"/> against each body.</summary>
     public bool CastCollider(in ColliderCastInput input, out ColliderCastHit closestHit)
-    {
-        closestHit = default;
-        ref WorldData data = ref _blob.Value;
-        var startPose = new RigidTransform(input.Start, input.Orientation);
-        var endPose = new RigidTransform(input.End, input.Orientation);
-        Aabb sweptAabb = input.Collider.CalculateAabb(startPose);
-        sweptAabb.Include(input.Collider.CalculateAabb(endPose));
-
-        float best = float.PositiveInfinity;
-        int bestBody = int.MaxValue;
-        bool found = false;
-
-        int node = 0;
-        int length = data.Bvh.Length;
-        while (node < length)
-        {
-            ref BvhNode bvh = ref data.Bvh.GetValue(node);
-            if (!sweptAabb.Overlaps(bvh.Bounds))
-            {
-                node = data.Bvh.GetEndIndex(node);
-                continue;
-            }
-
-            int body = bvh.BodyIndex;
-            node++;
-            if (body < 0) continue;
-            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, data.Colliders[body].Filter)) continue;
-            if (!ColliderCastQueries.Cast(input, data.Colliders[body], data.Transforms[body], out ColliderCastHit hit)) continue;
-            if (hit.Fraction > best || (hit.Fraction == best && body > bestBody)) continue;
-
-            best = hit.Fraction;
-            bestBody = body;
-            found = true;
-            closestHit = hit;
-            closestHit.BodyIndex = body;
-        }
-
-        return found;
-    }
+        => Handle.CastCollider(input, out closestHit);
 
     /// <summary>Smallest surface separation between the query collider and all filtered bodies
     /// within <see cref="ColliderDistanceInput.MaxDistance"/> (negative = penetration).</summary>
     public bool CalculateDistance(in ColliderDistanceInput input, out DistanceHit closestHit)
-    {
-        closestHit = default;
-        ref WorldData data = ref _blob.Value;
-        Aabb queryAabb = input.Collider.CalculateAabb(input.Transform).Expanded(new Vector3(input.MaxDistance));
-
-        float best = float.PositiveInfinity;
-        int bestBody = int.MaxValue;
-        bool found = false;
-
-        int node = 0;
-        int length = data.Bvh.Length;
-        while (node < length)
-        {
-            ref BvhNode bvh = ref data.Bvh.GetValue(node);
-            if (!queryAabb.Overlaps(bvh.Bounds))
-            {
-                node = data.Bvh.GetEndIndex(node);
-                continue;
-            }
-
-            int body = bvh.BodyIndex;
-            node++;
-            if (body < 0) continue;
-            if (!CollisionFilter.IsCollisionEnabled(input.Collider.Filter, data.Colliders[body].Filter)) continue;
-
-            DistanceResult distance = ConvexConvexDistance.Distance(input.Collider, input.Transform,
-                data.Colliders[body], data.Transforms[body]);
-            if (distance.Distance > input.MaxDistance) continue;
-            if (distance.Distance > best || (distance.Distance == best && body > bestBody)) continue;
-
-            best = distance.Distance;
-            bestBody = body;
-            found = true;
-            closestHit = new DistanceHit
-            {
-                Distance = distance.Distance,
-                Position = distance.ClosestB,
-                SurfaceNormal = distance.NormalBToA,
-                BodyIndex = body,
-            };
-        }
-
-        return found;
-    }
+        => Handle.CalculateDistance(input, out closestHit);
 
     // ---- BVH construction (deterministic median split) -----------------------
 

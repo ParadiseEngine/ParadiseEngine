@@ -12,6 +12,11 @@ public static class PlanarGroundSupport
 {
     public static bool IsSupported(CollisionWorld statics, in CollisionFilter supportFilter,
         Vector3 position, float probeDepth)
+        => IsSupported(statics.Handle, supportFilter, position, probeDepth);
+
+    /// <summary>Handle-based overload for use inside ECS systems.</summary>
+    public static bool IsSupported(CollisionWorldHandle statics, in CollisionFilter supportFilter,
+        Vector3 position, float probeDepth)
     {
         var input = new RaycastInput
         {
@@ -26,8 +31,16 @@ public static class PlanarGroundSupport
     /// must itself be supported (inductively true for movers that start on the ground).</summary>
     public static Vector3 Clamp(CollisionWorld statics, in CollisionFilter supportFilter,
         Vector3 from, Vector3 to, float probeDepth)
+        => Clamp(statics.Handle, supportFilter, from, to, probeDepth);
+
+    /// <summary>Handle-based overload for use inside ECS systems. An invalid (default) handle
+    /// means "no collision world" and accepts the full move — consistent with every other
+    /// handle query (invalid = miss = unobstructed), never "no support anywhere = freeze".</summary>
+    public static Vector3 Clamp(CollisionWorldHandle statics, in CollisionFilter supportFilter,
+        Vector3 from, Vector3 to, float probeDepth)
     {
         var candidate = new Vector3(to.X, from.Y, to.Z);
+        if (!statics.IsValid) return candidate;
         if (IsSupported(statics, supportFilter, candidate, probeDepth)) return candidate;
 
         var xOnly = new Vector3(to.X, from.Y, from.Z);

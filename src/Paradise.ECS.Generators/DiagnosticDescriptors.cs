@@ -370,4 +370,29 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "IEntitySystem fields must use ref T/ref readonly T for inline mode or Data for composition mode.");
+
+    /// <summary>
+    /// PECS3009: IWorldSystem has invalid fields.
+    /// </summary>
+    public static readonly DiagnosticDescriptor WorldSystemInvalidField = new(
+        id: "PECS3009",
+        title: "Invalid world-system field",
+        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments ({{Prefix}}Segments) or EntityCommandBuffer, and Segments fields are only valid on IWorldSystem",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "World systems access components exclusively through whole-query segment views; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
+
+    /// <summary>
+    /// PECS3008: [SingleWriter] component is written by multiple systems.
+    /// </summary>
+    public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(
+        id: "PECS3008",
+        title: "Single-writer component is written by multiple systems",
+        messageFormat: "Component '{0}' is marked [SingleWriter] but is written by multiple systems: {1}. Keep one owner system and use 'ref readonly'/'ReadOnlySpan' for read access.",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A component marked with [SingleWriter] may have write access (ref T field, Span<T> field) from at most one system per compilation. Read access via ref readonly T or ReadOnlySpan<T> is unrestricted.",
+        customTags: WellKnownDiagnosticTags.CompilationEnd);
 }

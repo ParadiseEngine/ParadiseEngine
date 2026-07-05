@@ -29,8 +29,8 @@ public sealed class QueryableRegistryTests
     [Test]
     public async Task QueryableRegistry_Count_ReturnsCorrectCount()
     {
-        // We have 3 queryable types: TestMovableEntity, TestProjectile, TestHealthEntity
-        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(3);
+        // We have 4 queryable types: TestMovableEntity, TestProjectile, TestHealthEntity, WsMovable
+        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(4);
     }
 
     [Test]

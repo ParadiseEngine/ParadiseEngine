@@ -97,7 +97,7 @@ public ref partial struct HealSystem : IEntitySystem
 
 /// <summary>
 /// Concurrent tests for parallel system execution using Coyote systematic testing.
-/// Verifies that <see cref="SystemSchedule{TMask,TConfig}.Run"/> with <see cref="ParallelWaveScheduler"/>
+/// Verifies that <see cref="SystemSchedule{TMask,TConfig}.Run()"/> with <see cref="ParallelWaveScheduler"/>
 /// produces correct results under all thread interleavings — especially the flattened chunk-level parallelism.
 /// </summary>
 public static class ParallelSystemTests

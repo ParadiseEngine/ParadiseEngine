@@ -32,6 +32,7 @@
     <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
     <Project Path="src/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />
     <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
+    <Project Path="src/Paradise.ECS.SnapshotTest/Paradise.ECS.SnapshotTest.csproj" />
     <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
     <Project Path="src/Paradise.Physics.Test/Paradise.Physics.Test.csproj" />
     <Project Path="src/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />

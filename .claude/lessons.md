@@ -20,3 +20,27 @@
   repo (ECS, Physics, BT) uses the TUnit fluent async style. Also: `Span<T>` locals cannot cross
   `await` boundaries (CS4007) — in fluent-async test projects, use arrays and let them convert
   to spans at call sites.
+
+## Paradise.Physics
+
+- [hits: 2] **An invalid (`default`) `CollisionWorldHandle` must mean "unobstructed", never
+  "frozen"**: casts return false (miss), and support clamping must follow the same rule.
+  `PlanarGroundSupport.Clamp`'s handle overload originally interpreted "no support hit
+  anywhere" as "stay put" and FROZE movers on an invalid handle; PR #65 review caught it and
+  the overload now guards `!statics.IsValid → accept the move` (like
+  `PlanarSphereDynamics.ClampToSupport` always did). When adding new handle-based queries,
+  keep the invariant: invalid handle = every query misses = movement unobstructed.
+
+## Paradise.ECS
+
+- [hits: 1] **Adding a required `With<T>` to an existing `[Queryable]` silently unmatches every
+  already-spawned entity that lacks T** — no error, the query just returns fewer rows and
+  systems quietly skip those entities. When growing a queryable (e.g. adding
+  `With<PhysicsWorldRef>`/`With<SimulationContext>`), sweep EVERY spawn site: runner spawn
+  helpers, test EntityBuilder chains, and scene-bridge spawns must all add the new component.
+
+- [hits: 1] **`SingleWriterAnalyzer` (PECS3008) write detection covers three field shapes**:
+  non-readonly `ref T`, `Span<T>`, and queryable composition fields (Data/ChunkData/Segments
+  nested in a `[Queryable]` type — every `With<T>` without `IsReadOnly`/`QueryOnly` counts as a
+  write). When adding a new generated field kind that can write components, extend
+  `GetWrittenComponent`/`GetQueryableWrittenComponents` or the analyzer goes blind to it.

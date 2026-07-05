@@ -109,6 +109,34 @@ public interface IChunkSystem : ISystem
 }
 
 /// <summary>
+/// Marker interface for whole-world systems: <see cref="Execute"/> is called ONCE per schedule
+/// run and sees every matching entity across all chunks through segment collections — the form
+/// for global work (pairwise physics, gather/solve/scatter) that per-entity/per-chunk systems
+/// cannot express. Implementing this on a <c>ref partial struct</c> enables source generator
+/// discovery; the generator emits the constructor, SystemId, and <c>RunWorld</c> dispatch.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Fields declare component access:
+/// <list type="bullet">
+///   <item><c>{Prefix}Segments</c> where {Prefix} is a [Queryable] — flat
+///     <see cref="ComponentSegments{T,TMask,TConfig}"/>/<see cref="ReadOnlyComponentSegments{T,TMask,TConfig}"/>
+///     views per component, index-correlated across the queryable's components</item>
+///   <item><c>EntityCommandBuffer</c> — deferred structural changes</item>
+/// </list>
+/// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
+/// Under <c>[assembly: SnapshotReadSystems]</c>, read-only components bind to the READ world
+/// passed to <c>SystemSchedule.Run(readWorld)</c> (previous tick); writable components bind to
+/// the write world.
+/// </para>
+/// </remarks>
+public interface IWorldSystem : ISystem
+{
+    /// <summary>Executes this system once over the whole world.</summary>
+    void Execute();
+}
+
+/// <summary>
 /// Typed system interface providing a static <c>RunChunk</c> dispatch method.
 /// Implemented by source-generated system partials to enable delegate-based dispatch
 /// without a generated switch statement.
@@ -127,15 +155,48 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <summary>
     /// Executes this system over a single chunk. Called by the scheduler.
     /// </summary>
-    /// <param name="world">The world containing the entities.</param>
+    /// <param name="world">The world containing the entities (the WRITE world).</param>
     /// <param name="chunk">The chunk handle to process.</param>
+    /// <param name="readChunkManager">Chunk memory source for read-only bindings; equals
+    /// <c>world.ChunkManager</c> in classic execution. Only snapshot-mode codegen
+    /// (<c>[assembly: SnapshotReadSystems]</c>) consumes it.</param>
+    /// <param name="readChunk">Chunk in the read source corresponding to <paramref name="chunk"/>.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
     static abstract void RunChunk(
         IWorld<TMask, TConfig> world,
         ChunkHandle chunk,
+        ChunkManager readChunkManager,
+        ChunkHandle readChunk,
         ImmutableArchetypeLayout<TMask, TConfig> layout,
         int entityCount,
+        EntityCommandBuffer commands);
+}
+
+/// <summary>
+/// Typed dispatch interface for source-generated <see cref="IWorldSystem"/> partials: a static
+/// <c>RunWorld</c> executed once per schedule run (not per chunk).
+/// </summary>
+/// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
+/// <typeparam name="TConfig">The world configuration type.</typeparam>
+public interface IWorldSystemRunner<TMask, TConfig> : ISystem
+    where TMask : unmanaged, IBitSet<TMask>
+    where TConfig : IConfig, new()
+{
+    /// <summary>The compile-time metadata for this system (masks used for wave scheduling).</summary>
+    static abstract SystemMetadata<TMask> Metadata { get; }
+
+    /// <summary>
+    /// Executes this system once over the whole world. Called by the scheduler.
+    /// </summary>
+    /// <param name="world">The WRITE world.</param>
+    /// <param name="readWorld">The immutable read world in snapshot mode
+    /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c> — generated
+    /// bodies fall back to binding reads to <paramref name="world"/>.</param>
+    /// <param name="commands">The entity command buffer for deferred structural changes.</param>
+    static abstract void RunWorld(
+        IWorld<TMask, TConfig> world,
+        IWorld<TMask, TConfig>? readWorld,
         EntityCommandBuffer commands);
 }
