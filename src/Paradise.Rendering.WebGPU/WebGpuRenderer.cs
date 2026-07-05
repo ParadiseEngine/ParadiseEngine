@@ -33,6 +33,11 @@ public sealed class WebGpuRenderer : IDisposable
     private readonly bool _isHeadless;
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
+    // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
+    // -error callback) — this side table lets Submit surface the mismatch as a synchronous,
+    // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
+    // the handle's lifetime.
+    private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
     private WgTexture? _offscreenTarget;
     private uint _offscreenWidth;
     private uint _offscreenHeight;
@@ -298,7 +303,9 @@ public sealed class WebGpuRenderer : IDisposable
         // First DestroyPipeline doesn't invalidate the second handle — matches the contract of
         // every other resource type (BufferHandle, TextureHandle, ShaderHandle).
         var native = _pipelineCache.GetOrCreateNative(in desc, d => _device.BuildNativePipeline(in d));
-        return _device.RegisterPipeline(native);
+        var handle = _device.RegisterPipeline(native);
+        _pipelineHasDepth[handle] = desc.DepthStencilFormat is not null;
+        return handle;
     }
 
     /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
@@ -317,6 +324,10 @@ public sealed class WebGpuRenderer : IDisposable
         BlendMode blend = BlendMode.Opaque,
         bool depthWriteEnabled = true,
         CompareFunction depthCompare = CompareFunction.Less,
+        // Deliberate scaffolding for the PBR milestone: its shader authors TWO fragment entry
+        // points (linear vs sRGB-encoding) in one program and selects by surface format. No
+        // in-repo caller passes this yet; the parameter exists so the selection lands as an
+        // argument, not an API break.
         string? fragmentEntryPoint = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -397,6 +408,7 @@ public sealed class WebGpuRenderer : IDisposable
         // when M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
         // No native teardown to defer — detach is pure slot invalidation, so it happens inline.
         _device.DetachPipeline(handle);
+        _pipelineHasDepth.Remove(handle);
     }
 
     // -------- Command stream submission --------
@@ -424,6 +436,7 @@ public sealed class WebGpuRenderer : IDisposable
         var commands = stream.Commands.Span;
 
         WgRenderPassEncoder? activePass = null;
+        var passHasDepth = false;
         try
         {
             for (var i = 0; i < commands.Length; i++)
@@ -441,6 +454,7 @@ public sealed class WebGpuRenderer : IDisposable
                             throw new InvalidOperationException(
                                 $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
                         activePass = BeginPass(encoder, passes[passIndex], backbuffer);
+                        passHasDepth = passes[passIndex].Depth is not null;
                         break;
                     }
                     case RenderCommandKind.EndPass:
@@ -458,7 +472,16 @@ public sealed class WebGpuRenderer : IDisposable
                     case RenderCommandKind.SetPipeline:
                     {
                         var pass = RequireActivePass(activePass);
-                        pass.SetPipeline(_device.ResolvePipeline(cmd.SetPipeline.Pipeline));
+                        var handle = cmd.SetPipeline.Pipeline;
+                        // Surface pipeline↔pass depth mismatch synchronously and descriptively —
+                        // Dawn would only report it asynchronously via the error callback.
+                        if (_pipelineHasDepth.TryGetValue(handle, out var pipelineHasDepth) && pipelineHasDepth != passHasDepth)
+                        {
+                            throw new InvalidOperationException(pipelineHasDepth
+                                ? "Pipeline was built with a DepthStencilFormat but the active pass has no Depth attachment — attach a depth texture to the pass or build the pipeline without depth."
+                                : "The active pass has a Depth attachment but the pipeline was built without a DepthStencilFormat — build the pipeline with a matching depth format or drop the pass's Depth attachment.");
+                        }
+                        pass.SetPipeline(_device.ResolvePipeline(handle));
                         break;
                     }
                     case RenderCommandKind.SetVertexBuffer:
