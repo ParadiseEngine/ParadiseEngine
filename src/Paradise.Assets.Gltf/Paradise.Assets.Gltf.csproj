@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Assets.Gltf</AssemblyName>
+    <RootNamespace>Paradise.Assets.Gltf</RootNamespace>
+    <PackageId>Paradise.Assets.Gltf</PackageId>
+    <Title>Paradise.Assets.Gltf</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Minimal AOT-clean GLB/glTF 2.0 reader scoped to the Paradise export contract: static meshes, metallic-roughness materials, KHR_texture_basisu, KHR_texture_transform. Pure CPU-side data — no renderer dependency.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>gltf;glb;assets;nativeaot;game-dev</PackageTags>
+    <!-- AOT-clean: source-gen-only JSON, no reflection. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Assets.Gltf.Test" />
+  </ItemGroup>
+
+</Project>
