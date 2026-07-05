@@ -140,6 +140,34 @@ public class GltfGeometryTests
     }
 
     [Test]
+    public async Task huge_declared_count_fails_the_range_check_before_any_allocation()
+    {
+        // The blocking review finding on this PR: accessor.count is untrusted JSON metadata —
+        // a few-hundred-byte GLB declaring count=200000000 must fail the (allocation-free)
+        // range check, never trigger a multi-GB attribute allocation. If validation ordering
+        // regresses, this test fails by OOM/timeout instead of the typed throw.
+        var b = new GlbTestBuilder();
+        var view = b.AddBufferView(new float[] { 0, 0, 0, 1, 0, 0 }); // 24 bytes
+        var position = b.AddAccessor(view, GlbTestBuilder.Float, "VEC3", count: 200_000_000);
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+        await Assert.That(() => GltfSceneReader.Read(b.Build())).Throws<InvalidDataException>();
+    }
+
+    [Test]
+    public async Task overflowing_count_times_stride_still_fails_the_range_check()
+    {
+        // count × stride wraps int (2_000_000 × 2_000 ≈ 4e9); the long-arithmetic range check
+        // must throw the typed error, not spuriously pass into an opaque slice failure.
+        var b = new GlbTestBuilder();
+        var view = b.AddBufferView(new float[] { 0, 0, 0 }, byteStride: 2_000);
+        var position = b.AddAccessor(view, GlbTestBuilder.Float, "VEC3", count: 2_000_000);
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+        await Assert.That(() => GltfSceneReader.Read(b.Build())).Throws<InvalidDataException>();
+    }
+
+    [Test]
     public async Task accessor_count_exceeding_buffer_view_throws()
     {
         var b = new GlbTestBuilder();

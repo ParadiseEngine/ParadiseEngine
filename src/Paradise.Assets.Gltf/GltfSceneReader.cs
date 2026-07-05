@@ -45,6 +45,18 @@ public static class GltfSceneReader
             if ((uint)viewIndex >= (uint)views.Length)
                 throw new InvalidDataException($"Image {i} bufferView {viewIndex} out of range.");
             var view = views[viewIndex];
+
+            // Same embedded-buffer contract the accessor path enforces: an image bufferView
+            // targeting an external buffer must throw, not silently slice the BIN chunk.
+            var buffers = root.Buffers
+                ?? throw new InvalidDataException($"Image {i} references buffer {view.Buffer} but glTF declares none.");
+            if ((uint)view.Buffer >= (uint)buffers.Length)
+                throw new InvalidDataException($"Image {i} buffer {view.Buffer} out of range ({buffers.Length} declared).");
+            if (buffers[view.Buffer].Uri is not null)
+                throw new NotSupportedException(
+                    $"Image {i} lives in an external buffer ('{buffers[view.Buffer].Uri}') — the contract embeds " +
+                    "everything in the GLB BIN chunk.");
+
             var offset = view.ByteOffset ?? 0;
             if (offset < 0 || view.ByteLength < 0 || offset + view.ByteLength > bin.Length)
                 throw new InvalidDataException($"Image {i} bufferView exceeds the BIN chunk.");
@@ -186,31 +198,45 @@ public static class GltfSceneReader
         if (!attributes.TryGetValue("POSITION", out var positionAccessor))
             throw new InvalidDataException($"Mesh {meshIndex} primitive {primitiveIndex} has no POSITION attribute.");
 
-        var count = AccessorReader.GetAccessor(root, positionAccessor).Count;
+        // Allocation ordering matters: every accessor's byte range is validated against its
+        // bufferView BEFORE any array is sized from its count — the raw JSON count is untrusted
+        // metadata, and a tiny GLB declaring count=200000000 must fail the range check, not
+        // trigger a multi-GB allocation. The validated count is bounded by the BIN chunk size.
+        var count = AccessorReader.GetValidatedFloatCount(root, bin, positionAccessor, 3);
+        var hasNormals = attributes.TryGetValue("NORMAL", out var normalAccessor);
+        if (hasNormals)
+            RequireMatchingCount(
+                AccessorReader.GetValidatedFloatCount(root, bin, normalAccessor, 3),
+                count, meshIndex, primitiveIndex, "NORMAL");
+        var hasTexCoords = attributes.TryGetValue("TEXCOORD_0", out var uvAccessor);
+        if (hasTexCoords)
+            RequireMatchingCount(
+                AccessorReader.GetValidatedFloatCount(root, bin, uvAccessor, 2),
+                count, meshIndex, primitiveIndex, "TEXCOORD_0");
+        var hasTangents = attributes.TryGetValue("TANGENT", out var tangentAccessor);
+        if (hasTangents)
+            RequireMatchingCount(
+                AccessorReader.GetValidatedFloatCount(root, bin, tangentAccessor, 4),
+                count, meshIndex, primitiveIndex, "TANGENT");
+
         var positions = new float[count * 3];
         AccessorReader.ReadFloats(root, bin, positionAccessor, 3, positions);
 
-        var hasNormals = attributes.TryGetValue("NORMAL", out var normalAccessor);
         var normals = new float[count * 3];
         if (hasNormals)
         {
-            RequireMatchingCount(root, normalAccessor, count, meshIndex, primitiveIndex, "NORMAL");
             AccessorReader.ReadFloats(root, bin, normalAccessor, 3, normals);
         }
 
-        var hasTexCoords = attributes.TryGetValue("TEXCOORD_0", out var uvAccessor);
         var uvs = new float[count * 2];
         if (hasTexCoords)
         {
-            RequireMatchingCount(root, uvAccessor, count, meshIndex, primitiveIndex, "TEXCOORD_0");
             AccessorReader.ReadFloats(root, bin, uvAccessor, 2, uvs);
         }
 
-        var hasTangents = attributes.TryGetValue("TANGENT", out var tangentAccessor);
         var tangents = new float[count * 4];
         if (hasTangents)
         {
-            RequireMatchingCount(root, tangentAccessor, count, meshIndex, primitiveIndex, "TANGENT");
             AccessorReader.ReadFloats(root, bin, tangentAccessor, 4, tangents);
         }
 
@@ -262,9 +288,8 @@ public static class GltfSceneReader
     }
 
     private static void RequireMatchingCount(
-        GltfRoot root, int accessorIndex, int expected, int meshIndex, int primitiveIndex, string attribute)
+        int count, int expected, int meshIndex, int primitiveIndex, string attribute)
     {
-        var count = AccessorReader.GetAccessor(root, accessorIndex).Count;
         if (count != expected)
             throw new InvalidDataException(
                 $"Mesh {meshIndex} primitive {primitiveIndex} attribute {attribute} has {count} elements " +
@@ -293,21 +318,28 @@ public static class GltfSceneReader
         if ((uint)sceneIndex >= (uint)scenes.Length)
             throw new InvalidDataException($"Default scene {sceneIndex} out of range ({scenes.Length} declared).");
 
+        // Iterative DFS (explicit stack): malformed input must never crash via CLR stack
+        // overflow — a 100k-node single-child chain is a VALID tree and must load. The visit
+        // budget (nodes.Length) rejects both cycles and shared children (glTF node graphs must
+        // be trees) with a typed error.
         var instances = new List<GltfMeshInstance>();
-        var visiting = new bool[nodes.Length];
-        foreach (var rootNode in scenes[sceneIndex].Nodes ?? [])
+        var pending = new Stack<(int NodeIndex, Matrix4x4 ParentWorld)>();
+        var sceneRoots = scenes[sceneIndex].Nodes ?? [];
+        for (var i = sceneRoots.Length - 1; i >= 0; i--)
         {
-            Visit(rootNode, Matrix4x4.Identity);
+            pending.Push((sceneRoots[i], Matrix4x4.Identity));
         }
-        return instances.ToArray();
 
-        void Visit(int nodeIndex, Matrix4x4 parentWorld)
+        var visitBudget = nodes.Length;
+        while (pending.Count > 0)
         {
+            var (nodeIndex, parentWorld) = pending.Pop();
             if ((uint)nodeIndex >= (uint)nodes.Length)
                 throw new InvalidDataException($"Node index {nodeIndex} out of range ({nodes.Length} declared).");
-            if (visiting[nodeIndex])
-                throw new InvalidDataException($"Node {nodeIndex} participates in a cycle — glTF node graphs must be trees.");
-            visiting[nodeIndex] = true;
+            if (visitBudget-- <= 0)
+                throw new InvalidDataException(
+                    "Scene visits more nodes than the glTF declares — the node graph has a cycle or a " +
+                    "shared child, but glTF node graphs must be trees.");
 
             var node = nodes[nodeIndex];
             // Row-vector convention: world = local × parent. glTF's column-major matrix loads
@@ -323,13 +355,13 @@ public static class GltfSceneReader
                 instances.Add(new GltfMeshInstance(meshIndex, world, node.Name));
             }
 
-            foreach (var child in node.Children ?? [])
+            var children = node.Children ?? [];
+            for (var i = children.Length - 1; i >= 0; i--)
             {
-                Visit(child, world);
+                pending.Push((children[i], world)); // reversed push keeps document order
             }
-
-            visiting[nodeIndex] = false;
         }
+        return instances.ToArray();
     }
 
     private static Matrix4x4 LocalMatrix(GltfNode node, int nodeIndex)

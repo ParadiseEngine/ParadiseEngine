@@ -15,6 +15,23 @@ internal static class AccessorReader
     private const int ComponentUInt = 5125;
     private const int ComponentFloat = 5126;
 
+    /// <summary>Validate a float attribute accessor WITHOUT allocating: component-count match
+    /// plus the full byte-range check against its bufferView. Returns the element count. Callers
+    /// size their arrays from this — the accessor's raw JSON <c>count</c> is untrusted metadata
+    /// and must never reach an allocation before this ran (a tiny GLB declaring
+    /// <c>count: 200000000</c> would otherwise force a multi-GB allocation).</summary>
+    public static int GetValidatedFloatCount(
+        GltfRoot root, ReadOnlyMemory<byte> bin, int accessorIndex, int componentCount)
+    {
+        var accessor = GetAccessor(root, accessorIndex);
+        var expected = ExpectedComponents(accessor.Type);
+        if (expected != componentCount)
+            throw new InvalidDataException(
+                $"Accessor {accessorIndex} is {accessor.Type} ({expected} components) but {componentCount} were requested.");
+        _ = ResolveView(root, bin, accessor, ElementSize(accessor.ComponentType) * componentCount);
+        return accessor.Count;
+    }
+
     /// <summary>Read a VEC2/VEC3/VEC4/SCALAR float accessor into <paramref name="destination"/>
     /// as <paramref name="componentCount"/> floats per element. float32 is read verbatim;
     /// normalized u8/u16 are converted (texcoord/color cases). Everything else throws.</summary>
@@ -128,16 +145,20 @@ internal static class AccessorReader
                 $"BufferView {viewIndex} stride {stride} is smaller than the element size {tightElementSize}.");
 
         var accessorOffset = accessor.ByteOffset ?? 0;
-        // Last element only occupies tightElementSize, not a full stride.
+        if (accessor.Count < 0)
+            throw new InvalidDataException($"Accessor declares a negative count ({accessor.Count}).");
+        // Long arithmetic: count/stride/offset are untrusted JSON values, and int math here
+        // could wrap the range check into a spurious pass. Last element only occupies
+        // tightElementSize, not a full stride.
         var required = accessor.Count == 0
-            ? 0
-            : accessorOffset + (accessor.Count - 1) * stride + tightElementSize;
+            ? 0L
+            : accessorOffset + ((long)accessor.Count - 1) * stride + tightElementSize;
         if (accessorOffset < 0 || required > view.ByteLength)
             throw new InvalidDataException(
                 $"Accessor range (offset {accessorOffset}, count {accessor.Count}, stride {stride}) " +
                 $"exceeds bufferView {viewIndex} ({view.ByteLength} bytes).");
 
-        return (bin.Slice(viewOffset + accessorOffset, required - accessorOffset), stride);
+        return (bin.Slice(viewOffset + accessorOffset, (int)required - accessorOffset), stride);
     }
 
     private static int ExpectedComponents(string? type) => type switch

@@ -102,6 +102,39 @@ public class GltfSceneBakeTests
     }
 
     [Test]
+    public async Task deep_single_child_chain_loads_without_stack_overflow()
+    {
+        // A 100k-node single-child chain is a VALID tree — the iterative walk must load it
+        // (the recursive implementation died with an uncatchable StackOverflowException).
+        const int Depth = 100_000;
+        var b = TriangleAsset(out var mesh);
+        var current = b.AddNode(mesh: mesh, name: "leaf"); // deepest node carries the mesh
+        for (var i = 1; i < Depth; i++)
+        {
+            current = b.AddNode(translation: [0f, 0f, 1f], children: [current]);
+        }
+        b.SetSceneRoots(current);
+
+        var asset = GltfSceneReader.Read(b.Build());
+        await Assert.That(asset.Instances.Length).IsEqualTo(1);
+        // Depth−1 parents each translate +1 on Z.
+        await Assert.That(asset.Instances[0].WorldTransform.Translation.Z).IsEqualTo(Depth - 1f);
+    }
+
+    [Test]
+    public async Task shared_child_between_two_parents_throws()
+    {
+        // glTF node graphs must be trees; a DAG (one child, two parents) exhausts the visit
+        // budget and throws the typed error rather than silently double-instancing.
+        var b = TriangleAsset(out var mesh);
+        var child = b.AddNode(mesh: mesh);
+        var p1 = b.AddNode(children: [child]);
+        var p2 = b.AddNode(children: [child]);
+        b.SetSceneRoots(p1, p2);
+        await Assert.That(() => GltfSceneReader.Read(b.Build())).Throws<InvalidDataException>();
+    }
+
+    [Test]
     public async Task node_cycle_throws()
     {
         var b = TriangleAsset(out var mesh);

@@ -172,6 +172,22 @@ internal sealed class GlbTestBuilder
         return _images.Count - 1;
     }
 
+    /// <summary>Raw-JSON escape hatches for corruption tests that need structure the typed
+    /// helpers refuse to produce (extra buffers, views on them, hand-rolled images).</summary>
+    public int AddRawBufferView(JsonObject view)
+    {
+        _bufferViews.Add(view);
+        return _bufferViews.Count - 1;
+    }
+
+    public int AddRawImage(JsonObject image)
+    {
+        _images.Add(image);
+        return _images.Count - 1;
+    }
+
+    public JsonArray? ExtraBuffers { get; set; }
+
     public void SetSceneRoots(params int[] nodeIndices)
     {
         _sceneRoots = [];
@@ -200,11 +216,16 @@ internal sealed class GlbTestBuilder
         if (_materials.Count > 0) root["materials"] = _materials.DeepClone();
         if (_textures.Count > 0) root["textures"] = _textures.DeepClone();
         if (_images.Count > 0) root["images"] = _images.DeepClone();
-        if (_bin.Length > 0 || _externalBufferUri is not null)
+        if (_bin.Length > 0 || _externalBufferUri is not null || ExtraBuffers is not null)
         {
             var buffer = new JsonObject { ["byteLength"] = (int)_bin.Length };
             if (_externalBufferUri is not null) buffer["uri"] = _externalBufferUri;
-            root["buffers"] = new JsonArray { buffer };
+            var buffersArray = new JsonArray { buffer };
+            if (ExtraBuffers is not null)
+            {
+                foreach (var extra in ExtraBuffers) buffersArray.Add(extra!.DeepClone());
+            }
+            root["buffers"] = buffersArray;
         }
 
         var json = Encoding.UTF8.GetBytes(root.ToJsonString());

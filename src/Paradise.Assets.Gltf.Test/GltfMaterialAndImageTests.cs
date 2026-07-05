@@ -191,6 +191,26 @@ public class GltfMaterialAndImageTests
     }
 
     [Test]
+    public async Task image_buffer_view_on_external_buffer_throws()
+    {
+        // Consistency with the accessor path: an image whose bufferView targets an external
+        // buffer must throw, not silently slice the embedded BIN chunk at that offset.
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
+        b.ExtraBuffers = [new JsonObject { ["byteLength"] = 64, ["uri"] = "textures/external.bin" }];
+        var externalView = b.AddRawBufferView(new JsonObject
+        {
+            ["buffer"] = 1,
+            ["byteOffset"] = 0,
+            ["byteLength"] = 14,
+        });
+        b.AddRawImage(new JsonObject { ["bufferView"] = externalView });
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+        await Assert.That(() => GltfSceneReader.Read(b.Build())).Throws<NotSupportedException>();
+    }
+
+    [Test]
     public async Task texture_index_out_of_range_throws()
     {
         var b = AssetWithMaterial(new JsonObject
