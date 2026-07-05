@@ -31,6 +31,9 @@ internal static unsafe class SurfaceFactory
         if (hwnd == IntPtr.Zero) throw new ArgumentException("Win32 surface requires a non-null HWND.", nameof(hwnd));
         var src = new SurfaceSourceWindowsHWNDFFI
         {
+            // Dawn identifies the chained struct by SType; the WebGPUSharp ctor does NOT stamp
+            // it (verified empirically: Dawn rejects "SType::0"), so set it on every source.
+            Chain = new WebGpuSharp.ChainedStruct { SType = WebGpuSharp.SType.SurfaceSourceWindowsHWND },
             // Hinstance is optional in Dawn — leaving it null lets the implementation pick.
             Hinstance = null,
             Hwnd = (void*)hwnd,
@@ -44,6 +47,7 @@ internal static unsafe class SurfaceFactory
         if (window == IntPtr.Zero) throw new ArgumentException("Xlib surface requires a non-null Window XID.", nameof(window));
         var src = new SurfaceSourceXlibWindowFFI
         {
+            Chain = new WebGpuSharp.ChainedStruct { SType = WebGpuSharp.SType.SurfaceSourceXlibWindow },
             Display = (void*)display,
             Window = (ulong)window.ToInt64(),
         };
@@ -56,6 +60,7 @@ internal static unsafe class SurfaceFactory
         if (surface == IntPtr.Zero) throw new ArgumentException("Wayland surface requires a non-null wl_surface*.", nameof(surface));
         var src = new SurfaceSourceWaylandSurfaceFFI
         {
+            Chain = new WebGpuSharp.ChainedStruct { SType = WebGpuSharp.SType.SurfaceSourceWaylandSurface },
             Display = (void*)display,
             Surface = (void*)surface,
         };
@@ -67,6 +72,7 @@ internal static unsafe class SurfaceFactory
         if (metalLayer == IntPtr.Zero) throw new ArgumentException("Cocoa surface requires a non-null CAMetalLayer*.", nameof(metalLayer));
         var src = new SurfaceSourceMetalLayerFFI
         {
+            Chain = new WebGpuSharp.ChainedStruct { SType = WebGpuSharp.SType.SurfaceSourceMetalLayer },
             Layer = (void*)metalLayer,
         };
         return CreateOrThrow(instance, new WgSurfaceDescriptor(ref src), nameof(SurfacePlatform.Cocoa));

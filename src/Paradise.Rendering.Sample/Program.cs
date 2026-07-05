@@ -82,6 +82,7 @@ internal static class Program
         }
 
         SDL_Window* window = null;
+        IntPtr metalView = IntPtr.Zero;
         WebGpuRenderer? renderer = null;
         try
         {
@@ -92,7 +93,7 @@ internal static class Program
                 return 1;
             }
 
-            var surfaceDesc = BuildSurfaceDescriptor(window);
+            var surfaceDesc = BuildSurfaceDescriptor(window, out metalView);
             renderer = new WebGpuRenderer(in surfaceDesc);
             using var scene = new TriangleScene(renderer);
 
@@ -128,13 +129,16 @@ internal static class Program
         finally
         {
             renderer?.Dispose();
+            // The Metal view (and its CAMetalLayer) must outlive the renderer's surface.
+            if (metalView != IntPtr.Zero) SDL_Metal_DestroyView(metalView);
             if (window != null) SDL_DestroyWindow(window);
             SDL_Quit();
         }
     }
 
-    private static unsafe SurfaceDescriptor BuildSurfaceDescriptor(SDL_Window* window)
+    private static unsafe SurfaceDescriptor BuildSurfaceDescriptor(SDL_Window* window, out IntPtr metalView)
     {
+        metalView = IntPtr.Zero;
         var props = SDL_GetWindowProperties(window);
 
         int w = 0, h = 0;
@@ -150,15 +154,18 @@ internal static class Program
 
         if (OperatingSystem.IsMacOS())
         {
-            // The Cocoa surface path expects a CAMetalLayer*, but SDL3 only exposes the
-            // NSWindow*. Wiring CAMetalLayer (creation on the main thread + attachment to the
-            // NSWindow content view) is out of scope for M0b per the issue spec. Refuse the
-            // windowed path explicitly rather than feeding the wrong pointer to Dawn — the
-            // headless adapter path (--headless N) covers macOS for now.
-            throw new PlatformNotSupportedException(
-                "Windowed macOS is not yet wired: SDL3 exposes NSWindow* but the Cocoa surface " +
-                "path requires a CAMetalLayer*. CAMetalLayer creation and attachment will land " +
-                "with full Cocoa support; use --headless N on macOS for now.");
+            // SDL owns the CAMetalLayer: SDL_Metal_CreateView attaches a Metal-backed view to
+            // the window's content view (must run on the main thread — we are on it; SDL3
+            // requires main-thread video on macOS), and SDL_Metal_GetLayer hands back the
+            // CAMetalLayer* that Dawn's Cocoa surface source needs. The caller destroys the
+            // view only after the renderer (and thus the wgpu surface) is disposed.
+            metalView = SDL_Metal_CreateView(window);
+            if (metalView == IntPtr.Zero)
+                throw new InvalidOperationException($"SDL_Metal_CreateView failed: {SDL_GetError()}");
+            var layer = SDL_Metal_GetLayer(metalView);
+            if (layer == IntPtr.Zero)
+                throw new InvalidOperationException("SDL_Metal_GetLayer returned null — no CAMetalLayer behind the SDL Metal view.");
+            return new SurfaceDescriptor(SurfacePlatform.Cocoa, IntPtr.Zero, layer, width, height);
         }
 
         if (OperatingSystem.IsLinux())
