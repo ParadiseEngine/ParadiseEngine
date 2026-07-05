@@ -50,23 +50,34 @@ public static class GltfSceneReader
                 throw new InvalidDataException($"Image {i} bufferView exceeds the BIN chunk.");
 
             var bytes = bin.Slice(offset, view.ByteLength).ToArray();
-            images[i] = new GltfImageData(bytes, SniffImageKind(bytes));
+            if (!IsKtx2(bytes))
+            {
+                // Magic sniff beats mimeType: ToktxKtx2 rewrites images in place and the magic
+                // is what the decoder would actually face. The contract is KTX2-only — PNG/JPEG
+                // GLBs mean the toktx pass didn't run on this asset.
+                throw new NotSupportedException(
+                    $"Image {i} is {DescribeImageMagic(bytes)}, but the contract requires KTX2 for every " +
+                    "texture (KHR_texture_basisu). Run the toktx pass (ToktxKtx2.ConvertEmbeddedTextures) " +
+                    "on this GLB before loading it.");
+            }
+            images[i] = new GltfImageData(bytes);
         }
         return images;
     }
 
-    private static GltfImageKind SniffImageKind(ReadOnlySpan<byte> bytes)
+    private static bool IsKtx2(ReadOnlySpan<byte> bytes)
     {
-        // Magic sniff beats mimeType: ToktxKtx2 rewrites images in place and the magic is what
-        // the decoder will actually face.
-        if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G')
-            return GltfImageKind.Png;
-        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
-            return GltfImageKind.Jpeg;
         ReadOnlySpan<byte> ktx2Magic = [0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A];
-        if (bytes.Length >= ktx2Magic.Length && bytes[..ktx2Magic.Length].SequenceEqual(ktx2Magic))
-            return GltfImageKind.Ktx2;
-        return GltfImageKind.Unknown;
+        return bytes.Length >= ktx2Magic.Length && bytes[..ktx2Magic.Length].SequenceEqual(ktx2Magic);
+    }
+
+    private static string DescribeImageMagic(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G')
+            return "PNG";
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            return "JPEG";
+        return "an unrecognized format";
     }
 
     // -------- materials --------

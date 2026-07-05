@@ -20,15 +20,23 @@ public class GltfMaterialAndImageTests
         return b;
     }
 
+    private static byte[] Ktx2Payload(byte tail)
+    {
+        var bytes = new byte[Ktx2MagicBytes.Length + 4];
+        Ktx2MagicBytes.CopyTo(bytes, 0);
+        bytes[^1] = tail;
+        return bytes;
+    }
+
     [Test]
     public async Task full_metallic_roughness_material_round_trips()
     {
         var b = new GlbTestBuilder();
         var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
-        var baseImage = b.AddImage(PngMagicBytes);
-        var ktxImage = b.AddImage(Ktx2MagicBytes);
+        var baseImage = b.AddImage(Ktx2Payload(1));
+        var ktxImage = b.AddImage(Ktx2Payload(2));
         var baseTexture = b.AddTexture(source: baseImage);
-        // basisu source wins over the (deliberately wrong) base source.
+        // basisu source wins over the base source.
         var normalTexture = b.AddTexture(source: baseImage, basisuSource: ktxImage);
 
         var material = new JsonObject
@@ -124,24 +132,51 @@ public class GltfMaterialAndImageTests
     }
 
     [Test]
-    public async Task image_kinds_are_sniffed_by_magic()
+    public async Task ktx2_images_load_with_bytes_intact()
     {
         var b = new GlbTestBuilder();
         var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
-        var png = b.AddImage(PngMagicBytes, mimeType: "image/png");
-        var ktx2 = b.AddImage(Ktx2MagicBytes, mimeType: "image/ktx2");
         // mimeType deliberately lies — magic must win (ToktxKtx2 rewrites in place).
-        var jpeg = b.AddImage(JpegMagicBytes, mimeType: "image/png");
-        var unknown = b.AddImage([1, 2, 3, 4]);
+        var ktx2 = b.AddImage(Ktx2MagicBytes, mimeType: "image/png");
         var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
         b.SetSceneRoots(b.AddNode(mesh: mesh));
 
         var asset = GltfSceneReader.Read(b.Build());
-        await Assert.That(asset.Images[png].Kind).IsEqualTo(GltfImageKind.Png);
-        await Assert.That(asset.Images[ktx2].Kind).IsEqualTo(GltfImageKind.Ktx2);
-        await Assert.That(asset.Images[jpeg].Kind).IsEqualTo(GltfImageKind.Jpeg);
-        await Assert.That(asset.Images[unknown].Kind).IsEqualTo(GltfImageKind.Unknown);
-        await Assert.That(asset.Images[png].Bytes).IsEquivalentTo(PngMagicBytes);
+        await Assert.That(asset.Images[ktx2].Bytes).IsEquivalentTo(Ktx2MagicBytes);
+    }
+
+    [Test]
+    public async Task non_ktx2_images_are_rejected_naming_the_detected_format()
+    {
+        // KTX2-only contract: PNG/JPEG in a GLB means the toktx pass didn't run — the reader
+        // fails fast instead of shipping a decode path per legacy container.
+        foreach (var (bytes, expectedName) in new[]
+                 {
+                     (PngMagicBytes, "PNG"),
+                     (JpegMagicBytes, "JPEG"),
+                     (new byte[] { 1, 2, 3, 4 }, "unrecognized"),
+                 })
+        {
+            var b = new GlbTestBuilder();
+            var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
+            b.AddImage(bytes);
+            var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+            b.SetSceneRoots(b.AddNode(mesh: mesh));
+            var glb = b.Build();
+
+            var thrown = false;
+            try
+            {
+                _ = GltfSceneReader.Read(glb);
+            }
+            catch (NotSupportedException ex)
+            {
+                thrown = true;
+                await Assert.That(ex.Message.Contains(expectedName, StringComparison.Ordinal)).IsTrue();
+                await Assert.That(ex.Message.Contains("KTX2", StringComparison.Ordinal)).IsTrue();
+            }
+            await Assert.That(thrown).IsTrue();
+        }
     }
 
     [Test]

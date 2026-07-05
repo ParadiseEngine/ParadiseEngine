@@ -74,16 +74,8 @@ public sealed record GltfMaterialData(
     int EmissiveImage,
     GltfUvTransform BaseColorUvTransform);
 
-public enum GltfImageKind : byte
-{
-    Unknown = 0,
-    Png,
-    Jpeg,
-    Ktx2,
-}
-
-/// <summary>One embedded image: raw container bytes (PNG/JPEG/KTX2) sniffed by magic. Decode
-/// and GPU-format decisions belong to the texture asset layer.</summary>
+/// <summary>One embedded image. ALWAYS a KTX2 container — the contract mandates KTX2 for every
+/// texture (the toktx pass in the export pipeline), and the reader rejects anything else at
+/// load time. Transcode decisions (BC vs RGBA32) belong to the texture asset layer.</summary>
 public sealed record GltfImageData(
-    byte[] Bytes,
-    GltfImageKind Kind);
+    byte[] Bytes);
