@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Assets.Textures.Test</AssemblyName>
+    <RootNamespace>Paradise.Assets.Textures.Test</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../Ktx.targets" />
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Textures\Paradise.Assets.Textures.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="fixtures/**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

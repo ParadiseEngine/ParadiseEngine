@@ -61,3 +61,11 @@
   with plain `IntPtr`** (no `SDL_MetalView` wrapper type). Windowed macOS = create the Metal
   view AFTER `SDL_CreateWindow`, hand `SDL_Metal_GetLayer` to the Cocoa surface source, and
   `SDL_Metal_DestroyView` only after the renderer/surface is disposed.
+
+- [hits: 1] **toktx `--normal_mode` stores X in RGB and Y in ALPHA ("RRRG" two-channel
+  layout), NOT a standard 3-channel normal map.** BC5 transcoding (`KTX_TTF_BC5_RG`) maps it
+  to R=X, G=Y natively — but a raw RGBA32 transcode yields (X,X,X,Y), so a shader sampling
+  R/G would read (X,X) and shade garbage. `Ktx2Transcoder`'s RGBA32 fallback swizzles normal
+  maps to (X, Y, 255, 255) so both paths share BC5 channel semantics (discovered by the
+  fixture golden test: expected B=255, got B=127=X). The game pipeline's UastcNormalLinear
+  preset always passes --normal_mode, so the two-channel layout is contractual.
