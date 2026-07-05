@@ -62,19 +62,35 @@ public readonly ref struct ComponentSegments<T, TMask, TConfig>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            for (int i = 0; i < _segments.Length; i++)
+            int i = FindSegment(_segments, index);
+            if (i >= 0)
             {
                 ref readonly ComponentSegment segment = ref _segments[i];
                 int local = index - segment.Start;
-                if ((uint)local < (uint)segment.Count)
-                {
-                    int baseOffset = new ImmutableArchetypeLayout<TMask, TConfig>(segment.LayoutData).GetBaseOffset(T.TypeId);
-                    return ref _chunkManager.GetBytes(segment.Chunk).GetRef<T>(baseOffset + local * Unsafe.SizeOf<T>());
-                }
+                int baseOffset = new ImmutableArchetypeLayout<TMask, TConfig>(segment.LayoutData).GetBaseOffset(T.TypeId);
+                return ref _chunkManager.GetBytes(segment.Chunk).GetRef<T>(baseOffset + local * Unsafe.SizeOf<T>());
             }
 
             throw new ArgumentOutOfRangeException(nameof(index));
         }
+    }
+
+    /// <summary>Binary search on cumulative Start (segments are ascending and contiguous):
+    /// O(log segments) per flat access instead of a linear scan. Returns -1 when out of range.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int FindSegment(ReadOnlySpan<ComponentSegment> segments, int index)
+    {
+        int lo = 0, hi = segments.Length - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (segments[mid].Start <= index) lo = mid;
+            else hi = mid - 1;
+        }
+
+        if (segments.Length == 0) return -1;
+        int local = index - segments[lo].Start;
+        return (uint)local < (uint)segments[lo].Count ? lo : -1;
     }
 
     /// <summary>One chunk's contiguous span, for tight inner loops.</summary>
@@ -153,15 +169,13 @@ public readonly ref struct ReadOnlyComponentSegments<T, TMask, TConfig>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            for (int i = 0; i < _segments.Length; i++)
+            int i = ComponentSegments<T, TMask, TConfig>.FindSegment(_segments, index);
+            if (i >= 0)
             {
                 ref readonly ComponentSegment segment = ref _segments[i];
                 int local = index - segment.Start;
-                if ((uint)local < (uint)segment.Count)
-                {
-                    int baseOffset = new ImmutableArchetypeLayout<TMask, TConfig>(segment.LayoutData).GetBaseOffset(T.TypeId);
-                    return ref _chunkManager.GetBytes(segment.Chunk).GetRef<T>(baseOffset + local * Unsafe.SizeOf<T>());
-                }
+                int baseOffset = new ImmutableArchetypeLayout<TMask, TConfig>(segment.LayoutData).GetBaseOffset(T.TypeId);
+                return ref _chunkManager.GetBytes(segment.Chunk).GetRef<T>(baseOffset + local * Unsafe.SizeOf<T>());
             }
 
             throw new ArgumentOutOfRangeException(nameof(index));

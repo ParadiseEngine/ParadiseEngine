@@ -70,6 +70,32 @@ public ref partial struct SnapContendedWriterBSystem : IEntitySystem
 [With<SnapPosition>(IsReadOnly = true)]
 public readonly ref partial struct SnapObserved;
 
+/// <summary>MIXED composition (writable SnapMarker + read-only SnapPosition) in an entity
+/// system: the read-only member must bind to the snapshot even though the same composition
+/// also writes — per-component binding, not per-field.</summary>
+public ref partial struct SnapMixedEntityReaderSystem : IEntitySystem
+{
+    public SnapObservedEntity Observed;
+
+    public void Execute() => Observed.SnapMarker.Observed = Observed.SnapPosition.X;
+}
+
+/// <summary>Same mixed composition through the chunk-system path.</summary>
+public ref partial struct SnapMixedChunkReaderSystem : IChunkSystem
+{
+    public SnapObservedChunk Observed;
+
+    public void ExecuteChunk()
+    {
+        var positions = Observed.SnapPositionSpan;
+        var markers = Observed.SnapMarkerSpan;
+        for (int i = 0; i < markers.Length; i++)
+        {
+            markers[i].Observed = positions[i].X;
+        }
+    }
+}
+
 /// <summary>World system: reads SnapPosition via READ-ONLY segments (snapshot-bound), writes
 /// SnapMarker via writable segments — one Execute over every matching entity.</summary>
 public ref partial struct SnapWorldReaderSystem : IWorldSystem
@@ -171,6 +197,42 @@ public sealed class SnapshotReadScheduleTests : IDisposable
 
         await Assert.That(_write.GetComponent<SnapMarker>(old).Observed).IsEqualTo(10f);      // snapshot
         await Assert.That(_write.GetComponent<SnapMarker>(newcomer).Observed).IsEqualTo(100f); // fallback
+    }
+
+    [Test]
+    public async Task mixed_composition_entity_data_readonly_member_binds_to_the_snapshot()
+    {
+        // SnapWriterSystem writes SnapPosition; the mixed-composition reader writes SnapMarker.
+        // Write masks are disjoint → ONE wave under SnapshotDagScheduler — sound only if the
+        // reader's read-only SnapPosition view binds to the snapshot, not the write world.
+        Entity e = SeedAgent(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create(_write)
+            .Add<SnapWriterSystem>()
+            .Add<SnapMixedEntityReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_current);
+
+        await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
+        // Pre-fix, the whole mixed composition bound to the write chunk → Observed read 11.
+        await Assert.That(_write.GetComponent<SnapMarker>(e).Observed).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task mixed_composition_chunk_data_readonly_span_binds_to_the_snapshot()
+    {
+        Entity e = SeedAgent(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create(_write)
+            .Add<SnapWriterSystem>()
+            .Add<SnapMixedChunkReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_current);
+
+        await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
+        await Assert.That(_write.GetComponent<SnapMarker>(e).Observed).IsEqualTo(10f);
     }
 
     [Test]

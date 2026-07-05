@@ -23,14 +23,13 @@
 
 ## Paradise.Physics
 
-- [hits: 1] **An invalid (`default`) `CollisionWorldHandle` is SAFE for casts but WRONG for
-  support clamping**: `CastRay`/`CastCollider`/`CalculateDistance` return false (queries miss →
-  unobstructed movement, the intended "no collision world" semantics), but
-  `PlanarGroundSupport.Clamp` interprets "no support hit anywhere" as "stay put" and returns
-  `from` — an unguarded call FREEZES the mover instead of letting it move freely.
-  `PlanarSphereDynamics` guards internally (`!statics.IsValid` skips the support clamp);
-  hand-written slide code must guard with `handle.IsValid` before calling `Clamp` (see the
-  game's `MovementSystem.Slide`).
+- [hits: 2] **An invalid (`default`) `CollisionWorldHandle` must mean "unobstructed", never
+  "frozen"**: casts return false (miss), and support clamping must follow the same rule.
+  `PlanarGroundSupport.Clamp`'s handle overload originally interpreted "no support hit
+  anywhere" as "stay put" and FROZE movers on an invalid handle; PR #65 review caught it and
+  the overload now guards `!statics.IsValid → accept the move` (like
+  `PlanarSphereDynamics.ClampToSupport` always did). When adding new handle-based queries,
+  keep the invariant: invalid handle = every query misses = movement unobstructed.
 
 ## Paradise.ECS
 

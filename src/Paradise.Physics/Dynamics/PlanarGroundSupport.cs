@@ -33,11 +33,14 @@ public static class PlanarGroundSupport
         Vector3 from, Vector3 to, float probeDepth)
         => Clamp(statics.Handle, supportFilter, from, to, probeDepth);
 
-    /// <summary>Handle-based overload for use inside ECS systems.</summary>
+    /// <summary>Handle-based overload for use inside ECS systems. An invalid (default) handle
+    /// means "no collision world" and accepts the full move — consistent with every other
+    /// handle query (invalid = miss = unobstructed), never "no support anywhere = freeze".</summary>
     public static Vector3 Clamp(CollisionWorldHandle statics, in CollisionFilter supportFilter,
         Vector3 from, Vector3 to, float probeDepth)
     {
         var candidate = new Vector3(to.X, from.Y, to.Z);
+        if (!statics.IsValid) return candidate;
         if (IsSupported(statics, supportFilter, candidate, probeDepth)) return candidate;
 
         var xOnly = new Vector3(to.X, from.Y, from.Z);

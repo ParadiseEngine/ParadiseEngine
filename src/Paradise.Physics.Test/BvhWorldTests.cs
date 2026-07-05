@@ -178,6 +178,12 @@ public class BvhWorldTests
         await Assert.That(hit).IsFalse();
         bool cast = handle.CastCollider(new ColliderCastInput { Collider = Collider.CreateSphere(1f), Orientation = Quaternion.Identity, Start = Vector3.Zero, End = Vector3.UnitX }, out _);
         await Assert.That(cast).IsFalse();
+
+        // Invalid = unobstructed everywhere: Clamp must accept the full move (Y from `from`),
+        // never freeze the mover at `from` because no support ray can hit.
+        Vector3 clamped = PlanarGroundSupport.Clamp(handle, CollisionFilter.Default,
+            from: new Vector3(1f, 0.9f, 1f), to: new Vector3(5f, 2f, 7f), probeDepth: 10f);
+        await Assert.That(clamped).IsEqualTo(new Vector3(5f, 0.9f, 7f));
     }
 
     [Test]

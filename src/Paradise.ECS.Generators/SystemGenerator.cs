@@ -937,22 +937,6 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}");
     }
 
-    /// <summary>True when every component a composition (queryable) field can touch is
-    /// read-only — such data binds to the read world in snapshot mode; any writable member
-    /// keeps the whole composition on the write world.</summary>
-    private static bool IsAllReadOnlyComposition(in SystemFieldInfo field)
-    {
-        foreach (var component in field.QueryableWithComponents)
-        {
-            if (!component.QueryOnly && !component.IsReadOnly) return false;
-        }
-        foreach (var component in field.QueryableOptionalComponents)
-        {
-            if (!component.QueryOnly && !component.IsReadOnly) return false;
-        }
-        return true;
-    }
-
     private static void GenerateEntityModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
@@ -1012,8 +996,9 @@ public class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>Snapshot-mode entity dispatcher ([assembly: SnapshotReadSystems]): read-only
-    /// inline fields and all-readonly composition data bind to (readChunkManager, readChunk) —
-    /// the immutable read world — while writable fields bind to the write world's chunk.</summary>
+    /// inline fields bind to (readChunkManager, readChunk) — the immutable read world — while
+    /// writable fields bind to the write world's chunk. Composition data binds PER COMPONENT
+    /// (via CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
     private static void GenerateSnapshotEntityModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
@@ -1047,10 +1032,9 @@ public class SystemGenerator : IIncrementalGenerator
         {
             var varName = ToCamelCase(field.FieldName) + "Data";
             var dataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
-            string chunkArgs = IsAllReadOnlyComposition(field)
-                ? "readChunkManager, world.EntityManager, layout, readChunk"
-                : "world.ChunkManager, world.EntityManager, layout, chunk";
-            sb.AppendLine($"{indent}    var {varName} = {dataType}.Create({chunkArgs}, __i);");
+            // Per-component binding: the Data struct routes each read-only member to the read
+            // chunk and each writable member to the write chunk (mixed compositions are safe).
+            sb.AppendLine($"{indent}    var {varName} = {dataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, __i);");
         }
 
         sb.Append($"{indent}    var __system = new {GetGlobalFQN(sys)}(");
@@ -1075,8 +1059,9 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}");
     }
 
-    /// <summary>Snapshot-mode chunk dispatcher: ReadOnlySpan fields and all-readonly composition
-    /// chunk data bind to the read world; Span fields bind to the write world.</summary>
+    /// <summary>Snapshot-mode chunk dispatcher: ReadOnlySpan fields bind to the read world;
+    /// Span fields bind to the write world. Composition chunk data binds PER COMPONENT (via
+    /// CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
     private static void GenerateSnapshotChunkModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineSpan).ToList();
@@ -1111,10 +1096,9 @@ public class SystemGenerator : IIncrementalGenerator
         {
             var varName = ToCamelCase(field.FieldName) + "ChunkData";
             var chunkDataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.ChunkData<{maskType}, {configType}>";
-            string chunkArgs = IsAllReadOnlyComposition(field)
-                ? "readChunkManager, world.EntityManager, layout, readChunk"
-                : "world.ChunkManager, world.EntityManager, layout, chunk";
-            sb.AppendLine($"{indent}var {varName} = {chunkDataType}.Create({chunkArgs}, entityCount);");
+            // Per-component binding: read-only spans come from the read chunk, writable spans
+            // from the write chunk (mixed compositions are safe).
+            sb.AppendLine($"{indent}var {varName} = {chunkDataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, entityCount);");
         }
 
         sb.Append($"{indent}var __system = new {GetGlobalFQN(sys)}(");

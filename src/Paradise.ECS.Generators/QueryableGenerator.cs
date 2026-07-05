@@ -516,10 +516,14 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
 
-        // Generate private fields
+        // Generate private fields. Read-only components bind to the READ chunk (== the write
+        // chunk except under snapshot-read execution, where it is the previous-tick pair) so
+        // mixed writable/read-only compositions never read in-flight writes.
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
         sb.AppendLine($"{indent}    private readonly nint _layoutData;");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _chunk;");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _readChunkManager;");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _readChunk;");
         sb.AppendLine($"{indent}    private readonly int _indexInChunk;");
         sb.AppendLine();
 
@@ -532,7 +536,21 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
         sb.AppendLine($"{indent}        int indexInChunk)");
-        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, indexInChunk);");
+        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, chunkManager, chunk, indexInChunk);");
+        sb.AppendLine();
+
+        // Snapshot-read factory: read-only component properties bind to the paired read chunk.
+        sb.AppendLine($"{indent}    /// <summary>Creates a Data instance whose read-only components bind to the paired");
+        sb.AppendLine($"{indent}    /// READ chunk (snapshot-read execution); writable components bind to the write chunk.</summary>");
+        sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}    public static Data<TMask, TConfig> CreateSnapshot(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager readChunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle readChunk,");
+        sb.AppendLine($"{indent}        int indexInChunk)");
+        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, readChunkManager, readChunk, indexInChunk);");
         sb.AppendLine();
 
         // Generate internal constructor
@@ -541,11 +559,15 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager readChunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle readChunk,");
         sb.AppendLine($"{indent}        int indexInChunk)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        _chunkManager = chunkManager;");
         sb.AppendLine($"{indent}        _layoutData = layout.DataPointer;");
         sb.AppendLine($"{indent}        _chunk = chunk;");
+        sb.AppendLine($"{indent}        _readChunkManager = readChunkManager;");
+        sb.AppendLine($"{indent}        _readChunk = readChunk;");
         sb.AppendLine($"{indent}        _indexInChunk = indexInChunk;");
         sb.AppendLine($"{indent}    }}");
 
@@ -563,8 +585,9 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             sb.AppendLine($"{indent}        get");
             sb.AppendLine($"{indent}        {{");
+            var (compManager, compChunk) = comp.IsReadOnly ? ("_readChunkManager", "_readChunk") : ("_chunkManager", "_chunk");
             sb.AppendLine($"{indent}            int offset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{comp.ComponentFullName}.TypeId) + _indexInChunk * global::{comp.ComponentFullName}.Size;");
-            sb.AppendLine($"{indent}            return ref _chunkManager.GetBytes(_chunk).GetRef<global::{comp.ComponentFullName}>(offset);");
+            sb.AppendLine($"{indent}            return ref {compManager}.GetBytes({compChunk}).GetRef<global::{comp.ComponentFullName}>(offset);");
             sb.AppendLine($"{indent}        }}");
             sb.AppendLine($"{indent}    }}");
         }
@@ -592,8 +615,9 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}        int baseOffset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{opt.ComponentFullName}.TypeId);");
             sb.AppendLine($"{indent}        if (baseOffset < 0)");
             sb.AppendLine($"{indent}            throw new global::System.InvalidOperationException(\"Optional component {opt.ComponentTypeName} is not present. Check Has{opt.PropertyName} before calling Get{opt.PropertyName}().\");");
+            var (optManager, optChunk) = opt.IsReadOnly ? ("_readChunkManager", "_readChunk") : ("_chunkManager", "_chunk");
             sb.AppendLine($"{indent}        int offset = baseOffset + _indexInChunk * global::{opt.ComponentFullName}.Size;");
-            sb.AppendLine($"{indent}        return ref _chunkManager.GetBytes(_chunk).GetRef<global::{opt.ComponentFullName}>(offset);");
+            sb.AppendLine($"{indent}        return ref {optManager}.GetBytes({optChunk}).GetRef<global::{opt.ComponentFullName}>(offset);");
             sb.AppendLine($"{indent}    }}");
         }
 
@@ -614,10 +638,13 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
 
-        // Generate private fields
+        // Generate private fields. Read-only spans bind to the READ chunk (== the write chunk
+        // except under snapshot-read execution) so mixed compositions never read in-flight writes.
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
         sb.AppendLine($"{indent}    private readonly nint _layoutData;");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _chunk;");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _readChunkManager;");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _readChunk;");
         sb.AppendLine($"{indent}    private readonly int _entityCount;");
         sb.AppendLine();
 
@@ -630,7 +657,21 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
         sb.AppendLine($"{indent}        int entityCount)");
-        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, entityCount);");
+        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, chunkManager, chunk, entityCount);");
+        sb.AppendLine();
+
+        // Snapshot-read factory: read-only span properties bind to the paired read chunk.
+        sb.AppendLine($"{indent}    /// <summary>Creates a ChunkData instance whose read-only spans bind to the paired");
+        sb.AppendLine($"{indent}    /// READ chunk (snapshot-read execution); writable spans bind to the write chunk.</summary>");
+        sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}    public static ChunkData<TMask, TConfig> CreateSnapshot(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager readChunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle readChunk,");
+        sb.AppendLine($"{indent}        int entityCount)");
+        sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, readChunkManager, readChunk, entityCount);");
         sb.AppendLine();
 
         // Generate internal constructor
@@ -639,11 +680,15 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager readChunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle readChunk,");
         sb.AppendLine($"{indent}        int entityCount)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        _chunkManager = chunkManager;");
         sb.AppendLine($"{indent}        _layoutData = layout.DataPointer;");
         sb.AppendLine($"{indent}        _chunk = chunk;");
+        sb.AppendLine($"{indent}        _readChunkManager = readChunkManager;");
+        sb.AppendLine($"{indent}        _readChunk = readChunk;");
         sb.AppendLine($"{indent}        _entityCount = entityCount;");
         sb.AppendLine($"{indent}    }}");
         sb.AppendLine();
@@ -672,8 +717,9 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
             sb.AppendLine($"{indent}        get");
             sb.AppendLine($"{indent}        {{");
+            var (compManager, compChunk) = comp.IsReadOnly ? ("_readChunkManager", "_readChunk") : ("_chunkManager", "_chunk");
             sb.AppendLine($"{indent}            int baseOffset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{comp.ComponentFullName}.TypeId);");
-            sb.AppendLine($"{indent}            return _chunkManager.GetBytes(_chunk).GetSpan<global::{comp.ComponentFullName}>(baseOffset, _entityCount);");
+            sb.AppendLine($"{indent}            return {compManager}.GetBytes({compChunk}).GetSpan<global::{comp.ComponentFullName}>(baseOffset, _entityCount);");
             sb.AppendLine($"{indent}        }}");
             sb.AppendLine($"{indent}    }}");
         }
@@ -701,8 +747,9 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    {{");
             sb.AppendLine($"{indent}        int baseOffset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{opt.ComponentFullName}.TypeId);");
             sb.AppendLine($"{indent}        if (baseOffset < 0)");
+            var (optManager, optChunk) = opt.IsReadOnly ? ("_readChunkManager", "_readChunk") : ("_chunkManager", "_chunk");
             sb.AppendLine($"{indent}            throw new global::System.InvalidOperationException(\"Optional component {opt.ComponentTypeName} is not present. Check Has{opt.PropertyName} before calling {spanMethodName}().\");");
-            sb.AppendLine($"{indent}        return _chunkManager.GetBytes(_chunk).GetSpan<global::{opt.ComponentFullName}>(baseOffset, _entityCount);");
+            sb.AppendLine($"{indent}        return {optManager}.GetBytes({optChunk}).GetSpan<global::{opt.ComponentFullName}>(baseOffset, _entityCount);");
             sb.AppendLine($"{indent}    }}");
         }
 

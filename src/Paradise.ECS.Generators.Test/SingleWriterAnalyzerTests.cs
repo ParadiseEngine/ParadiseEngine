@@ -259,6 +259,120 @@ public class SingleWriterAnalyzerTests
     }
 
     [Test]
+    public async Task queryable_composition_fields_count_writable_with_components_as_writers()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Movers;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public Movers Query;
+                public void Execute() { }
+            }
+
+            public ref partial struct BounceSystem : Paradise.ECS.IEntitySystem
+            {
+                public Movers Query;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'Position'", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
+    public async Task queryable_readonly_and_queryonly_with_components_are_not_writers()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            [Queryable]
+            [With<Position>(IsReadOnly = true)]
+            public readonly ref partial struct Readers;
+
+            [Queryable]
+            [With<Position>(QueryOnly = true)]
+            public readonly ref partial struct Filters;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct ObserveSystem : Paradise.ECS.IEntitySystem
+            {
+                public Readers Query;
+                public void Execute() { }
+            }
+
+            public ref partial struct FilterSystem : Paradise.ECS.IEntitySystem
+            {
+                public Filters Query;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task queryable_writable_optional_components_count_as_writers()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            [Queryable]
+            [Optional<Position>]
+            public readonly ref partial struct MaybeMovers;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct OptionalWriterSystem : Paradise.ECS.IEntitySystem
+            {
+                public MaybeMovers Query;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'OptionalWriterSystem'", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
+    public async Task queryable_readonly_optional_components_are_not_writers()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            [Queryable]
+            [Optional<Position>(IsReadOnly = true)]
+            public readonly ref partial struct MaybeReaders;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct OptionalReaderSystem : Paradise.ECS.IEntitySystem
+            {
+                public MaybeReaders Query;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task non_system_ref_structs_are_ignored()
     {
         var diagnostics = await Analyze(MarkedComponent + """

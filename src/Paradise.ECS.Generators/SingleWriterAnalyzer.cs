@@ -31,6 +31,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     private const string SpanMetadataName = "System.Span`1";
     private const string EcsNamespace = "Paradise.ECS";
     private const string WithAttributeName = "WithAttribute";
+    private const string OptionalAttributeName = "OptionalAttribute";
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } =
         ImmutableArray.Create(DiagnosticDescriptors.SingleWriterComponentHasMultipleWriters);
@@ -138,8 +139,9 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
 
     /// <summary>The writable components a queryable composition field injects: when the field's
     /// type (or its containing type, for the generated nested Data/ChunkData/Segments structs)
-    /// carries [Queryable], every <c>With&lt;T&gt;</c> that is not IsReadOnly/QueryOnly is a
-    /// write. Empty for non-queryable field types.</summary>
+    /// carries [Queryable], every <c>With&lt;T&gt;</c> or <c>Optional&lt;T&gt;</c> that is not
+    /// IsReadOnly/QueryOnly is a write (writable optionals surface as <c>ref</c>/<c>Span</c>
+    /// accessors just like With). Empty for non-queryable field types.</summary>
     private static System.Collections.Generic.IEnumerable<INamedTypeSymbol> GetQueryableWrittenComponents(
         IFieldSymbol field, INamedTypeSymbol? queryableAttribute)
     {
@@ -153,12 +155,13 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
 
         foreach (AttributeData attribute in queryable.GetAttributes())
         {
-            if (attribute.AttributeClass is not { IsGenericType: true, Name: WithAttributeName } withAttribute) continue;
-            if (withAttribute.ContainingNamespace.ToDisplayString() != EcsNamespace) continue;
+            if (attribute.AttributeClass is not { IsGenericType: true } accessAttribute) continue;
+            if (accessAttribute.Name is not (WithAttributeName or OptionalAttributeName)) continue;
+            if (accessAttribute.ContainingNamespace.ToDisplayString() != EcsNamespace) continue;
             bool skip = attribute.NamedArguments.Any(arg =>
                 (arg.Key == "IsReadOnly" || arg.Key == "QueryOnly") && arg.Value.Value is true);
             if (skip) continue;
-            if (withAttribute.TypeArguments[0] is INamedTypeSymbol componentType) yield return componentType;
+            if (accessAttribute.TypeArguments[0] is INamedTypeSymbol componentType) yield return componentType;
         }
     }
 

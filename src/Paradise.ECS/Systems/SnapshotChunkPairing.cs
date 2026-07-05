@@ -31,9 +31,13 @@ public static class SnapshotChunkPairing
 
         int perChunk = readArchetype.Layout.EntitiesPerChunk;
         int readEntityCount = Math.Min(perChunk, readArchetype.EntityCount - chunkIndex * perChunk);
-        System.Diagnostics.Debug.Assert(
-            writeEntityCount <= readEntityCount,
-            "Read world diverged structurally from the write world — structural changes between CopyFrom and the schedule run violate the snapshot contract.");
+        // Unconditional (not Debug.Assert): a violated pairing contract in Release would
+        // otherwise silently read out-of-bounds tail slots from the shorter read chunk.
+        if (writeEntityCount > readEntityCount)
+        {
+            throw new InvalidOperationException(
+                "Read world diverged structurally from the write world — structural changes between CopyFrom and the schedule run violate the snapshot contract.");
+        }
 
         readChunkManager = readWorld.ChunkManager;
         readChunk = readArchetype.GetChunk(chunkIndex);
