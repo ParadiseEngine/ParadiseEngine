@@ -9,8 +9,8 @@ namespace Paradise.Rendering.Pbr;
 /// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
 /// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
 /// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
-/// and image dedupe keyed by (image, usage) — the same KTX2 payload used as color vs data
-/// transcodes to different formats, so usage is part of texture identity.</summary>
+/// and image dedupe keyed by (content hash, usage) — the same KTX2 payload used as color vs
+/// data transcodes to different formats, so usage is part of texture identity.</summary>
 public sealed class MaterialResourceCache : IDisposable
 {
     private readonly WebGpuRenderer _renderer;
