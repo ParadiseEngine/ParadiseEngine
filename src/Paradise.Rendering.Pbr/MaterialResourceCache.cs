@@ -9,8 +9,8 @@ namespace Paradise.Rendering.Pbr;
 /// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
 /// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
 /// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
-/// and image dedupe keyed by (image, usage) — the same KTX2 payload used as color vs data
-/// transcodes to different formats, so usage is part of texture identity.</summary>
+/// and image dedupe keyed by (content hash, usage) — the same KTX2 payload used as color vs
+/// data transcodes to different formats, so usage is part of texture identity.</summary>
 public sealed class MaterialResourceCache : IDisposable
 {
     private readonly WebGpuRenderer _renderer;
@@ -18,7 +18,10 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly SamplerHandle _sampler;
     private readonly TextureHandle _defaultWhite;
     private readonly TextureHandle _defaultNormal;
-    private readonly Dictionary<(int ImageIndex, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
+    // Keyed by image CONTENT (SHA-256), not image index: indices are per-GLB, so two assets
+    // both referencing "image 0" would otherwise collide on one texture. Content keying also
+    // dedupes byte-identical images across assets.
+    private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
     private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend)> _materials = [];
     private readonly List<TextureHandle> _ownedTextures = [];
     private bool _disposed;
@@ -128,7 +131,10 @@ public sealed class MaterialResourceCache : IDisposable
         if ((uint)imageIndex >= (uint)images.Length)
             throw new ArgumentException($"Material references image {imageIndex} but the asset has {images.Length}.");
 
-        if (_textureCache.TryGetValue((imageIndex, usage), out var cached)) return cached;
+        // Hashing the (already-small, supercompressed) KTX2 bytes is trivial next to a
+        // transcode and buys cross-asset correctness — see the _textureCache comment.
+        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(images[imageIndex].Bytes));
+        if (_textureCache.TryGetValue((contentHash, usage), out var cached)) return cached;
 
         var transcoded = _renderer.SupportsBcTextureCompression
             ? Ktx2Transcoder.TranscodeToBc(images[imageIndex].Bytes, usage)
@@ -137,12 +143,12 @@ public sealed class MaterialResourceCache : IDisposable
         {
             // Malformed payload → the transcoder's empty sentinel → visible-but-wrong default,
             // matching the transcoder contract (no throw at render-load time).
-            _textureCache[(imageIndex, usage)] = fallback;
+            _textureCache[(contentHash, usage)] = fallback;
             return fallback;
         }
 
         var desc = new TextureDesc(
-            $"PbrTexture[{imageIndex},{usage}]",
+            $"PbrTexture[{contentHash[..8]},{usage}]",
             (uint)transcoded.Width, (uint)transcoded.Height, 1,
             (uint)transcoded.MipLevels.Length, 1,
             TextureDimension.D2,
@@ -159,7 +165,7 @@ public sealed class MaterialResourceCache : IDisposable
                 (uint)mip.Width, (uint)mip.Height);
         }
 
-        _textureCache[(imageIndex, usage)] = handle;
+        _textureCache[(contentHash, usage)] = handle;
         _ownedTextures.Add(handle);
         return handle;
     }

@@ -206,6 +206,68 @@ public class PbrRendererGpuTests
         }
     }
 
+    [Test]
+    public async Task texture_cache_keys_by_content_not_per_asset_image_index()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            // Two DIFFERENT images, each living at index 0 of its own asset's image array —
+            // the cross-GLB layout that an index-keyed cache collides on.
+            var colorBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2"));
+            var normalBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "normal-linear-uastc.ktx2"));
+            var assetA = new[] { new Paradise.Assets.Gltf.GltfImageData(colorBytes) };
+            var assetB = new[] { new Paradise.Assets.Gltf.GltfImageData(normalBytes) };
+            // Byte-identical content in a THIRD asset (fresh array) must share A's texture.
+            var assetC = new[] { new Paradise.Assets.Gltf.GltfImageData((byte[])colorBytes.Clone()) };
+
+            Paradise.Assets.Gltf.GltfMaterialData BaseColorOnly(string name) => new(
+                Name: name,
+                BaseColorFactor: Vector4.One,
+                MetallicFactor: 1f,
+                RoughnessFactor: 1f,
+                EmissiveFactor: Vector3.Zero,
+                NormalScale: 1f,
+                OcclusionStrength: 1f,
+                TransmissionFactor: 0f,
+                AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Opaque,
+                AlphaCutoff: 0.5f,
+                DoubleSided: false,
+                BaseColorImage: 0,
+                MetallicRoughnessImage: -1,
+                NormalImage: -1,
+                OcclusionImage: -1,
+                EmissiveImage: -1,
+                BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity);
+
+            try
+            {
+                var a = BaseColorOnly("a");
+                var b = BaseColorOnly("b");
+                var c = BaseColorOnly("c");
+                _ = pbr.Materials.AddMaterial(in a, assetA);
+                _ = pbr.Materials.AddMaterial(in b, assetB);
+                _ = pbr.Materials.AddMaterial(in c, assetC);
+            }
+            catch (DllNotFoundException ex)
+            {
+                Skip.Test($"libktx not loadable on this host: {ex.Message}");
+                return;
+            }
+
+            // Distinct contents → distinct textures (index keying collapsed these to 1);
+            // identical contents across assets → shared texture (no third upload).
+            await Assert.That(pbr.Materials.TextureCount).IsEqualTo(2);
+            await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(3);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
     private static string FixtureRoot()
     {
         // The KTX2 fixtures live in the sibling Assets.Textures test project — reuse rather
