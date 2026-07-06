@@ -90,9 +90,14 @@
       <_SlangcExeName Condition="$(_SlangResolvedRid.StartsWith('win-'))">slangc.exe</_SlangcExeName>
       <_SlangcExeName Condition="'$(_SlangcExeName)' == ''">slangc</_SlangcExeName>
       <SlangcPath>$(SlangDir)/bin/$(_SlangcExeName)</SlangcPath>
+      <!-- Bare `dotnet` is not on PATH when the build is spawned from a GUI process (Godot
+           editor, IDEs) even though the parent host was started by absolute path; the host
+           exports its own location as DOTNET_HOST_PATH for exactly this. -->
+      <_SlangDotNetHost Condition="'$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</_SlangDotNetHost>
+      <_SlangDotNetHost Condition="'$(_SlangDotNetHost)' == ''">dotnet</_SlangDotNetHost>
     </PropertyGroup>
 
-    <Exec Command="dotnet &quot;$(_SlangBootstrapAssembly)&quot; --manifest &quot;$(SlangManifestPath)&quot; --rid $(_SlangResolvedRid) --out &quot;$(SlangDir)&quot;"
+    <Exec Command="&quot;$(_SlangDotNetHost)&quot; &quot;$(_SlangBootstrapAssembly)&quot; --manifest &quot;$(SlangManifestPath)&quot; --rid $(_SlangResolvedRid) --out &quot;$(SlangDir)&quot;"
           ConsoleToMSBuild="true" />
 
     <Error Condition="!Exists('$(SlangcPath)')"
