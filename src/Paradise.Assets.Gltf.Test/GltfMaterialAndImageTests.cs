@@ -191,6 +191,42 @@ public class GltfMaterialAndImageTests
     }
 
     [Test]
+    public async Task external_image_uri_loads_ktx2_via_resolver()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
+        b.AddExternalImage("crate_0.ktx2");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+
+        string? requested = null;
+        var asset = GltfSceneReader.Read(b.Build(), uri =>
+        {
+            requested = uri;
+            return Ktx2MagicBytes;
+        });
+
+        // The resolver is asked for the image's uri, and its (KTX2) bytes populate the image.
+        await Assert.That(requested).IsEqualTo("crate_0.ktx2");
+        await Assert.That(asset.Images.Length).IsEqualTo(1);
+        await Assert.That(asset.Images[0].Bytes).IsEquivalentTo(Ktx2MagicBytes);
+    }
+
+    [Test]
+    public async Task external_image_resolver_rejects_non_ktx2_bytes()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
+        b.AddExternalImage("crate_0.ktx2");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+
+        // A resolver returning PNG bytes must still be rejected (KTX2-only contract).
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        await Assert.That(() => GltfSceneReader.Read(b.Build(), _ => png)).Throws<NotSupportedException>();
+    }
+
+    [Test]
     public async Task image_buffer_view_on_external_buffer_throws()
     {
         // Consistency with the accessor path: an image whose bufferView targets an external

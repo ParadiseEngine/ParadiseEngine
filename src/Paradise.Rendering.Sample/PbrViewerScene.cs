@@ -30,7 +30,10 @@ internal sealed class PbrViewerScene : IDisposable
 
         if (glbPath is not null)
         {
-            var asset = GltfSceneReader.Read(File.ReadAllBytes(glbPath));
+            var glbDir = Path.GetDirectoryName(Path.GetFullPath(glbPath))!;
+            var asset = GltfSceneReader.Read(
+                File.ReadAllBytes(glbPath),
+                uri => File.ReadAllBytes(Path.Combine(glbDir, uri.Replace('/', Path.DirectorySeparatorChar))));
             var meshes = _pbr.UploadMesh(asset);
             if (asset.Instances.Length == 0)
                 throw new InvalidOperationException($"'{glbPath}' has no mesh instances in its default scene.");

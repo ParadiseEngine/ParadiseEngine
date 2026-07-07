@@ -11,14 +11,23 @@ namespace Paradise.Assets.Gltf;
 /// <see cref="NotSupportedException"/>, malformed data throws <see cref="InvalidDataException"/>.</summary>
 public static class GltfSceneReader
 {
-    public static GltfAsset Read(ReadOnlyMemory<byte> glb)
+    public static GltfAsset Read(ReadOnlyMemory<byte> glb) => Read(glb, null);
+
+    /// <summary>
+    /// Reads a GLB. <paramref name="externalImageResolver"/>, when supplied, maps an image's
+    /// external file URI (relative to the GLB) to its bytes — the external-KTX2 texture layout,
+    /// where each texture is a sidecar <c>.ktx2</c> next to the GLB rather than embedded in the
+    /// BIN chunk. When it is null, external-URI images throw, preserving the embedded-only
+    /// contract. Resolved bytes must still be KTX2.
+    /// </summary>
+    public static GltfAsset Read(ReadOnlyMemory<byte> glb, Func<string, byte[]>? externalImageResolver)
     {
         var container = GlbContainer.Parse(glb);
         var root = JsonSerializer.Deserialize(container.Json.Span, GltfJsonContext.Default.GltfRoot)
             ?? throw new InvalidDataException("GLB JSON chunk deserialized to null.");
         var bin = container.Bin;
 
-        var images = ReadImages(root, bin);
+        var images = ReadImages(root, bin, externalImageResolver);
         var materials = ReadMaterials(root);
         var meshes = ReadMeshes(root, bin);
         var instances = BakeInstances(root);
@@ -28,7 +37,7 @@ public static class GltfSceneReader
 
     // -------- images --------
 
-    private static GltfImageData[] ReadImages(GltfRoot root, ReadOnlyMemory<byte> bin)
+    private static GltfImageData[] ReadImages(GltfRoot root, ReadOnlyMemory<byte> bin, Func<string, byte[]>? externalImageResolver)
     {
         var srcImages = root.Images ?? [];
         var images = new GltfImageData[srcImages.Length];
@@ -36,9 +45,10 @@ public static class GltfSceneReader
         {
             var src = srcImages[i];
             if (src.BufferView is not { } viewIndex)
-                throw new NotSupportedException(
-                    $"Image {i} has no bufferView (uri '{src.Uri}') — external/data-URI images are not supported; " +
-                    "the contract embeds images in the GLB.");
+            {
+                images[i] = ReadExternalImage(i, src, externalImageResolver);
+                continue;
+            }
 
             var views = root.BufferViews
                 ?? throw new InvalidDataException("glTF references a bufferView but declares none.");
@@ -75,6 +85,29 @@ public static class GltfSceneReader
             images[i] = new GltfImageData(bytes);
         }
         return images;
+    }
+
+    // An image with no bufferView is an external file URI (the external-KTX2 layout). Resolve it
+    // via the caller-supplied resolver (which reads the sidecar relative to the GLB) and enforce
+    // the same KTX2-only contract as the embedded path. data-URIs are out of scope.
+    private static GltfImageData ReadExternalImage(int i, GltfImage src, Func<string, byte[]>? resolver)
+    {
+        if (src.Uri is not { } uri)
+            throw new InvalidDataException($"Image {i} has neither a bufferView nor a uri.");
+        if (uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            throw new NotSupportedException(
+                $"Image {i} is a data-URI — only embedded bufferView images and external file URIs are supported.");
+        if (resolver is null)
+            throw new NotSupportedException(
+                $"Image {i} has no bufferView (uri '{uri}') — external-URI images require an image resolver, " +
+                "but this GLB is being read without one (embedded-only mode).");
+
+        var bytes = resolver(uri);
+        if (!IsKtx2(bytes))
+            throw new NotSupportedException(
+                $"External image {i} ('{uri}') is {DescribeImageMagic(bytes)}, but the contract requires KTX2 for " +
+                "every texture (KHR_texture_basisu).");
+        return new GltfImageData(bytes);
     }
 
     private static bool IsKtx2(ReadOnlySpan<byte> bytes)
