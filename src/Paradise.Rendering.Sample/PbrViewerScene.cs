@@ -31,9 +31,7 @@ internal sealed class PbrViewerScene : IDisposable
         if (glbPath is not null)
         {
             var glbDir = Path.GetDirectoryName(Path.GetFullPath(glbPath))!;
-            var asset = GltfSceneReader.Read(
-                File.ReadAllBytes(glbPath),
-                uri => File.ReadAllBytes(Path.Combine(glbDir, uri.Replace('/', Path.DirectorySeparatorChar))));
+            var asset = GltfSceneReader.Read(File.ReadAllBytes(glbPath), uri => ReadSidecarImage(glbDir, uri));
             var meshes = _pbr.UploadMesh(asset);
             if (asset.Instances.Length == 0)
                 throw new InvalidOperationException($"'{glbPath}' has no mesh instances in its default scene.");
@@ -119,4 +117,15 @@ internal sealed class PbrViewerScene : IDisposable
     }
 
     public void Dispose() => _pbr.Dispose();
+
+    // The uri comes from untrusted GLB content, so confine the resolved path to glbDir — reject
+    // absolute uris (Path.Combine passes those through verbatim) and any ".." escape.
+    private static byte[] ReadSidecarImage(string glbDir, string uri)
+    {
+        var root = glbDir.EndsWith(Path.DirectorySeparatorChar) ? glbDir : glbDir + Path.DirectorySeparatorChar;
+        var resolved = Path.GetFullPath(Path.Combine(glbDir, uri.Replace('/', Path.DirectorySeparatorChar)));
+        if (!resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            throw new NotSupportedException($"Image uri '{uri}' resolves outside the GLB directory.");
+        return File.ReadAllBytes(resolved);
+    }
 }

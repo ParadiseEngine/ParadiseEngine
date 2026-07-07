@@ -6,11 +6,14 @@ namespace Paradise.Assets.Gltf;
 
 /// <summary>Entry point: decode a GLB into a <see cref="GltfAsset"/>. Scope = the Paradise
 /// export contract — static triangle meshes, metallic-roughness materials,
-/// KHR_texture_basisu / KHR_texture_transform, everything embedded in the BIN chunk. No
-/// animations, no skins, no sparse accessors, no external URIs; unsupported structure throws
-/// <see cref="NotSupportedException"/>, malformed data throws <see cref="InvalidDataException"/>.</summary>
+/// KHR_texture_basisu / KHR_texture_transform. No animations, no skins, no sparse accessors,
+/// no data-URI images; unsupported structure throws <see cref="NotSupportedException"/>,
+/// malformed data throws <see cref="InvalidDataException"/>. Images are either embedded in the
+/// BIN chunk or, via <see cref="Read(ReadOnlyMemory{byte}, Func{string, byte[]})"/>, resolved
+/// from an external file URI relative to the GLB.</summary>
 public static class GltfSceneReader
 {
+    /// <summary>Embedded-only: every image must live in the GLB's BIN chunk. External-URI images throw.</summary>
     public static GltfAsset Read(ReadOnlyMemory<byte> glb) => Read(glb, null);
 
     /// <summary>
@@ -102,7 +105,9 @@ public static class GltfSceneReader
                 $"Image {i} has no bufferView (uri '{uri}') — external-URI images require an image resolver, " +
                 "but this GLB is being read without one (embedded-only mode).");
 
-        var bytes = resolver(uri);
+        // glTF uris are percent-encoded per the spec (e.g. a space becomes %20) — decode before
+        // handing off so the resolver sees the literal sidecar name, not the escaped form.
+        var bytes = resolver(Uri.UnescapeDataString(uri));
         if (!IsKtx2(bytes))
             throw new NotSupportedException(
                 $"External image {i} ('{uri}') is {DescribeImageMagic(bytes)}, but the contract requires KTX2 for " +

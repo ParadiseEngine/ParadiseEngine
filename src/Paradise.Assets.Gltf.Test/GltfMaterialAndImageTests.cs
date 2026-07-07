@@ -213,6 +213,26 @@ public class GltfMaterialAndImageTests
     }
 
     [Test]
+    public async Task external_image_uri_is_percent_decoded_before_resolving()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
+        b.AddExternalImage("crate%200.ktx2");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        b.SetSceneRoots(b.AddNode(mesh: mesh));
+
+        string? requested = null;
+        GltfSceneReader.Read(b.Build(), uri =>
+        {
+            requested = uri;
+            return Ktx2MagicBytes;
+        });
+
+        // The resolver receives the literal file name, not the percent-encoded glTF uri.
+        await Assert.That(requested).IsEqualTo("crate 0.ktx2");
+    }
+
+    [Test]
     public async Task external_image_resolver_rejects_non_ktx2_bytes()
     {
         var b = new GlbTestBuilder();
