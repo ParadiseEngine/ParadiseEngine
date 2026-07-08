@@ -19,8 +19,8 @@ struct SceneLight
     float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
     float4 directionAndRange;     // xyz: direction from surface to light, w: range
     float4 colorAndIntensity;     // rgb: color, w: intensity
-    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow tile (<0 = no shadow), w: shadow strength (0 = none)
-    float4 shadowAtlas;           // x: atlas columns, y: face count, z: tile scale (tile/atlas size), w: soft-shadow flag
+    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
+    float4 shadowAtlas;           // x: unused, y: face count (1 = dir/spot, 6 = point), z: unused, w: soft-shadow flag
 };
 
 struct DrawUniforms
@@ -39,7 +39,7 @@ struct FrameUniforms
     float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
     float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
     SceneLight sceneLights[MaxSceneLights];
-    float4   shadowSettings; // x: 1/atlasSize (texel size), yzw: unused
+    float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), yzw: unused
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
 };
 
@@ -61,13 +61,14 @@ ConstantBuffer<DrawUniforms> draw;
 [[vk::binding(0, 1)]]
 ConstantBuffer<FrameUniforms> frame;
 
-// Shadow map atlas (a single Depth32Float texture) + comparison sampler, on the group-1 slots
-// reserved when shadow mapping was removed. NOTE: the generated WGSL declares shadowTexture as
-// texture_2d<f32>; a build-time patch (Slang.targets) rewrites it to texture_depth_2d, which WGSL
-// requires for textureSampleCompareLevel (Slang issue #6942). The loader forces the matching
-// bind-group layout (DepthTexture + ComparisonSampler) by these exact names.
+// Shadow map array (a single Depth32Float 2D array, one layer per shadow view) + comparison
+// sampler, on the group-1 slots reserved when shadow mapping was removed. NOTE: the generated WGSL
+// declares shadowTexture as texture_2d_array<f32>; a build-time patch (Slang.targets) rewrites it
+// to texture_depth_2d_array, which WGSL requires for textureSampleCompareLevel (Slang issue #6942).
+// The loader forces the matching bind-group layout (DepthTextureArray + ComparisonSampler) by these
+// exact names.
 [[vk::binding(1, 1)]]
-Texture2D<float> shadowTexture;
+Texture2DArray<float> shadowTexture;
 
 [[vk::binding(2, 1)]]
 SamplerComparisonState shadowSampler;
@@ -250,8 +251,9 @@ int getPointShadowFace(float3 dir)
     return dir.z > 0.0 ? 4 : 5;
 }
 
-// Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shared
-// shadow atlas via the light's per-face view-projection and its atlas tile.
+// Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shadow-map
+// array — one full-resolution layer per shadow view (dir/spot = 1, point = 6 cube faces) — via the
+// light's per-face view-projection. No tile UV math and no seam clamp: each layer owns all of [0,1].
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 surfaceToLight)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
@@ -268,29 +270,21 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if (shadowPos.w <= 0.0)
         return 1.0;
     float3 ndc = shadowPos.xyz / shadowPos.w;
-    float2 localUv = ndc.xy * float2(0.5, -0.5) + 0.5; // NDC → UV, Y flipped (WebGPU clip-Z [0,1])
-    if (localUv.x < 0.0 || localUv.x > 1.0 || localUv.y < 0.0 || localUv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
+    float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5; // NDC → UV, Y flipped (WebGPU clip-Z [0,1])
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
         return 1.0; // outside the light frustum → treat as lit
 
-    float tileIndex = light.spotAngles.z + (float)face;
-    float columns = max(light.shadowAtlas.x, 1.0);
-    float2 tileXy = float2(fmod(tileIndex, columns), floor(tileIndex / columns));
-    float tileScale = light.shadowAtlas.z;
-    float2 uv = tileXy * tileScale + localUv * tileScale;
-
-    // Clamp every (center + PCF) sample to this light's own tile box so a tap near the tile seam
-    // can't read a neighbouring light's atlas tile (tiles are packed edge-to-edge, no border).
+    float layer = light.spotAngles.z + (float)face; // array slice for this view
     float texel = frame.shadowSettings.x;
-    float2 tileMin = tileXy * tileScale;
-    float2 tileMax = tileMin + tileScale - texel;
+    float compare = ndc.z - ShadowDepthBias;
 
-    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv, tileMin, tileMax), ndc.z - ShadowDepthBias);
-    if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF
+    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
+    if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF (sampler clamps to layer edge — no seam risk)
     {
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(-texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, -texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(texel, 0.0), layer), compare);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(-texel, 0.0), layer), compare);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(0.0, texel), layer), compare);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(0.0, -texel), layer), compare);
         lit *= 0.2;
     }
 

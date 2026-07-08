@@ -107,9 +107,9 @@ public class PbrRendererGpuTests
                     Position = new Vector3(4f, 5f, 6f),
                 },
             };
-            // Directional (1 tile) + spot (1 tile) + point (6 cube-face tiles) = 8 atlas tiles, all
-            // casting shadows: exercises the tile allocator, spot/point light matrices, per-tile
-            // viewport, and the point-light cube-face selection in the shader.
+            // Directional (1 layer) + spot (1 layer) + point (6 cube-face layers) = 8 array layers,
+            // all casting shadows: exercises dynamic array sizing, the per-layer depth passes, the
+            // spot/point light matrices, and the point-light cube-face selection in the shader.
             scene.Lights.Add(new PbrLight
             {
                 Type = PbrLightType.Directional,
@@ -146,7 +146,7 @@ public class PbrRendererGpuTests
             scene.Instances.Add(new PbrInstance { Mesh = occluder, Model = Matrix4x4.CreateTranslation(0f, 1.5f, 0f) });
 
             for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
-            // No WebGPU validation error across the 8-tile atlas fill + comparison sampling is the tripwire.
+            // No WebGPU validation error across the 8-layer array fill + comparison sampling is the tripwire.
             await Assert.That(pbr.PipelineVariantCountForTest).IsEqualTo(1);
         }
         finally

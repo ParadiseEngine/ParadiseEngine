@@ -265,6 +265,24 @@ public sealed class WebGpuRenderer : IDisposable
         _destructionQueue.Schedule(() => native.Texture.Destroy());
     }
 
+    /// <summary>Create an explicit view into a texture (a chosen dimension / array-layer range) —
+    /// e.g. a single layer of the shadow-map array as a render target, or the whole array as a
+    /// D2Array sampling view.</summary>
+    public TextureViewHandle CreateTextureView(in TextureViewDesc desc)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _device.CreateTextureView(in desc);
+    }
+
+    public void DestroyTextureView(TextureViewHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_device.DetachTextureView(handle, out var native))
+            return;
+        // Views have no native Destroy(); keep the wrapper alive through the deferred window.
+        _destructionQueue.Schedule(() => { _ = native; });
+    }
+
     public SamplerHandle CreateSampler(in SamplerDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -652,10 +670,14 @@ public sealed class WebGpuRenderer : IDisposable
         };
         if (pass.Depth is { } depth)
         {
-            var entry = _device.ResolveTexture(depth.DepthTexture);
+            // Render into an explicit view when provided (one layer of a depth array), else the
+            // texture's default view. DepthTexture always identifies the underlying resource.
+            var depthView = depth.DepthView.IsValid
+                ? _device.ResolveTextureView(depth.DepthView)
+                : _device.ResolveTexture(depth.DepthTexture).View;
             desc.DepthStencilAttachment = new WebGpuSharp.RenderPassDepthStencilAttachment
             {
-                View = entry.View,
+                View = depthView,
                 DepthLoadOp = depth.DepthLoad switch
                 {
                     LoadOp.Load => WgLoadOp.Load,

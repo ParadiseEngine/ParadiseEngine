@@ -17,11 +17,11 @@ public sealed class PbrRenderer : IDisposable
 {
     private const int MaxDrawsPerFrame = 4096;
     private const int FloatsPerVertex = 12;         // pos3/normal3/uv2/tan4 interleave
-    private const uint ShadowAtlasSize = 4096;      // shared shadow atlas (Depth32Float)
-    private const uint ShadowTileSize = 1024;       // one atlas cell
-    private const int ShadowAtlasColumns = 4;       // 4096 / 1024
-    private const int MaxShadowTiles = ShadowAtlasColumns * ShadowAtlasColumns; // 16
-    private const int ShadowMainPassIndex = 1;      // pass 0 = shadow depth, pass 1 = main color
+    private const uint ShadowMapSize = 1024;        // per-layer shadow map resolution (Depth32Float)
+    // One array layer per shadow view: dir/spot = 1 layer, point = 6 cube-face layers. Cap = every
+    // scene light casting a 6-face point shadow. The array is sized dynamically each frame (grow-only)
+    // to the layers actually in use, so a scene with one directional light allocates a single layer.
+    private const int MaxShadowLayers = FrameUniformsGpu.MaxSceneLights * 6; // 48
 
     private readonly WebGpuRenderer _renderer;
     private readonly ShaderProgramDesc _program;
@@ -29,27 +29,35 @@ public sealed class PbrRenderer : IDisposable
     private readonly uint _drawStride;
     private readonly BufferHandle _frameUniformBuffer;
     private readonly BufferHandle _drawUniformRing;
-    private readonly BindGroupHandle _frameGroup;
+    private BindGroupHandle _frameGroup; // rebuilt whenever the shadow array is (re)allocated
     private readonly BindGroupHandle _drawGroup;
     private readonly Dictionary<BlendMode, PipelineHandle> _pipelines = new();
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
-    private readonly RenderPassDesc[] _passes = new RenderPassDesc[2]; // [0] shadow depth, [1] main
+    // [0 .. shadowViews.Count-1] = one depth-only shadow pass per layer, [shadowViews.Count] = main.
+    // Grow-only; each frame a length-(shadowViews.Count+1) prefix is submitted.
+    private RenderPassDesc[] _passes = new RenderPassDesc[2];
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _opaque = [];
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _blend = [];
     private readonly List<BufferHandle> _ownedBuffers = [];
-    // Shadow mapping: a depth atlas filled by a depth-only caster pass, sampled by the main pass.
+    // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
+    // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
     private readonly PipelineHandle _shadowPipeline;
-    private readonly TextureHandle _shadowAtlas;
     private readonly SamplerHandle _shadowSampler;
     private readonly BufferHandle _shadowDrawRing;
     private readonly BindGroupHandle _shadowDrawGroup;
     private readonly byte[] _shadowStaging;
-    // Per-frame shadow plan: one render "view" per shadow-casting light face, plus per-light atlas
-    // tile assignment (base tile / face count; base tile -1 = not shadowed this frame).
-    private readonly List<(int LightIndex, int Face, uint Tile, Matrix4x4 Vp)> _shadowViews = [];
-    private readonly int[] _shadowBaseTile = new int[FrameUniformsGpu.MaxSceneLights];
+    // The shadow-map array + its views, (re)allocated by EnsureShadowArray (grow-only). The D2Array
+    // view is what the shader samples; each per-layer D2 view is a render target for one shadow pass.
+    private TextureHandle _shadowArray;
+    private TextureViewHandle _shadowArrayView;
+    private TextureViewHandle[] _shadowLayerViews = [];
+    private uint _shadowLayerCapacity;
+    // Per-frame shadow plan: one render "view" per shadow-casting light face, plus per-light array
+    // assignment (base layer / face count; base layer -1 = not shadowed this frame).
+    private readonly List<(int LightIndex, int Face, uint Layer, Matrix4x4 Vp)> _shadowViews = [];
+    private readonly int[] _shadowBaseLayer = new int[FrameUniformsGpu.MaxSceneLights];
     private readonly int[] _shadowFaceCount = new int[FrameUniformsGpu.MaxSceneLights];
     private TextureHandle _depthTexture;
     private uint _width;
@@ -98,28 +106,20 @@ public sealed class PbrRenderer : IDisposable
         var ringDesc = new BufferDesc("PbrDrawRing", (ulong)_drawStride * MaxDrawsPerFrame, BufferUsage.Uniform | BufferUsage.CopyDst);
         _drawUniformRing = renderer.CreateBuffer(in ringDesc);
 
-        // Shadow atlas: a single Depth32Float texture that is both the depth target of the caster
-        // pass and a sampled depth texture in the main pass. Paired with a comparison sampler.
-        var atlasDesc = new TextureDesc(
-            "PbrShadowAtlas", ShadowAtlasSize, ShadowAtlasSize, 1, 1, 1,
-            TextureDimension.D2, TextureFormat.Depth32Float,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-        _shadowAtlas = renderer.CreateTexture(in atlasDesc);
+        // Shadow-map array comparison sampler (clamp so a PCF tap near a layer edge reads that
+        // layer's border, never wraps). The array texture + views + frame bind group are built by
+        // EnsureShadowArray below and re-sized each frame to the layers actually in use.
         _shadowSampler = renderer.CreateSampler(new SamplerDesc(
             "PbrShadowSampler",
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest,
             MaxAnisotropy: 1, Compare: CompareFunction.LessEqual));
 
-        // Frame group now carries the shadow atlas (binding 1, DepthTexture) + comparison sampler
-        // (binding 2), matching pbr.slang's reserved group-1 slots.
-        var frameGroupDesc = new BindGroupDesc("PbrFrameGroup", FindGroup(1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
-            BindGroupEntryDesc.ForTexture(1, _shadowAtlas),
-            BindGroupEntryDesc.ForSampler(2, _shadowSampler),
-        });
-        _frameGroup = renderer.CreateBindGroup(in frameGroupDesc);
+        // Allocate the initial single-layer array + frame bind group (binding 1 = D2Array shadow
+        // view, binding 2 = comparison sampler; matches pbr.slang's reserved group-1 slots). A valid
+        // array must always be bound even when nothing casts, hence the minimum of one layer.
+        EnsureShadowArray(1);
+
         var drawGroupDesc = new BindGroupDesc("PbrDrawGroup", FindGroup(0), new[]
         {
             BindGroupEntryDesc.ForBuffer(0, _drawUniformRing, 0, (ulong)Unsafe.SizeOf<DrawUniformsGpu>()),
@@ -165,15 +165,59 @@ public sealed class PbrRenderer : IDisposable
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         _depthTexture = CreateDepthTexture(_width, _height);
-        // Pass 0 = shadow depth (no color, atlas depth attachment); pass 1 = main color + depth.
-        _passes[0] = new RenderPassDesc(colorAttachmentCount: 0)
+        // The pass list is (re)built each frame: N per-layer shadow passes + one main pass (see
+        // RenderFrame). The main pass's depth target is the window depth texture (recreated on resize).
+    }
+
+    // (Re)allocate the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
+    // full-resolution layers, plus the D2Array sampling view, the per-layer D2 render views, and the
+    // frame bind group that references the sampling view. A single shared texture across all shadow
+    // views keeps the frame group stable between frames of equal (or smaller) shadow-layer count.
+    private void EnsureShadowArray(uint layerCount)
+    {
+        layerCount = Math.Max(1, layerCount);
+        if (_shadowArray.IsValid && layerCount <= _shadowLayerCapacity) return;
+
+        DestroyShadowArray();
+
+        var desc = new TextureDesc(
+            "PbrShadowArray", ShadowMapSize, ShadowMapSize, layerCount, 1, 1,
+            TextureDimension.D2, TextureFormat.Depth32Float,
+            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
+        _shadowArray = _renderer.CreateTexture(in desc);
+        _shadowArrayView = _renderer.CreateTextureView(new TextureViewDesc(
+            "PbrShadowArrayView", _shadowArray, TextureViewDimension.D2Array, 0, layerCount));
+        _shadowLayerViews = new TextureViewHandle[layerCount];
+        for (var i = 0u; i < layerCount; i++)
+            _shadowLayerViews[i] = _renderer.CreateTextureView(new TextureViewDesc(
+                $"PbrShadowLayer{i}", _shadowArray, TextureViewDimension.D2, i, 1));
+        _shadowLayerCapacity = layerCount;
+
+        RebuildFrameGroup();
+    }
+
+    private void RebuildFrameGroup()
+    {
+        if (_frameGroup.IsValid) _renderer.DestroyBindGroup(_frameGroup);
+        var frameGroupDesc = new BindGroupDesc("PbrFrameGroup", FindGroup(1), new[]
         {
-            Depth = new DepthAttachmentDesc(_shadowAtlas, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
-        };
-        _passes[ShadowMainPassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
-        {
-            Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
-        };
+            BindGroupEntryDesc.ForBuffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
+            BindGroupEntryDesc.ForTextureView(1, _shadowArrayView),
+            BindGroupEntryDesc.ForSampler(2, _shadowSampler),
+        });
+        _frameGroup = _renderer.CreateBindGroup(in frameGroupDesc);
+    }
+
+    private void DestroyShadowArray()
+    {
+        if (_shadowArrayView.IsValid) _renderer.DestroyTextureView(_shadowArrayView);
+        foreach (var v in _shadowLayerViews)
+            if (v.IsValid) _renderer.DestroyTextureView(v);
+        if (_shadowArray.IsValid) _renderer.DestroyTexture(_shadowArray);
+        _shadowArray = default;
+        _shadowArrayView = default;
+        _shadowLayerViews = [];
+        _shadowLayerCapacity = 0;
     }
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
@@ -192,7 +236,7 @@ public sealed class PbrRenderer : IDisposable
         _width = width;
         _height = height;
         _depthTexture = CreateDepthTexture(width, height);
-        _passes[ShadowMainPassIndex].Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f);
+        // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
 
     public float AspectRatio => _width / (float)_height;
@@ -290,34 +334,40 @@ public sealed class PbrRenderer : IDisposable
             throw new InvalidOperationException(
                 $"{totalDraws} draws exceed the {MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
 
-        // Shadows: allocate atlas tiles to every shadow-casting light — directional/spot take one
-        // tile, point takes six cube-face tiles — and compute each face's light-space matrix, fit
-        // to the opaque casters' world AABB. When none, the shadow pass just clears the atlas.
+        // Shadows: assign one array layer per shadow view to every shadow-casting light —
+        // directional/spot take one layer, point takes six cube-face layers — and compute each
+        // face's light-space matrix, fit to the opaque casters' world AABB. When none, the shadow
+        // passes are skipped entirely (nothing samples an unwritten layer; base layer stays -1).
         _shadowViews.Clear();
-        Array.Fill(_shadowBaseTile, -1);
+        Array.Fill(_shadowBaseLayer, -1);
         Array.Clear(_shadowFaceCount);
+        var shadowLayerCount = 0;
         if (_opaque.Count > 0)
         {
             ComputeWorldBounds(out var center, out var extent);
-            var nextTile = 0;
             for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
             {
                 var light = scene.Lights[i];
                 if (!light.CastsShadows) continue;
                 var faceCount = light.Type == PbrLightType.Point ? 6 : 1;
-                if (nextTile + faceCount > MaxShadowTiles) continue; // won't fit; a later smaller light still can
-                _shadowBaseTile[i] = nextTile;
+                if (shadowLayerCount + faceCount > MaxShadowLayers) continue; // won't fit; a smaller later light still can
+                _shadowBaseLayer[i] = shadowLayerCount;
                 _shadowFaceCount[i] = faceCount;
                 for (var f = 0; f < faceCount; f++)
                 {
-                    _shadowViews.Add((i, f, (uint)(nextTile + f), ComputeLightMatrix(light, f, center, extent)));
+                    _shadowViews.Add((i, f, (uint)(shadowLayerCount + f), ComputeLightMatrix(light, f, center, extent)));
                 }
-                nextTile += faceCount;
+                shadowLayerCount += faceCount;
             }
         }
 
+        // Size the shadow-map array to the layers actually in use (grow-only; min one so the frame
+        // bind group always has a valid depth array bound). This is the runtime "create shadowmap
+        // based on light+shadow count" — a single directional light allocates exactly one layer.
+        EnsureShadowArray((uint)shadowLayerCount);
+
         // Shadow ring budget (separate from the main ring): views × casters. Hard-fail up front —
-        // like the main-pass check — so a partial atlas (silently missing shadows) can't ship.
+        // like the main-pass check — so a partial fill (silently missing shadows) can't ship.
         var shadowDrawTotal = _shadowViews.Count * _opaque.Count;
         if (shadowDrawTotal > MaxDrawsPerFrame)
             throw new InvalidOperationException(
@@ -325,23 +375,36 @@ public sealed class PbrRenderer : IDisposable
 
         UploadFrameUniforms(scene);
 
-        _commandWriter.ResetWrittenCount();
-        var encoder = new RenderCommandEncoder(_commandWriter);
-        _passes[ShadowMainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
+        // Build the pass list: one depth-only pass per shadow layer (rendering into that layer's
+        // D2 view) followed by the main color pass. WGSL has no layered single-pass rendering, so
+        // each layer is a separate pass — the cost is per-pass boundary overhead, not extra shading.
+        var mainPassIndex = _shadowViews.Count;
+        if (_passes.Length < mainPassIndex + 1) _passes = new RenderPassDesc[mainPassIndex + 1];
+        for (var k = 0; k < _shadowViews.Count; k++)
+        {
+            _passes[k] = new RenderPassDesc(colorAttachmentCount: 0)
+            {
+                Depth = new DepthAttachmentDesc(
+                    _shadowArray, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f,
+                    DepthView: _shadowLayerViews[_shadowViews[k].Layer]),
+            };
+        }
+        _passes[mainPassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
+        {
+            Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
+        };
+        _passes[mainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
             RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor);
 
-        // Pass 0: fill the shadow atlas (depth-only). Skipped entirely when no light casts — no
-        // light samples an unfilled atlas (each carries base tile -1), so the clear is unnecessary.
-        var shadowDraws = 0;
-        if (_shadowViews.Count > 0)
-        {
-            encoder.BeginPass(0);
-            EncodeShadowAtlas(ref encoder, ref shadowDraws);
-            encoder.EndPass();
-        }
+        _commandWriter.ResetWrittenCount();
+        var encoder = new RenderCommandEncoder(_commandWriter);
 
-        // Pass 1: main color, sampling the atlas.
-        encoder.BeginPass(ShadowMainPassIndex);
+        // One depth-only pass per shadow layer: fill that layer with every opaque caster's depth.
+        var shadowDraws = 0;
+        EncodeShadowLayers(ref encoder, ref shadowDraws);
+
+        // Main color pass, sampling the shadow array.
+        encoder.BeginPass(mainPassIndex);
         var drawIndex = 0;
         EncodeBucket(ref encoder, _opaque, BlendMode.Opaque, viewProjection, ref drawIndex);
         EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
@@ -352,21 +415,21 @@ public sealed class PbrRenderer : IDisposable
         if (drawIndex > 0)
             _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, drawIndex * (int)_drawStride));
 
-        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes);
+        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes.AsMemory(0, mainPassIndex + 1));
         _renderer.Submit(in stream);
     }
 
-    // Depth-only atlas fill: for each planned shadow view, restrict the viewport to its tile and
-    // draw every opaque caster with lightMvp = model × faceViewProjection (mirrors the main
-    // Mvp = model × viewProjection so the shadow shader matches pbr.slang).
-    private void EncodeShadowAtlas(ref RenderCommandEncoder encoder, ref int drawIndex)
+    // Per-layer depth-only fill: each shadow view is its own render pass writing one full array
+    // layer. Every opaque caster is drawn with lightMvp = model × faceViewProjection (mirrors the
+    // main Mvp = model × viewProjection so the shadow shader matches pbr.slang). No viewport math —
+    // each layer owns the whole [0,1] and the default viewport covers it.
+    private void EncodeShadowLayers(ref RenderCommandEncoder encoder, ref int drawIndex)
     {
-        encoder.SetPipeline(_shadowPipeline);
-        foreach (var (_, _, tile, vp) in _shadowViews)
+        for (var k = 0; k < _shadowViews.Count; k++)
         {
-            var col = (uint)(tile % ShadowAtlasColumns) * ShadowTileSize;
-            var row = (uint)(tile / ShadowAtlasColumns) * ShadowTileSize;
-            encoder.SetViewport(col, row, ShadowTileSize, ShadowTileSize);
+            var vp = _shadowViews[k].Vp;
+            encoder.BeginPass(k);
+            encoder.SetPipeline(_shadowPipeline);
             foreach (var (instance, primitive, _) in _opaque)
             {
                 // Budget guaranteed by the up-front shadowDrawTotal check in RenderFrame.
@@ -378,6 +441,7 @@ public sealed class PbrRenderer : IDisposable
                 encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
                 drawIndex++;
             }
+            encoder.EndPass();
         }
     }
 
@@ -517,7 +581,7 @@ public sealed class PbrRenderer : IDisposable
             AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights)),
             AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f),
             AaSettings = new Vector4(0f, _specularAaVariance, _specularAaClamp, 0f),
-            ShadowSettings = new Vector4(1f / ShadowAtlasSize, 0f, 0f, 0f),
+            ShadowSettings = new Vector4(1f / ShadowMapSize, 0f, 0f, 0f),
         };
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
@@ -529,15 +593,16 @@ public sealed class PbrRenderer : IDisposable
         {
             frame.SceneLightShadowMatrices[lightIndex * 6 + face] = vp;
         }
-        // Per-light atlas params (columns, face count, tile scale, soft flag) + base tile + strength.
-        const float tileScale = ShadowTileSize / (float)ShadowAtlasSize; // 0.25
+        // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
+        // face count (shadowAtlas.y) and soft-shadow flag (shadowAtlas.w). shadowAtlas.x/.z are
+        // unused in the array layout (no atlas columns / tile scale).
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
-            if (_shadowBaseTile[i] < 0) continue;
+            if (_shadowBaseLayer[i] < 0) continue;
             var light = frame.Lights[i];
-            light.SpotAngles.Z = _shadowBaseTile[i];
+            light.SpotAngles.Z = _shadowBaseLayer[i];
             light.SpotAngles.W = Math.Clamp(scene.Lights[i].ShadowStrength, 0f, 1f);
-            light.ShadowAtlas = new Vector4(ShadowAtlasColumns, _shadowFaceCount[i], tileScale, scene.Lights[i].SoftShadows ? 1f : 0f);
+            light.ShadowAtlas = new Vector4(0f, _shadowFaceCount[i], 0f, scene.Lights[i].SoftShadows ? 1f : 0f);
             frame.Lights[i] = light;
         }
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
@@ -593,7 +658,7 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyBindGroup(_shadowDrawGroup);
         _renderer.DestroyBuffer(_shadowDrawRing);
         _renderer.DestroySampler(_shadowSampler);
-        _renderer.DestroyTexture(_shadowAtlas);
+        DestroyShadowArray();
         _renderer.DestroyBindGroup(_drawGroup);
         _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);

@@ -102,15 +102,15 @@ internal static class ShaderProgramLoader
 
             // slangc reflection cannot distinguish a shadow-map depth texture / comparison sampler
             // from ordinary ones (SamplerComparisonState reflects as plain "samplerState", and the
-            // depth Texture2D<float> as "texture2D float"). The generated WGSL, however, declares
-            // them as texture_depth_2d / sampler_comparison (the shadowTexture type is patched at
-            // build time — see Slang.targets). The bind-group LAYOUT must match the shader, so
-            // override by the well-known names.
+            // depth Texture2DArray<float> as a plain "texture2DArray float"). The generated WGSL,
+            // however, declares them as texture_depth_2d_array / sampler_comparison (the shadowTexture
+            // type is patched at build time — see Slang.targets). The bind-group LAYOUT must match the
+            // shader, so override by the well-known names.
             var entry = type.Kind switch
             {
                 "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks),
-                "resource" when type.BaseShape == "texture2D" && p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTexture),
+                "resource" when p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTextureArray),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
