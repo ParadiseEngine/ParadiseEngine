@@ -17,24 +17,33 @@ namespace Paradise.Rendering.Pbr;
 //   PbrMath.NormalMatrix.
 
 /// <summary>Mirror of pbr.slang <c>SceneLight</c> (64 B, array stride 64).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 64)]
+[StructLayout(LayoutKind.Explicit, Size = 80)]
 public struct SceneLightGpu
 {
     [FieldOffset(0)] public Vector4 PositionAndType;    // xyz position, w: 0 dir / 1 point / 2 spot
     [FieldOffset(16)] public Vector4 DirectionAndRange; // xyz surface→light dir (directional), w range
     [FieldOffset(32)] public Vector4 ColorAndIntensity; // rgb linear color, w intensity
-    [FieldOffset(48)] public Vector4 SpotAngles;        // x outer°, y inner°, zw reserved
+    [FieldOffset(48)] public Vector4 SpotAngles;        // x outer°, y inner°, z base shadow tile (<0 none), w strength
+    [FieldOffset(64)] public Vector4 ShadowAtlas;       // x columns, y face count, z tile scale, w soft flag
 }
 
-/// <summary>Inline storage for the 8 scene lights (sequential — stride matches WGSL's 64).</summary>
+/// <summary>Inline storage for the 8 scene lights (sequential — stride matches WGSL's 80).</summary>
 [InlineArray(FrameUniformsGpu.MaxSceneLights)]
 public struct SceneLightArray
 {
     private SceneLightGpu _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (592 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 592)]
+/// <summary>Inline storage for the per-light, per-cube-face shadow view-projection matrices
+/// (<see cref="FrameUniformsGpu.MaxSceneLights"/> × 6). Stride matches WGSL's 64-byte mat4.</summary>
+[InlineArray(FrameUniformsGpu.MaxSceneLights * 6)]
+public struct ShadowMatrixArray
+{
+    private Matrix4x4 _element0;
+}
+
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (3808 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 3808)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 8;
@@ -44,7 +53,9 @@ public struct FrameUniformsGpu
     [FieldOffset(32)] public Vector4 AmbientEquator; // rgb equator, w scene light count
     [FieldOffset(48)] public Vector4 AmbientGround;  // rgb ground, w flat-ambient flag
     [FieldOffset(64)] public Vector4 AaSettings;     // y specular-AA variance, z clamp
-    [FieldOffset(80)] public SceneLightArray Lights;
+    [FieldOffset(80)] public SceneLightArray Lights;           // 8 × 80 = 640 B
+    [FieldOffset(720)] public Vector4 ShadowSettings;          // x 1/atlasSize (texel), yzw unused
+    [FieldOffset(736)] public ShadowMatrixArray SceneLightShadowMatrices; // 48 × 64 = 3072 B
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
@@ -56,6 +67,15 @@ public struct DrawUniformsGpu
     [FieldOffset(64)] public Matrix4x4 Model;
     [FieldOffset(128)] public Matrix4x4 NormalMatrix;
     [FieldOffset(192)] public Vector4 Highlight; // x weight, yzw unused
+}
+
+/// <summary>Mirror of shadow.slang <c>ShadowDrawUniforms</c>: the combined light-VP × model
+/// matrix for one shadow caster. Written into the shadow draw ring at the device's dynamic-offset
+/// stride (≥256), like <see cref="DrawUniformsGpu"/>.</summary>
+[StructLayout(LayoutKind.Explicit, Size = 64)]
+public struct ShadowDrawUniformsGpu
+{
+    [FieldOffset(0)] public Matrix4x4 LightMvp;
 }
 
 /// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>

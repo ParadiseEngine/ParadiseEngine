@@ -27,6 +27,7 @@ using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSampler = WebGpuSharp.Sampler;
 using WgSamplerDescriptor = WebGpuSharp.SamplerDescriptor;
+using WgCompareFunction = WebGpuSharp.CompareFunction;
 using WgBindGroup = WebGpuSharp.BindGroup;
 using WgBindGroupDescriptor = WebGpuSharp.BindGroupDescriptor;
 using WgBindGroupEntry = WebGpuSharp.BindGroupEntry;
@@ -280,6 +281,9 @@ internal sealed class WebGpuDevice : IDisposable
             MinFilter = FormatConversions.ToWgpu(desc.MinFilter),
             MipmapFilter = FormatConversions.ToWgpuMipmap(desc.MipmapFilter),
             MaxAnisotropy = Math.Max((ushort)1, desc.MaxAnisotropy),
+            // A non-Undefined compare turns this into a comparison sampler (sampler_comparison),
+            // consumed by shadow-map textureSampleCompareLevel.
+            Compare = desc.Compare is { } compare ? FormatConversions.ToWgpu(compare) : WgCompareFunction.Undefined,
         };
         var sampler = Device.CreateSampler(ref sd)
             ?? throw new InvalidOperationException("Sampler creation returned null.");
@@ -401,6 +405,16 @@ internal sealed class WebGpuDevice : IDisposable
                         Multisampled = false,
                     };
                     break;
+                case BindingResourceType.DepthTexture:
+                    // A depth texture read as texture_depth_2d (shadow maps). SampleType must be
+                    // Depth to pair with a comparison sampler.
+                    entry.Texture = new WgTextureBindingLayout
+                    {
+                        SampleType = WgTextureSampleType.Depth,
+                        ViewDimension = WgTextureViewDimension.D2,
+                        Multisampled = false,
+                    };
+                    break;
                 case BindingResourceType.Sampler:
                     entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Filtering };
                     break;
@@ -486,7 +500,9 @@ internal sealed class WebGpuDevice : IDisposable
     public WgRenderPipeline BuildNativePipeline(in PipelineDesc desc)
     {
         var vertex = ResolveShader(desc.VertexShader);
-        var fragment = ResolveShader(desc.FragmentShader);
+        // Depth-only pipelines (e.g. the shadow caster) carry no fragment shader → no color target.
+        var hasFragment = desc.FragmentShader.IsValid;
+        var fragment = hasFragment ? ResolveShader(desc.FragmentShader) : default;
 
         var vertexLayouts = new WgVertexBufferLayout[desc.VertexLayouts.Length];
         var attributePool = new WgVertexAttribute[desc.VertexLayouts.Span.SumAttributes()];
@@ -565,13 +581,18 @@ internal sealed class WebGpuDevice : IDisposable
                     : WebGpuSharp.IndexFormat.Undefined,
             },
             Multisample = new WgMultisampleState { Count = 1, Mask = uint.MaxValue },
-            Fragment = new WgFragmentState
+        };
+        if (hasFragment)
+        {
+            pipelineDesc.Fragment = new WgFragmentState
             {
-                Module = fragment,
+                Module = fragment!, // non-null when hasFragment
                 EntryPoint = string.IsNullOrEmpty(desc.FragmentEntryPoint) ? "fs_main" : desc.FragmentEntryPoint,
                 Targets = new WebGpuSharp.WebGpuManagedSpan<WgColorTargetState>(colorTargets),
-            },
-        };
+            };
+        }
+        // else: depth-only pipeline (no fragment stage, no color targets) — valid in WebGPU when a
+        // depth-stencil state is present (set below).
 
         if (desc.DepthStencilFormat is { } depthFormat)
         {

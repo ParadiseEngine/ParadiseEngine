@@ -398,6 +398,51 @@ public sealed class WebGpuRenderer : IDisposable
         }
     }
 
+    /// <summary>Build a DEPTH-ONLY pipeline (vertex + depth-stencil, no fragment stage / no color
+    /// target) — the shadow-caster path. <paramref name="vertexLayouts"/> overrides the program's
+    /// reflected vertex layout so the caster can read position from the full interleaved mesh
+    /// buffer (its shadow shader declares only location 0).</summary>
+    public PipelineHandle CreateDepthOnlyPipeline(
+        in ShaderProgramDesc program,
+        TextureFormat depthStencilFormat,
+        ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
+        CompareFunction depthCompare = CompareFunction.Less)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ShaderModuleDesc? vsModule = null;
+        foreach (var m in program.Modules)
+            if ((m.Stage & ShaderStage.Vertex) != 0) vsModule = m;
+        if (vsModule is null) throw new InvalidOperationException("Depth-only program has no vertex module.");
+
+        ShaderHandle vsHandle = default;
+        try
+        {
+            vsHandle = _device.CreateShaderModule(vsModule);
+            var pipelineDesc = new PipelineDesc
+            {
+                Name = "DepthOnlyPipeline",
+                VertexShader = vsHandle,
+                VertexEntryPoint = vsModule.EntryPoint,
+                FragmentShader = default,          // no fragment → depth-only
+                VertexLayouts = vertexLayouts,
+                Topology = PrimitiveTopology.TriangleList,
+                StripIndexFormat = IndexFormat.Uint16,
+                ColorFormat = depthStencilFormat,  // ignored (no color target)
+                DepthStencilFormat = depthStencilFormat,
+                DepthWriteEnabled = true,
+                DepthCompare = depthCompare,
+                Blend = BlendMode.Opaque,
+                Layout = program.Layout,
+            };
+            return CreatePipeline(in pipelineDesc);
+        }
+        finally
+        {
+            if (vsHandle.IsValid) DestroyShader(vsHandle);
+        }
+    }
+
     public void DestroyPipeline(PipelineHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -528,6 +573,13 @@ public sealed class WebGpuRenderer : IDisposable
                         pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
                         break;
                     }
+                    case RenderCommandKind.SetViewport:
+                    {
+                        var pass = RequireActivePass(activePass);
+                        var v = cmd.SetViewport;
+                        pass.SetViewport((uint)v.X, (uint)v.Y, (uint)v.Width, (uint)v.Height, v.MinDepth, v.MaxDepth);
+                        break;
+                    }
                     default:
                         throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
                 }
@@ -552,42 +604,51 @@ public sealed class WebGpuRenderer : IDisposable
 
     private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
     {
-        // A single color attachment targeting the backbuffer view, plus an optional depth
-        // attachment resolved from its TextureHandle. Multi-attachment / offscreen color targets
-        // are still deferred (the ColorAttachments[i].View slot stays reserved for them).
+        // Either ZERO color attachments (a depth-only pass, e.g. the shadow-atlas fill — its depth
+        // attachment is an offscreen texture resolved from its handle), or a SINGLE color attachment
+        // targeting the backbuffer view. Multi-attachment / offscreen color targets are still
+        // deferred (the ColorAttachments[i].View slot stays reserved for them).
         var colorCount = pass.ColorAttachmentCount;
-        if (colorCount != 1)
+        if (colorCount > 1)
             throw new NotSupportedException(
-                $"Exactly one color attachment per pass is supported (got {colorCount}). " +
+                $"At most one color attachment per pass is supported (got {colorCount}). " +
                 "Multi-attachment + non-backbuffer color rendering is deferred to offscreen-target work.");
 
-        var src = pass.Colors.Slot0;
-        var colors = new WgRenderPassColorAttachment[1];
-        // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
-        // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
-        // surfaces as a build break here rather than silently routing through Clear/Discard.
-        colors[0] = new WgRenderPassColorAttachment
+        WgRenderPassColorAttachment[] colors;
+        if (colorCount == 0)
         {
-            View = backbuffer,
-            LoadOp = src.Load switch
+            colors = Array.Empty<WgRenderPassColorAttachment>();
+        }
+        else
+        {
+            var src = pass.Colors.Slot0;
+            colors = new WgRenderPassColorAttachment[1];
+            // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
+            // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
+            // surfaces as a build break here rather than silently routing through Clear/Discard.
+            colors[0] = new WgRenderPassColorAttachment
             {
-                LoadOp.Load => WgLoadOp.Load,
-                LoadOp.Clear => WgLoadOp.Clear,
-                _ => throw new NotSupportedException($"LoadOp '{src.Load}' has no WebGPU mapping."),
-            },
-            StoreOp = src.Store switch
-            {
-                StoreOp.Store => WgStoreOp.Store,
-                StoreOp.Discard => WgStoreOp.Discard,
-                _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
-            },
-            ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
-            DepthSlice = null,
-        };
+                View = backbuffer,
+                LoadOp = src.Load switch
+                {
+                    LoadOp.Load => WgLoadOp.Load,
+                    LoadOp.Clear => WgLoadOp.Clear,
+                    _ => throw new NotSupportedException($"LoadOp '{src.Load}' has no WebGPU mapping."),
+                },
+                StoreOp = src.Store switch
+                {
+                    StoreOp.Store => WgStoreOp.Store,
+                    StoreOp.Discard => WgStoreOp.Discard,
+                    _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
+                },
+                ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
+                DepthSlice = null,
+            };
+        }
         var desc = new WgRenderPassDescriptor
         {
             ColorAttachments = colors,
-            Label = "ParadiseRenderPass",
+            Label = colorCount == 0 ? "ParadiseDepthPass" : "ParadiseRenderPass",
         };
         if (pass.Depth is { } depth)
         {
