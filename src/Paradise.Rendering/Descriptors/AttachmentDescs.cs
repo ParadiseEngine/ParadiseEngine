@@ -21,4 +21,7 @@ public readonly record struct DepthAttachmentDesc(
     TextureHandle DepthTexture,
     LoadOp DepthLoad,
     StoreOp DepthStore,
-    float ClearDepth);
+    float ClearDepth,
+    // When valid, render into this specific view (e.g. one layer of a depth array) instead of the
+    // texture's default view. DepthTexture is still used to identify the resource.
+    TextureViewHandle DepthView = default);

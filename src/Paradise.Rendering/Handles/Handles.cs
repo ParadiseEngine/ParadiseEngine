@@ -23,6 +23,15 @@ public readonly record struct TextureHandle(uint Index, uint Generation)
     public static readonly TextureHandle Invalid = default;
 }
 
+/// <summary>A view into a <see cref="TextureHandle"/> — a specific dimension and array-layer range
+/// (e.g. one layer of a shadow array as a 2D render target, or the whole array as a 2D-array
+/// sampled texture).</summary>
+public readonly record struct TextureViewHandle(uint Index, uint Generation)
+{
+    public bool IsValid => Generation != 0;
+    public static readonly TextureViewHandle Invalid = default;
+}
+
 /// <summary>Opaque handle to a backend GPU sampler. Default value is invalid.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly record struct SamplerHandle(uint Index, uint Generation)

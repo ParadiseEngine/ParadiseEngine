@@ -23,6 +23,7 @@ using WgPrimitiveState = WebGpuSharp.PrimitiveState;
 using WgMultisampleState = WebGpuSharp.MultisampleState;
 using WgTexture = WebGpuSharp.Texture;
 using WgTextureView = WebGpuSharp.TextureView;
+using WgTextureViewDescriptor = WebGpuSharp.TextureViewDescriptor;
 using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSampler = WebGpuSharp.Sampler;
@@ -68,9 +69,10 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgShaderModule> Shaders { get; } = new();
     public SlotTable<WgBuffer> Buffers { get; } = new();
     public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
-    // One default view per texture is enough for the M2 scope (sampled 2D + depth attachments);
-    // per-mip / per-layer views come with offscreen targets later.
+    // One default view per texture covers the common sampled-2D + depth-attachment cases; explicit
+    // TextureViews (below) provide per-layer / D2-array views for the shadow-map array.
     public SlotTable<TextureEntry> Textures { get; } = new();
+    public SlotTable<WgTextureView> TextureViews { get; } = new();
     public SlotTable<WgSampler> Samplers { get; } = new();
     public SlotTable<WgBindGroup> BindGroups { get; } = new();
 
@@ -266,6 +268,34 @@ internal sealed class WebGpuDevice : IDisposable
         return entry;
     }
 
+    public TextureViewHandle CreateTextureView(in TextureViewDesc desc)
+    {
+        var texture = ResolveTexture(desc.Texture).Texture;
+        var vd = new WgTextureViewDescriptor
+        {
+            Label = desc.Name ?? string.Empty,
+            Dimension = FormatConversions.ToWgpu(desc.Dimension),
+            BaseArrayLayer = desc.BaseArrayLayer,
+            ArrayLayerCount = Math.Max(1, desc.ArrayLayerCount),
+            BaseMipLevel = 0,
+            MipLevelCount = 1,
+        };
+        var view = texture.CreateView(in vd)
+            ?? throw new InvalidOperationException("Explicit texture view creation returned null.");
+        var (index, generation) = TextureViews.Add(view);
+        return new TextureViewHandle(index, generation);
+    }
+
+    public WgTextureView ResolveTextureView(TextureViewHandle h)
+    {
+        if (!TextureViews.TryGet(h.Index, h.Generation, out var view))
+            throw new StaleHandleException($"Texture view handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return view;
+    }
+
+    public bool DetachTextureView(TextureViewHandle h, out WgTextureView native) =>
+        TextureViews.Detach(h.Index, h.Generation, out native);
+
     public bool DetachTexture(TextureHandle h, out TextureEntry native) =>
         Textures.Detach(h.Index, h.Generation, out native);
 
@@ -327,6 +357,11 @@ internal sealed class WebGpuDevice : IDisposable
                 {
                     Binding = e.Binding,
                     Sampler = ResolveSampler(e.Sampler),
+                },
+                BindGroupEntryKind.TextureView => new WgBindGroupEntry
+                {
+                    Binding = e.Binding,
+                    TextureView = ResolveTextureView(e.View),
                 },
                 _ => throw new NotSupportedException($"Bind group entry kind '{e.Kind}' is not supported."),
             };
@@ -412,6 +447,16 @@ internal sealed class WebGpuDevice : IDisposable
                     {
                         SampleType = WgTextureSampleType.Depth,
                         ViewDimension = WgTextureViewDimension.D2,
+                        Multisampled = false,
+                    };
+                    break;
+                case BindingResourceType.DepthTextureArray:
+                    // A depth texture array read as texture_depth_2d_array (per-light shadow-map
+                    // array). Depth sample type + D2Array view; paired with a comparison sampler.
+                    entry.Texture = new WgTextureBindingLayout
+                    {
+                        SampleType = WgTextureSampleType.Depth,
+                        ViewDimension = WgTextureViewDimension.D2Array,
                         Multisampled = false,
                     };
                     break;

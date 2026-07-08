@@ -11,6 +11,7 @@ using WgAddressMode = WebGpuSharp.AddressMode;
 using WgFilterMode = WebGpuSharp.FilterMode;
 using WgMipmapFilterMode = WebGpuSharp.MipmapFilterMode;
 using WgCompareFunction = WebGpuSharp.CompareFunction;
+using WgTextureViewDimension = WebGpuSharp.TextureViewDimension;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -153,6 +154,14 @@ internal static class FormatConversions
         CompareFunction.GreaterEqual => WgCompareFunction.GreaterEqual,
         CompareFunction.Always => WgCompareFunction.Always,
         _ => throw new NotSupportedException($"Compare function '{f}' has no WebGPU mapping."),
+    };
+
+    public static WgTextureViewDimension ToWgpu(TextureViewDimension d) => d switch
+    {
+        TextureViewDimension.D2 => WgTextureViewDimension.D2,
+        TextureViewDimension.D2Array => WgTextureViewDimension.D2Array,
+        TextureViewDimension.Cube => WgTextureViewDimension.Cube,
+        _ => throw new NotSupportedException($"Texture view dimension '{d}' has no WebGPU mapping."),
     };
 
     public static TextureFormat FromWgpu(WgTextureFormat f) => f switch

@@ -86,6 +86,14 @@ public enum TextureUsage : uint
 }
 
 /// <summary>Texture dimensionality.</summary>
+/// <summary>How a texture is viewed when bound/attached (independent of its storage dimension).</summary>
+public enum TextureViewDimension : byte
+{
+    D2 = 0,
+    D2Array,
+    Cube,
+}
+
 public enum TextureDimension : byte
 {
     D1 = 0,
@@ -192,6 +200,9 @@ public enum BindingResourceType : byte
     // A depth texture sampled as a WGSL texture_depth_2d — required for shadow maps read through a
     // ComparisonSampler (textureSampleCompareLevel). Backend maps it to SampleType=Depth.
     DepthTexture,
+    // A depth texture ARRAY (texture_depth_2d_array) — the per-light shadow-map array. SampleType
+    // Depth, ViewDimension D2Array.
+    DepthTextureArray,
     MultisampledTexture,
     StorageTexture,
 }

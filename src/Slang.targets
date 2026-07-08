@@ -144,12 +144,13 @@
 
   <!--
     Build-time WGSL fixup for shadow maps. slangc (v2026.7 .. v2026.12.2) emits the shadow map as
-    `texture_2d<f32>` even though it is sampled with textureSampleCompareLevel, which WGSL permits
-    only on `texture_depth_2d` (Slang issue #6942 — closed, but still regressed for the standard
-    Texture2D<float> + SamplerComparisonState pattern). We patch the single `shadowTexture`
-    declaration here, at build time, so the runtime never performs WGSL surgery. No-op for shaders
-    without a shadow map; the guardrail fails the build if comparison sampling is present but the
-    depth-texture declaration is missing (e.g. a renamed shadow texture the regex didn't catch).
+    `texture_2d_array<f32>` even though it is sampled with textureSampleCompareLevel, which WGSL
+    permits only on `texture_depth_2d_array` (Slang issue #6942 — closed, but still regressed for the
+    standard Texture2DArray<float> + SamplerComparisonState pattern). We patch the single
+    `shadowTexture` declaration here, at build time, so the runtime never performs WGSL surgery.
+    No-op for shaders without a shadow map; the guardrail fails the build if comparison sampling is
+    present but the depth-texture declaration is missing (e.g. a renamed shadow texture the regex
+    didn't catch).
   -->
   <UsingTask TaskName="PatchShadowDepthTextureWgsl"
              TaskFactory="RoslynCodeTaskFactory"
@@ -165,10 +166,10 @@
         {
             var code = File.ReadAllText(WgslFile);
             var patched = Regex.Replace(code,
-                @"(var\s+shadowTexture(?:_\d+)?\s*:\s*)texture_2d<f32>",
-                "$1texture_depth_2d");
-            if (patched.Contains("textureSampleCompareLevel(") && !patched.Contains("texture_depth_2d"))
-                throw new Exception("Shadow comparison sampling present but no texture_depth_2d shadow texture after patch: " + WgslFile);
+                @"(var\s+shadowTexture(?:_\d+)?\s*:\s*)texture_2d_array<f32>",
+                "$1texture_depth_2d_array");
+            if (patched.Contains("textureSampleCompareLevel(") && !patched.Contains("texture_depth_2d_array"))
+                throw new Exception("Shadow comparison sampling present but no texture_depth_2d_array shadow texture after patch: " + WgslFile);
             if (patched != code)
                 File.WriteAllText(WgslFile, patched);
         }
