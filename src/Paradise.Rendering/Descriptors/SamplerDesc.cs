@@ -10,4 +10,7 @@ public readonly record struct SamplerDesc(
     SamplerFilterMode MagFilter,
     SamplerFilterMode MinFilter,
     SamplerFilterMode MipmapFilter,
-    ushort MaxAnisotropy = 1);
+    ushort MaxAnisotropy = 1,
+    // Non-null makes this a COMPARISON sampler (WGSL sampler_comparison), used for shadow-map
+    // depth comparison via textureSampleCompareLevel. Typically LessEqual.
+    CompareFunction? Compare = null);

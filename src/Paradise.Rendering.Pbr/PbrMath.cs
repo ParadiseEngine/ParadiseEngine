@@ -20,6 +20,11 @@ public static class PbrMath
     public static Matrix4x4 LookAt(Vector3 eye, Vector3 target, Vector3 up) =>
         Matrix4x4.CreateLookAt(eye, target, up);
 
+    /// <summary>Right-handed off-center orthographic projection (WebGPU clip-Z [0,1]) — used to fit
+    /// a directional light's shadow frustum to an asymmetric scene box in light space.</summary>
+    public static Matrix4x4 OrthographicOffCenter(float left, float right, float bottom, float top, float near, float far) =>
+        Matrix4x4.CreateOrthographicOffCenter(left, right, bottom, top, near, far);
+
     public static Matrix4x4 ViewProjection(in Matrix4x4 view, in Matrix4x4 projection) =>
         view * projection;
 

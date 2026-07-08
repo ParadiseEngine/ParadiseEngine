@@ -49,4 +49,9 @@ public ref struct RenderCommandEncoder
 
     public void DrawIndexed(in DrawIndexedCommand cmd) =>
         Write(RenderCommand.FromDrawIndexed(cmd));
+
+    /// <summary>Restrict rasterization to a pixel-space rectangle of the current pass's attachment
+    /// (the shadow-atlas tile a light renders into). Depth range defaults to [0, 1].</summary>
+    public void SetViewport(float x, float y, float width, float height, float minDepth = 0f, float maxDepth = 1f) =>
+        Write(RenderCommand.FromSetViewport(x, y, width, height, minDepth, maxDepth));
 }

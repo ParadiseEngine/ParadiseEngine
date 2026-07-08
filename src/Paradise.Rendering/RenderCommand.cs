@@ -13,7 +13,13 @@ public enum RenderCommandKind : byte
     SetBindGroup,
     Draw,
     DrawIndexed,
+    SetViewport,
 }
+
+/// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
+/// rectangle (and depth range) the rasterizer maps NDC into — used to render each shadow-casting
+/// light into its atlas tile. 24 bytes ≤ the 40-byte payload budget.</summary>
+public readonly record struct SetViewportPayload(float X, float Y, float Width, float Height, float MinDepth, float MaxDepth);
 
 /// <summary>Payload for <see cref="RenderCommandKind.BeginPass"/>: index into
 /// <see cref="RenderCommandStream.Passes"/>.</summary>
@@ -56,6 +62,7 @@ public readonly struct RenderCommand
     [FieldOffset(8)] public readonly SetBindGroupPayload SetBindGroup;
     [FieldOffset(8)] public readonly DrawCommand Draw;
     [FieldOffset(8)] public readonly DrawIndexedCommand DrawIndexed;
+    [FieldOffset(8)] public readonly SetViewportPayload SetViewport;
 
     private RenderCommand(RenderCommandKind kind, BeginPassPayload p) : this()
     {
@@ -99,6 +106,12 @@ public readonly struct RenderCommand
         DrawIndexed = p;
     }
 
+    private RenderCommand(RenderCommandKind kind, SetViewportPayload p) : this()
+    {
+        Kind = kind;
+        SetViewport = p;
+    }
+
     private RenderCommand(RenderCommandKind kind) : this()
     {
         Kind = kind;
@@ -130,6 +143,9 @@ public readonly struct RenderCommand
 
     public static RenderCommand FromDrawIndexed(in DrawIndexedCommand cmd) =>
         new(RenderCommandKind.DrawIndexed, cmd);
+
+    public static RenderCommand FromSetViewport(float x, float y, float width, float height, float minDepth, float maxDepth) =>
+        new(RenderCommandKind.SetViewport, new SetViewportPayload(x, y, width, height, minDepth, maxDepth));
 }
 
 /// <summary>Append-only sequence of <see cref="RenderCommand"/>s plus a side table of

@@ -143,6 +143,50 @@
   </Target>
 
   <!--
+    Build-time WGSL fixup for shadow maps. slangc (v2026.7 .. v2026.12.2) emits the shadow map as
+    `texture_2d<f32>` even though it is sampled with textureSampleCompareLevel, which WGSL permits
+    only on `texture_depth_2d` (Slang issue #6942 — closed, but still regressed for the standard
+    Texture2D<float> + SamplerComparisonState pattern). We patch the single `shadowTexture`
+    declaration here, at build time, so the runtime never performs WGSL surgery. No-op for shaders
+    without a shadow map; the guardrail fails the build if comparison sampling is present but the
+    depth-texture declaration is missing (e.g. a renamed shadow texture the regex didn't catch).
+  -->
+  <UsingTask TaskName="PatchShadowDepthTextureWgsl"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <WgslFile ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        if (File.Exists(WgslFile))
+        {
+            var code = File.ReadAllText(WgslFile);
+            var patched = Regex.Replace(code,
+                @"(var\s+shadowTexture(?:_\d+)?\s*:\s*)texture_2d<f32>",
+                "$1texture_depth_2d");
+            if (patched.Contains("textureSampleCompareLevel(") && !patched.Contains("texture_depth_2d"))
+                throw new Exception("Shadow comparison sampling present but no texture_depth_2d shadow texture after patch: " + WgslFile);
+            if (patched != code)
+                File.WriteAllText(WgslFile, patched);
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="_PatchShadowDepthTextureWgsl"
+          DependsOnTargets="CompileSlangShaders"
+          BeforeTargets="_AddSlangEmbeddedResources"
+          Condition="@(SlangShader-&gt;Count()) &gt; 0">
+    <PropertyGroup>
+      <_SlangOutputDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)shaders'))</_SlangOutputDir>
+    </PropertyGroup>
+    <PatchShadowDepthTextureWgsl WgslFile="$(_SlangOutputDir)/%(SlangShader.Filename).wgsl" />
+  </Target>
+
+  <!--
     Promote the compiled outputs to <EmbeddedResource>. Runs ahead of PrepareResourceNames so the
     items are visible to the resource embedding pipeline. The Inputs/Outputs gate on
     CompileSlangShaders keeps slangc itself incremental; this target is cheap on every build.

@@ -25,9 +25,9 @@ public class UniformLayoutTests
     public async Task struct_sizes_match_wgsl_totals()
     {
         await Assert.That(Unsafe.SizeOf<DrawUniformsGpu>()).IsEqualTo(208);
-        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(592);
+        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(3808);
         await Assert.That(Unsafe.SizeOf<MaterialUniformsGpu>()).IsEqualTo(80);
-        await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(64);
+        await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(80);
     }
 
     [Test]
@@ -63,7 +63,7 @@ public class UniformLayoutTests
         var program = LoadProgram();
         await Assert.That(program.Layout.Groups.Length).IsEqualTo(3);
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
-        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(1); // frame UBO (shadow slots freed)
+        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(3); // frame UBO + shadow depth texture + comparison sampler
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
     }
 
@@ -127,6 +127,6 @@ public class UniformLayoutTests
         await Assert.That(gpu.PositionAndType).IsEqualTo(new Vector4(1f, 2f, 3f, 2f));
         await Assert.That(gpu.DirectionAndRange).IsEqualTo(new Vector4(0f, -1f, 0f, 12f));
         await Assert.That(gpu.ColorAndIntensity).IsEqualTo(new Vector4(0.5f, 0.25f, 0.125f, 4f));
-        await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, 0f, 0f));
+        await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, -1f, 0f)); // z=-1 → no shadow (renderer assigns tiles)
     }
 }

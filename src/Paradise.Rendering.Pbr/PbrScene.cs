@@ -23,12 +23,20 @@ public sealed record PbrLight
     public float SpotOuterDegrees { get; init; } = 45f;
     public float SpotInnerDegrees { get; init; }
 
+    // Shadow intent. The atlas tile assignment + light-space matrices are computed by the renderer
+    // each frame (it owns the atlas), so ToGpu leaves the shadow slots "off" (base tile -1) and the
+    // renderer overrides SpotAngles.zw + ShadowAtlas for lights that actually get a tile.
+    public bool CastsShadows { get; init; }
+    public float ShadowStrength { get; init; } = 1f;
+    public bool SoftShadows { get; init; }
+
     public SceneLightGpu ToGpu() => new()
     {
         PositionAndType = new Vector4(Position, (float)Type),
         DirectionAndRange = new Vector4(Direction, Range),
         ColorAndIntensity = new Vector4(Color, Intensity),
-        SpotAngles = new Vector4(SpotOuterDegrees, SpotInnerDegrees, 0f, 0f),
+        SpotAngles = new Vector4(SpotOuterDegrees, SpotInnerDegrees, -1f, 0f), // z=-1 → no shadow
+        ShadowAtlas = Vector4.Zero,
     };
 }
 
@@ -59,7 +67,11 @@ public sealed record PbrPrimitive(
     uint IndexCount,
     ulong VertexByteLength,
     ulong IndexByteLength,
-    int MaterialId);
+    int MaterialId,
+    // Object-space AABB (for fitting the directional shadow frustum). Default (zero) is treated as
+    // "unknown" and contributes only the instance origin to the world bounds.
+    Vector3 LocalMin = default,
+    Vector3 LocalMax = default);
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);

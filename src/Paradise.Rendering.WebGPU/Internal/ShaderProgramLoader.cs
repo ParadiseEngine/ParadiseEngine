@@ -13,6 +13,12 @@ namespace Paradise.Rendering.WebGPU.Internal;
 /// absorbs any Slang reflection-JSON schema drift.</summary>
 internal static class ShaderProgramLoader
 {
+    // Well-known shader parameter names whose bind-group layout must be forced to the shadow-map
+    // depth-texture / comparison-sampler kinds (slangc reflection can't express them). Must match
+    // the declarations in pbr.slang and the Slang.targets WGSL depth-texture patch.
+    private const string ShadowTextureName = "shadowTexture";
+    private const string ShadowSamplerName = "shadowSampler";
+
     /// <summary>Load <paramref name="logicalNamePrefix"/>.wgsl + .reflection.json from
     /// <paramref name="assembly"/>. Returns a <see cref="ShaderProgramDesc"/> with one
     /// <see cref="ShaderModuleDesc"/> per Slang entry point (each carrying the same WGSL blob; the
@@ -94,11 +100,21 @@ internal static class ShaderProgramLoader
             var type = p.Type ?? throw new InvalidOperationException(
                 $"Global shader parameter '{p.Name ?? "<unnamed>"}' has no type node.");
 
+            // slangc reflection cannot distinguish a shadow-map depth texture / comparison sampler
+            // from ordinary ones (SamplerComparisonState reflects as plain "samplerState", and the
+            // depth Texture2D<float> as "texture2D float"). The generated WGSL, however, declares
+            // them as texture_depth_2d / sampler_comparison (the shadowTexture type is patched at
+            // build time — see Slang.targets). The bind-group LAYOUT must match the shader, so
+            // override by the well-known names.
             var entry = type.Kind switch
             {
                 "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks),
+                "resource" when type.BaseShape == "texture2D" && p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTexture),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
+                "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.ComparisonSampler),
                 "samplerState" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.Sampler),
                 _ => throw new NotSupportedException(

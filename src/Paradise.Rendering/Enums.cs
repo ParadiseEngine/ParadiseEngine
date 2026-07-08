@@ -189,6 +189,9 @@ public enum BindingResourceType : byte
     Sampler,
     ComparisonSampler,
     SampledTexture,
+    // A depth texture sampled as a WGSL texture_depth_2d — required for shadow maps read through a
+    // ComparisonSampler (textureSampleCompareLevel). Backend maps it to SampleType=Depth.
+    DepthTexture,
     MultisampledTexture,
     StorageTexture,
 }

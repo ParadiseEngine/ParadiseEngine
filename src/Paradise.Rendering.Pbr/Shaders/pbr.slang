@@ -19,7 +19,8 @@ struct SceneLight
     float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
     float4 directionAndRange;     // xyz: direction from surface to light, w: range
     float4 colorAndIntensity;     // rgb: color, w: intensity
-    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, zw: reserved (future shadows)
+    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow tile (<0 = no shadow), w: shadow strength (0 = none)
+    float4 shadowAtlas;           // x: atlas columns, y: face count, z: tile scale (tile/atlas size), w: soft-shadow flag
 };
 
 struct DrawUniforms
@@ -38,6 +39,8 @@ struct FrameUniforms
     float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
     float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
     SceneLight sceneLights[MaxSceneLights];
+    float4   shadowSettings; // x: 1/atlasSize (texel size), yzw: unused
+    float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
 };
 
 struct MaterialUniforms
@@ -57,6 +60,17 @@ ConstantBuffer<DrawUniforms> draw;
 
 [[vk::binding(0, 1)]]
 ConstantBuffer<FrameUniforms> frame;
+
+// Shadow map atlas (a single Depth32Float texture) + comparison sampler, on the group-1 slots
+// reserved when shadow mapping was removed. NOTE: the generated WGSL declares shadowTexture as
+// texture_2d<f32>; a build-time patch (Slang.targets) rewrites it to texture_depth_2d, which WGSL
+// requires for textureSampleCompareLevel (Slang issue #6942). The loader forces the matching
+// bind-group layout (DepthTexture + ComparisonSampler) by these exact names.
+[[vk::binding(1, 1)]]
+Texture2D<float> shadowTexture;
+
+[[vk::binding(2, 1)]]
+SamplerComparisonState shadowSampler;
 
 [[vk::binding(0, 2)]]
 ConstantBuffer<MaterialUniforms> material;
@@ -225,8 +239,67 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     return saturate((cosTheta - outerCos) / denom);
 }
 
+static const float ShadowDepthBias = 0.00035;
+
+// Cube face index (point lights) from the dominant axis of the light→surface direction.
+int getPointShadowFace(float3 dir)
+{
+    float3 a = abs(dir);
+    if (a.x >= a.y && a.x >= a.z) return dir.x > 0.0 ? 0 : 1;
+    if (a.y >= a.z)               return dir.y > 0.0 ? 2 : 3;
+    return dir.z > 0.0 ? 4 : 5;
+}
+
+// Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shared
+// shadow atlas via the light's per-face view-projection and its atlas tile.
+float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 surfaceToLight)
+{
+    if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
+        return 1.0; // no shadow for this light
+
+    int face = 0;
+    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5) // point light
+        face = getPointShadowFace(-surfaceToLight);
+    if ((float)face >= light.shadowAtlas.y)
+        return 1.0;
+
+    int matrixIndex = lightIndex * 6 + face;
+    float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(worldPos, 1.0));
+    if (shadowPos.w <= 0.0)
+        return 1.0;
+    float3 ndc = shadowPos.xyz / shadowPos.w;
+    float2 localUv = ndc.xy * float2(0.5, -0.5) + 0.5; // NDC → UV, Y flipped (WebGPU clip-Z [0,1])
+    if (localUv.x < 0.0 || localUv.x > 1.0 || localUv.y < 0.0 || localUv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
+        return 1.0; // outside the light frustum → treat as lit
+
+    float tileIndex = light.spotAngles.z + (float)face;
+    float columns = max(light.shadowAtlas.x, 1.0);
+    float2 tileXy = float2(fmod(tileIndex, columns), floor(tileIndex / columns));
+    float tileScale = light.shadowAtlas.z;
+    float2 uv = tileXy * tileScale + localUv * tileScale;
+
+    // Clamp every (center + PCF) sample to this light's own tile box so a tap near the tile seam
+    // can't read a neighbouring light's atlas tile (tiles are packed edge-to-edge, no border).
+    float texel = frame.shadowSettings.x;
+    float2 tileMin = tileXy * tileScale;
+    float2 tileMax = tileMin + tileScale - texel;
+
+    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv, tileMin, tileMax), ndc.z - ShadowDepthBias);
+    if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF
+    {
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(-texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, -texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit *= 0.2;
+    }
+
+    return lerp(1.0 - light.spotAngles.w, 1.0, lit);
+}
+
 float3 evaluateDirectLight(
     SceneLight light,
+    int lightIndex,
     float3 worldPos,
     float3 N,
     float3 V,
@@ -264,7 +337,8 @@ float3 evaluateDirectLight(
     float3 kD = (1.0 - F) * (1.0 - metallic);
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
-    return (diffuse * UnityDiffuseIntensityScale + specular * UnitySpecularIntensityScale) * radiance * NdotL;
+    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, L);
+    return (diffuse * UnityDiffuseIntensityScale + specular * UnitySpecularIntensityScale) * radiance * NdotL * shadow;
 }
 
 // Widen roughness based on how fast the shading normal changes across the screen.
@@ -304,6 +378,7 @@ float4 shadePbr(FragmentInput input)
     {
         Lo += evaluateDirectLight(
             frame.sceneLights[i],
+            i,
             input.worldPos,
             N,
             V,

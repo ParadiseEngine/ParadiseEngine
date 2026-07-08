@@ -85,6 +85,77 @@ public class PbrRendererGpuTests
     }
 
     [Test]
+    public async Task shadow_casting_lights_of_every_type_render_without_validation_errors()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var groundMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.5f, 0.5f, 0.5f, 1f));
+            var occluderMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.3f, 0.2f, 1f));
+            var ground = new PbrMesh([pbr.UploadPrimitive(vertices, indices, groundMat)]);
+            var occluder = new PbrMesh([pbr.UploadPrimitive(vertices, indices, occluderMat)]);
+
+            var scene = new PbrScene
+            {
+                Camera = new PbrCamera
+                {
+                    View = PbrMath.LookAt(new Vector3(4f, 5f, 6f), Vector3.Zero, Vector3.UnitY),
+                    Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                    Position = new Vector3(4f, 5f, 6f),
+                },
+            };
+            // Directional (1 tile) + spot (1 tile) + point (6 cube-face tiles) = 8 atlas tiles, all
+            // casting shadows: exercises the tile allocator, spot/point light matrices, per-tile
+            // viewport, and the point-light cube-face selection in the shader.
+            scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Directional,
+                Direction = Vector3.Normalize(new Vector3(0.4f, 1f, 0.3f)),
+                Intensity = 1.2f,
+                CastsShadows = true,
+                ShadowStrength = 0.8f,
+                SoftShadows = true,
+            });
+            scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Spot,
+                Position = new Vector3(3f, 4f, 3f),
+                Direction = Vector3.Normalize(new Vector3(-3f, -4f, -3f)), // surface→light ≈ toward the lamp
+                Color = new Vector3(1f, 0.9f, 0.7f),
+                Intensity = 8f,
+                Range = 20f,
+                SpotOuterDegrees = 50f,
+                CastsShadows = true,
+                ShadowStrength = 0.7f,
+            });
+            scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Point,
+                Position = new Vector3(-2f, 3f, 2f),
+                Color = new Vector3(0.7f, 0.8f, 1f),
+                Intensity = 10f,
+                Range = 15f,
+                CastsShadows = true,
+                ShadowStrength = 0.6f,
+                SoftShadows = true,
+            });
+            scene.Instances.Add(new PbrInstance { Mesh = ground, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
+            scene.Instances.Add(new PbrInstance { Mesh = occluder, Model = Matrix4x4.CreateTranslation(0f, 1.5f, 0f) });
+
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+            // No WebGPU validation error across the 8-tile atlas fill + comparison sampling is the tripwire.
+            await Assert.That(pbr.PipelineVariantCountForTest).IsEqualTo(1);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task blend_material_builds_the_second_pipeline_variant()
     {
         var renderer = TryCreateHeadlessOrSkip();
