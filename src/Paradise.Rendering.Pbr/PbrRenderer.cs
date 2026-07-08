@@ -305,7 +305,7 @@ public sealed class PbrRenderer : IDisposable
                 var light = scene.Lights[i];
                 if (!light.CastsShadows) continue;
                 var faceCount = light.Type == PbrLightType.Point ? 6 : 1;
-                if (nextTile + faceCount > MaxShadowTiles) break; // atlas full
+                if (nextTile + faceCount > MaxShadowTiles) continue; // won't fit; a later smaller light still can
                 _shadowBaseTile[i] = nextTile;
                 _shadowFaceCount[i] = faceCount;
                 for (var f = 0; f < faceCount; f++)
@@ -316,6 +316,13 @@ public sealed class PbrRenderer : IDisposable
             }
         }
 
+        // Shadow ring budget (separate from the main ring): views × casters. Hard-fail up front —
+        // like the main-pass check — so a partial atlas (silently missing shadows) can't ship.
+        var shadowDrawTotal = _shadowViews.Count * _opaque.Count;
+        if (shadowDrawTotal > MaxDrawsPerFrame)
+            throw new InvalidOperationException(
+                $"{shadowDrawTotal} shadow-caster draws ({_shadowViews.Count} views × {_opaque.Count} casters) exceed the {MaxDrawsPerFrame}-slot shadow ring.");
+
         UploadFrameUniforms(scene);
 
         _commandWriter.ResetWrittenCount();
@@ -323,11 +330,15 @@ public sealed class PbrRenderer : IDisposable
         _passes[ShadowMainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
             RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor);
 
-        // Pass 0: fill the shadow atlas (depth-only). Clears depth to 1.0 even with no casters.
+        // Pass 0: fill the shadow atlas (depth-only). Skipped entirely when no light casts — no
+        // light samples an unfilled atlas (each carries base tile -1), so the clear is unnecessary.
         var shadowDraws = 0;
-        encoder.BeginPass(0);
-        if (_shadowViews.Count > 0) EncodeShadowAtlas(ref encoder, ref shadowDraws);
-        encoder.EndPass();
+        if (_shadowViews.Count > 0)
+        {
+            encoder.BeginPass(0);
+            EncodeShadowAtlas(ref encoder, ref shadowDraws);
+            encoder.EndPass();
+        }
 
         // Pass 1: main color, sampling the atlas.
         encoder.BeginPass(ShadowMainPassIndex);
@@ -358,7 +369,7 @@ public sealed class PbrRenderer : IDisposable
             encoder.SetViewport(col, row, ShadowTileSize, ShadowTileSize);
             foreach (var (instance, primitive, _) in _opaque)
             {
-                if (drawIndex >= MaxDrawsPerFrame) return; // shadow ring full
+                // Budget guaranteed by the up-front shadowDrawTotal check in RenderFrame.
                 var uniforms = new ShadowDrawUniformsGpu { LightMvp = instance.Model * vp };
                 MemoryMarshal.Write(_shadowStaging.AsSpan(drawIndex * (int)_drawStride), in uniforms);
                 encoder.SetBindGroup(0, _shadowDrawGroup, dynamicOffset: (uint)(drawIndex * _drawStride));

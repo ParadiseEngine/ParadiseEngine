@@ -278,14 +278,19 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float tileScale = light.shadowAtlas.z;
     float2 uv = tileXy * tileScale + localUv * tileScale;
 
-    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, uv, ndc.z - ShadowDepthBias);
+    // Clamp every (center + PCF) sample to this light's own tile box so a tap near the tile seam
+    // can't read a neighbouring light's atlas tile (tiles are packed edge-to-edge, no border).
+    float texel = frame.shadowSettings.x;
+    float2 tileMin = tileXy * tileScale;
+    float2 tileMax = tileMin + tileScale - texel;
+
+    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv, tileMin, tileMax), ndc.z - ShadowDepthBias);
     if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF
     {
-        float texel = frame.shadowSettings.x;
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, uv + float2(texel, 0.0), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, uv + float2(-texel, 0.0), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, uv + float2(0.0, texel), ndc.z - ShadowDepthBias);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, uv + float2(0.0, -texel), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(-texel, 0.0), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, clamp(uv + float2(0.0, -texel), tileMin, tileMax), ndc.z - ShadowDepthBias);
         lit *= 0.2;
     }
 
