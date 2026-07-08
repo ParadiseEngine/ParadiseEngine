@@ -581,7 +581,12 @@ public sealed class PbrRenderer : IDisposable
             AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights)),
             AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f),
             AaSettings = new Vector4(0f, _specularAaVariance, _specularAaClamp, 0f),
-            ShadowSettings = new Vector4(1f / ShadowMapSize, 0f, 0f, 0f),
+            // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
+            ShadowSettings = new Vector4(
+                1f / ShadowMapSize,
+                (float)scene.Tonemap.Mode,
+                scene.Tonemap.Exposure,
+                scene.Tonemap.White),
         };
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {

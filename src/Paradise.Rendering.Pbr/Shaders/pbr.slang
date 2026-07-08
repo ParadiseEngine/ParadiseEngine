@@ -10,9 +10,6 @@
 
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 8;
-static const float UnityDiffuseIntensityScale = 0.9;
-static const float UnitySpecularIntensityScale = 12.0;
-static const float UnitySpecularRoughnessScale = 1.35;
 
 struct SceneLight
 {
@@ -39,7 +36,7 @@ struct FrameUniforms
     float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
     float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
     SceneLight sceneLights[MaxSceneLights];
-    float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), yzw: unused
+    float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
 };
 
@@ -323,16 +320,19 @@ float3 evaluateDirectLight(
     float NdotL = max(dot(N, L), 0.0);
     float NdotV = max(dot(N, V), 0.0);
     float3 H = normalize(V + L);
-    float specularRoughness = saturate(roughness * UnitySpecularRoughnessScale);
-    float D = distributionGGX(N, H, specularRoughness);
-    float G = geometrySmith(N, V, L, specularRoughness);
+    // Physically-normalized Cook-Torrance (specular) + Lambert (diffuse), matching Godot's
+    // light_compute: roughness feeds GGX directly (alpha = roughness²), specular carries the
+    // 1/(4·NdotV·NdotL) term, diffuse is albedo/π. No arbitrary intensity scales — the light
+    // energies exported from Godot (light_energy) are the single source of brightness.
+    float D = distributionGGX(N, H, roughness);
+    float G = geometrySmith(N, V, L, roughness);
     float3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
     float3 specular = D * G * F / max(4.0 * NdotV * NdotL, 0.0001);
     float3 kD = (1.0 - F) * (1.0 - metallic);
-    float3 diffuse = kD * baseColor;
+    float3 diffuse = kD * baseColor * (1.0 / PI);
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
     float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, L);
-    return (diffuse * UnityDiffuseIntensityScale + specular * UnitySpecularIntensityScale) * radiance * NdotL * shadow;
+    return (diffuse + specular) * radiance * NdotL * shadow;
 }
 
 // Widen roughness based on how fast the shading normal changes across the screen.
@@ -346,6 +346,55 @@ float applySpecularAntiAliasing(float roughness, float3 N)
     float kernelRoughness2 = min(2.0 * variance, frame.aaSettings.z);
     float alpha2 = saturate(roughness * roughness + kernelRoughness2);
     return sqrt(alpha2);
+}
+
+// Tone operators ported from Godot's tone_mapping_inc.glsl so an exported scene renders with the
+// same tonemap it was authored under (Environment.tonemap_mode). Each is normalized by the white
+// point where Godot's is. The active operator + exposure + white come from frame.shadowSettings.yzw
+// (exported from the Godot Environment — see PbrTonemap).
+
+// Reinhard (extended, white-point normalized) — Godot mode 1.
+float3 tonemapReinhard(float3 color, float white)
+{
+    return (color * (1.0 + color / (white * white))) / (1.0 + color);
+}
+
+// Filmic (modified Hable/Uncharted-2, fixed exposure_bias = 2) — Godot mode 2.
+float3 tonemapFilmic(float3 color, float white)
+{
+    const float expBias = 2.0;
+    const float A = 0.22 * expBias * expBias;
+    const float B = 0.30 * expBias;
+    const float C = 0.10;
+    const float D = 0.20;
+    const float E = 0.01;
+    const float F = 0.30;
+    float3 c = ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;
+    float w = ((white * (A * white + C * B) + D * E) / (white * (A * white + B) + D * F)) - E / F;
+    return c / w;
+}
+
+// ACES filmic (Narkowicz fit) — a close approximation of Godot mode 3, and the fallback for AgX
+// (mode 4) until a full AgX port lands. Scenes authored with Filmic are unaffected.
+float3 tonemapAces(float3 color)
+{
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
+}
+
+// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic, 3 ACES, 4 AgX(≈ACES).
+float3 applyTonemap(float3 color, float exposure, float white, float mode)
+{
+    color = max(color * exposure, 0.0);
+    white = max(white, 1e-4);
+    if (mode < 0.5) return color;                        // Linear
+    if (mode < 1.5) return tonemapReinhard(color, white);
+    if (mode < 2.5) return tonemapFilmic(color, white);
+    return tonemapAces(color);                            // ACES / AgX
 }
 
 float4 shadePbr(FragmentInput input)
@@ -413,6 +462,10 @@ float4 shadePbr(FragmentInput input)
 
     // Highlight flash (selection/hit feedback): additive push toward white.
     color += draw.highlight.x * 0.35;
+
+    // Tonemap the linear HDR result before the sRGB OETF, using the operator/exposure/white
+    // exported from the Godot Environment (frame.shadowSettings.yzw).
+    color = applyTonemap(color, frame.shadowSettings.z, frame.shadowSettings.w, frame.shadowSettings.y);
 
     return float4(color, baseColor.a);
 }

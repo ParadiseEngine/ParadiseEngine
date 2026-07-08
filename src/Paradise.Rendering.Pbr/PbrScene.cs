@@ -51,6 +51,27 @@ public sealed record PbrAmbient
     public bool Flat { get; init; }
 }
 
+/// <summary>Tone-mapping operator applied to the linear HDR result before the sRGB OETF. Mirrors
+/// Godot's <c>Environment</c> tone mapper so the exported scene renders with the same look. Values
+/// match Godot's <c>ToneMapper</c> enum ordering.</summary>
+public enum PbrTonemapMode : byte
+{
+    Linear = 0,
+    Reinhard = 1,
+    Filmic = 2,
+    Aces = 3,
+    Agx = 4,
+}
+
+/// <summary>Scene tone-mapping parameters (exported from Godot's Environment). <see cref="Exposure"/>
+/// scales the linear color before the operator; <see cref="White"/> is the operator's white point.</summary>
+public sealed record PbrTonemap
+{
+    public PbrTonemapMode Mode { get; init; } = PbrTonemapMode.Filmic;
+    public float Exposure { get; init; } = 1f;
+    public float White { get; init; } = 1f;
+}
+
 /// <summary>Camera state: matrices via <see cref="PbrMath"/>, plus the world position the
 /// shader needs for view vectors.</summary>
 public struct PbrCamera
@@ -90,6 +111,7 @@ public sealed class PbrScene
 {
     public PbrCamera Camera;
     public PbrAmbient Ambient = new();
+    public PbrTonemap Tonemap = new();
     public ColorRgba ClearColor = ColorRgba.CornflowerBlue;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
