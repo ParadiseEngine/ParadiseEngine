@@ -452,9 +452,11 @@ public sealed class PbrRenderer : IDisposable
         if (scene.HasSkyBackground)
         {
             // Inverse of the same view-projection used for MVP, so the sky shader can unproject each
-            // background pixel's NDC to a world-space eye ray (uploaded raw-bytes, like MVP).
-            var viewProj = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
-            Matrix4x4.Invert(viewProj, out var invViewProj);
+            // background pixel's NDC to a world-space eye ray (uploaded raw-bytes, like MVP). Falls
+            // back to identity on a singular VP (degenerate camera) rather than uploading NaN — same
+            // precedent as PbrMath.NormalMatrix/TryScreenPointToRay.
+            if (!Matrix4x4.Invert(viewProjection, out var invViewProj))
+                invViewProj = Matrix4x4.Identity;
             var skyUniforms = new SkyUniformsGpu
             {
                 SkyTop = new Vector4(scene.SkyTopColor, 1f),
