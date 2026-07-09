@@ -493,6 +493,78 @@ public sealed class WebGpuRenderer : IDisposable
         _destructionQueue.AdvanceFrame();
     }
 
+    /// <summary>Read the headless offscreen color target back to CPU memory as tightly-packed,
+    /// top-down <c>BGRA8</c> (4 bytes/pixel, <see cref="ColorFormat"/> = <see cref="TextureFormat.Bgra8Unorm"/>).
+    /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
+    /// Headless renderers only (windowed swapchain textures aren't CopySrc).</summary>
+    public byte[] ReadbackColor(out uint width, out uint height)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_isHeadless || _offscreenTarget is null)
+            throw new InvalidOperationException(
+                "ReadbackColor is only available on a headless renderer (CreateHeadless).");
+
+        width = _offscreenWidth;
+        height = _offscreenHeight;
+        const uint bytesPerPixel = 4;
+        var unpaddedBytesPerRow = width * bytesPerPixel;
+        // WebGPU requires a texture→buffer copy's BytesPerRow to be a multiple of 256.
+        var paddedBytesPerRow = (unpaddedBytesPerRow + 255u) & ~255u;
+        var bufferSize = (ulong)paddedBytesPerRow * height;
+
+        var readback = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+        {
+            Label = "ParadiseReadback",
+            Size = bufferSize,
+            // MapRead may only be combined with CopyDst (WebGPU usage-validity rule).
+            Usage = WebGpuSharp.BufferUsage.MapRead | WebGpuSharp.BufferUsage.CopyDst,
+            MappedAtCreation = false,
+        }) ?? throw new InvalidOperationException("Readback buffer creation returned null.");
+
+        var encoder = _device.Device.CreateCommandEncoder();
+        var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = _offscreenTarget, MipLevel = 0 };
+        var destination = new WebGpuSharp.TexelCopyBufferInfo
+        {
+            Buffer = readback,
+            Layout = new WebGpuSharp.TexelCopyBufferLayout
+            {
+                Offset = 0,
+                BytesPerRow = paddedBytesPerRow,
+                RowsPerImage = height,
+            },
+        };
+        var copySize = new WgExtent3D(width, height, 1);
+        encoder.CopyTextureToBuffer(in source, in destination, in copySize);
+        _device.Queue.Submit(encoder.Finish());
+
+        var rows = height;
+        var pixels = new byte[unpaddedBytesPerRow * rows];
+        var rowStride = paddedBytesPerRow;
+        var tightStride = unpaddedBytesPerRow;
+        // Destroy the staging buffer no matter what — a map timeout or a copy exception in this
+        // window must not leak it, since this method is called repeatedly (--screenshot, tests).
+        try
+        {
+            // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
+            const ulong timeoutNs = 5_000_000_000; // 5s
+            _device.Queue.OnSubmittedWorkSync(timeoutNs);
+            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000);
+            readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
+            {
+                for (var y = 0u; y < rows; y++)
+                    mapped.Slice((int)(y * rowStride), (int)tightStride)
+                          .CopyTo(pixels.AsSpan((int)(y * tightStride)));
+            });
+        }
+        finally
+        {
+            // Unmap only if the map succeeded; Unmap on an unmapped buffer is a validation error.
+            if (readback.GetMapState() == WebGpuSharp.BufferMapState.Mapped) readback.Unmap();
+            readback.Destroy();
+        }
+        return pixels;
+    }
+
     private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView backbuffer)
     {
         var passes = stream.Passes.Span;
