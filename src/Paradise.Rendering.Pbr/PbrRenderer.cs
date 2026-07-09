@@ -570,13 +570,17 @@ public sealed class PbrRenderer : IDisposable
         encoder.EndPass();
     }
 
-    // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off) makes the shader skip position sampling.
+    // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off, or no prepass this frame) makes the
+    // shader skip position sampling — gated on the same condition RenderFrame uses to decide
+    // whether the prepass actually runs (Enabled && _opaque.Count > 0), so a zero-opaque-instance
+    // frame never samples an unwritten/stale _positionTexture.
     private void UploadSsaoUniforms(PbrScene scene)
     {
         var s = scene.Ssao;
+        var hasPrepass = s.Enabled && _opaque.Count > 0;
         var u = new SsaoUniformsGpu
         {
-            Params = new Vector4(s.Enabled ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
+            Params = new Vector4(hasPrepass ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
             Screen = new Vector4(1f / _width, 1f / _height, _width, _height),
         };
         _renderer.UpdateBuffer<SsaoUniformsGpu>(_ssaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref u, 1));
