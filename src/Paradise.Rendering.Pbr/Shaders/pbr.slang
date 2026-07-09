@@ -218,9 +218,14 @@ float getDistanceAttenuation(float distanceToLight, float range)
         return 1.0;
     }
 
-    float normalizedDistance = saturate(distanceToLight / range);
-    float falloff = saturate(1.0 - normalizedDistance * normalizedDistance);
-    float smoothRangeFade = falloff * falloff;
+    // Godot's get_omni_attenuation: windowed inverse-square with a (d/range)^4 cutoff. The 4th-power
+    // window keeps the light near full strength longer before cutting sharply at the range boundary,
+    // which matches Godot's larger, punchier light pool (a squared window falls off too early).
+    float nd = distanceToLight / range;
+    nd *= nd;              // (d/range)^2
+    nd *= nd;              // (d/range)^4
+    float window = saturate(1.0 - nd);
+    float smoothRangeFade = window * window;
     float distanceSquared = max(distanceToLight * distanceToLight, 0.0001);
     return smoothRangeFade / distanceSquared;
 }
@@ -320,16 +325,18 @@ float3 evaluateDirectLight(
     float NdotL = max(dot(N, L), 0.0);
     float NdotV = max(dot(N, V), 0.0);
     float3 H = normalize(V + L);
-    // Physically-normalized Cook-Torrance (specular) + Lambert (diffuse), matching Godot's
-    // light_compute: roughness feeds GGX directly (alpha = roughness²), specular carries the
-    // 1/(4·NdotV·NdotL) term, diffuse is albedo/π. No arbitrary intensity scales — the light
-    // energies exported from Godot (light_energy) are the single source of brightness.
+    // Cook-Torrance (specular) + Lambert (diffuse), matching Godot's DEFAULT (non-physical light
+    // units) light_compute: roughness feeds GGX directly (alpha = roughness²), specular carries the
+    // 1/(4·NdotV·NdotL) term. Diffuse is albedo WITHOUT the 1/π — in Godot's non-physical mode
+    // light_energy is a raw radiance multiplier that already absorbs the π, so dividing here makes
+    // direct lighting ~π× too dim (measured against Godot). No arbitrary intensity scales — the
+    // exported light_energy is the single source of brightness.
     float D = distributionGGX(N, H, roughness);
     float G = geometrySmith(N, V, L, roughness);
     float3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
     float3 specular = D * G * F / max(4.0 * NdotV * NdotL, 0.0001);
     float3 kD = (1.0 - F) * (1.0 - metallic);
-    float3 diffuse = kD * baseColor * (1.0 / PI);
+    float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
     float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, L);
     return (diffuse + specular) * radiance * NdotL * shadow;
