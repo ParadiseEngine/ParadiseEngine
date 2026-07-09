@@ -193,6 +193,7 @@ public class PbrRendererGpuTests
             });
             scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
 
+            pbr.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
             await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
         }

@@ -753,9 +753,12 @@ public sealed class PbrRenderer : IDisposable
             frame.Lights[i] = light;
         }
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
-        _lastFrameLightsForTest = frame.Lights;
+        if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
     }
 
+    // Test-only readback of the per-frame packed light array (e.g. to assert ShadowAtlas.X survives the
+    // shadow-caster rebuild). Off by default so production frames never pay the array copy on the hot path.
+    internal bool CaptureFrameLightsForTest;
     private SceneLightArray _lastFrameLightsForTest;
     internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
 
