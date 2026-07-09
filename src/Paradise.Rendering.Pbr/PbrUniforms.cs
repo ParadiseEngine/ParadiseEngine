@@ -87,12 +87,19 @@ public struct SsaoUniformsGpu
     [FieldOffset(16)] public Vector4 Screen;
 }
 
-/// <summary>Mirror of sky.slang <c>SkyUniforms</c>: the two gradient colours (linear, tone-mapped).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 32)]
+/// <summary>Mirror of sky.slang <c>SkyUniforms</c>: Godot's ProceduralSkyMaterial as a per-view-ray
+/// two-gradient (sky above the horizon, ground below), reconstructing the world eye direction from
+/// <see cref="InvViewProj"/>. All four colours are linear and already tone-mapped at export.</summary>
+[StructLayout(LayoutKind.Explicit, Size = 160)]
 public struct SkyUniformsGpu
 {
-    [FieldOffset(0)] public Vector4 TopColor;
-    [FieldOffset(16)] public Vector4 HorizonColor;
+    [FieldOffset(0)] public Vector4 SkyTop;        // above horizon, at zenith
+    [FieldOffset(16)] public Vector4 SkyHorizon;   // above horizon, at the horizon
+    [FieldOffset(32)] public Vector4 GroundBottom; // below horizon, at nadir
+    [FieldOffset(48)] public Vector4 GroundHorizon;// below horizon, at the horizon
+    [FieldOffset(64)] public Vector4 Params;       // x: inv_sky_curve, y: inv_ground_curve
+    [FieldOffset(80)] public Vector4 CameraPos;    // xyz: world camera position
+    [FieldOffset(96)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
 }
 
 /// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>
