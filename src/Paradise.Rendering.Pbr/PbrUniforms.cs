@@ -78,6 +78,15 @@ public struct ShadowDrawUniformsGpu
     [FieldOffset(0)] public Matrix4x4 LightMvp;
 }
 
+/// <summary>Mirror of pbr.slang group-3 <c>SsaoUniforms</c>: params (x intensity, y radius, z bias,
+/// w power) and screen (xy 1/size, zw size).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 32)]
+public struct SsaoUniformsGpu
+{
+    [FieldOffset(0)] public Vector4 Params;
+    [FieldOffset(16)] public Vector4 Screen;
+}
+
 /// <summary>Mirror of sky.slang <c>SkyUniforms</c>: the two gradient colours (linear, tone-mapped).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 32)]
 public struct SkyUniformsGpu

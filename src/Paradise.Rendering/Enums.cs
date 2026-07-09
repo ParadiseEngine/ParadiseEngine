@@ -36,6 +36,9 @@ public enum TextureFormat : uint
     Rgba8UnormSrgb,
     Bgra8Unorm,
     Bgra8UnormSrgb,
+    // 32-bit float RGBA — a renderable, unfilterable-float format used for the SSAO world-position
+    // pre-pass target (sampled via textureLoad).
+    Rgba32Float,
     Depth32Float,
     Depth24PlusStencil8,
     // Block-compressed formats — exactly the set the KTX2 transcoder emits (BC7 color/ORM,
@@ -197,6 +200,9 @@ public enum BindingResourceType : byte
     Sampler,
     ComparisonSampler,
     SampledTexture,
+    // A sampled texture whose float format is not filterable (e.g. Rgba32Float) — read via
+    // textureLoad. Backend maps it to SampleType=UnfilterableFloat. Used by the SSAO position pre-pass.
+    UnfilterableFloatTexture,
     // A depth texture sampled as a WGSL texture_depth_2d — required for shadow maps read through a
     // ComparisonSampler (textureSampleCompareLevel). Backend maps it to SampleType=Depth.
     DepthTexture,

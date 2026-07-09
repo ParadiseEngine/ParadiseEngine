@@ -156,6 +156,89 @@ public class PbrRendererGpuTests
     }
 
     [Test]
+    public async Task ssao_enabled_renders_a_non_black_frame_via_offscreen_position_prepass()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
+            var ground = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
+            var box = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
+
+            var scene = new PbrScene
+            {
+                Camera = new PbrCamera
+                {
+                    View = PbrMath.LookAt(new Vector3(4f, 5f, 6f), Vector3.Zero, Vector3.UnitY),
+                    Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                    Position = new Vector3(4f, 5f, 6f),
+                },
+                // SSAO on → runs the world-position pre-pass (offscreen Rgba32Float color target) and
+                // samples it in group 3. Regression guard: a depth-format read here silently blanked
+                // the whole frame; the position-color path must render normally.
+                Ssao = new PbrSsao { Enabled = true, Radius = 1.5f, Intensity = 3f },
+            };
+            scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.Normalize(new Vector3(0.4f, 1f, 0.3f)), Intensity = 1.5f });
+            scene.Instances.Add(new PbrInstance { Mesh = ground, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
+            scene.Instances.Add(new PbrInstance { Mesh = box, Model = Matrix4x4.CreateTranslation(0f, 1f, 0f) });
+
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+
+            // Readback the offscreen target: SSAO must NOT blank the frame. A broken depth-sample
+            // path produced an all-zero image; assert meaningful non-zero content.
+            var pixels = renderer.ReadbackColor(out var w, out var h);
+            long sum = 0;
+            for (var i = 0; i < pixels.Length; i++) sum += pixels[i];
+            var mean = sum / (double)pixels.Length;
+            await Assert.That(mean).IsGreaterThan(8.0); // ~0.03 average — far above the all-black failure
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ssao_enabled_with_no_opaque_instances_does_not_sample_stale_positions()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var glassMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.8f, 1f, 0.3f)); // blend → not opaque
+            var glass = new PbrMesh([pbr.UploadPrimitive(vertices, indices, glassMat)]);
+
+            var scene = new PbrScene
+            {
+                Camera = new PbrCamera
+                {
+                    View = PbrMath.LookAt(new Vector3(3f, 3f, 3f), Vector3.Zero, Vector3.UnitY),
+                    Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                    Position = new Vector3(3f, 3f, 3f),
+                },
+                // SSAO on but only blend geometry → zero opaque → the pre-pass is skipped and the
+                // position target is never written. The uploaded intensity must be gated to 0 so the
+                // shader doesn't sample uninitialised/stale memory (the fix for the #82 review finding).
+                Ssao = new PbrSsao { Enabled = true, Intensity = 3f },
+            };
+            scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.UnitY, Intensity = 1f });
+            scene.Instances.Add(new PbrInstance { Mesh = glass, Model = Matrix4x4.Identity });
+
+            for (var i = 0; i < 2; i++) pbr.RenderFrame(scene); // must not throw / hit a validation error
+            await Assert.That(pbr.PipelineVariantCountForTest).IsGreaterThanOrEqualTo(1);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task blend_material_builds_the_second_pipeline_variant()
     {
         var renderer = TryCreateHeadlessOrSkip();

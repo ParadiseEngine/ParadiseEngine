@@ -18,6 +18,7 @@ internal static class ShaderProgramLoader
     // the declarations in pbr.slang and the Slang.targets WGSL depth-texture patch.
     private const string ShadowTextureName = "shadowTexture";
     private const string ShadowSamplerName = "shadowSampler";
+    private const string PositionTextureName = "positionTexture"; // SSAO world-position pre-pass (Rgba32Float, unfilterable)
 
     /// <summary>Load <paramref name="logicalNamePrefix"/>.wgsl + .reflection.json from
     /// <paramref name="assembly"/>. Returns a <see cref="ShaderProgramDesc"/> with one
@@ -111,6 +112,8 @@ internal static class ShaderProgramLoader
                 "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks),
                 "resource" when p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTextureArray),
+                "resource" when p.Name == PositionTextureName => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(

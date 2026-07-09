@@ -10,7 +10,11 @@ public readonly record struct ColorAttachmentDesc(
     RenderViewHandle View,
     LoadOp Load,
     StoreOp Store,
-    ColorRgba ClearValue);
+    ColorRgba ClearValue,
+    // When valid, render into this offscreen texture view instead of the backbuffer. The RenderView
+    // above (typically Invalid → backbuffer) is ignored when this is set. Used by offscreen targets
+    // such as the SSAO position pre-pass.
+    TextureViewHandle ColorView = default);
 
 /// <summary>Depth attachment binding for a render pass.</summary>
 // TODO(post-M0a): when the contract grows to express stencil load/store/clear, fold them in here

@@ -694,15 +694,15 @@ public sealed class WebGpuRenderer : IDisposable
 
     private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
     {
-        // Either ZERO color attachments (a depth-only pass, e.g. the shadow-atlas fill — its depth
-        // attachment is an offscreen texture resolved from its handle), or a SINGLE color attachment
-        // targeting the backbuffer view. Multi-attachment / offscreen color targets are still
-        // deferred (the ColorAttachments[i].View slot stays reserved for them).
+        // Either ZERO color attachments (a depth-only pass, e.g. a shadow layer fill), or a SINGLE
+        // color attachment — targeting either the backbuffer (ColorView invalid) or an offscreen
+        // texture view (ColorView valid, e.g. the SSAO position pre-pass). Multi-attachment is still
+        // deferred (the ColorAttachments[i] slots past 0 stay reserved).
         var colorCount = pass.ColorAttachmentCount;
         if (colorCount > 1)
             throw new NotSupportedException(
                 $"At most one color attachment per pass is supported (got {colorCount}). " +
-                "Multi-attachment + non-backbuffer color rendering is deferred to offscreen-target work.");
+                "Multi-attachment rendering is deferred.");
 
         WgRenderPassColorAttachment[] colors;
         if (colorCount == 0)
@@ -713,12 +713,14 @@ public sealed class WebGpuRenderer : IDisposable
         {
             var src = pass.Colors.Slot0;
             colors = new WgRenderPassColorAttachment[1];
+            // Offscreen color target when a ColorView is supplied; otherwise the backbuffer.
+            var colorView = src.ColorView.IsValid ? _device.ResolveTextureView(src.ColorView) : backbuffer;
             // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
             // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
             // surfaces as a build break here rather than silently routing through Clear/Discard.
             colors[0] = new WgRenderPassColorAttachment
             {
-                View = backbuffer,
+                View = colorView,
                 LoadOp = src.Load switch
                 {
                     LoadOp.Load => WgLoadOp.Load,

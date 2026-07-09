@@ -72,6 +72,18 @@ public sealed record PbrTonemap
     public float White { get; init; } = 1f;
 }
 
+/// <summary>Screen-space ambient-occlusion parameters (from Godot's Environment SSAO). When
+/// <see cref="Enabled"/>, the renderer runs a world-position pre-pass and darkens ambient in
+/// creases/contacts. <see cref="Radius"/> is in world units.</summary>
+public sealed record PbrSsao
+{
+    public bool Enabled { get; init; }
+    public float Radius { get; init; } = 1f;
+    public float Intensity { get; init; } = 2f;
+    public float Bias { get; init; } = 0.05f;
+    public float Power { get; init; } = 1.5f;
+}
+
 /// <summary>Camera state: matrices via <see cref="PbrMath"/>, plus the world position the
 /// shader needs for view vectors.</summary>
 public struct PbrCamera
@@ -118,6 +130,9 @@ public sealed class PbrScene
     public bool HasSkyBackground;
     public Vector3 SkyTopColor;
     public Vector3 SkyHorizonColor;
+    // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
+    // and the shader darkens ambient in creases/contacts.
+    public PbrSsao Ssao = new();
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
 }

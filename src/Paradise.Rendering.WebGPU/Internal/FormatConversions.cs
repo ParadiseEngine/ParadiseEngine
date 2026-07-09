@@ -89,6 +89,7 @@ internal static class FormatConversions
         TextureFormat.Rgba8UnormSrgb => WgTextureFormat.RGBA8UnormSrgb,
         TextureFormat.Bgra8Unorm => WgTextureFormat.BGRA8Unorm,
         TextureFormat.Bgra8UnormSrgb => WgTextureFormat.BGRA8UnormSrgb,
+        TextureFormat.Rgba32Float => WgTextureFormat.RGBA32Float,
         TextureFormat.Depth32Float => WgTextureFormat.Depth32Float,
         TextureFormat.Depth24PlusStencil8 => WgTextureFormat.Depth24PlusStencil8,
         TextureFormat.Bc1RgbaUnorm => WgTextureFormat.BC1RGBAUnorm,
