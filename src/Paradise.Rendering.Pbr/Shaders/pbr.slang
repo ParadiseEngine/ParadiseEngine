@@ -394,39 +394,55 @@ float3 tonemapAces(float3 color)
     return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
-// AgX (Godot mode 4). Ported from Godot's tone_mapping_inc.glsl: transform into the AgX working
-// space, log2-encode to [min_ev, max_ev], apply a 6th-order sigmoid, transform back, then pow(2.2)
-// to LINEARIZE — the sigmoid output is display-referred (sRGB-ish 2.2), and the sRGB OETF is applied
-// afterwards, so this final power prevents a double-encode. Matrices are row-major (mul(M, v)).
-float3 agxContrastApprox(float3 x)
+// AgX (mode 4) — the allenwp-curve AgX Godot has used since 4.4 (matches this project's Godot 4.7).
+// Ported from godot/servers/rendering/renderer_rd/shaders/effects/tonemap.glsl (tonemap_agx +
+// allenwp_curve). The curve params are precomputed for DEFAULT AgX (contrast 1.25, white 2.0, SDR
+// output_max 1.0) — exactly the values Godot's environment_storage.cpp computes on the CPU for a
+// default AgX environment. Returns LINEAR (no OETF here; the fragment entry applies it).
+float3 agxAllenwpCurve(float3 x)
 {
-    float3 x2 = x * x;
-    float3 x4 = x2 * x2;
-    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+    const float awpCrossover = 0.18;      // 18% middle gray
+    const float awpShoulderMax = 0.82;    // output_max_value(1.0) - crossover
+    const float awpContrast = 1.25;
+    const float awpToeA = 0.534111561;    // CPU-precomputed (see environment_storage.cpp)
+    const float awpSlope = 1.025000000;
+    const float awpW = 4.140500000;
+
+    // Reinhard-like shoulder (x >= crossover).
+    float3 s = x - awpCrossover;
+    float3 slopeS = awpSlope * s;
+    s = slopeS * (1.0 + s / awpW) / (1.0 + slopeS / awpShoulderMax) + awpCrossover;
+    // Sigmoid-power toe (x < crossover).
+    float3 t = pow(max(x, 0.0), awpContrast);
+    t = t / (t + awpToeA);
+    return float3(
+        x.x < awpCrossover ? t.x : s.x,
+        x.y < awpCrossover ? t.y : s.y,
+        x.z < awpCrossover ? t.z : s.z);
 }
 
 float3 tonemapAgx(float3 color)
 {
-    const float3x3 agxMat = float3x3(
-        0.842479062253094,  0.0784335999999992, 0.0792237451477643,
-        0.0423282422610123, 0.878468636469772,  0.0791661274605434,
-        0.0423756549057051, 0.0784336,          0.879142973793104);
-    const float3x3 agxMatInv = float3x3(
-        1.19687900512017,    -0.0528968517574562, -0.0529716355144438,
-        -0.0980208811401368,  1.15190312990417,   -0.0980434501171241,
-        -0.0990297440797205, -0.0989611768448433,  1.15107367264116);
-    const float minEv = -12.47393;
-    const float maxEv = 4.026069;
+    // Combined Rec.709→Rec.2020 + AgX inset (row-major for mul(M, v)).
+    const float3x3 agxInset = float3x3(
+        0.544814746488245, 0.373787398372697,  0.0813978551390581,
+        0.140416948464053, 0.754137554567394,  0.105445496968552,
+        0.0888104196149096, 0.178871756420858, 0.732317823964232);
+    // Combined inverse AgX outset + Rec.2020→Rec.709.
+    const float3x3 agxOutset = float3x3(
+        1.96488741169489,   -0.855988495690215, -0.108898916004672,
+        -0.299313364904742,  1.32639796461980,  -0.0270845997150571,
+        -0.164352742528393, -0.238183969428088,  1.40253671195648);
 
-    color = mul(agxMat, max(color, 0.0));
-    color = clamp(log2(color), minEv, maxEv);
-    color = (color - minEv) / (maxEv - minEv);
-    color = agxContrastApprox(color);
-    color = mul(agxMatInv, color);
-    return pow(max(color, 0.0), 2.2); // display-referred sigmoid output → linear
+    color = mul(agxInset, max(color, 0.0));
+    color = agxAllenwpCurve(color);
+    color = min(1.0, color);              // clip to output_max_value (SDR) — kills bright-input cyan
+    color = mul(agxOutset, color);
+    return color;                         // linear; may carry small negatives (as in Godot)
 }
 
-// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic, 3 ACES, 4 AgX.
+// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic (pixel-verified vs Godot),
+// 3 ACES (Narkowicz approx), 4 AgX (Godot 4.4+ allenwp AgX, default params).
 float3 applyTonemap(float3 color, float exposure, float white, float mode)
 {
     color = max(color * exposure, 0.0);
@@ -434,7 +450,7 @@ float3 applyTonemap(float3 color, float exposure, float white, float mode)
     if (mode < 0.5) return color;                        // Linear
     if (mode < 1.5) return tonemapReinhard(color, white);
     if (mode < 2.5) return tonemapFilmic(color, white);
-    if (mode < 3.5) return tonemapAces(color);           // ACES
+    if (mode < 3.5) return tonemapAces(color);           // ACES (approx)
     return tonemapAgx(color);                            // AgX
 }
 
