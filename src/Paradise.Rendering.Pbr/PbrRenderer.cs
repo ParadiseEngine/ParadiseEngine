@@ -451,10 +451,19 @@ public sealed class PbrRenderer : IDisposable
 
         if (scene.HasSkyBackground)
         {
+            // Inverse of the same view-projection used for MVP, so the sky shader can unproject each
+            // background pixel's NDC to a world-space eye ray (uploaded raw-bytes, like MVP).
+            var viewProj = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
+            Matrix4x4.Invert(viewProj, out var invViewProj);
             var skyUniforms = new SkyUniformsGpu
             {
-                TopColor = new Vector4(scene.SkyTopColor, 1f),
-                HorizonColor = new Vector4(scene.SkyHorizonColor, 1f),
+                SkyTop = new Vector4(scene.SkyTopColor, 1f),
+                SkyHorizon = new Vector4(scene.SkyHorizonColor, 1f),
+                GroundBottom = new Vector4(scene.SkyGroundBottom, 1f),
+                GroundHorizon = new Vector4(scene.SkyGroundHorizon, 1f),
+                Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, 0f, 0f),
+                CameraPos = new Vector4(scene.Camera.Position, 1f),
+                InvViewProj = invViewProj,
             };
             _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
         }
