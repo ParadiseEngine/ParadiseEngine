@@ -135,8 +135,8 @@ public sealed class PbrScene
     public bool HasSkyBackground;
     public Vector3 SkyTopColor;        // above horizon, at zenith
     public Vector3 SkyHorizonColor;    // above horizon, at the horizon
-    public Vector3 SkyGroundBottom;    // below horizon, at nadir
-    public Vector3 SkyGroundHorizon;   // below horizon, at the horizon
+    public Vector3 SkyGroundBottom;    // below horizon, at nadir — defaults black until the exporter populates it
+    public Vector3 SkyGroundHorizon;   // below horizon, at the horizon — defaults black until the exporter populates it
     public float SkySkyCurveInv = 4f;  // Godot inv_sky_curve  = 0.6 / sky_curve  (default 4)
     public float SkyGroundCurveInv = 30f; // Godot inv_ground_curve = 0.6 / ground_curve (default 30)
     // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
