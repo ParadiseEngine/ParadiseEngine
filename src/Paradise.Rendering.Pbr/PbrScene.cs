@@ -20,6 +20,10 @@ public sealed record PbrLight
     public Vector3 Color { get; init; } = Vector3.One;
     public float Intensity { get; init; } = 1f;
     public float Range { get; init; }
+    // Distance-falloff exponent for point/spot lights (Godot's LIGHT_PARAM_ATTENUATION / omni_/spot_
+    // attenuation). The shader applies pow(distance, -exponent): Godot's default 1.0 is inverse-LINEAR,
+    // not inverse-square. Unused by directionals (no range falloff).
+    public float AttenuationExponent { get; init; } = 1f;
     public float SpotOuterDegrees { get; init; } = 45f;
     public float SpotInnerDegrees { get; init; }
 
@@ -36,7 +40,7 @@ public sealed record PbrLight
         DirectionAndRange = new Vector4(Direction, Range),
         ColorAndIntensity = new Vector4(Color, Intensity),
         SpotAngles = new Vector4(SpotOuterDegrees, SpotInnerDegrees, -1f, 0f), // z=-1 → no shadow
-        ShadowAtlas = Vector4.Zero,
+        ShadowAtlas = new Vector4(AttenuationExponent, 0f, 0f, 0f), // x=decay; renderer fills y/w for shadow tiles
     };
 }
 
