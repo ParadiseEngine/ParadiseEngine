@@ -276,6 +276,9 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
 // depth-only is what lets contact shadows stay attached (matching Godot) while the ground stays acne-free.
 static const float ShadowDepthBias = 0.0004;
 static const float ShadowNormalBias = 0.05;
+// Tap spacing (in shadow texels) for the 3x3 soft-shadow PCF. Wider than 1 texel to broaden the
+// penumbra toward Godot's softer shadow edges.
+static const float ShadowPcfSpread = 2.0;
 static const float ShadowMaxNormalBias = 0.15;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
@@ -322,14 +325,21 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float texel = frame.shadowSettings.x;
     float compare = ndc.z - ShadowDepthBias;
 
-    float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
-    if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF (sampler clamps to layer edge — no seam risk)
+    float lit;
+    if (light.shadowAtlas.w > 0.5)
     {
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(texel, 0.0), layer), compare);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(-texel, 0.0), layer), compare);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(0.0, texel), layer), compare);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(0.0, -texel), layer), compare);
-        lit *= 0.2;
+        // Soft shadows: 3x3 PCF at a widened tap spacing for a broader penumbra matching Godot's
+        // softer shadow edges (the sampler clamps to the layer edge, so no cross-layer seam risk).
+        float s = texel * ShadowPcfSpread;
+        lit = 0.0;
+        [unroll] for (int dy = -1; dy <= 1; dy++)
+            [unroll] for (int dx = -1; dx <= 1; dx++)
+                lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(dx, dy) * s, layer), compare);
+        lit *= (1.0 / 9.0);
+    }
+    else
+    {
+        lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
     }
 
     return lerp(1.0 - light.spotAngles.w, 1.0, lit);
