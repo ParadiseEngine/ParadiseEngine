@@ -258,7 +258,16 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     return saturate((cosTheta - outerCos) / denom);
 }
 
+// Depth-comparison bias for shadow sampling. The base handles surfaces facing the light (tight
+// contact shadows). ShadowSlopeBias adds bias proportional to tan(angle between surface normal and
+// light) — a flat receiver seen edge-on to the light (the ground under an angled sun) has a steep
+// depth gradient across one shadow texel and self-shadows into a moiré weave without it; light-facing
+// surfaces keep the small base so contacts stay attached (no peter-panning). ShadowMaxBias caps the
+// grazing case. Slope-scaled rather than a large flat bias so the fix is robust to shadow-map/scene
+// scale instead of being hand-tuned per scene.
 static const float ShadowDepthBias = 0.00035;
+static const float ShadowSlopeBias = 0.007;
+static const float ShadowMaxBias = 0.012;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
 int getPointShadowFace(float3 dir)
@@ -272,7 +281,7 @@ int getPointShadowFace(float3 dir)
 // Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shadow-map
 // array — one full-resolution layer per shadow view (dir/spot = 1, point = 6 cube faces) — via the
 // light's per-face view-projection. No tile UV math and no seam clamp: each layer owns all of [0,1].
-float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 surfaceToLight)
+float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 N, float3 surfaceToLight)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
         return 1.0; // no shadow for this light
@@ -294,7 +303,12 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
 
     float layer = light.spotAngles.z + (float)face; // array slice for this view
     float texel = frame.shadowSettings.x;
-    float compare = ndc.z - ShadowDepthBias;
+    // Slope-scaled bias: more where the surface tilts away from the light (grazing ground → moiré),
+    // the base minimum where it faces the light (contacts stay attached).
+    float ndotl = saturate(dot(N, surfaceToLight));
+    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
+    float bias = clamp(ShadowDepthBias + ShadowSlopeBias * slope, ShadowDepthBias, ShadowMaxBias);
+    float compare = ndc.z - bias;
 
     float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
     if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF (sampler clamps to layer edge — no seam risk)
@@ -356,7 +370,7 @@ float3 evaluateDirectLight(
     float3 kD = (1.0 - F) * (1.0 - metallic);
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
-    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, L);
+    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, N, L);
     return (diffuse + specular) * radiance * NdotL * shadow;
 }
 
