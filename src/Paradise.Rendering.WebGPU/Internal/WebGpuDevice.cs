@@ -440,6 +440,14 @@ internal sealed class WebGpuDevice : IDisposable
                         Multisampled = false,
                     };
                     break;
+                case BindingResourceType.UnfilterableFloatTexture:
+                    entry.Texture = new WgTextureBindingLayout
+                    {
+                        SampleType = WgTextureSampleType.UnfilterableFloat,
+                        ViewDimension = WgTextureViewDimension.D2,
+                        Multisampled = false,
+                    };
+                    break;
                 case BindingResourceType.DepthTexture:
                     // A depth texture read as texture_depth_2d (shadow maps). SampleType must be
                     // Depth to pair with a comparison sampler.
