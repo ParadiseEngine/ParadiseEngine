@@ -330,7 +330,9 @@ float3 evaluateDirectLight(
     // 1/(4·NdotV·NdotL) term. Diffuse is albedo WITHOUT the 1/π — in Godot's non-physical mode
     // light_energy is a raw radiance multiplier that already absorbs the π, so dividing here makes
     // direct lighting ~π× too dim (measured against Godot). No arbitrary intensity scales — the
-    // exported light_energy is the single source of brightness.
+    // exported light_energy is the single source of brightness. Diffuse and specular are on Godot's
+    // non-physical basis (NOT a physically-conserving energy split) — don't reintroduce /π on either
+    // lobe without re-checking pixel-diff captures against Godot.
     float D = distributionGGX(N, H, roughness);
     float G = geometrySmith(N, V, L, roughness);
     float3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
