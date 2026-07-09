@@ -537,23 +537,31 @@ public sealed class WebGpuRenderer : IDisposable
         encoder.CopyTextureToBuffer(in source, in destination, in copySize);
         _device.Queue.Submit(encoder.Finish());
 
-        // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
-        const ulong timeoutNs = 5_000_000_000; // 5s
-        _device.Queue.OnSubmittedWorkSync(timeoutNs);
-        readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000);
-
         var rows = height;
         var pixels = new byte[unpaddedBytesPerRow * rows];
         var rowStride = paddedBytesPerRow;
         var tightStride = unpaddedBytesPerRow;
-        readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
+        // Destroy the staging buffer no matter what — a map timeout or a copy exception in this
+        // window must not leak it, since this method is called repeatedly (--screenshot, tests).
+        try
         {
-            for (var y = 0u; y < rows; y++)
-                mapped.Slice((int)(y * rowStride), (int)tightStride)
-                      .CopyTo(pixels.AsSpan((int)(y * tightStride)));
-        });
-        readback.Unmap();
-        readback.Destroy();
+            // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
+            const ulong timeoutNs = 5_000_000_000; // 5s
+            _device.Queue.OnSubmittedWorkSync(timeoutNs);
+            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000);
+            readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
+            {
+                for (var y = 0u; y < rows; y++)
+                    mapped.Slice((int)(y * rowStride), (int)tightStride)
+                          .CopyTo(pixels.AsSpan((int)(y * tightStride)));
+            });
+        }
+        finally
+        {
+            // Unmap only if the map succeeded; Unmap on an unmapped buffer is a validation error.
+            if (readback.GetMapState() == WebGpuSharp.BufferMapState.Mapped) readback.Unmap();
+            readback.Destroy();
+        }
         return pixels;
     }
 

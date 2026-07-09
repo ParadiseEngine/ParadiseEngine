@@ -88,6 +88,37 @@ public class HeadlessSmokeTests
     }
 
     [Test]
+    public async Task readback_color_returns_tightly_packed_bgra_of_the_cleared_frame()
+    {
+        const uint w = 40, h = 24; // width*4 = 160 is NOT a multiple of 256 → exercises row unpadding
+        var renderer = TryCreateHeadlessOrSkip(w, h);
+        if (renderer is null) return;
+
+        try
+        {
+            // Pure red so the BGRA channel order is unambiguous (B=0, G=0, R=255) with no rounding.
+            renderer.RenderClearFrame(new ColorRgba(1f, 0f, 0f, 1f));
+            var pixels = renderer.ReadbackColor(out var rw, out var rh);
+
+            await Assert.That(rw).IsEqualTo(w);
+            await Assert.That(rh).IsEqualTo(h);
+            // Tightly packed: exactly width*height*4 bytes, no row padding.
+            await Assert.That(pixels.Length).IsEqualTo((int)(w * h * 4));
+
+            // Center pixel, top-down row-major, BGRA byte order.
+            var idx = (int)((h / 2) * w + (w / 2)) * 4;
+            await Assert.That(pixels[idx + 0]).IsLessThan((byte)4);      // B
+            await Assert.That(pixels[idx + 1]).IsLessThan((byte)4);      // G
+            await Assert.That(pixels[idx + 2]).IsGreaterThan((byte)251); // R
+            await Assert.That(pixels[idx + 3]).IsGreaterThan((byte)251); // A
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task surface_ctor_rejects_headless_platform()
     {
         var desc = SurfaceDescriptor.Headless();
