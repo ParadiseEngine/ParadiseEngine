@@ -268,12 +268,15 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
 // lookup — this lifts a grazing self-shadowing surface (the ground under an angled sun) off itself to
 // kill the moiré weave WITHOUT the along-light offset a large depth bias adds, which pushes object
 // shadows off their contact point (peter-panning). It scales with tan(angle to light) since acne
-// worsens at grazing angles. ShadowDepthBias is a small constant for the residual. World-space units,
-// sized for the directional map (widest frustum / largest texels); a mild over-offset on the tighter
-// spot/point maps is harmless. Normal-offset rather than depth-only is what lets contact shadows stay
-// attached (matching Godot) while the ground stays acne-free.
+// worsens at grazing angles, capped at ShadowMaxNormalBias so the tan() blow-up near grazing incidence
+// (N·L → 0) can't displace the sample by more than a fixed world-space amount — otherwise a spot/point
+// light's tighter frustum could have the sample land outside its footprint. ShadowDepthBias is a small
+// constant for the residual. World-space units, sized for the directional map (widest frustum / largest
+// texels); a mild over-offset on the tighter spot/point maps is harmless. Normal-offset rather than
+// depth-only is what lets contact shadows stay attached (matching Godot) while the ground stays acne-free.
 static const float ShadowDepthBias = 0.0004;
 static const float ShadowNormalBias = 0.05;
+static const float ShadowMaxNormalBias = 0.15;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
 int getPointShadowFace(float3 dir)
@@ -304,7 +307,7 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     // therefore does not detach object shadows from their contact point.
     float ndotl = saturate(dot(N, surfaceToLight));
     float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
-    float3 samplePos = worldPos + N * (ShadowNormalBias * (1.0 + slope));
+    float3 samplePos = worldPos + N * min(ShadowNormalBias * (1.0 + slope), ShadowMaxNormalBias);
 
     int matrixIndex = lightIndex * 6 + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
