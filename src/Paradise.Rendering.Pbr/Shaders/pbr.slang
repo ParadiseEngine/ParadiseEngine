@@ -17,7 +17,7 @@ struct SceneLight
     float4 directionAndRange;     // xyz: direction from surface to light, w: range
     float4 colorAndIntensity;     // rgb: color, w: intensity
     float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
-    float4 shadowAtlas;           // x: unused, y: face count (1 = dir/spot, 6 = point), z: unused, w: soft-shadow flag
+    float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: unused, w: soft-shadow flag
 };
 
 struct DrawUniforms
@@ -227,35 +227,41 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
     return normalize(T * normalSample.x + B * normalSample.y + N * normalSample.z);
 }
 
-float getDistanceAttenuation(float distanceToLight, float range)
+float getDistanceAttenuation(float distanceToLight, float range, float decay)
 {
     if (range <= 0.0)
     {
         return 1.0;
     }
 
-    // Godot's get_omni_attenuation: windowed inverse-square with a (d/range)^4 cutoff. The 4th-power
-    // window keeps the light near full strength longer before cutting sharply at the range boundary,
-    // which matches Godot's larger, punchier light pool (a squared window falls off too early).
+    // Godot's get_omni_attenuation: window² · pow(distance, -decay) with a (d/range)^4 cutoff. The
+    // 4th-power window keeps the light near full strength before cutting sharply at the range boundary.
+    // decay is the exported LIGHT_PARAM_ATTENUATION (Godot's default 1.0 is inverse-LINEAR, not
+    // inverse-square) — matching it is what makes the light pool the right size/brightness.
     float nd = distanceToLight / range;
     nd *= nd;              // (d/range)^2
     nd *= nd;              // (d/range)^4
     float window = saturate(1.0 - nd);
     float smoothRangeFade = window * window;
-    float distanceSquared = max(distanceToLight * distanceToLight, 0.0001);
-    return smoothRangeFade / distanceSquared;
+    float dist = max(distanceToLight, 0.0001);
+    return smoothRangeFade * pow(dist, -decay);
 }
 
 float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
 {
+    // Godot's spot cone (light_process_spot): a smooth radial falloff from the cone axis (full) to the
+    // edge (zero) — NOT a hard-edged disc. spotRim is 0 on-axis, 1 at the cone boundary; Godot raises it
+    // to spot_angle_attenuation (default 1.0, assumed here → linear rim). The previous inner/outer blend
+    // drew a hard "circle" on the ground whenever no inner angle was authored (Godot has no inner angle),
+    // because it fell back to inner == outer. spotAngles.y (inner angle) is unused in this model.
     float3 lightToSurface = -surfaceToLight;
     float3 coneDirection = -normalize(light.directionAndRange.xyz);
     float cosTheta = dot(lightToSurface, coneDirection);
-    float outerCos = cos(radians(light.spotAngles.x * 0.5));
-    float innerAngle = light.spotAngles.y > 0.0 ? light.spotAngles.y : light.spotAngles.x;
-    float innerCos = cos(radians(innerAngle * 0.5));
-    float denom = max(innerCos - outerCos, 0.001);
-    return saturate((cosTheta - outerCos) / denom);
+    float coneCos = cos(radians(light.spotAngles.x * 0.5)); // cosine of the cone half-angle
+    float scos = max(cosTheta, coneCos);
+    float denom = max(1.0 - coneCos, 1e-4); // guards a degenerate 0°-outer-angle spot (coneCos == 1)
+    float spotRim = max(1e-4, (1.0 - scos) / denom);
+    return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
 }
 
 // Depth-comparison bias for shadow sampling. The base handles surfaces facing the light (tight
@@ -345,7 +351,7 @@ float3 evaluateDirectLight(
         float3 lightVector = light.positionAndType.xyz - worldPos;
         float distanceToLight = length(lightVector);
         L = lightVector / max(distanceToLight, 0.0001);
-        attenuation = getDistanceAttenuation(distanceToLight, light.directionAndRange.w);
+        attenuation = getDistanceAttenuation(distanceToLight, light.directionAndRange.w, light.shadowAtlas.x);
         if (light.positionAndType.w > 1.5)
         {
             attenuation *= getSpotAttenuation(light, L);

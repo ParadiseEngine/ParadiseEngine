@@ -741,19 +741,26 @@ public sealed class PbrRenderer : IDisposable
             frame.SceneLightShadowMatrices[lightIndex * 6 + face] = vp;
         }
         // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
-        // face count (shadowAtlas.y) and soft-shadow flag (shadowAtlas.w). shadowAtlas.x/.z are
-        // unused in the array layout (no atlas columns / tile scale).
+        // face count (shadowAtlas.y) and soft-shadow flag (shadowAtlas.w). shadowAtlas.x carries the
+        // distance-attenuation decay (set by ToGpu) and must be preserved here; .z stays unused.
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
             if (_shadowBaseLayer[i] < 0) continue;
             var light = frame.Lights[i];
             light.SpotAngles.Z = _shadowBaseLayer[i];
             light.SpotAngles.W = Math.Clamp(scene.Lights[i].ShadowStrength, 0f, 1f);
-            light.ShadowAtlas = new Vector4(0f, _shadowFaceCount[i], 0f, scene.Lights[i].SoftShadows ? 1f : 0f);
+            light.ShadowAtlas = new Vector4(light.ShadowAtlas.X, _shadowFaceCount[i], 0f, scene.Lights[i].SoftShadows ? 1f : 0f);
             frame.Lights[i] = light;
         }
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
+        if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
     }
+
+    // Test-only readback of the per-frame packed light array (e.g. to assert ShadowAtlas.X survives the
+    // shadow-caster rebuild). Off by default so production frames never pay the array copy on the hot path.
+    internal bool CaptureFrameLightsForTest;
+    private SceneLightArray _lastFrameLightsForTest;
+    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
 
     private PipelineHandle GetPipeline(BlendMode blend)
     {
