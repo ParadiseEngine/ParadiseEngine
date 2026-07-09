@@ -264,16 +264,19 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
 }
 
-// Depth-comparison bias for shadow sampling. The base handles surfaces facing the light (tight
-// contact shadows). ShadowSlopeBias adds bias proportional to tan(angle between surface normal and
-// light) — a flat receiver seen edge-on to the light (the ground under an angled sun) has a steep
-// depth gradient across one shadow texel and self-shadows into a moiré weave without it; light-facing
-// surfaces keep the small base so contacts stay attached (no peter-panning). ShadowMaxBias caps the
-// grazing case. Slope-scaled rather than a large flat bias so the fix is robust to shadow-map/scene
-// scale instead of being hand-tuned per scene.
-static const float ShadowDepthBias = 0.00035;
-static const float ShadowSlopeBias = 0.007;
-static const float ShadowMaxBias = 0.012;
+// Shadow bias. ShadowNormalBias nudges the receiver sample along its surface NORMAL before the shadow
+// lookup — this lifts a grazing self-shadowing surface (the ground under an angled sun) off itself to
+// kill the moiré weave WITHOUT the along-light offset a large depth bias adds, which pushes object
+// shadows off their contact point (peter-panning). It scales with tan(angle to light) since acne
+// worsens at grazing angles, capped at ShadowMaxNormalBias so the tan() blow-up near grazing incidence
+// (N·L → 0) can't displace the sample by more than a fixed world-space amount — otherwise a spot/point
+// light's tighter frustum could have the sample land outside its footprint. ShadowDepthBias is a small
+// constant for the residual. World-space units, sized for the directional map (widest frustum / largest
+// texels); a mild over-offset on the tighter spot/point maps is harmless. Normal-offset rather than
+// depth-only is what lets contact shadows stay attached (matching Godot) while the ground stays acne-free.
+static const float ShadowDepthBias = 0.0004;
+static const float ShadowNormalBias = 0.05;
+static const float ShadowMaxNormalBias = 0.15;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
 int getPointShadowFace(float3 dir)
@@ -298,8 +301,16 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if ((float)face >= light.shadowAtlas.y)
         return 1.0;
 
+    // Normal-offset bias: lift the receiver sample off its own surface along the normal, scaled by
+    // tan(angle to light) so grazing surfaces (where acne appears) get more. Perpendicular to the
+    // surface, so unlike a large depth bias it does NOT shift the sample along the light direction and
+    // therefore does not detach object shadows from their contact point.
+    float ndotl = saturate(dot(N, surfaceToLight));
+    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
+    float3 samplePos = worldPos + N * min(ShadowNormalBias * (1.0 + slope), ShadowMaxNormalBias);
+
     int matrixIndex = lightIndex * 6 + face;
-    float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(worldPos, 1.0));
+    float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
     if (shadowPos.w <= 0.0)
         return 1.0;
     float3 ndc = shadowPos.xyz / shadowPos.w;
@@ -309,12 +320,7 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
 
     float layer = light.spotAngles.z + (float)face; // array slice for this view
     float texel = frame.shadowSettings.x;
-    // Slope-scaled bias: more where the surface tilts away from the light (grazing ground → moiré),
-    // the base minimum where it faces the light (contacts stay attached).
-    float ndotl = saturate(dot(N, surfaceToLight));
-    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
-    float bias = clamp(ShadowDepthBias + ShadowSlopeBias * slope, ShadowDepthBias, ShadowMaxBias);
-    float compare = ndc.z - bias;
+    float compare = ndc.z - ShadowDepthBias;
 
     float lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
     if (light.shadowAtlas.w > 0.5) // 5-tap cross PCF (sampler clamps to layer edge — no seam risk)
