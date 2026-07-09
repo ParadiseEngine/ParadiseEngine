@@ -259,7 +259,8 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     float cosTheta = dot(lightToSurface, coneDirection);
     float coneCos = cos(radians(light.spotAngles.x * 0.5)); // cosine of the cone half-angle
     float scos = max(cosTheta, coneCos);
-    float spotRim = max(1e-4, (1.0 - scos) / (1.0 - coneCos));
+    float denom = max(1.0 - coneCos, 1e-4); // guards a degenerate 0°-outer-angle spot (coneCos == 1)
+    float spotRim = max(1e-4, (1.0 - scos) / denom);
     return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
 }
 

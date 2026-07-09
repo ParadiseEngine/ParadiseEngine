@@ -156,6 +156,53 @@ public class PbrRendererGpuTests
     }
 
     [Test]
+    public async Task shadow_caster_rebuild_preserves_attenuation_decay_in_shadow_atlas_x()
+    {
+        // UploadFrameUniforms rebuilds ShadowAtlas for shadow-casting lights to fill in the face
+        // count / soft-shadow flag (PbrRenderer.cs), and must carry ShadowAtlas.X (the distance-
+        // attenuation decay from ToGpu) through unchanged rather than clobbering it back to 0.
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.5f, 0.5f, 0.5f, 1f));
+            var mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
+
+            var scene = new PbrScene
+            {
+                Camera = new PbrCamera
+                {
+                    View = PbrMath.LookAt(new Vector3(4f, 5f, 6f), Vector3.Zero, Vector3.UnitY),
+                    Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                    Position = new Vector3(4f, 5f, 6f),
+                },
+            };
+            scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Point,
+                Position = new Vector3(-2f, 3f, 2f),
+                Color = new Vector3(0.7f, 0.8f, 1f),
+                Intensity = 10f,
+                Range = 15f,
+                AttenuationExponent = 1.75f,
+                CastsShadows = true,
+                ShadowStrength = 0.6f,
+                SoftShadows = true,
+            });
+            scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
+
+            pbr.RenderFrame(scene);
+            await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task ssao_enabled_renders_a_non_black_frame_via_offscreen_position_prepass()
     {
         var renderer = TryCreateHeadlessOrSkip();

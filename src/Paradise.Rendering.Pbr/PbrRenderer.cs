@@ -753,7 +753,11 @@ public sealed class PbrRenderer : IDisposable
             frame.Lights[i] = light;
         }
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
+        _lastFrameLightsForTest = frame.Lights;
     }
+
+    private SceneLightArray _lastFrameLightsForTest;
+    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
 
     private PipelineHandle GetPipeline(BlendMode blend)
     {
