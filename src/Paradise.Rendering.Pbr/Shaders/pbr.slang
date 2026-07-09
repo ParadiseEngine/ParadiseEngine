@@ -383,8 +383,7 @@ float3 tonemapFilmic(float3 color, float white)
     return c / w;
 }
 
-// ACES filmic (Narkowicz fit) — a close approximation of Godot mode 3, and the fallback for AgX
-// (mode 4) until a full AgX port lands. Scenes authored with Filmic are unaffected.
+// ACES filmic (Narkowicz fit) — a close approximation of Godot mode 3.
 float3 tonemapAces(float3 color)
 {
     const float a = 2.51;
@@ -395,7 +394,39 @@ float3 tonemapAces(float3 color)
     return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
-// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic, 3 ACES, 4 AgX(≈ACES).
+// AgX (Godot mode 4). Ported from Godot's tone_mapping_inc.glsl: transform into the AgX working
+// space, log2-encode to [min_ev, max_ev], apply a 6th-order sigmoid, transform back, then pow(2.2)
+// to LINEARIZE — the sigmoid output is display-referred (sRGB-ish 2.2), and the sRGB OETF is applied
+// afterwards, so this final power prevents a double-encode. Matrices are row-major (mul(M, v)).
+float3 agxContrastApprox(float3 x)
+{
+    float3 x2 = x * x;
+    float3 x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+float3 tonemapAgx(float3 color)
+{
+    const float3x3 agxMat = float3x3(
+        0.842479062253094,  0.0784335999999992, 0.0792237451477643,
+        0.0423282422610123, 0.878468636469772,  0.0791661274605434,
+        0.0423756549057051, 0.0784336,          0.879142973793104);
+    const float3x3 agxMatInv = float3x3(
+        1.19687900512017,    -0.0528968517574562, -0.0529716355144438,
+        -0.0980208811401368,  1.15190312990417,   -0.0980434501171241,
+        -0.0990297440797205, -0.0989611768448433,  1.15107367264116);
+    const float minEv = -12.47393;
+    const float maxEv = 4.026069;
+
+    color = mul(agxMat, max(color, 0.0));
+    color = clamp(log2(color), minEv, maxEv);
+    color = (color - minEv) / (maxEv - minEv);
+    color = agxContrastApprox(color);
+    color = mul(agxMatInv, color);
+    return pow(max(color, 0.0), 2.2); // display-referred sigmoid output → linear
+}
+
+// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic, 3 ACES, 4 AgX.
 float3 applyTonemap(float3 color, float exposure, float white, float mode)
 {
     color = max(color * exposure, 0.0);
@@ -403,7 +434,8 @@ float3 applyTonemap(float3 color, float exposure, float white, float mode)
     if (mode < 0.5) return color;                        // Linear
     if (mode < 1.5) return tonemapReinhard(color, white);
     if (mode < 2.5) return tonemapFilmic(color, white);
-    return tonemapAces(color);                            // ACES / AgX
+    if (mode < 3.5) return tonemapAces(color);           // ACES
+    return tonemapAgx(color);                            // AgX
 }
 
 float4 shadePbr(FragmentInput input)
