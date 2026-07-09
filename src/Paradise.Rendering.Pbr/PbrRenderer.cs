@@ -40,6 +40,11 @@ public sealed class PbrRenderer : IDisposable
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _opaque = [];
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _blend = [];
     private readonly List<BufferHandle> _ownedBuffers = [];
+    // Gradient-sky background: a fullscreen triangle (no vertex buffer) drawn first in the main pass
+    // with depth-write off / compare Always, so geometry overdraws it. Colours come from a tiny UBO.
+    private readonly PipelineHandle _skyPipeline;
+    private readonly BufferHandle _skyUniformBuffer;
+    private readonly BindGroupHandle _skyGroup;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -161,6 +166,23 @@ public sealed class PbrRenderer : IDisposable
             BindGroupEntryDesc.ForBuffer(0, _shadowDrawRing, 0, (ulong)Unsafe.SizeOf<ShadowDrawUniformsGpu>()),
         });
         _shadowDrawGroup = renderer.CreateBindGroup(in shadowDrawGroupDesc);
+
+        // Gradient-sky background program + pipeline. Fullscreen triangle (no vertex buffer — the
+        // vertex shader uses SV_VertexID), depth-write off + compare Always so it never occludes or
+        // is occluded by scene geometry. Fragment entry follows the same sRGB decision as the scene.
+        var skyProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.sky");
+        _skyPipeline = renderer.CreatePipeline(
+            skyProgram, renderer.ColorFormat,
+            depthStencilFormat: TextureFormat.Depth32Float,
+            depthWriteEnabled: false,
+            depthCompare: CompareFunction.Always,
+            fragmentEntryPoint: _useSrgbEntryPoint ? "skyFragmentSrgb" : "skyFragment");
+        var skyUniformDesc = new BufferDesc("PbrSkyUniforms", (ulong)Unsafe.SizeOf<SkyUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst);
+        _skyUniformBuffer = renderer.CreateBuffer(in skyUniformDesc);
+        _skyGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrSkyGroup", FindGroup(skyProgram, 0), new[]
+        {
+            BindGroupEntryDesc.ForBuffer(0, _skyUniformBuffer, 0, (ulong)Unsafe.SizeOf<SkyUniformsGpu>()),
+        }));
 
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
@@ -375,6 +397,16 @@ public sealed class PbrRenderer : IDisposable
 
         UploadFrameUniforms(scene);
 
+        if (scene.HasSkyBackground)
+        {
+            var skyUniforms = new SkyUniformsGpu
+            {
+                TopColor = new Vector4(scene.SkyTopColor, 1f),
+                HorizonColor = new Vector4(scene.SkyHorizonColor, 1f),
+            };
+            _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
+        }
+
         // Build the pass list: one depth-only pass per shadow layer (rendering into that layer's
         // D2 view) followed by the main color pass. WGSL has no layered single-pass rendering, so
         // each layer is a separate pass — the cost is per-pass boundary overhead, not extra shading.
@@ -405,6 +437,13 @@ public sealed class PbrRenderer : IDisposable
 
         // Main color pass, sampling the shadow array.
         encoder.BeginPass(mainPassIndex);
+        // Gradient-sky background first (fullscreen, no depth write) so geometry draws over it.
+        if (scene.HasSkyBackground)
+        {
+            encoder.SetPipeline(_skyPipeline);
+            encoder.SetBindGroup(0, _skyGroup);
+            encoder.Draw(new DrawCommand(3, 1, 0, 0));
+        }
         var drawIndex = 0;
         EncodeBucket(ref encoder, _opaque, BlendMode.Opaque, viewProjection, ref drawIndex);
         EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
@@ -664,6 +703,9 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyBuffer(_shadowDrawRing);
         _renderer.DestroySampler(_shadowSampler);
         DestroyShadowArray();
+        _renderer.DestroyPipeline(_skyPipeline);
+        _renderer.DestroyBindGroup(_skyGroup);
+        _renderer.DestroyBuffer(_skyUniformBuffer);
         _renderer.DestroyBindGroup(_drawGroup);
         _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);

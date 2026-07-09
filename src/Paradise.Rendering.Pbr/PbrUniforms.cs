@@ -78,6 +78,14 @@ public struct ShadowDrawUniformsGpu
     [FieldOffset(0)] public Matrix4x4 LightMvp;
 }
 
+/// <summary>Mirror of sky.slang <c>SkyUniforms</c>: the two gradient colours (linear, tone-mapped).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 32)]
+public struct SkyUniformsGpu
+{
+    [FieldOffset(0)] public Vector4 TopColor;
+    [FieldOffset(16)] public Vector4 HorizonColor;
+}
+
 /// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 80)]
 public struct MaterialUniformsGpu
