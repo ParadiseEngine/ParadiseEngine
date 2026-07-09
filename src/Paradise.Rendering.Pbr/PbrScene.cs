@@ -113,6 +113,11 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public ColorRgba ClearColor = ColorRgba.CornflowerBlue;
+    // Optional gradient-sky background (linear, already tone-mapped). When HasSkyBackground is set,
+    // the renderer draws a fullscreen top→horizon gradient behind the scene instead of a flat clear.
+    public bool HasSkyBackground;
+    public Vector3 SkyTopColor;
+    public Vector3 SkyHorizonColor;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
 }
