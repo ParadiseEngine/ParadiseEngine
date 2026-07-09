@@ -18,7 +18,7 @@ public class UniformLayoutTests
     {
         var program = LoadProgram();
         UniformLayoutValidator.Validate(program); // throws on any divergence
-        await Assert.That(program.UniformBlocks.Length).IsEqualTo(3);
+        await Assert.That(program.UniformBlocks.Length).IsEqualTo(4); // draw, frame, material, ssao
     }
 
     [Test]
@@ -58,13 +58,14 @@ public class UniformLayoutTests
     }
 
     [Test]
-    public async Task pipeline_layout_reflects_the_three_groups()
+    public async Task pipeline_layout_reflects_the_four_groups()
     {
         var program = LoadProgram();
-        await Assert.That(program.Layout.Groups.Length).IsEqualTo(3);
+        await Assert.That(program.Layout.Groups.Length).IsEqualTo(4);
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
         await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(3); // frame UBO + shadow depth texture + comparison sampler
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
+        await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(2); // SSAO UBO + position texture
     }
 
     [Test]

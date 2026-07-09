@@ -45,6 +45,17 @@ public sealed class PbrRenderer : IDisposable
     private readonly PipelineHandle _skyPipeline;
     private readonly BufferHandle _skyUniformBuffer;
     private readonly BindGroupHandle _skyGroup;
+    // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
+    // _positionTexture (Rgba32Float, offscreen color) with its own depth (_prepassDepthAux). The PBR
+    // shader (group 3) samples it via textureLoad and darkens ambient. The group is rebuilt on resize.
+    private readonly ShaderProgramDesc _positionPrepassProgram;
+    private readonly PipelineHandle _positionPrepassPipeline;
+    private readonly BufferHandle _ssaoUniformBuffer;
+    private BindGroupHandle _ssaoGroup;
+    private TextureHandle _positionTexture;
+    private TextureViewHandle _positionView;
+    private TextureHandle _prepassDepthAux;
+    private BindGroupLayoutDesc _ssaoGroupLayout;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -187,8 +198,43 @@ public sealed class PbrRenderer : IDisposable
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         _depthTexture = CreateDepthTexture(_width, _height);
-        // The pass list is (re)built each frame: N per-layer shadow passes + one main pass (see
-        // RenderFrame). The main pass's depth target is the window depth texture (recreated on resize).
+
+        // SSAO world-position pre-pass program + pipeline. Reuses the main draw ring/group (its group
+        // 0 is the same DrawUniforms, made dynamic-offset), renders opaque geometry to an Rgba32Float
+        // position target with its own depth. Vertex layout is position-only over the mesh stride.
+        var positionProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.positionPrepass");
+        var positionGroups = (BindGroupLayoutDesc[])positionProgram.Layout.Groups.Clone();
+        for (var i = 0; i < positionGroups.Length; i++)
+        {
+            if (positionGroups[i].GroupIndex != 0) continue;
+            positionGroups[i] = new BindGroupLayoutDesc(0, [positionGroups[i].Entries[0] with { HasDynamicOffset = true }]);
+        }
+        _positionPrepassProgram = new ShaderProgramDesc(
+            positionProgram.Modules,
+            new PipelineLayoutDesc(positionGroups, positionProgram.Layout.PushConstants),
+            positionProgram.VertexBuffers)
+        {
+            UniformBlocks = positionProgram.UniformBlocks,
+        };
+        var positionVertexLayout = new[]
+        {
+            new VertexBufferLayoutDesc(meshStride, VertexStepMode.Vertex,
+                new[] { new VertexAttributeDesc(0, VertexFormat.Float32x3, 0) }),
+        };
+        _positionPrepassPipeline = renderer.CreatePipeline(
+            _positionPrepassProgram, TextureFormat.Rgba32Float,
+            depthStencilFormat: TextureFormat.Depth32Float,
+            depthWriteEnabled: true,
+            depthCompare: CompareFunction.Less);
+
+        _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO uniforms + position texture
+        _ssaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
+            "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
+        _positionTexture = CreatePositionTexture(_width, _height);
+        _prepassDepthAux = CreateDepthTexture(_width, _height);
+        RebuildSsaoGroup();
+        // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
+        // position pre-pass, then the main pass (whose depth target is recreated on resize).
     }
 
     // (Re)allocate the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
@@ -255,9 +301,14 @@ public sealed class PbrRenderer : IDisposable
         height = Math.Max(1, height);
         if (width == _width && height == _height) return;
         _renderer.DestroyTexture(_depthTexture);
+        _renderer.DestroyTexture(_positionTexture);
+        _renderer.DestroyTexture(_prepassDepthAux);
         _width = width;
         _height = height;
         _depthTexture = CreateDepthTexture(width, height);
+        _positionTexture = CreatePositionTexture(width, height);
+        _prepassDepthAux = CreateDepthTexture(width, height);
+        RebuildSsaoGroup(); // position texture changed → rebind
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
 
@@ -396,6 +447,7 @@ public sealed class PbrRenderer : IDisposable
                 $"{shadowDrawTotal} shadow-caster draws ({_shadowViews.Count} views × {_opaque.Count} casters) exceed the {MaxDrawsPerFrame}-slot shadow ring.");
 
         UploadFrameUniforms(scene);
+        UploadSsaoUniforms(scene);
 
         if (scene.HasSkyBackground)
         {
@@ -407,10 +459,11 @@ public sealed class PbrRenderer : IDisposable
             _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
         }
 
-        // Build the pass list: one depth-only pass per shadow layer (rendering into that layer's
-        // D2 view) followed by the main color pass. WGSL has no layered single-pass rendering, so
-        // each layer is a separate pass — the cost is per-pass boundary overhead, not extra shading.
-        var mainPassIndex = _shadowViews.Count;
+        // Build the pass list: one depth-only pass per shadow layer, then an optional SSAO
+        // position pre-pass, then the main color pass.
+        var hasPrepass = scene.Ssao.Enabled && _opaque.Count > 0;
+        var prepassIndex = hasPrepass ? _shadowViews.Count : -1;
+        var mainPassIndex = _shadowViews.Count + (hasPrepass ? 1 : 0);
         if (_passes.Length < mainPassIndex + 1) _passes = new RenderPassDesc[mainPassIndex + 1];
         for (var k = 0; k < _shadowViews.Count; k++)
         {
@@ -420,6 +473,16 @@ public sealed class PbrRenderer : IDisposable
                     _shadowArray, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f,
                     DepthView: _shadowLayerViews[_shadowViews[k].Layer]),
             };
+        }
+        if (hasPrepass)
+        {
+            _passes[prepassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
+            {
+                Depth = new DepthAttachmentDesc(_prepassDepthAux, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
+            };
+            // Offscreen color: the Rgba32Float position target, cleared to 0 (background w = 0).
+            _passes[prepassIndex].Colors.Slot0 = new ColorAttachmentDesc(
+                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f), ColorView: _positionView);
         }
         _passes[mainPassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
         {
@@ -434,6 +497,11 @@ public sealed class PbrRenderer : IDisposable
         // One depth-only pass per shadow layer: fill that layer with every opaque caster's depth.
         var shadowDraws = 0;
         EncodeShadowLayers(ref encoder, ref shadowDraws);
+
+        // SSAO position pre-pass: render opaque world positions using the SAME main-draw-ring offsets
+        // that EncodeBucket fills for opaque (so no extra ring space is needed).
+        if (hasPrepass)
+            EncodeDepthPrepass(ref encoder, prepassIndex);
 
         // Main color pass, sampling the shadow array.
         encoder.BeginPass(mainPassIndex);
@@ -482,6 +550,36 @@ public sealed class PbrRenderer : IDisposable
             }
             encoder.EndPass();
         }
+    }
+
+    // SSAO position pre-pass: render opaque world positions into _positionTexture (offscreen color) +
+    // _prepassDepthAux. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
+    // EncodeBucket fills for it, so no extra ring space or upload is needed.
+    private void EncodeDepthPrepass(ref RenderCommandEncoder encoder, int passIndex)
+    {
+        encoder.BeginPass(passIndex);
+        encoder.SetPipeline(_positionPrepassPipeline);
+        for (var i = 0; i < _opaque.Count; i++)
+        {
+            var primitive = _opaque[i].Primitive;
+            encoder.SetBindGroup(0, _drawGroup, dynamicOffset: (uint)(i * _drawStride));
+            encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
+            encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
+            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
+        }
+        encoder.EndPass();
+    }
+
+    // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off) makes the shader skip position sampling.
+    private void UploadSsaoUniforms(PbrScene scene)
+    {
+        var s = scene.Ssao;
+        var u = new SsaoUniformsGpu
+        {
+            Params = new Vector4(s.Enabled ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
+            Screen = new Vector4(1f / _width, 1f / _height, _width, _height),
+        };
+        _renderer.UpdateBuffer<SsaoUniformsGpu>(_ssaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref u, 1));
     }
 
     // Light-space view-projection for one shadow face: directional = ortho fit to the scene AABB;
@@ -590,6 +688,7 @@ public sealed class PbrRenderer : IDisposable
 
         encoder.SetPipeline(GetPipeline(blend));
         encoder.SetBindGroup(1, _frameGroup);
+        encoder.SetBindGroup(3, _ssaoGroup); // SSAO uniforms + position pre-pass (group 3)
 
         foreach (var (instance, primitive, _) in bucket)
         {
@@ -680,6 +779,31 @@ public sealed class PbrRenderer : IDisposable
         return _renderer.CreateTexture(in desc);
     }
 
+    // SSAO world-position pre-pass target: Rgba32Float, both a render target and sampled (textureLoad).
+    private TextureHandle CreatePositionTexture(uint width, uint height)
+    {
+        var desc = new TextureDesc(
+            "PbrSsaoPosition", width, height, 1, 1, 1,
+            TextureDimension.D2, TextureFormat.Rgba32Float,
+            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
+        return _renderer.CreateTexture(in desc);
+    }
+
+    // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
+    // sampled binding uses an explicit view, distinct from the default view the pre-pass renders into.
+    private void RebuildSsaoGroup()
+    {
+        if (_ssaoGroup.IsValid) _renderer.DestroyBindGroup(_ssaoGroup);
+        if (_positionView.IsValid) _renderer.DestroyTextureView(_positionView);
+        _positionView = _renderer.CreateTextureView(new TextureViewDesc(
+            "PbrSsaoPositionView", _positionTexture, TextureViewDimension.D2, 0, 1));
+        _ssaoGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSsaoGroup", _ssaoGroupLayout, new[]
+        {
+            BindGroupEntryDesc.ForBuffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
+            BindGroupEntryDesc.ForTextureView(1, _positionView),
+        }));
+    }
+
     private BindGroupLayoutDesc FindGroup(uint groupIndex) => FindGroup(_program, groupIndex);
 
     private static BindGroupLayoutDesc FindGroup(ShaderProgramDesc program, uint groupIndex)
@@ -706,6 +830,12 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyPipeline(_skyPipeline);
         _renderer.DestroyBindGroup(_skyGroup);
         _renderer.DestroyBuffer(_skyUniformBuffer);
+        _renderer.DestroyPipeline(_positionPrepassPipeline);
+        _renderer.DestroyBindGroup(_ssaoGroup);
+        if (_positionView.IsValid) _renderer.DestroyTextureView(_positionView);
+        _renderer.DestroyBuffer(_ssaoUniformBuffer);
+        _renderer.DestroyTexture(_positionTexture);
+        _renderer.DestroyTexture(_prepassDepthAux);
         _renderer.DestroyBindGroup(_drawGroup);
         _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);

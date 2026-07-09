@@ -91,6 +91,22 @@ Texture2D<float4> occlusionTexture;
 [[vk::binding(6, 2)]]
 Texture2D<float4> emissiveTexture;
 
+// Group 3: screen-space ambient occlusion. positionTexture is the world-position pre-pass (xyz =
+// world position, w = coverage; Rgba32Float, sampled with textureLoad — unfilterable, no sampler).
+// AO is computed inline in the fragment and multiplies only the ambient term; intensity 0 disables
+// it (the pre-pass is skipped and the shader early-outs, so the stale texture is never read).
+struct SsaoUniforms
+{
+    float4 params; // x: intensity (0 = off), y: radius (world units), z: bias, w: power
+    float4 screen; // xy: 1/screenSize (texel), zw: screenSize (pixels)
+};
+
+[[vk::binding(0, 3)]]
+ConstantBuffer<SsaoUniforms> ssao;
+
+[[vk::binding(1, 3)]]
+Texture2D<float4> positionTexture;
+
 struct VertexInput
 {
     [[vk::location(0)]] float3 position : POSITION;
@@ -454,6 +470,51 @@ float3 applyTonemap(float3 color, float exposure, float white, float mode)
     return tonemapAgx(color);                            // AgX
 }
 
+// Screen-space ambient occlusion from the world-position pre-pass. A spiral of screen-space taps
+// around the fragment; each reconstructs the neighbour's world position (sampled directly, no matrix
+// math) and occludes when it's within `radius` of the fragment and above its tangent plane. Returns
+// a [0,1] AO multiplier applied to ambient only. Reading positionTexture via textureLoad avoids the
+// depth-format sampling hazard.
+float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
+{
+    float intensity = ssao.params.x;
+    if (intensity <= 0.0) return 1.0; // SSAO disabled
+
+    float radius = ssao.params.y;
+    float bias = ssao.params.z;
+    float power = max(ssao.params.w, 1e-3);
+    float2 screenSize = ssao.screen.zw;
+
+    float rot = frac(sin(dot(fragCoord, float2(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+    float cosr = cos(rot), sinr = sin(rot);
+    float pixelRadius = 26.0 * radius; // screen search extent; world-distance below enforces correctness
+
+    const int SAMPLES = 12;
+    float occlusion = 0.0;
+    for (int i = 0; i < SAMPLES; i++)
+    {
+        float a = (float(i) + 0.5) / float(SAMPLES);
+        float ang = a * 6.2831853 * 3.0;
+        float2 dir = float2(cos(ang), sin(ang));
+        float2 rdir = float2(dir.x * cosr - dir.y * sinr, dir.x * sinr + dir.y * cosr);
+        int2 samplePix = int2(fragCoord + rdir * a * pixelRadius);
+        if (samplePix.x < 0 || samplePix.y < 0 || samplePix.x >= (int)screenSize.x || samplePix.y >= (int)screenSize.y) continue;
+
+        float4 p = positionTexture.Load(int3(samplePix, 0));
+        if (p.w < 0.5) continue; // background (cleared to 0)
+
+        float3 diff = p.xyz - worldPos;
+        float dist = length(diff);
+        if (dist < 1e-3 || dist > radius) continue;
+
+        float ndl = dot(N, diff / dist);
+        if (ndl <= bias) continue;
+        occlusion += ndl * (1.0 - dist / radius);
+    }
+    occlusion /= float(SAMPLES);
+    return pow(saturate(1.0 - occlusion * intensity), power);
+}
+
 float4 shadePbr(FragmentInput input)
 {
     float2 baseUv = transformBaseColorUv(input.texcoord);
@@ -502,6 +563,8 @@ float4 shadePbr(FragmentInput input)
     }
     float occlusionSample = occlusionTexture.Sample(baseColorSampler, input.texcoord).r;
     float occlusion = lerp(1.0, occlusionSample, material.occlusionStrength);
+    // Screen-space AO (from the world-position pre-pass) also darkens only the ambient, like Godot.
+    occlusion *= computeSsao(input.position.xy, input.worldPos, N);
     float exposure = max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 
