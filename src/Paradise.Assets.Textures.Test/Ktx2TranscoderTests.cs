@@ -1,4 +1,5 @@
 using System.IO;
+using Ktx;
 using Paradise.Rendering;
 
 namespace Paradise.Assets.Textures.Test;
@@ -43,7 +44,9 @@ public class Ktx2TranscoderTests
 
         var data = Ktx2Transcoder.TranscodeToBc(bytes, CompressedTextureUsage.ColorSrgb);
         await Assert.That(data.IsEmpty).IsFalse();
-        await Assert.That(data.Format).IsEqualTo(TextureFormat.Bc7RgbaUnormSrgb);
+        // Color textures upload under a LINEAR BC7 format; the sRGB decode is done in-shader
+        // (pbr.slang srgbToLinear). The raw texels stay sRGB-valued; only the format tag is *Unorm.
+        await Assert.That(data.Format).IsEqualTo(TextureFormat.Bc7RgbaUnorm);
         await Assert.That(data.Width).IsEqualTo(8);
         await Assert.That(data.Height).IsEqualTo(8);
         await Assert.That(data.BlockWidth).IsEqualTo(4);
@@ -89,7 +92,8 @@ public class Ktx2TranscoderTests
 
         var data = Ktx2Transcoder.TranscodeToRgba32(bytes, CompressedTextureUsage.ColorSrgb);
         await Assert.That(data.IsEmpty).IsFalse();
-        await Assert.That(data.Format).IsEqualTo(TextureFormat.Rgba8UnormSrgb);
+        // Color uploads under a linear format; sRGB decode is in-shader (see BC test above).
+        await Assert.That(data.Format).IsEqualTo(TextureFormat.Rgba8Unorm);
         await Assert.That(data.BlockWidth).IsEqualTo(1);
         await Assert.That(data.BytesPerBlock).IsEqualTo(4);
 
@@ -130,6 +134,49 @@ public class Ktx2TranscoderTests
         await Assert.That(Math.Abs(data.Data[1] - 127)).IsLessThan(12); // G ← Y (from alpha)
         await Assert.That((int)data.Data[2]).IsEqualTo(255);            // B forced opaque-up
         await Assert.That((int)data.Data[3]).IsEqualTo(255);            // A forced
+    }
+
+    // TryMapVkFormat handles pre-compressed BC KTX2 passthrough (NeedsTranscoding == false).
+    // There's no toktx-produced pre-compressed BC7-sRGB fixture checked in, so these exercise
+    // the mapping directly rather than round-tripping through a binary KTX2 file.
+
+    [Test]
+    [Arguments(Ktx2.VkFormat.BC7SrgbBlock, TextureFormat.Bc7RgbaUnorm)]
+    [Arguments(Ktx2.VkFormat.BC1RgbSrgbBlock, TextureFormat.Bc1RgbaUnorm)]
+    [Arguments(Ktx2.VkFormat.BC1RgbaSrgbBlock, TextureFormat.Bc1RgbaUnorm)]
+    [Arguments(Ktx2.VkFormat.BC3SrgbBlock, TextureFormat.Bc3RgbaUnorm)]
+    public async Task pre_compressed_srgb_passthrough_strips_srgb_tag_for_color_usage(
+        Ktx2.VkFormat vkFormat, TextureFormat expected)
+    {
+        // Color textures upload under a LINEAR format everywhere (transcoded and pre-compressed
+        // alike) so the shader's srgbToLinear() decode isn't applied twice.
+        var mapped = Ktx2Transcoder.TryMapVkFormat(vkFormat, CompressedTextureUsage.ColorSrgb, out var format, out _);
+        await Assert.That(mapped).IsTrue();
+        await Assert.That(format).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments(Ktx2.VkFormat.BC7SrgbBlock, TextureFormat.Bc7RgbaUnormSrgb)]
+    [Arguments(Ktx2.VkFormat.BC1RgbSrgbBlock, TextureFormat.Bc1RgbaUnormSrgb)]
+    [Arguments(Ktx2.VkFormat.BC1RgbaSrgbBlock, TextureFormat.Bc1RgbaUnormSrgb)]
+    [Arguments(Ktx2.VkFormat.BC3SrgbBlock, TextureFormat.Bc3RgbaUnormSrgb)]
+    public async Task pre_compressed_srgb_passthrough_keeps_srgb_tag_for_non_color_usage(
+        Ktx2.VkFormat vkFormat, TextureFormat expected)
+    {
+        // Non-color usages (normal maps, packed scalar maps) have no shader-side decode, so the
+        // hardware sRGB format must pass through untouched.
+        var mapped = Ktx2Transcoder.TryMapVkFormat(vkFormat, CompressedTextureUsage.NormalMap, out var format, out _);
+        await Assert.That(mapped).IsTrue();
+        await Assert.That(format).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task pre_compressed_unorm_passthrough_is_unaffected_by_usage()
+    {
+        var mapped = Ktx2Transcoder.TryMapVkFormat(Ktx2.VkFormat.BC7UnormBlock, CompressedTextureUsage.ColorSrgb, out var format, out var bytesPerBlock);
+        await Assert.That(mapped).IsTrue();
+        await Assert.That(format).IsEqualTo(TextureFormat.Bc7RgbaUnorm);
+        await Assert.That(bytesPerBlock).IsEqualTo(16);
     }
 
     [Test]
