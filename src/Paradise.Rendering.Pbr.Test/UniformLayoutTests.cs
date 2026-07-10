@@ -130,6 +130,6 @@ public class UniformLayoutTests
         await Assert.That(gpu.DirectionAndRange).IsEqualTo(new Vector4(0f, -1f, 0f, 12f));
         await Assert.That(gpu.ColorAndIntensity).IsEqualTo(new Vector4(0.5f, 0.25f, 0.125f, 4f));
         await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, -1f, 0f)); // z=-1 → no shadow (renderer assigns array layers)
-        await Assert.That(gpu.ShadowAtlas).IsEqualTo(new Vector4(1.75f, 0f, 0f, 0f)); // x = distance-attenuation decay
+        await Assert.That(gpu.ShadowAtlas).IsEqualTo(new Vector4(1.75f, 0f, 0.5f, 0f)); // x = distance-attenuation decay
     }
 }

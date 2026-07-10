@@ -33,6 +33,8 @@ public sealed record PbrLight
     public bool CastsShadows { get; init; }
     public float ShadowStrength { get; init; } = 1f;
     public bool SoftShadows { get; init; }
+    // Godot LIGHT_PARAM_SPECULAR: scales the specular lobe only (default 0.5 — Godot's own).
+    public float Specular { get; init; } = 0.5f;
 
     public SceneLightGpu ToGpu() => new()
     {
@@ -40,7 +42,7 @@ public sealed record PbrLight
         DirectionAndRange = new Vector4(Direction, Range),
         ColorAndIntensity = new Vector4(Color, Intensity),
         SpotAngles = new Vector4(SpotOuterDegrees, SpotInnerDegrees, -1f, 0f), // z=-1 → no shadow
-        ShadowAtlas = new Vector4(AttenuationExponent, 0f, 0f, 0f), // x=decay; renderer fills y/w for shadow tiles
+        ShadowAtlas = new Vector4(AttenuationExponent, 0f, Specular, 0f), // x=decay, z=specular amount; renderer fills y/w for shadow tiles
     };
 }
 
