@@ -25,9 +25,9 @@ public class UniformLayoutTests
     public async Task struct_sizes_match_wgsl_totals()
     {
         await Assert.That(Unsafe.SizeOf<DrawUniformsGpu>()).IsEqualTo(208);
-        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(29968);
+        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(30992);
         await Assert.That(Unsafe.SizeOf<MaterialUniformsGpu>()).IsEqualTo(80);
-        await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(80);
+        await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(96);
     }
 
     [Test]
@@ -124,6 +124,7 @@ public class UniformLayoutTests
             SpotOuterDegrees = 40f,
             SpotInnerDegrees = 25f,
             AttenuationExponent = 1.75f,
+            Size = 0.6f,
         };
         var gpu = light.ToGpu();
         await Assert.That(gpu.PositionAndType).IsEqualTo(new Vector4(1f, 2f, 3f, 2f));
@@ -131,5 +132,6 @@ public class UniformLayoutTests
         await Assert.That(gpu.ColorAndIntensity).IsEqualTo(new Vector4(0.5f, 0.25f, 0.125f, 4f));
         await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, -1f, 0f)); // z=-1 → no shadow (renderer assigns array layers)
         await Assert.That(gpu.ShadowAtlas).IsEqualTo(new Vector4(1.75f, 0f, 0.5f, 0f)); // x = distance-attenuation decay
+        await Assert.That(gpu.SizeParams).IsEqualTo(new Vector4(0.6f, 0f, 0f, 0f)); // spot: raw world radius
     }
 }

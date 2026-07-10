@@ -17,14 +17,18 @@ namespace Paradise.Rendering.Pbr;
 //   PbrMath.NormalMatrix.
 
 /// <summary>Mirror of pbr.slang <c>SceneLight</c> (64 B, array stride 64).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 80)]
+[StructLayout(LayoutKind.Explicit, Size = 96)]
 public struct SceneLightGpu
 {
     [FieldOffset(0)] public Vector4 PositionAndType;    // xyz position, w: 0 dir / 1 point / 2 spot
     [FieldOffset(16)] public Vector4 DirectionAndRange; // xyz surface→light dir (directional), w range
     [FieldOffset(32)] public Vector4 ColorAndIntensity; // rgb linear color, w intensity
     [FieldOffset(48)] public Vector4 SpotAngles;        // x outer°, y inner°, z base shadow tile (<0 none), w strength
-    [FieldOffset(64)] public Vector4 ShadowAtlas;       // x columns, y face count, z tile scale, w soft flag
+    [FieldOffset(64)] public Vector4 ShadowAtlas;       // x columns, y face count, z LIGHT_PARAM_SPECULAR, w soft flag
+    // x: LIGHT_PARAM_SIZE — directional carries 1−cos(angular°) precomputed (Godot light_storage
+    // convention); point/spot carry the raw world radius (the shader derives the per-fragment
+    // angular term). Softens specular highlights + NdotL like Godot's size_A. yzw unused.
+    [FieldOffset(80)] public Vector4 SizeParams;
 }
 
 /// <summary>Inline storage for the 8 scene lights (sequential — stride matches WGSL's 80).</summary>
@@ -50,8 +54,8 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (29968 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 29968)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (30992 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 30992)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
@@ -65,9 +69,9 @@ public struct FrameUniformsGpu
     // Forward+ froxel clustering (see pbr.slang): forward.w = cluster near, params.w = far.
     [FieldOffset(224)] public Vector4 CameraForward; // xyz world camera forward, w cluster near
     [FieldOffset(240)] public Vector4 ClusterParams; // x tilesX, y tilesY, z zSlices, w cluster far
-    [FieldOffset(256)] public SceneLightArray Lights;          // 64 × 80 = 5120 B
-    [FieldOffset(5376)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
-    [FieldOffset(5392)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
+    [FieldOffset(256)] public SceneLightArray Lights;          // 64 × 96 = 6144 B
+    [FieldOffset(6400)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
+    [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
