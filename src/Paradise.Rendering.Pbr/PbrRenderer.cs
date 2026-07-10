@@ -63,6 +63,10 @@ public sealed class PbrRenderer : IDisposable
     private readonly TextureHandle _skySpecLutTexture;
     private readonly TextureViewHandle _skySpecLutView;
     private readonly SamplerHandle _skySpecSampler;
+    // The environment-BRDF (DFG) table: the real GGX pre-integral, baked once at startup —
+    // Godot's integrate_dfg.glsl integrand (Schlick-GGX, IBL k = α²/2, 1024 Hammersley samples).
+    private readonly TextureHandle _dfgLutTexture;
+    private readonly TextureViewHandle _dfgLutView;
     private (Vector3, Vector3, Vector3, Vector3, float, float, Vector3, float, float, float)? _skySpecKey;
     // Forward+ froxel clustering: one uint bitmask per froxel (bit i = sceneLights[i] overlaps),
     // CPU-binned each frame from conservative view-space sphere bounds. 32x32 px tiles x 32
@@ -268,6 +272,12 @@ public sealed class PbrRenderer : IDisposable
         // The LUT starts black (no reflections until a sky is provided); baked on first use.
         _renderer.WriteTexture(_skySpecLutTexture, 0, new byte[SkySpecLutWidth * SkySpecLutHeight * 4],
             SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
+        _dfgLutTexture = renderer.CreateTexture(new TextureDesc(
+            "PbrDfgLut", DfgLutSize, DfgLutSize, 1, 1, 1, TextureDimension.D2,
+            TextureFormat.Rgba16Float, TextureUsage.TextureBinding | TextureUsage.CopyDst));
+        _dfgLutView = renderer.CreateTextureView(new TextureViewDesc(
+            "PbrDfgLutView", _dfgLutTexture, TextureViewDimension.D2, 0, 1));
+        BakeDfgLut();
         RebuildSsaoGroup();
         // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
         // position pre-pass, then the main pass (whose depth target is recreated on resize).
@@ -987,6 +997,71 @@ public sealed class PbrRenderer : IDisposable
 
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
     // sampled binding uses an explicit view, distinct from the default view the pre-pass renders into.
+    private const int DfgLutSize = 128;
+
+    /// <summary>Bake the environment-BRDF (DFG) table: an exact port of Godot's
+    /// integrate_dfg.glsl (GGX importance sampling, Schlick-GGX with the IBL k = α²/2,
+    /// 1024 Hammersley samples). Stored as (scale = ∫(1−Fc)·G_Vis, bias = ∫Fc·G_Vis) so the
+    /// shader computes specular = F0·scale + f90·bias and the multiscatter energy compensation
+    /// uses scale + bias; u = NdotV, v = roughness. ~130 ms once at startup.</summary>
+    private void BakeDfgLut()
+    {
+        const int samples = 1024;
+        var data = new byte[DfgLutSize * DfgLutSize * 8]; // 4 × 16-bit half channels
+        for (var row = 0; row < DfgLutSize; row++)
+        {
+            var roughness = (row + 0.5f) / DfgLutSize;
+            var alpha2 = roughness * roughness * roughness * roughness;
+            var k = roughness * roughness / 2f; // Schlick-GGX IBL k
+            for (var col = 0; col < DfgLutSize; col++)
+            {
+                var ndv = (col + 0.5f) / DfgLutSize;
+                var v = new Vector3(MathF.Sqrt(1f - ndv * ndv), 0f, ndv); // N = +Z tangent frame
+                float a = 0f, b = 0f;
+                for (var i = 0; i < samples; i++)
+                {
+                    var u1 = (float)i / samples;
+                    uint bits = (uint)i;
+                    bits = (bits << 16) | (bits >> 16);
+                    bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
+                    bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
+                    bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
+                    bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
+                    var u2 = bits * 2.3283064365386963e-10f;
+                    var phi = 2f * MathF.PI * u1;
+                    var cosTheta = MathF.Sqrt((1f - u2) / (1f + (alpha2 - 1f) * u2));
+                    var sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
+                    var h = new Vector3(MathF.Cos(phi) * sinTheta, MathF.Sin(phi) * sinTheta, cosTheta);
+                    var l = 2f * Vector3.Dot(v, h) * h - v;
+                    var ndl = Math.Clamp(l.Z, 0f, 1f);
+                    if (ndl <= 0f) continue;
+                    var ndh = Math.Clamp(h.Z, 0f, 1f);
+                    var vdh = Math.Clamp(Vector3.Dot(v, h), 0f, 1f);
+                    var g = (ndv / (ndv * (1f - k) + k)) * (ndl / (ndl * (1f - k) + k));
+                    var gVis = g * vdh / MathF.Max(ndh * ndv, 1e-6f);
+                    var fc = MathF.Pow(1f - vdh, 5f);
+                    a += fc * gVis;
+                    b += gVis;
+                }
+                a /= samples;
+                b /= samples;
+                var idx = (row * DfgLutSize + col) * 8;
+                WriteHalf(data, idx + 0, b - a); // r = scale (∫(1−Fc)·G_Vis)
+                WriteHalf(data, idx + 2, a);     // g = bias  (∫Fc·G_Vis)
+                WriteHalf(data, idx + 4, 0f);
+                WriteHalf(data, idx + 6, 1f);
+            }
+        }
+        _renderer.WriteTexture(_dfgLutTexture, 0, data, DfgLutSize * 8, DfgLutSize, DfgLutSize, DfgLutSize);
+
+        static void WriteHalf(byte[] dest, int offset, float value)
+        {
+            var bits = BitConverter.HalfToUInt16Bits((Half)value);
+            dest[offset] = (byte)bits;
+            dest[offset + 1] = (byte)(bits >> 8);
+        }
+    }
+
     private const int SkySpecLutWidth = 64;
     private const int SkySpecLutHeight = 16; // rows 0..7 gradient half, 8..15 sun half
     internal const float SkySpecSunScale = 4f; // HDR headroom for the sun half in 8-bit sRGB texels
@@ -1107,6 +1182,7 @@ public sealed class PbrRenderer : IDisposable
             BindGroupEntryDesc.ForTextureView(1, _positionView),
             BindGroupEntryDesc.ForTextureView(2, _skySpecLutView),
             BindGroupEntryDesc.ForSampler(3, _skySpecSampler),
+            BindGroupEntryDesc.ForTextureView(4, _dfgLutView),
         }));
     }
 

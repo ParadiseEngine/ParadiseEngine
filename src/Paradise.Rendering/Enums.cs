@@ -39,6 +39,9 @@ public enum TextureFormat : uint
     // 32-bit float RGBA — a renderable, unfilterable-float format used for the SSAO world-position
     // pre-pass target (sampled via textureLoad).
     Rgba32Float,
+    // 16-bit float RGBA — filterable in core WebGPU; used for CPU-baked lookup tables that need
+    // more precision than 8-bit (the DFG environment-BRDF LUT).
+    Rgba16Float,
     Depth32Float,
     Depth24PlusStencil8,
     // Block-compressed formats — exactly the set the KTX2 transcoder emits (BC7 color/ORM,
