@@ -64,6 +64,16 @@ public sealed class PbrRenderer : IDisposable
     private readonly TextureViewHandle _skySpecLutView;
     private readonly SamplerHandle _skySpecSampler;
     private (Vector3, Vector3, Vector3, Vector3, float, float, Vector3, float, float, float)? _skySpecKey;
+    // Forward+ froxel clustering: one uint bitmask per froxel (bit i = sceneLights[i] overlaps),
+    // CPU-binned each frame from conservative view-space sphere bounds. 32x32 px tiles x 32
+    // logarithmic Z slices, matching Godot's cluster shape (Godot bins on the GPU with a compute
+    // rasterizer; the CPU route produces the same conservative result at our light counts).
+    private BufferHandle _clusterBuffer;
+    private uint[] _clusterMasks = [];
+    private int _clusterTilesX;
+    private int _clusterTilesY;
+    private const int ClusterTileSize = 32;
+    private const int ClusterZSlices = 32;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -138,6 +148,12 @@ public sealed class PbrRenderer : IDisposable
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest,
             MaxAnisotropy: 1, Compare: CompareFunction.LessEqual));
+
+        // Froxel mask buffer must exist before the frame bind group references it (binding 3).
+        // _width/_height are set later in the ctor, so size from the ctor parameters directly.
+        _width = Math.Max(1, width);
+        _height = Math.Max(1, height);
+        EnsureClusterBuffer();
 
         // Allocate the initial single-layer array + frame bind group (binding 1 = D2Array shadow
         // view, binding 2 = comparison sampler; matches pbr.slang's reserved group-1 slots). A valid
@@ -292,6 +308,7 @@ public sealed class PbrRenderer : IDisposable
             BindGroupEntryDesc.ForBuffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
             BindGroupEntryDesc.ForTextureView(1, _shadowArrayView),
             BindGroupEntryDesc.ForSampler(2, _shadowSampler),
+            BindGroupEntryDesc.ForBuffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
         });
         _frameGroup = _renderer.CreateBindGroup(in frameGroupDesc);
     }
@@ -329,7 +346,24 @@ public sealed class PbrRenderer : IDisposable
         _positionTexture = CreatePositionTexture(width, height);
         _prepassDepthAux = CreateDepthTexture(width, height);
         RebuildSsaoGroup(); // position texture changed → rebind
+        EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
+    }
+
+    // (Re)allocate the froxel mask buffer for the current resolution and rebind the frame group.
+    private void EnsureClusterBuffer()
+    {
+        var tilesX = (int)((_width + ClusterTileSize - 1) / ClusterTileSize);
+        var tilesY = (int)((_height + ClusterTileSize - 1) / ClusterTileSize);
+        if (tilesX == _clusterTilesX && tilesY == _clusterTilesY && _clusterBuffer.IsValid) return;
+        if (_clusterBuffer.IsValid) _renderer.DestroyBuffer(_clusterBuffer);
+        _clusterTilesX = tilesX;
+        _clusterTilesY = tilesY;
+        _clusterMasks = new uint[tilesX * tilesY * ClusterZSlices];
+        _clusterBuffer = _renderer.CreateBuffer(new BufferDesc(
+            "PbrClusterMasks", (ulong)(_clusterMasks.Length * sizeof(uint)),
+            BufferUsage.Storage | BufferUsage.CopyDst));
+        if (_frameGroup.IsValid) RebuildFrameGroup();
     }
 
     public float AspectRatio => _width / (float)_height;
@@ -466,6 +500,7 @@ public sealed class PbrRenderer : IDisposable
             throw new InvalidOperationException(
                 $"{shadowDrawTotal} shadow-caster draws ({_shadowViews.Count} views × {_opaque.Count} casters) exceed the {MaxDrawsPerFrame}-slot shadow ring.");
 
+        BuildClusters(scene);
         UploadFrameUniforms(scene);
         UploadSsaoUniforms(scene);
 
@@ -751,6 +786,103 @@ public sealed class PbrRenderer : IDisposable
         }
     }
 
+    // Cluster depth range for the CURRENT frame (extracted from the projection; the shader must
+    // slice with the same values, so they ride the frame UBO).
+    private float _clusterNear = 0.05f;
+    private float _clusterFar = 100f;
+
+    // World-space camera forward from the row-vector view matrix (third column is -forward).
+    private static Vector3 CameraForward(in Matrix4x4 view) =>
+        Vector3.Normalize(new Vector3(-view.M13, -view.M23, -view.M33));
+
+    private static int ClusterSlice(float viewZ, float near, float far) =>
+        Math.Clamp((int)(MathF.Log(Math.Max(viewZ, near) / near) / MathF.Log(far / near) * ClusterZSlices),
+            0, ClusterZSlices - 1);
+
+    /// <summary>Forward+ CPU binning: for every point/spot light, mark the froxels its bounding
+    /// sphere (position, range) can touch. Conservative on purpose — tile/slice ranges from a
+    /// projected view-space AABB, padded ±1 froxel against CPU/GPU float divergence at cell
+    /// boundaries. A false-positive bit costs a near-zero shading add; a false negative would
+    /// change pixels, so inclusion always wins. Directional lights are never clustered.</summary>
+    private void BuildClusters(PbrScene scene)
+    {
+        Array.Clear(_clusterMasks);
+        var view = scene.Camera.View;
+        var proj = scene.Camera.Projection;
+        // Near/far from the row-vector perspective projection (M33 = f/(n-f), M43 = n·f/(n-f)).
+        // Degenerate extraction (orthographic/custom) keeps the previous values.
+        if (MathF.Abs(proj.M33) > 1e-6f && MathF.Abs(proj.M33 + 1f) > 1e-6f)
+        {
+            var n = proj.M43 / proj.M33;
+            var f = proj.M43 / (proj.M33 + 1f);
+            if (n > 0f && f > n) { _clusterNear = n; _clusterFar = f; }
+        }
+
+        var count = Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights);
+        for (var i = 0; i < count; i++)
+        {
+            var light = scene.Lights[i];
+            if (light.Type == PbrLightType.Directional) continue;
+            var radius = Math.Max(light.Range, 0.01f);
+            var centerView = Vector3.Transform(light.Position, view);
+            var viewZ = -centerView.Z; // row-vector look-at: -Z is forward
+            if (viewZ + radius <= _clusterNear || viewZ - radius >= _clusterFar) continue;
+
+            var slice0 = Math.Max(ClusterSlice(viewZ - radius, _clusterNear, _clusterFar) - 1, 0);
+            var slice1 = Math.Min(ClusterSlice(viewZ + radius, _clusterNear, _clusterFar) + 1, ClusterZSlices - 1);
+
+            // Screen rect from the 8 corners of the view-space AABB around the sphere. Any corner
+            // at or in front of the near plane → the sphere may wrap the camera → full screen.
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            var fullScreen = false;
+            for (var c = 0; c < 8 && !fullScreen; c++)
+            {
+                var corner = centerView + new Vector3(
+                    (c & 1) == 0 ? -radius : radius,
+                    (c & 2) == 0 ? -radius : radius,
+                    (c & 4) == 0 ? -radius : radius);
+                if (corner.Z >= -_clusterNear) { fullScreen = true; break; }
+                var clip = Vector4.Transform(new Vector4(corner, 1f), proj);
+                var ndcX = clip.X / clip.W;
+                var ndcY = clip.Y / clip.W;
+                var sx = (ndcX * 0.5f + 0.5f) * _width;
+                var sy = (1f - (ndcY * 0.5f + 0.5f)) * _height;
+                minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx);
+                minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
+            }
+
+            int tx0 = 0, tx1 = _clusterTilesX - 1, ty0 = 0, ty1 = _clusterTilesY - 1;
+            if (!fullScreen)
+            {
+                tx0 = Math.Clamp((int)(minX / ClusterTileSize) - 1, 0, _clusterTilesX - 1);
+                tx1 = Math.Clamp((int)(maxX / ClusterTileSize) + 1, 0, _clusterTilesX - 1);
+                ty0 = Math.Clamp((int)(minY / ClusterTileSize) - 1, 0, _clusterTilesY - 1);
+                ty1 = Math.Clamp((int)(maxY / ClusterTileSize) + 1, 0, _clusterTilesY - 1);
+                if (tx1 < tx0 || ty1 < ty0) continue; // fully off-screen
+            }
+
+            var bit = 1u << i;
+            for (var sz = slice0; sz <= slice1; sz++)
+                for (var ty = ty0; ty <= ty1; ty++)
+                {
+                    var row = (sz * _clusterTilesY + ty) * _clusterTilesX;
+                    for (var tx = tx0; tx <= tx1; tx++)
+                        _clusterMasks[row + tx] |= bit;
+                }
+        }
+        _renderer.UpdateBuffer<uint>(_clusterBuffer, 0, _clusterMasks);
+        if (Environment.GetEnvironmentVariable("PARADISE_CLUSTER_DEBUG") == "1")
+        {
+            var empty = 0; var bits = 0L;
+            foreach (var m in _clusterMasks)
+            {
+                if (m == 0) empty++;
+                bits += System.Numerics.BitOperations.PopCount(m);
+            }
+            Console.Error.WriteLine($"[CLUSTER] froxels={_clusterMasks.Length} empty={empty} avgBits={(double)bits/_clusterMasks.Length:F2}");
+        }
+    }
+
     private void UploadFrameUniforms(PbrScene scene)
     {
         var frame = new FrameUniformsGpu
@@ -763,6 +895,8 @@ public sealed class PbrRenderer : IDisposable
             AaSettings = new Vector4(
                 scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
                 _specularAaVariance, _specularAaClamp, 0f),
+            CameraForward = new Vector4(CameraForward(scene.Camera.View), _clusterNear),
+            ClusterParams = new Vector4(_clusterTilesX, _clusterTilesY, ClusterZSlices, _clusterFar),
             // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
             ShadowSettings = new Vector4(
                 1f / ShadowMapSize,

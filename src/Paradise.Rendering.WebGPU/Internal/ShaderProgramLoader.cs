@@ -116,6 +116,10 @@ internal static class ShaderProgramLoader
                     binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
+                // StructuredBuffer<T> → WGSL var<storage, read> (read-only; no shader uses
+                // RWStructuredBuffer yet). Used by the Forward+ cluster mask buffer.
+                "resource" when type.BaseShape == "structuredBuffer" => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.ReadonlyStorageBuffer),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.ComparisonSampler),
                 "samplerState" => new BindGroupLayoutEntryDesc(
