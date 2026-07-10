@@ -420,8 +420,16 @@ float3 evaluateDirectLight(
     float D = distributionGGX(N, H, roughness);
     float G = geometrySmith(N, V, L, roughness);
     float3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
-    float3 specular = D * G * F / max(4.0 * NdotV * NdotL, 0.0001);
-    float3 kD = (1.0 - F) * (1.0 - metallic);
+    // Godot premultiplies light energy by π (non-physical mode) and divides only the DIFFUSE
+    // lobe back by π in the BSDF — its specular keeps the π, further scaled by
+    // LIGHT_PARAM_SPECULAR (default 0.5, not exported yet). Net: specular = π/2 × the physical
+    // Cook-Torrance term. Without this the direct light measured ~10% dim vs Godot (more on
+    // grazing/vertical faces where specular is a larger share).
+    const float godotSpecularAmount = 0.5;
+    float3 specular = D * G * F / max(4.0 * NdotV * NdotL, 0.0001) * (PI * godotSpecularAmount);
+    // Godot's default Lambert has NO (1-F) energy split against the specular lobe — only the
+    // metallic suppression. Matching that (dropping the (1-F)) restores grazing-angle diffuse.
+    float3 kD = float3(1.0 - metallic, 1.0 - metallic, 1.0 - metallic);
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
     float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, N, L);
