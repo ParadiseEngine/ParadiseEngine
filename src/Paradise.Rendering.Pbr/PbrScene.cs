@@ -129,9 +129,10 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public ColorRgba ClearColor = ColorRgba.CornflowerBlue;
-    // Optional procedural-sky background (Godot ProceduralSkyMaterial), all colors linear + already
-    // tone-mapped. When HasSkyBackground is set, the renderer draws a fullscreen background evaluating
-    // Godot's two-part gradient (sky above the horizon, ground below) per reconstructed view ray.
+    // Optional procedural-sky background (Godot ProceduralSkyMaterial), all colors LINEAR and
+    // UNTONEMAPPED. When HasSkyBackground is set, the renderer draws a fullscreen background
+    // evaluating Godot's two-part gradient (sky above the horizon, ground below) per reconstructed
+    // view ray, then applies Tonemap per-pixel (Godot's order — see sky.slang).
     public bool HasSkyBackground;
     public Vector3 SkyTopColor;        // above horizon, at zenith
     public Vector3 SkyHorizonColor;    // above horizon, at the horizon

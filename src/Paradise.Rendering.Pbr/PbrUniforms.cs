@@ -89,7 +89,9 @@ public struct SsaoUniformsGpu
 
 /// <summary>Mirror of sky.slang <c>SkyUniforms</c>: Godot's ProceduralSkyMaterial as a per-view-ray
 /// two-gradient (sky above the horizon, ground below), reconstructing the world eye direction from
-/// <see cref="InvViewProj"/>. All four colours are linear and already tone-mapped at export.</summary>
+/// <see cref="InvViewProj"/>. All four colours are LINEAR and untonemapped (raw sky endpoints); the
+/// shader blends the gradient in linear space and applies the tone operator per-pixel — Godot's
+/// order, which matters because tonemap(lerp) ≠ lerp(tonemap) for nonlinear operators.</summary>
 [StructLayout(LayoutKind.Explicit, Size = 160)]
 public struct SkyUniformsGpu
 {
@@ -97,8 +99,8 @@ public struct SkyUniformsGpu
     [FieldOffset(16)] public Vector4 SkyHorizon;   // above horizon, at the horizon
     [FieldOffset(32)] public Vector4 GroundBottom; // below horizon, at nadir
     [FieldOffset(48)] public Vector4 GroundHorizon;// below horizon, at the horizon
-    [FieldOffset(64)] public Vector4 Params;       // x: inv_sky_curve, y: inv_ground_curve
-    [FieldOffset(80)] public Vector4 CameraPos;    // xyz: world camera position
+    [FieldOffset(64)] public Vector4 Params;       // x: inv_sky_curve, y: inv_ground_curve, z: tonemap mode, w: tonemap exposure
+    [FieldOffset(80)] public Vector4 CameraPos;    // xyz: world camera position, w: tonemap white
     [FieldOffset(96)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
 }
 
