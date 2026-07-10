@@ -35,6 +35,11 @@ struct FrameUniforms
     float4   ambientEquator; // Ambient equator color (rgb), w: scene light count
     float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
     float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
+    // L2 spherical-harmonic sky irradiance (E/π), 9 RGB coefficients in Ramamoorthi order
+    // (Y00, Y1-1, Y10, Y11, Y2-2, Y2-1, Y20, Y21, Y22) with the band factors Â=(1, 2/3, 1/4)
+    // premultiplied at export — the per-normal ambient Godot's sky-SH produces, replacing the
+    // 3-zone hemisphere blend. ambientSh[0].w > 0.5 enables the SH path (zones are the fallback).
+    float4   ambientSh[9];
     SceneLight sceneLights[MaxSceneLights];
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
@@ -107,6 +112,17 @@ ConstantBuffer<SsaoUniforms> ssao;
 [[vk::binding(1, 3)]]
 Texture2D<float4> positionTexture;
 
+// Sky-reflection specular (Godot Environment.reflected_light_source = Sky/Background): the
+// ProceduralSky radiance GGX-prefiltered on the CPU into a small LUT. The gradient sky is
+// azimuth-symmetric, so the prefiltered radiance depends only on reflection.y (u) and
+// roughness (v). Enabled via frame.aaSettings.x (sun disk/halo excluded — a 1D-symmetric LUT
+// cannot carry a directional glint; its diffuse-scale contribution is negligible).
+[[vk::binding(2, 3)]]
+Texture2D<float4> skySpecularLut;
+
+[[vk::binding(3, 3)]]
+SamplerState skySpecularSampler;
+
 struct VertexInput
 {
     [[vk::location(0)]] float3 position : POSITION;
@@ -131,6 +147,10 @@ struct FragmentInput
     float3 worldNormal : NORMAL;
     float2 texcoord    : TEXCOORD0;
     float4 worldTangent : TANGENT;
+    // Godot flips the geometric normal on back-facing fragments (double-sided materials render
+    // their inside with the outward normal negated); without this the inside of a mesh reads the
+    // wrong ambient hemisphere / NdotL. The pipeline doesn't cull, so backfaces are shaded here.
+    bool isFrontFace   : SV_IsFrontFace;
 };
 
 // --- PBR helper functions ---
@@ -176,6 +196,18 @@ float glassFresnel(float3 N, float3 V)
 {
     float viewFacing = max(dot(N, V), 0.0);
     return pow(saturate(1.0 - viewFacing), 5.0);
+}
+
+// Karis mobile split-sum approximation of the environment BRDF (UE4 "EnvBRDFApprox"):
+// returns F0·scale + bias for the prefiltered-radiance product, replacing the 2D BRDF LUT.
+float3 envBrdfApprox(float3 F0, float roughness, float NdotV)
+{
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = roughness * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+    float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
+    return F0 * ab.x + ab.y;
 }
 
 float3 applyGlassResponse(float3 litColor, float3 baseColor, float fresnel)
@@ -561,7 +593,10 @@ float4 shadePbr(FragmentInput input)
     float metallic = saturate(material.metallicFactor * metallicRoughnessSample.b);
     float roughness = max(material.roughnessFactor * metallicRoughnessSample.g, 0.04); // clamp to avoid division by zero
 
-    float3 N = sampleNormal(input.texcoord, input.worldNormal, input.worldTangent);
+    // Back-facing fragments shade with the negated geometric normal (Godot's double-sided
+    // convention: `normal_interp * (FRONT_FACING ? 1.0 : -1.0)` before normal mapping).
+    float3 geometricNormal = input.isFrontFace ? input.worldNormal : -input.worldNormal;
+    float3 N = sampleNormal(input.texcoord, geometricNormal, input.worldTangent);
     roughness = applySpecularAntiAliasing(roughness, N);
     float3 V = normalize(frame.cameraPos.xyz - input.worldPos);
 
@@ -585,17 +620,38 @@ float4 shadePbr(FragmentInput input)
             roughness);
     }
 
-    // Simple ambient hemisphere tuned to better match Unity's lit presentation.
-    float3 skyColor = frame.ambient.rgb;
-    float3 equatorColor = frame.ambientEquator.rgb;
-    float3 groundColor = frame.ambientGround.rgb;
-    float hemisphere = dot(N, float3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
-    float3 hemisphereColor = hemisphere < 0.5
-        ? lerp(groundColor, equatorColor, hemisphere * 2.0)
-        : lerp(equatorColor, skyColor, (hemisphere - 0.5) * 2.0);
+    // Ambient: L2 SH sky irradiance per-normal (Godot's sky-SH ambient) when provided; the
+    // 3-zone hemisphere blend remains as the fallback, and the flat mode overrides both.
+    float3 hemisphereColor;
     if (frame.ambientGround.w > 0.5)
     {
-        hemisphereColor = skyColor;
+        hemisphereColor = frame.ambient.rgb; // flat ambient
+    }
+    else if (frame.ambientSh[0].w > 0.5)
+    {
+        // E/π(n) = Σ ĉ_i · Y_i(n): band factors are premultiplied into the coefficients at
+        // export; the basis constants (Ramamoorthi & Hanrahan) are applied here.
+        float3 n = N;
+        float3 sh = frame.ambientSh[0].rgb * 0.282095;
+        sh += frame.ambientSh[1].rgb * (0.488603 * n.y);
+        sh += frame.ambientSh[2].rgb * (0.488603 * n.z);
+        sh += frame.ambientSh[3].rgb * (0.488603 * n.x);
+        sh += frame.ambientSh[4].rgb * (1.092548 * n.x * n.y);
+        sh += frame.ambientSh[5].rgb * (1.092548 * n.y * n.z);
+        sh += frame.ambientSh[6].rgb * (0.315392 * (3.0 * n.z * n.z - 1.0));
+        sh += frame.ambientSh[7].rgb * (1.092548 * n.x * n.z);
+        sh += frame.ambientSh[8].rgb * (0.546274 * (n.x * n.x - n.y * n.y));
+        hemisphereColor = max(sh, 0.0);
+    }
+    else
+    {
+        float3 skyColor = frame.ambient.rgb;
+        float3 equatorColor = frame.ambientEquator.rgb;
+        float3 groundColor = frame.ambientGround.rgb;
+        float hemisphere = dot(N, float3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
+        hemisphereColor = hemisphere < 0.5
+            ? lerp(groundColor, equatorColor, hemisphere * 2.0)
+            : lerp(equatorColor, skyColor, (hemisphere - 0.5) * 2.0);
     }
     float occlusionSample = occlusionTexture.Sample(baseColorSampler, input.texcoord).r;
     float occlusion = lerp(1.0, occlusionSample, material.occlusionStrength);
@@ -603,6 +659,18 @@ float4 shadePbr(FragmentInput input)
     occlusion *= computeSsao(input.position.xy, input.worldPos, N);
     float exposure = max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
+
+    // Sky-reflection specular (Godot reflected_light_source = Sky): GGX-prefiltered sky radiance
+    // from the CPU LUT (u: reflection.y, v: roughness) × the split-sum environment BRDF. AO
+    // darkens it like the diffuse ambient (Godot applies AO to all ambient light).
+    if (frame.aaSettings.x > 0.5)
+    {
+        float3 R = reflect(-V, N);
+        float NdotV = max(dot(N, V), 0.0);
+        float2 lutUv = float2(R.y * 0.5 + 0.5, roughness);
+        float3 prefiltered = skySpecularLut.Sample(skySpecularSampler, lutUv).rgb;
+        ambient += prefiltered * envBrdfApprox(F0, roughness, NdotV) * occlusion;
+    }
 
     float3 color = ambient + Lo;
     float transmission = saturate(material.emissiveFactor.w);

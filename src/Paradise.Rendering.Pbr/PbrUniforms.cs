@@ -42,8 +42,16 @@ public struct ShadowMatrixArray
     private Matrix4x4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (3808 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 3808)]
+/// <summary>Inline storage for the 9 L2 spherical-harmonic ambient coefficients
+/// (Ramamoorthi order, band factors premultiplied at export; [0].w is the enable flag).</summary>
+[InlineArray(9)]
+public struct AmbientShArray
+{
+    private Vector4 _element0;
+}
+
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (3952 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 3952)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 8;
@@ -53,9 +61,10 @@ public struct FrameUniformsGpu
     [FieldOffset(32)] public Vector4 AmbientEquator; // rgb equator, w scene light count
     [FieldOffset(48)] public Vector4 AmbientGround;  // rgb ground, w flat-ambient flag
     [FieldOffset(64)] public Vector4 AaSettings;     // y specular-AA variance, z clamp
-    [FieldOffset(80)] public SceneLightArray Lights;           // 8 × 80 = 640 B
-    [FieldOffset(720)] public Vector4 ShadowSettings;          // x 1/atlasSize (texel), yzw unused
-    [FieldOffset(736)] public ShadowMatrixArray SceneLightShadowMatrices; // 48 × 64 = 3072 B
+    [FieldOffset(80)] public AmbientShArray AmbientSh;         // 9 × 16 = 144 B (L2 sky-SH irradiance)
+    [FieldOffset(224)] public SceneLightArray Lights;          // 8 × 80 = 640 B
+    [FieldOffset(864)] public Vector4 ShadowSettings;          // x 1/atlasSize (texel), yzw unused
+    [FieldOffset(880)] public ShadowMatrixArray SceneLightShadowMatrices; // 48 × 64 = 3072 B
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
@@ -92,16 +101,18 @@ public struct SsaoUniformsGpu
 /// <see cref="InvViewProj"/>. All four colours are LINEAR and untonemapped (raw sky endpoints); the
 /// shader blends the gradient in linear space and applies the tone operator per-pixel — Godot's
 /// order, which matters because tonemap(lerp) ≠ lerp(tonemap) for nonlinear operators.</summary>
-[StructLayout(LayoutKind.Explicit, Size = 160)]
+[StructLayout(LayoutKind.Explicit, Size = 192)]
 public struct SkyUniformsGpu
 {
-    [FieldOffset(0)] public Vector4 SkyTop;        // above horizon, at zenith
-    [FieldOffset(16)] public Vector4 SkyHorizon;   // above horizon, at the horizon
+    [FieldOffset(0)] public Vector4 SkyTop;        // above horizon, at zenith; w: sun angleMax cos
+    [FieldOffset(16)] public Vector4 SkyHorizon;   // above horizon, at the horizon; w: sun inv curve
     [FieldOffset(32)] public Vector4 GroundBottom; // below horizon, at nadir
     [FieldOffset(48)] public Vector4 GroundHorizon;// below horizon, at the horizon
     [FieldOffset(64)] public Vector4 Params;       // x: inv_sky_curve, y: inv_ground_curve, z: tonemap mode, w: tonemap exposure
     [FieldOffset(80)] public Vector4 CameraPos;    // xyz: world camera position, w: tonemap white
-    [FieldOffset(96)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
+    [FieldOffset(96)] public Vector4 SunDirection; // xyz: to-sun (unit), w: enabled flag
+    [FieldOffset(112)] public Vector4 SunColor;    // rgb: linear colour × energy, w: sun size cos
+    [FieldOffset(128)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
 }
 
 /// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>
