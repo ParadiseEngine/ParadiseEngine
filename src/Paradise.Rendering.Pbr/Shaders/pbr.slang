@@ -551,25 +551,10 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
     return pow(saturate(1.0 - occlusion * intensity), power);
 }
 
-// Inverse of linearToSrgb (the sRGB EOTF). Color textures (baseColor, emissive) are
-// uploaded under LINEAR GPU formats — the transcoder no longer tags them *UnormSrgb — so
-// the sampled texels are raw sRGB values and this shader owns the decode. Data maps
-// (metallic-roughness, occlusion, normal) are already linear and are NOT decoded.
-float3 srgbToLinear(float3 srgbColor)
-{
-    float3 lo = srgbColor / 12.92;
-    float3 hi = pow(max(srgbColor + 0.055, 0.0) / 1.055, 2.4);
-    return float3(
-        srgbColor.x <= 0.04045 ? lo.x : hi.x,
-        srgbColor.y <= 0.04045 ? lo.y : hi.y,
-        srgbColor.z <= 0.04045 ? lo.z : hi.z);
-}
-
 float4 shadePbr(FragmentInput input)
 {
     float2 baseUv = transformBaseColorUv(input.texcoord);
     float4 baseColorSample = baseColorTexture.Sample(baseColorSampler, baseUv);
-    baseColorSample.rgb = srgbToLinear(baseColorSample.rgb); // texture is linear-format; decode here
     float4 baseColor = baseColorSample * material.baseColorFactor;
 
     float4 metallicRoughnessSample = metallicRoughnessTexture.Sample(baseColorSampler, input.texcoord);
@@ -628,8 +613,8 @@ float4 shadePbr(FragmentInput input)
         baseColor.a = saturate(baseColor.a * lerp(1.0, 0.12, transmission) + fresnel * 0.05);
     }
 
-    // Emissive (color texture → linear-format, decode in-shader like baseColor)
-    color += srgbToLinear(emissiveTexture.Sample(baseColorSampler, input.texcoord).rgb) * material.emissiveFactor.rgb;
+    // Emissive
+    color += emissiveTexture.Sample(baseColorSampler, input.texcoord).rgb * material.emissiveFactor.rgb;
 
     // Highlight flash (selection/hit feedback): additive push toward white.
     color += draw.highlight.x * 0.35;

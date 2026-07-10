@@ -26,8 +26,4 @@
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="Paradise.Assets.Textures.Test" />
-  </ItemGroup>
-
 </Project>
