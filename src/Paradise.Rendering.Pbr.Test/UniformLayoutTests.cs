@@ -65,7 +65,7 @@ public class UniformLayoutTests
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
         await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(4); // frame UBO + shadow depth texture + comparison sampler + cluster masks
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
-        await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(4); // SSAO UBO + position texture + sky-specular LUT + sampler
+        await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(5); // SSAO UBO + position texture + sky-specular LUT + sampler + DFG LUT
     }
 
     [Test]

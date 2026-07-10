@@ -136,6 +136,15 @@ Texture2D<float4> skySpecularLut;
 [[vk::binding(3, 3)]]
 SamplerState skySpecularSampler;
 
+// The environment BRDF (DFG) table — the real GGX pre-integral (Godot's integrate_dfg.glsl
+// integrand: Schlick-GGX with the IBL k = α²/2, 1024 Hammersley samples), CPU-baked at startup
+// into a 128×128 Rgba16Float. r = scale (∫(1−Fc)·G_Vis), g = bias (∫Fc·G_Vis); specular =
+// F0·scale + f90·bias, and dfg_y (the F0=1 response used by the multiscatter energy
+// compensation) = scale + bias. u = NdotV, v = roughness. Replaces the Karis analytic fit,
+// whose few-percent corner error showed up on metals (× energy compensation × many lights).
+[[vk::binding(4, 3)]]
+Texture2D<float4> dfgLut;
+
 struct VertexInput
 {
     [[vk::location(0)]] float3 position : POSITION;
@@ -188,17 +197,11 @@ float glassFresnel(float3 N, float3 V)
     return pow(saturate(1.0 - viewFacing), 5.0);
 }
 
-// Karis mobile split-sum approximation of the environment BRDF (UE4 "EnvBRDFApprox"):
-// returns (scale, bias) — the split-sum pair (specular = F0·scale + bias) — replacing
-// Godot's prefiltered DFG LUT. Godot's Filament-convention dfg.y (the F0=1 response used by
-// the multiscatter energy compensation) is scale + bias.
+// Environment BRDF (scale, bias): sampled from the CPU-baked DFG table (see dfgLut).
+// specular = F0·scale + f90·bias; the F0=1 response for energy compensation is scale + bias.
 float2 envBrdfAb(float roughness, float NdotV)
 {
-    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
-    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
-    float4 r = roughness * c0 + c1;
-    float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
-    return float2(-1.04, 1.04) * a004 + r.zw;
+    return dfgLut.SampleLevel(skySpecularSampler, float2(NdotV, roughness), 0.0).rg;
 }
 
 // Filament/Godot multiscatter energy compensation: single-scatter GGX loses energy at high
