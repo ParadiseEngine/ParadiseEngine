@@ -76,11 +76,13 @@ public static class Ktx2Transcoder
                     else
                     {
                         transcodeFormat = Ktx2.TranscodeFormat.Rgba32;
-                        // libktx's RGBA32 output stays in the source transfer function, so the
-                        // sRGB-ness rides on the texture format exactly like the BC targets.
-                        textureFormat = usage == CompressedTextureUsage.ColorSrgb
-                            ? TextureFormat.Rgba8UnormSrgb
-                            : TextureFormat.Rgba8Unorm;
+                        // Color textures are stored/uploaded as LINEAR formats and the sRGB→linear
+                        // decode is applied in-shader (pbr.slang srgbToLinear). This unifies the
+                        // color path across UASTC/ETC1S sources and both hosts, and sidesteps the
+                        // UASTC→BC7-sRGB (*UnormSrgb) transcode path that mis-renders. libktx's
+                        // RGBA32 output stays in the source (sRGB) transfer function; we upload it
+                        // raw under an *Unorm format so the shader owns the decode.
+                        textureFormat = TextureFormat.Rgba8Unorm;
                         bytesPerBlock = 4; // one texel per 1×1 "block"
                         blockSize = 1;
                     }
@@ -172,8 +174,10 @@ public static class Ktx2Transcoder
         CompressedTextureUsage usage) =>
         usage switch
         {
+            // Color → BC7 under a LINEAR format; the sRGB decode is done in-shader
+            // (pbr.slang srgbToLinear). See the RGBA32 branch comment above for why.
             CompressedTextureUsage.ColorSrgb =>
-                (Ktx2.TranscodeFormat.BC7Rgba, TextureFormat.Bc7RgbaUnormSrgb, 16),
+                (Ktx2.TranscodeFormat.BC7Rgba, TextureFormat.Bc7RgbaUnorm, 16),
             CompressedTextureUsage.NormalMap =>
                 (Ktx2.TranscodeFormat.BC5Rg, TextureFormat.Bc5RgUnorm, 16),
             _ =>

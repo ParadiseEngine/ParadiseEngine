@@ -43,7 +43,9 @@ public class Ktx2TranscoderTests
 
         var data = Ktx2Transcoder.TranscodeToBc(bytes, CompressedTextureUsage.ColorSrgb);
         await Assert.That(data.IsEmpty).IsFalse();
-        await Assert.That(data.Format).IsEqualTo(TextureFormat.Bc7RgbaUnormSrgb);
+        // Color textures upload under a LINEAR BC7 format; the sRGB decode is done in-shader
+        // (pbr.slang srgbToLinear). The raw texels stay sRGB-valued; only the format tag is *Unorm.
+        await Assert.That(data.Format).IsEqualTo(TextureFormat.Bc7RgbaUnorm);
         await Assert.That(data.Width).IsEqualTo(8);
         await Assert.That(data.Height).IsEqualTo(8);
         await Assert.That(data.BlockWidth).IsEqualTo(4);
@@ -89,7 +91,8 @@ public class Ktx2TranscoderTests
 
         var data = Ktx2Transcoder.TranscodeToRgba32(bytes, CompressedTextureUsage.ColorSrgb);
         await Assert.That(data.IsEmpty).IsFalse();
-        await Assert.That(data.Format).IsEqualTo(TextureFormat.Rgba8UnormSrgb);
+        // Color uploads under a linear format; sRGB decode is in-shader (see BC test above).
+        await Assert.That(data.Format).IsEqualTo(TextureFormat.Rgba8Unorm);
         await Assert.That(data.BlockWidth).IsEqualTo(1);
         await Assert.That(data.BytesPerBlock).IsEqualTo(4);
 
