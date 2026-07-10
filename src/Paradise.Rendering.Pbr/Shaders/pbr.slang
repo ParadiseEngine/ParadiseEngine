@@ -655,14 +655,28 @@ float4 shadePbr(FragmentInput input)
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 
     // Sky-reflection specular (Godot reflected_light_source = Sky): GGX-prefiltered sky radiance
-    // from the CPU LUT (u: reflection.y, v: roughness) × the split-sum environment BRDF. AO
-    // darkens it like the diffuse ambient (Godot applies AO to all ambient light).
+    // from the CPU LUT × the split-sum environment BRDF. The LUT has two row halves: the gradient
+    // (u = reflection.y, rows 0..7) and the sun disk/halo (u = cos angle to the sun — radially
+    // symmetric around the sun direction, so this is exact; rows 8..15, stored ÷4 for 8-bit HDR
+    // headroom). The sun direction/colour come from the first directional scene light — the same
+    // light the sky background pairs with, so a disabled sun vanishes from reflections too. AO
+    // darkens it all like the diffuse ambient (Godot applies AO to all ambient light).
     if (frame.aaSettings.x > 0.5)
     {
         float3 R = reflect(-V, N);
         float NdotV = max(dot(N, V), 0.0);
-        float2 lutUv = float2(R.y * 0.5 + 0.5, roughness);
-        float3 prefiltered = skySpecularLut.Sample(skySpecularSampler, lutUv).rgb;
+        float vHalf = (clamp(roughness, 0.0, 1.0) * 7.0 + 0.5) / 16.0;
+        float3 prefiltered = skySpecularLut.Sample(skySpecularSampler, float2(R.y * 0.5 + 0.5, vHalf)).rgb;
+        for (int li = 0; li < sceneLightCount; li++)
+        {
+            if (frame.sceneLights[li].positionAndType.w < 0.5)
+            {
+                float cosToSun = dot(R, normalize(frame.sceneLights[li].directionAndRange.xyz));
+                prefiltered += skySpecularLut.Sample(skySpecularSampler,
+                    float2(cosToSun * 0.5 + 0.5, 0.5 + vHalf)).rgb * 4.0;
+                break;
+            }
+        }
         ambient += prefiltered * envBrdfApprox(F0, roughness, NdotV) * occlusion;
     }
 
