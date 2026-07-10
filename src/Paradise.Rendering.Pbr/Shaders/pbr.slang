@@ -9,7 +9,7 @@
 // The baseColor UV transform (KHR_texture_transform) lives in MaterialUniforms.
 
 static const float PI = 3.14159265359;
-static const int MaxSceneLights = 8;
+static const int MaxSceneLights = 32;
 
 struct SceneLight
 {
@@ -40,6 +40,11 @@ struct FrameUniforms
     // premultiplied at export — the per-normal ambient Godot's sky-SH produces, replacing the
     // 3-zone hemisphere blend. ambientSh[0].w > 0.5 enables the SH path (zones are the fallback).
     float4   ambientSh[9];
+    // Forward+ clustering (Godot's froxel model, CPU-binned): the screen is tiled 32x32 px and
+    // view depth is split into logarithmic slices; clusterMasks holds one uint bitmask per froxel
+    // (bit i = sceneLights[i] overlaps it). Directional lights are never clustered.
+    float4   cameraForward;  // xyz: world-space camera forward (unit), w: cluster near
+    float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
@@ -74,6 +79,13 @@ Texture2DArray<float> shadowTexture;
 
 [[vk::binding(2, 1)]]
 SamplerComparisonState shadowSampler;
+
+// Per-froxel light bitmasks (Forward+). Rebuilt by the renderer every frame; conservatively
+// binned on the CPU (sphere bounds, ±1 froxel padding), so a set bit may be a false positive
+// (the light's attenuation then contributes ~0) but never a false negative — clustering is
+// pure culling and must not change pixels.
+[[vk::binding(3, 1)]]
+StructuredBuffer<uint> clusterMasks;
 
 [[vk::binding(0, 2)]]
 ConstantBuffer<MaterialUniforms> material;
@@ -638,11 +650,29 @@ float4 shadePbr(FragmentInput input)
     float2 envAb = envBrdfAb(roughness, clamp(dot(N, V), 0.0001, 1.0));
     float3 energyComp = energyCompensation(F0, envAb.x + envAb.y);
 
-    // Direct lighting
+    // Direct lighting. Forward+: point/spot lights are skipped unless their bit is set in
+    // this fragment's froxel mask (directional lights always shade). The mask defaults to
+    // all-ones when clustering is disabled (clusterParams.x < 1).
     int sceneLightCount = min((int)frame.ambientEquator.w, MaxSceneLights);
+    uint clusterMask = 0xffffffffu;
+    if (frame.clusterParams.x >= 1.0)
+    {
+        int tilesX = (int)frame.clusterParams.x;
+        int tilesY = (int)frame.clusterParams.y;
+        int zSlices = (int)frame.clusterParams.z;
+        int tileX = clamp((int)(input.position.x / 32.0), 0, tilesX - 1);
+        int tileY = clamp((int)(input.position.y / 32.0), 0, tilesY - 1);
+        float nearZ = frame.cameraForward.w;
+        float farZ = frame.clusterParams.w;
+        float viewZ = max(dot(input.worldPos - frame.cameraPos.xyz, frame.cameraForward.xyz), nearZ);
+        int slice = clamp((int)(log(viewZ / nearZ) / log(farZ / nearZ) * (float)zSlices), 0, zSlices - 1);
+        clusterMask = clusterMasks[(slice * tilesY + tileY) * tilesX + tileX];
+    }
     float3 Lo = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < sceneLightCount; i++)
     {
+        if (frame.sceneLights[i].positionAndType.w >= 0.5 && (clusterMask & (1u << (uint)i)) == 0u)
+            continue;
         Lo += evaluateDirectLight(
             frame.sceneLights[i],
             i,

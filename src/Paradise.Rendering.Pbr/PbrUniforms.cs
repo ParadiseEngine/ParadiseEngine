@@ -50,11 +50,11 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (3952 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 3952)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (15120 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 15120)]
 public struct FrameUniformsGpu
 {
-    public const int MaxSceneLights = 8;
+    public const int MaxSceneLights = 32;
 
     [FieldOffset(0)] public Vector4 CameraPos;       // xyz world camera, w unused
     [FieldOffset(16)] public Vector4 Ambient;        // rgb sky, a exposure
@@ -62,9 +62,12 @@ public struct FrameUniformsGpu
     [FieldOffset(48)] public Vector4 AmbientGround;  // rgb ground, w flat-ambient flag
     [FieldOffset(64)] public Vector4 AaSettings;     // y specular-AA variance, z clamp
     [FieldOffset(80)] public AmbientShArray AmbientSh;         // 9 × 16 = 144 B (L2 sky-SH irradiance)
-    [FieldOffset(224)] public SceneLightArray Lights;          // 8 × 80 = 640 B
-    [FieldOffset(864)] public Vector4 ShadowSettings;          // x 1/atlasSize (texel), yzw unused
-    [FieldOffset(880)] public ShadowMatrixArray SceneLightShadowMatrices; // 48 × 64 = 3072 B
+    // Forward+ froxel clustering (see pbr.slang): forward.w = cluster near, params.w = far.
+    [FieldOffset(224)] public Vector4 CameraForward; // xyz world camera forward, w cluster near
+    [FieldOffset(240)] public Vector4 ClusterParams; // x tilesX, y tilesY, z zSlices, w cluster far
+    [FieldOffset(256)] public SceneLightArray Lights;          // 32 × 80 = 2560 B
+    [FieldOffset(2816)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
+    [FieldOffset(2832)] public ShadowMatrixArray SceneLightShadowMatrices; // 192 × 64 = 12288 B
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
