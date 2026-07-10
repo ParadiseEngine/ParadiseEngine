@@ -25,9 +25,10 @@ public static class UniformLayoutValidator
         ("ambientEquator", 32, 16),
         ("ambientGround", 48, 16),
         ("aaSettings", 64, 16),
-        ("sceneLights", 80, 640), // 8 × 80-byte SceneLight
-        ("shadowSettings", 720, 16),
-        ("sceneLightShadowMatrices", 736, 3072), // 8 × 6 × 64-byte mat4
+        ("ambientSh", 80, 144), // 9 × vec4 L2 sky-SH irradiance
+        ("sceneLights", 224, 640), // 8 × 80-byte SceneLight
+        ("shadowSettings", 864, 16),
+        ("sceneLightShadowMatrices", 880, 3072), // 8 × 6 × 64-byte mat4
     ];
 
     private static readonly (string Name, uint Offset, uint Size)[] s_materialFields =

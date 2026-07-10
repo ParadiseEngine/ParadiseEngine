@@ -16,12 +16,14 @@
 
 struct SkyUniforms
 {
-    float4 skyTop;        // above horizon, at zenith  (linear, untonemapped)
-    float4 skyHorizon;    // above horizon, at horizon
+    float4 skyTop;        // above horizon, at zenith (linear, untonemapped); w: sun angleMax cosine
+    float4 skyHorizon;    // above horizon, at horizon; w: sun inv curve
     float4 groundBottom;  // below horizon, at nadir
     float4 groundHorizon; // below horizon, at horizon
     float4 params;        // x: inv_sky_curve, y: inv_ground_curve, z: tonemap mode, w: tonemap exposure
     float4 cameraPos;     // xyz: world camera position, w: tonemap white
+    float4 sunDirection;  // xyz: to-sun (unit), w: enabled flag
+    float4 sunColor;      // rgb: linear colour × energy, w: sun size cosine (cos of angular radius)
     float4x4 invViewProj; // NDC (far plane) → world, for the eye ray
 };
 
@@ -148,6 +150,25 @@ float3 skyColor(float2 uv)
     float3 above = lerp(sky.skyTop.rgb, sky.skyHorizon.rgb, saturate(pow(1.0 - vAngle, sky.params.x)));
     float3 below = lerp(sky.groundBottom.rgb, sky.groundHorizon.rgb, saturate(pow(1.0 + vAngle, sky.params.y)));
     float3 gradient = eyeDir.y >= 0.0 ? above : below;
+
+    // Sun disk + halo (Godot ProceduralSkyMaterial LIGHT0 branch): full light colour inside the
+    // angular-size disk, a pow-curved halo out to the angleMax cosine. Only the sky half carries
+    // the sun in Godot (the ground half overwrites it), so guard on eyeDir.y like the mix there.
+    if (sky.sunDirection.w > 0.5 && eyeDir.y >= 0.0)
+    {
+        float sunAngle = dot(sky.sunDirection.xyz, eyeDir);
+        float sunSize = sky.sunColor.w;
+        float angleMax = sky.skyTop.w;
+        if (sunAngle > sunSize)
+        {
+            gradient = sky.sunColor.rgb;
+        }
+        else if (sunAngle > angleMax)
+        {
+            float c2 = (sunSize - sunAngle) / (sunSize - angleMax);
+            gradient = lerp(gradient, sky.sunColor.rgb, saturate(pow(1.0 - c2, sky.skyHorizon.w)));
+        }
+    }
     return applyTonemap(gradient, sky.params.w, sky.cameraPos.w, sky.params.z);
 }
 

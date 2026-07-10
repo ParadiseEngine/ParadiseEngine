@@ -53,6 +53,11 @@ public sealed record PbrAmbient
     public Vector3 Ground { get; init; } = new(0.05f, 0.05f, 0.05f);
     public float Exposure { get; init; } = 1f;
     public bool Flat { get; init; }
+    /// <summary>Optional L2 spherical-harmonic sky irradiance (E/π), 9 RGB coefficients in
+    /// Ramamoorthi order with the band factors Â=(1, 2/3, 1/4) premultiplied — the per-normal
+    /// ambient Godot's sky-SH produces. When set (and not <see cref="Flat"/>), the shader uses
+    /// this instead of the 3-zone hemisphere blend.</summary>
+    public Vector3[]? Sh { get; init; }
 }
 
 /// <summary>Tone-mapping operator applied to the linear HDR result before the sRGB OETF. Mirrors
@@ -140,6 +145,18 @@ public sealed class PbrScene
     public Vector3 SkyGroundHorizon;   // below horizon, at the horizon — defaults black until the exporter populates it
     public float SkySkyCurveInv = 4f;  // Godot inv_sky_curve  = 0.6 / sky_curve  (default 4)
     public float SkyGroundCurveInv = 30f; // Godot inv_ground_curve = 0.6 / ground_curve (default 30)
+    // Godot Environment.reflected_light_source: ambient SPECULAR from the sky (GGX-prefiltered
+    // gradient LUT × split-sum env BRDF). Only effective with HasSkyBackground.
+    public bool SkyReflections;
+    // ProceduralSky sun disk/halo (Godot sky_material.cpp LIGHT0 branch): to-sun direction,
+    // LINEAR colour × energy, and the cosine thresholds/curve. Enabled only while a directional
+    // light is on — disabling the light removes the sun from the sky, exactly like Godot.
+    public bool SkySunEnabled;
+    public Vector3 SkySunDirection;      // to-sun (unit)
+    public Vector3 SkySunColorEnergy;    // linear colour × light energy
+    public float SkySunSizeCos = 2f;     // cos(light angular distance); >1 = disk never triggers
+    public float SkySunAngleMaxCos = 2f; // halo outer cosine threshold
+    public float SkySunInvCurve = 24f;   // halo falloff exponent (1.6/curve^1.4, Godot's mapping)
     // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
     // and the shader darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();

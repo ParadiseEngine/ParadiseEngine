@@ -56,6 +56,14 @@ public sealed class PbrRenderer : IDisposable
     private TextureViewHandle _positionView;
     private TextureHandle _prepassDepthAux;
     private BindGroupLayoutDesc _ssaoGroupLayout;
+    // Sky-reflection specular (Godot reflected_light_source = Sky): the gradient sky GGX-prefiltered
+    // on the CPU into a small LUT (u: reflection.y, v: roughness — the gradient is azimuth-symmetric).
+    // Rgba8UnormSrgb: radiance ∈ [0,1] on the standard hardware-decoded color path. Rebaked only
+    // when the sky colours/curves change; group 3 binds it alongside the SSAO resources.
+    private readonly TextureHandle _skySpecLutTexture;
+    private readonly TextureViewHandle _skySpecLutView;
+    private readonly SamplerHandle _skySpecSampler;
+    private (Vector3, Vector3, Vector3, Vector3, float, float)? _skySpecKey;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -227,11 +235,23 @@ public sealed class PbrRenderer : IDisposable
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less);
 
-        _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO uniforms + position texture
+        _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO + sky-specular LUT
         _ssaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
         _positionTexture = CreatePositionTexture(_width, _height);
         _prepassDepthAux = CreateDepthTexture(_width, _height);
+        _skySpecLutTexture = renderer.CreateTexture(new TextureDesc(
+            "PbrSkySpecularLut", SkySpecLutWidth, SkySpecLutHeight, 1, 1, 1, TextureDimension.D2,
+            TextureFormat.Rgba8UnormSrgb, TextureUsage.TextureBinding | TextureUsage.CopyDst));
+        _skySpecLutView = renderer.CreateTextureView(new TextureViewDesc(
+            "PbrSkySpecularLutView", _skySpecLutTexture, TextureViewDimension.D2, 0, 1));
+        _skySpecSampler = renderer.CreateSampler(new SamplerDesc(
+            "PbrSkySpecularSampler",
+            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
+            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
+        // The LUT starts black (no reflections until a sky is provided); baked on first use.
+        _renderer.WriteTexture(_skySpecLutTexture, 0, new byte[SkySpecLutWidth * SkySpecLutHeight * 4],
+            SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
         RebuildSsaoGroup();
         // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
         // position pre-pass, then the main pass (whose depth target is recreated on resize).
@@ -451,6 +471,7 @@ public sealed class PbrRenderer : IDisposable
 
         if (scene.HasSkyBackground)
         {
+            if (scene.SkyReflections) EnsureSkySpecularLut(scene);
             // Inverse of the same view-projection used for MVP, so the sky shader can unproject each
             // background pixel's NDC to a world-space eye ray (uploaded raw-bytes, like MVP). Falls
             // back to identity on a singular VP (degenerate camera) rather than uploading NaN — same
@@ -459,14 +480,17 @@ public sealed class PbrRenderer : IDisposable
                 invViewProj = Matrix4x4.Identity;
             var skyUniforms = new SkyUniformsGpu
             {
-                SkyTop = new Vector4(scene.SkyTopColor, 1f),
-                SkyHorizon = new Vector4(scene.SkyHorizonColor, 1f),
+                // skyTop.w / skyHorizon.w carry the sun halo thresholds (see sky.slang).
+                SkyTop = new Vector4(scene.SkyTopColor, scene.SkySunAngleMaxCos),
+                SkyHorizon = new Vector4(scene.SkyHorizonColor, scene.SkySunInvCurve),
                 GroundBottom = new Vector4(scene.SkyGroundBottom, 1f),
                 GroundHorizon = new Vector4(scene.SkyGroundHorizon, 1f),
                 // zw + CameraPos.w carry the tone operator so the sky shader can blend the LINEAR
                 // gradient first and tonemap per-pixel (Godot's order; see sky.slang header).
                 Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, (float)scene.Tonemap.Mode, scene.Tonemap.Exposure),
                 CameraPos = new Vector4(scene.Camera.Position, scene.Tonemap.White),
+                SunDirection = new Vector4(scene.SkySunDirection, scene.SkySunEnabled ? 1f : 0f),
+                SunColor = new Vector4(scene.SkySunColorEnergy, scene.SkySunSizeCos),
                 InvViewProj = invViewProj,
             };
             _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
@@ -735,7 +759,10 @@ public sealed class PbrRenderer : IDisposable
             Ambient = new Vector4(scene.Ambient.Sky, scene.Ambient.Exposure),
             AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights)),
             AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f),
-            AaSettings = new Vector4(0f, _specularAaVariance, _specularAaClamp, 0f),
+            // x: sky-reflection specular enabled (Godot reflected_light_source = Sky).
+            AaSettings = new Vector4(
+                scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
+                _specularAaVariance, _specularAaClamp, 0f),
             // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
             ShadowSettings = new Vector4(
                 1f / ShadowMapSize,
@@ -743,6 +770,15 @@ public sealed class PbrRenderer : IDisposable
                 scene.Tonemap.Exposure,
                 scene.Tonemap.White),
         };
+        // L2 sky-SH ambient: coefficients pass through verbatim; [0].w flags the SH path on.
+        if (scene.Ambient.Sh is { Length: 9 } sh)
+        {
+            frame.AmbientSh[0] = new Vector4(sh[0], 1f);
+            for (var i = 1; i < 9; i++)
+            {
+                frame.AmbientSh[i] = new Vector4(sh[i], 0f);
+            }
+        }
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
             frame.Lights[i] = scene.Lights[i].ToGpu();
@@ -815,6 +851,88 @@ public sealed class PbrRenderer : IDisposable
 
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
     // sampled binding uses an explicit view, distinct from the default view the pre-pass renders into.
+    private const int SkySpecLutWidth = 64;
+    private const int SkySpecLutHeight = 8;
+
+    // GGX-prefilter the gradient sky into the specular LUT (split-sum first term, N=V=R
+    // convention). The gradient depends only on direction.y, so each texel is the lobe-filtered
+    // radiance for (reflection.y = u, roughness = v). Sun disk/halo excluded (azimuth-directional;
+    // see the shader comment). CPU cost ~64×8×64 evaluations, re-run only when the sky changes.
+    private void EnsureSkySpecularLut(PbrScene scene)
+    {
+        var key = (scene.SkyTopColor, scene.SkyHorizonColor, scene.SkyGroundBottom, scene.SkyGroundHorizon,
+            scene.SkySkyCurveInv, scene.SkyGroundCurveInv);
+        if (_skySpecKey == key) return;
+        _skySpecKey = key;
+
+        Vector3 Radiance(float y)
+        {
+            y = Math.Clamp(y, -1f, 1f);
+            return y >= 0f
+                ? Vector3.Lerp(scene.SkyTopColor, scene.SkyHorizonColor,
+                    Math.Clamp(MathF.Pow(1f - y, scene.SkySkyCurveInv), 0f, 1f))
+                : Vector3.Lerp(scene.SkyGroundBottom, scene.SkyGroundHorizon,
+                    Math.Clamp(MathF.Pow(1f + y, scene.SkyGroundCurveInv), 0f, 1f));
+        }
+
+        static float SrgbEncode(float c)
+        {
+            c = Math.Clamp(c, 0f, 1f);
+            return c <= 0.0031308f ? c * 12.92f : 1.055f * MathF.Pow(c, 1f / 2.4f) - 0.055f;
+        }
+
+        const int samples = 64;
+        var data = new byte[SkySpecLutWidth * SkySpecLutHeight * 4];
+        for (var row = 0; row < SkySpecLutHeight; row++)
+        {
+            float roughness = (row + 0.5f) / SkySpecLutHeight;
+            float alpha = roughness * roughness;
+            float alpha2 = alpha * alpha;
+            for (var col = 0; col < SkySpecLutWidth; col++)
+            {
+                float ry = col / (SkySpecLutWidth - 1f) * 2f - 1f;
+                var r = new Vector3(MathF.Sqrt(MathF.Max(0f, 1f - ry * ry)), ry, 0f);
+                // Tangent frame around R for GGX importance sampling.
+                var up = MathF.Abs(r.Y) > 0.999f ? Vector3.UnitX : Vector3.UnitY;
+                var tangent = Vector3.Normalize(Vector3.Cross(up, r));
+                var bitangent = Vector3.Cross(r, tangent);
+                Vector3 acc = default;
+                float wSum = 0f;
+                for (var s = 0; s < samples; s++)
+                {
+                    // Hammersley: (i+0.5)/N and the radical inverse of i.
+                    float u1 = (s + 0.5f) / samples;
+                    uint bits = (uint)s;
+                    bits = (bits << 16) | (bits >> 16);
+                    bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
+                    bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
+                    bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
+                    bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
+                    float u2 = bits * 2.3283064365386963e-10f;
+                    float phi = 2f * MathF.PI * u1;
+                    float cosTheta = MathF.Sqrt((1f - u2) / (1f + (alpha2 - 1f) * u2));
+                    float sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
+                    var h = tangent * (MathF.Cos(phi) * sinTheta)
+                        + bitangent * (MathF.Sin(phi) * sinTheta)
+                        + r * cosTheta;
+                    var l = 2f * Vector3.Dot(r, h) * h - r;
+                    float ndl = Vector3.Dot(r, l);
+                    if (ndl <= 0f) continue;
+                    acc += Radiance(l.Y) * ndl;
+                    wSum += ndl;
+                }
+                var c = wSum > 0f ? acc / wSum : Radiance(ry);
+                var i = (row * SkySpecLutWidth + col) * 4;
+                data[i + 0] = (byte)MathF.Round(SrgbEncode(c.X) * 255f);
+                data[i + 1] = (byte)MathF.Round(SrgbEncode(c.Y) * 255f);
+                data[i + 2] = (byte)MathF.Round(SrgbEncode(c.Z) * 255f);
+                data[i + 3] = 255;
+            }
+        }
+        _renderer.WriteTexture(_skySpecLutTexture, 0, data,
+            SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
+    }
+
     private void RebuildSsaoGroup()
     {
         if (_ssaoGroup.IsValid) _renderer.DestroyBindGroup(_ssaoGroup);
@@ -825,6 +943,8 @@ public sealed class PbrRenderer : IDisposable
         {
             BindGroupEntryDesc.ForBuffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
             BindGroupEntryDesc.ForTextureView(1, _positionView),
+            BindGroupEntryDesc.ForTextureView(2, _skySpecLutView),
+            BindGroupEntryDesc.ForSampler(3, _skySpecSampler),
         }));
     }
 
