@@ -147,8 +147,8 @@ float3 skyColor(float2 uv)
     float vAngle = clamp(eyeDir.y, -1.0, 1.0);
     float3 above = lerp(sky.skyTop.rgb, sky.skyHorizon.rgb, saturate(pow(1.0 - vAngle, sky.params.x)));
     float3 below = lerp(sky.groundBottom.rgb, sky.groundHorizon.rgb, saturate(pow(1.0 + vAngle, sky.params.y)));
-    float3 linear = eyeDir.y >= 0.0 ? above : below;
-    return applyTonemap(linear, sky.params.w, sky.cameraPos.w, sky.params.z);
+    float3 gradient = eyeDir.y >= 0.0 ? above : below;
+    return applyTonemap(gradient, sky.params.w, sky.cameraPos.w, sky.params.z);
 }
 
 float3 linearToSrgb(float3 linearColor)
