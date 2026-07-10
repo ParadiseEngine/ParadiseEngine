@@ -176,15 +176,25 @@ float glassFresnel(float3 N, float3 V)
 }
 
 // Karis mobile split-sum approximation of the environment BRDF (UE4 "EnvBRDFApprox"):
-// returns F0·scale + bias for the prefiltered-radiance product, replacing the 2D BRDF LUT.
-float3 envBrdfApprox(float3 F0, float roughness, float NdotV)
+// returns (scale, bias) — the split-sum pair (specular = F0·scale + bias) — replacing
+// Godot's prefiltered DFG LUT. Godot's Filament-convention dfg.y (the F0=1 response used by
+// the multiscatter energy compensation) is scale + bias.
+float2 envBrdfAb(float roughness, float NdotV)
 {
     const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
     const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
     float4 r = roughness * c0 + c1;
     float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
-    float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
-    return F0 * ab.x + ab.y;
+    return float2(-1.04, 1.04) * a004 + r.zw;
+}
+
+// Filament/Godot multiscatter energy compensation: single-scatter GGX loses energy at high
+// roughness; metals (large F0) recover it multiplicatively. env = dfg.y = the F0=1 split-sum
+// response. Applied to BOTH the direct specular lobe and the sky-reflection specular, exactly
+// where Godot applies it (scene_forward_clustered.glsl).
+float3 energyCompensation(float3 F0, float env)
+{
+    return 1.0 + F0 * (1.0 / max(env, 1e-3) - 1.0);
 }
 
 float3 applyGlassResponse(float3 litColor, float3 baseColor, float fresnel)
@@ -287,7 +297,6 @@ static const float ShadowDepthBias = 0.0004;
 static const float ShadowNormalBias = 0.05;
 // Tap spacing (in shadow texels) for the 3x3 soft-shadow PCF. Wider than 1 texel to broaden the
 // penumbra toward Godot's softer shadow edges.
-static const float ShadowPcfSpread = 2.0;
 static const float ShadowMaxNormalBias = 0.15;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
@@ -302,7 +311,14 @@ int getPointShadowFace(float3 dir)
 // Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shadow-map
 // array — one full-resolution layer per shadow view (dir/spot = 1, point = 6 cube faces) — via the
 // light's per-face view-projection. No tile UV math and no seam clamp: each layer owns all of [0,1].
-float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 N, float3 surfaceToLight)
+// Interleaved Gradient Noise (Godot's quick_hash) — decorrelates the per-pixel PCF disk rotation.
+float shadowDiskHash(float2 pos)
+{
+    const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+    return frac(magic.z * frac(dot(pos, magic.xy)));
+}
+
+float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 N, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
         return 1.0; // no shadow for this light
@@ -337,14 +353,30 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float lit;
     if (light.shadowAtlas.w > 0.5)
     {
-        // Soft shadows: 3x3 PCF at a widened tap spacing for a broader penumbra matching Godot's
-        // softer shadow edges (the sampler clamps to the layer edge, so no cross-layer seam risk).
-        float s = texel * ShadowPcfSpread;
+        // Soft shadows: Godot's SOFT_LOW PCF — a 4-sample Vogel disk (r = sqrt((i+0.5)/4),
+        // theta = 2.4i), radius 2 texels (quality radius x shadow_blur 1), randomly rotated per
+        // pixel with interleaved gradient noise exactly like sample_directional_pcf_shadow.
+        // The rotation trades the fixed-kernel banding for fine noise, which reads as a smooth
+        // penumbra at screen scale (and matches Godot's own edge texture).
+        static const float2 kVogel4[4] = {
+            float2(0.353553, 0.0),
+            float2(-0.451566, 0.413635),
+            float2(0.069177, -0.787537),
+            float2(0.569071, 0.742405),
+        };
+        float s = texel * 2.0;
+        float r = shadowDiskHash(fragCoord) * 2.0 * PI;
+        float cr = cos(r);
+        float sr = sin(r);
         lit = 0.0;
-        [unroll] for (int dy = -1; dy <= 1; dy++)
-            [unroll] for (int dx = -1; dx <= 1; dx++)
-                lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + float2(dx, dy) * s, layer), compare);
-        lit *= (1.0 / 9.0);
+        [unroll] for (int k = 0; k < 4; k++)
+        {
+            // Godot's mat2(vec2(cr,-sr), vec2(sr,cr)) * offset (column-major GLSL).
+            float2 o = float2(cr * kVogel4[k].x + sr * kVogel4[k].y,
+                              -sr * kVogel4[k].x + cr * kVogel4[k].y);
+            lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + o * s, layer), compare);
+        }
+        lit *= 0.25;
     }
     else
     {
@@ -363,7 +395,9 @@ float3 evaluateDirectLight(
     float3 F0,
     float3 baseColor,
     float metallic,
-    float roughness)
+    float roughness,
+    float3 energyComp,
+    float2 fragCoord)
 {
     float3 L = float3(0.0, 1.0, 0.0);
     float attenuation = 1.0;
@@ -412,13 +446,14 @@ float3 evaluateDirectLight(
     float m2 = m * m;
     float3 F = F0 + (f90 - F0) * (m2 * m2 * m);
     float specularAmount = light.shadowAtlas.z;
-    float3 specular = D * Vis * F * (PI * specularAmount);
+    // energyComp: Filament/Godot multiscatter compensation (computed once per fragment).
+    float3 specular = D * Vis * F * (PI * specularAmount) * energyComp;
     // Godot's default Lambert has NO (1-F) energy split against the specular lobe — only the
     // metallic suppression. Matching that (dropping the (1-F)) restores grazing-angle diffuse.
     float3 kD = float3(1.0 - metallic, 1.0 - metallic, 1.0 - metallic);
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
-    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, N, L);
+    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, N, L, fragCoord);
     return (diffuse + specular) * radiance * NdotL * shadow;
 }
 
@@ -597,6 +632,12 @@ float4 shadePbr(FragmentInput input)
     // Dielectric F0 = 0.04, metallic F0 = albedo
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor.rgb, metallic);
 
+    // Filament/Godot multiscatter energy compensation, computed once per fragment from the
+    // split-sum env BRDF (Godot: get_energy_compensation(f0, prefiltered_dfg(...).y)); it
+    // multiplies every specular lobe — each direct light and the sky reflection.
+    float2 envAb = envBrdfAb(roughness, clamp(dot(N, V), 0.0001, 1.0));
+    float3 energyComp = energyCompensation(F0, envAb.x + envAb.y);
+
     // Direct lighting
     int sceneLightCount = min((int)frame.ambientEquator.w, MaxSceneLights);
     float3 Lo = float3(0.0, 0.0, 0.0);
@@ -611,7 +652,9 @@ float4 shadePbr(FragmentInput input)
             F0,
             baseColor.rgb,
             metallic,
-            roughness);
+            roughness,
+            energyComp,
+            input.position.xy);
     }
 
     // Ambient: L2 SH sky irradiance per-normal (Godot's sky-SH ambient) when provided; the
@@ -664,7 +707,7 @@ float4 shadePbr(FragmentInput input)
     if (frame.aaSettings.x > 0.5)
     {
         float3 R = reflect(-V, N);
-        float NdotV = max(dot(N, V), 0.0);
+        float NdotV = clamp(dot(N, V), 0.0001, 1.0);
         float vHalf = (clamp(roughness, 0.0, 1.0) * 7.0 + 0.5) / 16.0;
         float3 prefiltered = skySpecularLut.Sample(skySpecularSampler, float2(R.y * 0.5 + 0.5, vHalf)).rgb;
         for (int li = 0; li < sceneLightCount; li++)
@@ -677,7 +720,11 @@ float4 shadePbr(FragmentInput input)
                 break;
             }
         }
-        ambient += prefiltered * envBrdfApprox(F0, roughness, NdotV) * occlusion;
+        // Godot's indirect-specular combine (scene_forward_clustered.glsl): the split-sum pair
+        // with the cheap-luminance f90 and the multiscatter energy compensation (envAb/energyComp
+        // computed once per fragment above).
+        float f90i = clamp(50.0 * F0.g, metallic, 1.0);
+        ambient += prefiltered * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
     }
 
     float3 color = ambient + Lo;
