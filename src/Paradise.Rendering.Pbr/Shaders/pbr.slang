@@ -9,7 +9,7 @@
 // The baseColor UV transform (KHR_texture_transform) lives in MaterialUniforms.
 
 static const float PI = 3.14159265359;
-static const int MaxSceneLights = 32;
+static const int MaxSceneLights = 64;
 
 struct SceneLight
 {
@@ -41,8 +41,9 @@ struct FrameUniforms
     // 3-zone hemisphere blend. ambientSh[0].w > 0.5 enables the SH path (zones are the fallback).
     float4   ambientSh[9];
     // Forward+ clustering (Godot's froxel model, CPU-binned): the screen is tiled 32x32 px and
-    // view depth is split into logarithmic slices; clusterMasks holds one uint bitmask per froxel
-    // (bit i = sceneLights[i] overlaps it). Directional lights are never clustered.
+    // view depth is split into logarithmic slices; clusterMasks holds TWO uint bitmask words per
+    // froxel (word i>>5, bit i&31 = sceneLights[i] overlaps it). Directional lights are never
+    // clustered.
     float4   cameraForward;  // xyz: world-space camera forward (unit), w: cluster near
     float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];
@@ -654,7 +655,8 @@ float4 shadePbr(FragmentInput input)
     // this fragment's froxel mask (directional lights always shade). The mask defaults to
     // all-ones when clustering is disabled (clusterParams.x < 1).
     int sceneLightCount = min((int)frame.ambientEquator.w, MaxSceneLights);
-    uint clusterMask = 0xffffffffu;
+    uint clusterMask0 = 0xffffffffu;
+    uint clusterMask1 = 0xffffffffu;
     if (frame.clusterParams.x >= 1.0)
     {
         int tilesX = (int)frame.clusterParams.x;
@@ -666,12 +668,15 @@ float4 shadePbr(FragmentInput input)
         float farZ = frame.clusterParams.w;
         float viewZ = max(dot(input.worldPos - frame.cameraPos.xyz, frame.cameraForward.xyz), nearZ);
         int slice = clamp((int)(log(viewZ / nearZ) / log(farZ / nearZ) * (float)zSlices), 0, zSlices - 1);
-        clusterMask = clusterMasks[(slice * tilesY + tileY) * tilesX + tileX];
+        int froxel = ((slice * tilesY + tileY) * tilesX + tileX) * 2;
+        clusterMask0 = clusterMasks[froxel];
+        clusterMask1 = clusterMasks[froxel + 1];
     }
     float3 Lo = float3(0.0, 0.0, 0.0);
     for (int i = 0; i < sceneLightCount; i++)
     {
-        if (frame.sceneLights[i].positionAndType.w >= 0.5 && (clusterMask & (1u << (uint)i)) == 0u)
+        uint maskWord = ((uint)i >> 5) == 0u ? clusterMask0 : clusterMask1;
+        if (frame.sceneLights[i].positionAndType.w >= 0.5 && (maskWord & (1u << ((uint)i & 31u))) == 0u)
             continue;
         Lo += evaluateDirectLight(
             frame.sceneLights[i],
