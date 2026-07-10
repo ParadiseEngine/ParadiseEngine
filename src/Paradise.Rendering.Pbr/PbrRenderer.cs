@@ -463,8 +463,10 @@ public sealed class PbrRenderer : IDisposable
                 SkyHorizon = new Vector4(scene.SkyHorizonColor, 1f),
                 GroundBottom = new Vector4(scene.SkyGroundBottom, 1f),
                 GroundHorizon = new Vector4(scene.SkyGroundHorizon, 1f),
-                Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, 0f, 0f),
-                CameraPos = new Vector4(scene.Camera.Position, 1f),
+                // zw + CameraPos.w carry the tone operator so the sky shader can blend the LINEAR
+                // gradient first and tonemap per-pixel (Godot's order; see sky.slang header).
+                Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, (float)scene.Tonemap.Mode, scene.Tonemap.Exposure),
+                CameraPos = new Vector4(scene.Camera.Position, scene.Tonemap.White),
                 InvViewProj = invViewProj,
             };
             _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
