@@ -63,7 +63,7 @@ public sealed class PbrRenderer : IDisposable
     private readonly TextureHandle _skySpecLutTexture;
     private readonly TextureViewHandle _skySpecLutView;
     private readonly SamplerHandle _skySpecSampler;
-    private (Vector3, Vector3, Vector3, Vector3, float, float)? _skySpecKey;
+    private (Vector3, Vector3, Vector3, Vector3, float, float, Vector3, float, float, float)? _skySpecKey;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -853,16 +853,23 @@ public sealed class PbrRenderer : IDisposable
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
     // sampled binding uses an explicit view, distinct from the default view the pre-pass renders into.
     private const int SkySpecLutWidth = 64;
-    private const int SkySpecLutHeight = 8;
+    private const int SkySpecLutHeight = 16; // rows 0..7 gradient half, 8..15 sun half
+    internal const float SkySpecSunScale = 4f; // HDR headroom for the sun half in 8-bit sRGB texels
 
-    // GGX-prefilter the gradient sky into the specular LUT (split-sum first term, N=V=R
-    // convention). The gradient depends only on direction.y, so each texel is the lobe-filtered
-    // radiance for (reflection.y = u, roughness = v). Sun disk/halo excluded (azimuth-directional;
-    // see the shader comment). CPU cost ~64×8×64 evaluations, re-run only when the sky changes.
+    // GGX-prefilter the sky into the specular LUT (split-sum first term, N=V=R convention),
+    // split into two row halves:
+    //   rows 0..7  — the GRADIENT (azimuth-symmetric → depends only on reflection.y = u).
+    //   rows 8..15 — the SUN disk/halo, which is radially symmetric around the sun direction →
+    //                depends only on dot(reflection, sunDir) = u. Exact, no cubemap needed.
+    // The sun half is stored ÷SkySpecSunScale for HDR headroom in the 8-bit sRGB texel (the
+    // disk radiance is colour × energy, typically > 1); the shader multiplies it back.
+    // CPU cost ~64×16×64 evaluations, re-run only when the sky or sun changes.
     private void EnsureSkySpecularLut(PbrScene scene)
     {
         var key = (scene.SkyTopColor, scene.SkyHorizonColor, scene.SkyGroundBottom, scene.SkyGroundHorizon,
-            scene.SkySkyCurveInv, scene.SkyGroundCurveInv);
+            scene.SkySkyCurveInv, scene.SkyGroundCurveInv,
+            scene.SkySunEnabled ? scene.SkySunColorEnergy : Vector3.Zero,
+            scene.SkySunSizeCos, scene.SkySunAngleMaxCos, scene.SkySunInvCurve);
         if (_skySpecKey == key) return;
         _skySpecKey = key;
 
@@ -876,6 +883,21 @@ public sealed class PbrRenderer : IDisposable
                     Math.Clamp(MathF.Pow(1f + y, scene.SkyGroundCurveInv), 0f, 1f));
         }
 
+        // Godot's sun disk/halo weight (sky_material.cpp) as a function of the cosine to the sun.
+        Vector3 SunRadiance(float cosToSun)
+        {
+            if (!scene.SkySunEnabled) return Vector3.Zero;
+            float w;
+            if (cosToSun > scene.SkySunSizeCos) w = 1f;
+            else if (cosToSun > scene.SkySunAngleMaxCos)
+            {
+                float c2 = (scene.SkySunSizeCos - cosToSun) / (scene.SkySunSizeCos - scene.SkySunAngleMaxCos);
+                w = Math.Clamp(MathF.Pow(1f - c2, scene.SkySunInvCurve), 0f, 1f);
+            }
+            else return Vector3.Zero;
+            return scene.SkySunColorEnergy * (w / SkySpecSunScale);
+        }
+
         static float SrgbEncode(float c)
         {
             c = Math.Clamp(c, 0f, 1f);
@@ -883,14 +905,18 @@ public sealed class PbrRenderer : IDisposable
         }
 
         const int samples = 64;
+        const int halfRows = SkySpecLutHeight / 2;
         var data = new byte[SkySpecLutWidth * SkySpecLutHeight * 4];
         for (var row = 0; row < SkySpecLutHeight; row++)
         {
-            float roughness = (row + 0.5f) / SkySpecLutHeight;
+            bool sunHalf = row >= halfRows;
+            float roughness = (row % halfRows + 0.5f) / halfRows;
             float alpha = roughness * roughness;
             float alpha2 = alpha * alpha;
             for (var col = 0; col < SkySpecLutWidth; col++)
             {
+                // For the gradient half, u = reflection.y; for the sun half, u = cos(angle to
+                // sun) — either way the radiance is symmetric around the Y axis of this frame.
                 float ry = col / (SkySpecLutWidth - 1f) * 2f - 1f;
                 var r = new Vector3(MathF.Sqrt(MathF.Max(0f, 1f - ry * ry)), ry, 0f);
                 // Tangent frame around R for GGX importance sampling.
@@ -919,10 +945,10 @@ public sealed class PbrRenderer : IDisposable
                     var l = 2f * Vector3.Dot(r, h) * h - r;
                     float ndl = Vector3.Dot(r, l);
                     if (ndl <= 0f) continue;
-                    acc += Radiance(l.Y) * ndl;
+                    acc += (sunHalf ? SunRadiance(l.Y) : Radiance(l.Y)) * ndl;
                     wSum += ndl;
                 }
-                var c = wSum > 0f ? acc / wSum : Radiance(ry);
+                var c = wSum > 0f ? acc / wSum : (sunHalf ? SunRadiance(ry) : Radiance(ry));
                 var i = (row * SkySpecLutWidth + col) * 4;
                 data[i + 0] = (byte)MathF.Round(SrgbEncode(c.X) * 255f);
                 data[i + 1] = (byte)MathF.Round(SrgbEncode(c.Y) * 255f);
