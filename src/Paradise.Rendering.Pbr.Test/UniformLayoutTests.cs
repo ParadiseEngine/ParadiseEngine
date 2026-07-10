@@ -25,7 +25,7 @@ public class UniformLayoutTests
     public async Task struct_sizes_match_wgsl_totals()
     {
         await Assert.That(Unsafe.SizeOf<DrawUniformsGpu>()).IsEqualTo(208);
-        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(15120);
+        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(29968);
         await Assert.That(Unsafe.SizeOf<MaterialUniformsGpu>()).IsEqualTo(80);
         await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(80);
     }

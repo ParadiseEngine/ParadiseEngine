@@ -359,7 +359,7 @@ public sealed class PbrRenderer : IDisposable
         if (_clusterBuffer.IsValid) _renderer.DestroyBuffer(_clusterBuffer);
         _clusterTilesX = tilesX;
         _clusterTilesY = tilesY;
-        _clusterMasks = new uint[tilesX * tilesY * ClusterZSlices];
+        _clusterMasks = new uint[tilesX * tilesY * ClusterZSlices * 2]; // two mask words per froxel (64 lights)
         _clusterBuffer = _renderer.CreateBuffer(new BufferDesc(
             "PbrClusterMasks", (ulong)(_clusterMasks.Length * sizeof(uint)),
             BufferUsage.Storage | BufferUsage.CopyDst));
@@ -861,13 +861,14 @@ public sealed class PbrRenderer : IDisposable
                 if (tx1 < tx0 || ty1 < ty0) continue; // fully off-screen
             }
 
-            var bit = 1u << i;
+            var word = i >> 5;
+            var bit = 1u << (i & 31);
             for (var sz = slice0; sz <= slice1; sz++)
                 for (var ty = ty0; ty <= ty1; ty++)
                 {
                     var row = (sz * _clusterTilesY + ty) * _clusterTilesX;
                     for (var tx = tx0; tx <= tx1; tx++)
-                        _clusterMasks[row + tx] |= bit;
+                        _clusterMasks[(row + tx) * 2 + word] |= bit;
                 }
         }
         _renderer.UpdateBuffer<uint>(_clusterBuffer, 0, _clusterMasks);
@@ -879,7 +880,7 @@ public sealed class PbrRenderer : IDisposable
                 if (m == 0) empty++;
                 bits += System.Numerics.BitOperations.PopCount(m);
             }
-            Console.Error.WriteLine($"[CLUSTER] froxels={_clusterMasks.Length} empty={empty} avgBits={(double)bits/_clusterMasks.Length:F2}");
+            Console.Error.WriteLine($"[CLUSTER] froxels={_clusterMasks.Length / 2} emptyWords={empty} avgBits={(double)bits/(_clusterMasks.Length / 2):F2}");
         }
     }
 
