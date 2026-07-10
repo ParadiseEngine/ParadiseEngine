@@ -17,7 +17,7 @@ struct SceneLight
     float4 directionAndRange;     // xyz: direction from surface to light, w: range
     float4 colorAndIntensity;     // rgb: color, w: intensity
     float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
-    float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: unused, w: soft-shadow flag
+    float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
 };
 
 struct DrawUniforms
@@ -167,29 +167,6 @@ float distributionGGX(float3 N, float3 H, float roughness)
     denom = PI * denom * denom;
 
     return a2 / max(denom, 0.0001);
-}
-
-// Smith's method with Schlick-GGX geometry function
-float geometrySchlickGGX(float NdotV, float roughness)
-{
-    float r = roughness + 1.0;
-    float k = (r * r) / 8.0;
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-float geometrySmith(float3 N, float3 V, float3 L, float roughness)
-{
-    float NdotV = max(dot(N, V), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
-    float ggx1 = geometrySchlickGGX(NdotV, roughness);
-    float ggx2 = geometrySchlickGGX(NdotL, roughness);
-    return ggx1 * ggx2;
-}
-
-// Schlick Fresnel approximation
-float3 fresnelSchlick(float cosTheta, float3 F0)
-{
-    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 float glassFresnel(float3 N, float3 V)
@@ -417,16 +394,25 @@ float3 evaluateDirectLight(
     // exported light_energy is the single source of brightness. Diffuse and specular are on Godot's
     // non-physical basis (NOT a physically-conserving energy split) — don't reintroduce /π on either
     // lobe without re-checking pixel-diff captures against Godot.
-    float D = distributionGGX(N, H, roughness);
-    float G = geometrySmith(N, V, L, roughness);
-    float3 F = fresnelSchlick(max(dot(H, V), 0.0), F0);
+    // Specular: an exact port of Godot's light_compute isotropic GGX lobe
+    // (scene_forward_lights_inc.glsl) so the two hosts agree per-pixel:
+    //   D  — GGX with α = roughness² (identical to the standard Trowbridge-Reitz form).
+    //   V  — Hammon's visibility approximation 0.5/mix(2·NL·NV, NL+NV, α), which FOLDS the
+    //        Smith G and the 1/(4·NL·NV) denominator into one term (do not divide again).
+    //   F  — Schlick with Filament's specular-occlusion f90 = clamp(dot(f0, 16.67), metallic, 1).
     // Godot premultiplies light energy by π (non-physical mode) and divides only the DIFFUSE
-    // lobe back by π in the BSDF — its specular keeps the π, further scaled by
-    // LIGHT_PARAM_SPECULAR (default 0.5, not exported yet). Net: specular = π/2 × the physical
-    // Cook-Torrance term. Without this the direct light measured ~10% dim vs Godot (more on
-    // grazing/vertical faces where specular is a larger share).
-    const float godotSpecularAmount = 0.5;
-    float3 specular = D * G * F / max(4.0 * NdotV * NdotL, 0.0001) * (PI * godotSpecularAmount);
+    // lobe back by π — its specular keeps the π, scaled by LIGHT_PARAM_SPECULAR (exported in
+    // shadowAtlas.z; Godot default 0.5).
+    float alphaGgx = roughness * roughness;
+    float D = distributionGGX(N, H, roughness);
+    float Vis = saturate(0.5 / lerp(2.0 * NdotL * NdotV, NdotL + NdotV, alphaGgx));
+    float LdotH = max(dot(L, H), 0.0);
+    float f90 = clamp(dot(F0, float3(16.67, 16.67, 16.67)), metallic, 1.0);
+    float m = 1.0 - LdotH;
+    float m2 = m * m;
+    float3 F = F0 + (f90 - F0) * (m2 * m2 * m);
+    float specularAmount = light.shadowAtlas.z;
+    float3 specular = D * Vis * F * (PI * specularAmount);
     // Godot's default Lambert has NO (1-F) energy split against the specular lobe — only the
     // metallic suppression. Matching that (dropping the (1-F)) restores grazing-angle diffuse.
     float3 kD = float3(1.0 - metallic, 1.0 - metallic, 1.0 - metallic);
