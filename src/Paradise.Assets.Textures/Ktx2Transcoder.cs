@@ -96,7 +96,7 @@ public static class Ktx2Transcoder
                         return CreateEmpty();
                     }
                 }
-                else if (preferBc && TryMapVkFormat(texture->VkFormat, out textureFormat, out bytesPerBlock))
+                else if (preferBc && TryMapVkFormat(texture->VkFormat, usage, out textureFormat, out bytesPerBlock))
                 {
                     // Pre-compressed BC KTX2 passes through verbatim.
                     blockSize = 4;
@@ -221,8 +221,14 @@ public static class Ktx2Transcoder
         return Math.Max(1, count);
     }
 
-    private static bool TryMapVkFormat(
+    // Maps a pre-compressed BC KTX2's VkFormat to the engine format verbatim, except for color
+    // usages: color textures are always uploaded under a LINEAR format (the sRGB decode happens
+    // in-shader — see SelectBcTarget/shadePbr's srgbToLinear), so an *Srgb source block is
+    // stripped to its *Unorm equivalent here too. Without this, a pre-compressed BC-sRGB color
+    // KTX2 would be hardware-decoded on sample AND decoded again in the shader.
+    internal static bool TryMapVkFormat(
         Ktx2.VkFormat vkFormat,
+        CompressedTextureUsage usage,
         out TextureFormat textureFormat,
         out int bytesPerBlock)
     {
@@ -235,7 +241,9 @@ public static class Ktx2Transcoder
                 return true;
             case Ktx2.VkFormat.BC1RgbSrgbBlock:
             case Ktx2.VkFormat.BC1RgbaSrgbBlock:
-                textureFormat = TextureFormat.Bc1RgbaUnormSrgb;
+                textureFormat = usage == CompressedTextureUsage.ColorSrgb
+                    ? TextureFormat.Bc1RgbaUnorm
+                    : TextureFormat.Bc1RgbaUnormSrgb;
                 bytesPerBlock = 8;
                 return true;
             case Ktx2.VkFormat.BC3UnormBlock:
@@ -243,7 +251,9 @@ public static class Ktx2Transcoder
                 bytesPerBlock = 16;
                 return true;
             case Ktx2.VkFormat.BC3SrgbBlock:
-                textureFormat = TextureFormat.Bc3RgbaUnormSrgb;
+                textureFormat = usage == CompressedTextureUsage.ColorSrgb
+                    ? TextureFormat.Bc3RgbaUnorm
+                    : TextureFormat.Bc3RgbaUnormSrgb;
                 bytesPerBlock = 16;
                 return true;
             case Ktx2.VkFormat.BC4UnormBlock:
@@ -259,7 +269,9 @@ public static class Ktx2Transcoder
                 bytesPerBlock = 16;
                 return true;
             case Ktx2.VkFormat.BC7SrgbBlock:
-                textureFormat = TextureFormat.Bc7RgbaUnormSrgb;
+                textureFormat = usage == CompressedTextureUsage.ColorSrgb
+                    ? TextureFormat.Bc7RgbaUnorm
+                    : TextureFormat.Bc7RgbaUnormSrgb;
                 bytesPerBlock = 16;
                 return true;
             default:
