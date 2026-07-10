@@ -35,6 +35,9 @@ public sealed record PbrLight
     public bool SoftShadows { get; init; }
     // Godot LIGHT_PARAM_SPECULAR: scales the specular lobe only (default 0.5 — Godot's own).
     public float Specular { get; init; } = 0.5f;
+    // Godot LIGHT_PARAM_SIZE: directional = angular diameter in DEGREES; point/spot = world
+    // radius in meters. 0 = punctual (no highlight softening).
+    public float Size { get; init; }
 
     public SceneLightGpu ToGpu() => new()
     {
@@ -43,6 +46,11 @@ public sealed record PbrLight
         ColorAndIntensity = new Vector4(Color, Intensity),
         SpotAngles = new Vector4(SpotOuterDegrees, SpotInnerDegrees, -1f, 0f), // z=-1 → no shadow
         ShadowAtlas = new Vector4(AttenuationExponent, 0f, Specular, 0f), // x=decay, z=specular amount; renderer fills y/w for shadow tiles
+        // Directional: precompute 1−cos(angular) like Godot's light_storage; point/spot pass the
+        // raw radius (the shader derives the per-fragment angular term from distance).
+        SizeParams = new Vector4(
+            Type == PbrLightType.Directional ? 1f - MathF.Cos(Size * (MathF.PI / 180f)) : Size,
+            0f, 0f, 0f),
     };
 }
 

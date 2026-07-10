@@ -18,6 +18,7 @@ struct SceneLight
     float4 colorAndIntensity;     // rgb: color, w: intensity
     float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
     float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
+    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), yzw unused
 };
 
 struct DrawUniforms
@@ -177,17 +178,13 @@ struct FragmentInput
 
 // --- PBR helper functions ---
 
-// GGX/Trowbridge-Reitz Normal Distribution Function
-float distributionGGX(float3 N, float3 H, float roughness)
+// GGX/Trowbridge-Reitz NDF from a precomputed (possibly size_A-widened) NdotH.
+float distributionGGXFromNdotH(float NdotH, float roughness)
 {
     float a = roughness * roughness;
     float a2 = a * a;
-    float NdotH = max(dot(N, H), 0.0);
-    float NdotH2 = NdotH * NdotH;
-
-    float denom = NdotH2 * (a2 - 1.0) + 1.0;
+    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
     denom = PI * denom * denom;
-
     return a2 / max(denom, 0.0001);
 }
 
@@ -433,7 +430,23 @@ float3 evaluateDirectLight(
         }
     }
 
-    float NdotL = max(dot(N, L), 0.0);
+    // Godot's size_A: an angular widening from the light's physical size — directional carries
+    // 1−cos(angular) precomputed; point/spot derive it from radius/distance per fragment
+    // (scene_forward_lights_inc.glsl: size = max(1 − 1/sqrt(1 + t²), 0), t = size/dist). It is
+    // ADDED to the NdotL / LdotH / NdotH cosines like Godot does, softening highlights (and
+    // slightly wrapping the diffuse terminator) for area-ish lights.
+    float sizeA = 0.0;
+    if (light.positionAndType.w < 0.5)
+    {
+        sizeA = light.sizeParams.x;
+    }
+    else if (light.sizeParams.x > 0.0)
+    {
+        float t = light.sizeParams.x / max(length(light.positionAndType.xyz - worldPos), 0.001);
+        sizeA = max(1.0 - 1.0 / sqrt(1.0 + t * t), 0.0);
+    }
+
+    float NdotL = saturate(min(sizeA + dot(N, L), 1.0));
     float NdotV = max(dot(N, V), 0.0);
     float3 H = normalize(V + L);
     // Cook-Torrance (specular) + Lambert (diffuse), matching Godot's DEFAULT (non-physical light
@@ -454,9 +467,10 @@ float3 evaluateDirectLight(
     // lobe back by π — its specular keeps the π, scaled by LIGHT_PARAM_SPECULAR (exported in
     // shadowAtlas.z; Godot default 0.5).
     float alphaGgx = roughness * roughness;
-    float D = distributionGGX(N, H, roughness);
+    float cNdotH = saturate(sizeA + dot(N, H));
+    float D = distributionGGXFromNdotH(cNdotH, roughness);
     float Vis = saturate(0.5 / lerp(2.0 * NdotL * NdotV, NdotL + NdotV, alphaGgx));
-    float LdotH = max(dot(L, H), 0.0);
+    float LdotH = saturate(sizeA + dot(L, H));
     float f90 = clamp(dot(F0, float3(16.67, 16.67, 16.67)), metallic, 1.0);
     float m = 1.0 - LdotH;
     float m2 = m * m;
