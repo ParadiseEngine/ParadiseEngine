@@ -410,11 +410,13 @@ public sealed class PbrRenderer : IDisposable
     }
 
     /// <summary>Upload one interleaved primitive (12 floats per vertex: pos3/normal3/uv2/tan4 —
-    /// the GltfPrimitive layout). Also the entry point for procedural geometry.</summary>
-    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId)
+    /// the GltfPrimitive layout). Also the entry point for procedural geometry.
+    /// <paramref name="dynamic"/> makes the vertex buffer updatable via
+    /// <see cref="UpdatePrimitiveVertices"/> — the CPU-skinning path re-writes it per frame.</summary>
+    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId, bool dynamic = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var vbDesc = new BufferDesc("PbrVertices", 0, BufferUsage.Vertex);
+        var vbDesc = new BufferDesc("PbrVertices", 0, dynamic ? BufferUsage.Vertex | BufferUsage.CopyDst : BufferUsage.Vertex);
         var vb = _renderer.CreateBufferWithData(in vbDesc, (ReadOnlySpan<float>)vertices);
         var ibDesc = new BufferDesc("PbrIndices", 0, BufferUsage.Index);
         var ib = _renderer.CreateBufferWithData(in ibDesc, (ReadOnlySpan<uint>)indices);
@@ -437,6 +439,21 @@ public sealed class PbrRenderer : IDisposable
             vb, ib, (uint)indices.Length,
             (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
             min, max);
+    }
+
+    /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
+    /// have been uploaded with <c>dynamic: true</c>; the float count must match the upload.
+    /// NOTE: the shadow frustum fit uses the UPLOAD-time AABB — poses that swing far outside
+    /// the bind-pose bounds can clip at the directional shadow edge (bank-heist has the same
+    /// property).</summary>
+    public void UpdatePrimitiveVertices(in PbrPrimitive primitive, ReadOnlySpan<float> vertices)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if ((ulong)vertices.Length * sizeof(float) != primitive.VertexByteLength)
+            throw new ArgumentException(
+                $"Vertex float count {vertices.Length} does not match the uploaded primitive " +
+                $"({primitive.VertexByteLength / sizeof(float)}).");
+        _renderer.UpdateBuffer(primitive.VertexBuffer, 0, vertices);
     }
 
     /// <summary>Render one frame: frame UBO upload, draw-ring fill, opaque-then-blend command
