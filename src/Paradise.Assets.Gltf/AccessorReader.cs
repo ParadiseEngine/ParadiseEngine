@@ -57,9 +57,11 @@ internal static class AccessorReader
                 destination[i * componentCount + c] = accessor.ComponentType switch
                 {
                     ComponentFloat => BinaryPrimitives.ReadSingleLittleEndian(element[(c * 4)..]),
-                    ComponentUByte when accessor.Normalized => element[c] / 255f,
-                    ComponentUShort when accessor.Normalized =>
-                        BinaryPrimitives.ReadUInt16LittleEndian(element[(c * 2)..]) / 65535f,
+                    // Raw (non-normalized) u8/u16 read as plain floats — JOINTS_0 indices.
+                    ComponentUByte => accessor.Normalized ? element[c] / 255f : element[c],
+                    ComponentUShort => accessor.Normalized
+                        ? BinaryPrimitives.ReadUInt16LittleEndian(element[(c * 2)..]) / 65535f
+                        : BinaryPrimitives.ReadUInt16LittleEndian(element[(c * 2)..]),
                     _ => throw new NotSupportedException(
                         $"Accessor {accessorIndex}: component type {accessor.ComponentType} " +
                         $"(normalized={accessor.Normalized}) is not supported for float attributes."),
@@ -167,6 +169,7 @@ internal static class AccessorReader
         "VEC2" => 2,
         "VEC3" => 3,
         "VEC4" => 4,
+        "MAT4" => 16, // inverse bind matrices
         _ => throw new NotSupportedException($"Accessor type '{type}' is not supported for vertex attributes."),
     };
 
