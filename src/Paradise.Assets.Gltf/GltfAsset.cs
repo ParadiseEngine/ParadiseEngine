@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 
 namespace Paradise.Assets.Gltf;
@@ -9,15 +10,73 @@ public sealed record GltfAsset(
     GltfMeshInstance[] Instances,
     GltfMeshData[] Meshes,
     GltfMaterialData[] Materials,
-    GltfImageData[] Images);
+    GltfImageData[] Images,
+    GltfNodeData[] Nodes,
+    GltfSkinData[] Skins,
+    GltfAnimationData[] Animations);
 
 /// <summary>One node of the default scene that carries a mesh, with its node hierarchy baked
 /// into a single world transform (System.Numerics row-vector convention; no handedness
-/// conversion anywhere — the contract is RH glTF-native).</summary>
+/// conversion anywhere — the contract is RH glTF-native). <see cref="NodeIndex"/> addresses
+/// <see cref="GltfAsset.Nodes"/>; <see cref="SkinIndex"/> is −1 for rigid meshes.</summary>
 public sealed record GltfMeshInstance(
     int MeshIndex,
     Matrix4x4 WorldTransform,
-    string? NodeName);
+    string? NodeName,
+    int NodeIndex = -1,
+    int SkinIndex = -1);
+
+/// <summary>The node hierarchy with REST-pose local transforms — the animation player samples
+/// channel curves over these (unanimated paths keep the rest value, glTF semantics).</summary>
+public sealed record GltfNodeData(
+    string? Name,
+    int ParentIndex, // −1 = scene root
+    Vector3 RestTranslation,
+    Quaternion RestRotation,
+    Vector3 RestScale);
+
+/// <summary>One skin: joint node indices + inverse bind matrices (row-vector convention, the
+/// same transpose duality as node matrices). Joint palette for a mesh instance:
+/// inverseBind[i] × jointWorld[i] × inverse(meshWorld) — bank-heist's formula.</summary>
+public sealed record GltfSkinData(
+    string? Name,
+    int[] JointNodes,
+    Matrix4x4[] InverseBindMatrices);
+
+public enum GltfAnimationPath : byte
+{
+    Translation = 0,
+    Rotation,
+    Scale,
+}
+
+/// <summary>One animation clip: per-channel keyframes targeting node T/R/S. Times are seconds
+/// ascending; Values are packed floats (3 per key for T/S, 4 per key — XYZW quaternion — for
+/// R). LINEAR (Lerp/Slerp) and STEP interpolation only; CUBICSPLINE is rejected at load.</summary>
+public sealed record GltfAnimationData(
+    string? Name,
+    GltfAnimationChannelData[] Channels)
+{
+    public float Duration
+    {
+        get
+        {
+            var end = 0f;
+            foreach (var channel in Channels)
+            {
+                if (channel.Times.Length > 0) end = Math.Max(end, channel.Times[^1]);
+            }
+            return end;
+        }
+    }
+}
+
+public sealed record GltfAnimationChannelData(
+    int NodeIndex,
+    GltfAnimationPath Path,
+    bool Step, // STEP interpolation (else LINEAR)
+    float[] Times,
+    float[] Values);
 
 public sealed record GltfMeshData(
     string? Name,
@@ -32,9 +91,15 @@ public sealed record GltfPrimitive(
     int MaterialIndex,
     bool HasNormals,
     bool HasTexCoords,
-    bool HasTangents)
+    bool HasTangents,
+    float[]? JointsWeights = null)
 {
     public const int FloatsPerVertex = 12;
+
+    /// <summary>Floats per vertex in <see cref="JointsWeights"/>: 4 joint indices (as floats)
+    /// followed by 4 weights. Null when the primitive has no JOINTS_0/WEIGHTS_0 — the base
+    /// <see cref="Vertices"/> stream is unchanged either way (CPU skinning reads both).</summary>
+    public const int SkinFloatsPerVertex = 8;
 
     public int VertexCount => Vertices.Length / FloatsPerVertex;
 }

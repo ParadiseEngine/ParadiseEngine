@@ -25,6 +25,8 @@ internal sealed class GlbTestBuilder
     private readonly JsonArray _materials = [];
     private readonly JsonArray _textures = [];
     private readonly JsonArray _images = [];
+    private readonly JsonArray _skins = [];
+    private readonly JsonArray _animations = [];
     private JsonArray _sceneRoots = [];
     private int? _sceneIndex;
     private string? _externalBufferUri;
@@ -75,7 +77,7 @@ internal sealed class GlbTestBuilder
 
     public int AddFloatAccessor(float[] data, string type, int? byteStride = null)
     {
-        var components = type switch { "SCALAR" => 1, "VEC2" => 2, "VEC3" => 3, "VEC4" => 4, _ => throw new ArgumentException(type) };
+        var components = type switch { "SCALAR" => 1, "VEC2" => 2, "VEC3" => 3, "VEC4" => 4, "MAT4" => 16, _ => throw new ArgumentException(type) };
         var view = AddBufferView(data, byteStride);
         return AddAccessor(view, Float, type, data.Length / components);
     }
@@ -105,12 +107,15 @@ internal sealed class GlbTestBuilder
 
     public static JsonObject Primitive(
         int position, int? normal = null, int? uv = null, int? tangent = null,
-        int? indices = null, int? material = null, int? mode = null)
+        int? indices = null, int? material = null, int? mode = null,
+        int? joints = null, int? weights = null)
     {
         var attributes = new JsonObject { ["POSITION"] = position };
         if (normal is { } n) attributes["NORMAL"] = n;
         if (uv is { } u) attributes["TEXCOORD_0"] = u;
         if (tangent is { } t) attributes["TANGENT"] = t;
+        if (joints is { } j) attributes["JOINTS_0"] = j;
+        if (weights is { } w) attributes["WEIGHTS_0"] = w;
         var primitive = new JsonObject { ["attributes"] = attributes };
         if (indices is { } i) primitive["indices"] = i;
         if (material is { } m) primitive["material"] = m;
@@ -119,11 +124,13 @@ internal sealed class GlbTestBuilder
     }
 
     public int AddNode(int? mesh = null, float[]? translation = null, float[]? rotation = null,
-        float[]? scale = null, float[]? matrix = null, int[]? children = null, string? name = null)
+        float[]? scale = null, float[]? matrix = null, int[]? children = null, string? name = null,
+        int? skin = null)
     {
         var node = new JsonObject();
         if (name is not null) node["name"] = name;
         if (mesh is { } m) node["mesh"] = m;
+        if (skin is { } sk) node["skin"] = sk;
         if (matrix is not null) node["matrix"] = ToJsonArray(matrix);
         if (translation is not null) node["translation"] = ToJsonArray(translation);
         if (rotation is not null) node["rotation"] = ToJsonArray(rotation);
@@ -136,6 +143,39 @@ internal sealed class GlbTestBuilder
         }
         _nodes.Add(node);
         return _nodes.Count - 1;
+    }
+
+    public int AddSkin(int[] joints, int? inverseBindMatrices = null, string? name = null)
+    {
+        var skin = new JsonObject();
+        if (name is not null) skin["name"] = name;
+        var arr = new JsonArray();
+        foreach (var j in joints) arr.Add(j);
+        skin["joints"] = arr;
+        if (inverseBindMatrices is { } ibm) skin["inverseBindMatrices"] = ibm;
+        _skins.Add(skin);
+        return _skins.Count - 1;
+    }
+
+    public int AddAnimation(string? name, params (int Node, string Path, int Input, int Output, string? Interpolation)[] channels)
+    {
+        var samplers = new JsonArray();
+        var channelArray = new JsonArray();
+        foreach (var (node, path, input, output, interpolation) in channels)
+        {
+            var sampler = new JsonObject { ["input"] = input, ["output"] = output };
+            if (interpolation is not null) sampler["interpolation"] = interpolation;
+            samplers.Add(sampler);
+            channelArray.Add(new JsonObject
+            {
+                ["sampler"] = samplers.Count - 1,
+                ["target"] = new JsonObject { ["node"] = node, ["path"] = path },
+            });
+        }
+        var animation = new JsonObject { ["channels"] = channelArray, ["samplers"] = samplers };
+        if (name is not null) animation["name"] = name;
+        _animations.Add(animation);
+        return _animations.Count - 1;
     }
 
     public int AddMaterial(JsonObject material)
@@ -216,6 +256,8 @@ internal sealed class GlbTestBuilder
         if (_materials.Count > 0) root["materials"] = _materials.DeepClone();
         if (_textures.Count > 0) root["textures"] = _textures.DeepClone();
         if (_images.Count > 0) root["images"] = _images.DeepClone();
+        if (_skins.Count > 0) root["skins"] = _skins.DeepClone();
+        if (_animations.Count > 0) root["animations"] = _animations.DeepClone();
         if (_bin.Length > 0 || _externalBufferUri is not null || ExtraBuffers is not null)
         {
             var buffer = new JsonObject { ["byteLength"] = (int)_bin.Length };

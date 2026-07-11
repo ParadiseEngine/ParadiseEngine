@@ -34,8 +34,11 @@ public static class GltfSceneReader
         var materials = ReadMaterials(root);
         var meshes = ReadMeshes(root, bin);
         var instances = BakeInstances(root);
+        var nodes = ReadNodeHierarchy(root);
+        var skins = ReadSkins(root, bin);
+        var animations = ReadAnimations(root, bin);
 
-        return new GltfAsset(instances, meshes, materials, images);
+        return new GltfAsset(instances, meshes, materials, images, nodes, skins, animations);
     }
 
     // -------- images --------
@@ -321,8 +324,42 @@ public static class GltfSceneReader
                     $"Mesh {meshIndex} primitive {primitiveIndex} index {index} exceeds vertex count {count}.");
         }
 
+        // Skinned primitives carry a SEPARATE joints/weights stream (the base interleaved
+        // layout is unchanged, so rigid uploads and the CPU skinner share it). JOINTS_0 is
+        // raw (non-normalized) u8/u16 indices read as floats; WEIGHTS_0 is float or
+        // normalized u8/u16.
+        float[]? jointsWeights = null;
+        if (attributes.TryGetValue("JOINTS_0", out var jointsAccessor) &&
+            attributes.TryGetValue("WEIGHTS_0", out var weightsAccessor))
+        {
+            RequireMatchingCount(
+                AccessorReader.GetValidatedFloatCount(root, bin, jointsAccessor, 4),
+                count, meshIndex, primitiveIndex, "JOINTS_0");
+            RequireMatchingCount(
+                AccessorReader.GetValidatedFloatCount(root, bin, weightsAccessor, 4),
+                count, meshIndex, primitiveIndex, "WEIGHTS_0");
+            var joints = new float[count * 4];
+            var weights = new float[count * 4];
+            AccessorReader.ReadFloats(root, bin, jointsAccessor, 4, joints);
+            AccessorReader.ReadFloats(root, bin, weightsAccessor, 4, weights);
+            jointsWeights = new float[count * GltfPrimitive.SkinFloatsPerVertex];
+            for (var i = 0; i < count; i++)
+            {
+                var w = i * GltfPrimitive.SkinFloatsPerVertex;
+                jointsWeights[w + 0] = joints[i * 4 + 0];
+                jointsWeights[w + 1] = joints[i * 4 + 1];
+                jointsWeights[w + 2] = joints[i * 4 + 2];
+                jointsWeights[w + 3] = joints[i * 4 + 3];
+                jointsWeights[w + 4] = weights[i * 4 + 0];
+                jointsWeights[w + 5] = weights[i * 4 + 1];
+                jointsWeights[w + 6] = weights[i * 4 + 2];
+                jointsWeights[w + 7] = weights[i * 4 + 3];
+            }
+        }
+
         return new GltfPrimitive(
-            vertices, indices, primitive.Material ?? -1, hasNormals, hasTexCoords, hasTangents);
+            vertices, indices, primitive.Material ?? -1, hasNormals, hasTexCoords, hasTangents,
+            jointsWeights);
     }
 
     private static void RequireMatchingCount(
@@ -390,7 +427,7 @@ public static class GltfSceneReader
                 var meshCount = root.Meshes?.Length ?? 0;
                 if ((uint)meshIndex >= (uint)meshCount)
                     throw new InvalidDataException($"Node {nodeIndex} mesh {meshIndex} out of range ({meshCount} declared).");
-                instances.Add(new GltfMeshInstance(meshIndex, world, node.Name));
+                instances.Add(new GltfMeshInstance(meshIndex, world, node.Name, nodeIndex, node.Skin ?? -1));
             }
 
             var children = node.Children ?? [];
@@ -400,6 +437,146 @@ public static class GltfSceneReader
             }
         }
         return instances.ToArray();
+    }
+
+    // -------- animation data --------
+
+    /// <summary>The full node hierarchy with rest-pose TRS. Matrix-form nodes are decomposed;
+    /// a non-decomposable (skewed) matrix keeps identity TRS — animation would misbehave on
+    /// such nodes, but plain meshes never reference them via skins.</summary>
+    private static GltfNodeData[] ReadNodeHierarchy(GltfRoot root)
+    {
+        var nodes = root.Nodes ?? [];
+        var parents = new int[nodes.Length];
+        Array.Fill(parents, -1);
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            foreach (var child in nodes[i].Children ?? [])
+            {
+                if ((uint)child < (uint)parents.Length) parents[child] = i;
+            }
+        }
+
+        var result = new GltfNodeData[nodes.Length];
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            var node = nodes[i];
+            Vector3 translation;
+            Quaternion rotation;
+            Vector3 scale;
+            if (node.Matrix is { Length: 16 })
+            {
+                var m = LocalMatrix(node, i);
+                if (!Matrix4x4.Decompose(m, out scale, out rotation, out translation))
+                {
+                    translation = m.Translation;
+                    rotation = Quaternion.Identity;
+                    scale = Vector3.One;
+                }
+            }
+            else
+            {
+                translation = node.Translation is { Length: 3 } t ? new Vector3(t[0], t[1], t[2]) : Vector3.Zero;
+                rotation = node.Rotation is { Length: 4 } r ? new Quaternion(r[0], r[1], r[2], r[3]) : Quaternion.Identity;
+                scale = node.Scale is { Length: 3 } sc ? new Vector3(sc[0], sc[1], sc[2]) : Vector3.One;
+            }
+            result[i] = new GltfNodeData(node.Name, parents[i], translation, rotation, scale);
+        }
+        return result;
+    }
+
+    private static GltfSkinData[] ReadSkins(GltfRoot root, ReadOnlyMemory<byte> bin)
+    {
+        var skinsJson = root.Skins ?? [];
+        var skins = new GltfSkinData[skinsJson.Length];
+        var nodeCount = root.Nodes?.Length ?? 0;
+        for (var s = 0; s < skinsJson.Length; s++)
+        {
+            var skin = skinsJson[s];
+            var joints = skin.Joints ?? [];
+            foreach (var joint in joints)
+            {
+                if ((uint)joint >= (uint)nodeCount)
+                    throw new InvalidDataException($"Skin {s} joint node {joint} out of range ({nodeCount} declared).");
+            }
+            var inverseBind = new Matrix4x4[joints.Length];
+            if (skin.InverseBindMatrices is { } ibmAccessor)
+            {
+                var floats = new float[joints.Length * 16];
+                var actual = AccessorReader.GetValidatedFloatCount(root, bin, ibmAccessor, 16);
+                if (actual != joints.Length)
+                    throw new InvalidDataException(
+                        $"Skin {s} has {joints.Length} joints but {actual} inverse bind matrices.");
+                AccessorReader.ReadFloats(root, bin, ibmAccessor, 16, floats);
+                for (var i = 0; i < joints.Length; i++)
+                {
+                    // glTF column-major → System.Numerics row-major storage: byte-identical
+                    // under the row-vector convention (same transpose duality as node matrices).
+                    inverseBind[i] = new Matrix4x4(
+                        floats[i * 16 + 0], floats[i * 16 + 1], floats[i * 16 + 2], floats[i * 16 + 3],
+                        floats[i * 16 + 4], floats[i * 16 + 5], floats[i * 16 + 6], floats[i * 16 + 7],
+                        floats[i * 16 + 8], floats[i * 16 + 9], floats[i * 16 + 10], floats[i * 16 + 11],
+                        floats[i * 16 + 12], floats[i * 16 + 13], floats[i * 16 + 14], floats[i * 16 + 15]);
+                }
+            }
+            else
+            {
+                Array.Fill(inverseBind, Matrix4x4.Identity);
+            }
+            skins[s] = new GltfSkinData(skin.Name, joints, inverseBind);
+        }
+        return skins;
+    }
+
+    private static GltfAnimationData[] ReadAnimations(GltfRoot root, ReadOnlyMemory<byte> bin)
+    {
+        var animationsJson = root.Animations ?? [];
+        var animations = new GltfAnimationData[animationsJson.Length];
+        var nodeCount = root.Nodes?.Length ?? 0;
+        for (var a = 0; a < animationsJson.Length; a++)
+        {
+            var anim = animationsJson[a];
+            var samplers = anim.Samplers ?? [];
+            var channelsJson = anim.Channels ?? [];
+            var channels = new List<GltfAnimationChannelData>(channelsJson.Length);
+            foreach (var channel in channelsJson)
+            {
+                // Channels without a node target (or with unsupported paths like "weights" —
+                // morph targets) are skipped, not fatal: the rest of the clip still plays.
+                if (channel.Target?.Node is not { } node || (uint)node >= (uint)nodeCount) continue;
+                var path = channel.Target.Path switch
+                {
+                    "translation" => GltfAnimationPath.Translation,
+                    "rotation" => GltfAnimationPath.Rotation,
+                    "scale" => GltfAnimationPath.Scale,
+                    _ => (GltfAnimationPath?)null,
+                };
+                if (path is null) continue;
+                if ((uint)channel.Sampler >= (uint)samplers.Length)
+                    throw new InvalidDataException($"Animation {a} channel references sampler {channel.Sampler} out of range.");
+                var sampler = samplers[channel.Sampler];
+                var interpolation = sampler.Interpolation ?? "LINEAR";
+                if (interpolation == "CUBICSPLINE")
+                    throw new InvalidDataException(
+                        $"Animation '{anim.Name}' uses CUBICSPLINE interpolation, which is not supported — " +
+                        "re-export with linear keys.");
+
+                var keyCount = AccessorReader.GetValidatedFloatCount(root, bin, sampler.Input, 1);
+                var componentCount = path == GltfAnimationPath.Rotation ? 4 : 3;
+                var valueCount = AccessorReader.GetValidatedFloatCount(root, bin, sampler.Output, componentCount);
+                if (valueCount != keyCount)
+                    throw new InvalidDataException(
+                        $"Animation '{anim.Name}': sampler has {keyCount} keys but {valueCount} values.");
+                var times = new float[keyCount];
+                var values = new float[keyCount * componentCount];
+                AccessorReader.ReadFloats(root, bin, sampler.Input, 1, times);
+                AccessorReader.ReadFloats(root, bin, sampler.Output, componentCount, values);
+                channels.Add(new GltfAnimationChannelData(
+                    node, path.Value, interpolation == "STEP", times, values));
+            }
+            animations[a] = new GltfAnimationData(anim.Name, channels.ToArray());
+        }
+        return animations;
     }
 
     private static Matrix4x4 LocalMatrix(GltfNode node, int nodeIndex)

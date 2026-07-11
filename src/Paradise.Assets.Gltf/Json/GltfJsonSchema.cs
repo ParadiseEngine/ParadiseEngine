@@ -19,6 +19,8 @@ internal sealed record GltfRoot(
     [property: JsonPropertyName("bufferViews")] GltfBufferView[]? BufferViews,
     [property: JsonPropertyName("buffers")] GltfBuffer[]? Buffers,
     [property: JsonPropertyName("materials")] GltfMaterial[]? Materials,
+    [property: JsonPropertyName("skins")] GltfSkinJson[]? Skins,
+    [property: JsonPropertyName("animations")] GltfAnimationJson[]? Animations,
     [property: JsonPropertyName("textures")] GltfTexture[]? Textures,
     [property: JsonPropertyName("images")] GltfImage[]? Images);
 
@@ -32,6 +34,7 @@ internal sealed record GltfNode(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("children")] int[]? Children,
     [property: JsonPropertyName("mesh")] int? Mesh,
+    [property: JsonPropertyName("skin")] int? Skin,
     [property: JsonPropertyName("matrix")] float[]? Matrix,
     [property: JsonPropertyName("translation")] float[]? Translation,
     [property: JsonPropertyName("rotation")] float[]? Rotation,
@@ -126,6 +129,29 @@ internal sealed record GltfTextureExtensions(
 
 internal sealed record GltfBasisu(
     [property: JsonPropertyName("source")] int Source);
+
+internal sealed record GltfSkinJson(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("joints")] int[]? Joints,
+    [property: JsonPropertyName("inverseBindMatrices")] int? InverseBindMatrices);
+
+internal sealed record GltfAnimationJson(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("channels")] GltfAnimationChannelJson[]? Channels,
+    [property: JsonPropertyName("samplers")] GltfAnimationSamplerJson[]? Samplers);
+
+internal sealed record GltfAnimationChannelJson(
+    [property: JsonPropertyName("sampler")] int Sampler,
+    [property: JsonPropertyName("target")] GltfAnimationTargetJson? Target);
+
+internal sealed record GltfAnimationTargetJson(
+    [property: JsonPropertyName("node")] int? Node,
+    [property: JsonPropertyName("path")] string? Path);
+
+internal sealed record GltfAnimationSamplerJson(
+    [property: JsonPropertyName("input")] int Input,
+    [property: JsonPropertyName("output")] int Output,
+    [property: JsonPropertyName("interpolation")] string? Interpolation);
 
 internal sealed record GltfImage(
     [property: JsonPropertyName("uri")] string? Uri,
