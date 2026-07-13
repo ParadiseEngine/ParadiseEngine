@@ -35,9 +35,15 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
     private readonly Queue _queue;
     private readonly WebGpuSharp.TextureFormat _colorFormat;
 
-    private readonly WebGpuSharp.Buffer _vertexBuffer;
-    private readonly WebGpuSharp.Buffer _indexBuffer;
-    private readonly WebGpuSharp.Buffer _uniformBuffer;
+    // Sub-allocated per frame; grown (never wrapped) when a frame's cumulative demand exceeds
+    // capacity — wrapping would silently overwrite uniform/vertex/index data that earlier
+    // batches in this same not-yet-submitted frame are still bound to.
+    private WebGpuSharp.Buffer _vertexBuffer;
+    private WebGpuSharp.Buffer _indexBuffer;
+    private WebGpuSharp.Buffer _uniformBuffer;
+    private uint _vertexCapacity = VertexBufferBytes;
+    private uint _indexCapacity = IndexBufferBytes;
+    private uint _uniformCapacity = UniformRingBytes;
     private readonly byte[] _vertexScratch = new byte[VertexBufferBytes];
     private readonly byte[] _indexScratch = new byte[IndexBufferBytes];
     private GCHandle _vertexPin;
@@ -386,10 +392,18 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
     public override void UnmapVertices()
     {
         // Sub-allocate: WriteBuffer stages immediately and applies in queue order, so distinct
-        // regions per map keep every already-recorded draw pointing at stable data.
+        // regions per map keep every already-recorded draw pointing at stable data. Grow
+        // (never wrap) when this frame's cumulative demand exceeds capacity — wrapping would
+        // silently overwrite an earlier, still-unsubmitted batch's vertex data.
         _vertexBase = _vertexCursor;
         if (_mappedVertexBytes > 0)
         {
+            var needed = Align4(_vertexBase + _mappedVertexBytes);
+            if (needed > _vertexCapacity)
+            {
+                _vertexBuffer = GrowBuffer("global::Noesis.VB", BufferUsage.Vertex | BufferUsage.CopyDst, needed, ref _vertexCapacity);
+                _vertexBase = 0;
+            }
             _queue.WriteBuffer(_vertexBuffer, _vertexBase, _vertexScratch.AsSpan(0, (int)_mappedVertexBytes));
             _vertexCursor = Align4(_vertexBase + _mappedVertexBytes);
         }
@@ -407,6 +421,12 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
         _indexBase = _indexCursor;
         if (_mappedIndexBytes > 0)
         {
+            var needed = Align4(_indexBase + _mappedIndexBytes);
+            if (needed > _indexCapacity)
+            {
+                _indexBuffer = GrowBuffer("global::Noesis.IB", BufferUsage.Index | BufferUsage.CopyDst, needed, ref _indexCapacity);
+                _indexBase = 0;
+            }
             _queue.WriteBuffer(_indexBuffer, _indexBase, _indexScratch.AsSpan(0, (int)_mappedIndexBytes));
             _indexCursor = Align4(_indexBase + _mappedIndexBytes);
         }
@@ -414,6 +434,17 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
     }
 
     private static uint Align4(uint v) => (v + 3u) & ~3u;
+
+    /// <summary>Allocate a fresh, larger buffer for the remainder of this (and future) frames.
+    /// The old buffer is not destroyed — commands already recorded against it this frame are
+    /// still unsubmitted and remain valid; it is simply dropped once no longer referenced.</summary>
+    private WebGpuSharp.Buffer GrowBuffer(string label, BufferUsage usage, uint needed, ref uint capacity)
+    {
+        var next = capacity;
+        while (next < needed) next *= 2;
+        capacity = next;
+        return CreateBuffer(label, next, usage);
+    }
 
     // ---- draw ----
 
@@ -443,20 +474,27 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
             pass.SetStencilReference(batch.StencilRef);
             _stencilRef = batch.StencilRef;
         }
-        pass.SetVertexBuffer(0, _vertexBuffer, _vertexBase + batch.VertexOffset, VertexBufferBytes - (_vertexBase + batch.VertexOffset));
-        pass.SetIndexBuffer(_indexBuffer, WebGpuSharp.IndexFormat.Uint16, _indexBase, IndexBufferBytes - _indexBase);
+        pass.SetVertexBuffer(0, _vertexBuffer, _vertexBase + batch.VertexOffset, _vertexCapacity - (_vertexBase + batch.VertexOffset));
+        pass.SetIndexBuffer(_indexBuffer, WebGpuSharp.IndexFormat.Uint16, _indexBase, _indexCapacity - _indexBase);
         pass.DrawIndexed(batch.NumIndices, 1, batch.StartIndex, 0, 0);
     }
 
     private unsafe uint WriteUniform(in global::Noesis.UniformData first, in global::Noesis.UniformData second, uint slotBytes = 256)
     {
-        var offset = _uniformCursor;
-        _uniformCursor += Math.Max(slotBytes, UniformAlign);
-        if (_uniformCursor > UniformRingBytes)
+        var slot = Math.Max(slotBytes, UniformAlign);
+        // Grow (never wrap) when this frame's cumulative demand exceeds capacity — wrapping to
+        // offset 0 would silently overwrite an earlier, still-unsubmitted batch's uniform data,
+        // since queue.WriteBuffer applies before the frame's single command buffer executes.
+        if (_uniformCursor + slot > _uniformCapacity)
         {
-            offset = 0;
-            _uniformCursor = Math.Max(slotBytes, UniformAlign);
+            _uniformBuffer = GrowBuffer("global::Noesis.Uniforms", BufferUsage.Uniform | BufferUsage.CopyDst, _uniformCursor + slot, ref _uniformCapacity);
+            _uniformCursor = 0;
+            // Existing bind groups embed the old (now orphaned) buffer object; drop them so
+            // every subsequent GetBindGroup call rebinds against the new one.
+            _bindGroups.Clear();
         }
+        var offset = _uniformCursor;
+        _uniformCursor += slot;
         var scratch = _uniformScratch.AsSpan(0, (int)slotBytes);
         scratch.Clear();
         if (first.NumWords > 0 && first.Values != IntPtr.Zero)
@@ -696,7 +734,13 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
         Alpha = new BlendComponent { Operation = BlendOperation.Add, SrcFactor = BlendFactor.One, DstFactor = BlendFactor.OneMinusSrcAlpha },
     };
 
-    /// <summary>Free the pinned map buffers, then the base component.</summary>
+    /// <summary>Free the pinned map buffers, then the base component. <c>Noesis.BaseComponent.Dispose()</c>
+    /// is sealed (non-virtual, no <c>Dispose(bool)</c> hook) and calls <c>GC.SuppressFinalize</c>, so this
+    /// can only hide it, not override it. Disposing through a <see cref="NoesisRenderDevice"/>- or
+    /// <see cref="IDisposable"/>-typed reference resolves here correctly; disposing through a
+    /// <c>Noesis.RenderDevice</c>- or <c>Noesis.BaseComponent</c>-typed reference skips this override
+    /// and leaks the two pinned scratch arrays — callers must hold this type (or <see cref="IDisposable"/>)
+    /// at the disposal site.</summary>
     public new void Dispose()
     {
         if (_vertexPin.IsAllocated) _vertexPin.Free();
