@@ -10,6 +10,7 @@
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.2" />
+    <PackageVersion Include="Noesis.GUI" Version="3.2.12" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Testing (TUnit with Native AOT support) -->
