@@ -33,23 +33,31 @@ public class NoesisRenderDeviceTests
 
     private static Device? TryCreateDevice()
     {
-        var instance = WebGPU.CreateInstance();
-        if (instance is null) return null;
-        var options = new RequestAdapterOptions
+        try
         {
-            CompatibleSurface = null!,
-            PowerPreference = PowerPreference.HighPerformance,
-            FeatureLevel = FeatureLevel.Core,
-        };
-        var adapter = instance.RequestAdapterSync(in options, 10_000_000_000UL);
-        if (adapter is null) return null;
-        var desc = new DeviceDescriptor
+            var instance = WebGPU.CreateInstance();
+            if (instance is null) return null;
+            var options = new RequestAdapterOptions
+            {
+                CompatibleSurface = null!,
+                PowerPreference = PowerPreference.HighPerformance,
+                FeatureLevel = FeatureLevel.Core,
+            };
+            var adapter = instance.RequestAdapterSync(in options, 10_000_000_000UL);
+            if (adapter is null) return null;
+            var desc = new DeviceDescriptor
+            {
+                Label = "Paradise.Ui.Noesis.Test",
+                UncapturedErrorCallback = static (type, message) =>
+                    Console.Error.WriteLine($"[NoesisTest][wgpu {type}] {message.ToString()}"),
+            };
+            return adapter.RequestDeviceSync(in desc, 10_000_000_000UL);
+        }
+        catch (DllNotFoundException ex)
         {
-            Label = "Paradise.Ui.Noesis.Test",
-            UncapturedErrorCallback = static (type, message) =>
-                Console.Error.WriteLine($"[NoesisTest][wgpu {type}] {message.ToString()}"),
-        };
-        return adapter.RequestDeviceSync(in desc, 10_000_000_000UL);
+            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            return null;
+        }
     }
 
     [Test]
