@@ -101,6 +101,46 @@ public class NoesisRenderDeviceTests
     }
 
     [Test]
+    public async Task create_texture_reads_a_per_mip_pointer_array()
+    {
+        EnsureNoesis();
+        var device = TryCreateDevice();
+        if (device is null)
+        {
+            Skip.Test("No WebGPU adapter available.");
+            return;
+        }
+        using var noesisDevice = new NoesisRenderDevice(device, WebGpuSharp.TextureFormat.RGBA8Unorm);
+
+        // The native contract is `const void** data`: one pointer per mip level, NOT one
+        // contiguous allocation (regression: treating it as pixels SIGBUSed on the first
+        // mipmapped image bank-heist's production UI loaded). Allocate two exact-size levels
+        // with nothing readable behind them and hand over the pointer array.
+        var level0 = new byte[8 * 8 * 4];
+        var level1 = new byte[4 * 4 * 4];
+        Array.Fill(level0, (byte)0x40);
+        Array.Fill(level1, (byte)0x80);
+        var pin0 = System.Runtime.InteropServices.GCHandle.Alloc(level0, System.Runtime.InteropServices.GCHandleType.Pinned);
+        var pin1 = System.Runtime.InteropServices.GCHandle.Alloc(level1, System.Runtime.InteropServices.GCHandleType.Pinned);
+        var pointers = new IntPtr[] { pin0.AddrOfPinnedObject(), pin1.AddrOfPinnedObject() };
+        var pinTable = System.Runtime.InteropServices.GCHandle.Alloc(pointers, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try
+        {
+            var texture = noesisDevice.CreateTexture(
+                "MipContract", 8, 8, 2, global::Noesis.TextureFormat.RGBA8, pinTable.AddrOfPinnedObject());
+            await Assert.That(texture.Width).IsEqualTo(8u);
+            await Assert.That(texture.HasMipMaps).IsTrue();
+            device.GetQueue()!.OnSubmittedWorkSync(5_000_000_000UL); // uploads flushed, no fault
+        }
+        finally
+        {
+            pinTable.Free();
+            pin0.Free();
+            pin1.Free();
+        }
+    }
+
+    [Test]
     public async Task xaml_with_masks_gradients_and_opacity_groups_renders()
     {
         var device = TryCreateDevice();

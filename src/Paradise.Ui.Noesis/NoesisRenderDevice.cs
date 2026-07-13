@@ -338,15 +338,23 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
         var texture = CreateNativeTexture(label, width, height, numLevels, format);
         if (data != IntPtr.Zero)
         {
-            var w = width;
-            var h = height;
-            var offset = 0L;
-            for (var level = 0u; level < numLevels; level++)
+            // The native contract is `const void** data`: an array of numLevels pointers,
+            // each to that level's tightly-packed pixels (SIGBUS-verified — it is NOT one
+            // contiguous allocation).
+            unsafe
             {
-                UploadLevel(texture, level, 0, 0, w, h, data + (nint)offset);
-                offset += (long)w * h * BytesPerPixel(format);
-                w = Math.Max(1, w / 2);
-                h = Math.Max(1, h / 2);
+                var levels = (IntPtr*)data;
+                var w = width;
+                var h = height;
+                for (var level = 0u; level < numLevels; level++)
+                {
+                    if (levels[level] != IntPtr.Zero)
+                    {
+                        UploadLevel(texture, level, 0, 0, w, h, levels[level]);
+                    }
+                    w = Math.Max(1, w / 2);
+                    h = Math.Max(1, h / 2);
+                }
             }
         }
         return texture;
