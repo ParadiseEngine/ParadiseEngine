@@ -26,6 +26,7 @@
     <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
     <Project Path="src/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
     <Project Path="src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <Project Path="src/Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
     <Project Path="src/Paradise.Ui.Noesis/Paradise.Ui.Noesis.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -44,6 +45,7 @@
     <Project Path="src/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
     <Project Path="src/Paradise.Rendering.Pbr.Test/Paradise.Rendering.Pbr.Test.csproj" />
     <Project Path="src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
+    <Project Path="src/Paradise.Ui.ImGui.Test/Paradise.Ui.ImGui.Test.csproj" />
     <Project Path="src/Paradise.Ui.Noesis.Test/Paradise.Ui.Noesis.Test.csproj" />
   </Folder>
 </Solution>
