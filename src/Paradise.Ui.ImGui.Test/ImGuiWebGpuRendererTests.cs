@@ -31,10 +31,20 @@ public class ImGuiWebGpuRendererTests
         s_contextReady = true;
     }
 
+    // WebGPU.CreateInstance() throws DllNotFoundException (rather than returning null) when the
+    // native Dawn library isn't loadable on this host — matches the skip pattern established in
+    // Paradise.Rendering.WebGPU.Test/HeadlessSmokeTests.cs.
     private static Device? TryCreateDevice()
     {
-        var instance = WebGPU.CreateInstance();
-        if (instance is null) return null;
+        Instance instance;
+        try
+        {
+            instance = WebGPU.CreateInstance() ?? throw new DllNotFoundException("WebGPU.CreateInstance() returned null.");
+        }
+        catch (DllNotFoundException)
+        {
+            return null;
+        }
         var options = new RequestAdapterOptions
         {
             CompatibleSurface = null!,
