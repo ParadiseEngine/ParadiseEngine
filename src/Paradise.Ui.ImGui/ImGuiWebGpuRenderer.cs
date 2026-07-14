@@ -170,6 +170,10 @@ public sealed class ImGuiWebGpuRenderer
     /// <paramref name="target"/>. Render thread only.</summary>
     public void Render(CommandEncoder encoder, TextureView target, uint targetWidth, uint targetHeight, ImGuiDrawSnapshot snapshot)
     {
+        if (!_textures.ContainsKey(FontTextureId))
+        {
+            throw new InvalidOperationException("SetFontAtlas must be called before the first Render.");
+        }
         if (snapshot.CommandCount == 0 || snapshot.VertexBytes == 0 ||
             snapshot.DisplaySize.X <= 0 || snapshot.DisplaySize.Y <= 0)
         {
@@ -214,7 +218,10 @@ public sealed class ImGuiWebGpuRenderer
         pass.End();
     }
 
-    private static int AlignIndexBytes(int bytes) => (bytes + 3) & ~3; // WriteBuffer needs 4B multiples
+    // WriteBuffer needs 4-byte multiples; reading up to 3 bytes past IndexBytes is safe only
+    // because ImGuiDrawSnapshot grows its buffers from a 1KiB floor by doubling (always 4-byte
+    // aligned and >= IndexBytes). Keep that invariant if the growth strategy ever changes.
+    private static int AlignIndexBytes(int bytes) => (bytes + 3) & ~3;
 
     private static float[] Orthographic(ImGuiDrawSnapshot snapshot)
     {
