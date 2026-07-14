@@ -476,6 +476,26 @@ public sealed class WebGpuRenderer : IDisposable
 
     // -------- Command stream submission --------
 
+    /// <summary>Optional overlay pass recorded into the frame encoder AFTER the scene passes and
+    /// before submit/present — the seam UI composition (e.g. the Noesis device) hooks into. The
+    /// callback receives the frame's command encoder and the backbuffer view; passes it records
+    /// should load (not clear) the color target so they composite over the scene. Invoked on the
+    /// render thread only. Single-subscriber: assigning replaces any previous handler rather than
+    /// composing with it.</summary>
+    public Action<WebGpuSharp.CommandEncoder, WgTextureView>? OverlayPass { get; set; }
+
+    /// <summary>The raw WebGPUSharp device, for subsystems that record their own passes through
+    /// <see cref="OverlayPass"/> (they need it to create pipelines/buffers/textures). Treat as
+    /// read-only infrastructure — resource lifetime stays with the creating subsystem.</summary>
+    public WebGpuSharp.Device NativeDevice
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _device.Device;
+        }
+    }
+
     /// <summary>Submit a recorded <see cref="RenderCommandStream"/>. Acquires the backbuffer view,
     /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU, presents (when windowed),
     /// and advances the frame counter so deferred destructions can drain.</summary>
@@ -487,6 +507,7 @@ public sealed class WebGpuRenderer : IDisposable
 
         var encoder = _device.Device.CreateCommandEncoder();
         ExecuteStream(in stream, encoder, view);
+        OverlayPass?.Invoke(encoder, view);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
         if (!_isHeadless) _surface!.Native.Present();
