@@ -5,6 +5,9 @@ namespace Paradise.Physics;
 /// <summary>
 /// Mutable state of a dynamic sphere, owned by the caller (e.g. ECS components in a game).
 /// The library never stores it — every step is a pure function over caller-owned spans.
+/// Caller owns ALL fields: like <see cref="Mass"/> and <see cref="Radius"/>, the material
+/// params <see cref="LinearDamping"/> and <see cref="Restitution"/> zero-initialize — an
+/// unset sphere is undamped and plastic; set them explicitly.
 /// </summary>
 public struct DynamicSphere
 {
