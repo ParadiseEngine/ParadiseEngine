@@ -122,12 +122,19 @@ public static class PlanarSphereDynamics
             Vector3 position = sphere.Position;
             for (int iteration = 0; iteration < MaxSlideIterations && remaining.LengthSquared() > MinMoveSq; iteration++)
             {
+                float length = remaining.Length();
+                Vector3 direction = remaining / length;
+                // The cast is padded by Skin: the resolver keeps bodies Skin away from statics,
+                // so a cast of exactly this tick's displacement can never reach a wall from the
+                // clearance band when the tick's move is shorter than Skin (speed < Skin/dt) —
+                // the ball would creep in, get pushed back out by the depenetration pass, and
+                // grind against the wall forever with its velocity never reflected.
                 var input = new ColliderCastInput
                 {
                     Collider = ball,
                     Orientation = Quaternion.Identity,
                     Start = position,
-                    End = position + remaining,
+                    End = position + direction * (length + settings.Skin),
                 };
                 if (!statics.CastCollider(input, out ColliderCastHit hit))
                 {
@@ -135,9 +142,10 @@ public static class PlanarSphereDynamics
                     break;
                 }
 
-                float length = remaining.Length();
-                Vector3 direction = remaining / length;
-                float travel = length * hit.Fraction - settings.Skin;
+                // Distance to surface contact along the padded cast; stop Skin short of it,
+                // never moving farther than this tick's actual displacement.
+                float contact = (length + settings.Skin) * hit.Fraction;
+                float travel = MathF.Min(contact - settings.Skin, length);
                 if (travel > 0f)
                 {
                     position += direction * travel;
@@ -156,7 +164,7 @@ public static class PlanarSphereDynamics
                     velocity -= (1f + settings.StaticRestitution) * velocityInto * normal;
                 }
 
-                Vector3 rest = remaining * (1f - hit.Fraction);
+                Vector3 rest = direction * (length - MathF.Max(travel, 0f));
                 float restInto = Vector3.Dot(rest, normal);
                 if (restInto < 0f)
                 {
@@ -211,7 +219,11 @@ public static class PlanarSphereDynamics
     }
 
     /// <summary>Second static pass: pair resolution can shove a sphere into a wall; push it back
-    /// out to skin clearance.</summary>
+    /// out to skin clearance. Also the bounce of last resort: a sphere inside the skin band whose
+    /// velocity still points INTO the surface never got its cast bounce — an oblique contact's
+    /// along-path gap grows as 1/sin(θ), so no finite cast padding catches every slow shallow
+    /// approach; without the reflection here such a ball slides along the wall (tangential motion
+    /// preserved, normal motion cancelled by the push-out) instead of rebounding.</summary>
     private static void DepenetrateFromStatics(Span<DynamicSphere> spheres, CollisionWorldHandle statics,
         in PlanarDynamicsSettings settings)
     {
@@ -232,6 +244,14 @@ public static class PlanarSphereDynamics
 
             sphere.Position = ClampToSupport(statics, settings,
                 sphere.Position, sphere.Position + normal * (settings.Skin - hit.Distance));
+
+            // Reflect only an into-surface velocity (a cast bounce this step already turned
+            // the sphere away, and dot ≥ 0 then keeps this from double-bouncing it).
+            float velocityInto = Vector3.Dot(sphere.Velocity, normal);
+            if (velocityInto < 0f)
+            {
+                sphere.Velocity -= (1f + settings.StaticRestitution) * velocityInto * normal;
+            }
         }
     }
 

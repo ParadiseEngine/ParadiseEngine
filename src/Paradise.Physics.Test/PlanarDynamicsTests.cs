@@ -56,6 +56,55 @@ public class PlanarDynamicsTests
     }
 
     [Test]
+    public async Task slow_ball_still_bounces_off_a_wall()
+    {
+        // Regression: a ball slower than Skin/dt (0.02·60 = 1.2 m/s) never bounced — each
+        // tick's cast was exactly the tick's displacement, shorter than the skin gap the
+        // depenetration pass maintains, so no contact was ever reported: the ball crept into
+        // the skin band, was pushed back out, and ground against the wall with its velocity
+        // unreflected until damping killed it. The skin-padded cast must report the contact.
+        CollisionWorld statics = WallAtX5();
+        DynamicSphere[] spheres = [Ball(new Vector3(4f, 0f, 0f), new Vector3(0.5f, 0f, 0f), radius: 0.5f)];
+
+        for (int i = 0; i < 240; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+        }
+
+        // Reflected at ≈ StaticRestitution × incoming speed (no damping in the Ball factory)…
+        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);
+        await Assert.That(MathF.Abs(-spheres[0].Velocity.X - 0.4f * 0.5f)).IsLessThan(0.03f);
+        // …and it actually left the wall instead of parking in the skin band (face at x=4.5).
+        await Assert.That(spheres[0].Position.X).IsLessThan(4.4f);
+    }
+
+    [Test]
+    public async Task slow_side_kick_bounces_instead_of_sliding_along_the_wall()
+    {
+        // Regression: an oblique contact's along-path gap grows as 1/sin(θ), so the
+        // skin-padded cast still misses slow shallow approaches — the ball crept into the
+        // skin band, the depenetration pass cancelled only its normal motion, and the
+        // preserved tangential velocity slid it along the wall to the wall's edge instead
+        // of rebounding. The depenetration pass must reflect a velocity still pointing
+        // into the surface it is pushing out of.
+        CollisionWorld statics = WallAtX5();
+        // 45° at 0.42 m/s: below the padded cast's catch threshold for this angle.
+        DynamicSphere[] spheres = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f)];
+
+        for (int i = 0; i < 240; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+        }
+
+        // Reflected: normal component reversed at ≈ restitution strength, tangential kept.
+        await Assert.That(spheres[0].Velocity.X).IsLessThan(-0.05f);
+        await Assert.That(MathF.Abs(-spheres[0].Velocity.X - 0.4f * 0.3f)).IsLessThan(0.03f);
+        await Assert.That(MathF.Abs(spheres[0].Velocity.Z - 0.3f)).IsLessThan(0.01f);
+        // And it left the wall (face at x=4.5) instead of grinding along it.
+        await Assert.That(spheres[0].Position.X).IsLessThan(4.4f);
+    }
+
+    [Test]
     public async Task equal_masses_swap_momentum_head_on_when_elastic()
     {
         PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
