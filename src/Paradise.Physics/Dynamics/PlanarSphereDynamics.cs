@@ -24,6 +24,10 @@ public static class PlanarSphereDynamics
     public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
         CollisionWorldHandle statics, in PlanarDynamicsSettings settings, float deltaSeconds)
     {
+        for (int i = 0; i < spheres.Length; i++)
+        {
+            spheres[i].ContactImpulse = 0f; // per-step output; see DynamicSphere.ContactImpulse
+        }
         PushFromKinematics(spheres, pushers, statics, settings);
         Integrate(spheres, statics, settings, deltaSeconds);
         ResolvePairs(spheres, statics, settings);
@@ -199,6 +203,8 @@ public static class PlanarSphereDynamics
                 float impulse = -(1f + settings.DynamicRestitution) * approaching / (1f / massA + 1f / massB);
                 a.Velocity -= normal * (impulse / massA);
                 b.Velocity += normal * (impulse / massB);
+                a.ContactImpulse += impulse;
+                b.ContactImpulse += impulse;
             }
         }
     }
