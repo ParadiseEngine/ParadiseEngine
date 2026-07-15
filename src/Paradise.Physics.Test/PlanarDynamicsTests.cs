@@ -76,6 +76,36 @@ public class PlanarDynamicsTests
     }
 
     [Test]
+    public async Task pair_collisions_report_contact_impulses()
+    {
+        var settings = NoDamping with { DynamicRestitution = 1f };
+        DynamicSphere[] spheres =
+        [
+            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f)),
+            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero),
+        ];
+
+        // Approach: no contact yet -> zero impulse on both.
+        PlanarSphereDynamics.Step(spheres, [], statics: null, settings, Dt);
+        await Assert.That(spheres[0].ContactImpulse).IsEqualTo(0f);
+        await Assert.That(spheres[1].ContactImpulse).IsEqualTo(0f);
+
+        float peak = 0f;
+        for (int i = 0; i < 180; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics: null, settings, Dt);
+            peak = MathF.Max(peak, spheres[0].ContactImpulse);
+            // Both partners of a pair report the same accumulated magnitude.
+            await Assert.That(MathF.Abs(spheres[0].ContactImpulse - spheres[1].ContactImpulse)).IsLessThan(1e-4f);
+        }
+
+        // Elastic equal-mass hit at 3 m/s, unit masses: impulse = (1+e)*|dv|/(1/mA+1/mB) = 3.
+        await Assert.That(MathF.Abs(peak - 3f)).IsLessThan(0.2f);
+        // The step is an OUTPUT per call: once separated, it resets to zero.
+        await Assert.That(spheres[0].ContactImpulse).IsEqualTo(0f);
+    }
+
+    [Test]
     public async Task kinematic_pusher_depenetrates_and_injects_velocity()
     {
         var pusher = new KinematicCapsule

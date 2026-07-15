@@ -12,6 +12,11 @@ public struct DynamicSphere
     public Vector3 Velocity;
     public float Radius;
     public float Mass;
+
+    /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
+    /// during the last <see cref="PlanarSphereDynamics.Step"/> (zeroed at step start). Game
+    /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
+    public float ContactImpulse;
 }
 
 /// <summary>A kinematic (infinite-mass) capsule pusher — e.g. a player character. It displaces
