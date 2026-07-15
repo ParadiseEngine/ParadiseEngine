@@ -89,7 +89,7 @@ public static class PlanarSphereDynamics
             ref DynamicSphere sphere = ref spheres[i];
             Vector3 velocity = sphere.Velocity;
             velocity.Y = 0f;
-            velocity *= MathF.Max(0f, 1f - settings.LinearDamping * deltaSeconds);
+            velocity *= MathF.Max(0f, 1f - sphere.LinearDamping * deltaSeconds);
             if (velocity.LengthSquared() < settings.MinSpeed * settings.MinSpeed)
             {
                 sphere.Velocity = Vector3.Zero;
@@ -200,7 +200,8 @@ public static class PlanarSphereDynamics
                 float approaching = Vector3.Dot(b.Velocity - a.Velocity, normal);
                 if (approaching >= 0f) continue; // separating already
 
-                float impulse = -(1f + settings.DynamicRestitution) * approaching / (1f / massA + 1f / massB);
+                float restitution = 0.5f * (a.Restitution + b.Restitution);
+                float impulse = -(1f + restitution) * approaching / (1f / massA + 1f / massB);
                 a.Velocity -= normal * (impulse / massA);
                 b.Velocity += normal * (impulse / massB);
                 a.ContactImpulse += impulse;

@@ -62,6 +62,7 @@ public class GroundSupportTests
             Velocity = new Vector3(-8f, 0f, 0f), // straight at the x = 0 edge
             Radius = 0.35f,
             Mass = 1f,
+            LinearDamping = 1.5f,
         }];
 
         for (int i = 0; i < 300; i++)
@@ -91,7 +92,7 @@ public class GroundSupportTests
         ];
         using CollisionWorld statics = CollisionWorld.Build(colliders, transforms);
 
-        var settings = Supported with { LinearDamping = 0f };
+        PlanarDynamicsSettings settings = Supported;
         DynamicSphere[] spheres = [new()
         {
             Position = new Vector3(4.2f, 0.85f, 0.35f),
@@ -118,6 +119,7 @@ public class GroundSupportTests
             Velocity = new Vector3(-8f, 0f, 3f),
             Radius = 0.35f,
             Mass = 1f,
+            LinearDamping = 1.5f,
         }];
 
         for (int i = 0; i < 300; i++)

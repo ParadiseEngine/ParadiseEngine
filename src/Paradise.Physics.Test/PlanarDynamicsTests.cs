@@ -6,8 +6,6 @@ public class PlanarDynamicsTests
 {
     private const float Dt = 1f / 60f;
 
-    private static PlanarDynamicsSettings NoDamping => PlanarDynamicsSettings.Default with { LinearDamping = 0f };
-
     private static CollisionWorld WallAtX5()
     {
         // Box face at x = 5, tall and long so contacts are always horizontal.
@@ -16,13 +14,18 @@ public class PlanarDynamicsTests
         return CollisionWorld.Build(colliders, transforms);
     }
 
-    private static DynamicSphere Ball(Vector3 position, Vector3 velocity, float radius = 0.35f, float mass = 1f)
-        => new() { Position = position, Velocity = velocity, Radius = radius, Mass = mass };
+    private static DynamicSphere Ball(Vector3 position, Vector3 velocity, float radius = 0.35f, float mass = 1f,
+        float damping = 0f, float restitution = 0.6f)
+        => new()
+        {
+            Position = position, Velocity = velocity, Radius = radius, Mass = mass,
+            LinearDamping = damping, Restitution = restitution,
+        };
 
     [Test]
     public async Task damping_brings_a_rolling_sphere_to_rest()
     {
-        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0.85f, 0f), new Vector3(2f, 0f, 0f))];
+        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0.85f, 0f), new Vector3(2f, 0f, 0f), damping: 1.5f)];
         for (int i = 0; i < 600; i++)
         {
             PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
@@ -37,7 +40,7 @@ public class PlanarDynamicsTests
     public async Task sphere_bounces_off_wall_with_restitution()
     {
         CollisionWorld statics = WallAtX5();
-        var settings = NoDamping;
+        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
         DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f)];
 
         float incomingSpeed = 5f;
@@ -55,11 +58,11 @@ public class PlanarDynamicsTests
     [Test]
     public async Task equal_masses_swap_momentum_head_on_when_elastic()
     {
-        var settings = NoDamping with { DynamicRestitution = 1f };
+        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
         DynamicSphere[] spheres =
         [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f)),
-            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero),
+            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
+            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 1f),
         ];
 
         for (int i = 0; i < 180; i++)
@@ -78,11 +81,11 @@ public class PlanarDynamicsTests
     [Test]
     public async Task pair_collisions_report_contact_impulses()
     {
-        var settings = NoDamping with { DynamicRestitution = 1f };
+        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
         DynamicSphere[] spheres =
         [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f)),
-            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero),
+            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
+            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 1f),
         ];
 
         // Approach: no contact yet -> zero impulse on both.
@@ -118,7 +121,7 @@ public class PlanarDynamicsTests
         // Sphere overlapping the capsule wall on the +X side.
         DynamicSphere[] spheres = [Ball(new Vector3(0.5f, 0.85f, 0f), Vector3.Zero, radius: 0.3f)];
 
-        PlanarSphereDynamics.Step(spheres, [pusher], statics: null, NoDamping, Dt);
+        PlanarSphereDynamics.Step(spheres, [pusher], statics: null, PlanarDynamicsSettings.Default, Dt);
 
         // Depenetrated: horizontal center distance ≥ radii sum + skin (within tolerance)…
         float horizontal = spheres[0].Position.X; // push is along +X
@@ -164,6 +167,46 @@ public class PlanarDynamicsTests
             await Assert.That(spheres[0].Position.Y).IsEqualTo(0.85f); // bitwise
             await Assert.That(spheres[1].Position.Y).IsEqualTo(0.85f);
         }
+    }
+
+    [Test]
+    public async Task per_sphere_damping_changes_travel_distance()
+    {
+        DynamicSphere[] spheres =
+        [
+            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(2f, 0f, 0f), damping: 0.5f),
+            Ball(new Vector3(0f, 0.85f, 5f), new Vector3(2f, 0f, 0f), damping: 3f),
+        ];
+        for (int i = 0; i < 1200; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
+        }
+
+        await Assert.That(spheres[0].Velocity).IsEqualTo(Vector3.Zero);
+        await Assert.That(spheres[1].Velocity).IsEqualTo(Vector3.Zero);
+        // Same launch speed: the lightly damped ball rolls far past the heavily damped one
+        // (analytic bounds: v0/damping = 4 m and 2/3 m respectively).
+        await Assert.That(spheres[0].Position.X).IsGreaterThan(2f * spheres[1].Position.X);
+    }
+
+    [Test]
+    public async Task pair_restitution_is_the_average_of_both_spheres()
+    {
+        // e = (1 + 0) / 2 = 0.5: elastic-vs-plastic head-on with equal masses.
+        // Post-impact (1-D, mA = mB, B at rest): vA = v0(1−e)/2, vB = v0(1+e)/2.
+        DynamicSphere[] spheres =
+        [
+            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
+            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 0f),
+        ];
+
+        for (int i = 0; i < 120; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
+        }
+
+        await Assert.That(MathF.Abs(spheres[0].Velocity.X - 0.75f)).IsLessThan(0.05f);
+        await Assert.That(MathF.Abs(spheres[1].Velocity.X - 2.25f)).IsLessThan(0.05f);
     }
 
     [Test]

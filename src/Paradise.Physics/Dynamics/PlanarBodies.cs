@@ -13,6 +13,13 @@ public struct DynamicSphere
     public float Radius;
     public float Mass;
 
+    /// <summary>Per-second linear damping applied during integration: v *= max(0, 1 − damping·dt).</summary>
+    public float LinearDamping;
+
+    /// <summary>Bounce factor for sphere ↔ sphere contacts; a pair bounces with the average of
+    /// both spheres' values (0 = plastic, 1 = elastic).</summary>
+    public float Restitution;
+
     /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
     /// during the last <see cref="PlanarSphereDynamics.Step"/> (zeroed at step start). Game
     /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
@@ -36,17 +43,12 @@ public struct KinematicCapsule
 /// <summary>Tuning for <see cref="PlanarSphereDynamics.Step"/>.</summary>
 public struct PlanarDynamicsSettings
 {
-    /// <summary>Per-second linear damping: v *= max(0, 1 − damping·dt).</summary>
-    public float LinearDamping;
-
     /// <summary>Speeds below this snap to rest (m/s).</summary>
     public float MinSpeed;
 
-    /// <summary>Bounce factor for sphere ↔ static contacts (0 = slide, 1 = elastic).</summary>
+    /// <summary>Bounce factor for sphere ↔ static contacts (0 = slide, 1 = elastic).
+    /// Sphere ↔ sphere bounce is per-body: <see cref="DynamicSphere.Restitution"/>.</summary>
     public float StaticRestitution;
-
-    /// <summary>Bounce factor for sphere ↔ sphere contacts.</summary>
-    public float DynamicRestitution;
 
     /// <summary>Scale applied to a kinematic pusher's velocity when injected into a sphere.</summary>
     public float PushStrength;
@@ -70,10 +72,8 @@ public struct PlanarDynamicsSettings
 
     public static PlanarDynamicsSettings Default => new()
     {
-        LinearDamping = 1.5f,
         MinSpeed = 0.005f,
         StaticRestitution = 0.4f,
-        DynamicRestitution = 0.6f,
         PushStrength = 1.2f,
         Skin = 0.02f,
         StaticFilter = CollisionFilter.Default,
