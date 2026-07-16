@@ -590,9 +590,11 @@ internal sealed class WebGpuDevice : IDisposable
             new WgColorTargetState
             {
                 Format = FormatConversions.ToWgpu(desc.ColorFormat),
-                // Standard alpha compositing for the AlphaBlend preset; null (opaque) otherwise.
-                Blend = desc.Blend == BlendMode.AlphaBlend
-                    ? new WgBlendState
+                // Standard alpha compositing for AlphaBlend, additive accumulation for Additive,
+                // null (opaque) otherwise.
+                Blend = desc.Blend switch
+                {
+                    BlendMode.AlphaBlend => new WgBlendState
                     {
                         Color = new WgBlendComponent
                         {
@@ -606,8 +608,24 @@ internal sealed class WebGpuDevice : IDisposable
                             SrcFactor = WgBlendFactor.One,
                             DstFactor = WgBlendFactor.OneMinusSrcAlpha,
                         },
-                    }
-                    : null,
+                    },
+                    BlendMode.Additive => new WgBlendState
+                    {
+                        Color = new WgBlendComponent
+                        {
+                            Operation = WgBlendOperation.Add,
+                            SrcFactor = WgBlendFactor.One,
+                            DstFactor = WgBlendFactor.One,
+                        },
+                        Alpha = new WgBlendComponent
+                        {
+                            Operation = WgBlendOperation.Add,
+                            SrcFactor = WgBlendFactor.One,
+                            DstFactor = WgBlendFactor.One,
+                        },
+                    },
+                    _ => null,
+                },
                 WriteMask = WebGpuSharp.ColorWriteMask.All,
             },
         };

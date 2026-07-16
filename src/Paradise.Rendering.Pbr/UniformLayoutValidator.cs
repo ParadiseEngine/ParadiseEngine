@@ -31,6 +31,7 @@ public static class UniformLayoutValidator
         ("sceneLights", 256, 6144), // 64 × 96-byte SceneLight
         ("shadowSettings", 6400, 16),
         ("sceneLightShadowMatrices", 6416, 24576), // 64 × 6 × 64-byte mat4
+        ("time", 30992, 16),
     ];
 
     private static readonly (string Name, uint Offset, uint Size)[] s_materialFields =
@@ -43,6 +44,9 @@ public static class UniformLayoutValidator
         ("emissiveFactor", 32, 16),
         ("uvOffsetScale", 48, 16),
         ("uvRotation", 64, 16),
+        ("procColorA", 80, 16),
+        ("procColorB", 96, 16),
+        ("procParams", 112, 16),
     ];
 
     /// <summary>Validate all three uniform blocks of the PBR program. Call once at renderer

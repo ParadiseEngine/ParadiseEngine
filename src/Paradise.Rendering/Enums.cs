@@ -77,6 +77,8 @@ public enum BlendMode : byte
 {
     Opaque = 0,
     AlphaBlend,
+    // Additive (src·1 + dst·1) — HDR accumulation, e.g. bloom upsample-and-add.
+    Additive,
 }
 
 /// <summary>How a texture may be used by the GPU. Combine with bitwise OR.</summary>

@@ -91,6 +91,18 @@ public sealed record PbrTonemap
     public float White { get; init; } = 1f;
 }
 
+/// <summary>Bloom (HDR glow) parameters for the post-process composite. When <see cref="Enabled"/>,
+/// the renderer runs a threshold + progressive dual-filter blur on the linear HDR scene target and
+/// adds it back scaled by <see cref="Intensity"/>. <see cref="Threshold"/>/<see cref="Knee"/> set
+/// the soft-knee brightness onset (in linear HDR luminance).</summary>
+public sealed record PbrBloom
+{
+    public bool Enabled { get; init; }
+    public float Threshold { get; init; } = 1f;
+    public float Knee { get; init; } = 0.5f;
+    public float Intensity { get; init; } = 0.6f;
+}
+
 /// <summary>Screen-space ambient-occlusion parameters (from Godot's Environment SSAO). When
 /// <see cref="Enabled"/>, the renderer runs a world-position pre-pass and darkens ambient in
 /// creases/contacts. <see cref="Radius"/> is in world units.</summary>
@@ -143,6 +155,10 @@ public sealed class PbrScene
     public PbrCamera Camera;
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
+    public PbrBloom Bloom = new();
+    /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned
+    /// via <c>--anim-time</c> for deterministic screenshots/parity).</summary>
+    public float ElapsedSeconds;
     public ColorRgba ClearColor = ColorRgba.CornflowerBlue;
     // Optional procedural-sky background (Godot ProceduralSkyMaterial), all colors LINEAR and
     // UNTONEMAPPED. When HasSkyBackground is set, the renderer draws a fullscreen background

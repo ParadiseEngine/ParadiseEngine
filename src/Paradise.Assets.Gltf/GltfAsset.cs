@@ -137,7 +137,18 @@ public sealed record GltfMaterialData(
     int NormalImage,
     int OcclusionImage,
     int EmissiveImage,
-    GltfUvTransform BaseColorUvTransform);
+    GltfUvTransform BaseColorUvTransform)
+{
+    // Procedural material: a noise recipe (see pbr.slang) overriding the surface when ProcKind >= 1.
+    // Init-only so existing positional constructions (the GLB reader) stay valid; the runtime scene
+    // assembler sets them for procedural materials. ProcColorA/B tint the tintable recipes.
+    public int ProcKind { get; init; }
+    public float ProcNoiseScale { get; init; } = 1f;
+    public float ProcFlowSpeed { get; init; } = 1f;
+    public float ProcEmissiveStrength { get; init; } = 1f;
+    public Vector3 ProcColorA { get; init; }
+    public Vector3 ProcColorB { get; init; }
+}
 
 /// <summary>One embedded image. ALWAYS a KTX2 container — the contract mandates KTX2 for every
 /// texture (the toktx pass in the export pipeline), and the reader rejects anything else at

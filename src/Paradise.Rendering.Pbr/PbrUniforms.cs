@@ -54,8 +54,8 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (30992 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 30992)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31008 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 31008)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
@@ -72,6 +72,7 @@ public struct FrameUniformsGpu
     [FieldOffset(256)] public SceneLightArray Lights;          // 64 × 96 = 6144 B
     [FieldOffset(6400)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
     [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
+    [FieldOffset(30992)] public Vector4 Time;                  // x elapsed seconds (procedural animation)
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
@@ -122,8 +123,16 @@ public struct SkyUniformsGpu
     [FieldOffset(128)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
 }
 
-/// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 80)]
+/// <summary>Mirror of composite.slang <c>CompositeUniforms</c>: the tone operator + bloom
+/// intensity for the final post-process pass.</summary>
+[StructLayout(LayoutKind.Explicit, Size = 16)]
+public struct CompositeUniformsGpu
+{
+    [FieldOffset(0)] public Vector4 Tone; // x mode, y exposure, z white, w bloom intensity
+}
+
+/// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (128 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 128)]
 public struct MaterialUniformsGpu
 {
     [FieldOffset(0)] public Vector4 BaseColorFactor;
@@ -134,4 +143,7 @@ public struct MaterialUniformsGpu
     [FieldOffset(32)] public Vector4 EmissiveFactor; // rgb emissive, w transmission
     [FieldOffset(48)] public Vector4 UvOffsetScale;  // xy offset, zw scale (baseColor KHR_texture_transform)
     [FieldOffset(64)] public Vector4 UvRotation;     // x radians, yzw unused
+    [FieldOffset(80)] public Vector4 ProcColorA;     // procedural recipe color A
+    [FieldOffset(96)] public Vector4 ProcColorB;     // procedural recipe color B
+    [FieldOffset(112)] public Vector4 ProcParams;    // x kind, y noiseScale, z flowSpeed, w emissiveStrength
 }

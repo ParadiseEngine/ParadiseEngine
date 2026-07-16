@@ -67,6 +67,9 @@ public sealed class MaterialResourceCache : IDisposable
                 material.BaseColorUvTransform.Offset.X, material.BaseColorUvTransform.Offset.Y,
                 material.BaseColorUvTransform.Scale.X, material.BaseColorUvTransform.Scale.Y),
             UvRotation = new Vector4(material.BaseColorUvTransform.Rotation, 0f, 0f, 0f),
+            ProcColorA = new Vector4(material.ProcColorA, 0f),
+            ProcColorB = new Vector4(material.ProcColorB, 0f),
+            ProcParams = new Vector4(material.ProcKind, material.ProcNoiseScale, material.ProcFlowSpeed, material.ProcEmissiveStrength),
         };
 
         var uboDesc = new BufferDesc($"PbrMaterial[{_materials.Count}]", 0, BufferUsage.Uniform);

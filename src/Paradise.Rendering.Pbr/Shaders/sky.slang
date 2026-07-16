@@ -169,7 +169,9 @@ float3 skyColor(float2 uv)
             gradient = lerp(gradient, sky.sunColor.rgb, saturate(pow(1.0 - c2, sky.skyHorizon.w)));
         }
     }
-    return applyTonemap(gradient, sky.params.w, sky.cameraPos.w, sky.params.z);
+    // Return LINEAR HDR — the composite pass tonemaps the whole scene once (see composite.slang).
+    // (tonemap(lerp) order still holds: the gradient is blended linear here, tonemapped downstream.)
+    return gradient;
 }
 
 float3 linearToSrgb(float3 linearColor)
