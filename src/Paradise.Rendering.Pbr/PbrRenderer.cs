@@ -51,13 +51,26 @@ public sealed class PbrRenderer : IDisposable
     private readonly PipelineHandle _compositePipeline;
     private readonly BufferHandle _compositeUniformBuffer;
     private readonly SamplerHandle _compositeSampler;
-    private readonly TextureHandle _bloomPlaceholderTexture; // 1×1 black until bloom lands
-    private readonly TextureViewHandle _bloomPlaceholderView;
     private BindGroupLayoutDesc _compositeGroupLayout;
     private TextureHandle _hdrTexture;
     private TextureViewHandle _hdrView;
     private BindGroupHandle _compositeGroup;
     private const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
+    // Bloom mip chain (progressive dual-filter, COD-style): a half-res base halving to ~BloomMinDim.
+    // bright-pass (threshold) → downsample chain → additive upsample chain; _bloomViews[0] is the
+    // result composite adds. Pipelines built once; textures/views/groups rebuilt on resize.
+    private const int BloomMaxLevels = 6;
+    private const uint BloomMinDim = 8;
+    private readonly PipelineHandle _bloomBrightPipeline;
+    private readonly PipelineHandle _bloomDownPipeline;
+    private readonly PipelineHandle _bloomUpPipeline;
+    private readonly BufferHandle _bloomUniformBuffer;
+    private BindGroupLayoutDesc _bloomGroupLayout;
+    private int _bloomLevels;
+    private TextureHandle[] _bloomTextures = [];
+    private TextureViewHandle[] _bloomViews = [];
+    private BindGroupHandle[] _bloomGroups = []; // _bloomGroups[i] samples _bloomTextures[i]
+    private BindGroupHandle _bloomHdrGroup;        // samples _hdrView (bright pass source)
     // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
     // _positionTexture (Rgba32Float, offscreen color) with its own depth (_prepassDepthAux). The PBR
     // shader (group 3) samples it via textureLoad and darkens ambient. The group is rebuilt on resize.
@@ -297,25 +310,31 @@ public sealed class PbrRenderer : IDisposable
         // fullscreen pass tonemaps it (using the tone operators moved out of pbr/sky) to the
         // swapchain, so the whole frame composites in linear HDR (enabling bloom). The composite
         // pipeline targets the surface format (sRGB decision applies HERE now, not the main pass).
+        _compositeSampler = renderer.CreateSampler(new SamplerDesc(
+            "PbrCompositeSampler",
+            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
+            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
+
+        // Bloom pipelines (built once; share one bind-group layout: source texture + sampler + params).
+        var bloomProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.bloom");
+        _bloomGroupLayout = FindGroup(bloomProgram, 0);
+        _bloomUniformBuffer = renderer.CreateBuffer(new BufferDesc(
+            "PbrBloomUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
+        _bloomBrightPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, fragmentEntryPoint: "brightFragment");
+        _bloomDownPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, fragmentEntryPoint: "downsampleFragment");
+        _bloomUpPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, blend: BlendMode.Additive, fragmentEntryPoint: "upsampleFragment");
+
         _hdrTexture = CreateHdrTexture(_width, _height);
+        EnsureHdrView();
+        EnsureBloomChain(_width, _height);
+
         var compositeProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.composite");
         _compositeGroupLayout = FindGroup(compositeProgram, 0);
         _compositePipeline = renderer.CreatePipeline(
             compositeProgram, renderer.ColorFormat,
             fragmentEntryPoint: _useSrgbEntryPoint ? "compositeFragmentSrgb" : "compositeFragment");
-        _compositeSampler = renderer.CreateSampler(new SamplerDesc(
-            "PbrCompositeSampler",
-            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
-            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
         _compositeUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        // 1×1 black bloom input until the bloom passes land; composite skips it while intensity = 0.
-        _bloomPlaceholderTexture = renderer.CreateTexture(new TextureDesc(
-            "PbrBloomPlaceholder", 1, 1, 1, 1, 1, TextureDimension.D2, HdrFormat,
-            TextureUsage.TextureBinding | TextureUsage.CopyDst));
-        _renderer.WriteTexture(_bloomPlaceholderTexture, 0, new byte[8], 8, 1, 1, 1); // one Rgba16Float texel = 8 B, zero
-        _bloomPlaceholderView = renderer.CreateTextureView(new TextureViewDesc(
-            "PbrBloomPlaceholderView", _bloomPlaceholderTexture, TextureViewDimension.D2, 0, 1));
         RebuildCompositeGroup();
 
         // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
@@ -396,8 +415,10 @@ public sealed class PbrRenderer : IDisposable
         _positionTexture = CreatePositionTexture(width, height);
         _prepassDepthAux = CreateDepthTexture(width, height);
         _hdrTexture = CreateHdrTexture(width, height);
+        EnsureHdrView(); // HDR target changed → new view (bloom + composite groups reference it)
+        EnsureBloomChain(width, height); // mip sizes + the HDR-sampling group changed
         RebuildSsaoGroup(); // position texture changed → rebind
-        RebuildCompositeGroup(); // HDR target changed → rebind
+        RebuildCompositeGroup(); // HDR + bloom result views changed → rebind
         EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
@@ -605,7 +626,12 @@ public sealed class PbrRenderer : IDisposable
         var hasPrepass = scene.Ssao.Enabled && _opaque.Count > 0;
         var prepassIndex = hasPrepass ? _shadowViews.Count : -1;
         var mainPassIndex = _shadowViews.Count + (hasPrepass ? 1 : 0);
-        var compositeIndex = mainPassIndex + 1;
+        // Bloom inserts 2·levels−1 passes (1 bright + (L−1) down + (L−1) additive up) between the
+        // main HDR pass and the composite pass; disabled = zero passes, composite reads unused bloom.
+        var bloomEnabled = scene.Bloom.Enabled && _bloomLevels > 1;
+        var bloomStart = mainPassIndex + 1;
+        var bloomPassCount = bloomEnabled ? 2 * _bloomLevels - 1 : 0;
+        var compositeIndex = bloomStart + bloomPassCount;
         if (_passes.Length < compositeIndex + 1) _passes = new RenderPassDesc[compositeIndex + 1];
         for (var k = 0; k < _shadowViews.Count; k++)
         {
@@ -633,15 +659,43 @@ public sealed class PbrRenderer : IDisposable
         // Main color pass → the offscreen HDR scene target (linear), not the swapchain.
         _passes[mainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
             RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+
+        if (bloomEnabled)
+        {
+            // bright → _bloomViews[0]; downsample i → _bloomViews[i+1] (Clear); additive upsample
+            // k+1 → _bloomViews[k] (Load, so the tent blur accumulates onto the down-mip content).
+            var black = new ColorRgba(0f, 0f, 0f, 1f);
+            _passes[bloomStart] = new RenderPassDesc(colorAttachmentCount: 1);
+            _passes[bloomStart].Colors.Slot0 = new ColorAttachmentDesc(
+                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, black, ColorView: _bloomViews[0]);
+            for (var i = 0; i < _bloomLevels - 1; i++)
+            {
+                var p = bloomStart + 1 + i;
+                _passes[p] = new RenderPassDesc(colorAttachmentCount: 1);
+                _passes[p].Colors.Slot0 = new ColorAttachmentDesc(
+                    RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, black, ColorView: _bloomViews[i + 1]);
+            }
+            for (var j = 0; j < _bloomLevels - 1; j++)
+            {
+                var target = _bloomLevels - 2 - j;
+                var p = bloomStart + _bloomLevels + j;
+                _passes[p] = new RenderPassDesc(colorAttachmentCount: 1);
+                _passes[p].Colors.Slot0 = new ColorAttachmentDesc(
+                    RenderViewHandle.Invalid, LoadOp.Load, StoreOp.Store, black, ColorView: _bloomViews[target]);
+            }
+            var bloomUniforms = new CompositeUniformsGpu { Tone = new Vector4(scene.Bloom.Threshold, scene.Bloom.Knee, 0f, 0f) };
+            _renderer.UpdateBuffer<CompositeUniformsGpu>(_bloomUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref bloomUniforms, 1));
+        }
+
         // Composite pass → the swapchain: samples the HDR target, tonemaps (+ bloom), no depth.
         _passes[compositeIndex] = new RenderPassDesc(colorAttachmentCount: 1);
         _passes[compositeIndex].Colors.Slot0 = new ColorAttachmentDesc(
             RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f));
 
-        // Tone operator + bloom intensity for the composite pass (bloom off until the bloom passes land).
         var compositeUniforms = new CompositeUniformsGpu
         {
-            Tone = new Vector4((float)scene.Tonemap.Mode, scene.Tonemap.Exposure, scene.Tonemap.White, 0f),
+            Tone = new Vector4((float)scene.Tonemap.Mode, scene.Tonemap.Exposure, scene.Tonemap.White,
+                bloomEnabled ? scene.Bloom.Intensity : 0f),
         };
         _renderer.UpdateBuffer<CompositeUniformsGpu>(_compositeUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref compositeUniforms, 1));
 
@@ -670,6 +724,35 @@ public sealed class PbrRenderer : IDisposable
         EncodeBucket(ref encoder, _opaque, BlendMode.Opaque, viewProjection, ref drawIndex);
         EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
         encoder.EndPass();
+
+        if (bloomEnabled)
+        {
+            // bright: HDR scene → _bloomViews[0]
+            encoder.BeginPass(bloomStart);
+            encoder.SetPipeline(_bloomBrightPipeline);
+            encoder.SetBindGroup(0, _bloomHdrGroup);
+            encoder.Draw(new DrawCommand(3, 1, 0, 0));
+            encoder.EndPass();
+            // downsample: _bloomViews[i] → _bloomViews[i+1]
+            for (var i = 0; i < _bloomLevels - 1; i++)
+            {
+                encoder.BeginPass(bloomStart + 1 + i);
+                encoder.SetPipeline(_bloomDownPipeline);
+                encoder.SetBindGroup(0, _bloomGroups[i]);
+                encoder.Draw(new DrawCommand(3, 1, 0, 0));
+                encoder.EndPass();
+            }
+            // additive upsample: _bloomViews[k+1] → _bloomViews[k], smallest first
+            for (var j = 0; j < _bloomLevels - 1; j++)
+            {
+                var source = _bloomLevels - 1 - j;
+                encoder.BeginPass(bloomStart + _bloomLevels + j);
+                encoder.SetPipeline(_bloomUpPipeline);
+                encoder.SetBindGroup(0, _bloomGroups[source]);
+                encoder.Draw(new DrawCommand(3, 1, 0, 0));
+                encoder.EndPass();
+            }
+        }
 
         // Composite: fullscreen triangle sampling the HDR scene target → tonemap (+ bloom) → swapchain.
         encoder.BeginPass(compositeIndex);
@@ -1083,20 +1166,75 @@ public sealed class PbrRenderer : IDisposable
         return _renderer.CreateTexture(in desc);
     }
 
-    // (Re)build the composite bind group after the HDR view changes (startup / resize).
-    private void RebuildCompositeGroup()
+    private void EnsureHdrView()
     {
-        if (_compositeGroup.IsValid) _renderer.DestroyBindGroup(_compositeGroup);
         if (_hdrView.IsValid) _renderer.DestroyTextureView(_hdrView);
         _hdrView = _renderer.CreateTextureView(new TextureViewDesc(
             "PbrHdrSceneView", _hdrTexture, TextureViewDimension.D2, 0, 1));
+    }
+
+    // (Re)build the composite bind group; binds the HDR scene + the bloom result (_bloomViews[0]).
+    private void RebuildCompositeGroup()
+    {
+        if (_compositeGroup.IsValid) _renderer.DestroyBindGroup(_compositeGroup);
         _compositeGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrCompositeGroup", _compositeGroupLayout, new[]
         {
             BindGroupEntryDesc.ForTextureView(0, _hdrView),
             BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForTextureView(2, _bloomPlaceholderView),
+            BindGroupEntryDesc.ForTextureView(2, _bloomViews[0]),
             BindGroupEntryDesc.ForBuffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
         }));
+    }
+
+    // (Re)allocate the bloom mip chain sized to the current target: a half-res base halving down to
+    // ~BloomMinDim (≤ BloomMaxLevels levels). Each level is an Rgba16Float render target sampled by
+    // the next pass; per-level bind groups (source = that level) + one group sampling the HDR scene.
+    private void EnsureBloomChain(uint width, uint height)
+    {
+        DestroyBloomChain();
+        var sizes = new List<(uint W, uint H)>();
+        uint w = Math.Max(1, width / 2), h = Math.Max(1, height / 2);
+        for (var i = 0; i < BloomMaxLevels; i++)
+        {
+            sizes.Add((w, h));
+            if (w <= BloomMinDim || h <= BloomMinDim) break;
+            w = Math.Max(1, w / 2);
+            h = Math.Max(1, h / 2);
+        }
+        _bloomLevels = sizes.Count;
+        _bloomTextures = new TextureHandle[_bloomLevels];
+        _bloomViews = new TextureViewHandle[_bloomLevels];
+        _bloomGroups = new BindGroupHandle[_bloomLevels];
+        for (var i = 0; i < _bloomLevels; i++)
+        {
+            _bloomTextures[i] = _renderer.CreateTexture(new TextureDesc(
+                $"PbrBloom{i}", sizes[i].W, sizes[i].H, 1, 1, 1, TextureDimension.D2, HdrFormat,
+                TextureUsage.RenderAttachment | TextureUsage.TextureBinding));
+            _bloomViews[i] = _renderer.CreateTextureView(new TextureViewDesc(
+                $"PbrBloomView{i}", _bloomTextures[i], TextureViewDimension.D2, 0, 1));
+        }
+        for (var i = 0; i < _bloomLevels; i++)
+            _bloomGroups[i] = CreateBloomGroup(_bloomViews[i]);
+        _bloomHdrGroup = CreateBloomGroup(_hdrView);
+    }
+
+    private BindGroupHandle CreateBloomGroup(TextureViewHandle source) =>
+        _renderer.CreateBindGroup(new BindGroupDesc("PbrBloomGroup", _bloomGroupLayout, new[]
+        {
+            BindGroupEntryDesc.ForTextureView(0, source),
+            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
+            BindGroupEntryDesc.ForBuffer(2, _bloomUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
+        }));
+
+    private void DestroyBloomChain()
+    {
+        if (_bloomHdrGroup.IsValid) _renderer.DestroyBindGroup(_bloomHdrGroup);
+        foreach (var g in _bloomGroups) if (g.IsValid) _renderer.DestroyBindGroup(g);
+        foreach (var v in _bloomViews) if (v.IsValid) _renderer.DestroyTextureView(v);
+        foreach (var t in _bloomTextures) if (t.IsValid) _renderer.DestroyTexture(t);
+        _bloomGroups = [];
+        _bloomViews = [];
+        _bloomTextures = [];
     }
 
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
@@ -1333,7 +1471,10 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyTexture(_hdrTexture);
         _renderer.DestroyBuffer(_compositeUniformBuffer);
         _renderer.DestroySampler(_compositeSampler);
-        _renderer.DestroyTextureView(_bloomPlaceholderView);
-        _renderer.DestroyTexture(_bloomPlaceholderTexture);
+        DestroyBloomChain();
+        _renderer.DestroyPipeline(_bloomBrightPipeline);
+        _renderer.DestroyPipeline(_bloomDownPipeline);
+        _renderer.DestroyPipeline(_bloomUpPipeline);
+        _renderer.DestroyBuffer(_bloomUniformBuffer);
     }
 }
