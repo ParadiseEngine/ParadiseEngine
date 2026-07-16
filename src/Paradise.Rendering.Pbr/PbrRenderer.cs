@@ -45,6 +45,19 @@ public sealed class PbrRenderer : IDisposable
     private readonly PipelineHandle _skyPipeline;
     private readonly BufferHandle _skyUniformBuffer;
     private readonly BindGroupHandle _skyGroup;
+    // HDR post-process seam: the main pass (PBR + sky) now renders LINEAR HDR into _hdrTexture
+    // (Rgba16Float) instead of tonemapping to the swapchain in-shader; a fullscreen composite pass
+    // tonemaps it (+ optional bloom) to the surface. This is where future post effects hook in.
+    private readonly PipelineHandle _compositePipeline;
+    private readonly BufferHandle _compositeUniformBuffer;
+    private readonly SamplerHandle _compositeSampler;
+    private readonly TextureHandle _bloomPlaceholderTexture; // 1×1 black until bloom lands
+    private readonly TextureViewHandle _bloomPlaceholderView;
+    private BindGroupLayoutDesc _compositeGroupLayout;
+    private TextureHandle _hdrTexture;
+    private TextureViewHandle _hdrView;
+    private BindGroupHandle _compositeGroup;
+    private const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
     // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
     // _positionTexture (Rgba32Float, offscreen color) with its own depth (_prepassDepthAux). The PBR
     // shader (group 3) samples it via textureLoad and darkens ambient. The group is rebuilt on resize.
@@ -211,11 +224,11 @@ public sealed class PbrRenderer : IDisposable
         // is occluded by scene geometry. Fragment entry follows the same sRGB decision as the scene.
         var skyProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.sky");
         _skyPipeline = renderer.CreatePipeline(
-            skyProgram, renderer.ColorFormat,
+            skyProgram, HdrFormat, // linear HDR into _hdrTexture, like the PBR pass; composite tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: false,
             depthCompare: CompareFunction.Always,
-            fragmentEntryPoint: _useSrgbEntryPoint ? "skyFragmentSrgb" : "skyFragment");
+            fragmentEntryPoint: "skyFragment"); // always linear
         var skyUniformDesc = new BufferDesc("PbrSkyUniforms", (ulong)Unsafe.SizeOf<SkyUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst);
         _skyUniformBuffer = renderer.CreateBuffer(in skyUniformDesc);
         _skyGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrSkyGroup", FindGroup(skyProgram, 0), new[]
@@ -279,8 +292,34 @@ public sealed class PbrRenderer : IDisposable
             "PbrDfgLutView", _dfgLutTexture, TextureViewDimension.D2, 0, 1));
         BakeDfgLut();
         RebuildSsaoGroup();
+
+        // HDR scene target + composite pass. The main pass renders LINEAR HDR here; the composite
+        // fullscreen pass tonemaps it (using the tone operators moved out of pbr/sky) to the
+        // swapchain, so the whole frame composites in linear HDR (enabling bloom). The composite
+        // pipeline targets the surface format (sRGB decision applies HERE now, not the main pass).
+        _hdrTexture = CreateHdrTexture(_width, _height);
+        var compositeProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.composite");
+        _compositeGroupLayout = FindGroup(compositeProgram, 0);
+        _compositePipeline = renderer.CreatePipeline(
+            compositeProgram, renderer.ColorFormat,
+            fragmentEntryPoint: _useSrgbEntryPoint ? "compositeFragmentSrgb" : "compositeFragment");
+        _compositeSampler = renderer.CreateSampler(new SamplerDesc(
+            "PbrCompositeSampler",
+            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
+            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
+        _compositeUniformBuffer = renderer.CreateBuffer(new BufferDesc(
+            "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
+        // 1×1 black bloom input until the bloom passes land; composite skips it while intensity = 0.
+        _bloomPlaceholderTexture = renderer.CreateTexture(new TextureDesc(
+            "PbrBloomPlaceholder", 1, 1, 1, 1, 1, TextureDimension.D2, HdrFormat,
+            TextureUsage.TextureBinding | TextureUsage.CopyDst));
+        _renderer.WriteTexture(_bloomPlaceholderTexture, 0, new byte[8], 8, 1, 1, 1); // one Rgba16Float texel = 8 B, zero
+        _bloomPlaceholderView = renderer.CreateTextureView(new TextureViewDesc(
+            "PbrBloomPlaceholderView", _bloomPlaceholderTexture, TextureViewDimension.D2, 0, 1));
+        RebuildCompositeGroup();
+
         // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
-        // position pre-pass, then the main pass (whose depth target is recreated on resize).
+        // position pre-pass, the main pass (LINEAR HDR → _hdrTexture), then the composite pass.
     }
 
     // (Re)allocate the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
@@ -350,12 +389,15 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyTexture(_depthTexture);
         _renderer.DestroyTexture(_positionTexture);
         _renderer.DestroyTexture(_prepassDepthAux);
+        _renderer.DestroyTexture(_hdrTexture);
         _width = width;
         _height = height;
         _depthTexture = CreateDepthTexture(width, height);
         _positionTexture = CreatePositionTexture(width, height);
         _prepassDepthAux = CreateDepthTexture(width, height);
+        _hdrTexture = CreateHdrTexture(width, height);
         RebuildSsaoGroup(); // position texture changed → rebind
+        RebuildCompositeGroup(); // HDR target changed → rebind
         EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
@@ -563,7 +605,8 @@ public sealed class PbrRenderer : IDisposable
         var hasPrepass = scene.Ssao.Enabled && _opaque.Count > 0;
         var prepassIndex = hasPrepass ? _shadowViews.Count : -1;
         var mainPassIndex = _shadowViews.Count + (hasPrepass ? 1 : 0);
-        if (_passes.Length < mainPassIndex + 1) _passes = new RenderPassDesc[mainPassIndex + 1];
+        var compositeIndex = mainPassIndex + 1;
+        if (_passes.Length < compositeIndex + 1) _passes = new RenderPassDesc[compositeIndex + 1];
         for (var k = 0; k < _shadowViews.Count; k++)
         {
             _passes[k] = new RenderPassDesc(colorAttachmentCount: 0)
@@ -587,8 +630,20 @@ public sealed class PbrRenderer : IDisposable
         {
             Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
         };
+        // Main color pass → the offscreen HDR scene target (linear), not the swapchain.
         _passes[mainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
-            RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor);
+            RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+        // Composite pass → the swapchain: samples the HDR target, tonemaps (+ bloom), no depth.
+        _passes[compositeIndex] = new RenderPassDesc(colorAttachmentCount: 1);
+        _passes[compositeIndex].Colors.Slot0 = new ColorAttachmentDesc(
+            RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f));
+
+        // Tone operator + bloom intensity for the composite pass (bloom off until the bloom passes land).
+        var compositeUniforms = new CompositeUniformsGpu
+        {
+            Tone = new Vector4((float)scene.Tonemap.Mode, scene.Tonemap.Exposure, scene.Tonemap.White, 0f),
+        };
+        _renderer.UpdateBuffer<CompositeUniformsGpu>(_compositeUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref compositeUniforms, 1));
 
         _commandWriter.ResetWrittenCount();
         var encoder = new RenderCommandEncoder(_commandWriter);
@@ -616,12 +671,19 @@ public sealed class PbrRenderer : IDisposable
         EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
         encoder.EndPass();
 
+        // Composite: fullscreen triangle sampling the HDR scene target → tonemap (+ bloom) → swapchain.
+        encoder.BeginPass(compositeIndex);
+        encoder.SetPipeline(_compositePipeline);
+        encoder.SetBindGroup(0, _compositeGroup);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+        encoder.EndPass();
+
         if (shadowDraws > 0)
             _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, shadowDraws * (int)_drawStride));
         if (drawIndex > 0)
             _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, drawIndex * (int)_drawStride));
 
-        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes.AsMemory(0, mainPassIndex + 1));
+        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes.AsMemory(0, compositeIndex + 1));
         _renderer.Submit(in stream);
     }
 
@@ -979,11 +1041,11 @@ public sealed class PbrRenderer : IDisposable
         if (_pipelines.TryGetValue(blend, out var pipeline)) return pipeline;
         pipeline = _renderer.CreatePipeline(
             _program,
-            _renderer.ColorFormat,
+            HdrFormat, // main pass now emits LINEAR HDR into _hdrTexture; the composite pass tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
             blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque, // blended surfaces read but don't write depth
-            fragmentEntryPoint: _useSrgbEntryPoint ? "fragmentMainSrgb" : "fragmentMain");
+            fragmentEntryPoint: "fragmentMain"); // always linear (the sRGB decision moved to composite)
         _pipelines[blend] = pipeline;
         return pipeline;
     }
@@ -1010,6 +1072,31 @@ public sealed class PbrRenderer : IDisposable
             TextureDimension.D2, TextureFormat.Rgba32Float,
             TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
         return _renderer.CreateTexture(in desc);
+    }
+
+    private TextureHandle CreateHdrTexture(uint width, uint height)
+    {
+        var desc = new TextureDesc(
+            "PbrHdrScene", width, height, 1, 1, 1,
+            TextureDimension.D2, HdrFormat,
+            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
+        return _renderer.CreateTexture(in desc);
+    }
+
+    // (Re)build the composite bind group after the HDR view changes (startup / resize).
+    private void RebuildCompositeGroup()
+    {
+        if (_compositeGroup.IsValid) _renderer.DestroyBindGroup(_compositeGroup);
+        if (_hdrView.IsValid) _renderer.DestroyTextureView(_hdrView);
+        _hdrView = _renderer.CreateTextureView(new TextureViewDesc(
+            "PbrHdrSceneView", _hdrTexture, TextureViewDimension.D2, 0, 1));
+        _compositeGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrCompositeGroup", _compositeGroupLayout, new[]
+        {
+            BindGroupEntryDesc.ForTextureView(0, _hdrView),
+            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
+            BindGroupEntryDesc.ForTextureView(2, _bloomPlaceholderView),
+            BindGroupEntryDesc.ForBuffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
+        }));
     }
 
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
@@ -1240,5 +1327,13 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyBuffer(_drawUniformRing);
         _renderer.DestroyBuffer(_frameUniformBuffer);
         _renderer.DestroyTexture(_depthTexture);
+        _renderer.DestroyPipeline(_compositePipeline);
+        _renderer.DestroyBindGroup(_compositeGroup);
+        if (_hdrView.IsValid) _renderer.DestroyTextureView(_hdrView);
+        _renderer.DestroyTexture(_hdrTexture);
+        _renderer.DestroyBuffer(_compositeUniformBuffer);
+        _renderer.DestroySampler(_compositeSampler);
+        _renderer.DestroyTextureView(_bloomPlaceholderView);
+        _renderer.DestroyTexture(_bloomPlaceholderTexture);
     }
 }

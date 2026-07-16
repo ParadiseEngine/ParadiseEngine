@@ -122,6 +122,14 @@ public struct SkyUniformsGpu
     [FieldOffset(128)] public Matrix4x4 InvViewProj;// NDC(far plane) → world, for the eye ray
 }
 
+/// <summary>Mirror of composite.slang <c>CompositeUniforms</c>: the tone operator + bloom
+/// intensity for the final post-process pass.</summary>
+[StructLayout(LayoutKind.Explicit, Size = 16)]
+public struct CompositeUniformsGpu
+{
+    [FieldOffset(0)] public Vector4 Tone; // x mode, y exposure, z white, w bloom intensity
+}
+
 /// <summary>Mirror of pbr.slang <c>MaterialUniforms</c> (80 B).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 80)]
 public struct MaterialUniformsGpu

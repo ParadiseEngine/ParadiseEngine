@@ -794,10 +794,9 @@ float4 shadePbr(FragmentInput input)
     // Highlight flash (selection/hit feedback): additive push toward white.
     color += draw.highlight.x * 0.35;
 
-    // Tonemap the linear HDR result before the sRGB OETF, using the operator/exposure/white
-    // exported from the Godot Environment (frame.shadowSettings.yzw).
-    color = applyTonemap(color, frame.shadowSettings.z, frame.shadowSettings.w, frame.shadowSettings.y);
-
+    // Return LINEAR HDR — tonemapping moved to the composite pass (composite.slang), which
+    // tonemaps the whole HDR scene target once (enabling bloom + a single consistent curve).
+    // The tone operators above are retained for reference/parity but are no longer called here.
     return float4(color, baseColor.a);
 }
 
