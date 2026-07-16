@@ -156,6 +156,9 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public PbrBloom Bloom = new();
+    /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned
+    /// via <c>--anim-time</c> for deterministic screenshots/parity).</summary>
+    public float ElapsedSeconds;
     public ColorRgba ClearColor = ColorRgba.CornflowerBlue;
     // Optional procedural-sky background (Godot ProceduralSkyMaterial), all colors LINEAR and
     // UNTONEMAPPED. When HasSkyBackground is set, the renderer draws a fullscreen background

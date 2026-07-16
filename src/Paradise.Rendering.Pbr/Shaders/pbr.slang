@@ -50,6 +50,7 @@ struct FrameUniforms
     SceneLight sceneLights[MaxSceneLights];
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
+    float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
 };
 
 struct MaterialUniforms
@@ -62,6 +63,12 @@ struct MaterialUniforms
     float4 emissiveFactor;    // glTF emissiveFactor (rgb), w: KHR_materials_transmission factor
     float4 uvOffsetScale;     // KHR_texture_transform (baseColor): xy offset, zw scale
     float4 uvRotation;        // x: rotation radians, yzw unused
+    // Procedural material (see the recipe library below): a noise-driven, time-animated surface
+    // overriding albedo/roughness/metallic/emissive when kind >= 1. Object-space so the pattern
+    // rides a rolling ball. procColorA/B tint the tintable recipes.
+    float4 procColorA;        // recipe color A (rgb)
+    float4 procColorB;        // recipe color B (rgb)
+    float4 procParams;        // x: kind (0 = off), y: noise scale, z: flow speed, w: emissive strength
 };
 
 [[vk::binding(0, 0)]]
@@ -161,6 +168,7 @@ struct VertexOutput
     float3 worldNormal : NORMAL;
     float2 texcoord    : TEXCOORD0;
     float4 worldTangent : TANGENT;
+    float3 objectPos   : OBJECTPOS; // object-space position (procedural materials ride the mesh)
 };
 
 struct FragmentInput
@@ -170,6 +178,7 @@ struct FragmentInput
     float3 worldNormal : NORMAL;
     float2 texcoord    : TEXCOORD0;
     float4 worldTangent : TANGENT;
+    float3 objectPos   : OBJECTPOS;
     // Godot flips the geometric normal on back-facing fragments (double-sided materials render
     // their inside with the outward normal negated); without this the inside of a mesh reads the
     // wrong ambient hemisphere / NdotL. The pipeline doesn't cull, so backfaces are shaded here.
@@ -225,6 +234,7 @@ VertexOutput vertexMain(VertexInput input)
     VertexOutput output;
     output.position = mul(draw.mvp, float4(input.position, 1.0));
     output.worldPos = mul(draw.model, float4(input.position, 1.0)).xyz;
+    output.objectPos = input.position;
     output.worldNormal = mul((float3x3)draw.normalMatrix, input.normal);
     output.texcoord = input.texcoord;
     output.worldTangent = float4(mul((float3x3)draw.normalMatrix, input.tangent.xyz), input.tangent.w);
@@ -642,6 +652,148 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
     return pow(saturate(1.0 - occlusion * intensity), power);
 }
 
+// ---- procedural material library (noise + per-kind recipes) ----
+// Mirrors data/ui-adjacent Godot GDShader (kept in lockstep by a recipe-parity test). Object-space
+// p (scaled by procParams.y), time t (elapsed·flowSpeed). Returns albedo/emissive/roughness/metallic
+// that override the sampled PBR surface, then flow through the normal lighting (so a lava ball still
+// reflects the sky). Emissive is HDR (× emissiveStrength) so bright recipes bloom.
+
+float hash31(float3 p)
+{
+    p = frac(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return frac(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float3 hash33(float3 p)
+{
+    p = float3(dot(p, float3(127.1, 311.7, 74.7)),
+               dot(p, float3(269.5, 183.3, 246.1)),
+               dot(p, float3(113.5, 271.9, 124.6)));
+    return frac(sin(p) * 43758.5453);
+}
+
+float valueNoise(float3 x)
+{
+    float3 i = floor(x);
+    float3 f = frac(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(lerp(hash31(i + float3(0,0,0)), hash31(i + float3(1,0,0)), f.x),
+                     lerp(hash31(i + float3(0,1,0)), hash31(i + float3(1,1,0)), f.x), f.y),
+                lerp(lerp(hash31(i + float3(0,0,1)), hash31(i + float3(1,0,1)), f.x),
+                     lerp(hash31(i + float3(0,1,1)), hash31(i + float3(1,1,1)), f.x), f.y), f.z);
+}
+
+float fbm(float3 p)
+{
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 5; i++) { v += a * valueNoise(p); p *= 2.02; a *= 0.5; }
+    return v;
+}
+
+// Worley (cellular) F1 distance — facets, frost cells, flecks.
+float worley(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+    float d = 1.0;
+    for (int x = -1; x <= 1; x++)
+    for (int y = -1; y <= 1; y++)
+    for (int z = -1; z <= 1; z++)
+    {
+        float3 g = float3(x, y, z);
+        float3 o = hash33(i + g);
+        float3 r = g + o - f;
+        d = min(d, dot(r, r));
+    }
+    return sqrt(d);
+}
+
+struct ProcResult { float3 albedo; float3 emissive; float roughness; float metallic; };
+
+ProcResult evalProcedural(int kind, float3 p, float t, float3 colorA, float3 colorB)
+{
+    ProcResult r;
+    r.albedo = colorA;
+    r.emissive = float3(0.0, 0.0, 0.0);
+    r.roughness = 0.4;
+    r.metallic = 0.0;
+
+    if (kind == 1) // lava — dark crust with glowing, flowing molten cracks
+    {
+        float3 q = p + float3(0.0, t, 0.0) * 0.35;
+        float n = fbm(q * 1.5);
+        float cracks = fbm(q * 3.0 + n);
+        float hot = smoothstep(0.42, 0.72, cracks);
+        r.albedo = lerp(float3(0.05, 0.02, 0.01), float3(0.14, 0.06, 0.03), n);
+        float3 glow = lerp(float3(0.95, 0.16, 0.02), float3(1.0, 0.75, 0.12), smoothstep(0.5, 0.95, cracks));
+        r.emissive = glow * hot;
+        r.roughness = 0.65;
+    }
+    else if (kind == 2) // marble — veined stone
+    {
+        float n = fbm(p * 2.0);
+        float veins = abs(sin((p.x + p.y * 0.6 + n * 3.5) * 3.2));
+        veins = pow(1.0 - veins, 2.2);
+        r.albedo = lerp(colorA, colorB, veins);
+        r.roughness = 0.28;
+    }
+    else if (kind == 3) // jade — layered translucent green with inner depth
+    {
+        float n = fbm(p * 2.5 + t * 0.12);
+        float depth = fbm(p * 5.0 + n * 2.2);
+        r.albedo = lerp(float3(0.05, 0.32, 0.18), float3(0.22, 0.72, 0.46), depth);
+        r.emissive = float3(0.02, 0.11, 0.07) * smoothstep(0.4, 0.85, depth);
+        r.roughness = 0.2;
+    }
+    else if (kind == 4) // ice — frosted worley cells + fine frost
+    {
+        float cells = worley(p * 3.0);
+        float frost = fbm(p * 6.0 + t * 0.06);
+        r.albedo = lerp(float3(0.58, 0.78, 0.95), float3(0.88, 0.94, 1.0), cells) + frost * 0.08;
+        r.emissive = float3(0.05, 0.08, 0.13) * (1.0 - cells);
+        r.roughness = 0.07 + cells * 0.1;
+    }
+    else if (kind == 5) // molten metal — flowing brushed metallic
+    {
+        float n = fbm(p * 3.0 + t * 0.25);
+        r.albedo = colorA * (0.78 + n * 0.44);
+        r.roughness = 0.14 + n * 0.16;
+        r.metallic = 1.0;
+    }
+    else if (kind == 6) // obsidian — near-black volcanic glass, subtle swirl
+    {
+        float n = fbm(p * 4.0);
+        r.albedo = lerp(float3(0.01, 0.01, 0.02), float3(0.06, 0.04, 0.09), n);
+        r.roughness = 0.05 + n * 0.05;
+    }
+    else if (kind == 7) // gem — faceted translucent, tinted, faint internal glow
+    {
+        float facets = worley(p * 4.0);
+        r.albedo = lerp(colorA * 0.45, colorA, facets);
+        r.emissive = colorA * 0.18 * facets;
+        r.roughness = 0.1;
+    }
+    else if (kind == 8) // amber — warm translucent resin with glowing flecks
+    {
+        float n = fbm(p * 3.0);
+        float flecks = smoothstep(0.68, 0.74, worley(p * 8.0));
+        r.albedo = lerp(float3(0.55, 0.28, 0.05), float3(0.9, 0.55, 0.16), n);
+        r.emissive = float3(0.3, 0.12, 0.02) * n + float3(1.0, 0.6, 0.2) * flecks * 0.6;
+        r.roughness = 0.16;
+    }
+    else if (kind == 9) // nebula/quartz — swirling two-tone with soft glow
+    {
+        float ang = fbm(p * 2.0 + t * 0.15);
+        float swirl = fbm(p * 4.0 + ang * 3.0);
+        r.albedo = lerp(colorA, colorB, swirl);
+        r.emissive = colorB * 0.12 * smoothstep(0.5, 0.92, swirl);
+        r.roughness = 0.15;
+    }
+    return r;
+}
+
 float4 shadePbr(FragmentInput input)
 {
     float2 baseUv = transformBaseColorUv(input.texcoord);
@@ -651,6 +803,21 @@ float4 shadePbr(FragmentInput input)
     float4 metallicRoughnessSample = metallicRoughnessTexture.Sample(baseColorSampler, input.texcoord);
     float metallic = saturate(material.metallicFactor * metallicRoughnessSample.b);
     float roughness = max(material.roughnessFactor * metallicRoughnessSample.g, 0.04); // clamp to avoid division by zero
+
+    // Procedural material: override the sampled surface from a noise recipe (object-space, animated
+    // by frame.time). The result then flows through the normal PBR lighting below.
+    float3 procEmissive = float3(0.0, 0.0, 0.0);
+    int procKind = int(material.procParams.x + 0.5);
+    if (procKind >= 1)
+    {
+        ProcResult pr = evalProcedural(
+            procKind, input.objectPos * material.procParams.y, frame.time.x * material.procParams.z,
+            material.procColorA.rgb, material.procColorB.rgb);
+        baseColor = float4(pr.albedo, baseColor.a);
+        roughness = max(pr.roughness, 0.04);
+        metallic = pr.metallic;
+        procEmissive = pr.emissive * material.procParams.w;
+    }
 
     // Back-facing fragments shade with the negated geometric normal (Godot's double-sided
     // convention: `normal_interp * (FRONT_FACING ? 1.0 : -1.0)` before normal mapping).
@@ -790,6 +957,7 @@ float4 shadePbr(FragmentInput input)
 
     // Emissive
     color += emissiveTexture.Sample(baseColorSampler, input.texcoord).rgb * material.emissiveFactor.rgb;
+    color += procEmissive; // HDR procedural emissive (lava cracks, gem glow) — blooms in composite
 
     // Highlight flash (selection/hit feedback): additive push toward white.
     color += draw.highlight.x * 0.35;

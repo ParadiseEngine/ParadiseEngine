@@ -1060,6 +1060,7 @@ public sealed class PbrRenderer : IDisposable
     {
         var frame = new FrameUniformsGpu
         {
+            Time = new Vector4(scene.ElapsedSeconds, 0f, 0f, 0f),
             CameraPos = new Vector4(scene.Camera.Position, 0f),
             Ambient = new Vector4(scene.Ambient.Sky, scene.Ambient.Exposure),
             AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights)),
