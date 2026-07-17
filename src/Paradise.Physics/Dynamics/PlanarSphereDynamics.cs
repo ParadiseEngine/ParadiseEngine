@@ -162,18 +162,7 @@ public static class PlanarSphereDynamics
                 if (velocityInto < 0f)
                 {
                     velocity -= (1f + settings.StaticRestitution) * velocityInto * normal;
-
-                    // English: a cushion contact is where sidespin shows. Bend the rebound along
-                    // the rail tangent by the sphere's spin, then bleed the spin. Stateless —
-                    // SpinY is a caller-owned span slot the library only reads and writes here.
-                    // Applied ONLY at this primary cast bounce (not the slow-grind depenetration
-                    // fallback) so a single contact never double-bleeds. Off when RailEnglish 0.
-                    if (settings.RailEnglish != 0f && sphere.SpinY != 0f)
-                    {
-                        Vector3 tangent = Vector3.Cross(Vector3.UnitY, normal); // horizontal, along the rail
-                        velocity += tangent * (sphere.SpinY * settings.RailEnglish);
-                        sphere.SpinY *= settings.RailSpinLoss;
-                    }
+                    ApplyRailEnglish(ref velocity, ref sphere.SpinY, normal, settings);
                 }
 
                 Vector3 rest = direction * (length - MathF.Max(travel, 0f));
@@ -263,8 +252,29 @@ public static class PlanarSphereDynamics
             if (velocityInto < 0f)
             {
                 sphere.Velocity -= (1f + settings.StaticRestitution) * velocityInto * normal;
+                // English here too: slow shallow banking rail shots reflect ONLY in this pass
+                // (their oblique along-path gap outruns any cast padding), and that regime is
+                // exactly where english matters most. Same into-surface guard as the cast bounce,
+                // so when the cast path already reflected this wall (velocityInto ≥ 0 here) the
+                // spin is neither re-kicked nor double-bled.
+                ApplyRailEnglish(ref sphere.Velocity, ref sphere.SpinY, normal, settings);
             }
         }
+    }
+
+    /// <summary>Sidespin ("english") at a cushion contact: bend the rebound along the rail
+    /// tangent by the sphere's <see cref="DynamicSphere.SpinY"/>, then bleed the spin. Stateless —
+    /// SpinY is a caller-owned span slot the library only reads and writes; nothing is stored
+    /// between steps. Called at both rebound sites (cast bounce + depenetration fallback), each
+    /// guarded by its own into-surface test so a single contact is kicked and bled exactly once.
+    /// No-op when english is off (<see cref="PlanarDynamicsSettings.RailEnglish"/> 0).</summary>
+    private static void ApplyRailEnglish(ref Vector3 velocity, ref float spinY, Vector3 normal,
+        in PlanarDynamicsSettings settings)
+    {
+        if (settings.RailEnglish == 0f || spinY == 0f) return;
+        Vector3 tangent = Vector3.Cross(Vector3.UnitY, normal); // horizontal unit (UnitY ⟂ horizontal normal)
+        velocity += tangent * (spinY * settings.RailEnglish);
+        spinY *= settings.RailSpinLoss;
     }
 
     /// <summary>Flatten a contact normal to the XZ plane; falls back to the (flattened)

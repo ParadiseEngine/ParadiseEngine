@@ -126,6 +126,29 @@ public class PlanarDynamicsTests
     }
 
     [Test]
+    public async Task english_bends_a_slow_oblique_rebound_in_the_depenetration_fallback()
+    {
+        // Slow shallow banking shots reflect ONLY in DepenetrateFromStatics (see
+        // slow_side_kick_bounces_instead_of_sliding_along_the_wall) — the regime where english
+        // matters most in pool. A spinning ball must still bank farther along the rail tangent
+        // (+Z) than its spinless twin, and its spin must bleed.
+        CollisionWorld statics = WallAtX5();
+        var settings = PlanarDynamicsSettings.Default with { RailEnglish = 1.5f, RailSpinLoss = 0.6f };
+        DynamicSphere[] spun = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 1f)];
+        DynamicSphere[] plain = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 0f)];
+
+        for (int i = 0; i < 240; i++)
+        {
+            PlanarSphereDynamics.Step(spun, [], statics, settings, Dt);
+            PlanarSphereDynamics.Step(plain, [], statics, settings, Dt);
+        }
+
+        await Assert.That(spun[0].Velocity.Z).IsGreaterThan(plain[0].Velocity.Z + 0.2f); // english banked it +Z
+        await Assert.That(spun[0].SpinY).IsLessThan(1f);   // bled at the contact
+        await Assert.That(spun[0].SpinY).IsGreaterThanOrEqualTo(0f);
+    }
+
+    [Test]
     public async Task english_is_inert_by_default()
     {
         // Regression guard: with the default settings (RailEnglish 0) a spinning ball rebounds
