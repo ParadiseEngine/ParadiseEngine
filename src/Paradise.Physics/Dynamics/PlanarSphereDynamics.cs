@@ -231,21 +231,27 @@ public static class PlanarSphereDynamics
         supported = false;
         if (!statics.IsValid) return;
 
+        // Probe a bit past the skin band: a resting ball hovers at ~skin clearance, so support
+        // (and sleeping) must be detected slightly beyond it, while depenetration/reflection only
+        // act when genuinely inside the band.
+        float supportProbe = settings.Skin * 2f;
         var input = new ColliderDistanceInput
         {
             Collider = Collider.CreateSphere(sphere.Radius, settings.StaticFilter),
             Transform = new RigidTransform(sphere.Position, Quaternion.Identity),
-            MaxDistance = settings.Skin,
+            MaxDistance = supportProbe,
         };
         if (!statics.CalculateDistance(input, out DistanceHit hit)) return;
-        if (hit.Distance >= settings.Skin) return;
+        if (hit.Distance >= supportProbe) return;
 
         Vector3 normal = hit.SurfaceNormal;
         if (normal.LengthSquared() < Eps) return;
         normal = Vector3.Normalize(normal);
+        supported = normal.Y > SupportNormalY;
+
+        if (hit.Distance >= settings.Skin) return; // supported but not penetrating — nothing to resolve
 
         sphere.Position += normal * (settings.Skin - hit.Distance);
-        supported = normal.Y > SupportNormalY;
 
         // Reflect only an into-surface velocity (a cast bounce this step already turned it away).
         if (Vector3.Dot(sphere.Velocity + Vector3.Cross(sphere.AngularVelocity, -normal * sphere.Radius), normal) < 0f)
