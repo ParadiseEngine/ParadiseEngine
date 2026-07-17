@@ -144,8 +144,10 @@ public class PlanarDynamicsTests
         }
 
         await Assert.That(spun[0].Velocity.Z).IsGreaterThan(plain[0].Velocity.Z + 0.2f); // english banked it +Z
-        await Assert.That(spun[0].SpinY).IsLessThan(1f);   // bled at the contact
-        await Assert.That(spun[0].SpinY).IsGreaterThanOrEqualTo(0f);
+        // Exactly one bleed per contact: the depenetration reflection flips the normal component
+        // to -e·velocityInto > 0, so the next tick's velocityInto ≥ 0 guard blocks re-application.
+        // SpinY therefore lands on RailSpinLoss (0.6) — pinning it guards against a double-bleed.
+        await Assert.That(MathF.Abs(spun[0].SpinY - 0.6f)).IsLessThan(1e-4f);
     }
 
     [Test]
