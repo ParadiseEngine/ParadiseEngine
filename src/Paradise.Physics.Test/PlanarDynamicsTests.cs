@@ -15,11 +15,11 @@ public class PlanarDynamicsTests
     }
 
     private static DynamicSphere Ball(Vector3 position, Vector3 velocity, float radius = 0.35f, float mass = 1f,
-        float damping = 0f, float restitution = 0.6f)
+        float damping = 0f, float restitution = 0.6f, float spinY = 0f)
         => new()
         {
             Position = position, Velocity = velocity, Radius = radius, Mass = mass,
-            LinearDamping = damping, Restitution = restitution,
+            LinearDamping = damping, Restitution = restitution, SpinY = spinY,
         };
 
     [Test]
@@ -102,6 +102,69 @@ public class PlanarDynamicsTests
         await Assert.That(MathF.Abs(spheres[0].Velocity.Z - 0.3f)).IsLessThan(0.01f);
         // And it left the wall (face at x=4.5) instead of grinding along it.
         await Assert.That(spheres[0].Position.X).IsLessThan(4.4f);
+    }
+
+    [Test]
+    public async Task sidespin_bends_the_rebound_off_a_cushion()
+    {
+        // English: a ball fired STRAIGHT into the wall (+X, no Z) rebounds with a tangential
+        // (Z) component proportional to its spin, and the spin bleeds by RailSpinLoss. The rail
+        // tangent for this wall's normal (−X) is Cross(UnitY, −X) = +Z, so positive spin → +Z.
+        CollisionWorld statics = WallAtX5();
+        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default with { RailEnglish = 1.5f, RailSpinLoss = 0.6f };
+        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f, spinY: 1f)];
+
+        for (int i = 0; i < 120; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics, settings, Dt);
+        }
+
+        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);        // rebounded off the rail
+        await Assert.That(spheres[0].Velocity.Z).IsGreaterThan(0.5f);   // english pushed it +Z
+        // Spin bled by RailSpinLoss on the single contact (1 → 0.6), never grew.
+        await Assert.That(MathF.Abs(spheres[0].SpinY - 0.6f)).IsLessThan(1e-4f);
+    }
+
+    [Test]
+    public async Task english_bends_a_slow_oblique_rebound_in_the_depenetration_fallback()
+    {
+        // Slow shallow banking shots reflect ONLY in DepenetrateFromStatics (see
+        // slow_side_kick_bounces_instead_of_sliding_along_the_wall) — the regime where english
+        // matters most in pool. A spinning ball must still bank farther along the rail tangent
+        // (+Z) than its spinless twin, and its spin must bleed.
+        CollisionWorld statics = WallAtX5();
+        var settings = PlanarDynamicsSettings.Default with { RailEnglish = 1.5f, RailSpinLoss = 0.6f };
+        DynamicSphere[] spun = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 1f)];
+        DynamicSphere[] plain = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 0f)];
+
+        for (int i = 0; i < 240; i++)
+        {
+            PlanarSphereDynamics.Step(spun, [], statics, settings, Dt);
+            PlanarSphereDynamics.Step(plain, [], statics, settings, Dt);
+        }
+
+        await Assert.That(spun[0].Velocity.Z).IsGreaterThan(plain[0].Velocity.Z + 0.2f); // english banked it +Z
+        await Assert.That(spun[0].SpinY).IsLessThan(1f);   // bled at the contact
+        await Assert.That(spun[0].SpinY).IsGreaterThanOrEqualTo(0f);
+    }
+
+    [Test]
+    public async Task english_is_inert_by_default()
+    {
+        // Regression guard: with the default settings (RailEnglish 0) a spinning ball rebounds
+        // exactly like a spinless one — straight back, no Z, spin untouched — so every existing
+        // scene and test is unaffected by the new field.
+        CollisionWorld statics = WallAtX5();
+        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f, spinY: 1f)];
+
+        for (int i = 0; i < 120; i++)
+        {
+            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+        }
+
+        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);
+        await Assert.That(MathF.Abs(spheres[0].Velocity.Z)).IsLessThan(1e-4f); // no tangential deflection
+        await Assert.That(spheres[0].SpinY).IsEqualTo(1f);                     // spin never touched
     }
 
     [Test]

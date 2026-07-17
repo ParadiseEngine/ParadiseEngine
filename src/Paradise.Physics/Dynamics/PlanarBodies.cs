@@ -23,6 +23,13 @@ public struct DynamicSphere
     /// both spheres' values (0 = plastic, 1 = elastic).</summary>
     public float Restitution;
 
+    /// <summary>Signed vertical-axis sidespin ("english"), caller-owned like every other field —
+    /// the library keeps NO spin state between steps, it only reads and writes this span slot.
+    /// Latent while the sphere rolls the open plane; at a cushion (static) contact it bends the
+    /// tangential rebound by <see cref="PlanarDynamicsSettings.RailEnglish"/> and bleeds off by
+    /// <see cref="PlanarDynamicsSettings.RailSpinLoss"/>. Zero = no english (the default).</summary>
+    public float SpinY;
+
     /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
     /// during the last <see cref="PlanarSphereDynamics.Step"/> (zeroed at step start). Game
     /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
@@ -56,6 +63,22 @@ public struct PlanarDynamicsSettings
     /// <summary>Scale applied to a kinematic pusher's velocity when injected into a sphere.</summary>
     public float PushStrength;
 
+    /// <summary>Sidespin "english": tangential rebound velocity (m/s) added to a sphere per unit
+    /// <see cref="DynamicSphere.SpinY"/> at a cushion (static) contact. 0 = english off — the
+    /// resolver skips the spin path entirely, so an unset setting reproduces the old bounce
+    /// exactly (kept 0 in <see cref="Default"/> for byte-identical existing scenes/tests). The
+    /// kick is per-unit-spin and independent of impact speed (impulse-style, like restitution),
+    /// so a graze and a smash snap the same amount; scale <see cref="DynamicSphere.SpinY"/> by
+    /// shot power at the call site if speed-proportional english is wanted.</summary>
+    public float RailEnglish;
+
+    /// <summary>Fraction of a sphere's <see cref="DynamicSphere.SpinY"/> retained after a cushion
+    /// contact; the english bleeds off as the ball banks around the table. Callers keep this in
+    /// [0, 1] — like the struct's other coefficients it is NOT clamped, so a value &gt; 1 would
+    /// grow spin at every contact instead of decaying it. 1 in <see cref="Default"/> (with
+    /// <see cref="RailEnglish"/> 0 this is a no-op).</summary>
+    public float RailSpinLoss;
+
     /// <summary>Clearance kept between surfaces (meters).</summary>
     public float Skin;
 
@@ -78,6 +101,8 @@ public struct PlanarDynamicsSettings
         MinSpeed = 0.005f,
         StaticRestitution = 0.4f,
         PushStrength = 1.2f,
+        RailEnglish = 0f,   // english off by default → identical to the pre-english bounce
+        RailSpinLoss = 1f,
         Skin = 0.02f,
         StaticFilter = CollisionFilter.Default,
         RequireSupport = false,
