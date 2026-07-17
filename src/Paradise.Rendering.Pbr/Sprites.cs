@@ -226,8 +226,15 @@ public sealed class PbrSpriteBatch
     public void Update(PbrRenderer pbr, ReadOnlySpan<SpriteInstance> sprites, in Vector3 right, in Vector3 up)
     {
         ArgumentNullException.ThrowIfNull(pbr);
-        Array.Clear(_vertices);
         var count = Math.Min(sprites.Length, Capacity);
+        // Blank only the tail that was live LAST frame — the [0, count) region is fully
+        // rewritten below, so a full-buffer memset would be redundant work every frame.
+        if (_lastCount > count)
+        {
+            Array.Clear(_vertices, count * SpriteGeometry.QuadFloats,
+                (_lastCount - count) * SpriteGeometry.QuadFloats);
+        }
+        _lastCount = count;
         for (var i = 0; i < count; i++)
         {
             ref readonly var sprite = ref sprites[i];
@@ -237,25 +244,36 @@ public sealed class PbrSpriteBatch
         }
         pbr.UpdatePrimitiveVertices(_primitive, _vertices);
     }
+
+    private int _lastCount;
 }
 
 /// <summary>
 /// A dynamic batch of solid axis-aligned cubes (voxel particles): one primitive, one draw,
 /// re-written from caller data every frame. Same zero-blanking contract as
 /// <see cref="PbrSpriteBatch"/>.
+///
+/// Voxels are OPAQUE, so they join the shadow-caster set — but a dynamic primitive's
+/// object-space AABB is fixed at upload time, and this batch uploads zeroed vertices (an
+/// "unknown" AABB that contributes only the instance origin to the shadow-frustum fit).
+/// Pass <c>boundsRadius</c> — the max distance voxels roam from the batch origin — when voxel
+/// shadows matter and no other opaque geometry spans the scene; 0 keeps the unknown AABB.
 /// </summary>
 public sealed class PbrVoxelBatch
 {
     private readonly PbrPrimitive _primitive;
     private readonly float[] _vertices;
 
-    public PbrVoxelBatch(PbrRenderer pbr, int capacity, Vector4 color)
+    public PbrVoxelBatch(PbrRenderer pbr, int capacity, Vector4 color, float boundsRadius = 0f)
     {
         ArgumentNullException.ThrowIfNull(pbr);
         Capacity = Math.Max(1, capacity);
         _vertices = new float[Capacity * SpriteGeometry.CubeFloats];
         var material = pbr.Materials.AddDefaultMaterial(color, metallic: 0f, roughness: 1f);
-        _primitive = pbr.UploadPrimitive(_vertices, SpriteGeometry.CubeIndices(Capacity), material, dynamic: true);
+        var uploaded = pbr.UploadPrimitive(_vertices, SpriteGeometry.CubeIndices(Capacity), material, dynamic: true);
+        _primitive = boundsRadius > 0f
+            ? uploaded with { LocalMin = new Vector3(-boundsRadius), LocalMax = new Vector3(boundsRadius) }
+            : uploaded;
         Instance = new PbrInstance { Mesh = new PbrMesh([_primitive]), Model = Matrix4x4.Identity };
     }
 
@@ -268,8 +286,14 @@ public sealed class PbrVoxelBatch
     public void Update(PbrRenderer pbr, ReadOnlySpan<VoxelInstance> voxels)
     {
         ArgumentNullException.ThrowIfNull(pbr);
-        Array.Clear(_vertices);
         var count = Math.Min(voxels.Length, Capacity);
+        // Blank only the tail that was live LAST frame (see PbrSpriteBatch.Update).
+        if (_lastCount > count)
+        {
+            Array.Clear(_vertices, count * SpriteGeometry.CubeFloats,
+                (_lastCount - count) * SpriteGeometry.CubeFloats);
+        }
+        _lastCount = count;
         for (var i = 0; i < count; i++)
         {
             ref readonly var voxel = ref voxels[i];
@@ -277,4 +301,6 @@ public sealed class PbrVoxelBatch
         }
         pbr.UpdatePrimitiveVertices(_primitive, _vertices);
     }
+
+    private int _lastCount;
 }
