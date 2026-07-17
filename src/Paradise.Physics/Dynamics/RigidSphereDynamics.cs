@@ -81,6 +81,10 @@ public static class RigidSphereDynamics
                     capsule, capsulePose, out DistanceHit hit);
                 if (hit.Distance >= settings.Skin) continue;
 
+                // Deliberately use the horizontal center-to-center direction, NOT hit.SurfaceNormal:
+                // for a Y-aligned capsule pushing a ball at similar height the two are equal, and
+                // this keeps the push strictly horizontal (a pusher never lifts a ball) even at an
+                // end-cap/vertically-offset contact.
                 Vector3 normal = Horizontal(sphere.Position - pusher.Position);
                 if (normal == Vector3.Zero) continue;
 
@@ -147,7 +151,7 @@ public static class RigidSphereDynamics
 
             // Resolve this contact's velocity (normal restitution + Coulomb friction with torque).
             ResolveStaticContact(ref velocity, ref sphere.AngularVelocity, sphere.Radius, sphere.InverseMass,
-                sphere.InverseInertia, normal, sphere.Restitution, CombineFriction(sphere.Friction, settings.StaticFriction),
+                sphere.InverseInertia, normal, settings.StaticRestitution, CombineFriction(sphere.Friction, settings.StaticFriction),
                 settings);
 
             // Slide the leftover displacement along the surface for the rest of this tick.
@@ -175,9 +179,10 @@ public static class RigidSphereDynamics
                 Vector3 delta = b.Position - a.Position;
                 float distance = delta.Length();
                 float minDistance = a.Radius + b.Radius;
-                if (distance >= minDistance || distance < Eps) continue;
+                if (distance >= minDistance) continue;
 
-                Vector3 n = delta / distance; // from A toward B
+                // Exactly-coincident spheres (respawn/teleport) still get a deterministic push-apart.
+                Vector3 n = distance > Eps ? delta / distance : Vector3.UnitX; // from A toward B
                 float penetration = minDistance - distance;
                 float invA = a.InverseMass, invB = b.InverseMass;
                 float invSum = invA + invB;
@@ -257,7 +262,7 @@ public static class RigidSphereDynamics
         if (Vector3.Dot(sphere.Velocity + Vector3.Cross(sphere.AngularVelocity, -normal * sphere.Radius), normal) < 0f)
         {
             ResolveStaticContact(ref sphere.Velocity, ref sphere.AngularVelocity, sphere.Radius, sphere.InverseMass,
-                sphere.InverseInertia, normal, sphere.Restitution,
+                sphere.InverseInertia, normal, settings.StaticRestitution,
                 CombineFriction(sphere.Friction, settings.StaticFriction), settings);
         }
     }

@@ -90,7 +90,9 @@ public struct SphereDynamicsSettings
     public float StaticRestitution;
 
     /// <summary>Coulomb friction coefficient for sphere ↔ static contacts (cushions, cloth).
-    /// Combined with the sphere's own <see cref="DynamicSphere.Friction"/> (geometric mean).</summary>
+    /// Combined with the sphere's own <see cref="DynamicSphere.Friction"/> via the GEOMETRIC MEAN —
+    /// so a sphere that leaves <see cref="DynamicSphere.Friction"/> at its 0 default cancels this
+    /// entirely (√(0·x)=0, frictionless): set per-sphere Friction when you want static friction.</summary>
     public float StaticFriction;
 
     /// <summary>Scale applied to a kinematic pusher's velocity when injected into a sphere.</summary>

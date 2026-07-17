@@ -206,6 +206,24 @@ public class SphereDynamicsTests
     }
 
     [Test]
+    public async Task cushion_bounce_uses_static_restitution_not_the_pairwise_value()
+    {
+        // The wall (static) bounce is driven by settings.StaticRestitution, NOT the ball's own
+        // Restitution (which is the ball↔ball coefficient). An elastic ball (1.0) off a dead wall
+        // (0.2) rebounds SLOW — decoupling the two so they can't silently re-converge.
+        CollisionWorld statics = FloorAndWallAtX5();
+        var settings = SphereDynamicsSettings.Default with { StaticRestitution = 0.2f, StaticFriction = 0f };
+        DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(5f, 0f, 0f),
+            radius: 0.5f, restitution: 1f, friction: 0f)];
+        for (int i = 0; i < 120; i++)
+        {
+            RigidSphereDynamics.Step(s, [], statics, settings, Dt);
+        }
+        await Assert.That(s[0].Velocity.X).IsLessThan(0f);            // rebounded off the wall
+        await Assert.That(MathF.Abs(s[0].Velocity.X)).IsLessThan(2f); // ≈0.2×5, NOT elastic (~5)
+    }
+
+    [Test]
     public async Task kinematic_pusher_shoves_a_ball_horizontally()
     {
         CollisionWorld statics = Floor();
