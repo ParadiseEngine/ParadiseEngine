@@ -15,7 +15,7 @@ namespace Paradise.Physics;
 /// integrates the quaternion from <see cref="DynamicSphere.AngularVelocity"/>.
 /// (Type name is historical — the model is fully 3D now, not planar.)
 /// </summary>
-public static class PlanarSphereDynamics
+public static class RigidSphereDynamics
 {
     private const int MaxSlideIterations = 4;
     private const float MinMoveSq = 1e-10f;
@@ -29,13 +29,13 @@ public static class PlanarSphereDynamics
     private const float SupportNormalY = 0.5f;
 
     public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
-        CollisionWorld? statics, in PlanarDynamicsSettings settings, float deltaSeconds)
+        CollisionWorld? statics, in SphereDynamicsSettings settings, float deltaSeconds)
         => Step(spheres, pushers, statics?.Handle ?? default, settings, deltaSeconds);
 
     /// <summary>Handle-based overload for use inside ECS systems. An invalid handle means no
     /// statics: spheres integrate under gravity unobstructed (pushes and pair impulses still apply).</summary>
     public static void Step(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
-        CollisionWorldHandle statics, in PlanarDynamicsSettings settings, float deltaSeconds)
+        CollisionWorldHandle statics, in SphereDynamicsSettings settings, float deltaSeconds)
     {
         for (int i = 0; i < spheres.Length; i++)
         {
@@ -66,7 +66,7 @@ public static class PlanarSphereDynamics
     /// velocity up to pusherSpeed·PushStrength (a stable carry-along). Horizontal only — pushers
     /// are Y-aligned capsules and never lift a ball.</summary>
     private static void PushFromKinematics(Span<DynamicSphere> spheres, ReadOnlySpan<KinematicCapsule> pushers,
-        in PlanarDynamicsSettings settings)
+        in SphereDynamicsSettings settings)
     {
         foreach (ref readonly KinematicCapsule pusher in pushers)
         {
@@ -101,7 +101,7 @@ public static class PlanarSphereDynamics
     /// the normal+friction impulse is applied and the remaining displacement slides along the
     /// surface (so a ball banks around a cushion within one tick).</summary>
     private static void Integrate(ref DynamicSphere sphere, CollisionWorldHandle statics,
-        in PlanarDynamicsSettings settings, float dt)
+        in SphereDynamicsSettings settings, float dt)
     {
         Vector3 velocity = sphere.Velocity + settings.Gravity * dt;
         velocity *= MathF.Max(0f, 1f - sphere.LinearDamping * dt);
@@ -163,7 +163,7 @@ public static class PlanarSphereDynamics
     /// <summary>Pairwise sphere-sphere: depenetrate half/half along the center axis, exchange the
     /// central normal impulse (no torque), then a tangential friction impulse at the contact =
     /// "throw" (transfers spin to both).</summary>
-    private static void ResolvePairs(Span<DynamicSphere> spheres, in PlanarDynamicsSettings settings)
+    private static void ResolvePairs(Span<DynamicSphere> spheres, in SphereDynamicsSettings settings)
     {
         for (int i = 0; i < spheres.Length; i++)
         {
@@ -226,7 +226,7 @@ public static class PlanarSphereDynamics
     /// and resolve the contact velocity (support against gravity + friction). Reports whether the
     /// contact supports the sphere (upward normal) for sleeping.</summary>
     private static void DepenetrateAndSupport(ref DynamicSphere sphere, CollisionWorldHandle statics,
-        in PlanarDynamicsSettings settings, out bool supported)
+        in SphereDynamicsSettings settings, out bool supported)
     {
         supported = false;
         if (!statics.IsValid) return;
@@ -267,7 +267,7 @@ public static class PlanarSphereDynamics
     /// torques the sphere. <paramref name="normal"/> points from the surface toward the sphere.</summary>
     private static void ResolveStaticContact(ref Vector3 velocity, ref Vector3 angular, float radius,
         float invMass, float invInertia, Vector3 normal, float restitution, float friction,
-        in PlanarDynamicsSettings settings)
+        in SphereDynamicsSettings settings)
     {
         Vector3 r = -normal * radius; // center → contact point
         Vector3 vContact = velocity + Vector3.Cross(angular, r);
@@ -294,7 +294,7 @@ public static class PlanarSphereDynamics
     }
 
     /// <summary>Settle a slow, supported sphere to exact rest so it doesn't creep on gravity churn.</summary>
-    private static void Settle(ref DynamicSphere sphere, in PlanarDynamicsSettings settings, bool supported)
+    private static void Settle(ref DynamicSphere sphere, in SphereDynamicsSettings settings, bool supported)
     {
         if (!supported) return;
         if (sphere.Velocity.LengthSquared() < settings.MinSpeed * settings.MinSpeed)

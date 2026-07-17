@@ -40,7 +40,7 @@ public struct DynamicSphere
     public float Friction;
 
     /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
-    /// during the last <see cref="PlanarSphereDynamics.Step"/> (zeroed at step start). Game
+    /// during the last <see cref="RigidSphereDynamics.Step"/> (zeroed at step start). Game
     /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
     public float ContactImpulse;
 
@@ -73,8 +73,8 @@ public struct KinematicCapsule
     public float HalfLength;
 }
 
-/// <summary>Tuning for <see cref="PlanarSphereDynamics.Step"/>.</summary>
-public struct PlanarDynamicsSettings
+/// <summary>Tuning for <see cref="RigidSphereDynamics.Step"/>.</summary>
+public struct SphereDynamicsSettings
 {
     /// <summary>Gravity acceleration (m/s²), applied to every sphere each step. Default points −Y.</summary>
     public Vector3 Gravity;
@@ -108,7 +108,7 @@ public struct PlanarDynamicsSettings
     /// ground/floor now that gravity rests spheres on it (not just walls).</summary>
     public CollisionFilter StaticFilter;
 
-    public static PlanarDynamicsSettings Default => new()
+    public static SphereDynamicsSettings Default => new()
     {
         Gravity = new Vector3(0f, -9.81f, 0f),
         MinSpeed = 0.01f,

@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Paradise.Physics.Test;
 
-public class PlanarDynamicsTests
+public class SphereDynamicsTests
 {
     private const float Dt = 1f / 60f;
 
@@ -47,7 +47,7 @@ public class PlanarDynamicsTests
         DynamicSphere[] s = [Ball(new Vector3(0f, 2f, 0f), Vector3.Zero, radius: 0.5f)];
         for (int i = 0; i < 400; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
+            RigidSphereDynamics.Step(s, [], statics, SphereDynamicsSettings.Default, Dt);
         }
 
         await Assert.That(s[0].Position.Y).IsGreaterThan(0.45f); // rests ON the felt, doesn't sink
@@ -61,7 +61,7 @@ public class PlanarDynamicsTests
         DynamicSphere[] s = [Ball(new Vector3(0f, 0f, 0f), Vector3.Zero)];
         for (int i = 0; i < 30; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics: null, PlanarDynamicsSettings.Default, Dt);
+            RigidSphereDynamics.Step(s, [], statics: null, SphereDynamicsSettings.Default, Dt);
         }
         await Assert.That(s[0].Position.Y).IsLessThan(-0.5f);   // fell
         await Assert.That(s[0].Velocity.Y).IsLessThan(-3f);     // accelerating downward
@@ -73,11 +73,11 @@ public class PlanarDynamicsTests
         // A ball sliding +X with no spin picks up roll from cloth friction: natural roll about −Z
         // (ω = Up × v / r). Friction couples linear → angular.
         CollisionWorld statics = Floor();
-        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.4f };
+        var settings = SphereDynamicsSettings.Default with { StaticFriction = 0.4f };
         DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), friction: 0.4f)];
         for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(s, [], statics, settings, Dt);
         }
         await Assert.That(s[0].AngularVelocity.Z).IsLessThan(-1f); // developed forward roll
         await Assert.That(s[0].Position.X).IsGreaterThan(0.5f);    // still travelled forward
@@ -89,12 +89,12 @@ public class PlanarDynamicsTests
         // Pure spin, no linear velocity: cloth friction converts it into linear motion (the ball
         // "walks"), and the spin bleeds down.
         CollisionWorld statics = Floor();
-        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.6f };
+        var settings = SphereDynamicsSettings.Default with { StaticFriction = 0.6f };
         DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), Vector3.Zero, friction: 0.6f,
             angularVelocity: new Vector3(0f, 0f, 20f))];
         for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(s, [], statics, settings, Dt);
         }
         await Assert.That(MathF.Abs(s[0].Position.X)).IsGreaterThan(0.05f);   // walked off its spin
         await Assert.That(MathF.Abs(s[0].AngularVelocity.Z)).IsLessThan(20f); // spin bled
@@ -105,14 +105,14 @@ public class PlanarDynamicsTests
     {
         // English (ω.y) at the wall contact bends the rebound tangentially vs a spinless control.
         CollisionWorld statics = FloorAndWallAtX5();
-        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.4f };
+        var settings = SphereDynamicsSettings.Default with { StaticFriction = 0.4f };
         DynamicSphere[] spun = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(6f, 0f, 0f), friction: 0.4f,
             angularVelocity: new Vector3(0f, 30f, 0f))];
         DynamicSphere[] plain = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(6f, 0f, 0f), friction: 0.4f)];
         for (int i = 0; i < 90; i++)
         {
-            PlanarSphereDynamics.Step(spun, [], statics, settings, Dt);
-            PlanarSphereDynamics.Step(plain, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(spun, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(plain, [], statics, settings, Dt);
         }
         await Assert.That(spun[0].Velocity.X).IsLessThan(0f);           // rebounded off the wall
         await Assert.That(MathF.Abs(spun[0].Position.Z - plain[0].Position.Z)).IsGreaterThan(0.1f); // english bent it
@@ -126,7 +126,7 @@ public class PlanarDynamicsTests
         float maxY = 0f;
         for (int i = 0; i < 120; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
+            RigidSphereDynamics.Step(s, [], statics, SphereDynamicsSettings.Default, Dt);
             maxY = MathF.Max(maxY, s[0].Position.Y);
         }
         await Assert.That(maxY).IsGreaterThan(0.9f);          // it left the felt (jumped)
@@ -138,7 +138,7 @@ public class PlanarDynamicsTests
     {
         // Elastic, frictionless, on the floor: A stops, B carries the speed.
         CollisionWorld statics = Floor();
-        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0f };
+        var settings = SphereDynamicsSettings.Default with { StaticFriction = 0f };
         DynamicSphere[] s =
         [
             Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f, friction: 0f),
@@ -146,7 +146,7 @@ public class PlanarDynamicsTests
         ];
         for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(s, [], statics, settings, Dt);
         }
         await Assert.That(s[1].Velocity.X).IsGreaterThan(2f);            // B carries the momentum
         await Assert.That(s[0].Velocity.X).IsLessThan(s[1].Velocity.X); // A trails B
@@ -158,7 +158,7 @@ public class PlanarDynamicsTests
     public async Task pair_collisions_report_contact_impulses()
     {
         CollisionWorld statics = Floor();
-        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0f };
+        var settings = SphereDynamicsSettings.Default with { StaticFriction = 0f };
         DynamicSphere[] s =
         [
             Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f, friction: 0f),
@@ -167,7 +167,7 @@ public class PlanarDynamicsTests
         float peak = 0f;
         for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
+            RigidSphereDynamics.Step(s, [], statics, settings, Dt);
             peak = MathF.Max(peak, s[0].ContactImpulse);
             await Assert.That(MathF.Abs(s[0].ContactImpulse - s[1].ContactImpulse)).IsLessThan(1e-3f);
         }
@@ -189,7 +189,7 @@ public class PlanarDynamicsTests
             ];
             for (int i = 0; i < 300; i++)
             {
-                PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
+                RigidSphereDynamics.Step(s, [], statics, SphereDynamicsSettings.Default, Dt);
             }
             var sink = new List<int>();
             foreach (DynamicSphere b in s)
@@ -217,7 +217,7 @@ public class PlanarDynamicsTests
         DynamicSphere[] s = [Ball(new Vector3(0.7f, 0.5f, 0f), Vector3.Zero, radius: 0.3f)];
         for (int i = 0; i < 30; i++)
         {
-            PlanarSphereDynamics.Step(s, [pusher], statics, PlanarDynamicsSettings.Default, Dt);
+            RigidSphereDynamics.Step(s, [pusher], statics, SphereDynamicsSettings.Default, Dt);
         }
         await Assert.That(s[0].Position.X).IsGreaterThan(0.7f);        // pushed along +X
         await Assert.That(MathF.Abs(s[0].Position.Y - 0.3f)).IsLessThan(0.1f); // stayed on the felt
