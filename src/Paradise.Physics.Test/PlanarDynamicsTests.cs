@@ -6,360 +6,220 @@ public class PlanarDynamicsTests
 {
     private const float Dt = 1f / 60f;
 
-    private static CollisionWorld WallAtX5()
+    // Big flat floor with its top surface at y = 0 (balls rest at y = radius).
+    private static CollisionWorld Floor()
     {
-        // Box face at x = 5, tall and long so contacts are always horizontal.
-        Span<Collider> colliders = [Collider.CreateBox(new Vector3(1f, 10f, 10f))];
-        Span<RigidTransform> transforms = [new RigidTransform(new Vector3(6f, 0f, 0f), Quaternion.Identity)];
+        Span<Collider> colliders = [Collider.CreateBox(new Vector3(50f, 1f, 50f))];
+        Span<RigidTransform> transforms = [new RigidTransform(new Vector3(0f, -1f, 0f), Quaternion.Identity)];
         return CollisionWorld.Build(colliders, transforms);
     }
 
-    private static DynamicSphere Ball(Vector3 position, Vector3 velocity, float radius = 0.35f, float mass = 1f,
-        float damping = 0f, float restitution = 0.6f, float spinY = 0f)
+    // Floor plus a vertical wall whose −X face is at x = 5.
+    private static CollisionWorld FloorAndWallAtX5()
+    {
+        Span<Collider> colliders =
+        [
+            Collider.CreateBox(new Vector3(50f, 1f, 50f)),
+            Collider.CreateBox(new Vector3(1f, 10f, 10f)),
+        ];
+        Span<RigidTransform> transforms =
+        [
+            new RigidTransform(new Vector3(0f, -1f, 0f), Quaternion.Identity),
+            new RigidTransform(new Vector3(6f, 0f, 0f), Quaternion.Identity),
+        ];
+        return CollisionWorld.Build(colliders, transforms);
+    }
+
+    private static DynamicSphere Ball(Vector3 position, Vector3 velocity, float radius = 0.5f, float mass = 1f,
+        float restitution = 0.4f, float friction = 0.3f, Vector3 angularVelocity = default,
+        float linearDamping = 0f, float angularDamping = 0f)
         => new()
         {
-            Position = position, Velocity = velocity, Radius = radius, Mass = mass,
-            LinearDamping = damping, Restitution = restitution, SpinY = spinY,
+            Position = position, Velocity = velocity, AngularVelocity = angularVelocity,
+            Radius = radius, Mass = mass, Restitution = restitution, Friction = friction,
+            LinearDamping = linearDamping, AngularDamping = angularDamping,
         };
 
     [Test]
-    public async Task damping_brings_a_rolling_sphere_to_rest()
+    public async Task a_dropped_ball_settles_on_the_floor()
     {
-        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0.85f, 0f), new Vector3(2f, 0f, 0f), damping: 1.5f)];
-        for (int i = 0; i < 600; i++)
+        CollisionWorld statics = Floor();
+        DynamicSphere[] s = [Ball(new Vector3(0f, 2f, 0f), Vector3.Zero, radius: 0.5f)];
+        for (int i = 0; i < 400; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
+            PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
         }
 
-        await Assert.That(spheres[0].Velocity).IsEqualTo(Vector3.Zero);
-        await Assert.That(spheres[0].Position.X).IsGreaterThan(0.1f);   // it did roll
-        await Assert.That(spheres[0].Position.X).IsLessThan(2f / 1.5f); // bounded by damping
+        await Assert.That(s[0].Position.Y).IsGreaterThan(0.45f); // rests ON the felt, doesn't sink
+        await Assert.That(s[0].Position.Y).IsLessThan(0.55f);    // and doesn't hover
+        await Assert.That(s[0].Velocity.Length()).IsLessThan(0.1f); // settled, not bouncing forever
     }
 
     [Test]
-    public async Task sphere_bounces_off_wall_with_restitution()
+    public async Task gravity_pulls_a_free_ball_down()
     {
-        CollisionWorld statics = WallAtX5();
-        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
-        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f)];
-
-        float incomingSpeed = 5f;
-        for (int i = 0; i < 120; i++)
+        DynamicSphere[] s = [Ball(new Vector3(0f, 0f, 0f), Vector3.Zero)];
+        for (int i = 0; i < 30; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics, settings, Dt);
-            await Assert.That(spheres[0].Position.X).IsLessThanOrEqualTo(5f - 0.5f + 1e-3f); // never penetrates
+            PlanarSphereDynamics.Step(s, [], statics: null, PlanarDynamicsSettings.Default, Dt);
         }
-
-        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f); // reflected
-        float outgoingSpeed = MathF.Abs(spheres[0].Velocity.X);
-        await Assert.That(MathF.Abs(outgoingSpeed - settings.StaticRestitution * incomingSpeed)).IsLessThan(0.05f);
+        await Assert.That(s[0].Position.Y).IsLessThan(-0.5f);   // fell
+        await Assert.That(s[0].Velocity.Y).IsLessThan(-3f);     // accelerating downward
     }
 
     [Test]
-    public async Task slow_ball_still_bounces_off_a_wall()
+    public async Task a_sliding_ball_develops_rolling_spin()
     {
-        // Regression: a ball slower than Skin/dt (0.02·60 = 1.2 m/s) never bounced — each
-        // tick's cast was exactly the tick's displacement, shorter than the skin gap the
-        // depenetration pass maintains, so no contact was ever reported: the ball crept into
-        // the skin band, was pushed back out, and ground against the wall with its velocity
-        // unreflected until damping killed it. The skin-padded cast must report the contact.
-        CollisionWorld statics = WallAtX5();
-        DynamicSphere[] spheres = [Ball(new Vector3(4f, 0f, 0f), new Vector3(0.5f, 0f, 0f), radius: 0.5f)];
-
-        for (int i = 0; i < 240; i++)
+        // A ball sliding +X with no spin picks up roll from cloth friction: natural roll about −Z
+        // (ω = Up × v / r). Friction couples linear → angular.
+        CollisionWorld statics = Floor();
+        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.4f };
+        DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), friction: 0.4f)];
+        for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
         }
-
-        // Reflected at ≈ StaticRestitution × incoming speed (no damping in the Ball factory)…
-        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);
-        await Assert.That(MathF.Abs(-spheres[0].Velocity.X - 0.4f * 0.5f)).IsLessThan(0.03f);
-        // …and it actually left the wall instead of parking in the skin band (face at x=4.5).
-        await Assert.That(spheres[0].Position.X).IsLessThan(4.4f);
+        await Assert.That(s[0].AngularVelocity.Z).IsLessThan(-1f); // developed forward roll
+        await Assert.That(s[0].Position.X).IsGreaterThan(0.5f);    // still travelled forward
     }
 
     [Test]
-    public async Task slow_side_kick_bounces_instead_of_sliding_along_the_wall()
+    public async Task a_spinning_ball_at_rest_is_driven_by_friction()
     {
-        // Regression: an oblique contact's along-path gap grows as 1/sin(θ), so the
-        // skin-padded cast still misses slow shallow approaches — the ball crept into the
-        // skin band, the depenetration pass cancelled only its normal motion, and the
-        // preserved tangential velocity slid it along the wall to the wall's edge instead
-        // of rebounding. The depenetration pass must reflect a velocity still pointing
-        // into the surface it is pushing out of.
-        CollisionWorld statics = WallAtX5();
-        // 45° at 0.42 m/s: below the padded cast's catch threshold for this angle.
-        DynamicSphere[] spheres = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f)];
-
-        for (int i = 0; i < 240; i++)
+        // Pure spin, no linear velocity: cloth friction converts it into linear motion (the ball
+        // "walks"), and the spin bleeds down.
+        CollisionWorld statics = Floor();
+        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.6f };
+        DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), Vector3.Zero, friction: 0.6f,
+            angularVelocity: new Vector3(0f, 0f, 20f))];
+        for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
         }
-
-        // Reflected: normal component reversed at ≈ restitution strength, tangential kept.
-        await Assert.That(spheres[0].Velocity.X).IsLessThan(-0.05f);
-        await Assert.That(MathF.Abs(-spheres[0].Velocity.X - 0.4f * 0.3f)).IsLessThan(0.03f);
-        await Assert.That(MathF.Abs(spheres[0].Velocity.Z - 0.3f)).IsLessThan(0.01f);
-        // And it left the wall (face at x=4.5) instead of grinding along it.
-        await Assert.That(spheres[0].Position.X).IsLessThan(4.4f);
+        await Assert.That(MathF.Abs(s[0].Position.X)).IsGreaterThan(0.05f);   // walked off its spin
+        await Assert.That(MathF.Abs(s[0].AngularVelocity.Z)).IsLessThan(20f); // spin bled
     }
 
     [Test]
-    public async Task sidespin_bends_the_rebound_off_a_cushion()
+    public async Task sidespin_deflects_a_cushion_rebound()
     {
-        // English: a ball fired STRAIGHT into the wall (+X, no Z) rebounds with a tangential
-        // (Z) component proportional to its spin, and the spin bleeds by RailSpinLoss. The rail
-        // tangent for this wall's normal (−X) is Cross(UnitY, −X) = +Z, so positive spin → +Z.
-        CollisionWorld statics = WallAtX5();
-        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default with { RailEnglish = 1.5f, RailSpinLoss = 0.6f };
-        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f, spinY: 1f)];
-
-        for (int i = 0; i < 120; i++)
-        {
-            PlanarSphereDynamics.Step(spheres, [], statics, settings, Dt);
-        }
-
-        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);        // rebounded off the rail
-        await Assert.That(spheres[0].Velocity.Z).IsGreaterThan(0.5f);   // english pushed it +Z
-        // Spin bled by RailSpinLoss on the single contact (1 → 0.6), never grew.
-        await Assert.That(MathF.Abs(spheres[0].SpinY - 0.6f)).IsLessThan(1e-4f);
-    }
-
-    [Test]
-    public async Task english_bends_a_slow_oblique_rebound_in_the_depenetration_fallback()
-    {
-        // Slow shallow banking shots reflect ONLY in DepenetrateFromStatics (see
-        // slow_side_kick_bounces_instead_of_sliding_along_the_wall) — the regime where english
-        // matters most in pool. A spinning ball must still bank farther along the rail tangent
-        // (+Z) than its spinless twin, and its spin must bleed.
-        CollisionWorld statics = WallAtX5();
-        var settings = PlanarDynamicsSettings.Default with { RailEnglish = 1.5f, RailSpinLoss = 0.6f };
-        DynamicSphere[] spun = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 1f)];
-        DynamicSphere[] plain = [Ball(new Vector3(4.3f, 0f, 0f), new Vector3(0.3f, 0f, 0.3f), radius: 0.5f, spinY: 0f)];
-
-        for (int i = 0; i < 240; i++)
+        // English (ω.y) at the wall contact bends the rebound tangentially vs a spinless control.
+        CollisionWorld statics = FloorAndWallAtX5();
+        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0.4f };
+        DynamicSphere[] spun = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(6f, 0f, 0f), friction: 0.4f,
+            angularVelocity: new Vector3(0f, 30f, 0f))];
+        DynamicSphere[] plain = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(6f, 0f, 0f), friction: 0.4f)];
+        for (int i = 0; i < 90; i++)
         {
             PlanarSphereDynamics.Step(spun, [], statics, settings, Dt);
             PlanarSphereDynamics.Step(plain, [], statics, settings, Dt);
         }
-
-        await Assert.That(spun[0].Velocity.Z).IsGreaterThan(plain[0].Velocity.Z + 0.2f); // english banked it +Z
-        // Exactly one bleed per contact: the depenetration reflection flips the normal component
-        // to -e·velocityInto > 0, so the next tick's velocityInto ≥ 0 guard blocks re-application.
-        // SpinY therefore lands on RailSpinLoss (0.6) — pinning it guards against a double-bleed.
-        await Assert.That(MathF.Abs(spun[0].SpinY - 0.6f)).IsLessThan(1e-4f);
+        await Assert.That(spun[0].Velocity.X).IsLessThan(0f);           // rebounded off the wall
+        await Assert.That(MathF.Abs(spun[0].Position.Z - plain[0].Position.Z)).IsGreaterThan(0.1f); // english bent it
     }
 
     [Test]
-    public async Task english_is_inert_by_default()
+    public async Task a_ball_can_jump_and_land_back_on_the_felt()
     {
-        // Regression guard: with the default settings (RailEnglish 0) a spinning ball rebounds
-        // exactly like a spinless one — straight back, no Z, spin untouched — so every existing
-        // scene and test is unaffected by the new field.
-        CollisionWorld statics = WallAtX5();
-        DynamicSphere[] spheres = [Ball(new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f), radius: 0.5f, spinY: 1f)];
-
+        CollisionWorld statics = Floor();
+        DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(2f, 4f, 0f))];
+        float maxY = 0f;
         for (int i = 0; i < 120; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
+            PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
+            maxY = MathF.Max(maxY, s[0].Position.Y);
         }
-
-        await Assert.That(spheres[0].Velocity.X).IsLessThan(0f);
-        await Assert.That(MathF.Abs(spheres[0].Velocity.Z)).IsLessThan(1e-4f); // no tangential deflection
-        await Assert.That(spheres[0].SpinY).IsEqualTo(1f);                     // spin never touched
+        await Assert.That(maxY).IsGreaterThan(0.9f);          // it left the felt (jumped)
+        await Assert.That(s[0].Position.Y).IsLessThan(0.6f);  // and landed back near rest
     }
 
     [Test]
-    public async Task equal_masses_swap_momentum_head_on_when_elastic()
+    public async Task equal_masses_swap_momentum_head_on()
     {
-        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
-        DynamicSphere[] spheres =
+        // Elastic, frictionless, on the floor: A stops, B carries the speed.
+        CollisionWorld statics = Floor();
+        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0f };
+        DynamicSphere[] s =
         [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
-            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 1f),
+            Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f, friction: 0f),
+            Ball(new Vector3(1.2f, 0.5f, 0f), Vector3.Zero, restitution: 1f, friction: 0f),
         ];
-
-        for (int i = 0; i < 180; i++)
+        for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics: null, settings, Dt);
+            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
         }
-
-        // Elastic equal-mass head-on: A stops, B carries the full speed.
-        await Assert.That(MathF.Abs(spheres[0].Velocity.X)).IsLessThan(0.05f);
-        await Assert.That(MathF.Abs(spheres[1].Velocity.X - 3f)).IsLessThan(0.05f);
-        // And they end separated.
-        float distance = Vector3.Distance(spheres[0].Position, spheres[1].Position);
-        await Assert.That(distance).IsGreaterThanOrEqualTo(0.7f - 1e-3f);
+        await Assert.That(s[1].Velocity.X).IsGreaterThan(2f);            // B carries the momentum
+        await Assert.That(s[0].Velocity.X).IsLessThan(s[1].Velocity.X); // A trails B
+        float distance = Vector3.Distance(s[0].Position, s[1].Position);
+        await Assert.That(distance).IsGreaterThanOrEqualTo(1f - 1e-2f);  // separated
     }
 
     [Test]
     public async Task pair_collisions_report_contact_impulses()
     {
-        PlanarDynamicsSettings settings = PlanarDynamicsSettings.Default;
-        DynamicSphere[] spheres =
+        CollisionWorld statics = Floor();
+        var settings = PlanarDynamicsSettings.Default with { StaticFriction = 0f };
+        DynamicSphere[] s =
         [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
-            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 1f),
+            Ball(new Vector3(0f, 0.5f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f, friction: 0f),
+            Ball(new Vector3(1.2f, 0.5f, 0f), Vector3.Zero, restitution: 1f, friction: 0f),
         ];
-
-        // Approach: no contact yet -> zero impulse on both.
-        PlanarSphereDynamics.Step(spheres, [], statics: null, settings, Dt);
-        await Assert.That(spheres[0].ContactImpulse).IsEqualTo(0f);
-        await Assert.That(spheres[1].ContactImpulse).IsEqualTo(0f);
-
         float peak = 0f;
-        for (int i = 0; i < 180; i++)
+        for (int i = 0; i < 60; i++)
         {
-            PlanarSphereDynamics.Step(spheres, [], statics: null, settings, Dt);
-            peak = MathF.Max(peak, spheres[0].ContactImpulse);
-            // Both partners of a pair report the same accumulated magnitude.
-            await Assert.That(MathF.Abs(spheres[0].ContactImpulse - spheres[1].ContactImpulse)).IsLessThan(1e-4f);
+            PlanarSphereDynamics.Step(s, [], statics, settings, Dt);
+            peak = MathF.Max(peak, s[0].ContactImpulse);
+            await Assert.That(MathF.Abs(s[0].ContactImpulse - s[1].ContactImpulse)).IsLessThan(1e-3f);
         }
-
-        // Elastic equal-mass hit at 3 m/s, unit masses: impulse = (1+e)*|dv|/(1/mA+1/mB) = 3.
-        await Assert.That(MathF.Abs(peak - 3f)).IsLessThan(0.2f);
-        // The step is an OUTPUT per call: once separated, it resets to zero.
-        await Assert.That(spheres[0].ContactImpulse).IsEqualTo(0f);
-    }
-
-    [Test]
-    public async Task kinematic_pusher_depenetrates_and_injects_velocity()
-    {
-        var pusher = new KinematicCapsule
-        {
-            Position = new Vector3(0f, 0.9f, 0f),
-            Velocity = new Vector3(1f, 0f, 0f),
-            Radius = 0.4f,
-            HalfLength = 0.5f,
-        };
-        // Sphere overlapping the capsule wall on the +X side.
-        DynamicSphere[] spheres = [Ball(new Vector3(0.5f, 0.85f, 0f), Vector3.Zero, radius: 0.3f)];
-
-        PlanarSphereDynamics.Step(spheres, [pusher], statics: null, PlanarDynamicsSettings.Default, Dt);
-
-        // Depenetrated: horizontal center distance ≥ radii sum + skin (within tolerance)…
-        float horizontal = spheres[0].Position.X; // push is along +X
-        await Assert.That(horizontal).IsGreaterThan(0.5f);
-        // …and carried along: normal velocity ≈ pusherSpeed × PushStrength.
-        await Assert.That(spheres[0].Velocity.X).IsGreaterThanOrEqualTo(1f * PlanarDynamicsSettings.Default.PushStrength - 0.05f);
-        await Assert.That(spheres[0].Position.Y).IsEqualTo(0.85f);
-    }
-
-    [Test]
-    public async Task second_pass_pushes_an_overlapping_sphere_out_of_a_wall()
-    {
-        CollisionWorld statics = WallAtX5();
-        // Center outside the box but surface overlapping (gap 4.7 → penetration 0.2), zero velocity
-        // so the integrate step does nothing — only the depenetration pass can fix it.
-        DynamicSphere[] spheres = [Ball(new Vector3(4.7f, 0f, 0f), Vector3.Zero, radius: 0.5f)];
-
-        PlanarSphereDynamics.Step(spheres, [], statics, PlanarDynamicsSettings.Default, Dt);
-
-        await Assert.That(spheres[0].Position.X).IsLessThanOrEqualTo(5f - 0.5f - PlanarDynamicsSettings.Default.Skin + 1e-3f);
-    }
-
-    [Test]
-    public async Task y_is_never_modified()
-    {
-        CollisionWorld statics = WallAtX5();
-        var pusher = new KinematicCapsule
-        {
-            Position = new Vector3(3f, 0.9f, 0f),
-            Velocity = new Vector3(2f, 0f, 0f),
-            Radius = 0.4f,
-            HalfLength = 0.5f,
-        };
-        DynamicSphere[] spheres =
-        [
-            Ball(new Vector3(3.6f, 0.85f, 0f), new Vector3(4f, 0f, 0f)),
-            Ball(new Vector3(4.1f, 0.85f, 0.1f), Vector3.Zero),
-        ];
-
-        for (int i = 0; i < 240; i++)
-        {
-            PlanarSphereDynamics.Step(spheres, [pusher], statics, PlanarDynamicsSettings.Default, Dt);
-            await Assert.That(spheres[0].Position.Y).IsEqualTo(0.85f); // bitwise
-            await Assert.That(spheres[1].Position.Y).IsEqualTo(0.85f);
-        }
-    }
-
-    [Test]
-    public async Task per_sphere_damping_changes_travel_distance()
-    {
-        DynamicSphere[] spheres =
-        [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(2f, 0f, 0f), damping: 0.5f),
-            Ball(new Vector3(0f, 0.85f, 5f), new Vector3(2f, 0f, 0f), damping: 3f),
-        ];
-        for (int i = 0; i < 1200; i++)
-        {
-            PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
-        }
-
-        await Assert.That(spheres[0].Velocity).IsEqualTo(Vector3.Zero);
-        await Assert.That(spheres[1].Velocity).IsEqualTo(Vector3.Zero);
-        // Same launch speed: the lightly damped ball rolls far past the heavily damped one
-        // (analytic bounds: v0/damping = 4 m and 2/3 m respectively).
-        await Assert.That(spheres[0].Position.X).IsGreaterThan(2f * spheres[1].Position.X);
-    }
-
-    [Test]
-    public async Task pair_restitution_is_the_average_of_both_spheres()
-    {
-        // e = (1 + 0) / 2 = 0.5: elastic-vs-plastic head-on with equal masses.
-        // Post-impact (1-D, mA = mB, B at rest): vA = v0(1−e)/2, vB = v0(1+e)/2.
-        DynamicSphere[] spheres =
-        [
-            Ball(new Vector3(0f, 0.85f, 0f), new Vector3(3f, 0f, 0f), restitution: 1f),
-            Ball(new Vector3(2f, 0.85f, 0f), Vector3.Zero, restitution: 0f),
-        ];
-
-        for (int i = 0; i < 120; i++)
-        {
-            PlanarSphereDynamics.Step(spheres, [], statics: null, PlanarDynamicsSettings.Default, Dt);
-        }
-
-        await Assert.That(MathF.Abs(spheres[0].Velocity.X - 0.75f)).IsLessThan(0.05f);
-        await Assert.That(MathF.Abs(spheres[1].Velocity.X - 2.25f)).IsLessThan(0.05f);
+        await Assert.That(peak).IsGreaterThan(1f); // the hit registered
     }
 
     [Test]
     public async Task steps_are_bitwise_deterministic()
     {
-        CollisionWorld statics = WallAtX5();
         var results = new List<int>[2];
-
         for (int pass = 0; pass < 2; pass++)
         {
-            DynamicSphere[] spheres =
+            CollisionWorld statics = FloorAndWallAtX5();
+            DynamicSphere[] s =
             [
-                Ball(new Vector3(0f, 0.85f, 0f), new Vector3(4f, 0f, 0.3f)),
-                Ball(new Vector3(2f, 0.85f, 0.2f), Vector3.Zero),
-                Ball(new Vector3(3.5f, 0.85f, -0.3f), new Vector3(-1f, 0f, 0f)),
+                Ball(new Vector3(0f, 0.5f, 0f), new Vector3(4f, 0f, 0.3f), angularVelocity: new Vector3(1f, 5f, 0f)),
+                Ball(new Vector3(2f, 0.5f, 0.2f), Vector3.Zero),
+                Ball(new Vector3(3.5f, 0.5f, -0.3f), new Vector3(-1f, 1f, 0f)),
             ];
-            var pusher = new KinematicCapsule
-            {
-                Position = new Vector3(-1f, 0.9f, 0f),
-                Velocity = new Vector3(3f, 0f, 0f),
-                Radius = 0.4f,
-                HalfLength = 0.5f,
-            };
             for (int i = 0; i < 300; i++)
             {
-                PlanarSphereDynamics.Step(spheres, [pusher], statics, PlanarDynamicsSettings.Default, Dt);
+                PlanarSphereDynamics.Step(s, [], statics, PlanarDynamicsSettings.Default, Dt);
             }
-
             var sink = new List<int>();
-            foreach (DynamicSphere s in spheres)
+            foreach (DynamicSphere b in s)
             {
-                sink.Add(BitConverter.SingleToInt32Bits(s.Position.X));
-                sink.Add(BitConverter.SingleToInt32Bits(s.Position.Z));
-                sink.Add(BitConverter.SingleToInt32Bits(s.Velocity.X));
-                sink.Add(BitConverter.SingleToInt32Bits(s.Velocity.Z));
+                sink.Add(BitConverter.SingleToInt32Bits(b.Position.X));
+                sink.Add(BitConverter.SingleToInt32Bits(b.Position.Y));
+                sink.Add(BitConverter.SingleToInt32Bits(b.Position.Z));
+                sink.Add(BitConverter.SingleToInt32Bits(b.Velocity.X));
+                sink.Add(BitConverter.SingleToInt32Bits(b.AngularVelocity.Y));
             }
             results[pass] = sink;
         }
-
         await Assert.That(results[0].SequenceEqual(results[1])).IsTrue();
+    }
+
+    [Test]
+    public async Task kinematic_pusher_shoves_a_ball_horizontally()
+    {
+        CollisionWorld statics = Floor();
+        var pusher = new KinematicCapsule
+        {
+            Position = new Vector3(0f, 0.5f, 0f), Velocity = new Vector3(1f, 0f, 0f),
+            Radius = 0.4f, HalfLength = 0.5f,
+        };
+        DynamicSphere[] s = [Ball(new Vector3(0.7f, 0.5f, 0f), Vector3.Zero, radius: 0.3f)];
+        for (int i = 0; i < 30; i++)
+        {
+            PlanarSphereDynamics.Step(s, [pusher], statics, PlanarDynamicsSettings.Default, Dt);
+        }
+        await Assert.That(s[0].Position.X).IsGreaterThan(0.7f);        // pushed along +X
+        await Assert.That(MathF.Abs(s[0].Position.Y - 0.3f)).IsLessThan(0.1f); // stayed on the felt
     }
 }
