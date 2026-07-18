@@ -94,8 +94,9 @@ public class QueryableGenerator : IIncrementalGenerator
         var typeName = typeSymbol.Name;
         var containingTypes = GeneratorUtilities.GetContainingTypes(typeSymbol);
 
-        // Get optional manual Id from [Queryable(Id = X)]
+        // Get optional manual Id / Singleton flag from [Queryable(Id = X, Singleton = true)]
         int? manualId = null;
+        bool isSingleton = false;
         foreach (var attr in context.Attributes)
         {
             foreach (var namedArg in attr.NamedArguments)
@@ -103,6 +104,10 @@ public class QueryableGenerator : IIncrementalGenerator
                 if (namedArg.Key == "Id" && namedArg.Value.Value is int idValue && idValue >= 0)
                 {
                     manualId = idValue;
+                }
+                if (namedArg.Key == "Singleton" && namedArg.Value.Value is bool singleton)
+                {
+                    isSingleton = singleton;
                 }
             }
         }
@@ -230,6 +235,7 @@ public class QueryableGenerator : IIncrementalGenerator
             typeName,
             containingTypes,
             manualId,
+            isSingleton,
             withComponents.ToImmutableArray(),
             withComponentsAccess.ToImmutableArray(),
             withoutComponents.ToImmutableArray(),
@@ -374,6 +380,10 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"global using {prefix}Entity = {fqn}.Data<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine($"global using {prefix}Chunk = {fqn}.ChunkData<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine($"global using {prefix}Segments = {fqn}.Segments<{maskTypeFullyQualified}, {configTypeFull}>;");
+            if (queryable.IsSingleton)
+            {
+                sb.AppendLine($"global using {prefix}Singleton = {fqn}.Singleton<{maskTypeFullyQualified}, {configTypeFull}>;");
+            }
             sb.AppendLine();
         }
 
@@ -446,6 +456,12 @@ public class QueryableGenerator : IIncrementalGenerator
 
         // Generate nested Segments<TMask, TConfig> struct for world systems
         GenerateNestedSegmentsStruct(sb, queryable, indent + "    ");
+
+        // Generate nested Singleton<TMask, TConfig> struct for [Queryable(Singleton = true)]
+        if (queryable.IsSingleton)
+        {
+            GenerateNestedSingletonStruct(sb, queryable, indent + "    ");
+        }
 
         sb.AppendLine($"{indent}}}");
 
@@ -834,6 +850,112 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}");
     }
 
+    /// <summary>
+    /// Generates the nested Singleton struct for <c>[Queryable(Singleton = true)]</c>: the
+    /// queryable resolved ONCE against exactly one matching entity. <c>Resolve</c> runs the
+    /// query against the (write) world, throws unless exactly one entity matches, pairs the
+    /// entity's chunk against the read world (snapshot-read execution; pass null to bind reads
+    /// to the write world — classic execution or <c>[CurrentTick]</c>), and wraps a
+    /// <c>Data</c> view so component access rules match composition data exactly.
+    /// </summary>
+    private static void GenerateNestedSingletonStruct(StringBuilder sb, QueryableInfo queryable, string indent)
+    {
+        var queryableFQN = "global::" + queryable.FullyQualifiedName.Replace("+", ".");
+
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>");
+        sb.AppendLine($"{indent}/// Singleton view: this queryable resolved against EXACTLY one matching entity.");
+        sb.AppendLine($"{indent}/// Component access matches Data (ref / ref readonly per With IsReadOnly).");
+        sb.AppendLine($"{indent}/// </summary>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
+        sb.AppendLine($"{indent}public readonly ref struct Singleton<TMask, TConfig>");
+        sb.AppendLine($"{indent}    where TMask : unmanaged, global::Paradise.ECS.IBitSet<TMask>");
+        sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly Data<TMask, TConfig> _data;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}    internal Singleton(Data<TMask, TConfig> data)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        _data = data;");
+        sb.AppendLine($"{indent}    }}");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Resolves the singleton by running this queryable's query against");
+        sb.AppendLine($"{indent}    /// <paramref name=\"world\"/> (the write world — cardinality is checked there).");
+        sb.AppendLine($"{indent}    /// Read-only components bind to the paired chunk in <paramref name=\"readWorld\"/>");
+        sb.AppendLine($"{indent}    /// when provided (snapshot-read execution); pass null to bind every component to");
+        sb.AppendLine($"{indent}    /// the write world (classic execution or [CurrentTick] fresh reads).</summary>");
+        sb.AppendLine($"{indent}    /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the query");
+        sb.AppendLine($"{indent}    /// matches zero or more than one entity.</exception>");
+        sb.AppendLine($"{indent}    public static Singleton<TMask, TConfig> Resolve(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig> world,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        var query = world.ArchetypeRegistry.GetOrCreateQuery(global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[{queryableFQN}.QueryableId]);");
+        sb.AppendLine($"{indent}        int count = 0;");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk = default;");
+        sb.AppendLine($"{indent}        nint layoutData = 0;");
+        sb.AppendLine($"{indent}        int archetypeId = 0;");
+        sb.AppendLine($"{indent}        int chunkIndex = 0;");
+        sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
+        sb.AppendLine($"{indent}        {{");
+        sb.AppendLine($"{indent}            if (count == 0 && ci.EntityCount > 0)");
+        sb.AppendLine($"{indent}            {{");
+        sb.AppendLine($"{indent}                chunk = ci.Handle;");
+        sb.AppendLine($"{indent}                layoutData = ci.Archetype.Layout.DataPointer;");
+        sb.AppendLine($"{indent}                archetypeId = ci.Archetype.Id;");
+        sb.AppendLine($"{indent}                chunkIndex = ci.ChunkIndex;");
+        sb.AppendLine($"{indent}            }}");
+        sb.AppendLine($"{indent}            count += ci.EntityCount;");
+        sb.AppendLine($"{indent}        }}");
+        sb.AppendLine($"{indent}        if (count != 1)");
+        sb.AppendLine($"{indent}        {{");
+        sb.AppendLine($"{indent}            throw new global::System.InvalidOperationException(");
+        sb.AppendLine($"{indent}                \"Singleton queryable '{queryable.FullyQualifiedName}' must resolve to exactly one entity, but the query matched \" + count + \" entities.\");");
+        sb.AppendLine($"{indent}        }}");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.SnapshotChunkPairing.Resolve(world, readWorld, archetypeId, chunkIndex, chunk, 1, out var readChunkManager, out var readChunk);");
+        sb.AppendLine($"{indent}        return new Singleton<TMask, TConfig>(new Data<TMask, TConfig>(world.ChunkManager, new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(layoutData), chunk, readChunkManager, readChunk, 0));");
+        sb.AppendLine($"{indent}    }}");
+
+        // Forward component properties to the wrapped Data view (unless QueryOnly)
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly)
+                continue;
+
+            sb.AppendLine();
+            var refType = comp.IsReadOnly ? "ref readonly" : "ref";
+            sb.AppendLine($"{indent}    /// <summary>Gets a {(comp.IsReadOnly ? "read-only " : "")}reference to the singleton's {comp.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    public {refType} global::{comp.ComponentFullName} {comp.PropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}        get => ref _data.{comp.PropertyName};");
+            sb.AppendLine($"{indent}    }}");
+        }
+
+        // Forward Has/Get accessors for Optional<T> components
+        foreach (var opt in queryable.OptionalComponents)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets whether the singleton has the {opt.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    public bool Has{opt.PropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}        get => _data.Has{opt.PropertyName};");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            var refType = opt.IsReadOnly ? "ref readonly" : "ref";
+            sb.AppendLine($"{indent}    /// <summary>Gets a {(opt.IsReadOnly ? "read-only " : "")}reference to the singleton's {opt.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the component is not present. Check Has{opt.PropertyName} first.</exception>");
+            sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}    public {refType} global::{opt.ComponentFullName} Get{opt.PropertyName}()");
+            sb.AppendLine($"{indent}        => ref _data.Get{opt.PropertyName}();");
+        }
+
+        sb.AppendLine($"{indent}}}");
+    }
+
     private static void GenerateQueryableRegistry(
         SourceProductionContext context,
         List<(QueryableInfo Info, int TypeId)> queryables,
@@ -985,6 +1107,7 @@ public class QueryableGenerator : IIncrementalGenerator
         public string TypeName { get; }
         public ImmutableArray<ContainingTypeInfo> ContainingTypes { get; }
         public int? ManualId { get; }
+        public bool IsSingleton { get; }
         public ImmutableArray<string> WithComponents { get; }
         public ImmutableArray<ComponentInfo> WithComponentsAccess { get; }
         public ImmutableArray<string> WithoutComponents { get; }
@@ -1025,6 +1148,7 @@ public class QueryableGenerator : IIncrementalGenerator
             string typeName,
             ImmutableArray<ContainingTypeInfo> containingTypes,
             int? manualId,
+            bool isSingleton,
             ImmutableArray<string> withComponents,
             ImmutableArray<ComponentInfo> withComponentsAccess,
             ImmutableArray<string> withoutComponents,
@@ -1040,6 +1164,7 @@ public class QueryableGenerator : IIncrementalGenerator
             TypeName = typeName;
             ContainingTypes = containingTypes;
             ManualId = manualId;
+            IsSingleton = isSingleton;
             WithComponents = withComponents;
             WithComponentsAccess = withComponentsAccess;
             WithoutComponents = withoutComponents;

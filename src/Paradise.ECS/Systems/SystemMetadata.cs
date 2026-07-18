@@ -31,6 +31,14 @@ public readonly struct SystemMetadata<TMask>
     public TMask WriteMask { get; init; }
 
     /// <summary>
+    /// Bitmask of components this system reads FRESH via <c>[CurrentTick]</c> fields: the read
+    /// binds to the write world even under snapshot-read execution, so any system writing one of
+    /// these components must be ordered into an EARLIER wave. Always a subset of
+    /// <see cref="ReadMask"/> and never a write claim — CurrentTick fields are read-only.
+    /// </summary>
+    public TMask FreshReadMask { get; init; }
+
+    /// <summary>
     /// The query description used to find matching archetypes.
     /// Pre-wrapped in HashedKey for efficient lookup.
     /// </summary>

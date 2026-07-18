@@ -273,4 +273,51 @@ public static class GeneratorTestHelper
         var allDiagnostics = await RunAnalyzerAsync<TAnalyzer>(source);
         return [.. allDiagnostics.Where(d => d.Id == diagnosticId)];
     }
+
+    /// <summary>
+    /// Runs the Component/Tag/Queryable generators first, then the analyzer against the UPDATED
+    /// compilation — required when the analyzed source references generated types such as the
+    /// {Prefix}Singleton global-using alias (which resolves to the generated nested
+    /// Queryable.Singleton struct, exactly as in a real build).
+    /// </summary>
+    public static async Task<ImmutableArray<Diagnostic>> GetAnalyzerDiagnosticsWithGeneratorsAsync<TAnalyzer>(string source, string diagnosticId)
+        where TAnalyzer : DiagnosticAnalyzer, new()
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText(source);
+
+        var references = new List<MetadataReference>
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Attribute).Assembly.Location),
+        };
+
+        var runtimeAssembly = System.Reflection.Assembly.Load("System.Runtime");
+        references.Add(MetadataReference.CreateFromFile(runtimeAssembly.Location));
+
+        var netstandardPath = Path.Combine(
+            Path.GetDirectoryName(typeof(object).Assembly.Location)!,
+            "netstandard.dll");
+        if (File.Exists(netstandardPath))
+        {
+            references.Add(MetadataReference.CreateFromFile(netstandardPath));
+        }
+
+        references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ComponentAttribute).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.TagAttribute).Assembly.Location));
+
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            [syntaxTree],
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        IIncrementalGenerator[] generators = [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator()];
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators.Select(g => g.AsSourceGenerator()).ToArray());
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var updatedCompilation, out _);
+
+        var compilationWithAnalyzers = updatedCompilation.WithAnalyzers([new TAnalyzer()]);
+        var diagnostics = await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync();
+        return [.. diagnostics.Where(d => d.Id == diagnosticId)];
+    }
 }

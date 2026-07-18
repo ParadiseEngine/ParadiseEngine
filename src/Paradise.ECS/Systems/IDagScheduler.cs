@@ -62,6 +62,11 @@ public sealed class DefaultDagScheduler : IDagScheduler
             }
         }
 
+        // [CurrentTick] fresh reads must observe same-tick writes: order writers of a
+        // fresh-read component before the reader (the plain read/write conflict below only
+        // separates the pair into different waves; it does not fix the direction).
+        SnapshotDagScheduler.AddFreshReadEdges(systems, adj, predAdj, inDegree);
+
         // Topological sort (Kahn's algorithm)
         var queue = new Queue<int>();
         for (int i = 0; i < n; i++)

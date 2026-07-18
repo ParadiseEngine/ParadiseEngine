@@ -24,6 +24,8 @@ public interface ISystem
 ///   <item><c>ref T</c> where T is a [Component] — writable per-entity access</item>
 ///   <item><c>ref readonly T</c> where T is a [Component] — read-only per-entity access</item>
 ///   <item><c>{Prefix}Entity</c> where {Prefix} is a [Queryable] — composition access via generated Data type</item>
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///     the queryable resolved once per dispatch against exactly one entity</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -70,6 +72,8 @@ public interface IEntitySystem : ISystem
 ///   <item><c>Span&lt;T&gt;</c> where T is a [Component] — writable batch access</item>
 ///   <item><c>ReadOnlySpan&lt;T&gt;</c> where T is a [Component] — read-only batch access</item>
 ///   <item><c>{Prefix}Chunk</c> where {Prefix} is a [Queryable] — composition access via generated ChunkData type</item>
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///     the queryable resolved once per dispatch against exactly one entity</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -122,6 +126,8 @@ public interface IChunkSystem : ISystem
 ///   <item><c>{Prefix}Segments</c> where {Prefix} is a [Queryable] — flat
 ///     <see cref="ComponentSegments{T,TMask,TConfig}"/>/<see cref="ReadOnlyComponentSegments{T,TMask,TConfig}"/>
 ///     views per component, index-correlated across the queryable's components</item>
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///     the queryable resolved once per run against exactly one entity</item>
 ///   <item><c>EntityCommandBuffer</c> — deferred structural changes</item>
 /// </list>
 /// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
@@ -161,6 +167,10 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <c>world.ChunkManager</c> in classic execution. Only snapshot-mode codegen
     /// (<c>[assembly: SnapshotReadSystems]</c>) consumes it.</param>
     /// <param name="readChunk">Chunk in the read source corresponding to <paramref name="chunk"/>.</param>
+    /// <param name="readWorld">The immutable read world in snapshot mode
+    /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c>. Consumed by
+    /// snapshot-mode codegen to pair chunks OUTSIDE this system's own query — e.g. resolving the
+    /// read-world copy of a <c>{Prefix}Singleton</c> field's entity.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
@@ -169,6 +179,7 @@ public interface ISystem<TMask, TConfig> : ISystem
         ChunkHandle chunk,
         ChunkManager readChunkManager,
         ChunkHandle readChunk,
+        IWorld<TMask, TConfig>? readWorld,
         ImmutableArchetypeLayout<TMask, TConfig> layout,
         int entityCount,
         EntityCommandBuffer commands);
