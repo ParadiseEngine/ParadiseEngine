@@ -26,6 +26,23 @@ public readonly record struct Entity(int Id, uint Version)
         get => Version > 0;
     }
 
+    /// <summary>
+    /// Gets whether this handle is a deferred-spawn placeholder returned by
+    /// <see cref="EntityCommandBuffer.Spawn"/> (high bit of <see cref="Id"/> set; real entities
+    /// always have non-negative IDs). A placeholder is valid ONLY as an argument to commands
+    /// recorded on the SAME <see cref="EntityCommandBuffer"/>; it must not be stored into
+    /// component data or passed to World methods. For a placeholder, <see cref="Id"/> encodes
+    /// the buffer-local spawn index in the low 31 bits and <see cref="Version"/> carries the
+    /// owning buffer's unique ID.
+    /// </summary>
+    public bool IsPlaceholder
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Id < 0;
+    }
+
     public override string ToString() =>
-        IsValid ? $"Entity(Id: {Id}, Ver: {Version})" : "Entity(Invalid)";
+        IsPlaceholder
+            ? $"Entity(Placeholder #{Id & 0x7FFFFFFF}, Buffer: {Version})"
+            : IsValid ? $"Entity(Id: {Id}, Ver: {Version})" : "Entity(Invalid)";
 }

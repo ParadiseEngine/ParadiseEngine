@@ -47,7 +47,6 @@ public sealed class EntityManager : IEntityManager
 
     /// <summary>
     /// Gets the thread-safe entity ID allocator used by this manager.
-    /// Can be shared with <see cref="EntityCommandBuffer"/> for real ID reservation.
     /// </summary>
     public EntityIdAllocator Allocator
     {
@@ -81,18 +80,6 @@ public sealed class EntityManager : IEntityManager
     }
 
     /// <summary>
-    /// Registers a previously reserved entity (from <see cref="EntityIdAllocator.Reserve"/>)
-    /// into the entity manager. Called during ECB playback to make reserved entities alive.
-    /// </summary>
-    /// <param name="entity">The reserved entity to register.</param>
-    public void RegisterReserved(Entity entity)
-    {
-        EnsureCapacity(entity.Id);
-        _packedLocations[entity.Id] = new EntityLocation(entity.Version, -1, -1).Packed;
-        _aliveCount++;
-    }
-
-    /// <summary>
     /// Destroys the entity associated with the handle.
     /// Increments the version to invalidate the handle and returns the ID to the free pool.
     /// Safe to call multiple times or with invalid/stale handles (no-op).
@@ -103,7 +90,8 @@ public sealed class EntityManager : IEntityManager
         if (!entity.IsValid)
             return;
 
-        if (entity.Id >= _packedLocations.Count)
+        // Unsigned compare also rejects negative IDs (deferred-spawn placeholders)
+        if ((uint)entity.Id >= (uint)_packedLocations.Count)
             return;
 
         var location = EntityLocation.FromPacked(_packedLocations[entity.Id]);
@@ -132,7 +120,8 @@ public sealed class EntityManager : IEntityManager
         if (!entity.IsValid)
             return false;
 
-        if (entity.Id >= _packedLocations.Count)
+        // Unsigned compare also rejects negative IDs (deferred-spawn placeholders)
+        if ((uint)entity.Id >= (uint)_packedLocations.Count)
             return false;
 
         return EntityLocation.FromPacked(_packedLocations[entity.Id]).Version == entity.Version;

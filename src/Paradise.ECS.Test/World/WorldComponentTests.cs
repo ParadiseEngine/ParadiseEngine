@@ -367,5 +367,24 @@ public sealed class WorldComponentTests : IDisposable
         }
     }
 
+    [Test]
+    public async Task AddComponent_TagComponent_DoesNotCorruptChunkEntityIds()
+    {
+        // Regression: AddComponent<T> for a zero-size tag used to write default(T)
+        // (sizeof = 1 byte for an empty struct) at the tag's zero base offset, clobbering
+        // the low byte of the FIRST entity ID stored at the start of the chunk.
+        _world.Spawn(); // occupy id 0 so the tagged entity has a nonzero id
+        var entity = _world.Spawn();
+        _world.AddComponent(entity, new TestPosition { X = 1 });
+
+        _world.AddComponent<TestTag>(entity); // entity lands in slot 0 of the [Position, Tag] chunk
+
+        var location = _world.GetLocation(entity);
+        var archetype = _world.ArchetypeRegistry.GetById(location.ArchetypeId)!;
+        var bytes = _world.ChunkManager.GetBytes(archetype.GetChunk(0));
+        int storedId = ImmutableArchetypeLayout<SmallBitSet<ulong>, DefaultConfig>.ReadEntityId(bytes, 0);
+        await Assert.That(storedId).IsEqualTo(entity.Id);
+    }
+
     #endregion
 }

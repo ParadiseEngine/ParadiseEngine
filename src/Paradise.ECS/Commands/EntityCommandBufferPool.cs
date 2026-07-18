@@ -1,43 +1,45 @@
 namespace Paradise.ECS;
 
 /// <summary>
-/// Thread-safe pool of <see cref="EntityCommandBuffer"/> instances.
-/// Each thread that calls <see cref="Get"/> receives its own dedicated buffer,
-/// avoiding contention during parallel system execution. After all work completes,
-/// <see cref="PlaybackAll{TMask,TConfig}"/> replays every buffer sequentially
-/// and <see cref="ClearAll"/> resets them for the next run.
+/// Pool of <see cref="EntityCommandBuffer"/> instances handed out in SCHEDULE order.
+/// <see cref="SystemSchedule{TMask,TConfig}"/> rents one buffer per work item at dispatch time —
+/// on the schedule thread, in (wave index, position-in-wave, chunk index) order, with the wave's
+/// system order (stable system IDs resolved at Build time) breaking ties within a wave. A work
+/// item runs on exactly one thread and iterates sequentially, so each buffer is single-threaded
+/// and internally deterministic by construction.
 /// </summary>
+/// <remarks>
+/// <see cref="PlaybackAll{TMask,TConfig}"/> replays buffers in rent order, which IS the schedule
+/// order — commands apply as if the schedule had run serially. Cross-system conflicts are
+/// well-defined (last in schedule order wins), and <see cref="ParallelWaveScheduler"/> and
+/// <see cref="SequentialWaveScheduler"/> produce identical worlds, including entity IDs
+/// (allocation is deferred to playback — see <see cref="EntityCommandBuffer.Spawn"/>).
+/// <para>
+/// NOT thread-safe: <see cref="Rent"/>/<see cref="PlaybackAll{TMask,TConfig}"/>/<see cref="ClearAll"/>
+/// must be called from the schedule thread only. Wave workers never touch the pool — each work
+/// item carries its pre-rented buffer.
+/// </para>
+/// </remarks>
 internal sealed class EntityCommandBufferPool : IDisposable
 {
-    private readonly EntityIdAllocator _allocator;
-    private readonly ThreadLocal<EntityCommandBuffer> _threadLocal;
-    private readonly List<EntityCommandBuffer> _all = new();
-    private readonly Lock _lock = new();
+    private readonly List<EntityCommandBuffer> _buffers = new();
+    private int _rentedCount;
     private bool _disposed;
 
     /// <summary>
-    /// Creates a new pool backed by the given entity ID allocator.
+    /// Returns the next <see cref="EntityCommandBuffer"/> in schedule order, creating one on
+    /// first use. Buffers are replayed by <see cref="PlaybackAll{TMask,TConfig}"/> in rent order.
     /// </summary>
-    /// <param name="allocator">The allocator used to reserve entity IDs in each buffer.</param>
-    public EntityCommandBufferPool(EntityIdAllocator allocator)
-    {
-        _allocator = allocator;
-        _threadLocal = new ThreadLocal<EntityCommandBuffer>(CreateBuffer, trackAllValues: false);
-    }
-
-    /// <summary>
-    /// Returns the <see cref="EntityCommandBuffer"/> for the current thread.
-    /// Creates one on first access.
-    /// </summary>
-    public EntityCommandBuffer Get()
+    public EntityCommandBuffer Rent()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _threadLocal.Value!;
+        if (_rentedCount == _buffers.Count)
+            _buffers.Add(new EntityCommandBuffer());
+        return _buffers[_rentedCount++];
     }
 
     /// <summary>
-    /// Plays back all buffers that were accessed during the current run,
-    /// in the order they were created.
+    /// Plays back all buffers rented during the current run, in rent (= schedule) order.
     /// </summary>
     /// <typeparam name="TMask">The component mask type.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -47,50 +49,32 @@ internal sealed class EntityCommandBufferPool : IDisposable
         where TConfig : IConfig, new()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        lock (_lock)
-        {
-            foreach (var ecb in _all)
-                ecb.Playback(world);
-        }
+        for (int i = 0; i < _rentedCount; i++)
+            _buffers[i].Playback(world);
     }
 
     /// <summary>
-    /// Clears all buffers for reuse in the next run.
+    /// Clears all rented buffers and resets the rent cursor for the next run.
     /// </summary>
     public void ClearAll()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        lock (_lock)
-        {
-            foreach (var ecb in _all)
-                ecb.Clear();
-        }
+        for (int i = 0; i < _rentedCount; i++)
+            _buffers[i].Clear();
+        _rentedCount = 0;
     }
 
     /// <summary>
-    /// Disposes the thread-local storage and all pooled buffers.
+    /// Disposes all pooled buffers.
     /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
-        _threadLocal.Dispose();
-        lock (_lock)
-        {
-            foreach (var ecb in _all)
-                ecb.Dispose();
-            _all.Clear();
-        }
-    }
-
-    private EntityCommandBuffer CreateBuffer()
-    {
-        var ecb = new EntityCommandBuffer(_allocator);
-        lock (_lock)
-        {
-            _all.Add(ecb);
-        }
-        return ecb;
+        foreach (var ecb in _buffers)
+            ecb.Dispose();
+        _buffers.Clear();
+        _rentedCount = 0;
     }
 }

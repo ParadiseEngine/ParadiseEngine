@@ -6,8 +6,7 @@ namespace Paradise.ECS;
 
 /// <summary>
 /// Thread-safe entity ID allocator using atomic operations.
-/// Reserves entity IDs with versions for use by <see cref="EntityCommandBuffer"/>
-/// without requiring access to <see cref="EntityManager"/>.
+/// Backs <see cref="EntityManager"/> entity creation with fresh-ID and free-slot reuse.
 /// </summary>
 public sealed class EntityIdAllocator
 {

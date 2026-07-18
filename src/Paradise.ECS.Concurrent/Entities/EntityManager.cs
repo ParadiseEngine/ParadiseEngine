@@ -42,7 +42,6 @@ public sealed class EntityManager : IEntityManager, IDisposable
 
     /// <summary>
     /// Gets the thread-safe entity ID allocator used by this manager.
-    /// Can be shared with <see cref="EntityCommandBuffer"/> for real ID reservation.
     /// </summary>
     public EntityIdAllocator Allocator
     {
@@ -82,20 +81,6 @@ public sealed class EntityManager : IEntityManager, IDisposable
     }
 
     /// <summary>
-    /// Registers a previously reserved entity (from <see cref="EntityIdAllocator.Reserve"/>)
-    /// into the entity manager. Called during ECB playback to make reserved entities alive.
-    /// </summary>
-    /// <param name="entity">The reserved entity to register.</param>
-    public void RegisterReserved(Entity entity)
-    {
-        using var _ = _operationGuard.EnterScope();
-        ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
-
-        WriteReservedLocation(entity);
-        Interlocked.Increment(ref _aliveCount);
-    }
-
-    /// <summary>
     /// Ensures capacity and writes the initial location for a reserved entity.
     /// </summary>
     private void WriteReservedLocation(Entity entity)
@@ -129,7 +114,8 @@ public sealed class EntityManager : IEntityManager, IDisposable
         using var _ = _operationGuard.EnterScope();
         if (_disposed != 0) return;
 
-        if (entity.Id >= Volatile.Read(ref _packedLocations).Length)
+        // Unsigned compare also rejects negative IDs (deferred-spawn placeholders)
+        if ((uint)entity.Id >= (uint)Volatile.Read(ref _packedLocations).Length)
             return;
 
         // Lock-free CAS loop for atomic read-modify-write
@@ -180,7 +166,8 @@ public sealed class EntityManager : IEntityManager, IDisposable
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
         var locations = Volatile.Read(ref _packedLocations);
-        if (entity.Id >= locations.Length)
+        // Unsigned compare also rejects negative IDs (deferred-spawn placeholders)
+        if ((uint)entity.Id >= (uint)locations.Length)
             return false;
 
         var packed = EntityLocation.FromPacked(Volatile.Read(ref locations[entity.Id]));
@@ -249,7 +236,8 @@ public sealed class EntityManager : IEntityManager, IDisposable
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
         var locations = Volatile.Read(ref _packedLocations);
-        if (entity.Id >= locations.Length)
+        // Unsigned compare also rejects negative IDs (deferred-spawn placeholders)
+        if ((uint)entity.Id >= (uint)locations.Length)
         {
             location = EntityLocation.Invalid;
             return false;

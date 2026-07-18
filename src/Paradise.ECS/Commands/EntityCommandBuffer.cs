@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -43,10 +44,13 @@ internal struct CommandHeader
     /// </summary>
     public short ComponentId;
 
-    /// <summary>The entity ID.</summary>
+    /// <summary>
+    /// The entity ID. May be a placeholder ID (high bit set) referring to an earlier
+    /// <see cref="CommandType.Spawn"/> command in the same buffer.
+    /// </summary>
     public int EntityId;
 
-    /// <summary>The entity version.</summary>
+    /// <summary>The entity version (the owning buffer's ID for placeholders).</summary>
     public uint EntityVersion;
 
     /// <summary>
@@ -62,29 +66,38 @@ internal struct CommandHeader
 /// from structural changes during iteration.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Commands are serialized into a contiguous byte buffer and replayed sequentially.
-/// Entities created via <see cref="Spawn"/> receive real, stable IDs from the
-/// <see cref="EntityIdAllocator"/> immediately. These entities are not registered
-/// in the <see cref="EntityManager"/> until <see cref="Playback{TMask,TConfig}"/> is called.
+/// <see cref="Spawn"/> does NOT allocate a real entity ID at record time — it returns a tagged
+/// placeholder handle (see <see cref="Entity.IsPlaceholder"/>). Real IDs are allocated during
+/// <see cref="Playback{TMask,TConfig}"/>, in command order, so entity IDs depend only on
+/// playback order — never on which thread recorded the commands. This is the foundation of
+/// deterministic system-side structural changes (see <see cref="EntityCommandBufferPool"/>).
+/// </para>
+/// <para>
+/// After playback, <see cref="Resolve"/> translates a placeholder to the real entity it became.
+/// </para>
 /// </remarks>
 public sealed class EntityCommandBuffer : IDisposable
 {
+    private const int PlaceholderIndexMask = 0x7FFF_FFFF;
+    private const uint PlaceholderTag = 0x8000_0000u;
+
+    private static int s_nextBufferId;
+
     private readonly ArrayBufferWriter<byte> _buffer = new();
-    private readonly EntityIdAllocator _allocator;
-    private readonly List<Entity> _reservedEntities = new();
+
+    /// <summary>Process-unique ID stamped into placeholder versions to detect (in DEBUG builds)
+    /// placeholders leaking into a different buffer's commands.</summary>
+    private readonly uint _bufferId = (uint)Interlocked.Increment(ref s_nextBufferId);
+
+    /// <summary>Real entities created during playback, indexed by buffer-local spawn index.</summary>
+    private readonly List<Entity> _spawnedEntities = new();
+
+    private int _spawnCount;
     private int _commandCount;
     private bool _playedBack;
     private bool _disposed;
-
-    /// <summary>
-    /// Creates a new EntityCommandBuffer that reserves entity IDs from the specified allocator.
-    /// </summary>
-    /// <param name="allocator">The thread-safe entity ID allocator, typically from <see cref="EntityManager.Allocator"/>.</param>
-    public EntityCommandBuffer(EntityIdAllocator allocator)
-    {
-        ArgumentNullException.ThrowIfNull(allocator);
-        _allocator = allocator;
-    }
 
     /// <summary>
     /// Gets the number of recorded commands.
@@ -105,27 +118,36 @@ public sealed class EntityCommandBuffer : IDisposable
     }
 
     /// <summary>
-    /// Records a deferred entity spawn. Reserves a real entity ID from the allocator immediately.
-    /// The entity is not alive until <see cref="Playback{TMask,TConfig}"/> is called.
-    /// Thread-safe with respect to the allocator — multiple ECBs can call Spawn concurrently.
+    /// Records a deferred entity spawn and returns a PLACEHOLDER handle
+    /// (<see cref="Entity.IsPlaceholder"/> is true). No real entity ID is allocated until
+    /// <see cref="Playback{TMask,TConfig}"/>, which allocates IDs in deterministic playback order.
     /// </summary>
-    /// <returns>An entity with a real, stable ID (version >= 1).</returns>
+    /// <remarks>
+    /// RESTRICTION: the returned placeholder is valid ONLY as an argument to commands recorded
+    /// on THIS buffer afterwards (<see cref="Despawn"/>, <see cref="AddComponent{T}"/>,
+    /// <see cref="RemoveComponent{T}"/>, <see cref="SetComponent{T}"/>). It must NOT be stored
+    /// into component data, passed to another buffer's commands, or passed to World methods —
+    /// DEBUG builds throw when a foreign placeholder is detected. Use <see cref="Resolve"/>
+    /// after playback to obtain the real entity.
+    /// </remarks>
+    /// <returns>A placeholder entity handle scoped to this buffer's current recording.</returns>
     public Entity Spawn()
     {
         ThrowIfDisposed();
-        var entity = _allocator.Reserve();
-        _reservedEntities.Add(entity);
-        WriteCommand(CommandType.Spawn, entity.Id, entity.Version, -1, ReadOnlySpan<byte>.Empty);
-        return entity;
+        var placeholder = new Entity(unchecked((int)(PlaceholderTag | (uint)_spawnCount)), _bufferId);
+        _spawnCount++;
+        WriteCommand(CommandType.Spawn, placeholder.Id, placeholder.Version, -1, ReadOnlySpan<byte>.Empty);
+        return placeholder;
     }
 
     /// <summary>
     /// Records a deferred entity despawn.
     /// </summary>
-    /// <param name="entity">The entity to despawn. Can be a real or reserved entity.</param>
+    /// <param name="entity">The entity to despawn. Can be a real entity or a placeholder from this buffer.</param>
     public void Despawn(Entity entity)
     {
         ThrowIfDisposed();
+        AssertPlaceholderBelongsToThisBuffer(entity);
         WriteCommand(CommandType.Despawn, entity.Id, entity.Version, -1, ReadOnlySpan<byte>.Empty);
     }
 
@@ -133,11 +155,12 @@ public sealed class EntityCommandBuffer : IDisposable
     /// Records a deferred component addition.
     /// </summary>
     /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity to add the component to. Can be a real or reserved entity.</param>
+    /// <param name="entity">The entity to add the component to. Can be a real entity or a placeholder from this buffer.</param>
     /// <param name="value">The component value.</param>
     public void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent
     {
         ThrowIfDisposed();
+        AssertPlaceholderBelongsToThisBuffer(entity);
         var data = T.Size > 0
             ? MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))
             : ReadOnlySpan<byte>.Empty;
@@ -148,10 +171,11 @@ public sealed class EntityCommandBuffer : IDisposable
     /// Records a deferred component removal.
     /// </summary>
     /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity to remove the component from. Can be a real or reserved entity.</param>
+    /// <param name="entity">The entity to remove the component from. Can be a real entity or a placeholder from this buffer.</param>
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
     {
         ThrowIfDisposed();
+        AssertPlaceholderBelongsToThisBuffer(entity);
         WriteCommand(CommandType.RemoveComponent, entity.Id, entity.Version, T.TypeId.Value, ReadOnlySpan<byte>.Empty);
     }
 
@@ -159,11 +183,12 @@ public sealed class EntityCommandBuffer : IDisposable
     /// Records a deferred component value set (non-structural).
     /// </summary>
     /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity to set the component on. Can be a real or reserved entity.</param>
+    /// <param name="entity">The entity to set the component on. Can be a real entity or a placeholder from this buffer.</param>
     /// <param name="value">The new component value.</param>
     public void SetComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent
     {
         ThrowIfDisposed();
+        AssertPlaceholderBelongsToThisBuffer(entity);
         var data = T.Size > 0
             ? MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))
             : ReadOnlySpan<byte>.Empty;
@@ -172,7 +197,8 @@ public sealed class EntityCommandBuffer : IDisposable
 
     /// <summary>
     /// Replays all recorded commands against the specified world in order.
-    /// Reserved entities are materialized (registered + placed in empty archetype) during playback.
+    /// Spawn commands allocate real entity IDs here (in command order); placeholder arguments
+    /// in subsequent commands are remapped to the real entities.
     /// Can only be called once per recording. Call <see cref="Clear"/> to reuse.
     /// </summary>
     /// <typeparam name="TMask">The component mask type.</typeparam>
@@ -208,13 +234,18 @@ public sealed class EntityCommandBuffer : IDisposable
             // Advance past header + data + padding to 4-byte alignment
             offset += Memory.AlignUp(totalSize, 4);
 
-            var entity = new Entity(header.EntityId, header.EntityVersion);
+            if ((CommandType)header.Type == CommandType.Spawn)
+            {
+                // Real ID allocation happens here, in command order — deterministic as long as
+                // buffers are played back in a deterministic order.
+                _spawnedEntities.Add(world.Spawn());
+                continue;
+            }
+
+            var entity = RemapForPlayback(new Entity(header.EntityId, header.EntityVersion));
 
             switch ((CommandType)header.Type)
             {
-                case CommandType.Spawn:
-                    world.MaterializeEntity(entity);
-                    break;
                 case CommandType.Despawn:
                     world.Despawn(entity);
                     break;
@@ -234,16 +265,39 @@ public sealed class EntityCommandBuffer : IDisposable
     }
 
     /// <summary>
+    /// Translates a placeholder returned by <see cref="Spawn"/> into the real entity created
+    /// during <see cref="Playback{TMask,TConfig}"/>. Real (non-placeholder) handles pass through
+    /// unchanged. Valid after playback and until <see cref="Clear"/>.
+    /// </summary>
+    /// <param name="placeholder">The placeholder (or real) entity handle.</param>
+    /// <returns>The real entity the placeholder became.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if playback has not run yet, or the
+    /// placeholder does not belong to this buffer's current recording.</exception>
+    public Entity Resolve(Entity placeholder)
+    {
+        ThrowIfDisposed();
+        if (!placeholder.IsPlaceholder)
+            return placeholder;
+        if (!_playedBack)
+            throw new InvalidOperationException("Cannot resolve a placeholder before Playback has run.");
+        int index = placeholder.Id & PlaceholderIndexMask;
+        if (placeholder.Version != _bufferId || index >= _spawnedEntities.Count)
+            throw new InvalidOperationException(
+                $"{placeholder} does not belong to this buffer's current recording.");
+        return _spawnedEntities[index];
+    }
+
+    /// <summary>
     /// Clears all recorded commands and resets the buffer for reuse.
-    /// If Playback has not been called, releases reserved entity IDs back to the allocator.
+    /// Placeholders from the cleared recording become permanently unresolvable.
     /// </summary>
     public void Clear()
     {
         ThrowIfDisposed();
-        ReleaseUnplayedReservations();
         _buffer.Clear();
         _commandCount = 0;
-        _reservedEntities.Clear();
+        _spawnCount = 0;
+        _spawnedEntities.Clear();
         _playedBack = false;
     }
 
@@ -253,22 +307,44 @@ public sealed class EntityCommandBuffer : IDisposable
         if (_disposed)
             return;
         _disposed = true;
-        ReleaseUnplayedReservations();
         _buffer.Clear();
         _commandCount = 0;
-        _reservedEntities.Clear();
+        _spawnCount = 0;
+        _spawnedEntities.Clear();
     }
 
-    private void ReleaseUnplayedReservations()
+    /// <summary>
+    /// Remaps a recorded entity argument at playback time: placeholders resolve to the real
+    /// entity created by the corresponding Spawn command; real handles pass through.
+    /// </summary>
+    private Entity RemapForPlayback(Entity entity)
     {
-        if (_playedBack || _reservedEntities.Count == 0)
-            return;
+        if (!entity.IsPlaceholder)
+            return entity;
 
-        foreach (var entity in _reservedEntities)
-        {
-            uint nextVersion = EntityLocation.NextVersion(entity.Version);
-            _allocator.Release(entity.Id, nextVersion);
-        }
+        int index = entity.Id & PlaceholderIndexMask;
+        if (entity.Version != _bufferId || index >= _spawnedEntities.Count)
+            throw new InvalidOperationException(
+                $"{entity} was recorded on a different EntityCommandBuffer (or before its Spawn command). " +
+                "Placeholder handles are only valid within the buffer that created them.");
+        return _spawnedEntities[index];
+    }
+
+    /// <summary>
+    /// DEBUG-only guard: throws if a placeholder from a DIFFERENT buffer (or from a cleared
+    /// recording) is passed to this buffer's commands. Compiled out in Release builds, where the
+    /// misuse is still caught at playback by <see cref="RemapForPlayback"/> when out of range.
+    /// </summary>
+    [Conditional("DEBUG")]
+    private void AssertPlaceholderBelongsToThisBuffer(Entity entity)
+    {
+        if (!entity.IsPlaceholder)
+            return;
+        if (entity.Version != _bufferId || (entity.Id & PlaceholderIndexMask) >= _spawnCount)
+            throw new InvalidOperationException(
+                $"{entity} does not belong to this EntityCommandBuffer's current recording. " +
+                "Placeholder handles returned by Spawn() are only valid as arguments to commands " +
+                "recorded afterwards on the SAME buffer.");
     }
 
     private void WriteCommand(CommandType type, int entityId, uint entityVersion, int componentId, ReadOnlySpan<byte> data)

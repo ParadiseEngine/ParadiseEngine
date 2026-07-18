@@ -35,7 +35,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     private readonly IWorld<TMask, TConfig>? _readWorld;
     private readonly nint _layoutPtr;
     private readonly int _entityCount;
-    private readonly EntityCommandBufferPool _commandPool;
+    private readonly EntityCommandBuffer _commands;
 
     internal WorkItem(
         int systemId,
@@ -47,7 +47,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         IWorld<TMask, TConfig>? readWorld,
         nint layoutPtr,
         int entityCount,
-        EntityCommandBufferPool commandPool)
+        EntityCommandBuffer commands)
     {
         SystemId = systemId;
         Chunk = chunk;
@@ -59,7 +59,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         _readWorld = readWorld;
         _layoutPtr = layoutPtr;
         _entityCount = entityCount;
-        _commandPool = commandPool;
+        _commands = commands;
     }
 
     /// <summary>Work item for a whole-world system (<see cref="IWorldSystem"/>): one invocation
@@ -69,7 +69,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         SystemRunWorldAction<TMask, TConfig> worldDispatcher,
         IWorld<TMask, TConfig> world,
         IWorld<TMask, TConfig>? readWorld,
-        EntityCommandBufferPool commandPool)
+        EntityCommandBuffer commands)
     {
         SystemId = systemId;
         Chunk = default;
@@ -81,22 +81,24 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         _readWorld = readWorld;
         _layoutPtr = 0;
         _entityCount = 0;
-        _commandPool = commandPool;
+        _commands = commands;
     }
 
     /// <summary>
-    /// Executes this work item, resolving the thread-local ECB at invocation time.
+    /// Executes this work item with the <see cref="EntityCommandBuffer"/> assigned at dispatch
+    /// time. The buffer is per work item (not per thread), so recorded commands replay in
+    /// schedule order regardless of which thread executed the item.
     /// </summary>
     public void Invoke()
     {
         if (_worldDispatcher is not null)
         {
-            _worldDispatcher(_world, _readWorld, _commandPool.Get());
+            _worldDispatcher(_world, _readWorld, _commands);
             return;
         }
 
         _dispatcher!(_world, Chunk, _readChunkManager, _readChunk, _readWorld,
-            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
+            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commands);
     }
 }
 
