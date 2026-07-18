@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Engine-neutral export core, shared by editor hosts (ParadiseGodot today; any future
+    Unity/other authoring host). Owns the exported data contract (LevelDocument + JSON
+    round-trip), DotRecast navmesh baking, and the Blender/ktx external-tool orchestration.
+    NO editor/engine references by design: buildable and testable with plain dotnet.
+    Moved verbatim from ParadiseGodotEditor's ParadiseExport (2026-07-18).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Ported sources declare all usings explicitly; keep them verbatim. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Title>Paradise.Export</Title>
+    <PackageId>Paradise.Export</PackageId>
+    <Description>Engine-neutral export core for Paradise editor hosts: the exported scene/prefab/material data contract with source-generated JSON round-trip, DotRecast navmesh baking, and Blender/KTX external-tool orchestration. No engine or editor dependency.</Description>
+    <PackageTags>export;authoring;gltf;ktx2;navmesh;dotrecast;game-dev</PackageTags>
+    <!-- Source-generated System.Text.Json keeps serialization reflection-free. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Match the DotRecast version the original ParadiseUnityEditor vendored so the navmesh
+         binary format stays identical to what the Paradise runtime expects. -->
+    <PackageReference Include="DotRecast.Core" />
+    <PackageReference Include="DotRecast.Detour" />
+    <PackageReference Include="DotRecast.Recast" />
+  </ItemGroup>
+
+</Project>

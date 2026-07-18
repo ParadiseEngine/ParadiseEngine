@@ -1,0 +1,157 @@
+{
+  "SchemaVersion": 2,
+  "Camera": {
+    "Position": [
+      0,
+      1,
+      10
+    ],
+    "Rotation": [
+      0,
+      0,
+      0
+    ],
+    "OrthographicSize": 5,
+    "BackgroundColor": {
+      "r": 0.03137255,
+      "g": 0.07450981,
+      "b": 0.19215687,
+      "a": 0
+    }
+  },
+  "Lighting": {
+    "ActiveState": "Default",
+    "States": [
+      {
+        "Name": "Default",
+        "Environment": {
+          "AmbientMode": "Skybox",
+          "AmbientColor": {
+            "r": 0.03529412,
+            "g": 0.043137256,
+            "b": 0.05490196,
+            "a": 1
+          },
+          "AmbientEquatorColor": {
+            "r": 0.011764706,
+            "g": 0.015686275,
+            "b": 0.015686275,
+            "a": 1
+          },
+          "AmbientGroundColor": {
+            "r": 0.003921569,
+            "g": 0.003921569,
+            "b": 0.003921569,
+            "a": 1
+          },
+          "AmbientSh": null,
+          "SkyReflections": false,
+          "SkySunSizeCos": 2,
+          "SkySunAngleMaxCos": 2,
+          "SkySunInvCurve": 24,
+          "Exposure": 1,
+          "AmbientEnergy": 1,
+          "HasBackground": false,
+          "BackgroundColor": {
+            "r": 0.5019608,
+            "g": 0.52156866,
+            "b": 0.56078434,
+            "a": 1
+          },
+          "SkyGradient": false,
+          "SkyTopColor": {
+            "r": 0.03137255,
+            "g": 0.023529412,
+            "b": 0.015686275,
+            "a": 1
+          },
+          "SkyHorizonColor": {
+            "r": 0.2,
+            "g": 0.2,
+            "b": 0.21176471,
+            "a": 1
+          },
+          "SkyGroundBottomColor": {
+            "r": 0.03137255,
+            "g": 0.023529412,
+            "b": 0.015686275,
+            "a": 1
+          },
+          "SkyGroundHorizonColor": {
+            "r": 0.2,
+            "g": 0.2,
+            "b": 0.21176471,
+            "a": 1
+          },
+          "SkySkyCurveInv": 4,
+          "SkyGroundCurveInv": 30,
+          "FogEnabled": false,
+          "FogColor": {
+            "r": 0.21568628,
+            "g": 0.21568628,
+            "b": 0.21568628,
+            "a": 1
+          },
+          "FogDensity": 0.01,
+          "SsaoEnabled": false,
+          "SsaoRadius": 1,
+          "SsaoIntensity": 2,
+          "SsaoPower": 1.5,
+          "TonemapMode": "Linear",
+          "TonemapExposure": 1,
+          "TonemapWhite": 1,
+          "GlowEnabled": false,
+          "GlowIntensity": 0.6,
+          "GlowThreshold": 1
+        },
+        "Lights": [
+          {
+            "Id": "Directional Light",
+            "Type": "Directional",
+            "Position": [
+              0,
+              3,
+              0
+            ],
+            "Direction": [
+              0.3213938,
+              0.76604444,
+              0.5566705
+            ],
+            "Color": {
+              "r": 1,
+              "g": 0.78039217,
+              "b": 0.61960787,
+              "a": 1
+            },
+            "Enabled": true,
+            "Intensity": 2,
+            "UseColorTemperature": true,
+            "ColorTemperature": 5000,
+            "Range": 10,
+            "AttenuationExponent": 1,
+            "SpotAngle": 30,
+            "InnerSpotAngle": 21.80208,
+            "AreaSize": [
+              0,
+              0
+            ],
+            "ShadowsEnabled": true,
+            "ShadowType": "Soft",
+            "ShadowStrength": 1,
+            "Specular": 0.5,
+            "Size": 0,
+            "LayerMask": -1,
+            "RenderingLayerMask": 1,
+            "Group": "Default"
+          }
+        ]
+      }
+    ]
+  },
+  "NavMeshAgent": null,
+  "Interactables": [],
+  "Entities": [],
+  "NavMeshFile": null,
+  "Materials": []
+}

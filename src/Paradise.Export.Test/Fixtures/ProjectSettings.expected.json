@@ -1,0 +1,57 @@
+{
+  "SchemaVersion": 1,
+  "Physics": {
+    "CollisionMatrix": {
+      "LayerMasks": [
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1,
+        -1
+      ]
+    },
+    "Dynamics": {
+      "MinSpeed": 0.005,
+      "Skin": 0.02,
+      "PushStrength": 1.2,
+      "DefaultStaticRestitution": 0.4,
+      "GravityY": -9.81,
+      "StaticFriction": 0.2,
+      "MinAngularSpeed": 0.05
+    }
+  },
+  "Rendering": {
+    "RenderScale": 1,
+    "MsaaSamples": 1,
+    "AnisotropicLevel": 16,
+    "SpecularAaVariance": 0.5,
+    "SpecularAaClamp": 0.25
+  }
+}
