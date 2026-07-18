@@ -97,6 +97,30 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
             "EntityCommandBuffer (or deferred to a post-pass).");
 
     /// <summary>
+    /// DEBUG-only guard: throws if a deferred-spawn placeholder from
+    /// <see cref="EntityCommandBuffer.Spawn"/> escapes into World methods. Placeholders are only
+    /// valid as arguments to commands on the buffer that created them; the real entity exists
+    /// only after playback (use <see cref="EntityCommandBuffer.Resolve"/>). Compiled out in
+    /// Release builds, where placeholder handles simply fail alive/validation checks.
+    /// </summary>
+    /// <param name="entity">The entity handle to check.</param>
+    [Conditional("DEBUG")]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AssertNotPlaceholder(Entity entity)
+    {
+        if (entity.IsPlaceholder)
+            ThrowPlaceholderEscaped(entity);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowPlaceholderEscaped(Entity entity) =>
+        throw new InvalidOperationException(
+            $"{entity} is a deferred-spawn placeholder from EntityCommandBuffer.Spawn() and " +
+            "cannot be passed to World methods. Placeholders are only valid as arguments to " +
+            "commands recorded on the SAME buffer; use EntityCommandBuffer.Resolve() after " +
+            "playback to obtain the real entity.");
+
+    /// <summary>
     /// Creates a new entity with no components.
     /// The entity is placed in the empty archetype.
     /// </summary>
@@ -246,48 +270,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         }
     }
 
-    /// <inheritdoc/>
-    public void MaterializeEntity(Entity entity)
-    {
-        AssertStructuralChangesAllowed(nameof(MaterializeEntity));
-
-        // Validate entity ID fits within configured byte-size limits
-        ThrowHelper.ThrowIfEntityIdExceedsLimit(entity.Id, Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
-
-        if (entity.Id < _entityManager.Capacity)
-        {
-            var location = _entityManager.GetLocation(entity.Id);
-            if (location.Version == entity.Version)
-            {
-                if (location.ArchetypeId >= 0)
-                {
-                    // Already materialized, no-op
-                    return;
-                }
-                // Registered but not yet placed in an archetype — fall through to allocate
-            }
-            else if (location.Version > entity.Version)
-            {
-                // Slot is occupied by a newer generation — the reserved entity is stale
-                throw new InvalidOperationException(
-                    $"Cannot materialize entity {entity.Id} v{entity.Version}: slot already at v{location.Version}.");
-            }
-            else
-            {
-                // Entity was reserved but not yet registered
-                _entityManager.RegisterReserved(entity);
-            }
-        }
-        else
-        {
-            // Entity ID beyond current capacity — reserved but not yet registered
-            _entityManager.RegisterReserved(entity);
-        }
-
-        int globalIndex = _emptyArchetype.AllocateEntity(entity);
-        _entityManager.SetLocation(entity.Id, new EntityLocation(entity.Version, _emptyArchetype.Id, globalIndex));
-    }
-
     /// <summary>
     /// Destroys an entity and removes it from its archetype.
     /// </summary>
@@ -318,6 +300,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAlive(Entity entity)
     {
+        AssertNotPlaceholder(entity);
         if (!entity.IsValid)
             return false;
 
@@ -402,6 +385,12 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         // Move entity to target archetype
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
 
+        // Skip writes for zero-size tag components (same guard as WithComponent.WriteComponents):
+        // empty structs have sizeof=1 in C#, so writing default(T) at the tag's zero base offset
+        // would clobber the first byte of the chunk's entity-ID array.
+        if (T.Size == 0)
+            return;
+
         // Write the new component value - get updated location
         var updatedLocation = _entityManager.GetLocation(entity.Id);
         var (newChunkIndex, newIndexInChunk) = targetArchetype.GetChunkLocation(updatedLocation.GlobalIndex);
@@ -472,7 +461,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     }
 
     /// <summary>
-    /// Gets the thread-safe entity ID allocator for constructing <see cref="EntityCommandBuffer"/> instances.
+    /// Gets the thread-safe entity ID allocator backing this world's entity manager.
     /// </summary>
     public EntityIdAllocator EntityIdAllocator
     {
@@ -675,6 +664,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private EntityLocation GetValidatedLocation(Entity entity)
     {
+        AssertNotPlaceholder(entity);
         if (!entity.IsValid)
             throw new InvalidOperationException("Invalid entity handle.");
 

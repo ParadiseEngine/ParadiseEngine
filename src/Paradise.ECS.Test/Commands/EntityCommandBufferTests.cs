@@ -24,37 +24,51 @@ public sealed class EntityCommandBufferTests : IDisposable
     }
 
     [Test]
-    public async Task Spawn_ReturnsEntityWithRealId()
+    public async Task Spawn_ReturnsPlaceholderEntity()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var entity = ecb.Spawn();
 
-        await Assert.That(entity.Id).IsGreaterThanOrEqualTo(0);
+        await Assert.That(entity.IsPlaceholder).IsTrue();
+        await Assert.That(entity.Id).IsLessThan(0);
         await Assert.That(entity.IsValid).IsTrue();
     }
 
     [Test]
-    public async Task Spawn_MultipleDeferredEntities_HaveUniqueNonNegativeIds()
+    public async Task Spawn_MultipleDeferredEntities_HaveUniquePlaceholderIds()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var d1 = ecb.Spawn();
         var d2 = ecb.Spawn();
         var d3 = ecb.Spawn();
 
-        await Assert.That(d1.Id).IsGreaterThanOrEqualTo(0);
-        await Assert.That(d2.Id).IsGreaterThanOrEqualTo(0);
-        await Assert.That(d3.Id).IsGreaterThanOrEqualTo(0);
+        await Assert.That(d1.IsPlaceholder).IsTrue();
+        await Assert.That(d2.IsPlaceholder).IsTrue();
+        await Assert.That(d3.IsPlaceholder).IsTrue();
         await Assert.That(d1.Id).IsNotEqualTo(d2.Id);
         await Assert.That(d2.Id).IsNotEqualTo(d3.Id);
         await Assert.That(d1.Id).IsNotEqualTo(d3.Id);
     }
 
     [Test]
+    public async Task Spawn_DoesNotTouchAllocatorAtRecordTime()
+    {
+        using var ecb = new EntityCommandBuffer();
+        int freshIdBefore = _world.EntityIdAllocator.PeekNextFreshId();
+
+        ecb.Spawn();
+        ecb.Spawn();
+
+        // Real IDs are allocated at Playback, not at record time
+        await Assert.That(_world.EntityIdAllocator.PeekNextFreshId()).IsEqualTo(freshIdBefore);
+    }
+
+    [Test]
     public async Task Spawn_Playback_CreatesRealEntity()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         ecb.Spawn();
 
         int countBefore = _world.EntityCount;
@@ -66,7 +80,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Spawn_MultiplePlayback_CreatesMultipleEntities()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         ecb.Spawn();
         ecb.Spawn();
         ecb.Spawn();
@@ -81,7 +95,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     public async Task Despawn_ExistingEntity_RemovedAfterPlayback()
     {
         var entity = _world.Spawn();
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.Despawn(entity);
         ecb.Playback(_world);
@@ -93,7 +107,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     public async Task Despawn_DeferredSpawnThenDespawn_NetZero()
     {
         int countBefore = _world.EntityCount;
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var deferred = ecb.Spawn();
         ecb.Despawn(deferred);
@@ -105,15 +119,17 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task AddComponent_OnDeferredEntity_Playback_AddsComponent()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var deferred = ecb.Spawn();
         ecb.AddComponent(deferred, new TestPosition { X = 10, Y = 20, Z = 30 });
         ecb.Playback(_world);
 
-        // The deferred entity now has a real, stable ID — use it directly
-        await Assert.That(_world.HasComponent<TestPosition>(deferred)).IsTrue();
-        var pos = _world.GetComponent<TestPosition>(deferred);
+        // Resolve the placeholder to the real entity created at playback
+        var real = ecb.Resolve(deferred);
+        await Assert.That(real.IsPlaceholder).IsFalse();
+        await Assert.That(_world.HasComponent<TestPosition>(real)).IsTrue();
+        var pos = _world.GetComponent<TestPosition>(real);
         await Assert.That(pos.X).IsEqualTo(10f);
         await Assert.That(pos.Y).IsEqualTo(20f);
         await Assert.That(pos.Z).IsEqualTo(30f);
@@ -123,7 +139,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     public async Task AddComponent_OnExistingEntity_Playback_AddsComponent()
     {
         var entity = _world.Spawn();
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.AddComponent(entity, new TestPosition { X = 42 });
         ecb.Playback(_world);
@@ -137,7 +153,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     public async Task AddComponent_TagComponent_Playback_AddsTag()
     {
         var entity = _world.Spawn();
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.AddComponent<TestTag>(entity);
         ecb.Playback(_world);
@@ -148,7 +164,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task AddComponent_MultipleComponentsOnSameEntity_Playback_AllPresent()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var deferred = ecb.Spawn();
         ecb.AddComponent(deferred, new TestPosition { X = 1 });
@@ -156,13 +172,14 @@ public sealed class EntityCommandBufferTests : IDisposable
         ecb.AddComponent(deferred, new TestHealth { Current = 100, Max = 200 });
         ecb.Playback(_world);
 
-        await Assert.That(_world.HasComponent<TestPosition>(deferred)).IsTrue();
-        await Assert.That(_world.HasComponent<TestVelocity>(deferred)).IsTrue();
-        await Assert.That(_world.HasComponent<TestHealth>(deferred)).IsTrue();
+        var real = ecb.Resolve(deferred);
+        await Assert.That(_world.HasComponent<TestPosition>(real)).IsTrue();
+        await Assert.That(_world.HasComponent<TestVelocity>(real)).IsTrue();
+        await Assert.That(_world.HasComponent<TestHealth>(real)).IsTrue();
 
-        await Assert.That(_world.GetComponent<TestPosition>(deferred).X).IsEqualTo(1f);
-        await Assert.That(_world.GetComponent<TestVelocity>(deferred).X).IsEqualTo(2f);
-        var health = _world.GetComponent<TestHealth>(deferred);
+        await Assert.That(_world.GetComponent<TestPosition>(real).X).IsEqualTo(1f);
+        await Assert.That(_world.GetComponent<TestVelocity>(real).X).IsEqualTo(2f);
+        var health = _world.GetComponent<TestHealth>(real);
         await Assert.That(health.Current).IsEqualTo(100);
         await Assert.That(health.Max).IsEqualTo(200);
     }
@@ -172,7 +189,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     {
         var entity = _world.Spawn();
         _world.AddComponent(entity, new TestPosition { X = 10 });
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.RemoveComponent<TestPosition>(entity);
         ecb.Playback(_world);
@@ -185,7 +202,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     public async Task RemoveComponent_MissingComponent_Playback_Throws()
     {
         var entity = _world.Spawn();
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.RemoveComponent<TestPosition>(entity);
 
@@ -197,7 +214,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     {
         var entity = _world.Spawn();
         _world.AddComponent(entity, new TestPosition { X = 1, Y = 2, Z = 3 });
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.SetComponent(entity, new TestPosition { X = 10, Y = 20, Z = 30 });
         ecb.Playback(_world);
@@ -213,7 +230,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     {
         var entity = _world.Spawn();
         _world.AddComponent<TestTag>(entity);
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         ecb.SetComponent<TestTag>(entity);
         ecb.Playback(_world);
@@ -224,7 +241,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Mixed_SpawnAddSetDespawn_Sequence()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         var existing = _world.Spawn();
         _world.AddComponent(existing, new TestHealth { Current = 50, Max = 100 });
 
@@ -238,16 +255,17 @@ public sealed class EntityCommandBufferTests : IDisposable
         // Existing entity should be despawned
         await Assert.That(_world.IsAlive(existing)).IsFalse();
 
-        // Deferred entity should exist with Position — use its real ID directly
-        await Assert.That(_world.IsAlive(deferred)).IsTrue();
-        await Assert.That(_world.HasComponent<TestPosition>(deferred)).IsTrue();
-        await Assert.That(_world.GetComponent<TestPosition>(deferred).X).IsEqualTo(5f);
+        // Deferred entity should exist with Position — resolve the placeholder first
+        var real = ecb.Resolve(deferred);
+        await Assert.That(_world.IsAlive(real)).IsTrue();
+        await Assert.That(_world.HasComponent<TestPosition>(real)).IsTrue();
+        await Assert.That(_world.GetComponent<TestPosition>(real).X).IsEqualTo(5f);
     }
 
     [Test]
     public async Task Mixed_MultipleDeferredEntities_IndependentState()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         var d1 = ecb.Spawn();
         var d2 = ecb.Spawn();
@@ -258,16 +276,19 @@ public sealed class EntityCommandBufferTests : IDisposable
 
         ecb.Playback(_world);
 
-        await Assert.That(_world.GetComponent<TestPosition>(d1).X).IsEqualTo(100f);
-        await Assert.That(_world.GetComponent<TestPosition>(d2).X).IsEqualTo(200f);
-        await Assert.That(_world.HasComponent<TestVelocity>(d1)).IsTrue();
-        await Assert.That(_world.HasComponent<TestVelocity>(d2)).IsFalse();
+        var r1 = ecb.Resolve(d1);
+        var r2 = ecb.Resolve(d2);
+        await Assert.That(r1).IsNotEqualTo(r2);
+        await Assert.That(_world.GetComponent<TestPosition>(r1).X).IsEqualTo(100f);
+        await Assert.That(_world.GetComponent<TestPosition>(r2).X).IsEqualTo(200f);
+        await Assert.That(_world.HasComponent<TestVelocity>(r1)).IsTrue();
+        await Assert.That(_world.HasComponent<TestVelocity>(r2)).IsFalse();
     }
 
     [Test]
     public async Task EmptyPlayback_IsNoOp()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         int countBefore = _world.EntityCount;
 
         ecb.Playback(_world);
@@ -278,7 +299,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Clear_ResetsBuffer()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         ecb.Spawn();
         ecb.Spawn();
 
@@ -291,7 +312,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Clear_AllowsReuse()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         ecb.Spawn();
         ecb.Playback(_world);
 
@@ -307,7 +328,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task CommandCount_TracksRecordedCommands()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
 
         await Assert.That(ecb.CommandCount).IsEqualTo(0);
         await Assert.That(ecb.IsEmpty).IsTrue();
@@ -324,7 +345,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Dispose_PreventsRecording()
     {
-        var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        var ecb = new EntityCommandBuffer();
         ecb.Dispose();
 
         await Assert.That(ecb.Spawn).ThrowsExactly<ObjectDisposedException>();
@@ -333,7 +354,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Dispose_PreventsPlayback()
     {
-        var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        var ecb = new EntityCommandBuffer();
         ecb.Dispose();
 
         await Assert.That(() => ecb.Playback(_world)).ThrowsExactly<ObjectDisposedException>();
@@ -461,7 +482,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Spawn_ManyDeferredEntities_Works()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         const int count = 200;
         for (int i = 0; i < count; i++)
             ecb.Spawn();
@@ -496,7 +517,7 @@ public sealed class EntityCommandBufferTests : IDisposable
     [Test]
     public async Task Playback_CalledTwice_Throws()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
+        using var ecb = new EntityCommandBuffer();
         ecb.Spawn();
         ecb.Playback(_world);
 
@@ -504,66 +525,129 @@ public sealed class EntityCommandBufferTests : IDisposable
     }
 
     [Test]
-    public async Task Dispose_WithoutPlayback_ReleasesReservedIds()
+    public async Task Dispose_WithoutPlayback_LeavesAllocatorUntouched()
     {
-        int idBefore;
+        int freshIdBefore = _world.EntityIdAllocator.PeekNextFreshId();
         {
-            var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
-            var entity = ecb.Spawn();
-            idBefore = entity.Id;
-            // Dispose without Playback — should release the reserved ID
+            var ecb = new EntityCommandBuffer();
+            ecb.Spawn();
+            // Dispose without Playback — nothing was reserved, so nothing to release
             ecb.Dispose();
         }
 
-        // The released ID should be reused by the next reservation
-        using var ecb2 = new EntityCommandBuffer(_world.EntityIdAllocator);
-        var reused = ecb2.Spawn();
-        await Assert.That(reused.Id).IsEqualTo(idBefore);
+        await Assert.That(_world.EntityIdAllocator.PeekNextFreshId()).IsEqualTo(freshIdBefore);
     }
 
     [Test]
-    public async Task Clear_WithoutPlayback_ReleasesReservedIds()
+    public async Task Clear_AfterPlayback_SpawnedEntityStaysAlive()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
-        var entity = ecb.Spawn();
-        int idBefore = entity.Id;
-
-        ecb.Clear();
-
-        // The released ID should be reused by the next reservation
-        var reused = ecb.Spawn();
-        await Assert.That(reused.Id).IsEqualTo(idBefore);
-    }
-
-    [Test]
-    public async Task Clear_AfterPlayback_DoesNotReleaseIds()
-    {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
-        var entity = ecb.Spawn();
-        int playedId = entity.Id;
+        using var ecb = new EntityCommandBuffer();
+        var deferred = ecb.Spawn();
         ecb.Playback(_world);
+        var real = ecb.Resolve(deferred);
 
         ecb.Clear();
 
         // The played-back entity should still be alive
-        await Assert.That(_world.IsAlive(entity)).IsTrue();
+        await Assert.That(_world.IsAlive(real)).IsTrue();
 
-        // Next spawn should get a new ID, not the played-back one
+        // A new recording resolves independently: next playback creates a different entity
         var next = ecb.Spawn();
-        await Assert.That(next.Id).IsNotEqualTo(playedId);
+        ecb.Playback(_world);
+        await Assert.That(ecb.Resolve(next)).IsNotEqualTo(real);
+    }
+
+    // ---- Placeholder semantics (DEBUG guards) ----
+
+    [Test]
+    public async Task Placeholder_ChainedSpawnAddSet_RemapsToSameRealEntity()
+    {
+        using var ecb = new EntityCommandBuffer();
+
+        var deferred = ecb.Spawn();
+        ecb.AddComponent(deferred, new TestPosition { X = 1 });
+        ecb.SetComponent(deferred, new TestPosition { X = 2, Y = 3, Z = 4 });
+        ecb.AddComponent<TestTag>(deferred);
+        ecb.Playback(_world);
+
+        var real = ecb.Resolve(deferred);
+        await Assert.That(_world.IsAlive(real)).IsTrue();
+        var pos = _world.GetComponent<TestPosition>(real);
+        await Assert.That(pos.X).IsEqualTo(2f);
+        await Assert.That(pos.Y).IsEqualTo(3f);
+        await Assert.That(pos.Z).IsEqualTo(4f);
+        await Assert.That(_world.HasComponent<TestTag>(real)).IsTrue();
     }
 
     [Test]
-    public async Task Spawn_EntityNotAliveBeforePlayback()
+    public async Task Placeholder_PassedToDifferentBuffer_ThrowsInDebug()
     {
-        using var ecb = new EntityCommandBuffer(_world.EntityIdAllocator);
-        var entity = ecb.Spawn();
+        using var ecb1 = new EntityCommandBuffer();
+        using var ecb2 = new EntityCommandBuffer();
+        var foreign = ecb1.Spawn();
 
-        // Entity has a real ID but is not alive until Playback
-        await Assert.That(_world.IsAlive(entity)).IsFalse();
+        await Assert.That(() => ecb2.AddComponent(foreign, new TestPosition { X = 1 }))
+            .ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => ecb2.Despawn(foreign)).ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => ecb2.SetComponent(foreign, new TestPosition()))
+            .ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => ecb2.RemoveComponent<TestPosition>(foreign))
+            .ThrowsExactly<InvalidOperationException>();
+    }
 
-        ecb.Playback(_world);
+    [Test]
+    public async Task Placeholder_PassedToWorldMethods_ThrowsInDebug()
+    {
+        using var ecb = new EntityCommandBuffer();
+        var placeholder = ecb.Spawn();
 
-        await Assert.That(_world.IsAlive(entity)).IsTrue();
+        await Assert.That(() => _world.IsAlive(placeholder)).ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => _world.GetComponent<TestPosition>(placeholder))
+            .ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => _world.AddComponent(placeholder, new TestPosition()))
+            .ThrowsExactly<InvalidOperationException>();
+        await Assert.That(() => _world.Despawn(placeholder)).ThrowsExactly<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task Placeholder_FromClearedRecording_ThrowsOnReuse()
+    {
+        using var ecb = new EntityCommandBuffer();
+        var stale = ecb.Spawn();
+        ecb.Clear();
+
+        // The recording that created the placeholder is gone — reuse must throw (DEBUG)
+        await Assert.That(() => ecb.AddComponent(stale, new TestPosition()))
+            .ThrowsExactly<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task Resolve_BeforePlayback_Throws()
+    {
+        using var ecb = new EntityCommandBuffer();
+        var deferred = ecb.Spawn();
+
+        await Assert.That(() => ecb.Resolve(deferred)).ThrowsExactly<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task Resolve_RealEntity_PassesThrough()
+    {
+        using var ecb = new EntityCommandBuffer();
+        var real = _world.Spawn();
+
+        await Assert.That(ecb.Resolve(real)).IsEqualTo(real);
+    }
+
+    [Test]
+    public async Task Resolve_ForeignPlaceholder_Throws()
+    {
+        using var ecb1 = new EntityCommandBuffer();
+        using var ecb2 = new EntityCommandBuffer();
+        var foreign = ecb1.Spawn();
+        ecb2.Spawn();
+        ecb2.Playback(_world);
+
+        await Assert.That(() => ecb2.Resolve(foreign)).ThrowsExactly<InvalidOperationException>();
     }
 }

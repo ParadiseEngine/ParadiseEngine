@@ -85,7 +85,7 @@ public interface IWorld<TMask, TConfig>
     ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry { get; }
 
     /// <summary>
-    /// Gets the thread-safe entity ID allocator for constructing <see cref="EntityCommandBuffer"/> instances.
+    /// Gets the thread-safe entity ID allocator backing this world's entity manager.
     /// </summary>
     EntityIdAllocator EntityIdAllocator { get; }
 
@@ -116,15 +116,6 @@ public interface IWorld<TMask, TConfig>
     /// <param name="builder">The component builder with components to add or update.</param>
     /// <returns>The entity handle.</returns>
     Entity AddComponents<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
-
-    /// <summary>
-    /// Materializes a reserved entity by registering it in the entity manager
-    /// and placing it in the empty archetype. Used by <see cref="EntityCommandBuffer"/>
-    /// during playback for entities reserved via <see cref="EntityIdAllocator.Reserve"/>.
-    /// Idempotent — no-op if the entity is already materialized.
-    /// </summary>
-    /// <param name="entity">The reserved entity to materialize.</param>
-    void MaterializeEntity(Entity entity);
 
     /// <summary>
     /// Adds a component to an entity using raw bytes. This is a structural change that may move the entity.

@@ -54,6 +54,10 @@ public delegate void SystemRunWorldAction<TMask, TConfig>(
 /// via the <see cref="IWaveScheduler"/> provided to the builder.
 /// ECB playback happens once after all waves complete, so structural changes from commands
 /// are NOT visible within the same <see cref="Run()"/> call.
+/// Each work item receives its own <see cref="EntityCommandBuffer"/>, rented in schedule order
+/// and played back in that same order — so structural changes are deterministic: any
+/// <see cref="IWaveScheduler"/> (sequential or parallel, any thread count) produces an identical
+/// world, including entity IDs.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -84,7 +88,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         _worldDispatchers = worldDispatchers;
         _metadata = metadata;
         _scheduler = scheduler;
-        _ecbPool = new EntityCommandBufferPool(world.EntityIdAllocator);
+        _ecbPool = new EntityCommandBufferPool();
     }
 
     /// <summary>
@@ -132,7 +136,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         // (Spawn/Despawn/Add-/RemoveComponent/…) throw — systems must use their injected
         // EntityCommandBuffer. try/finally keeps the flag exception-safe (a throwing system
         // must not wedge the world), and it is cleared BEFORE _ecbPool.PlaybackAll below so
-        // playback's MaterializeEntity/structural work is not blocked.
+        // playback's Spawn/structural work is not blocked.
         _world.SetSystemRunInProgress(true);
         try
         {
@@ -149,6 +153,10 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
     private void RunWaves(IWorld<TMask, TConfig>? readWorld)
     {
+        // Work items are constructed on this thread in (wave, position-in-wave, chunk) order,
+        // and each rents its own ECB from the pool at construction time. Rent order therefore
+        // equals schedule order, and PlaybackAll replays in that same order — commands apply as
+        // if the schedule had run serially, independent of the wave scheduler's threading.
         foreach (var wave in _waves)
         {
             _workItems.Clear();
@@ -158,7 +166,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                 if (_worldDispatchers[systemId] is { } worldDispatcher)
                 {
                     _workItems.Add(new WorkItem<TMask, TConfig>(
-                        systemId, worldDispatcher, _world, readWorld, _ecbPool));
+                        systemId, worldDispatcher, _world, readWorld, _ecbPool.Rent()));
                     continue;
                 }
 
@@ -179,7 +187,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                         readWorld,
                         ci.Archetype.Layout.DataPointer,
                         ci.EntityCount,
-                        _ecbPool));
+                        _ecbPool.Rent()));
                 }
             }
             _scheduler.Execute(_workItems);
