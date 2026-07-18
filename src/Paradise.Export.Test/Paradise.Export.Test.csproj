@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for the engine-neutral export core: JSON round-trip + golden fixtures (real
+    Unity exports), contract matrix order, collider scale fold, DotRecast writer, and the
+    ktx CLI pipeline (end-to-end encode self-skips when the vendored tool is absent for the
+    platform). The committed-data cross-check against a real editor export lives with the
+    editor repo (ParadiseGodotEditor), not here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Benign: Microsoft.Testing.Platform ships resource locales the SDK doesn't recognize. -->
+    <NoWarn>$(NoWarn);NETSDK1188</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Golden fixtures (real Unity exports) copied next to the test assembly. -->
+    <None Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -87,6 +87,7 @@ jobs:
             Paradise.BT.Builder
             Paradise.BT.Nodes
             Paradise.ECS
+            Paradise.Export
             Paradise.ECS.Tag
             Paradise.ECS.Concurrent
             Paradise.ECS.Jobs

@@ -14,6 +14,11 @@
     <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
+    <!-- Export pipeline (match the DotRecast version ParadiseUnityEditor vendored — navmesh
+         binary format must stay identical to what the runtime expects) -->
+    <PackageVersion Include="DotRecast.Core" Version="2026.1.3" />
+    <PackageVersion Include="DotRecast.Detour" Version="2026.1.3" />
+    <PackageVersion Include="DotRecast.Recast" Version="2026.1.3" />
     <!-- Testing (TUnit with Native AOT support) -->
     <PackageVersion Include="TUnit" Version="1.11.16" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
