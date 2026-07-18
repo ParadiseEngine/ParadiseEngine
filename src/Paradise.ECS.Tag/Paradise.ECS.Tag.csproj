@@ -4,6 +4,10 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <Title>Paradise.ECS.Tag</Title>
+    <PackageId>Paradise.ECS.Tag</PackageId>
+    <Description>Zero-size tag component support for Paradise.ECS.</Description>
+    <PackageTags>ecs;tag-components;nativeaot;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -12,6 +12,17 @@
     <Version>0.1.1</Version>
   </PropertyGroup>
 
+  <!-- Shared NuGet package metadata. Per-project csproj supplies Description and
+       PackageTags; tests/samples/benchmarks/generators opt out via IsPackable=false. -->
+  <PropertyGroup>
+    <Authors>ParadiseEngine</Authors>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
   <ItemGroup>
     <Link Include="../.editorconfig" />
   </ItemGroup>

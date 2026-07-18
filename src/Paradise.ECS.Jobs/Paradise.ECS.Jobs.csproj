@@ -8,6 +8,10 @@
       target net10.0 only (see Paradise.ECS.Common.props for the rationale).
     -->
     <TargetFramework>net10.0</TargetFramework>
+    <Title>Paradise.ECS.Jobs</Title>
+    <PackageId>Paradise.ECS.Jobs</PackageId>
+    <Description>Parallel job scheduling over Paradise.ECS chunks: dependency-tracked system jobs with deterministic execution.</Description>
+    <PackageTags>ecs;jobs;parallel;scheduling;nativeaot;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

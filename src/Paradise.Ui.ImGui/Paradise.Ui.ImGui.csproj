@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Title>Paradise.Ui.ImGui</Title>
+    <PackageId>Paradise.Ui.ImGui</PackageId>
+    <Description>Dear ImGui overlay integration for Paradise Engine: ImGui.NET-driven debug UI rendered through the WebGPU backend.</Description>
+    <PackageTags>imgui;ui;overlay;webgpu;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
