@@ -1,9 +1,9 @@
 # Paradise Engine
 
 A modular .NET game engine monorepo: archetype ECS, behavior trees, stateless physics
-queries, a WebGPU (Dawn) renderer with a Slang shader pipeline, glTF/KTX2 asset loading,
-and ImGui/NoesisGUI UI integrations. Targets `net10.0`, C# 14, NativeAOT/trimming
-compatible throughout.
+queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline,
+glTF/KTX2 asset loading, and ImGui/NoesisGUI UI integrations. Targets `net10.0`, C# 14,
+NativeAOT/trimming compatible.
 
 All library packages are published to NuGet from a single version tag.
 
@@ -14,7 +14,7 @@ All library packages are published to NuGet from a single version tag.
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.BLOB](src/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
-| [Paradise.Physics](src/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries: static colliders, raycasts, shape casts |
+| [Paradise.Physics](src/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
 
 ### ECS
 
