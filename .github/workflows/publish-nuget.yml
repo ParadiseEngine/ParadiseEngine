@@ -33,6 +33,16 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Paradise.Rendering.Pbr embeds Slang-compiled shaders; cache the slangc toolchain
+      # exactly like dotnet-test.yml does (keyed on the manifest so version bumps invalidate).
+      - name: Cache slangc
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_slang
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
+          restore-keys: |
+            slang-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Resolve package version
         shell: bash
         run: |
@@ -64,46 +74,45 @@ jobs:
 
           echo "value=$user" >> "$GITHUB_OUTPUT"
 
-      - name: Restore packable projects
+      # Every packable library in src/. Listed in rough dependency order so incremental
+      # builds reuse shared ProjectReference outputs. Source generators are not published
+      # standalone: Paradise.BT.Generators ships inside Paradise.BT, Paradise.ECS.Generators
+      # inside Paradise.ECS (analyzers/dotnet/cs).
+      - name: Pack all packages
+        shell: bash
         run: |
-          dotnet restore src/Paradise.BLOB/Paradise.BLOB.csproj
-          dotnet restore src/Paradise.BT/Paradise.BT.csproj
+          projects=(
+            Paradise.BLOB
+            Paradise.BT
+            Paradise.BT.Builder
+            Paradise.BT.Nodes
+            Paradise.ECS
+            Paradise.ECS.Tag
+            Paradise.ECS.Concurrent
+            Paradise.ECS.Jobs
+            Paradise.Physics
+            Paradise.Rendering
+            Paradise.Rendering.WebGPU
+            Paradise.Assets.Gltf
+            Paradise.Assets.Textures
+            Paradise.Rendering.Pbr
+            Paradise.Ui.ImGui
+            Paradise.Ui.Noesis
+          )
 
-      - name: Build Paradise.BLOB
-        run: >
-          dotnet build src/Paradise.BLOB/Paradise.BLOB.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-restore
-          -p:ContinuousIntegrationBuild=true
-          -p:Version=${{ env.PACKAGE_VERSION }}
+          for project in "${projects[@]}"; do
+            dotnet pack "src/$project/$project.csproj" \
+              -c "$CONFIGURATION" \
+              -o "$PACKAGE_OUTPUT_DIR" \
+              -p:ContinuousIntegrationBuild=true \
+              -p:Version="$PACKAGE_VERSION"
+          done
 
-      - name: Build Paradise.BT
-        run: >
-          dotnet build src/Paradise.BT/Paradise.BT.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-restore
-          -p:ContinuousIntegrationBuild=true
-          -p:Version=${{ env.PACKAGE_VERSION }}
-
-      - name: Pack Paradise.BLOB
-        run: >
-          dotnet pack src/Paradise.BLOB/Paradise.BLOB.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-build
-          --no-restore
-          -o ${{ env.PACKAGE_OUTPUT_DIR }}
-          -p:ContinuousIntegrationBuild=true
-          -p:Version=${{ env.PACKAGE_VERSION }}
-
-      - name: Pack Paradise.BT
-        run: >
-          dotnet pack src/Paradise.BT/Paradise.BT.csproj
-          -c ${{ env.CONFIGURATION }}
-          --no-build
-          --no-restore
-          -o ${{ env.PACKAGE_OUTPUT_DIR }}
-          -p:ContinuousIntegrationBuild=true
-          -p:Version=${{ env.PACKAGE_VERSION }}
+          count=$(ls "$PACKAGE_OUTPUT_DIR"/*.nupkg | wc -l)
+          if [[ "$count" -ne "${#projects[@]}" ]]; then
+            echo "::error::Expected ${#projects[@]} packages, found $count"
+            exit 1
+          fi
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1

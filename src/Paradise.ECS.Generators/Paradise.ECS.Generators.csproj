@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <IsRoslynComponent>true</IsRoslynComponent>
+    <!-- Not published standalone: shipped inside Paradise.ECS under analyzers/dotnet/cs. -->
+    <IsPackable>false</IsPackable>
     <!-- Suppress analyzer release tracking requirement for internal generator -->
     <NoWarn>$(NoWarn);RS2008</NoWarn>
   </PropertyGroup>

@@ -4,6 +4,10 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <Title>Paradise.ECS</Title>
+    <PackageId>Paradise.ECS</PackageId>
+    <Description>Archetype-based ECS core for Paradise Engine: chunked component storage, source-generated queryables and systems, deterministic snapshots. NativeAOT-compatible.</Description>
+    <PackageTags>ecs;entity-component-system;archetype;nativeaot;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +21,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the source generator inside the package (same pattern as Paradise.BT). -->
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.ECS.Generators\bin\$(Configuration)\netstandard2.0\Paradise.ECS.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>
