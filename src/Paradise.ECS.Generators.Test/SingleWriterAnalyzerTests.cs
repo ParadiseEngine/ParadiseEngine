@@ -373,6 +373,67 @@ public class SingleWriterAnalyzerTests
     }
 
     [Test]
+    public async Task singleton_composition_fields_count_writable_with_components_as_writers()
+    {
+        // Runs generators first so the {Prefix}Singleton alias resolves to the generated nested
+        // Queryable.Singleton struct — the analyzer must see it through the SAME containing-type
+        // path as existing composition fields.
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable(Singleton = true)]
+            [With<Position>]
+            public readonly ref partial struct Board;
+
+            public ref partial struct FirstBonusSystem : Paradise.ECS.IEntitySystem
+            {
+                public BoardSingleton Board;
+                public void Execute() { }
+            }
+
+            public ref partial struct SecondBonusSystem : Paradise.ECS.IEntitySystem
+            {
+                public BoardSingleton Board;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'Position'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'FirstBonusSystem'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'SecondBonusSystem'", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
+    public async Task current_tick_singleton_reader_with_one_writer_passes()
+    {
+        // [CurrentTick] reads fresh values but claims NO write — one real writer plus the
+        // CurrentTick reader must not trip single-writer enforcement.
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable(Singleton = true)]
+            [With<Position>(IsReadOnly = true)]
+            public readonly ref partial struct Observed;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct FreshReaderSystem : Paradise.ECS.IEntitySystem
+            {
+                [Paradise.ECS.CurrentTick] public ObservedSingleton Observed;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task non_system_ref_structs_are_ignored()
     {
         var diagnostics = await Analyze(MarkedComponent + """

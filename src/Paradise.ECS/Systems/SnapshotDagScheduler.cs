@@ -4,7 +4,8 @@ namespace Paradise.ECS;
 /// DAG scheduler for SNAPSHOT-READ execution (<c>SystemSchedule.Run(readWorld)</c> with
 /// <c>[assembly: SnapshotReadSystems]</c> codegen): read-only fields bind to the immutable
 /// previous-tick world, so read-vs-write conflicts cannot alias and only <b>write ∩ write</b>
-/// overlaps (plus explicit <c>[After]</c>/<c>[Before]</c> edges) split systems into waves.
+/// overlaps (plus explicit <c>[After]</c>/<c>[Before]</c> edges, plus implicit writer →
+/// <c>[CurrentTick]</c>-fresh-reader edges) split systems into waves.
 /// With <c>[SingleWriter]</c> components (PECS3008) writes are disjoint by construction and the
 /// schedule collapses to a single, fully parallel wave.
 ///
@@ -49,6 +50,11 @@ public sealed class SnapshotDagScheduler : IDagScheduler
                 }
             }
         }
+
+        // [CurrentTick] fresh reads bind to the WRITE world even in snapshot mode: a fresh
+        // reader must observe same-tick writes, so every system writing a fresh-read component
+        // becomes an implicit predecessor — the reader lands in a strictly LATER wave.
+        AddFreshReadEdges(systems, adj, predAdj, inDegree);
 
         // Topological sort (Kahn's algorithm)
         var queue = new Queue<int>();
@@ -114,8 +120,35 @@ public sealed class SnapshotDagScheduler : IDagScheduler
     }
 
     /// <summary>Snapshot mode: reads bind to the immutable world and can never alias writes —
-    /// only overlapping WRITE sets force separate waves.</summary>
+    /// only overlapping WRITE sets (or a write overlapping a <c>[CurrentTick]</c> fresh read)
+    /// force separate waves.</summary>
     private static bool HasWriteConflict<TMask>(SystemMetadata<TMask> a, SystemMetadata<TMask> b)
         where TMask : unmanaged, IBitSet<TMask>
-        => a.WriteMask.ContainsAny(b.WriteMask);
+        => a.WriteMask.ContainsAny(b.WriteMask)
+        || a.WriteMask.ContainsAny(b.FreshReadMask)
+        || b.WriteMask.ContainsAny(a.FreshReadMask);
+
+    /// <summary>Adds implicit writer → fresh-reader dependency edges: any system whose write set
+    /// overlaps another system's <see cref="SystemMetadata{TMask}.FreshReadMask"/> must run
+    /// first, so the CurrentTick reader observes the same-tick write. Mutually fresh-reading
+    /// writers form a cycle and are rejected like any other cyclic dependency.</summary>
+    internal static void AddFreshReadEdges<TMask>(
+        ReadOnlySpan<SystemMetadata<TMask>> systems,
+        List<int>[] adj,
+        List<int>[] predAdj,
+        int[] inDegree)
+        where TMask : unmanaged, IBitSet<TMask>
+    {
+        for (int writer = 0; writer < systems.Length; writer++)
+        {
+            for (int reader = 0; reader < systems.Length; reader++)
+            {
+                if (writer == reader) continue;
+                if (!systems[writer].WriteMask.ContainsAny(systems[reader].FreshReadMask)) continue;
+                adj[writer].Add(reader);
+                predAdj[reader].Add(writer);
+                inDegree[reader]++;
+            }
+        }
+    }
 }

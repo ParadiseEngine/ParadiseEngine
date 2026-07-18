@@ -136,7 +136,8 @@ public class SystemGenerator : IIncrementalGenerator
                     field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     null, ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isRefField: fieldIsRef, errorTypeName: errorTypeName));
+                    isRefField: fieldIsRef, errorTypeName: errorTypeName,
+                    isCurrentTick: HasCurrentTickAttribute(field)));
             }
             else
             {
@@ -197,6 +198,17 @@ public class SystemGenerator : IIncrementalGenerator
             ? typeSymbol.Name
             : string.Join("", containingTypes.Select(ct => ct.Name)) + typeSymbol.Name;
 
+        // Read the Singleton flag from [Queryable(Singleton = true)]
+        bool isSingleton = false;
+        foreach (var attr in ctx.Attributes)
+        {
+            foreach (var namedArg in attr.NamedArguments)
+            {
+                if (namedArg.Key == "Singleton" && namedArg.Value.Value is bool singleton)
+                    isSingleton = singleton;
+            }
+        }
+
         // Collect With/Without/WithAny/Optional component info
         var withComponents = new List<QueryableComponentAccess>();
         var withoutComponents = new List<string>();
@@ -248,7 +260,7 @@ public class SystemGenerator : IIncrementalGenerator
         }
 
         return new QueryableLookupInfo(
-            prefix, fqn,
+            prefix, fqn, isSingleton,
             withComponents.ToImmutableArray(),
             withoutComponents.ToImmutableArray(),
             withAnyComponents.ToImmutableArray(),
@@ -297,6 +309,17 @@ public class SystemGenerator : IIncrementalGenerator
                     resolvedKind = FieldKind.CompositionSegments;
                 }
             }
+            // Try {prefix}Singleton → CompositionSingleton (any system kind; queryable must opt
+            // in via [Queryable(Singleton = true)] — otherwise left Invalid for PECS3010).
+            else if (name.EndsWith("Singleton", StringComparison.Ordinal) && name.Length > 9)
+            {
+                var prefix = name.Substring(0, name.Length - 9);
+                if (queryableLookup.TryGetValue(prefix, out var singletonInfo) && singletonInfo.IsSingleton)
+                {
+                    matched = singletonInfo;
+                    resolvedKind = FieldKind.CompositionSingleton;
+                }
+            }
             // Try {prefix}Chunk → CompositionChunkData (chunk system)
             else if (name.EndsWith("Chunk", StringComparison.Ordinal) && name.Length > 5)
             {
@@ -318,7 +341,8 @@ public class SystemGenerator : IIncrementalGenerator
                     matched.Value.WithoutComponents,
                     matched.Value.WithAnyComponents,
                     queryableOptionalComponents: matched.Value.OptionalComponents,
-                    isRefField: true));
+                    isRefField: true,
+                    isCurrentTick: field.IsCurrentTick));
             }
             else
             {
@@ -346,6 +370,7 @@ public class SystemGenerator : IIncrementalGenerator
         var fieldType = field.Type;
         bool isRef = field.RefKind != RefKind.None;
         bool isRefReadOnly = isRef && IsRefReadOnlySyntax(field);
+        bool isCurrentTick = HasCurrentTickAttribute(field);
 
         // ref T or ref readonly T where T has [Component] or [Tag] attribute → InlineComponent
         if (isRef && fieldType is INamedTypeSymbol refNamedType)
@@ -357,7 +382,8 @@ public class SystemGenerator : IIncrementalGenerator
                     fieldType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     GeneratorUtilities.GetFullyQualifiedName(refNamedType),
                     ImmutableArray<QueryableComponentAccess>.Empty,
-                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                    isCurrentTick: isCurrentTick);
             }
         }
 
@@ -369,7 +395,8 @@ public class SystemGenerator : IIncrementalGenerator
                 field.Name, FieldKind.CommandBuffer, false,
                 "global::Paradise.ECS.EntityCommandBuffer",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
-                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                isCurrentTick: isCurrentTick);
         }
 
         // Entity field → EntityHandle (for entity systems)
@@ -380,7 +407,8 @@ public class SystemGenerator : IIncrementalGenerator
                 field.Name, FieldKind.EntityHandle, false,
                 "global::Paradise.ECS.Entity",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
-                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                isCurrentTick: isCurrentTick);
         }
 
         // Span<T> / ReadOnlySpan<T> where T has [Component] attribute → InlineSpan
@@ -398,7 +426,8 @@ public class SystemGenerator : IIncrementalGenerator
                     field.Name, FieldKind.EntitySpan, true,
                     "global::System.ReadOnlySpan<global::Paradise.ECS.Entity>",
                     null, ImmutableArray<QueryableComponentAccess>.Empty,
-                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                    isCurrentTick: isCurrentTick);
             }
 
             if (origDef.Name == "Span" &&
@@ -411,7 +440,8 @@ public class SystemGenerator : IIncrementalGenerator
                     fieldType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     GeneratorUtilities.GetFullyQualifiedName(spanArg),
                     ImmutableArray<QueryableComponentAccess>.Empty,
-                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                    isCurrentTick: isCurrentTick);
             }
 
             if (origDef.Name == "ReadOnlySpan" &&
@@ -424,11 +454,22 @@ public class SystemGenerator : IIncrementalGenerator
                     fieldType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                     GeneratorUtilities.GetFullyQualifiedName(rosArg),
                     ImmutableArray<QueryableComponentAccess>.Empty,
-                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                    isCurrentTick: isCurrentTick);
             }
         }
 
         return null;
+    }
+
+    private static bool HasCurrentTickAttribute(IFieldSymbol field)
+    {
+        foreach (var attr in field.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() == "Paradise.ECS.CurrentTickAttribute")
+                return true;
+        }
+        return false;
     }
 
     private static bool IsRefReadOnlySyntax(IFieldSymbol field)
@@ -511,7 +552,19 @@ public class SystemGenerator : IIncrementalGenerator
             foreach (var field in sys.Fields)
             {
                 if (field.Kind == FieldKind.Invalid)
-                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SystemInvalidFieldType, sys.Location, field.FieldName, sys.FullyQualifiedName, field.TypeFQN));
+                {
+                    // A {Prefix}Singleton field on a queryable that did not opt into
+                    // Singleton = true gets a targeted diagnostic instead of the generic one.
+                    if (TryGetNonSingletonQueryable(field, queryableLookup, out var nonSingletonFQN))
+                        context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SingletonFieldOnNonSingletonQueryable, sys.Location, field.FieldName, sys.FullyQualifiedName, nonSingletonFQN));
+                    else
+                        context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SystemInvalidFieldType, sys.Location, field.FieldName, sys.FullyQualifiedName, field.TypeFQN));
+                }
+
+                // [CurrentTick] applies only to inline `ref readonly T` fields and
+                // {Prefix}Singleton composition fields.
+                if (field.IsCurrentTick && field.Kind != FieldKind.Invalid && !IsValidCurrentTickField(field))
+                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.CurrentTickInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
 
                 // IChunkSystem with entity-mode fields
                 if (sys.Kind == SystemKind.Chunk && IsEntityModeField(field.Kind))
@@ -521,10 +574,11 @@ public class SystemGenerator : IIncrementalGenerator
                 if (sys.Kind == SystemKind.Entity && IsChunkModeField(field.Kind))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.EntitySystemHasChunkFields, sys.Location, field.FieldName, sys.FullyQualifiedName));
 
-                // IWorldSystem only accepts {Prefix}Segments + EntityCommandBuffer fields;
-                // segments fields are only valid on IWorldSystem.
+                // IWorldSystem only accepts {Prefix}Segments, {Prefix}Singleton, and
+                // EntityCommandBuffer fields; segments fields are only valid on IWorldSystem.
+                // Singleton fields are valid on every system kind.
                 bool worldFieldMismatch =
-                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CommandBuffer or FieldKind.Invalid)) ||
+                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.Invalid)) ||
                     (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
                 if (worldFieldMismatch)
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
@@ -537,9 +591,10 @@ public class SystemGenerator : IIncrementalGenerator
         {
             foreach (var f in s.Fields)
             {
+                if (f.IsCurrentTick && !IsValidCurrentTickField(f)) return false;
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
-                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CommandBuffer)) return false;
+                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer)) return false;
                 if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
             }
             return true;
@@ -590,6 +645,7 @@ public class SystemGenerator : IIncrementalGenerator
         var allComponents = new HashSet<string>();
         var readComponents = new HashSet<string>();
         var writeComponents = new HashSet<string>();
+        var freshReadComponents = new HashSet<string>();
         var withoutComponents = new HashSet<string>(sys.WithoutComponents);
         var withAnyComponents = new HashSet<string>(sys.WithAnyComponents);
 
@@ -604,6 +660,8 @@ public class SystemGenerator : IIncrementalGenerator
                 readComponents.Add(field.ComponentFQN);
                 if (!field.IsReadOnly)
                     writeComponents.Add(field.ComponentFQN);
+                else if (field.IsCurrentTick)
+                    freshReadComponents.Add(field.ComponentFQN);
             }
             else if (field.Kind is FieldKind.CompositionData or FieldKind.CompositionChunkData or FieldKind.CompositionSegments)
             {
@@ -627,12 +685,46 @@ public class SystemGenerator : IIncrementalGenerator
                 foreach (var c in field.QueryableWithoutComponents) withoutComponents.Add(c);
                 foreach (var c in field.QueryableWithAnyComponents) withAnyComponents.Add(c);
             }
+            else if (field.Kind is FieldKind.CompositionSingleton)
+            {
+                // Singleton components flow into the READ/WRITE masks (scheduling + snapshot
+                // conflict detection) but NOT into the system's own query masks — the singleton
+                // is world-level data resolved by its own query, not a per-entity filter.
+                foreach (var comp in field.QueryableWithComponents)
+                {
+                    if (comp.QueryOnly) continue;
+                    readComponents.Add(comp.ComponentFQN);
+                    if (comp.IsReadOnly)
+                    {
+                        if (field.IsCurrentTick)
+                            freshReadComponents.Add(comp.ComponentFQN);
+                    }
+                    else
+                    {
+                        writeComponents.Add(comp.ComponentFQN);
+                    }
+                }
+                foreach (var comp in field.QueryableOptionalComponents)
+                {
+                    readComponents.Add(comp.ComponentFQN);
+                    if (comp.IsReadOnly)
+                    {
+                        if (field.IsCurrentTick)
+                            freshReadComponents.Add(comp.ComponentFQN);
+                    }
+                    else
+                    {
+                        writeComponents.Add(comp.ComponentFQN);
+                    }
+                }
+            }
         }
 
         return new ComponentAccess(
             allComponents.ToImmutableArray(),
             readComponents.ToImmutableArray(),
             writeComponents.ToImmutableArray(),
+            freshReadComponents.ToImmutableArray(),
             withoutComponents.ToImmutableArray(),
             withAnyComponents.ToImmutableArray());
     }
@@ -801,6 +893,9 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.CompositionSegments:
                     sb.Append($"global::{field.ComponentFQN!.Replace("+", ".")}.Segments<{maskType}, {configType}> {ToCamelCase(field.FieldName)}");
                     break;
+                case FieldKind.CompositionSingleton:
+                    sb.Append($"global::{field.ComponentFQN!.Replace("+", ".")}.Singleton<{maskType}, {configType}> {ToCamelCase(field.FieldName)}");
+                    break;
                 case FieldKind.CommandBuffer:
                     sb.Append($"global::Paradise.ECS.EntityCommandBuffer {ToCamelCase(field.FieldName)}");
                     break;
@@ -879,6 +974,8 @@ public class SystemGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
+        GenerateSingletonResolution(sb, sys, body, maskType, configType, snapshotRead: snapshotReadSystems);
+
         sb.Append($"{body}var __system = new {GetGlobalFQN(sys)}(");
         bool first = true;
         int segmentIndex = 0;
@@ -892,6 +989,10 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append($"{ToCamelCase(segmentFields[segmentIndex].FieldName)}Segments");
                 segmentIndex++;
+            }
+            else if (field.Kind == FieldKind.CompositionSingleton)
+            {
+                sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             }
             else if (field.Kind == FieldKind.CommandBuffer)
             {
@@ -911,6 +1012,7 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkHandle chunk,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager readChunkManager,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkHandle readChunk,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}> layout,");
         sb.AppendLine($"{indent}    int entityCount,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
@@ -937,12 +1039,31 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}}}");
     }
 
+    /// <summary>Emits one <c>var xSingleton = ...Singleton.Resolve(world, ...)</c> statement per
+    /// CompositionSingleton field: resolution happens ONCE per dispatch, before iteration, and
+    /// asserts exactly one matching entity in the write world. Under snapshot-read codegen the
+    /// read world is passed so read-only components bind to the previous tick — except for
+    /// [CurrentTick] fields, which bind everything to the write world (fresh values).</summary>
+    private static void GenerateSingletonResolution(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType, bool snapshotRead)
+    {
+        foreach (var field in sys.Fields)
+        {
+            if (field.Kind != FieldKind.CompositionSingleton) continue;
+            var varName = ToCamelCase(field.FieldName) + "Singleton";
+            var singletonType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Singleton<{maskType}, {configType}>";
+            var readArg = snapshotRead && !field.IsCurrentTick ? "readWorld" : "null";
+            sb.AppendLine($"{indent}var {varName} = {singletonType}.Resolve(world, {readArg});");
+        }
+    }
+
     private static void GenerateEntityModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
         var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionData).ToList();
         bool hasEntityHandle = sys.Fields.Any(f => f.Kind == FieldKind.EntityHandle);
         bool needsBytes = inlineFields.Count > 0 || hasEntityHandle;
+
+        GenerateSingletonResolution(sb, sys, indent, maskType, configType, snapshotRead: false);
 
         if (needsBytes)
         {
@@ -985,6 +1106,8 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"ref {ToCamelCase(field.FieldName)}Span[__i]");
             else if (field.Kind == FieldKind.CompositionData)
                 sb.Append($"{ToCamelCase(field.FieldName)}Data");
+            else if (field.Kind == FieldKind.CompositionSingleton)
+                sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             else if (field.Kind == FieldKind.CommandBuffer)
                 sb.Append("commands");
             else if (field.Kind == FieldKind.EntityHandle)
@@ -1005,8 +1128,11 @@ public class SystemGenerator : IIncrementalGenerator
         var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionData).ToList();
         bool hasEntityHandle = sys.Fields.Any(f => f.Kind == FieldKind.EntityHandle);
         // Entity-id column comes from the write chunk (identical in both worlds after CopyFrom).
-        bool needsBytes = inlineFields.Any(f => !f.IsReadOnly) || hasEntityHandle;
-        bool needsReadBytes = inlineFields.Any(f => f.IsReadOnly);
+        // [CurrentTick] read-only fields bind to the WRITE chunk (fresh, same-tick values).
+        bool needsBytes = inlineFields.Any(f => !f.IsReadOnly || f.IsCurrentTick) || hasEntityHandle;
+        bool needsReadBytes = inlineFields.Any(f => f.IsReadOnly && !f.IsCurrentTick);
+
+        GenerateSingletonResolution(sb, sys, indent, maskType, configType, snapshotRead: true);
 
         if (needsBytes)
             sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
@@ -1015,7 +1141,7 @@ public class SystemGenerator : IIncrementalGenerator
         foreach (var field in inlineFields)
         {
             var varName = ToCamelCase(field.FieldName) + "Span";
-            var source = field.IsReadOnly ? "readBytes" : "bytes";
+            var source = field.IsReadOnly && !field.IsCurrentTick ? "readBytes" : "bytes";
             sb.AppendLine($"{indent}var {varName} = {source}.GetSpan<{field.TypeFQN}>(layout.GetBaseOffset({field.TypeFQN}.TypeId), entityCount);");
         }
 
@@ -1049,6 +1175,8 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"ref {ToCamelCase(field.FieldName)}Span[__i]");
             else if (field.Kind == FieldKind.CompositionData)
                 sb.Append($"{ToCamelCase(field.FieldName)}Data");
+            else if (field.Kind == FieldKind.CompositionSingleton)
+                sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             else if (field.Kind == FieldKind.CommandBuffer)
                 sb.Append("commands");
             else if (field.Kind == FieldKind.EntityHandle)
@@ -1069,6 +1197,8 @@ public class SystemGenerator : IIncrementalGenerator
         bool hasEntitySpan = sys.Fields.Any(f => f.Kind == FieldKind.EntitySpan);
         bool needsBytes = inlineFields.Any(f => !f.IsReadOnly) || hasEntitySpan;
         bool needsReadBytes = inlineFields.Any(f => f.IsReadOnly);
+
+        GenerateSingletonResolution(sb, sys, indent, maskType, configType, snapshotRead: true);
 
         if (needsBytes)
             sb.AppendLine($"{indent}var bytes = world.ChunkManager.GetBytes(chunk);");
@@ -1120,6 +1250,10 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append($"{ToCamelCase(field.FieldName)}ChunkData");
             }
+            else if (field.Kind == FieldKind.CompositionSingleton)
+            {
+                sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
+            }
             else if (field.Kind == FieldKind.CommandBuffer)
             {
                 sb.Append("commands");
@@ -1139,6 +1273,8 @@ public class SystemGenerator : IIncrementalGenerator
         var compositionFields = sys.Fields.Where(f => f.Kind == FieldKind.CompositionChunkData).ToList();
         bool hasEntitySpan = sys.Fields.Any(f => f.Kind == FieldKind.EntitySpan);
         bool needsBytes = inlineFields.Count > 0 || hasEntitySpan;
+
+        GenerateSingletonResolution(sb, sys, indent, maskType, configType, snapshotRead: false);
 
         if (needsBytes)
         {
@@ -1189,6 +1325,10 @@ public class SystemGenerator : IIncrementalGenerator
             else if (field.Kind == FieldKind.CompositionChunkData)
             {
                 sb.Append($"{ToCamelCase(field.FieldName)}ChunkData");
+            }
+            else if (field.Kind == FieldKind.CompositionSingleton)
+            {
+                sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             }
             else if (field.Kind == FieldKind.CommandBuffer)
             {
@@ -1251,6 +1391,10 @@ public class SystemGenerator : IIncrementalGenerator
             GenerateMask(sb, access.WriteComponents);
             sb.AppendLine(";");
 
+            sb.Append($"        var freshReadMask{id} = ");
+            GenerateMask(sb, access.FreshReadComponents);
+            sb.AppendLine(";");
+
             sb.Append($"        var allMask{id} = ");
             GenerateMask(sb, access.AllComponents);
             sb.AppendLine(";");
@@ -1272,6 +1416,7 @@ public class SystemGenerator : IIncrementalGenerator
             sb.AppendLine($"            TypeName = \"{info.FullyQualifiedName}\",");
             sb.AppendLine($"            ReadMask = readMask{id},");
             sb.AppendLine($"            WriteMask = writeMask{id},");
+            sb.AppendLine($"            FreshReadMask = freshReadMask{id},");
             sb.AppendLine($"            QueryDescription = (global::Paradise.ECS.HashedKey<global::Paradise.ECS.ImmutableQueryDescription<TMask>>)new global::Paradise.ECS.ImmutableQueryDescription<TMask>(allMask{id}, noneMask{id}, anyMask{id}),");
             if (afterIds.Count > 0)
                 sb.AppendLine($"            AfterSystemIds = global::System.Collections.Immutable.ImmutableArray.Create({string.Join(", ", afterIds)}),");
@@ -1417,7 +1562,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk, World }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CommandBuffer, EntityHandle, EntitySpan, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EntityHandle, EntitySpan, Invalid }
 
     private static bool IsEntityModeField(FieldKind kind) =>
         kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;
@@ -1427,6 +1572,31 @@ public class SystemGenerator : IIncrementalGenerator
 
     private static bool IsWorldModeField(FieldKind kind) =>
         kind is FieldKind.CompositionSegments;
+
+    /// <summary>[CurrentTick] is valid on inline `ref readonly T` component fields and on
+    /// {Prefix}Singleton composition fields (where it covers the singleton's read-only
+    /// components); everything else is PECS3011.</summary>
+    private static bool IsValidCurrentTickField(SystemFieldInfo field) =>
+        (field.Kind == FieldKind.InlineComponent && field.IsReadOnly) ||
+        field.Kind == FieldKind.CompositionSingleton;
+
+    /// <summary>True when an unresolved field is a {Prefix}Singleton reference to a KNOWN
+    /// queryable that is not marked [Queryable(Singleton = true)].</summary>
+    private static bool TryGetNonSingletonQueryable(
+        SystemFieldInfo field,
+        Dictionary<string, QueryableLookupInfo> queryableLookup,
+        out string queryableFQN)
+    {
+        queryableFQN = "";
+        var name = field.ErrorTypeName;
+        if (name == null || !name.EndsWith("Singleton", StringComparison.Ordinal) || name.Length <= 9)
+            return false;
+        var prefix = name.Substring(0, name.Length - 9);
+        if (!queryableLookup.TryGetValue(prefix, out var info) || info.IsSingleton)
+            return false;
+        queryableFQN = info.FQN;
+        return true;
+    }
 
     private readonly struct QueryableComponentAccess
     {
@@ -1446,13 +1616,14 @@ public class SystemGenerator : IIncrementalGenerator
     {
         public string Prefix { get; }
         public string FQN { get; }
+        public bool IsSingleton { get; }
         public ImmutableArray<QueryableComponentAccess> WithComponents { get; }
         public ImmutableArray<string> WithoutComponents { get; }
         public ImmutableArray<string> WithAnyComponents { get; }
         public ImmutableArray<QueryableComponentAccess> OptionalComponents { get; }
 
         public QueryableLookupInfo(
-            string prefix, string fqn,
+            string prefix, string fqn, bool isSingleton,
             ImmutableArray<QueryableComponentAccess> withComponents,
             ImmutableArray<string> withoutComponents,
             ImmutableArray<string> withAnyComponents,
@@ -1460,6 +1631,7 @@ public class SystemGenerator : IIncrementalGenerator
         {
             Prefix = prefix;
             FQN = fqn;
+            IsSingleton = isSingleton;
             WithComponents = withComponents;
             WithoutComponents = withoutComponents;
             WithAnyComponents = withAnyComponents;
@@ -1480,6 +1652,7 @@ public class SystemGenerator : IIncrementalGenerator
         public ImmutableArray<QueryableComponentAccess> QueryableOptionalComponents { get; }
         public bool IsRefField { get; }
         public string? ErrorTypeName { get; }
+        public bool IsCurrentTick { get; }
 
         public SystemFieldInfo(
             string fieldName, FieldKind kind, bool isReadOnly, string typeFQN,
@@ -1489,7 +1662,8 @@ public class SystemGenerator : IIncrementalGenerator
             ImmutableArray<string> queryableWithAnyComponents,
             ImmutableArray<QueryableComponentAccess> queryableOptionalComponents = default,
             bool isRefField = false,
-            string? errorTypeName = null)
+            string? errorTypeName = null,
+            bool isCurrentTick = false)
         {
             FieldName = fieldName;
             Kind = kind;
@@ -1502,6 +1676,7 @@ public class SystemGenerator : IIncrementalGenerator
             QueryableOptionalComponents = queryableOptionalComponents.IsDefault ? ImmutableArray<QueryableComponentAccess>.Empty : queryableOptionalComponents;
             IsRefField = isRefField;
             ErrorTypeName = errorTypeName;
+            IsCurrentTick = isCurrentTick;
         }
     }
 
@@ -1557,6 +1732,7 @@ public class SystemGenerator : IIncrementalGenerator
         public ImmutableArray<string> AllComponents { get; }
         public ImmutableArray<string> ReadComponents { get; }
         public ImmutableArray<string> WriteComponents { get; }
+        public ImmutableArray<string> FreshReadComponents { get; }
         public ImmutableArray<string> WithoutComponents { get; }
         public ImmutableArray<string> WithAnyComponents { get; }
 
@@ -1564,12 +1740,14 @@ public class SystemGenerator : IIncrementalGenerator
             ImmutableArray<string> allComponents,
             ImmutableArray<string> readComponents,
             ImmutableArray<string> writeComponents,
+            ImmutableArray<string> freshReadComponents,
             ImmutableArray<string> withoutComponents,
             ImmutableArray<string> withAnyComponents)
         {
             AllComponents = allComponents;
             ReadComponents = readComponents;
             WriteComponents = writeComponents;
+            FreshReadComponents = freshReadComponents;
             WithoutComponents = withoutComponents;
             WithAnyComponents = withAnyComponents;
         }

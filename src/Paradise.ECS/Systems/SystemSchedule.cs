@@ -17,6 +17,9 @@ namespace Paradise.ECS;
 /// <c>[assembly: SnapshotReadSystems]</c> consume it — classic codegen ignores it.</param>
 /// <param name="readChunk">The chunk in the read source corresponding to <paramref name="chunk"/>
 /// (same archetype, same chunk index; identical entity slots per World.CopyFrom).</param>
+/// <param name="readWorld">The immutable read world in snapshot mode, or null under classic
+/// <c>Run()</c>. Consumed by snapshot-mode codegen to pair chunks outside the system's own query
+/// (e.g. resolving the read-world copy of a <c>{Prefix}Singleton</c> field's entity).</param>
 /// <param name="layout">The archetype layout describing component offsets (layouts live in
 /// shared metadata, so one layout is valid for both worlds' chunks).</param>
 /// <param name="entityCount">The number of entities in the chunk.</param>
@@ -26,6 +29,7 @@ public delegate void SystemRunChunkAction<TMask, TConfig>(
     ChunkHandle chunk,
     ChunkManager readChunkManager,
     ChunkHandle readChunk,
+    IWorld<TMask, TConfig>? readWorld,
     ImmutableArchetypeLayout<TMask, TConfig> layout,
     int entityCount,
     EntityCommandBuffer commands)
@@ -172,6 +176,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                         readChunk,
                         dispatcher,
                         _world,
+                        readWorld,
                         ci.Archetype.Layout.DataPointer,
                         ci.EntityCount,
                         _ecbPool));

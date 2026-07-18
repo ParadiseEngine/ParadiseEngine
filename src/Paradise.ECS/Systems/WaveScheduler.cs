@@ -44,6 +44,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         ChunkHandle readChunk,
         SystemRunChunkAction<TMask, TConfig> dispatcher,
         IWorld<TMask, TConfig> world,
+        IWorld<TMask, TConfig>? readWorld,
         nint layoutPtr,
         int entityCount,
         EntityCommandBufferPool commandPool)
@@ -55,7 +56,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         _dispatcher = dispatcher;
         _worldDispatcher = null;
         _world = world;
-        _readWorld = null;
+        _readWorld = readWorld;
         _layoutPtr = layoutPtr;
         _entityCount = entityCount;
         _commandPool = commandPool;
@@ -94,7 +95,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
             return;
         }
 
-        _dispatcher!(_world, Chunk, _readChunkManager, _readChunk,
+        _dispatcher!(_world, Chunk, _readChunkManager, _readChunk, _readWorld,
             new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commandPool.Get());
     }
 }

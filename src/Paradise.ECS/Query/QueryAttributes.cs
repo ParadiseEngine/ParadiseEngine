@@ -35,6 +35,24 @@ public sealed class QueryableAttribute : Attribute
     /// Must be a non-negative integer. -1 (default) means auto-assign.
     /// </remarks>
     public int Id { get; set; } = -1;
+
+    /// <summary>
+    /// Gets or sets whether this queryable is a singleton: resolved once per schedule run against
+    /// EXACTLY one matching entity. When true, the generator additionally emits a
+    /// <c>{Prefix}Singleton</c> composition type that systems of any kind (entity, chunk, world)
+    /// may declare as a field. Resolution runs the queryable's query against the world before
+    /// iteration; matching 0 or more than 1 entity throws
+    /// <see cref="InvalidOperationException"/> naming the queryable and the actual count.
+    /// Default: false.
+    /// </summary>
+    /// <remarks>
+    /// Under <c>[assembly: SnapshotReadSystems]</c>, read-only components of the singleton bind
+    /// to the READ world's copy of the singleton entity (stale-by-one, standard rule) while
+    /// writable components bind to the write world. Cardinality is checked against the write
+    /// world. Mark the singleton field with <c>[CurrentTick]</c> to bind its read-only
+    /// components to the write world (fresh, same-tick values) instead.
+    /// </remarks>
+    public bool Singleton { get; set; }
 }
 
 /// <summary>
