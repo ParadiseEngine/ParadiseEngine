@@ -153,4 +153,16 @@ public interface IWorld<TMask, TConfig>
     /// Removes all entities from this world.
     /// </summary>
     void Clear();
+
+    /// <summary>
+    /// Marks whether a <see cref="SystemSchedule{TMask,TConfig}"/> run is currently in progress
+    /// on this world. Set by the schedule around wave execution (and cleared before ECB
+    /// playback). While set, DEBUG builds reject direct structural changes
+    /// (Spawn/CreateEntity/Despawn/Add-/RemoveComponent/Clear/…) with
+    /// <see cref="InvalidOperationException"/> — mid-run structural changes must be recorded on
+    /// an injected <see cref="EntityCommandBuffer"/> instead. The checks are compiled out in
+    /// Release builds, where this flag has no observable effect.
+    /// </summary>
+    /// <param name="running">True while schedule waves are executing; false otherwise.</param>
+    void SetSystemRunInProgress(bool running);
 }

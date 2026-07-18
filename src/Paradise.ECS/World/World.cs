@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
@@ -19,6 +20,17 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     private readonly EntityManager _entityManager;
     private readonly ImmutableArray<ComponentTypeInfo> _typeInfos;
     private Archetype<TMask, TConfig> _emptyArchetype;
+
+    /// <summary>
+    /// True while a <see cref="SystemSchedule{TMask,TConfig}"/> is executing waves against this
+    /// world. Only the schedule thread writes it (before and after wave execution — the wave
+    /// scheduler joins its workers before returning, so those writes are ordered with respect to
+    /// all system code), which is why a plain bool with a volatile read in the DEBUG guard is
+    /// sufficient: no worker can observe a torn or reordered value while systems run.
+    /// Read only by <see cref="AssertStructuralChangesAllowed"/>, whose call sites are compiled
+    /// out in Release builds.
+    /// </summary>
+    private bool _systemRunInProgress;
 
     /// <summary>
     /// Gets the number of currently alive entities.
@@ -58,6 +70,32 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
             (HashedKey<TMask>)TMask.Empty);
     }
 
+    /// <inheritdoc/>
+    public void SetSystemRunInProgress(bool running) => Volatile.Write(ref _systemRunInProgress, running);
+
+    /// <summary>
+    /// DEBUG-only guard (same mechanism as <see cref="ThreadAffinity"/>): throws if a structural
+    /// change is attempted while a schedule run is in progress. Immediate archetype mutations
+    /// mid-run would silently corrupt the chunk iteration of executing systems, so they must go
+    /// through an <see cref="EntityCommandBuffer"/> instead. Completely removed in Release builds.
+    /// </summary>
+    /// <param name="operation">The name of the attempted structural operation, for the error message.</param>
+    [Conditional("DEBUG")]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AssertStructuralChangesAllowed(string operation)
+    {
+        if (Volatile.Read(ref _systemRunInProgress))
+            ThrowStructuralChangeDuringRun(operation);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowStructuralChangeDuringRun(string operation) =>
+        throw new InvalidOperationException(
+            $"World.{operation} was called while a SystemSchedule run is in progress; " +
+            "immediate structural changes would corrupt the iteration of executing systems. " +
+            "Structural changes during a schedule run must be recorded on an injected " +
+            "EntityCommandBuffer (or deferred to a post-pass).");
+
     /// <summary>
     /// Creates a new entity with no components.
     /// The entity is placed in the empty archetype.
@@ -66,6 +104,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity Spawn()
     {
+        AssertStructuralChangesAllowed(nameof(Spawn));
         // Validate before creating to avoid inconsistent state if limit exceeded
         ThrowHelper.ThrowIfEntityIdExceedsLimit(_entityManager.PeekNextId(), Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
         var entity = _entityManager.Create();
@@ -78,6 +117,8 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     public Entity CreateEntity<TBuilder>(TBuilder builder)
         where TBuilder : unmanaged, IComponentsBuilder
     {
+        AssertStructuralChangesAllowed(nameof(CreateEntity));
+
         // Collect component mask
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
@@ -97,6 +138,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     public Entity OverwriteEntity<TBuilder>(Entity entity, TBuilder builder)
         where TBuilder : unmanaged, IComponentsBuilder
     {
+        AssertStructuralChangesAllowed(nameof(OverwriteEntity));
         var location = GetValidatedLocation(entity);
 
         // Collect component mask
@@ -119,6 +161,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     public Entity AddComponents<TBuilder>(Entity entity, TBuilder builder)
         where TBuilder : unmanaged, IComponentsBuilder
     {
+        AssertStructuralChangesAllowed(nameof(AddComponents));
         var location = GetValidatedLocation(entity);
 
         // Collect new component mask from builder
@@ -206,6 +249,8 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <inheritdoc/>
     public void MaterializeEntity(Entity entity)
     {
+        AssertStructuralChangesAllowed(nameof(MaterializeEntity));
+
         // Validate entity ID fits within configured byte-size limits
         ThrowHelper.ThrowIfEntityIdExceedsLimit(entity.Id, Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
 
@@ -250,6 +295,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <returns>True if the entity was destroyed, false if it was already dead or invalid.</returns>
     public bool Despawn(Entity entity)
     {
+        AssertStructuralChangesAllowed(nameof(Despawn));
         if (!IsAlive(entity))
             return false;
 
@@ -342,6 +388,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <exception cref="InvalidOperationException">Entity is not alive or already has the component.</exception>
     public void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent
     {
+        AssertStructuralChangesAllowed(nameof(AddComponent));
         var location = GetValidatedLocation(entity);
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
@@ -371,6 +418,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
     {
+        AssertStructuralChangesAllowed(nameof(RemoveComponent));
         var location = GetValidatedLocation(entity);
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
@@ -551,6 +599,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <exception cref="InvalidOperationException">Entity is not alive or already has the component.</exception>
     public void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
     {
+        AssertStructuralChangesAllowed(nameof(AddComponentRaw));
         int expectedSize = _typeInfos[componentId].Size;
         if (data.Length != expectedSize)
             throw new ArgumentException($"Data size {data.Length} does not match component {componentId} size {expectedSize}.", nameof(data));
@@ -583,6 +632,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
     public void RemoveComponentRaw(Entity entity, ComponentId componentId)
     {
+        AssertStructuralChangesAllowed(nameof(RemoveComponentRaw));
         var location = GetValidatedLocation(entity);
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
@@ -649,6 +699,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// </summary>
     public void Clear()
     {
+        AssertStructuralChangesAllowed(nameof(Clear));
         _archetypeRegistry.Clear();
         _entityManager.Clear();
 
@@ -666,6 +717,8 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <exception cref="InvalidOperationException">Thrown if worlds don't share the same SharedArchetypeMetadata, or if source is the same as this world.</exception>
     public void CopyFrom(World<TMask, TConfig> source)
     {
+        // CopyFrom clears the destination world — never legal while systems iterate it.
+        AssertStructuralChangesAllowed(nameof(CopyFrom));
         ArgumentNullException.ThrowIfNull(source);
 
         // Validate not self-copy (would clear then copy from empty)

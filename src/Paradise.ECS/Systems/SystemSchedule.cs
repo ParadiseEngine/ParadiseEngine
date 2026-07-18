@@ -124,6 +124,27 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
     private void RunInternal(IWorld<TMask, TConfig>? readWorld)
     {
+        // DEBUG structural-change guard: while waves execute, direct structural World calls
+        // (Spawn/Despawn/Add-/RemoveComponent/…) throw — systems must use their injected
+        // EntityCommandBuffer. try/finally keeps the flag exception-safe (a throwing system
+        // must not wedge the world), and it is cleared BEFORE _ecbPool.PlaybackAll below so
+        // playback's MaterializeEntity/structural work is not blocked.
+        _world.SetSystemRunInProgress(true);
+        try
+        {
+            RunWaves(readWorld);
+        }
+        finally
+        {
+            _world.SetSystemRunInProgress(false);
+        }
+
+        _ecbPool.PlaybackAll(_world);
+        _ecbPool.ClearAll();
+    }
+
+    private void RunWaves(IWorld<TMask, TConfig>? readWorld)
+    {
         foreach (var wave in _waves)
         {
             _workItems.Clear();
@@ -158,9 +179,6 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
             }
             _scheduler.Execute(_workItems);
         }
-
-        _ecbPool.PlaybackAll(_world);
-        _ecbPool.ClearAll();
     }
 
     /// <inheritdoc/>
