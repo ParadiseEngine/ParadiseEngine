@@ -29,5 +29,6 @@ Same binary + same hardware ⇒ bit-identical results. Cross-ISA determinism is 
 
 ## Deferred (phase 2+)
 
-BVH broadphase, dynamics/solver, contact manifolds & EPA, compound/mesh/convex-hull colliders,
+BVH broadphase, dynamics beyond rigid spheres (`Dynamics/RigidSphereDynamics` is the shipped
+solver), contact manifolds & EPA, compound/mesh/convex-hull colliders,
 collector variants (all-hits/any-hit), point-distance & AABB-overlap queries, rotational sweeps.
