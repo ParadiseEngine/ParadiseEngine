@@ -21,6 +21,14 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     private readonly Dictionary<HashedKey<ImmutableQueryDescription<TMask>>, int> _queryDescriptionToId = new();
     private readonly List<QueryData> _queries = new();
 
+    // Guards _queryDescriptionToId and _queries. Query resolution is lazy and can be triggered
+    // from parallel scheduler threads at dispatch time (e.g. singleton-queryable resolution, or
+    // a world system's first query) — an unsynchronized Dictionary corrupts under that race.
+    // Structural archetype creation only happens outside schedule runs (DEBUG-guarded), but it
+    // scans/mutates _queries too, so every access point takes this lock. Creation is rare and
+    // the lock is uncontended in steady state.
+    private readonly object _queryLock = new();
+
     /// <summary>
     /// Holds query description and its matched archetype IDs together for cache locality.
     /// </summary>
@@ -42,7 +50,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     /// <summary>
     /// Gets the number of registered query descriptions.
     /// </summary>
-    public int QueryDescriptionCount => _queries.Count;
+    public int QueryDescriptionCount { get { lock (_queryLock) { return _queries.Count; } } }
 
     /// <summary>
     /// Creates a new shared archetype metadata instance.
@@ -168,29 +176,32 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
 
-        // Check if already exists
-        if (_queryDescriptionToId.TryGetValue(description, out int existingId))
+        lock (_queryLock)
         {
-            return existingId;
-        }
-
-        // Create query data and populate matched archetypes with existing matches
-        var queryData = new QueryData(description.Value);
-        int archetypeCount = _layouts.Count;
-        for (int i = 0; i < archetypeCount; i++)
-        {
-            var layout = new ImmutableArchetypeLayout<TMask, TConfig>(_layouts[i]);
-            if (description.Value.Matches(layout.ComponentMask))
+            // Check if already exists
+            if (_queryDescriptionToId.TryGetValue(description, out int existingId))
             {
-                queryData.MatchedArchetypeIds.Add(i);
+                return existingId;
             }
+
+            // Create query data and populate matched archetypes with existing matches
+            var queryData = new QueryData(description.Value);
+            int archetypeCount = _layouts.Count;
+            for (int i = 0; i < archetypeCount; i++)
+            {
+                var layout = new ImmutableArchetypeLayout<TMask, TConfig>(_layouts[i]);
+                if (description.Value.Matches(layout.ComponentMask))
+                {
+                    queryData.MatchedArchetypeIds.Add(i);
+                }
+            }
+
+            int newId = _queries.Count;
+            _queries.Add(queryData);
+            _queryDescriptionToId[description] = newId;
+
+            return newId;
         }
-
-        int newId = _queries.Count;
-        _queries.Add(queryData);
-        _queryDescriptionToId[description] = newId;
-
-        return newId;
     }
 
     /// <summary>
@@ -242,7 +253,10 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     public IReadOnlyList<int> GetMatchedArchetypeIds(int queryId)
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
-        return _queries[queryId].MatchedArchetypeIds;
+        lock (_queryLock)
+        {
+            return _queries[queryId].MatchedArchetypeIds;
+        }
     }
 
     /// <summary>
@@ -255,7 +269,10 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     public ImmutableQueryDescription<TMask> GetQueryDescription(int queryId)
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
-        return _queries[queryId].Description;
+        lock (_queryLock)
+        {
+            return _queries[queryId].Description;
+        }
     }
 
     /// <summary>
@@ -268,14 +285,17 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     /// <param name="matchedQueries">The list to add matching query IDs to.</param>
     private void NotifyQueriesOfNewArchetype<T>(int archetypeId, TMask mask, T matchedQueries) where T : IList<int>
     {
-        int queryCount = _queries.Count;
-        for (int i = 0; i < queryCount; i++)
+        lock (_queryLock)
         {
-            var query = _queries[i];
-            if (query.Description.Matches(mask))
+            int queryCount = _queries.Count;
+            for (int i = 0; i < queryCount; i++)
             {
-                matchedQueries.Add(i);
-                query.MatchedArchetypeIds.Add(archetypeId);
+                var query = _queries[i];
+                if (query.Description.Matches(mask))
+                {
+                    matchedQueries.Add(i);
+                    query.MatchedArchetypeIds.Add(archetypeId);
+                }
             }
         }
     }
@@ -290,18 +310,21 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
 
-        // TODO: Optimize with inverted index when query count becomes a bottleneck.
-        // Current: O(queries) linear scan over all queries.
-        // Optimization: Maintain Dictionary<ComponentId, List<int>> mapping components to query indices.
-        // When matching, find the component in the mask with fewest associated queries, then only
-        // check those candidates. Reduces to O(queries containing rarest component).
-        int queryCount = _queries.Count;
-        for (int i = 0; i < queryCount; i++)
+        lock (_queryLock)
         {
-            var query = _queries[i];
-            if (query.Description.Matches(mask))
+            // TODO: Optimize with inverted index when query count becomes a bottleneck.
+            // Current: O(queries) linear scan over all queries.
+            // Optimization: Maintain Dictionary<ComponentId, List<int>> mapping components to query indices.
+            // When matching, find the component in the mask with fewest associated queries, then only
+            // check those candidates. Reduces to O(queries containing rarest component).
+            int queryCount = _queries.Count;
+            for (int i = 0; i < queryCount; i++)
             {
-                result.Add(i);
+                var query = _queries[i];
+                if (query.Description.Matches(mask))
+                {
+                    result.Add(i);
+                }
             }
         }
     }
