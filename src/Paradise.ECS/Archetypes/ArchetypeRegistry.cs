@@ -17,6 +17,11 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     private readonly List<Archetype<TMask, TConfig>?> _archetypes = new();
     private readonly List<List<Archetype<TMask, TConfig>>?> _queryCache = new();
 
+    // Guards _queryCache. Lazy query resolution can run on parallel scheduler threads at
+    // dispatch time (singleton queryables, world systems); the List grows unsynchronized
+    // otherwise. Nested lock order is registry -> shared metadata only, never the reverse.
+    private readonly object _queryCacheLock = new();
+
     /// <summary>
     /// Temporary list for collecting matched query IDs during archetype operations.
     /// Reused to avoid allocations on each operation.
@@ -117,42 +122,45 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     /// <returns>The query for this description.</returns>
     public Query<TMask, TConfig, Archetype<TMask, TConfig>> GetOrCreateQuery(HashedKey<ImmutableQueryDescription<TMask>> description)
     {
-        // Get or create global query ID
-        int queryId = _sharedMetadata.GetOrCreateQueryId(description);
-
-        // Fast path: query already exists in this world
-        if ((uint)queryId < (uint)_queryCache.Count && _queryCache[queryId] is { } existingList)
+        lock (_queryCacheLock)
         {
-            return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(existingList);
-        }
+            // Get or create global query ID
+            int queryId = _sharedMetadata.GetOrCreateQueryId(description);
 
-        // Grow list if needed by adding nulls
-        int requiredCount = queryId + 1;
-        _queryCache.EnsureCapacity(requiredCount);
-        for (int i = _queryCache.Count; i < requiredCount; i++)
-        {
-            _queryCache.Add(null);
-        }
-
-        // Get matched archetype IDs from shared metadata and add only locally existing archetypes
-        var matchedIds = _sharedMetadata.GetMatchedArchetypeIds(queryId);
-        int matchedCount = matchedIds.Count;
-        var archetypes = new List<Archetype<TMask, TConfig>>(matchedCount);
-
-        int localArchetypeCount = _archetypes.Count;
-        for (int i = 0; i < matchedCount; i++)
-        {
-            int archetypeId = matchedIds[i];
-            // Only add archetypes that already exist in this world
-            // New archetypes will be added via NotifyQueries when created
-            if ((uint)archetypeId < (uint)localArchetypeCount && _archetypes[archetypeId] is { } archetype)
+            // Fast path: query already exists in this world
+            if ((uint)queryId < (uint)_queryCache.Count && _queryCache[queryId] is { } existingList)
             {
-                archetypes.Add(archetype);
+                return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(existingList);
             }
-        }
 
-        _queryCache[queryId] = archetypes;
-        return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(archetypes);
+            // Grow list if needed by adding nulls
+            int requiredCount = queryId + 1;
+            _queryCache.EnsureCapacity(requiredCount);
+            for (int i = _queryCache.Count; i < requiredCount; i++)
+            {
+                _queryCache.Add(null);
+            }
+
+            // Get matched archetype IDs from shared metadata and add only locally existing archetypes
+            var matchedIds = _sharedMetadata.GetMatchedArchetypeIds(queryId);
+            int matchedCount = matchedIds.Count;
+            var archetypes = new List<Archetype<TMask, TConfig>>(matchedCount);
+
+            int localArchetypeCount = _archetypes.Count;
+            for (int i = 0; i < matchedCount; i++)
+            {
+                int archetypeId = matchedIds[i];
+                // Only add archetypes that already exist in this world
+                // New archetypes will be added via NotifyQueries when created
+                if ((uint)archetypeId < (uint)localArchetypeCount && _archetypes[archetypeId] is { } archetype)
+                {
+                    archetypes.Add(archetype);
+                }
+            }
+
+            _queryCache[queryId] = archetypes;
+            return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(archetypes);
+        }
     }
 
     /// <summary>
@@ -175,7 +183,10 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
             _archetypes[i]?.Clear();
         }
         _archetypes.Clear();
-        _queryCache.Clear();
+        lock (_queryCacheLock)
+        {
+            _queryCache.Clear();
+        }
         _tempMatchedQueries.Clear();
     }
 
@@ -262,16 +273,19 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     /// <param name="matchedQueries">The list of matching query IDs from shared metadata.</param>
     private void NotifyQueries(Archetype<TMask, TConfig> archetype, List<int> matchedQueries)
     {
-        int localQueryCount = _queryCache.Count;
-        int matchedCount = matchedQueries.Count;
-
-        for (int i = 0; i < matchedCount; i++)
+        lock (_queryCacheLock)
         {
-            int queryId = matchedQueries[i];
-            // Only notify queries that exist locally in this world
-            if ((uint)queryId < (uint)localQueryCount && _queryCache[queryId] is { } archetypes)
+            int localQueryCount = _queryCache.Count;
+            int matchedCount = matchedQueries.Count;
+
+            for (int i = 0; i < matchedCount; i++)
             {
-                archetypes.Add(archetype);
+                int queryId = matchedQueries[i];
+                // Only notify queries that exist locally in this world
+                if ((uint)queryId < (uint)localQueryCount && _queryCache[queryId] is { } archetypes)
+                {
+                    archetypes.Add(archetype);
+                }
             }
         }
     }

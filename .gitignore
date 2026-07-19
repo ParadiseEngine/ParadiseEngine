@@ -51,3 +51,6 @@ libs/*.so
 
 # Unity asset uid files
 *.uid
+
+# Claude Code worktrees (local-only)
+/.claude/worktrees/
