@@ -168,6 +168,14 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
   - Carried by `CopyFrom` like any other incoming event; tests cover set → read-back → snapshot
   - Consumed by the immortal-cultivation outcome-event migration (mid-flight trade save/reload)
 
+- [x] **SystemEvents — `Emit` managed-emit API** (0.5.2)
+  - `WorldEventStore.Emit<T>(in T)` — the non-system sibling of `SystemEventWriter.Append`, so
+    managed code (command handlers, host passes) can put events on the bus
+  - Staged store-side, dispatched by `Commit` after all system writers (fixed, deterministic
+    position), transient (reset by `CopyFrom`/`Clear`) — never enters the snapshot
+  - One-frame-deferred like system emits when called in a pre-schedule pass; owner-thread-only
+  - Enables reactors whose producers are managed; consumed by the game's cross-entity affection system
+
 ### In Progress
 
 
@@ -351,6 +359,7 @@ Minor TODOs in codebase:
 
 ### Recent Activity
 
+- **2026-07-20**: Shipped `SystemEvents` `Emit` managed-emit API (0.5.2) — non-system code can put events on the bus, committed deterministically after system writers
 - **2026-07-20**: Shipped `SystemEvents` `SetIncoming` restore API (0.5.1) — host-side re-seed of in-flight events for mid-window save/reload
 - **2026-07-18**: Shipped `SystemEvents` deferred event bus (0.5.0) — off-entity typed event buffers, schedule-order merge, snapshot participation
 - **2026-03-04**: Merged [#54](https://github.com/quabug/ParadiseECS/pull/54) - Add entity handle injection in systems

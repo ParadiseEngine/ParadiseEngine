@@ -152,6 +152,68 @@ public sealed class SystemEventsTests
         await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected);
     }
 
+    [Test]
+    public async Task Emit_DeliversManagedEventsOnCommit()
+    {
+        // A managed emit (no system writer involved) surfaces in the next incoming set, exactly like
+        // a system-written event — this is the managed sibling of SystemEventWriter.Append.
+        var store = new WorldEventStore();
+        store.Emit(new Died { NpcId = 11 });
+        store.Emit(new Died { NpcId = 12 });
+
+        store.Commit(ReadOnlySpan<SystemEventWriter>.Empty);
+
+        var expected = new[] { 11, 12 };
+        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected);
+    }
+
+    [Test]
+    public async Task Emit_MergesAfterSystemWritersDeterministically()
+    {
+        // System writers merge first (in schedule order), then managed emits — a fixed position, so
+        // the merged order is deterministic regardless of when Emit was called relative to the wave.
+        var store = new WorldEventStore();
+        store.Emit(new Died { NpcId = 99 });
+        var writers = new[] { Writer(new Died { NpcId = 1 }), Writer(new Died { NpcId = 2 }) };
+
+        store.Commit(writers);
+
+        var ids = ToIds(store.Incoming<Died>());
+        var expected = new[] { 1, 2, 99 };
+        await Assert.That(ids).IsEquivalentTo(expected);
+        await Assert.That(ids[0]).IsEqualTo(1);  // writer 0 first
+        await Assert.That(ids[1]).IsEqualTo(2);  // writer 1 next
+        await Assert.That(ids[2]).IsEqualTo(99); // managed emit last (fixed, deterministic position)
+    }
+
+    [Test]
+    public async Task Emit_IsTransient_ClearedAfterEachCommit()
+    {
+        // Managed staging is drained by the commit that publishes it — it must not re-appear next frame.
+        var store = new WorldEventStore();
+        store.Emit(new Died { NpcId = 7 });
+        store.Commit(ReadOnlySpan<SystemEventWriter>.Empty);
+        await Assert.That(store.Incoming<Died>().Length).IsEqualTo(1);
+
+        store.Commit(ReadOnlySpan<SystemEventWriter>.Empty); // next frame, nothing emitted
+        await Assert.That(store.Incoming<Died>().Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Emit_RidesWorldCopyFromLikeSystemEvents()
+    {
+        using var shared = new SharedWorld<SmallBitSet<ulong>, DefaultConfig>(ComponentRegistry.Shared.TypeInfos);
+        var write = shared.CreateWorld();
+        var snapshot = shared.CreateWorld();
+
+        write.Events.Emit(new Died { NpcId = 55 });
+        write.Events.Commit(ReadOnlySpan<SystemEventWriter>.Empty);
+        snapshot.CopyFrom(write);
+
+        var expected = new[] { 55 };
+        await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected);
+    }
+
     private static int[] ToIds(ReadOnlySpan<Died> span)
     {
         var ids = new int[span.Length];

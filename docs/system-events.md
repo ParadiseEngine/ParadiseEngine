@@ -105,6 +105,23 @@ types' `SystemEvents<T>` buffers. `World.CopyFrom` copies it alongside `_entityM
 Event types are registered like components (generated id + `Size` + `InitCapacity`), so the
 store is a fixed-size array indexed by event-type id (AOT-friendly, no per-tick `Dictionary`).
 
+Two public managed entry points on the store (both call on the world's owner thread only):
+
+```
+ReadOnlySpan<T> Incoming<T>()      // read the previous frame's events (read-many)
+void            SetIncoming<T>(…)  // 0.5.1: re-seed incoming on load (a mid-window save)
+void            Emit<T>(in T e)    // 0.5.2: MANAGED emit — the non-system sibling of Append
+```
+
+`Emit<T>` lets non-system managed code (a command handler, a host pre-pass) put an event on the
+bus. It stages into a store-owned buffer that `Commit` dispatches **after** all per-work-item
+system writers (a fixed, deterministic position in the merge), then clears. Called in a pre-schedule
+pass, a managed emit therefore commits with that tick's wave and is delivered one frame later with
+identical semantics to a system emit. It is NOT thread-safe and must run on the owner thread and
+outside a schedule run — the same contract as `world.GetComponent<T>().Value = …`; the managed
+staging is transient (drained each commit, reset by `CopyFrom`/`Clear`), so it never enters the
+snapshot.
+
 ### 4.3 `SystemEventWriter` — the injected write handle (mirror `EntityCommandBuffer`)
 
 One non-generic type with a generic append, exactly like the ECB's `AddComponent<T>`:
@@ -202,6 +219,10 @@ All stages below are landed and released. Status in brackets.
 6. **`SetIncoming<T>` restore API (0.5.1):** `WorldEventStore.SetIncoming<T>(ReadOnlySpan<T>)`
    replaces a type's incoming buffer so a host can re-seed events that were in-flight when a save
    was taken mid-window; carried by `CopyFrom`, covered by set → read-back → snapshot tests. **[done, 0.5.1]**
+7. **`Emit<T>` managed-emit API (0.5.2):** `WorldEventStore.Emit<T>(in T)` — the non-system sibling
+   of `SystemEventWriter.Append`, so managed code (command handlers, host passes) can put events on
+   the bus. Staged store-side, dispatched by `Commit` after all system writers (deterministic),
+   transient. Enables reactors whose *producers* are managed, not systems. **[done, 0.5.2]**
 
 **Consumer status.** The bus went well past the `NpcDied` pilot: the immortal-cultivation game
 moved *all eight* rng/trade feature outcomes onto it — each feature system now emits a `*Resolved`
