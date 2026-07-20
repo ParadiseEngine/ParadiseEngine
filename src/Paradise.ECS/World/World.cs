@@ -19,6 +19,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     private readonly ArchetypeRegistry<TMask, TConfig> _archetypeRegistry;
     private readonly EntityManager _entityManager;
     private readonly ImmutableArray<ComponentTypeInfo> _typeInfos;
+    private readonly WorldEventStore _events = new();
     private Archetype<TMask, TConfig> _emptyArchetype;
 
     /// <summary>
@@ -445,6 +446,17 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// Gets the chunk manager for this world.
     /// Used by generated queryable types for direct component access.
     /// </summary>
+    /// <summary>
+    /// The world's deferred event buffers (see <c>docs/system-events.md</c>). Holds each event
+    /// type's INCOMING events (produced last frame, read-many by systems this frame). Rides
+    /// <see cref="CopyFrom"/>, so events participate in the immutable snapshot.
+    /// </summary>
+    public WorldEventStore Events
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _events;
+    }
+
     public ChunkManager ChunkManager
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -692,6 +704,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         AssertStructuralChangesAllowed(nameof(Clear));
         _archetypeRegistry.Clear();
         _entityManager.Clear();
+        _events.Clear();
 
         // Re-create the empty archetype for componentless entities
         _emptyArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)TMask.Empty);
@@ -727,6 +740,9 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
         // Copy archetype data (chunks)
         _archetypeRegistry.CopyFrom(source._archetypeRegistry);
+
+        // Copy deferred event buffers so one-frame-deferred events ride the snapshot
+        _events.CopyFrom(source._events);
 
         // Restore empty archetype reference (GetOrCreate returns existing if already created)
         _emptyArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)TMask.Empty);

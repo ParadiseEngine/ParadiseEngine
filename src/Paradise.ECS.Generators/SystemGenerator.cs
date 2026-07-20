@@ -399,6 +399,30 @@ public class SystemGenerator : IIncrementalGenerator
                 isCurrentTick: isCurrentTick);
         }
 
+        // SystemEventWriter field → EventWriter (deferred event emission; off-entity, no masks)
+        if (!isRef && fieldType is INamedTypeSymbol eventWriterType &&
+            eventWriterType.ToDisplayString() == "Paradise.ECS.SystemEventWriter")
+        {
+            return new SystemFieldInfo(
+                field.Name, FieldKind.EventWriter, false,
+                "global::Paradise.ECS.SystemEventWriter",
+                null, ImmutableArray<QueryableComponentAccess>.Empty,
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                isCurrentTick: isCurrentTick);
+        }
+
+        // SystemEventReader field → EventReader (reads last frame's events; off-entity, no masks)
+        if (!isRef && fieldType is INamedTypeSymbol eventReaderType &&
+            eventReaderType.ToDisplayString() == "Paradise.ECS.SystemEventReader")
+        {
+            return new SystemFieldInfo(
+                field.Name, FieldKind.EventReader, false,
+                "global::Paradise.ECS.SystemEventReader",
+                null, ImmutableArray<QueryableComponentAccess>.Empty,
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                isCurrentTick: isCurrentTick);
+        }
+
         // Entity field → EntityHandle (for entity systems)
         if (!isRef && fieldType is INamedTypeSymbol entityType &&
             entityType.ToDisplayString() == "Paradise.ECS.Entity")
@@ -578,7 +602,7 @@ public class SystemGenerator : IIncrementalGenerator
                 // EntityCommandBuffer fields; segments fields are only valid on IWorldSystem.
                 // Singleton fields are valid on every system kind.
                 bool worldFieldMismatch =
-                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.Invalid)) ||
+                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.Invalid)) ||
                     (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
                 if (worldFieldMismatch)
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
@@ -594,7 +618,7 @@ public class SystemGenerator : IIncrementalGenerator
                 if (f.IsCurrentTick && !IsValidCurrentTickField(f)) return false;
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
-                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer)) return false;
+                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader)) return false;
                 if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
             }
             return true;
@@ -651,7 +675,7 @@ public class SystemGenerator : IIncrementalGenerator
 
         foreach (var field in sys.Fields)
         {
-            if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer or FieldKind.EntityHandle or FieldKind.EntitySpan) continue;
+            if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityHandle or FieldKind.EntitySpan) continue;
 
             if (field.Kind is FieldKind.InlineComponent or FieldKind.InlineSpan)
             {
@@ -899,6 +923,12 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.CommandBuffer:
                     sb.Append($"global::Paradise.ECS.EntityCommandBuffer {ToCamelCase(field.FieldName)}");
                     break;
+                case FieldKind.EventWriter:
+                    sb.Append($"global::Paradise.ECS.SystemEventWriter {ToCamelCase(field.FieldName)}");
+                    break;
+                case FieldKind.EventReader:
+                    sb.Append($"global::Paradise.ECS.SystemEventReader {ToCamelCase(field.FieldName)}");
+                    break;
                 case FieldKind.EntityHandle:
                     sb.Append($"global::Paradise.ECS.Entity {ToCamelCase(field.FieldName)}");
                     break;
@@ -934,7 +964,8 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}static void global::Paradise.ECS.IWorldSystemRunner<{maskType}, {configType}>.RunWorld(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
-        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.SystemEventWriter eventWriter)");
         sb.AppendLine($"{indent}{{");
         var body = indent + "    ";
 
@@ -998,6 +1029,14 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("commands");
             }
+            else if (field.Kind == FieldKind.EventWriter)
+            {
+                sb.Append("eventWriter");
+            }
+            else if (field.Kind == FieldKind.EventReader)
+            {
+                sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
+            }
         }
         sb.AppendLine(");");
         sb.AppendLine($"{body}__system.Execute();");
@@ -1015,7 +1054,8 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}> layout,");
         sb.AppendLine($"{indent}    int entityCount,");
-        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands)");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.EntityCommandBuffer commands,");
+        sb.AppendLine($"{indent}    global::Paradise.ECS.SystemEventWriter eventWriter)");
         sb.AppendLine($"{indent}{{");
 
         // Classic path: single-world binding, byte-identical bodies to the pre-snapshot codegen
@@ -1110,6 +1150,10 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             else if (field.Kind == FieldKind.CommandBuffer)
                 sb.Append("commands");
+            else if (field.Kind == FieldKind.EventWriter)
+                sb.Append("eventWriter");
+            else if (field.Kind == FieldKind.EventReader)
+                sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
         }
@@ -1179,6 +1223,10 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append($"{ToCamelCase(field.FieldName)}Singleton");
             else if (field.Kind == FieldKind.CommandBuffer)
                 sb.Append("commands");
+            else if (field.Kind == FieldKind.EventWriter)
+                sb.Append("eventWriter");
+            else if (field.Kind == FieldKind.EventReader)
+                sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
         }
@@ -1258,6 +1306,14 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("commands");
             }
+            else if (field.Kind == FieldKind.EventWriter)
+            {
+                sb.Append("eventWriter");
+            }
+            else if (field.Kind == FieldKind.EventReader)
+            {
+                sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
+            }
             else if (field.Kind == FieldKind.EntitySpan)
             {
                 sb.Append("(global::System.ReadOnlySpan<global::Paradise.ECS.Entity>)__entitySpan");
@@ -1333,6 +1389,14 @@ public class SystemGenerator : IIncrementalGenerator
             else if (field.Kind == FieldKind.CommandBuffer)
             {
                 sb.Append("commands");
+            }
+            else if (field.Kind == FieldKind.EventWriter)
+            {
+                sb.Append("eventWriter");
+            }
+            else if (field.Kind == FieldKind.EventReader)
+            {
+                sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
             else if (field.Kind == FieldKind.EntitySpan)
             {
@@ -1562,7 +1626,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk, World }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EntityHandle, EntitySpan, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EventWriter, EventReader, EntityHandle, EntitySpan, Invalid }
 
     private static bool IsEntityModeField(FieldKind kind) =>
         kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;

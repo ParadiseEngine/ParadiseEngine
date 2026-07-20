@@ -21,7 +21,8 @@ public struct DirectSpawnOffenderSystem : IWorldSystemRunner<SmallBitSet<uint>, 
     public static void RunWorld(
         IWorld<SmallBitSet<uint>, DefaultConfig> world,
         IWorld<SmallBitSet<uint>, DefaultConfig>? readWorld,
-        EntityCommandBuffer commands)
+        EntityCommandBuffer commands,
+        SystemEventWriter eventWriter)
         => world.Spawn();
 }
 
