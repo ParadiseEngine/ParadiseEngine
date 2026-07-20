@@ -65,6 +65,14 @@ internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged
         _stagingCount = 0;
     }
 
+    public void SetIncoming(ReadOnlySpan<T> events)
+    {
+        if (_incoming.Length < events.Length)
+            _incoming = new T[events.Length];
+        events.CopyTo(_incoming);
+        _incomingCount = events.Length;
+    }
+
     public void CopyIncomingFrom(ISystemEvents source)
     {
         var src = (SystemEvents<T>)source;

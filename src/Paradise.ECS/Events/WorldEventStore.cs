@@ -29,6 +29,22 @@ public sealed class WorldEventStore
     }
 
     /// <summary>
+    /// Directly replaces the incoming buffer for event type <typeparamref name="T"/> — used to
+    /// RE-SEED events on load (a save taken while an event was in-flight, produced tick N but not yet
+    /// consumed until N+1, must restore it here). Call OUTSIDE a schedule run; the next tick's readers
+    /// observe it exactly as if it had been committed by the previous frame. See docs/system-events.md.
+    /// </summary>
+    /// <typeparam name="T">The unmanaged event type.</typeparam>
+    /// <param name="events">The incoming events to restore (copied in).</param>
+    public void SetIncoming<T>(ReadOnlySpan<T> events) where T : unmanaged
+    {
+        int id = SystemEventType<T>.Id;
+        EnsureCapacity(id + 1);
+        var buffer = (SystemEvents<T>)(_byType[id] ??= new SystemEvents<T>());
+        buffer.SetIncoming(events);
+    }
+
+    /// <summary>
     /// Post-wave commit: replaces every type's incoming buffer with the events the writers recorded
     /// this frame, walked in schedule order (so the merge is deterministic in <paramref name="writers"/>
     /// order). Types with no new events this frame get an empty incoming — last frame's events expire.

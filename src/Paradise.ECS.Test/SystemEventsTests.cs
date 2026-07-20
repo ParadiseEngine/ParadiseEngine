@@ -127,6 +127,31 @@ public sealed class SystemEventsTests
         await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected);
     }
 
+    [Test]
+    public async Task SetIncoming_SeedsEventsForReaders()
+    {
+        var store = new WorldEventStore();
+        var restored = new[] { new Died { NpcId = 9 }, new Died { NpcId = 10 } };
+        store.SetIncoming<Died>(restored);
+
+        var expected = new[] { 9, 10 };
+        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected);
+    }
+
+    [Test]
+    public async Task SetIncoming_ThenCopyFrom_RoundTrips()
+    {
+        var a = new WorldEventStore();
+        var seed = new[] { new Died { NpcId = 3 } };
+        a.SetIncoming<Died>(seed);
+
+        var b = new WorldEventStore();
+        b.CopyFrom(a);
+
+        var expected = new[] { 3 };
+        await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected);
+    }
+
     private static int[] ToIds(ReadOnlySpan<Died> span)
     {
         var ids = new int[span.Length];
