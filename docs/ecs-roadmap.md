@@ -161,6 +161,13 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
     `World.CopyFrom` so in-flight events are part of the snapshot
   - Full spec: `docs/system-events.md`
 
+- [x] **SystemEvents — `SetIncoming` restore API** (0.5.1)
+  - `WorldEventStore.SetIncoming<T>(ReadOnlySpan<T>)` replaces a type's incoming buffer directly,
+    so a host can re-seed events in-flight when a save was taken during the one-frame window
+    (produced tick N, consumed N+1) — the round-trip resumes bit-identically
+  - Carried by `CopyFrom` like any other incoming event; tests cover set → read-back → snapshot
+  - Consumed by the immortal-cultivation outcome-event migration (mid-flight trade save/reload)
+
 ### In Progress
 
 
@@ -344,6 +351,8 @@ Minor TODOs in codebase:
 
 ### Recent Activity
 
+- **2026-07-20**: Shipped `SystemEvents` `SetIncoming` restore API (0.5.1) — host-side re-seed of in-flight events for mid-window save/reload
+- **2026-07-18**: Shipped `SystemEvents` deferred event bus (0.5.0) — off-entity typed event buffers, schedule-order merge, snapshot participation
 - **2026-03-04**: Merged [#54](https://github.com/quabug/ParadiseECS/pull/54) - Add entity handle injection in systems
 - **2026-03-04**: Merged [#53](https://github.com/quabug/ParadiseECS/pull/53) - Integrate ECB with system scheduler
 - **2026-03-03**: Merged [#51](https://github.com/quabug/ParadiseECS/pull/51) - Add EntityCommandBuffer with real entity ID reservation

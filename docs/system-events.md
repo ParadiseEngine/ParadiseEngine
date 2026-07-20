@@ -182,21 +182,32 @@ tick N+1: reads write.Incoming = events N. ✓
 - **Save round-trip (game side):** serialize a world with pending incoming events, reload,
   continue one tick, assert bit-identical to the un-saved run.
 
-## 9. Staged implementation plan
+## 9. Staged implementation plan — SHIPPED
+
+All stages below are landed and released. Status in brackets.
 
 1. **Runtime core (no generator):** `SystemEvents<T>`, `WorldEventStore`, `SystemEventWriter`,
    `SystemEventReader`, `SystemEventBufferPool`; wire `World.CopyFrom`, `SystemSchedule` commit,
-   `WorkItem`. Direct (hand-called) API + unit tests §8(1-4). *Provable without codegen.*
+   `WorkItem`. Direct (hand-called) API + unit tests §8(1-4). *Provable without codegen.* **[done, 0.5.0]**
 2. **Generator injection:** `FieldKind.EventWriter` / `FieldKind.EventReader`, dispatcher
-   emission, `IWorldSystem` allow-list. Analyzer tests.
+   emission, `IWorldSystem` allow-list. Analyzer tests. **[done, 0.5.0]**
 3. **Event-type registration (OPTIONAL / deferred):** generator-assigned stable ids. NOT
    required for correctness — the engine never serializes event ids; the game's `SaveService`
    persists events through its own typed DTO and re-`Append`s on load, so process-local ids are
    consistent within any single run (determinism holds per-process). Only needed if raw engine
-   ids were ever written to disk, which they are not.
-4. **Pack `Paradise.ECS` 0.5.0** locally; bump the game.
+   ids were ever written to disk, which they are not. **[not needed — confirmed by the game migration]**
+4. **Pack `Paradise.ECS` 0.5.0**; bump the game. **[done — published to nuget.org]**
 5. **Game migration:** `NpcDied` fan-out replaces the `NpcJustDied` flag path; save round-trip
-   §8(5); docs.
+   §8(5); docs. **[done]**
+6. **`SetIncoming<T>` restore API (0.5.1):** `WorldEventStore.SetIncoming<T>(ReadOnlySpan<T>)`
+   replaces a type's incoming buffer so a host can re-seed events that were in-flight when a save
+   was taken mid-window; carried by `CopyFrom`, covered by set → read-back → snapshot tests. **[done, 0.5.1]**
+
+**Consumer status.** The bus went well past the `NpcDied` pilot: the immortal-cultivation game
+moved *all eight* rng/trade feature outcomes onto it — each feature system now emits a `*Resolved`
+event instead of writing an `*Outcome` component, the sole player-state owner system applies the
+numeric deltas from those events, and a thin managed drain turns the same events into narration.
+`SetIncoming` (stage 6) is what lets a save taken between roll and application round-trip exactly.
 
 ## 10. Relationship to the ECB (the subset)
 
