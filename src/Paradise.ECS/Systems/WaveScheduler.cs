@@ -36,6 +36,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     private readonly nint _layoutPtr;
     private readonly int _entityCount;
     private readonly EntityCommandBuffer _commands;
+    private readonly SystemEventWriter _eventWriter;
 
     internal WorkItem(
         int systemId,
@@ -47,7 +48,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         IWorld<TMask, TConfig>? readWorld,
         nint layoutPtr,
         int entityCount,
-        EntityCommandBuffer commands)
+        EntityCommandBuffer commands,
+        SystemEventWriter eventWriter)
     {
         SystemId = systemId;
         Chunk = chunk;
@@ -60,6 +62,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         _layoutPtr = layoutPtr;
         _entityCount = entityCount;
         _commands = commands;
+        _eventWriter = eventWriter;
     }
 
     /// <summary>Work item for a whole-world system (<see cref="IWorldSystem"/>): one invocation
@@ -69,7 +72,8 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         SystemRunWorldAction<TMask, TConfig> worldDispatcher,
         IWorld<TMask, TConfig> world,
         IWorld<TMask, TConfig>? readWorld,
-        EntityCommandBuffer commands)
+        EntityCommandBuffer commands,
+        SystemEventWriter eventWriter)
     {
         SystemId = systemId;
         Chunk = default;
@@ -82,6 +86,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
         _layoutPtr = 0;
         _entityCount = 0;
         _commands = commands;
+        _eventWriter = eventWriter;
     }
 
     /// <summary>
@@ -93,12 +98,12 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
     {
         if (_worldDispatcher is not null)
         {
-            _worldDispatcher(_world, _readWorld, _commands);
+            _worldDispatcher(_world, _readWorld, _commands, _eventWriter);
             return;
         }
 
         _dispatcher!(_world, Chunk, _readChunkManager, _readChunk, _readWorld,
-            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commands);
+            new ImmutableArchetypeLayout<TMask, TConfig>(_layoutPtr), _entityCount, _commands, _eventWriter);
     }
 }
 

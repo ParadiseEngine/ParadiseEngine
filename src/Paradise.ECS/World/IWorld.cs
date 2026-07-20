@@ -75,6 +75,12 @@ public interface IWorld<TMask, TConfig>
     ChunkManager ChunkManager { get; }
 
     /// <summary>
+    /// Gets the world's deferred event buffers (see <c>docs/system-events.md</c>): each event
+    /// type's INCOMING events (produced last frame). Participates in <c>CopyFrom</c>/snapshots.
+    /// </summary>
+    WorldEventStore Events { get; }
+
+    /// <summary>
     /// Gets the entity manager for entity lifecycle and location tracking.
     /// </summary>
     IEntityManager EntityManager { get; }

@@ -24,6 +24,7 @@ namespace Paradise.ECS;
 /// shared metadata, so one layout is valid for both worlds' chunks).</param>
 /// <param name="entityCount">The number of entities in the chunk.</param>
 /// <param name="commands">The entity command buffer for deferred structural changes.</param>
+/// <param name="eventWriter">The per-work-item writer for emitting deferred events (see docs/system-events.md).</param>
 public delegate void SystemRunChunkAction<TMask, TConfig>(
     IWorld<TMask, TConfig> world,
     ChunkHandle chunk,
@@ -32,7 +33,8 @@ public delegate void SystemRunChunkAction<TMask, TConfig>(
     IWorld<TMask, TConfig>? readWorld,
     ImmutableArchetypeLayout<TMask, TConfig> layout,
     int entityCount,
-    EntityCommandBuffer commands)
+    EntityCommandBuffer commands,
+    SystemEventWriter eventWriter)
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new();
 
@@ -45,7 +47,8 @@ public delegate void SystemRunChunkAction<TMask, TConfig>(
 public delegate void SystemRunWorldAction<TMask, TConfig>(
     IWorld<TMask, TConfig> world,
     IWorld<TMask, TConfig>? readWorld,
-    EntityCommandBuffer commands)
+    EntityCommandBuffer commands,
+    SystemEventWriter eventWriter)
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new();
 
@@ -72,6 +75,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     private readonly ImmutableArray<SystemMetadata<TMask>> _metadata;
     private readonly IWaveScheduler _scheduler;
     private readonly EntityCommandBufferPool _ecbPool;
+    private readonly SystemEventBufferPool _eventPool;
     private readonly List<WorkItem<TMask, TConfig>> _workItems = new();
 
     internal SystemSchedule(
@@ -89,6 +93,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         _metadata = metadata;
         _scheduler = scheduler;
         _ecbPool = new EntityCommandBufferPool();
+        _eventPool = new SystemEventBufferPool();
     }
 
     /// <summary>
@@ -149,6 +154,11 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
         _ecbPool.PlaybackAll(_world);
         _ecbPool.ClearAll();
+
+        // Merge this run's per-work-item event writers into the world's event store, in schedule
+        // order (deterministic). Always runs — with no writer this expires last frame's events.
+        _eventPool.CommitTo(_world.Events);
+        _eventPool.ClearAll();
     }
 
     private void RunWaves(IWorld<TMask, TConfig>? readWorld)
@@ -166,7 +176,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                 if (_worldDispatchers[systemId] is { } worldDispatcher)
                 {
                     _workItems.Add(new WorkItem<TMask, TConfig>(
-                        systemId, worldDispatcher, _world, readWorld, _ecbPool.Rent()));
+                        systemId, worldDispatcher, _world, readWorld, _ecbPool.Rent(), _eventPool.Rent()));
                     continue;
                 }
 
@@ -187,7 +197,8 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                         readWorld,
                         ci.Archetype.Layout.DataPointer,
                         ci.EntityCount,
-                        _ecbPool.Rent()));
+                        _ecbPool.Rent(),
+                        _eventPool.Rent()));
                 }
             }
             _scheduler.Execute(_workItems);

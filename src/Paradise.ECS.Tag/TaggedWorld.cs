@@ -123,6 +123,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public ChunkManager ChunkManager => _world.ChunkManager;
 
     /// <inheritdoc/>
+    public WorldEventStore Events => _world.Events;
+
+    /// <inheritdoc/>
     public EntityIdAllocator EntityIdAllocator => _world.EntityIdAllocator;
 
     /// <summary>

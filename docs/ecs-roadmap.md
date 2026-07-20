@@ -151,6 +151,16 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
   - Source generator detects Entity/ReadOnlySpan<Entity> fields and emits extraction code
   - Validation diagnostics (PECS3006/PECS3007) for mismatched field kinds across system types
 
+- [x] **SystemEvents — deferred event bus** (0.5.0)
+  - Off-entity, unmanaged, type-keyed event buffers owned by the world (`WorldEventStore`)
+  - System-injected `SystemEventWriter` (`Append<T>`) + `SystemEventReader` (`Read<T>`), mirroring
+    `EntityCommandBuffer` injection; no read/write masks, so events add no DAG edges
+  - Per-work-item writers merged in schedule order after the wave (`SystemEventBufferPool`) —
+    bit-identical event order under any `IWaveScheduler`
+  - One-frame-deferred delivery (reader binds to the read world); event store rides
+    `World.CopyFrom` so in-flight events are part of the snapshot
+  - Full spec: `docs/system-events.md`
+
 ### In Progress
 
 
