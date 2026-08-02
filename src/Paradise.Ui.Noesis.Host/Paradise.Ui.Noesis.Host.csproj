@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Ui.Noesis.Host</AssemblyName>
+    <RootNamespace>Paradise.Ui.Noesis.Host</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Title>Paradise.Ui.Noesis.Host</Title>
+    <PackageId>Paradise.Ui.Noesis.Host</PackageId>
+    <Description>Host layer above Paradise.Ui.Noesis: sim-thread NoesisGUI view lifecycle with file-system resource providers and the Paradise.Ui input contract, plus the WebGPU render-half overlay recorder. Requires a NoesisGUI license for use.</Description>
+    <PackageTags>noesis;xaml;ui;webgpu;game-dev</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Noesis.GUI" />
+    <PackageReference Include="WebGPUSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
+    <ProjectReference Include="..\Paradise.Ui.Noesis\Paradise.Ui.Noesis.csproj" />
+  </ItemGroup>
+</Project>

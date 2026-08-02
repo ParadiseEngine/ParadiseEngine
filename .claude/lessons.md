@@ -62,6 +62,22 @@
   view AFTER `SDL_CreateWindow`, hand `SDL_Metal_GetLayer` to the Cocoa surface source, and
   `SDL_Metal_DestroyView` only after the renderer/surface is disposed.
 
+- [hits: 1] **`NoesisRenderDevice` offscreen surfaces must be created in `_colorFormat`, never
+  hardcoded RGBA8** — every pipeline's color target state is `_colorFormat`, and the same
+  pipeline cache serves offscreen and onscreen passes. On a BGRA8 host (the headless
+  renderer's offscreen target, typical windowed swapchains) a hardcoded-RGBA8 offscreen
+  surface makes every opacity-group/effect frame's pass invalid, and **Dawn drops the ENTIRE
+  command buffer silently** — no `UncapturedErrorCallback` fires without an instance event
+  pump, so the symptom is a backbuffer frozen at the last pre-Noesis frame while every CPU
+  loop keeps "succeeding" (sim ticks, RecordOverlay, Submit all normal). Debugging trap on
+  top: a "clear landed" pixel probe must check ALPHA (zero-initialized texture reads the same
+  0 as a dark clear color in RGB); a probe that can't distinguish "frame dropped" from
+  "frame landed dark" hides exactly this failure. Fixed 2026-08-01 (issue #126 branch):
+  `CreateNativeTexture(renderTarget: true)` now uses `_colorFormat`; guarded by
+  `frames_after_a_noesis_overlay_still_reach_the_target(BGRA8Unorm)` +
+  `concurrent_sim_ticks_do_not_freeze_the_target` with Noesis-content pixel asserts. Related:
+  `WebGpuDevice` now installs a `DeviceLostCallback` so silent device loss is at least loggable.
+
 - [hits: 1] **toktx `--normal_mode` stores X in RGB and Y in ALPHA ("RRRG" two-channel
   layout), NOT a standard 3-channel normal map.** BC5 transcoding (`KTX_TTF_BC5_RG`) maps it
   to R=X, G=Y natively — but a raw RGBA32 transcode yields (X,X,X,Y), so a shader sampling

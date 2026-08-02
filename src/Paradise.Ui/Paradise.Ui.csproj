@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Ui</AssemblyName>
+    <RootNamespace>Paradise.Ui</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Title>Paradise.Ui</Title>
+    <PackageId>Paradise.Ui</PackageId>
+    <Description>Engine-neutral UI input contract for Paradise Engine hosts: the UiEvent stream, the sim-thread IUiInput half, and CompositeUiInput fan-out for stacking UI systems.</Description>
+    <PackageTags>ui;input;game-dev</PackageTags>
+  </PropertyGroup>
+</Project>
