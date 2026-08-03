@@ -47,6 +47,32 @@
 
 ## Paradise.Rendering
 
+- [hits: 1] **`Queue.WriteBuffer` rejects any size that is not a multiple of 4, and the rejection
+  is SILENT** — it is validated on the queue, not at draw time, so the upload simply never lands
+  and every draw reading that region renders whatever the buffer held before (zeros on a fresh
+  buffer, last frame's geometry on a reused one). `NoesisRenderDevice` staged Noesis's mapped
+  blocks at their exact mapped length; indices are 16-bit, so any frame with an ODD total index
+  count produced a size like 18006 and lost its **entire** index block. In the game's map that
+  meant ~1400 rectangles (6 indices each, an even total) rendered fine until ONE filled
+  `DrawGeometry` added a 3-index triangle fan — the whole page then smeared into garbage
+  triangles, which read like a path-rendering bug and is really an upload-alignment bug. Vertices
+  never tripped it because every `NoesisShaderCatalog.AttrSizes` entry is a multiple of 4. Fixed
+  2026-08-04 (issue #129): `WriteAligned` rounds the written length up to 4 — safe because the
+  sub-allocation cursors already advance by `Align4`, so the padding lands in a gap no draw
+  indexes into. **Debugging trap that cost most of the time here**: nothing pumps Dawn's
+  uncaptured-error callback, so the validation message never appeared, and the frame just came
+  back as the clear colour. `device.PushErrorScope(ErrorFilter.Validation)` +
+  `PopErrorScopeSync` around a frame prints it immediately — reach for an error scope FIRST when
+  a WebGPU frame renders empty or stale, before theorising about buffer lifetimes. Guarded by
+  `a_dense_rectangle_field_plus_a_filled_path_renders_without_corrupting_the_frame`, which
+  asserts the error scope is clean AND that the frame really had an unaligned map.
+
+- [hits: 1] **"Path too complex to render. Please split the geometry into several paths" comes
+  from the Noesis NATIVE core, not from Paradise** — the string lives in `Noesis.dylib`, and
+  `NoesisRenderDevice` has no path-complexity cap of its own. There is no engine-side knob to
+  raise; a `Path` with hundreds of figures must be split into several paths (or drawn as
+  separate primitives) by the caller. Do not go looking for the limit in the render device.
+
 - [hits: 1] **WebGPUSharp 0.5.2's type-specific `SurfaceDescriptor(ref SurfaceSource*FFI)`
   constructors do NOT stamp `Chain.SType`** — Dawn then rejects the surface with
   "Unexpected chained struct of type SType::0" and `Surface.GetCapabilities` returns null.
