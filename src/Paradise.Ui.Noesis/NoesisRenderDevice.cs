@@ -31,6 +31,13 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
 
     public readonly HashSet<string> Unsupported = new();
 
+    /// <summary>How many blocks Noesis mapped during the frame in progress whose length was not a
+    /// multiple of 4, and so needed padding to be uploadable at all (see <see cref="WriteAligned"/>).
+    /// Reset by <see cref="BeginFrame"/>. This is the exact frame shape that used to lose its
+    /// geometry, so the regression test asserts on it — otherwise the test would silently stop
+    /// covering the bug if Noesis ever changed how it groups geometry.</summary>
+    public int UnalignedMaps => _unalignedMaps;
+
     private readonly Device _device;
     private readonly Queue _queue;
     private readonly WebGpuSharp.TextureFormat _colorFormat;
@@ -56,6 +63,7 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
     private uint _indexBase;
     private uint _uniformCursor;
     private readonly byte[] _uniformScratch = new byte[512];
+    private int _unalignedMaps;
 
     private readonly BindGroupLayout _bindGroupLayout;
     private readonly PipelineLayout _pipelineLayout;
@@ -200,6 +208,7 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
         _vertexCursor = 0;
         _indexCursor = 0;
         _uniformCursor = 0;
+        _unalignedMaps = 0;
     }
 
     /// <summary>Detach from the frame encoder (the host submits it).</summary>
@@ -419,7 +428,7 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
                 _vertexBuffer = GrowBuffer("global::Noesis.VB", BufferUsage.Vertex | BufferUsage.CopyDst, needed, ref _vertexCapacity);
                 _vertexBase = 0;
             }
-            _queue.WriteBuffer(_vertexBuffer, _vertexBase, _vertexScratch.AsSpan(0, (int)_mappedVertexBytes));
+            WriteAligned(_vertexBuffer, _vertexBase, _vertexScratch, _mappedVertexBytes);
             _vertexCursor = Align4(_vertexBase + _mappedVertexBytes);
         }
         _mappedVertexBytes = 0;
@@ -442,13 +451,39 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
                 _indexBuffer = GrowBuffer("global::Noesis.IB", BufferUsage.Index | BufferUsage.CopyDst, needed, ref _indexCapacity);
                 _indexBase = 0;
             }
-            _queue.WriteBuffer(_indexBuffer, _indexBase, _indexScratch.AsSpan(0, (int)_mappedIndexBytes));
+            WriteAligned(_indexBuffer, _indexBase, _indexScratch, _mappedIndexBytes);
             _indexCursor = Align4(_indexBase + _mappedIndexBytes);
         }
         _mappedIndexBytes = 0;
     }
 
     private static uint Align4(uint v) => (v + 3u) & ~3u;
+
+    /// <summary>Stage a mapped block, rounding the WRITTEN LENGTH up to 4 bytes.
+    ///
+    /// <c>WriteBuffer</c> rejects any size that is not a multiple of 4, and — because a queue
+    /// write is validated on the queue, not at draw time — a rejected write is SILENT: the
+    /// upload simply never lands and every batch reading that block draws whatever the buffer
+    /// held before (zeros on a fresh buffer, the previous frame's geometry on a reused one).
+    /// Indices are 16-bit, so any frame whose total index count is ODD produced a size like
+    /// 18006 and lost its entire index block — one filled path (a 3-index triangle fan) among
+    /// thousands of 6-index rectangles is exactly what flips the total odd, which is why a
+    /// single <c>DrawGeometry</c> could smear a whole frame of rectangles into garbage.
+    ///
+    /// Rounding up is safe: the cursors already advance by <see cref="Align4"/>, so the one to
+    /// three padding bytes fall in a gap no draw indexes into, and the scratch arrays are
+    /// 4-byte-multiple sized so the padded span always stays in bounds.</summary>
+    private void WriteAligned(WebGpuSharp.Buffer buffer, uint offset, byte[] scratch, uint bytes)
+    {
+        var padded = Align4(bytes);
+        if (padded != bytes) _unalignedMaps++;
+        if (padded > scratch.Length)
+        {
+            throw new InvalidOperationException(
+                $"Noesis mapped {bytes} bytes, more than the {scratch.Length}-byte staging buffer.");
+        }
+        _queue.WriteBuffer(buffer, offset, scratch.AsSpan(0, (int)padded));
+    }
 
     /// <summary>Allocate a fresh, larger buffer for the remainder of this (and future) frames.
     /// The old buffer is not destroyed — commands already recorded against it this frame are
