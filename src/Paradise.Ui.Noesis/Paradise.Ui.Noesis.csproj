@@ -10,6 +10,10 @@
     <PackageId>Paradise.Ui.Noesis</PackageId>
     <Description>NoesisGUI (XAML) UI integration for Paradise Engine hosts. Requires a NoesisGUI license for use.</Description>
     <PackageTags>noesis;xaml;ui;webgpu;game-dev</PackageTags>
+    <!-- Noesis.GUI is deliberately pinned to the 4.0 preview line (the Studio-first release;
+         see the workspace UI-migration plan). NU5104 would otherwise block packing a stable
+         Paradise version over that prerelease dependency. -->
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
