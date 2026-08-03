@@ -369,7 +369,14 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
         {
             Label = label,
             Size = new Extent3D(width, height, 1),
-            Format = format == global::Noesis.TextureFormat.R8 ? WebGpuSharp.TextureFormat.R8Unorm : WebGpuSharp.TextureFormat.RGBA8Unorm,
+            // Offscreen surfaces are drawn with the SAME pipelines as the onscreen pass, whose
+            // color target state is _colorFormat — a render-attachment surface in any other
+            // format makes every offscreen pass invalid and Dawn drops the whole command
+            // buffer (silently, when no error callback pump runs). Sampled-only textures stay
+            // RGBA8/R8, matching Noesis's upload formats.
+            Format = renderTarget
+                ? _colorFormat
+                : format == global::Noesis.TextureFormat.R8 ? WebGpuSharp.TextureFormat.R8Unorm : WebGpuSharp.TextureFormat.RGBA8Unorm,
             Usage = TextureUsage.TextureBinding | TextureUsage.CopyDst | (renderTarget ? TextureUsage.RenderAttachment : default),
             MipLevelCount = numLevels,
             SampleCount = 1,

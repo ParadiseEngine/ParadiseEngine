@@ -97,8 +97,10 @@ jobs:
             Paradise.Assets.Gltf
             Paradise.Assets.Textures
             Paradise.Rendering.Pbr
+            Paradise.Ui
             Paradise.Ui.ImGui
             Paradise.Ui.Noesis
+            Paradise.Ui.Noesis.Host
           )
 
           for project in "${projects[@]}"; do

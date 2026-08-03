@@ -48,3 +48,8 @@ jobs:
 
       - name: Test
         run: dotnet test --solution ParadiseEngine.ci.slnx --no-build --output normal
+        env:
+          # NoesisGUI license for Paradise.Ui.Noesis[.Host] tests; without these the tests
+          # still run (unlicensed Noesis renders for 10 minutes per session).
+          NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
+          NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}

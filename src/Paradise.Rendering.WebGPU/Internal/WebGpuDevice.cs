@@ -157,6 +157,11 @@ internal sealed class WebGpuDevice : IDisposable
                 var text = message.Length == 0 ? "(no message)" : System.Text.Encoding.UTF8.GetString(message);
                 Console.Error.WriteLine($"[WebGPU] {type}: {text}");
             },
+            DeviceLostCallback = static (reason, message) =>
+            {
+                var text = message.Length == 0 ? "(no message)" : System.Text.Encoding.UTF8.GetString(message);
+                Console.Error.WriteLine($"[WebGPU] device lost ({reason}): {text}");
+            },
         };
         if (supportsBc)
         {
