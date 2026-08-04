@@ -134,6 +134,20 @@ public sealed class NoesisViewCore
 
     private sealed class UiInputHalf(NoesisViewCore owner) : IUiInput
     {
+        /// <summary>One wheel notch, in the Win32/WPF units Noesis expects — three lines of
+        /// scrolling. Hosts report scroll deltas in notches, so this is the conversion.</summary>
+        private const float NotchUnits = 120f;
+
+        // Noesis hit-tests a wheel event at a point, but the UiEvent contract reuses X/Y for the
+        // scroll delta — so the last pointer position is what a scroll is aimed at.
+        private int _pointerX;
+        private int _pointerY;
+        // Precise pointing devices (a MacBook trackpad, a free-spinning wheel) report small
+        // fractions of a notch per event. Carrying the sub-unit remainder instead of truncating
+        // it away is what makes a slow two-finger scroll move at all.
+        private float _pendingHorizontal;
+        private float _pendingVertical;
+
         private View SimView => owner._view ??= owner.CreateViewOnSimThread();
 
         public bool Handle(in UiEvent uiEvent)
@@ -144,11 +158,26 @@ public sealed class NoesisViewCore
                 switch (uiEvent.Kind)
                 {
                     case UiEventKind.PointerMove:
-                        return view.MouseMove((int)uiEvent.X, (int)uiEvent.Y);
+                        return view.MouseMove(TrackX(uiEvent.X), TrackY(uiEvent.Y));
                     case UiEventKind.PointerDown:
-                        return view.MouseButtonDown((int)uiEvent.X, (int)uiEvent.Y, ToNoesis(uiEvent.Button));
+                        return view.MouseButtonDown(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
                     case UiEventKind.PointerUp:
-                        return view.MouseButtonUp((int)uiEvent.X, (int)uiEvent.Y, ToNoesis(uiEvent.Button));
+                        return view.MouseButtonUp(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
+                    case UiEventKind.Scroll:
+                    {
+                        // X/Y are the delta in notches: +Y is a wheel rotated forward (scroll up),
+                        // +X is a wheel rotated right — both matching Noesis's own sign convention.
+                        var handled = false;
+                        if (TakeRotation(uiEvent.Y, ref _pendingVertical) is { } vertical)
+                        {
+                            handled |= view.MouseWheel(_pointerX, _pointerY, vertical);
+                        }
+                        if (TakeRotation(uiEvent.X, ref _pendingHorizontal) is { } horizontal)
+                        {
+                            handled |= view.MouseHWheel(_pointerX, _pointerY, horizontal);
+                        }
+                        return handled;
+                    }
                     case UiEventKind.Resize:
                         owner._width = (uint)uiEvent.X;
                         owner._height = (uint)uiEvent.Y;
@@ -168,6 +197,20 @@ public sealed class NoesisViewCore
                 owner._simTick?.Invoke();
                 view.Update(simTimeSeconds);
             }
+        }
+
+        private int TrackX(float x) => _pointerX = (int)x;
+        private int TrackY(float y) => _pointerY = (int)y;
+
+        /// <summary>Converts a delta in notches to whole Noesis wheel units, banking whatever
+        /// does not fill a unit for the next event. Null when nothing whole came out.</summary>
+        private static int? TakeRotation(float notches, ref float pending)
+        {
+            pending += notches * NotchUnits;
+            var rotation = (int)pending; // truncates toward zero, so the sign is preserved
+            if (rotation == 0) return null;
+            pending -= rotation;
+            return rotation;
         }
 
         private static MouseButton ToNoesis(UiPointerButton button) => button switch

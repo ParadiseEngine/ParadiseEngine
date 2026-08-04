@@ -99,6 +99,56 @@ public class NoesisViewCoreTests
         await Assert.That(core.Height).IsEqualTo(480u);
     }
 
+    /// <summary>A Scroll UiEvent must arrive in the view as a Noesis wheel event — one notch is
+    /// 120 units — and the sub-notch deltas a MacBook trackpad reports must accumulate instead of
+    /// truncating to nothing. Asserted on the routed MouseWheel event rather than a ScrollViewer's
+    /// offset because a bare view has no theme, so ScrollViewer gets no template (and therefore no
+    /// scroll info) here.</summary>
+    [Test]
+    public async Task scroll_events_reach_the_view_including_sub_notch_trackpad_deltas()
+    {
+        var xamlPath = WriteXamlToTempDir(); // a hit-testable Grid — the wheel needs something under it
+        var core = new NoesisViewCore(xamlPath, 200, 100);
+
+        try
+        {
+            core.Input.Tick(0.0);
+        }
+        catch (DllNotFoundException ex)
+        {
+            Skip.Test($"Noesis native library not loadable on this host: {ex.Message}");
+            return;
+        }
+
+        var deltas = new List<(int Delta, global::Noesis.Orientation Orientation)>();
+        ((global::Noesis.FrameworkElement)core.View!.Content).MouseWheel +=
+            (_, args) => deltas.Add((args.Delta, args.Orientation));
+
+        // Park the pointer over the content: Noesis hit-tests a wheel event at a point, and the
+        // Scroll UiEvent carries only a delta.
+        _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
+        core.Input.Tick(1.0 / 60.0);
+
+        // One whole notch down, the way a discrete mouse wheel reports it.
+        _ = core.Input.Handle(UiEvent.Scroll(0f, -1f));
+        // ...then twenty fractions of a notch, the way a trackpad does. Each is worth 6 units, so
+        // truncating per event would lose every one of them.
+        for (var i = 0; i < 20; i++)
+        {
+            _ = core.Input.Handle(UiEvent.Scroll(0f, -0.05f));
+        }
+        // ...and a horizontal notch, which must route as a horizontal wheel, not a vertical one.
+        _ = core.Input.Handle(UiEvent.Scroll(1f, 0f));
+
+        var vertical = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Vertical);
+        var horizontal = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Horizontal);
+
+        await Assert.That(vertical[0].Delta).IsEqualTo(-120);
+        await Assert.That(vertical.ConvertAll(d => d.Delta).Sum()).IsEqualTo(-240); // the notch + 20 x 6
+        await Assert.That(horizontal.Count).IsEqualTo(1);
+        await Assert.That(horizontal[0].Delta).IsEqualTo(120);
+    }
+
     [Test]
     [Arguments(WebGpuSharp.TextureFormat.RGBA8Unorm)]
     [Arguments(WebGpuSharp.TextureFormat.BGRA8Unorm)]
