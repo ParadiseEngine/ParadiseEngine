@@ -111,3 +111,23 @@
   maps to (X, Y, 255, 255) so both paths share BC5 channel semantics (discovered by the
   fixture golden test: expected B=255, got B=127=X). The game pipeline's UastcNormalLinear
   preset always passes --normal_mode, so the two-channel layout is contractual.
+
+- [hits: 1] **A Noesis `View` routes NOTHING you don't explicitly dispatch, and drops the rest
+  in total silence.** `MouseMove`/`MouseButtonDown`/`MouseButtonUp`/`MouseWheel`/`MouseHWheel`/
+  `Scroll`/`HScroll`/`Touch*` are each a separate call; a `UiEventKind` that lands in
+  `NoesisViewCore.UiInputHalf.Handle`'s `default:` arm produces no warning and no visual clue —
+  the UI simply never reacts. `UiEventKind.Scroll` sat in that arm from 0.6.0 until 0.6.2, so
+  NO host could scroll a ScrollViewer or wheel-zoom a custom element, on any platform. **Rule**:
+  when adding a `UiEventKind`, grep every `IUiInput.Handle`, not just ImGui's. Note
+  `MouseWheel`/`MouseHWheel` take `(x, y, rotation)` and hit-test at that point while the
+  `UiEvent` contract reuses X/Y for the delta — the view half has to remember the last pointer
+  position. Rotation is Win32 units: 120 per notch, positive = forward / to the right.
+
+- [hits: 1] **A bare Noesis view has no theme, so templated controls get no template — and a
+  `ScrollViewer` without one silently cannot scroll.** `NoesisViewCore` only calls
+  `GUI.LoadApplicationResources` when `Theme/NoesisTheme.DarkBlue.xaml` sits next to the XAML.
+  Without it a test `ScrollViewer` lays out fine (`ActualHeight` is correct) but reports
+  `ExtentHeight == ViewportHeight == 0` forever: no template ⇒ no `ScrollContentPresenter` ⇒ no
+  `IScrollInfo`. **Rule**: test input plumbing against the routed event
+  (`element.MouseWheel += …`, reading `MouseWheelEventArgs.Delta`/`.Orientation`), not against a
+  templated control's state — it is the honest assertion AND needs no WebGPU device.
