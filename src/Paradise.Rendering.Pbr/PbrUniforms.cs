@@ -87,12 +87,14 @@ public struct DrawUniformsGpu
 }
 
 /// <summary>Mirror of shadow.slang <c>ShadowDrawUniforms</c>: the combined light-VP × model
-/// matrix for one shadow caster. Written into the shadow draw ring at the device's dynamic-offset
-/// stride (≥256), like <see cref="DrawUniformsGpu"/>.</summary>
-[StructLayout(LayoutKind.Explicit, Size = 64)]
+/// matrix for one shadow caster, plus the joint palette base index a skinned caster poses from.
+/// Written into the shadow draw ring at the device's dynamic-offset stride (≥256), like
+/// <see cref="DrawUniformsGpu"/>.</summary>
+[StructLayout(LayoutKind.Explicit, Size = 80)]
 public struct ShadowDrawUniformsGpu
 {
     [FieldOffset(0)] public Matrix4x4 LightMvp;
+    [FieldOffset(64)] public Vector4 Params; // x: joint palette base index, yzw unused
 }
 
 /// <summary>Mirror of pbr.slang group-3 <c>SsaoUniforms</c>: params (x intensity, y radius, z bias,
