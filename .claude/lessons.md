@@ -47,7 +47,7 @@
 
 ## Paradise.Rendering
 
-- [hits: 1] **`Queue.WriteBuffer` rejects any size that is not a multiple of 4, and the rejection
+- [hits: 2] **`Queue.WriteBuffer` rejects any size that is not a multiple of 4, and the rejection
   is SILENT** — it is validated on the queue, not at draw time, so the upload simply never lands
   and every draw reading that region renders whatever the buffer held before (zeros on a fresh
   buffer, last frame's geometry on a reused one). `NoesisRenderDevice` staged Noesis's mapped
@@ -66,6 +66,38 @@
   a WebGPU frame renders empty or stale, before theorising about buffer lifetimes. Guarded by
   `a_dense_rectangle_field_plus_a_filled_path_renders_without_corrupting_the_frame`, which
   asserts the error scope is clean AND that the frame really had an unaligned map.
+  **Re-hit 2026-08-12 (GPU skinning):** an invalid PIPELINE (see the loader-visibility entry
+  below) blanked entire frames — every pass dropped at submit, background included, mean pixel
+  exactly 0 — with nothing on stderr even in a standalone console run. Hours of shader-level
+  bisecting before the object-validity check; the error-scope rule above would have named the
+  failing object in one run. Addendum to the rule: *mean exactly 0 including the clear colour
+  means an invalid object poisoned the whole command buffer — check createRenderPipeline /
+  createBindGroupLayout validity before reading a single line of shader code.*
+
+- [hits: 1] **`ShaderProgramLoader.BuildLayout`'s binding-type mappings encode the visibility of
+  their FIRST consumer, not a general rule — and its doc comment lies about it.** The comment
+  says "Visibility is Vertex|Fragment for every entry", but `StructuredBuffer<T>` was hardcoded
+  `ShaderStage.Fragment` because the Forward+ cluster masks (fragment-read) were the only storage
+  buffer when it was written. The GPU-skinning joint palette — read from the VERTEX stage — then
+  failed createRenderPipeline silently (see the re-hit note above). Read-only storage is legal in
+  the vertex stage; only read_write is prohibited there. When a new binding is read from a stage
+  no existing shader uses, verify the `BuildLayout` switch actually grants that stage.
+
+- [hits: 1] **A Slang program's vertex entry point and its vertex layout must travel together,
+  and until 2026-08-12 they didn't.** `CreatePipeline`/`CreateDepthOnlyPipeline` picked the
+  vertex module last-wins (no `break`) while `VertexLayouts` reflected only the FIRST entry
+  point — so authoring a second `[shader("vertex")]` in any .slang silently repointed every
+  existing pipeline at it with a mismatched stride: all draws empty, no error. Now:
+  `vertexEntryPoint` parameter (first-wins default) + `ShaderProgramDesc.VertexBuffersByEntryPoint`.
+  Trap that re-blacked the frame once during the fix: `PbrRenderer` REBUILDS its
+  `ShaderProgramDesc`s for dynamic-offset patching, and any init-only property not explicitly
+  carried across a `new ShaderProgramDesc(...)` rebuild vanishes.
+
+- [hits: 1] **When bisecting a dead draw, remove the RESOURCE REFERENCE, not just its use.** A
+  probe that calls the suspect function but discards the result (guarded dead code, to keep the
+  bind group stable) still keeps the binding in the entry point's interface — and therefore keeps
+  the very validation failure being hunted. "Shader ignores the palette" and "entry point never
+  references the palette buffer" are different experiments; only the second discriminated here.
 
 - [hits: 1] **"Path too complex to render. Please split the geometry into several paths" comes
   from the Noesis NATIVE core, not from Paradise** — the string lives in `Noesis.dylib`, and

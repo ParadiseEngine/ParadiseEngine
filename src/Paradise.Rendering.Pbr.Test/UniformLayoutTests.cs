@@ -63,7 +63,7 @@ public class UniformLayoutTests
         var program = LoadProgram();
         await Assert.That(program.Layout.Groups.Length).IsEqualTo(4);
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
-        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(4); // frame UBO + shadow depth texture + comparison sampler + cluster masks
+        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(5); // frame UBO + shadow depth texture + comparison sampler + cluster masks + joint palettes
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
         await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(5); // SSAO UBO + position texture + sky-specular LUT + sampler + DFG LUT
     }
@@ -94,6 +94,22 @@ public class UniformLayoutTests
     }
 
     private const int GltfPrimitiveFloats = 12;
+
+    [Test]
+    public async Task skinned_vertex_layout_is_the_twenty_float_interleave()
+    {
+        // The rigid and skinned entry points reflect DIFFERENT strides, and a pipeline built with
+        // one entry point's module and the other's layout renders nothing while reporting success.
+        var program = LoadProgram();
+        var skinned = program.VertexBuffersByEntryPoint["vertexMainSkinned"];
+        await Assert.That(skinned.Length).IsEqualTo(1);
+        await Assert.That(skinned[0].Stride).IsEqualTo((ulong)(20 * sizeof(float)));
+        await Assert.That(skinned[0].Attributes.Length).IsEqualTo(6);
+        await Assert.That(skinned[0].Attributes[4].Offset).IsEqualTo(48ul); // joints, after tan4
+        await Assert.That(skinned[0].Attributes[5].Offset).IsEqualTo(64ul); // weights
+        // The rigid entry point must be untouched by the addition.
+        await Assert.That(program.VertexBuffersByEntryPoint["vertexMain"][0].Stride).IsEqualTo(48ul);
+    }
 
     [Test]
     public async Task matrix_bytes_carry_translation_at_flat_12_to_14()

@@ -63,9 +63,19 @@ internal static class ShaderProgramLoader
         }
 
         var vertexBuffers = ExtractVertexBuffers(entryPoints);
+        var byEntryPoint = new Dictionary<string, VertexBufferLayoutDesc[]>(StringComparer.Ordinal);
+        foreach (var ep in entryPoints)
+        {
+            if (!string.Equals(ep.Stage, "vertex", StringComparison.Ordinal)) continue;
+            byEntryPoint[ep.Name] = ExtractVertexBuffers([ep]);
+        }
         var (layout, uniformBlocks) = BuildLayout(reflection.Parameters ?? Array.Empty<SlangParameter>());
 
-        return new ShaderProgramDesc(modules, layout, vertexBuffers) { UniformBlocks = uniformBlocks };
+        return new ShaderProgramDesc(modules, layout, vertexBuffers)
+        {
+            UniformBlocks = uniformBlocks,
+            VertexBuffersByEntryPoint = byEntryPoint,
+        };
     }
 
     /// <summary>Build bind-group layouts + uniform-block byte layouts from the reflection's
@@ -117,9 +127,14 @@ internal static class ShaderProgramLoader
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
                 // StructuredBuffer<T> → WGSL var<storage, read> (read-only; no shader uses
-                // RWStructuredBuffer yet). Used by the Forward+ cluster mask buffer.
+                // RWStructuredBuffer yet). Vertex|Fragment like every other over-visible entry:
+                // read-only storage is legal in the vertex stage (only read_write is prohibited
+                // there), and the joint-palette buffer is READ from it. This was Fragment-only
+                // once, sized to the Forward+ cluster masks — and a vertex-stage reader then
+                // failed createRenderPipeline, which Dawn reports only through the async error
+                // callback: the pipeline just silently dropped every frame that used it.
                 "resource" when type.BaseShape == "structuredBuffer" => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.ReadonlyStorageBuffer),
+                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.ReadonlyStorageBuffer),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.ComparisonSampler),
                 "samplerState" => new BindGroupLayoutEntryDesc(

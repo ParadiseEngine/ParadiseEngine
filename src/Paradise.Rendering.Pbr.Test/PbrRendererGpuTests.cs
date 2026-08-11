@@ -26,6 +26,95 @@ public class PbrRendererGpuTests
         }
     }
 
+    /// <summary>
+    /// GPU skinning moves the mesh: the same uploaded buffers, rendered twice, differ only by the
+    /// joint palette.
+    ///
+    /// This is the assertion that actually distinguishes working skinning from a shader that
+    /// compiles and ignores its joints — the failure mode is a character that renders perfectly
+    /// and never moves, which no compile or validation error catches. Every vertex is bound to
+    /// joint 0 at full weight, so translating that one matrix must translate the whole cube.
+    /// </summary>
+    [Test]
+    public async Task skinned_geometry_follows_its_joint_palette()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var vertexCount = vertices.Length / 12;
+
+            // joints = (0,0,0,0), weights = (1,0,0,0): rigidly bound to joint 0.
+            var jointsWeights = new float[vertexCount * 8];
+            for (var i = 0; i < vertexCount; i++) jointsWeights[i * 8 + 4] = 1f;
+
+            // Reuse the lighting/camera the other GPU tests render a visible cube with, so a dark
+            // frame here means the skinned path drew nothing rather than the scene being unlit.
+            var scene = BuildCubeScene(pbr);
+            var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
+            var skinnedPrimitive = pbr.UploadSkinnedPrimitive(vertices, jointsWeights, indices, mat);
+            // The AABB is computed by striding the interleaved buffer, so a unit cube's bounds
+            // prove the 20-float weave landed positions where the vertex layout expects them.
+            await Assert.That(skinnedPrimitive.LocalMin.X).IsEqualTo(-0.5f).Within(0.001f);
+            await Assert.That(skinnedPrimitive.LocalMax.Y).IsEqualTo(0.5f).Within(0.001f);
+            await Assert.That(skinnedPrimitive.Skinned).IsTrue();
+            await Assert.That(skinnedPrimitive.VertexByteLength).IsEqualTo((ulong)(24 * 20 * sizeof(float)));
+            var mesh = new PbrMesh([skinnedPrimitive]);
+            var instance = new PbrInstance { Mesh = mesh, JointOffset = 0 };
+            scene.Instances.Clear();
+            scene.Instances.Add(instance);
+
+            byte[] Render(Matrix4x4 joint)
+            {
+                // Three frames, as the other readback test does. The palette is staged per frame —
+                // RenderFrame uploads and clears the staged range — so it is set before each.
+                for (var i = 0; i < 3; i++)
+                {
+                    pbr.SetJointPalette(0, new[] { joint });
+                    pbr.RenderFrame(scene);
+                }
+                return (byte[])renderer.ReadbackColor(out _, out _).Clone();
+            }
+
+            var centred = Render(Matrix4x4.Identity);
+            // Was the skinned branch taken at all? Distinguishes "skinned pipeline draws nothing"
+            // from "the draw loop never selected it".
+            await Assert.That(pbr.SkinnedPipelineVariantCountForTest).IsGreaterThan(0);
+            // Far enough to clear the cube's own silhouette, so the two images cannot coincide.
+            var shifted = Render(Matrix4x4.CreateTranslation(new Vector3(2.5f, 0f, 0f)));
+
+            static double Mean(byte[] p)
+            {
+                long sum = 0;
+                foreach (var b in p) sum += b;
+                return sum / (double)p.Length;
+            }
+
+            // Baseline: the SAME cube through the rigid path, in the same scene. If this is dark
+            // too then the scene is at fault, not skinning — which is the ambiguity that makes a
+            // bare "is it black" assertion useless to debug.
+            scene.Instances.Clear();
+            scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]) });
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+            var rigid = (byte[])renderer.ReadbackColor(out _, out _).Clone();
+            await Assert.That(Mean(rigid)).IsGreaterThan(1.0);
+
+            // Both frames must contain the cube — a blank frame would "differ" for the wrong reason.
+            await Assert.That(Mean(centred)).IsGreaterThan(1.0);
+            await Assert.That(Mean(shifted)).IsGreaterThan(1.0);
+
+            var differing = 0;
+            for (var i = 0; i < centred.Length; i++) if (centred[i] != shifted[i]) differing++;
+            await Assert.That(differing).IsGreaterThan(centred.Length / 100);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
     private static PbrScene BuildCubeScene(PbrRenderer pbr, float transmission = 0f)
     {
         var (vertices, indices) = Procedural.UnitCube();

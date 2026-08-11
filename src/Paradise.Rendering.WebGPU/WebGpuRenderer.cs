@@ -346,7 +346,12 @@ public sealed class WebGpuRenderer : IDisposable
         // points (linear vs sRGB-encoding) in one program and selects by surface format. No
         // in-repo caller passes this yet; the parameter exists so the selection lands as an
         // argument, not an API break.
-        string? fragmentEntryPoint = null)
+        string? fragmentEntryPoint = null,
+        // The vertex-side twin of fragmentEntryPoint, for programs authoring more than one vertex
+        // entry (rigid vs skinned). Selecting the module also selects its reflected vertex layout:
+        // the two must move together, or one entry point's stride is fed to another's attributes
+        // and the draw produces nothing without erroring.
+        string? vertexEntryPoint = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -354,7 +359,14 @@ public sealed class WebGpuRenderer : IDisposable
         ShaderModuleDesc? fsModule = null;
         foreach (var m in program.Modules)
         {
-            if ((m.Stage & ShaderStage.Vertex) != 0) vsModule = m;
+            if ((m.Stage & ShaderStage.Vertex) != 0)
+            {
+                // Mirrors the fragment rule below: without a selector the FIRST vertex module
+                // wins. It used to be the last, which meant adding a second vertex entry point
+                // silently repointed every existing pipeline at it.
+                if (vertexEntryPoint is null && vsModule is null) vsModule = m;
+                else if (vertexEntryPoint is not null && string.Equals(m.EntryPoint, vertexEntryPoint, StringComparison.Ordinal)) vsModule = m;
+            }
             if ((m.Stage & ShaderStage.Fragment) != 0)
             {
                 // Multi-fragment-entry programs (e.g. linear vs sRGB-encoding variants) select by
@@ -363,7 +375,10 @@ public sealed class WebGpuRenderer : IDisposable
                 else if (fragmentEntryPoint is not null && string.Equals(m.EntryPoint, fragmentEntryPoint, StringComparison.Ordinal)) fsModule = m;
             }
         }
-        if (vsModule is null) throw new InvalidOperationException("ShaderProgramDesc has no vertex module.");
+        if (vsModule is null)
+            throw new InvalidOperationException(vertexEntryPoint is null
+                ? "ShaderProgramDesc has no vertex module."
+                : $"ShaderProgramDesc has no vertex module named '{vertexEntryPoint}'.");
         if (fsModule is null)
             throw new InvalidOperationException(fragmentEntryPoint is null
                 ? "ShaderProgramDesc has no fragment module."
@@ -397,7 +412,12 @@ public sealed class WebGpuRenderer : IDisposable
                 VertexEntryPoint = vsModule.EntryPoint,
                 FragmentShader = fsHandle,
                 FragmentEntryPoint = fsModule.EntryPoint,
-                VertexLayouts = program.VertexBuffers,
+                // The chosen entry point's own layout, falling back to the program-level one for
+                // single-vertex-entry programs (and for hand-built ShaderProgramDescs, which carry
+                // no per-entry map).
+                VertexLayouts = program.VertexBuffersByEntryPoint.TryGetValue(vsModule.EntryPoint, out var perEntry)
+                    ? perEntry
+                    : program.VertexBuffers,
                 Topology = topology,
                 StripIndexFormat = stripIndexFormat,
                 ColorFormat = colorFormat,
@@ -424,14 +444,25 @@ public sealed class WebGpuRenderer : IDisposable
         in ShaderProgramDesc program,
         TextureFormat depthStencilFormat,
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
-        CompareFunction depthCompare = CompareFunction.Less)
+        CompareFunction depthCompare = CompareFunction.Less,
+        // As in CreatePipeline: a depth-only program may author a rigid and a skinned caster.
+        string? vertexEntryPoint = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         ShaderModuleDesc? vsModule = null;
         foreach (var m in program.Modules)
-            if ((m.Stage & ShaderStage.Vertex) != 0) vsModule = m;
-        if (vsModule is null) throw new InvalidOperationException("Depth-only program has no vertex module.");
+        {
+            if ((m.Stage & ShaderStage.Vertex) == 0) continue;
+            // First wins without a selector — see CreatePipeline. This used to take the LAST
+            // vertex module, so a second entry point would have repointed the shadow pipeline.
+            if (vertexEntryPoint is null && vsModule is null) vsModule = m;
+            else if (vertexEntryPoint is not null && string.Equals(m.EntryPoint, vertexEntryPoint, StringComparison.Ordinal)) vsModule = m;
+        }
+        if (vsModule is null)
+            throw new InvalidOperationException(vertexEntryPoint is null
+                ? "Depth-only program has no vertex module."
+                : $"Depth-only program has no vertex module named '{vertexEntryPoint}'.");
 
         ShaderHandle vsHandle = default;
         try

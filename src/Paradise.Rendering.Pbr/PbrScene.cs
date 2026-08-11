@@ -135,7 +135,11 @@ public sealed record PbrPrimitive(
     // Object-space AABB (for fitting the directional shadow frustum). Default (zero) is treated as
     // "unknown" and contributes only the instance origin to the world bounds.
     Vector3 LocalMin = default,
-    Vector3 LocalMax = default);
+    Vector3 LocalMax = default,
+    // Uploaded with joints/weights interleaved after the tangent (20 floats/vertex instead of 12),
+    // which selects the skinned pipeline and its matching vertex layout. The two must travel
+    // together: the rigid layout over a skinned buffer reads tangents as positions.
+    bool Skinned = false);
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);
@@ -146,6 +150,11 @@ public sealed class PbrInstance
     public required PbrMesh Mesh { get; init; }
     public Matrix4x4 Model = Matrix4x4.Identity;
     public float Highlight;
+    /// <summary>Index of this instance's first joint matrix in the renderer's palette buffer, or
+    /// −1 for a rigid instance. Two instances of the same skinned mesh differ ONLY here — which is
+    /// what lets five characters share one set of GPU buffers and still hold different poses.
+    /// Write the matrices with <c>PbrRenderer.SetJointPalette</c> before the frame.</summary>
+    public int JointOffset = -1;
 }
 
 /// <summary>Everything <see cref="PbrRenderer.RenderFrame"/> consumes for one frame. Plain CPU

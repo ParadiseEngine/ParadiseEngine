@@ -17,6 +17,8 @@ public sealed class PbrRenderer : IDisposable
 {
     private const int MaxDrawsPerFrame = 4096;
     private const int FloatsPerVertex = 12;         // pos3/normal3/uv2/tan4 interleave
+    private const int SkinFloatsPerVertex = 8;      // joint4 (indices as floats) + weight4
+    private const int SkinnedFloatsPerVertex = FloatsPerVertex + SkinFloatsPerVertex; // vertexMainSkinned's stride
     private const uint ShadowMapSize = 1024;        // per-layer shadow map resolution (Depth32Float)
     // One array layer per shadow view: dir/spot = 1 layer, point = 6 cube-face layers. Cap = every
     // scene light casting a 6-face point shadow. The array is sized dynamically each frame (grow-only)
@@ -104,6 +106,29 @@ public sealed class PbrRenderer : IDisposable
     private int _clusterTilesY;
     private const int ClusterTileSize = 32;
     private const int ClusterZSlices = 32;
+    // Joint palettes for skinned instances, packed end to end and indexed by
+    // PbrInstance.JointOffset. Bound to set 1 unconditionally: WebGPU requires every declared
+    // binding to be present, so a scene with no skinned mesh still binds this at its minimum size
+    // (leave it unbound and EVERY draw fails, not just skinned ones).
+    private BufferHandle _jointBuffer;
+    private Matrix4x4[] _jointPalettes = [];
+    private int _jointCapacity;
+    // The same palette buffer bound into the shadow and position-prepass programs, which declare
+    // it in their own group 1. Every group a pipeline layout declares must be bound on every draw,
+    // so these exist even in scenes with nothing skinned.
+    private BindGroupHandle _shadowJointGroup;
+    private BindGroupHandle _prepassJointGroup;
+    private int _jointHighWater;          // staged range to upload this frame
+    private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
+    // Skinned twins of the three pipelines, built lazily so a scene with nothing skinned never
+    // compiles them.
+    private readonly Dictionary<BlendMode, PipelineHandle> _skinnedPipelines = new();
+    private PipelineHandle _shadowSkinnedPipeline;
+    private PipelineHandle _prepassSkinnedPipeline;
+    /// <summary>Palette slots allocated up front. 64 characters at 65 joints, or any mix — one
+    /// 16 KB storage buffer. Overflowing is reported once rather than silently dropping a palette,
+    /// which would draw the mesh collapsed at the origin and read as a rigging bug.</summary>
+    public const int MaxSkinnedJoints = 4096;
     // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
     // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
     private readonly ShaderProgramDesc _shadowProgram;
@@ -156,6 +181,9 @@ public sealed class PbrRenderer : IDisposable
         _program = new ShaderProgramDesc(program.Modules, dynamicLayout, program.VertexBuffers)
         {
             UniformBlocks = program.UniformBlocks,
+            // Must be carried across the rebuild: dropping it silently falls the skinned pipeline
+            // back to the rigid 12-float layout, which draws nothing at all.
+            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
         };
 
         // One sRGB decision for the renderer's lifetime, driven by the surface format: sRGB
@@ -183,6 +211,9 @@ public sealed class PbrRenderer : IDisposable
         // _width/_height are set later in the ctor, so size from the ctor parameters directly.
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
+        // Before the cluster buffer, because the first frame-group build needs BOTH storage
+        // buffers to exist — group 1 declares bindings 3 and 4 and WebGPU rejects a partial group.
+        EnsureJointBuffer();
         EnsureClusterBuffer();
 
         // Allocate the initial single-layer array + frame bind group (binding 1 = D2Array shadow
@@ -214,6 +245,7 @@ public sealed class PbrRenderer : IDisposable
             shadowProgram.VertexBuffers)
         {
             UniformBlocks = shadowProgram.UniformBlocks,
+            VertexBuffersByEntryPoint = shadowProgram.VertexBuffersByEntryPoint,
         };
         var meshStride = _program.VertexBuffers[0].Stride;
         var shadowVertexLayout = new[]
@@ -231,6 +263,10 @@ public sealed class PbrRenderer : IDisposable
             BindGroupEntryDesc.ForBuffer(0, _shadowDrawRing, 0, (ulong)Unsafe.SizeOf<ShadowDrawUniformsGpu>()),
         });
         _shadowDrawGroup = renderer.CreateBindGroup(in shadowDrawGroupDesc);
+        _shadowJointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrShadowJointGroup", FindGroup(_shadowProgram, 1), new[]
+        {
+            BindGroupEntryDesc.ForBuffer(0, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
+        }));
 
         // Gradient-sky background program + pipeline. Fullscreen triangle (no vertex buffer — the
         // vertex shader uses SV_VertexID), depth-write off + compare Always so it never occludes or
@@ -269,6 +305,7 @@ public sealed class PbrRenderer : IDisposable
             positionProgram.VertexBuffers)
         {
             UniformBlocks = positionProgram.UniformBlocks,
+            VertexBuffersByEntryPoint = positionProgram.VertexBuffersByEntryPoint,
         };
         var positionVertexLayout = new[]
         {
@@ -280,6 +317,10 @@ public sealed class PbrRenderer : IDisposable
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less);
+        _prepassJointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrPrepassJointGroup", FindGroup(_positionPrepassProgram, 1), new[]
+        {
+            BindGroupEntryDesc.ForBuffer(0, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
+        }));
 
         _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO + sky-specular LUT
         _ssaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
@@ -377,6 +418,7 @@ public sealed class PbrRenderer : IDisposable
             BindGroupEntryDesc.ForTextureView(1, _shadowArrayView),
             BindGroupEntryDesc.ForSampler(2, _shadowSampler),
             BindGroupEntryDesc.ForBuffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
+            BindGroupEntryDesc.ForBuffer(4, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
         });
         _frameGroup = _renderer.CreateBindGroup(in frameGroupDesc);
     }
@@ -421,6 +463,47 @@ public sealed class PbrRenderer : IDisposable
         RebuildCompositeGroup(); // HDR + bloom result views changed → rebind
         EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
+    }
+
+    /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
+    /// buffer. Call for every skinned instance each frame before <see cref="RenderFrame"/>, which
+    /// uploads the whole staged range in one write.
+    ///
+    /// Matrices use the same convention as <c>DrawUniformsGpu.Mvp</c> — a System.Numerics
+    /// row-vector product, applied in the shader as <c>mul(matrix, vector)</c>.</summary>
+    public void SetJointPalette(int offset, ReadOnlySpan<Matrix4x4> matrices)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (offset < 0 || offset + matrices.Length > _jointCapacity)
+        {
+            // Loud, and once per frame rather than per instance: silently skipping would draw the
+            // character folded into the origin, which looks like a broken rig rather than a full
+            // palette buffer.
+            if (!_jointOverflowReported)
+            {
+                _jointOverflowReported = true;
+                Console.Error.WriteLine(
+                    $"[PbrRenderer] Joint palette overflow: {offset}+{matrices.Length} exceeds " +
+                    $"MaxSkinnedJoints ({MaxSkinnedJoints}). Skinned meshes past this point render in bind pose.");
+            }
+            return;
+        }
+        matrices.CopyTo(_jointPalettes.AsSpan(offset));
+        _jointHighWater = Math.Max(_jointHighWater, offset + matrices.Length);
+    }
+
+    // Allocate the joint palette storage once. Unlike the cluster buffer this is resolution
+    // independent, so it never needs reallocating.
+    private void EnsureJointBuffer()
+    {
+        if (_jointBuffer.IsValid) return;
+        _jointCapacity = MaxSkinnedJoints;
+        _jointPalettes = new Matrix4x4[_jointCapacity];
+        for (var i = 0; i < _jointCapacity; i++) _jointPalettes[i] = Matrix4x4.Identity;
+        _jointBuffer = _renderer.CreateBuffer(new BufferDesc(
+            "PbrJointPalettes", (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>()),
+            BufferUsage.Storage | BufferUsage.CopyDst));
+        _renderer.UpdateBuffer<Matrix4x4>(_jointBuffer, 0, _jointPalettes);
     }
 
     // (Re)allocate the froxel mask buffer for the current resolution and rebind the frame group.
@@ -472,11 +555,41 @@ public sealed class PbrRenderer : IDisposable
         return meshes;
     }
 
+    /// <summary>Upload a skinned primitive: the 12-float mesh stream interleaved with the 8-float
+    /// joints/weights stream into the 20 floats <c>vertexMainSkinned</c> reads.
+    ///
+    /// The two arrive separately from glTF (<c>GltfPrimitive.Vertices</c> and
+    /// <c>.JointsWeights</c>) and are woven together here, ONCE, at upload. That is the whole
+    /// difference from CPU skinning: the pose then costs a joint palette per frame — 65 matrices —
+    /// instead of rewriting every vertex.</summary>
+    public PbrPrimitive UploadSkinnedPrimitive(float[] vertices, float[] jointsWeights, uint[] indices, int materialId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var vertexCount = vertices.Length / FloatsPerVertex;
+        if (vertexCount * SkinFloatsPerVertex != jointsWeights.Length)
+        {
+            throw new ArgumentException(
+                $"Skin stream holds {jointsWeights.Length} floats; {vertexCount} vertices need " +
+                $"{vertexCount * SkinFloatsPerVertex}.", nameof(jointsWeights));
+        }
+
+        var interleaved = new float[vertexCount * SkinnedFloatsPerVertex];
+        for (var i = 0; i < vertexCount; i++)
+        {
+            Array.Copy(vertices, i * FloatsPerVertex, interleaved, i * SkinnedFloatsPerVertex, FloatsPerVertex);
+            Array.Copy(jointsWeights, i * SkinFloatsPerVertex,
+                interleaved, i * SkinnedFloatsPerVertex + FloatsPerVertex, SkinFloatsPerVertex);
+        }
+
+        var primitive = UploadPrimitive(interleaved, indices, materialId, stride: SkinnedFloatsPerVertex);
+        return primitive with { Skinned = true };
+    }
+
     /// <summary>Upload one interleaved primitive (12 floats per vertex: pos3/normal3/uv2/tan4 —
     /// the GltfPrimitive layout). Also the entry point for procedural geometry.
     /// <paramref name="dynamic"/> makes the vertex buffer updatable via
     /// <see cref="UpdatePrimitiveVertices"/> — the CPU-skinning path re-writes it per frame.</summary>
-    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId, bool dynamic = false)
+    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId, bool dynamic = false, int stride = FloatsPerVertex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var vbDesc = new BufferDesc("PbrVertices", 0, dynamic ? BufferUsage.Vertex | BufferUsage.CopyDst : BufferUsage.Vertex);
@@ -490,13 +603,13 @@ public sealed class PbrRenderer : IDisposable
         // directional shadow frustum fit.
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
-        for (var v = 0; v + 2 < vertices.Length; v += FloatsPerVertex)
+        for (var v = 0; v + 2 < vertices.Length; v += stride)
         {
             var p = new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]);
             min = Vector3.Min(min, p);
             max = Vector3.Max(max, p);
         }
-        if (vertices.Length < FloatsPerVertex) { min = max = Vector3.Zero; }
+        if (vertices.Length < stride) { min = max = Vector3.Zero; }
 
         return new PbrPrimitive(
             vb, ib, (uint)indices.Length,
@@ -765,6 +878,13 @@ public sealed class PbrRenderer : IDisposable
             _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, shadowDraws * (int)_drawStride));
         if (drawIndex > 0)
             _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, drawIndex * (int)_drawStride));
+        // One write for every skinned instance staged this frame — the payload GPU skinning trades
+        // for the whole vertex stream. Reset so a frame that skins nothing uploads nothing.
+        if (_jointHighWater > 0)
+        {
+            _renderer.UpdateBuffer<Matrix4x4>(_jointBuffer, 0, _jointPalettes.AsSpan(0, _jointHighWater));
+            _jointHighWater = 0;
+        }
 
         var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes.AsMemory(0, compositeIndex + 1));
         _renderer.Submit(in stream);
@@ -780,11 +900,24 @@ public sealed class PbrRenderer : IDisposable
         {
             var vp = _shadowViews[k].Vp;
             encoder.BeginPass(k);
-            encoder.SetPipeline(_shadowPipeline);
+            encoder.SetBindGroup(1, _shadowJointGroup);
+            var shadowSkinned = (bool?)null;
             foreach (var (instance, primitive, _) in _opaque)
             {
+                var skinned = primitive.Skinned && instance.JointOffset >= 0;
+                if (shadowSkinned != skinned)
+                {
+                    encoder.SetPipeline(skinned ? GetShadowSkinnedPipeline() : _shadowPipeline);
+                    shadowSkinned = skinned;
+                }
                 // Budget guaranteed by the up-front shadowDrawTotal check in RenderFrame.
-                var uniforms = new ShadowDrawUniformsGpu { LightMvp = instance.Model * vp };
+                var uniforms = new ShadowDrawUniformsGpu
+                {
+                    LightMvp = instance.Model * vp,
+                    // The caster poses from the same palette slice its mesh does, so the shadow
+                    // tracks the animation instead of staying in bind pose.
+                    Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
+                };
                 MemoryMarshal.Write(_shadowStaging.AsSpan(drawIndex * (int)_drawStride), in uniforms);
                 encoder.SetBindGroup(0, _shadowDrawGroup, dynamicOffset: (uint)(drawIndex * _drawStride));
                 encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
@@ -802,10 +935,19 @@ public sealed class PbrRenderer : IDisposable
     private void EncodeDepthPrepass(ref RenderCommandEncoder encoder, int passIndex)
     {
         encoder.BeginPass(passIndex);
-        encoder.SetPipeline(_positionPrepassPipeline);
+        encoder.SetBindGroup(1, _prepassJointGroup);
+        var prepassSkinned = (bool?)null;
         for (var i = 0; i < _opaque.Count; i++)
         {
             var primitive = _opaque[i].Primitive;
+            // The prepass reads the SAME draw-ring slot EncodeBucket filled for this instance, so
+            // the joint base index rides along with no extra upload.
+            var skinned = primitive.Skinned && _opaque[i].Instance.JointOffset >= 0;
+            if (prepassSkinned != skinned)
+            {
+                encoder.SetPipeline(skinned ? GetPrepassSkinnedPipeline() : _positionPrepassPipeline);
+                prepassSkinned = skinned;
+            }
             encoder.SetBindGroup(0, _drawGroup, dynamicOffset: (uint)(i * _drawStride));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
@@ -934,18 +1076,30 @@ public sealed class PbrRenderer : IDisposable
     {
         if (bucket.Count == 0) return;
 
-        encoder.SetPipeline(GetPipeline(blend));
+        // Pipeline is chosen per draw (rigid vs skinned need different vertex layouts) but only
+        // re-set on a change, so an all-rigid bucket still issues exactly one SetPipeline. Bind
+        // groups persist across SetPipeline within a pass — both pipelines share one layout.
+        var skinnedActive = (bool?)null;
         encoder.SetBindGroup(1, _frameGroup);
         encoder.SetBindGroup(3, _ssaoGroup); // SSAO uniforms + position pre-pass (group 3)
 
         foreach (var (instance, primitive, _) in bucket)
         {
+            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            if (skinnedActive != skinned)
+            {
+                encoder.SetPipeline(skinned ? GetSkinnedPipeline(blend) : GetPipeline(blend));
+                skinnedActive = skinned;
+            }
+
             var uniforms = new DrawUniformsGpu
             {
                 Mvp = instance.Model * viewProjection,
                 Model = instance.Model,
                 NormalMatrix = PbrMath.NormalMatrix(instance.Model),
-                Highlight = new Vector4(instance.Highlight, 0f, 0f, 0f),
+                // y carries the joint palette base for skinned draws; the lanes beside the
+                // highlight weight were already spare, so this needs no uniform layout change.
+                Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f, 0f, 0f),
             };
             MemoryMarshal.Write(_drawStaging.AsSpan(drawIndex * (int)_drawStride), in uniforms);
 
@@ -1134,7 +1288,49 @@ public sealed class PbrRenderer : IDisposable
         return pipeline;
     }
 
+    /// <summary>The skinned twin of <see cref="GetPipeline"/>. Identical except for the vertex
+    /// entry point — which also selects its 20-float vertex layout, since the two are reflected
+    /// together.</summary>
+    private PipelineHandle GetSkinnedPipeline(BlendMode blend)
+    {
+        if (_skinnedPipelines.TryGetValue(blend, out var pipeline)) return pipeline;
+        pipeline = _renderer.CreatePipeline(
+            _program,
+            HdrFormat,
+            depthStencilFormat: TextureFormat.Depth32Float,
+            blend: blend,
+            depthWriteEnabled: blend == BlendMode.Opaque,
+            fragmentEntryPoint: "fragmentMain",
+            vertexEntryPoint: "vertexMainSkinned");
+        _skinnedPipelines[blend] = pipeline;
+        return pipeline;
+    }
+
+    private PipelineHandle GetShadowSkinnedPipeline()
+    {
+        if (_shadowSkinnedPipeline.IsValid) return _shadowSkinnedPipeline;
+        var layout = _shadowProgram.VertexBuffersByEntryPoint.TryGetValue("vertexMainSkinned", out var vb)
+            ? vb
+            : throw new InvalidOperationException("shadow.slang reflects no vertexMainSkinned layout.");
+        _shadowSkinnedPipeline = _renderer.CreateDepthOnlyPipeline(
+            _shadowProgram, TextureFormat.Depth32Float, layout, vertexEntryPoint: "vertexMainSkinned");
+        return _shadowSkinnedPipeline;
+    }
+
+    private PipelineHandle GetPrepassSkinnedPipeline()
+    {
+        if (_prepassSkinnedPipeline.IsValid) return _prepassSkinnedPipeline;
+        _prepassSkinnedPipeline = _renderer.CreatePipeline(
+            _positionPrepassProgram, TextureFormat.Rgba32Float,
+            depthStencilFormat: TextureFormat.Depth32Float,
+            depthWriteEnabled: true,
+            depthCompare: CompareFunction.Less,
+            vertexEntryPoint: "vertexMainSkinned");
+        return _prepassSkinnedPipeline;
+    }
+
     internal int PipelineVariantCountForTest => _pipelines.Count;
+    internal int SkinnedPipelineVariantCountForTest => _skinnedPipelines.Count;
     internal bool UsesSrgbEntryPointForTest => _useSrgbEntryPoint;
 
     private static bool IsSrgbFormat(TextureFormat format) =>
@@ -1446,6 +1642,9 @@ public sealed class PbrRenderer : IDisposable
         _disposed = true;
         Materials.Dispose();
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
+        foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
+        if (_shadowSkinnedPipeline.IsValid) _renderer.DestroyPipeline(_shadowSkinnedPipeline);
+        if (_prepassSkinnedPipeline.IsValid) _renderer.DestroyPipeline(_prepassSkinnedPipeline);
         foreach (var buffer in _ownedBuffers) _renderer.DestroyBuffer(buffer);
         _renderer.DestroyPipeline(_shadowPipeline);
         _renderer.DestroyBindGroup(_shadowDrawGroup);
@@ -1465,6 +1664,9 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);
         _renderer.DestroyBuffer(_frameUniformBuffer);
+        if (_jointBuffer.IsValid) _renderer.DestroyBuffer(_jointBuffer);
+        if (_shadowJointGroup.IsValid) _renderer.DestroyBindGroup(_shadowJointGroup);
+        if (_prepassJointGroup.IsValid) _renderer.DestroyBindGroup(_prepassJointGroup);
         _renderer.DestroyTexture(_depthTexture);
         _renderer.DestroyPipeline(_compositePipeline);
         _renderer.DestroyBindGroup(_compositeGroup);

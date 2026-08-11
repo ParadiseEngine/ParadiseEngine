@@ -1,6 +1,9 @@
-// pbr.slang — PBR metallic-roughness shader (Cook-Torrance BRDF), ported from bank-heist with
-// skinning and shadow mapping deleted (bindings (0,3), (1,1), (2,1) freed for future PRs) and
-// two properly-authored fragment entry points instead of runtime WGSL surgery:
+// pbr.slang — PBR metallic-roughness shader (Cook-Torrance BRDF), ported from bank-heist. Shadow
+// mapping and skinning were both deleted in that port; both have since returned, so the bindings
+// the port note listed as free are not — set 1 now runs frame(0)/shadowTexture(1)/shadowSampler(2)/
+// clusterMasks(3), and skinning took binding 4.
+//
+// Two properly-authored fragment entry points instead of runtime WGSL surgery:
 //   fragmentMain     — linear output, for *UnormSrgb swapchain formats (hardware encodes)
 //   fragmentMainSrgb — applies the sRGB OETF in-shader, for non-sRGB-only surfaces
 // Implements GGX/Trowbridge-Reitz NDF, Smith-Schlick geometry, Schlick Fresnel, hemisphere
@@ -96,6 +99,16 @@ SamplerComparisonState shadowSampler;
 [[vk::binding(3, 1)]]
 StructuredBuffer<uint> clusterMasks;
 
+// Joint palettes for skinned draws, packed end to end: one contiguous run of matrices per skinned
+// instance, and DrawUniforms.highlight.y carries that instance's first index. One buffer for every
+// skinned draw in the frame keeps this to a single binding and a single upload — 24 KB for a scene
+// of six 65-joint characters, versus re-uploading their vertex streams.
+//
+// Same convention as DrawUniforms.mvp: built as a row-vector product on the CPU and applied here
+// as mul(matrix, vector), which is what the rigid path already does with mvp/model.
+[[vk::binding(4, 1)]]
+StructuredBuffer<float4x4> jointMatrices;
+
 [[vk::binding(0, 2)]]
 ConstantBuffer<MaterialUniforms> material;
 
@@ -159,6 +172,22 @@ struct VertexInput
     [[vk::location(1)]] float3 normal   : NORMAL;
     [[vk::location(2)]] float2 texcoord : TEXCOORD0;
     [[vk::location(3)]] float4 tangent  : TANGENT;
+};
+
+// Skinned meshes extend the same stream rather than binding a second vertex buffer: the loader
+// reflects ONE interleaved layout per vertex entry point, so joints/weights ride along at the end
+// (20 floats/vertex instead of 12). They are uploaded once with the mesh, not per frame.
+//
+// Joint indices arrive as floats because that is how GltfPrimitive.JointsWeights stores them —
+// exact for any index a glTF skin can hold, and it keeps the stream a single float array.
+struct VertexInputSkinned
+{
+    [[vk::location(0)]] float3 position : POSITION;
+    [[vk::location(1)]] float3 normal   : NORMAL;
+    [[vk::location(2)]] float2 texcoord : TEXCOORD0;
+    [[vk::location(3)]] float4 tangent  : TANGENT;
+    [[vk::location(4)]] float4 joints   : JOINTS;
+    [[vk::location(5)]] float4 weights  : WEIGHTS;
 };
 
 struct VertexOutput
@@ -238,6 +267,48 @@ VertexOutput vertexMain(VertexInput input)
     output.worldNormal = mul((float3x3)draw.normalMatrix, input.normal);
     output.texcoord = input.texcoord;
     output.worldTangent = float4(mul((float3x3)draw.normalMatrix, input.tangent.xyz), input.tangent.w);
+    return output;
+}
+
+/// Blend one vertex by its four joint weights. Returns the bind-pose matrix (identity) when the
+/// weights sum to nothing, matching GltfAnimationRig.SkinVertices' fallback — an unweighted vertex
+/// otherwise collapses to the origin, which reads as an exploded mesh rather than a rigging bug.
+float4x4 skinMatrix(float4 joints, float4 weights)
+{
+    float total = weights.x + weights.y + weights.z + weights.w;
+    if (total <= 0.0001)
+    {
+        return float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    }
+
+    uint base = (uint)draw.highlight.y;
+    return jointMatrices[base + (uint)joints.x] * weights.x
+         + jointMatrices[base + (uint)joints.y] * weights.y
+         + jointMatrices[base + (uint)joints.z] * weights.z
+         + jointMatrices[base + (uint)joints.w] * weights.w;
+}
+
+/// Skinned twin of vertexMain. Skinning happens in OBJECT space, before mvp/model, so everything
+/// downstream — including objectPos, which procedural materials ride — behaves exactly as it does
+/// for a rigid mesh.
+[shader("vertex")]
+VertexOutput vertexMainSkinned(VertexInputSkinned input)
+{
+    float4x4 skin = skinMatrix(input.joints, input.weights);
+    float3 position = mul(skin, float4(input.position, 1.0)).xyz;
+    // 3x3 of the blended matrix for directions. A weighted sum of rigid transforms is not exactly
+    // rigid, so this is only correct up to the non-uniform scale a blend can introduce; the shader
+    // renormalizes in the fragment stage as it already does for interpolated normals.
+    float3 normal = mul((float3x3)skin, input.normal);
+    float3 tangent = mul((float3x3)skin, input.tangent.xyz);
+
+    VertexOutput output;
+    output.position = mul(draw.mvp, float4(position, 1.0));
+    output.worldPos = mul(draw.model, float4(position, 1.0)).xyz;
+    output.objectPos = position;
+    output.worldNormal = mul((float3x3)draw.normalMatrix, normal);
+    output.texcoord = input.texcoord;
+    output.worldTangent = float4(mul((float3x3)draw.normalMatrix, tangent), input.tangent.w);
     return output;
 }
 

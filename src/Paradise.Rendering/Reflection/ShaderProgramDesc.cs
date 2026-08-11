@@ -77,4 +77,15 @@ public sealed record ShaderProgramDesc(
     /// <summary>Reflected constant-buffer layouts, one per uniform-buffer binding in
     /// <see cref="Layout"/>. Empty for programs without uniforms.</summary>
     public UniformBlockDesc[] UniformBlocks { get; init; } = [];
+
+    /// <summary>Vertex layout per vertex entry point, for programs that author more than one.
+    /// <see cref="VertexBuffers"/> stays the FIRST entry point's layout, so every existing caller
+    /// keeps its behaviour.
+    ///
+    /// This exists because a vertex layout belongs to an entry point, not to a program: a skinned
+    /// variant reads joints and weights the rigid one does not. Selecting a vertex entry point
+    /// without also selecting its layout silently feeds one shader's stride to another — which
+    /// draws nothing rather than failing, so nothing tells you.</summary>
+    public IReadOnlyDictionary<string, VertexBufferLayoutDesc[]> VertexBuffersByEntryPoint { get; init; } =
+        new Dictionary<string, VertexBufferLayoutDesc[]>(StringComparer.Ordinal);
 }
