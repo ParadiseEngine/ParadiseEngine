@@ -1,0 +1,75 @@
+{
+  "entryPoints": [
+    {
+      "name": "vertexMain",
+      "stage": "vertex",
+      "parameters": [
+        {
+          "name": "input",
+          "binding": { "kind": "varyingInput", "index": 0, "count": 1 },
+          "type": {
+            "kind": "struct",
+            "name": "VsIn",
+            "fields": [
+              {
+                "name": "position",
+                "binding": { "kind": "varyingInput", "index": 0, "count": 1 },
+                "type": {
+                  "kind": "vector",
+                  "elementCount": 3,
+                  "elementType": { "kind": "scalar", "scalarType": "float32" }
+                }
+              },
+              {
+                "name": "uv",
+                "binding": { "kind": "varyingInput", "index": 1, "count": 1 },
+                "type": {
+                  "kind": "vector",
+                  "elementCount": 2,
+                  "elementType": { "kind": "scalar", "scalarType": "float32" }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "fragmentMain",
+      "stage": "fragment",
+      "parameters": []
+    }
+  ],
+  "parameters": [
+    {
+      "name": "uniforms",
+      "binding": { "kind": "descriptorTableSlot", "index": 0, "count": 1 },
+      "type": {
+        "kind": "constantBuffer",
+        "elementVarLayout": {
+          "binding": { "kind": "uniform", "index": 0, "offset": 0, "size": 80 }
+        },
+        "elementType": {
+          "kind": "struct",
+          "name": "Uniforms",
+          "fields": [
+            {
+              "name": "mvp",
+              "binding": { "kind": "uniform", "index": 0, "offset": 0, "size": 64 },
+              "type": { "kind": "matrix" }
+            },
+            {
+              "name": "tint",
+              "binding": { "kind": "uniform", "index": 0, "offset": 64, "size": 16 },
+              "type": {
+                "kind": "vector",
+                "elementCount": 4,
+                "elementType": { "kind": "scalar", "scalarType": "float32" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

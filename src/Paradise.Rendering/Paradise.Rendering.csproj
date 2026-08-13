@@ -21,6 +21,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Rendering.Test" />
+    <!-- ShaderProgramLoader's raw-Slang-schema records (SlangReflection and friends) are internal,
+         but the golden tests that pin the schema live in the WebGPU test project: they need real
+         slangc output, and Slang.targets compiles the .slang fixtures there alongside the
+         headless-renderer pipeline tests that consume the same shaders. -->
+    <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.Test" />
   </ItemGroup>
 
 </Project>

@@ -3,7 +3,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paradise.Assets.Gltf;
-using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr;
 
@@ -25,7 +24,7 @@ public sealed class PbrRenderer : IDisposable
     // to the layers actually in use, so a scene with one directional light allocates a single layer.
     private const int MaxShadowLayers = FrameUniformsGpu.MaxSceneLights * 6; // 48
 
-    private readonly WebGpuRenderer _renderer;
+    private readonly IRenderer _renderer;
     private readonly ShaderProgramDesc _program;
     private readonly bool _useSrgbEntryPoint;
     private readonly uint _drawStride;
@@ -158,14 +157,14 @@ public sealed class PbrRenderer : IDisposable
     public MaterialResourceCache Materials { get; }
 
     public PbrRenderer(
-        WebGpuRenderer renderer, uint width, uint height,
+        IRenderer renderer, uint width, uint height,
         ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f)
     {
         _renderer = renderer;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
-        var program = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.pbr");
+        var program = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.pbr");
         UniformLayoutValidator.Validate(program);
 
         // Group 0 (draw UBO) becomes a dynamic-offset ring: a LAYOUT property, so the program's
@@ -232,7 +231,7 @@ public sealed class PbrRenderer : IDisposable
         // Shadow caster program + depth-only pipeline. Its group-0 draw UBO is a dynamic-offset ring
         // like the main one; the vertex layout reads position from the full interleaved mesh stride
         // (shadow.slang declares only location 0).
-        var shadowProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.shadow");
+        var shadowProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.shadow");
         var shadowGroups = (BindGroupLayoutDesc[])shadowProgram.Layout.Groups.Clone();
         for (var i = 0; i < shadowGroups.Length; i++)
         {
@@ -271,7 +270,7 @@ public sealed class PbrRenderer : IDisposable
         // Gradient-sky background program + pipeline. Fullscreen triangle (no vertex buffer — the
         // vertex shader uses SV_VertexID), depth-write off + compare Always so it never occludes or
         // is occluded by scene geometry. Fragment entry follows the same sRGB decision as the scene.
-        var skyProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.sky");
+        var skyProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.sky");
         _skyPipeline = renderer.CreatePipeline(
             skyProgram, HdrFormat, // linear HDR into _hdrTexture, like the PBR pass; composite tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
@@ -292,7 +291,7 @@ public sealed class PbrRenderer : IDisposable
         // SSAO world-position pre-pass program + pipeline. Reuses the main draw ring/group (its group
         // 0 is the same DrawUniforms, made dynamic-offset), renders opaque geometry to an Rgba32Float
         // position target with its own depth. Vertex layout is position-only over the mesh stride.
-        var positionProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.positionPrepass");
+        var positionProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.positionPrepass");
         var positionGroups = (BindGroupLayoutDesc[])positionProgram.Layout.Groups.Clone();
         for (var i = 0; i < positionGroups.Length; i++)
         {
@@ -357,7 +356,7 @@ public sealed class PbrRenderer : IDisposable
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
 
         // Bloom pipelines (built once; share one bind-group layout: source texture + sampler + params).
-        var bloomProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.bloom");
+        var bloomProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.bloom");
         _bloomGroupLayout = FindGroup(bloomProgram, 0);
         _bloomUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrBloomUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
@@ -369,7 +368,7 @@ public sealed class PbrRenderer : IDisposable
         EnsureHdrView();
         EnsureBloomChain(_width, _height);
 
-        var compositeProgram = WebGpuRenderer.LoadShaderProgram(typeof(PbrRenderer).Assembly, "Shaders.composite");
+        var compositeProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.composite");
         _compositeGroupLayout = FindGroup(compositeProgram, 0);
         _compositePipeline = renderer.CreatePipeline(
             compositeProgram, renderer.ColorFormat,
@@ -1212,26 +1211,31 @@ public sealed class PbrRenderer : IDisposable
 
     private void UploadFrameUniforms(PbrScene scene)
     {
-        var frame = new FrameUniformsGpu
-        {
-            Time = new Vector4(scene.ElapsedSeconds, 0f, 0f, 0f),
-            CameraPos = new Vector4(scene.Camera.Position, 0f),
-            Ambient = new Vector4(scene.Ambient.Sky, scene.Ambient.Exposure),
-            AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights)),
-            AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f),
-            // x: sky-reflection specular enabled (Godot reflected_light_source = Sky).
-            AaSettings = new Vector4(
-                scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
-                _specularAaVariance, _specularAaClamp, 0f),
-            CameraForward = new Vector4(CameraForward(scene.Camera.View), _clusterNear),
-            ClusterParams = new Vector4(_clusterTilesX, _clusterTilesY, ClusterZSlices, _clusterFar),
-            // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
-            ShadowSettings = new Vector4(
-                1f / ShadowMapSize,
-                (float)scene.Tonemap.Mode,
-                scene.Tonemap.Exposure,
-                scene.Tonemap.White),
-        };
+        // Filled IN PLACE through a ref to the field — never `var frame = new FrameUniformsGpu {…}`.
+        // See _frameUniforms: a 31 KB local kills the wasm runtime at tier-up time.
+        ref var frame = ref _frameUniforms;
+        // The field persists between frames, so start from zero to keep the semantics of the fresh
+        // struct this used to allocate. AmbientSh is the one that would actually bite: it is written
+        // only when the scene carries SH coefficients, and its [0].w is the flag that switches the
+        // shader onto the SH ambient path — a stale one keeps that path on after a scene drops it.
+        frame = default;
+        frame.Time = new Vector4(scene.ElapsedSeconds, 0f, 0f, 0f);
+        frame.CameraPos = new Vector4(scene.Camera.Position, 0f);
+        frame.Ambient = new Vector4(scene.Ambient.Sky, scene.Ambient.Exposure);
+        frame.AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights));
+        frame.AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f);
+        // x: sky-reflection specular enabled (Godot reflected_light_source = Sky).
+        frame.AaSettings = new Vector4(
+            scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
+            _specularAaVariance, _specularAaClamp, 0f);
+        frame.CameraForward = new Vector4(CameraForward(scene.Camera.View), _clusterNear);
+        frame.ClusterParams = new Vector4(_clusterTilesX, _clusterTilesY, ClusterZSlices, _clusterFar);
+        // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
+        frame.ShadowSettings = new Vector4(
+            1f / ShadowMapSize,
+            (float)scene.Tonemap.Mode,
+            scene.Tonemap.Exposure,
+            scene.Tonemap.White);
         // L2 sky-SH ambient: coefficients pass through verbatim; [0].w flags the SH path on.
         if (scene.Ambient.Sh is { Length: 9 } sh)
         {
@@ -1267,6 +1271,15 @@ public sealed class PbrRenderer : IDisposable
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
         if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
     }
+
+    // The frame UBO's CPU mirror lives in a FIELD, never in a local. FrameUniformsGpu is 31 KB (64
+    // lights + 384 shadow matrices), and Mono's wasm interpreter aborts the ENTIRE runtime when it
+    // tiers up a method whose locals exceed its frame budget: "Unable to run method
+    // UploadFrameUniforms: locals size too big". The abort lands a couple of seconds into steady
+    // rendering — long after the method has been interpreting happily, and long after any short
+    // smoke test has reported success — so it reads as a random browser crash rather than a struct
+    // size problem. Filling this in place also saves a 31 KB stack copy per frame on every backend.
+    private FrameUniformsGpu _frameUniforms;
 
     // Test-only readback of the per-frame packed light array (e.g. to assert ShadowAtlas.X survives the
     // shadow-caster rebuild). Off by default so production frames never pay the array copy on the hot path.

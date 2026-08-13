@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Textures;
-using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr;
 
@@ -13,7 +12,7 @@ namespace Paradise.Rendering.Pbr;
 /// data transcodes to different formats, so usage is part of texture identity.</summary>
 public sealed class MaterialResourceCache : IDisposable
 {
-    private readonly WebGpuRenderer _renderer;
+    private readonly IRenderer _renderer;
     private readonly BindGroupLayoutDesc _materialGroupLayout;
     private readonly SamplerHandle _sampler;
     private readonly TextureHandle _defaultWhite;
@@ -31,7 +30,7 @@ public sealed class MaterialResourceCache : IDisposable
 
     public int MaterialCount => _materials.Count;
 
-    public MaterialResourceCache(WebGpuRenderer renderer, ShaderProgramDesc program, ushort maxAnisotropy = 16)
+    public MaterialResourceCache(IRenderer renderer, ShaderProgramDesc program, ushort maxAnisotropy = 16)
     {
         _renderer = renderer;
         _materialGroupLayout = FindGroup(program, 2);

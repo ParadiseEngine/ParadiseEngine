@@ -1,5 +1,3 @@
-using Paradise.Rendering.WebGPU.Internal;
-
 namespace Paradise.Rendering.WebGPU.Test;
 
 /// <summary>THE golden contract test for the M2 binding pipeline: <c>Shaders/bindings.slang</c>

@@ -24,7 +24,13 @@ namespace Paradise.Rendering.WebGPU;
 /// for windowed rendering, or via <see cref="CreateHeadless"/> for the offscreen adapter path
 /// used by CI smoke tests. Exposes resource Create/Destroy plus the
 /// <see cref="Submit(in RenderCommandStream)"/> path that drives a real frame.</summary>
-public sealed class WebGpuRenderer : IDisposable
+/// <remarks>Implements <see cref="IRenderer"/>, the backend-agnostic slice consumed by
+/// <c>Paradise.Rendering.Pbr</c>. The members beyond it — <see cref="OverlayPass"/>,
+/// <see cref="NativeDevice"/>, <see cref="ReadbackColor"/>, <see cref="RenderClearFrame"/>, and
+/// the raw <see cref="CreateShader(in ShaderDesc)"/> / <see cref="CreatePipeline(in PipelineDesc)"/>
+/// descriptor paths — are Dawn-specific and reached through this concrete type; see
+/// <see cref="IRenderer"/> for why each is excluded.</remarks>
+public sealed class WebGpuRenderer : IRenderer, IDisposable
 {
     private const int DefaultFramesInFlight = 2;
 
@@ -866,11 +872,11 @@ public sealed class WebGpuRenderer : IDisposable
         return _device.Device.CreateTexture(in desc);
     }
 
-    /// <summary>Internal helper for <see cref="Paradise.Rendering.Sample"/>: load a Slang-compiled
-    /// shader pair from an embedded resource pair (<paramref name="logicalNamePrefix"/>.wgsl +
-    /// .reflection.json) and return a <see cref="ShaderProgramDesc"/>. Wraps
-    /// <see cref="ShaderProgramLoader.Load"/> so the loader stays internal while the sample
-    /// (and tests) can drive it without InternalsVisibleTo to every consumer.</summary>
+    /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>, which now
+    /// lives in the backend-agnostic <c>Paradise.Rendering</c> package (loading a Slang-compiled
+    /// WGSL + reflection-JSON resource pair means the same thing to every backend). Kept so
+    /// existing callers keep compiling; new code should call the loader directly rather than
+    /// route a backend-neutral operation through a concrete backend.</summary>
     public static ShaderProgramDesc LoadShaderProgram(Assembly assembly, string logicalNamePrefix) =>
         ShaderProgramLoader.Load(assembly, logicalNamePrefix);
 
