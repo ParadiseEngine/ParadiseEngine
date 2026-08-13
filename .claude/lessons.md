@@ -47,6 +47,17 @@
 
 ## Paradise.Rendering
 
+- [hits: 1] **Dropping `Paradise.Rendering.Pbr`'s ProjectReference to `Paradise.Rendering.WebGPU`
+  (the IRenderer extraction, 2026-08-13) breaks whoever was getting the backend TRANSITIVELY, and
+  the only in-repo casualty is `Paradise.Rendering.Pbr.Test`** — its GPU tests call
+  `WebGpuRenderer.CreateHeadless`, so it now needs its own explicit ProjectReference (added).
+  Checked the sibling game repos before worrying about downstream fallout: ShiningPie.Launcher,
+  ParadiseTown.Launcher, ImmortalCultivation.Launcher and ParadiseGodotEditor's
+  Paradise.Sample.Runtime **all already declare `Paradise.Rendering.WebGPU` explicitly**, so the
+  0.7.0 bump needs no csproj patching there — sweep for the pattern rather than assuming a
+  release-note-worthy break. Note the workspace source override converts PackageReferences to
+  ProjectReferences one-for-one, so it neither masks nor creates this class of failure.
+
 - [hits: 2] **`Queue.WriteBuffer` rejects any size that is not a multiple of 4, and the rejection
   is SILENT** — it is validated on the queue, not at draw time, so the upload simply never lands
   and every draw reading that region renders whatever the buffer held before (zeros on a fresh
@@ -163,3 +174,70 @@
   `IScrollInfo`. **Rule**: test input plumbing against the routed event
   (`element.MouseWheel += …`, reading `MouseWheelEventArgs.Delta`/`.Orientation`), not against a
   templated control's state — it is the honest assertion AND needs no WebGPU device.
+
+## WebAssembly / browser backend
+
+- [hits: 1] **`JSHost.ImportAsync` resolves a RELATIVE module URL against `_framework/`, not
+  against the page** — the dynamic `import()` happens inside the runtime's own JS module, so
+  `"./_content/Paradise.Rendering.Browser/paradise-webgpu.js"` is fetched from
+  `_framework/_content/...` and 404s. The failure is doubly confusing because the 404 is silent in
+  the .NET log and the *next* `[JSImport]` call is what throws ("ES6 module X was not imported yet,
+  please call JSHost.ImportAsync() first"), pointing at the wrong line. Fix used in
+  `BrowserRenderer.CreateAsync`: resolve the URL against `document.baseURI`
+  (`JSHost.GlobalThis.GetPropertyAsJSObject("document").GetPropertyAsString("baseURI")` + `new
+  Uri(base, relative)`) before calling ImportAsync — that also keeps apps hosted under a sub-path
+  working, which a hardcoded leading `/` or `../` would not. App-side modules can instead be
+  resolved page-side (`new URL(name, document.baseURI).href`) and passed in, which the sample does.
+
+- [hits: 1] **Static web asset fingerprinting only touches `_framework/`, never `wwwroot/` or
+  `_content/`.** Verified by publishing the same app with `WasmFingerprintAssets` true and false:
+  `_content/Paradise.Rendering.Browser/paradise-webgpu.js` keeps its plain name either way (so a
+  package can hardcode that URL as its default), while `_framework/dotnet.js` becomes
+  `dotnet.<hash>.js` and is reachable only through the importmap that `OverrideHtmlAssetPlaceholders`
+  injects into `index.html`. So an app's own `main.js` may keep importing `./_framework/dotnet.js`,
+  but it MUST keep the `<script type="importmap"></script>` placeholder in its HTML or the stock
+  publish breaks. Do not disable fingerprinting to "fix" a missing-module error — check the
+  placeholder first.
+
+- [hits: 1] **`Slang.targets` took its slangc RID from `$(RuntimeIdentifier)`, which describes the
+  BUILD OUTPUT, not the build machine.** Harmless for desktop builds (the two coincide) until a
+  `Microsoft.NET.Sdk.WebAssembly` project imported it: RuntimeIdentifier is `browser-wasm` there, so
+  SlangBootstrap went looking for a browser-wasm slangc and the build died in `RestoreSlang` with an
+  opaque MSB3073. Fixed 2026-08-13: `_ResolveSlangRid` now always host-detects, with `$(SlangRid)`
+  as the explicit override. Rule for build-time native tools: never key their download on the
+  project's RuntimeIdentifier.
+
+- [hits: 1] **A `[JSImport]` partial method compiles fine in a plain `net10.0` class library —
+  including a `Microsoft.NET.Sdk.Razor` one — as long as `AllowUnsafeBlocks` is on.** No
+  `net10.0-browser` TFM and no WebAssembly SDK is needed: the JSImport source generator ships in the
+  base SDK and `System.Runtime.InteropServices.JavaScript` is in the `net10.0` reference pack.
+  Without `AllowUnsafeBlocks` the error is SYSLIB1074 plus a confusing CS0227. Annotate the public
+  types `[SupportedOSPlatform("browser")]` and CA1416 stays quiet. This is what lets
+  `Paradise.Rendering.Browser` ship as an ordinary NuGet package whose `wwwroot/` JS rides along as
+  a static web asset.
+
+- [hits: 1] **A big struct in a LOCAL kills the wasm runtime — not with an exception, with a process
+  abort, and only after a few seconds of steady rendering.** `PbrRenderer.UploadFrameUniforms` built
+  its `FrameUniformsGpu` (31008 bytes: 64 lights + 384 shadow matrices) as `var frame = new
+  FrameUniformsGpu { … }`. Mono's wasm interpreter runs that fine while interpreting cold, then the
+  jiterpreter tries to tier the hot method up and asserts:
+  `tiering.c:86 … Unable to run method 'PbrRenderer:UploadFrameUniforms': locals size too big`,
+  followed by `ExitStatus` — the whole runtime goes down and the app cannot survive it. Fixed
+  2026-08-13 by holding the mirror in a private FIELD and filling it in place through
+  `ref var frame = ref _frameUniforms;` (plus `frame = default;` first, because the field persists
+  across frames and `AmbientSh[0].w` is the flag that switches the shader onto the SH ambient path —
+  a stale one keeps it on after a scene drops SH). Measured bonus: browser frame CPU fell from
+  ~2.5 ms to ~0.6 ms, because the method can finally tier up, and desktop loses a 31 KB copy per
+  frame. **Rule**: any GPU-uniform mirror over a few KB belongs in a field, never a local, on every
+  path a wasm host can reach. `WasmEnableJiterpreter=false` makes the symptom disappear and is NOT
+  the fix — it just stops the tier-up that exposes it, at a real throughput cost.
+
+- [hits: 1] **A smoke marker that fires before the failure mode is worse than no marker.**
+  `Paradise.Rendering.Browser.Sample` reported `SAMPLE-OK` after 60 frames; the tier-up abort above
+  landed at about frame 110, so the acceptance page reported success and *then* the runtime died —
+  both scenes had been "verified green" against a build that crashes after two seconds. The DOM
+  marker is now gated on 300 frames, and the puppeteer driver has a soak mode (`/tmp/pptr/soak.mjs`
+  pattern) that keeps rendering afterwards and fails on `Assertion at`/`ExitStatus`/`locals size too
+  big` in the console AND on a frame counter that stops advancing. **Rule**: when choosing a
+  frame/tick threshold for a browser smoke test, pick one past wasm tier-up (hundreds of frames, not
+  tens), and assert liveness after the marker, not just the marker.

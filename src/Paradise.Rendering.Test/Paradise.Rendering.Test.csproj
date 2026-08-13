@@ -22,4 +22,13 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Hand-written stand-in for a Slang.targets build output: logical names match the
+         `{prefix}.wgsl` / `{prefix}.reflection.json` pair ShaderProgramLoader.Load expects, so the
+         test exercises the real embedded-resource path. No SlangShader items here on purpose —
+         this project must keep loading shader programs with no backend and no slangc. -->
+    <EmbeddedResource Include="Shaders/minimal.wgsl" LogicalName="Shaders.minimal.wgsl" />
+    <EmbeddedResource Include="Shaders/minimal.reflection.json" LogicalName="Shaders.minimal.reflection.json" />
+  </ItemGroup>
 </Project>

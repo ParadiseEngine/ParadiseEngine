@@ -4,14 +4,17 @@ using System.Reflection;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace Paradise.Rendering.WebGPU.Internal;
+namespace Paradise.Rendering;
 
 /// <summary>Loads a build-time Slang-compiled shader pair from an assembly's embedded resources
 /// (<c>{prefix}.wgsl</c> + <c>{prefix}.reflection.json</c>) and returns a
 /// <see cref="ShaderProgramDesc"/> with vertex layout populated from reflection — never
 /// hand-coded. The transformation keeps the engine-canonical record shape stable while the loader
 /// absorbs any Slang reflection-JSON schema drift.</summary>
-internal static class ShaderProgramLoader
+/// <remarks>Backend-agnostic on purpose: the WGSL blob and its reflection record are produced by
+/// <c>Slang.targets</c> at build time and mean the same thing to every rendering backend, so the
+/// loader lives in this contract package rather than inside one of them.</remarks>
+public static class ShaderProgramLoader
 {
     // Well-known shader parameter names whose bind-group layout must be forced to the shadow-map
     // depth-texture / comparison-sampler kinds (slangc reflection can't express them). Must match

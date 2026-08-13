@@ -94,6 +94,7 @@ jobs:
             Paradise.Physics
             Paradise.Rendering
             Paradise.Rendering.WebGPU
+            Paradise.Rendering.Browser
             Paradise.Assets.Gltf
             Paradise.Assets.Textures
             Paradise.Rendering.Pbr

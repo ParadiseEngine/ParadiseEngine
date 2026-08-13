@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Rendering.Browser</AssemblyName>
+    <RootNamespace>Paradise.Rendering.Browser</RootNamespace>
+    <PackageId>Paradise.Rendering.Browser</PackageId>
+    <Title>Paradise.Rendering.Browser</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Browser (WebAssembly) WebGPU backend for Paradise.Rendering. Drives the browser's own WebGPU implementation through a JS shim shipped with the package; consumers see only Paradise.Rendering handle/descriptor types and need no JavaScript of their own.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>rendering;webgpu;webassembly;wasm;browser;graphics;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <!-- Razor SDK so wwwroot/paradise-webgpu.js ships as a static web asset: consuming apps serve
+         it from _content/Paradise.Rendering.Browser/ and JSHost.ImportAsync loads it from there. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Rendering.Browser.Test" />
+  </ItemGroup>
+
+</Project>

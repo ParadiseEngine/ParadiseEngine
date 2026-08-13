@@ -15,5 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
+    <!-- Explicit since Pbr stopped referencing a concrete backend: the GPU tests drive the real
+         thing through WebGpuRenderer.CreateHeadless, so they need a backend of their own. -->
+    <ProjectReference Include="..\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
   </ItemGroup>
 </Project>

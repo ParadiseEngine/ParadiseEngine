@@ -1,5 +1,4 @@
 using System;
-using Paradise.Rendering.WebGPU.Internal;
 
 namespace Paradise.Rendering.WebGPU.Test;
 

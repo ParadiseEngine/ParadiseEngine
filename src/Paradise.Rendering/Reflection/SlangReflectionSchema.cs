@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Paradise.Rendering.WebGPU.Internal;
+namespace Paradise.Rendering;
 
 // Records mirroring the subset of `slangc -reflection-json` output the loader consumes:
 // (a) entry points, split per [shader("...")] attribute, with varying inputs driving the vertex
@@ -13,9 +13,10 @@ namespace Paradise.Rendering.WebGPU.Internal;
 // The shape is pinned by the bindings.slang golden test in Paradise.Rendering.WebGPU.Test —
 // schema drift breaks that test, and only this file plus ShaderProgramLoader absorb the change.
 //
-// This is the *raw Slang JSON* schema, not the engine-canonical ShaderProgramDesc shape from
-// Paradise.Rendering. The loader transforms one to the other so the engine surface stays stable
-// even if Slang's reflection schema evolves.
+// This is the *raw Slang JSON* schema, not the engine-canonical ShaderProgramDesc shape these
+// types sit beside. The loader transforms one to the other so the engine surface stays stable
+// even if Slang's reflection schema evolves — hence `internal`: the schema records are the
+// absorbing layer, never part of the package's public contract.
 
 internal sealed record SlangReflection(
     [property: JsonPropertyName("entryPoints")] SlangEntryPoint[]? EntryPoints,
