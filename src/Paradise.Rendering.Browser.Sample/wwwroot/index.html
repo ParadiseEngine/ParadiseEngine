@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <title>Paradise browser renderer sample</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preload" id="webassembly" />
+  <script type="importmap"></script>
+  <script type="module" src="main.js"></script>
+  <style>
+    body { font-family: ui-monospace, monospace; background: #14161a; color: #dde1e6; margin: 16px; }
+    h1 { font-size: 1.1rem; font-weight: 600; }
+    canvas { border: 1px solid #333a44; display: block; margin: 12px 0; max-width: 100%; }
+    p { margin: 4px 0; }
+  </style>
+</head>
+
+<body>
+  <h1>Paradise.Rendering.Browser &mdash; WebGPU acceptance sample</h1>
+  <canvas id="gpu-canvas" width="960" height="600"></canvas>
+  <p id="stats">waiting for the first frame&hellip;</p>
+  <p id="status">booting .NET runtime&hellip;</p>
+</body>
+
+</html>

@@ -22,6 +22,13 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Paradise.Rendering.Browser.Sample is a Microsoft.NET.Sdk.WebAssembly app
+      # (UsingBrowserRuntimeWorkload=true), so the solution no longer builds on a stock SDK -
+      # without this the build fails with NETSDK1147. Only the sample needs it; the packable
+      # Paradise.Rendering.Browser library is an ordinary net10.0 class library.
+      - name: Install the WebAssembly workload
+        run: dotnet workload install wasm-tools
+
       # Cache the downloaded slangc toolchain across runs. Keyed on the manifest SHA so a Slang
       # version bump invalidates the cache automatically; the cache root mirrors RestoreSlang's
       # default ($(NuGetPackageRoot)_slang) which lives under ~/.nuget/packages on Linux runners.

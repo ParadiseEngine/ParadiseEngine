@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Paradise.Rendering.Browser.Sample</RootNamespace>
+    <!-- Lets index.html carry the runtime's preload + importmap placeholders. Asset fingerprinting
+         is left at its default (on): the importmap it emits is what maps main.js's plain
+         ./_framework/dotnet.js import onto the fingerprinted file, and _content/ assets like the
+         backend's shim are never fingerprinted, so BrowserRenderer's default module URL resolves
+         under the stock configuration. -->
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+    <ProjectReference Include="../Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
+    <ProjectReference Include="../Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
+  </ItemGroup>
+
+  <Import Project="../Slang.targets" />
+
+  <ItemGroup>
+    <SlangShader Include="Shaders/**/*.slang" />
+  </ItemGroup>
+
+</Project>
