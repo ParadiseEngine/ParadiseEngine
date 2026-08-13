@@ -275,6 +275,44 @@ public sealed class WwiseSoundEngine : IDisposable
         }
     }
 
+    // ---- offline capture ------------------------------------------------------------------------
+
+    /// <summary>
+    /// Also write the master output to a .wav, until <see cref="StopOutputCapture"/>.
+    ///
+    /// This is the only way to assert that something is actually AUDIBLE, which is worth having
+    /// because almost every way a Wwise integration fails is silent: an unresolved switch, a
+    /// missing bank, an unregistered codec, and an event whose container has no children all
+    /// return success and produce no sound. A captured file that is all zeroes separates "played
+    /// nothing" from "played something" when no return code can.
+    ///
+    /// The path is resolved by the low-level I/O hook, so it lands under the soundbank directory
+    /// unless it is absolute.
+    /// </summary>
+    public bool StartOutputCapture(string fileName)
+    {
+        if (!_initialized)
+        {
+            return false;
+        }
+
+        var result = WwiseNative.StartOutputCapture(fileName);
+        if (result != WwiseNative.Success)
+        {
+            LastError = result;
+            return false;
+        }
+        return true;
+    }
+
+    public void StopOutputCapture()
+    {
+        if (_initialized)
+        {
+            WwiseNative.StopOutputCapture();
+        }
+    }
+
     // ---- parameters ---------------------------------------------------------------------------
 
     /// <summary>Set a game parameter. Defaults to the global scope; pass an object to give that

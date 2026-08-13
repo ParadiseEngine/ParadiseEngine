@@ -88,6 +88,14 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_SetState")]
     public static partial int SetState(uint stateGroup, uint state);
 
+    // ---- offline capture ------------------------------------------------------------------------
+
+    [LibraryImport(Library, EntryPoint = "Pdx_Wwise_StartOutputCapture", StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int StartOutputCapture(string fileName);
+
+    [LibraryImport(Library, EntryPoint = "Pdx_Wwise_StopOutputCapture")]
+    public static partial int StopOutputCapture();
+
     // ---- ids ----------------------------------------------------------------------------------
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_GetIDFromString", StringMarshalling = StringMarshalling.Utf8)]

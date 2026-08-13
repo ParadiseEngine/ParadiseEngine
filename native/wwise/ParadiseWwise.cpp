@@ -298,6 +298,18 @@ extern "C" int32_t Pdx_Wwise_SetState(uint32_t in_stateGroup, uint32_t in_state)
     return AK::SoundEngine::SetState(in_stateGroup, in_state);
 }
 
+// ---- offline capture ---------------------------------------------------------------------------
+
+extern "C" int32_t Pdx_Wwise_StartOutputCapture(const char* in_fileName)
+{
+    return AK::SoundEngine::StartOutputCapture(in_fileName);
+}
+
+extern "C" int32_t Pdx_Wwise_StopOutputCapture(void)
+{
+    return AK::SoundEngine::StopOutputCapture();
+}
+
 // ---- ids --------------------------------------------------------------------------------------
 
 extern "C" uint32_t Pdx_Wwise_GetIDFromString(const char* in_name)

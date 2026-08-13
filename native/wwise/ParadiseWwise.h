@@ -120,6 +120,19 @@ PDX_WWISE_API int32_t Pdx_Wwise_SetSwitch(
 
 PDX_WWISE_API int32_t Pdx_Wwise_SetState(uint32_t in_stateGroup, uint32_t in_state);
 
+// ---- offline capture ---------------------------------------------------------------------------
+
+/// Start writing the master output to a .wav alongside playing it.
+///
+/// This is the only way to assert that something is actually AUDIBLE. Most of the ways a Wwise
+/// integration fails are silent: an unresolved switch, a missing bank, an unregistered codec and
+/// an event that plays a container with no children all return success and produce no sound. A
+/// captured file that is all zeroes distinguishes "played nothing" from "played something",
+/// which no return code does.
+PDX_WWISE_API int32_t Pdx_Wwise_StartOutputCapture(const char* in_fileName);
+
+PDX_WWISE_API int32_t Pdx_Wwise_StopOutputCapture(void);
+
 // ---- ids ------------------------------------------------------------------------------------
 
 /// Hash a name to the id Wwise generated for it. Same FNV hash the authoring tool uses, so this
