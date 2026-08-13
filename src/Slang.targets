@@ -36,8 +36,14 @@
   </PropertyGroup>
 
   <Target Name="_ResolveSlangRid">
+    <!-- slangc is a BUILD-TIME tool, so its RID is the build machine's, never the project's
+         $(RuntimeIdentifier) (which describes the output). Those coincide for an ordinary desktop
+         build, which is why reading RuntimeIdentifier worked until a project targeted something
+         slangc has no build for: a Microsoft.NET.Sdk.WebAssembly app sets RuntimeIdentifier to
+         browser-wasm, and the bootstrap then fails looking for a browser-wasm slangc. Set
+         $(SlangRid) to override the detected host. -->
     <PropertyGroup Condition="'$(_SlangResolvedRid)' == ''">
-      <_SlangResolvedRid>$(RuntimeIdentifier)</_SlangResolvedRid>
+      <_SlangResolvedRid>$(SlangRid)</_SlangResolvedRid>
     </PropertyGroup>
     <PropertyGroup Condition="'$(_SlangResolvedRid)' == ''">
       <_SlangHostOs Condition="$([MSBuild]::IsOSPlatform('Windows'))">win</_SlangHostOs>
