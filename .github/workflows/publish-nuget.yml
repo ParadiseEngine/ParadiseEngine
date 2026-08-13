@@ -92,6 +92,7 @@ jobs:
             Paradise.ECS.Concurrent
             Paradise.ECS.Jobs
             Paradise.Physics
+            Paradise.Audio.Wwise
             Paradise.Rendering
             Paradise.Rendering.WebGPU
             Paradise.Rendering.Browser
