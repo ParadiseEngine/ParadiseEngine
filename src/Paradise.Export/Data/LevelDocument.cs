@@ -97,6 +97,7 @@ namespace Paradise.Export.Data
         public AgentComponentData? Agent { get; set; }
         public SpriteAnimationComponentData? SpriteAnimation { get; set; }
         public ParticleEmitterComponentData? ParticleEmitter { get; set; }
+        public AudioEmitterComponentData? AudioEmitter { get; set; }
     }
 
     /// <summary>
@@ -240,6 +241,54 @@ namespace Paradise.Export.Data
             Rows = Math.Max(1, Rows);
             FrameCount = Math.Clamp(FrameCount <= 0 ? Columns * Rows : FrameCount, 1, Columns * Rows);
             Fps = float.IsFinite(Fps) && Fps >= 0f ? Fps : 0f;
+        }
+    }
+
+    /// <summary>
+    /// A positional sound source. The entity's world position is the emitter's position; the
+    /// runtime registers one audio-engine object per emitter and keeps it in sync.
+    ///
+    /// EVENTS ARE NAMED, NOT RESOLVED HERE. <see cref="StartEvent"/> and <see cref="StopEvent"/>
+    /// are authoring-tool event names (Wwise, in the shipped integration), and the contract
+    /// deliberately carries the string rather than a resolved id: ids are produced by hashing the
+    /// name at bank-generation time, so resolving at export would pin the scene to one particular
+    /// soundbank build. The runtime hashes the name instead, which is stable across regenerations.
+    ///
+    /// A name that matches nothing plays nothing. That is the audio middleware's model — event
+    /// names only exist inside the audio project, which the exporter cannot see — so an emitter
+    /// whose event was renamed goes quiet rather than failing the export.
+    /// </summary>
+    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000008")]
+    public sealed record AudioEmitterComponentData
+    {
+        /// <summary>Event posted for this emitter. Null or empty means the emitter exists as a
+        /// positioned object but plays nothing until game code posts to it.</summary>
+        public string? StartEvent { get; set; }
+
+        /// <summary>Event posted to stop it. Optional: a one-shot needs none, and a loop can also
+        /// be stopped by its playing id, which is what the runtime does when this is absent.</summary>
+        public string? StopEvent { get; set; }
+
+        /// <summary>Post <see cref="StartEvent"/> as soon as the scene loads. Ambience and looping
+        /// machinery want this; a door creak does not.</summary>
+        public bool PlayOnStart { get; set; } = true;
+
+        /// <summary>False makes the emitter 2D — positioned in the scene for authoring
+        /// convenience, but heard at full level regardless of where the listener is. Music and
+        /// narration are the cases that want it.</summary>
+        public bool Is3D { get; set; } = true;
+
+        /// <summary>Scales the attenuation curve authored on the sound, so one authored falloff
+        /// can serve emitters of different physical size. 1 is the authored distance.</summary>
+        public float AttenuationScale { get; set; } = 1f;
+
+        public void ValidateAndNormalize()
+        {
+            // A non-finite or non-positive scale would collapse the attenuation curve and make
+            // the emitter either silent everywhere or audible everywhere — both read as a broken
+            // sound rather than a bad number, so clamp rather than trusting the authored value.
+            AttenuationScale =
+                float.IsFinite(AttenuationScale) && AttenuationScale > 0f ? AttenuationScale : 1f;
         }
     }
 

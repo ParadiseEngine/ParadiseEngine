@@ -1,0 +1,119 @@
+<Project>
+
+  <!--
+    Builds and stages libParadiseWwise into the consuming app's output.
+
+    NuGet imports this automatically for any project that references Paradise.Audio.Wwise; the
+    workspace-local source override imports it by hand, because a ProjectReference does not carry
+    a package's build/ targets.
+
+    WHY THE NATIVE BINARY IS BUILT HERE RATHER THAN SHIPPED. The Wwise SDK is under a commercial
+    licence that forbids redistributing its libraries, and this package is MIT. So the package
+    ships our SHIM SOURCE (native/wwise/, a few hundred lines that are ours) and compiles it
+    against whatever Wwise SDK the developer has installed. Nothing of Audiokinetic's is
+    redistributed, and the resulting dylib never leaves the machine that built it.
+
+    WHEN NO SDK IS PRESENT this warns and does nothing. It must never fail the build: a
+    contributor without a Wwise licence, and CI, still have to be able to build and test the game.
+    The managed side treats a missing dylib as "audio unavailable" and the game runs silent.
+
+    ONE TARGET, NOT THREE. Resolution, build and staging are deliberately fused. Splitting them
+    means a later target's Condition reads a property an earlier target sets, and whether MSBuild
+    evaluates a Condition before or after DependsOnTargets is exactly the kind of ordering
+    subtlety that fails SILENTLY here — you get a green build with no native library and a game
+    that is quiet for no visible reason. Internal guards have no such ambiguity.
+
+    Opt out entirely with -p:ParadiseWwiseEnabled=false.
+  -->
+
+  <PropertyGroup>
+    <ParadiseWwiseEnabled Condition="'$(ParadiseWwiseEnabled)' == ''">true</ParadiseWwiseEnabled>
+
+    <!-- Profile is the default because it is the only configuration Wwise Authoring's profiler
+         can attach to; Release compiles comms out entirely. See native/wwise/build.sh. -->
+    <ParadiseWwiseConfig Condition="'$(ParadiseWwiseConfig)' == ''">Profile</ParadiseWwiseConfig>
+
+    <!-- Two layouts to satisfy: inside the restored package (build/ and native/ are siblings),
+         and inside the engine checkout, where this file sits at src/Paradise.Audio.Wwise/build/
+         and the sources are at native/wwise/ off the repo root. -->
+    <_ParadiseWwiseNativeDir Condition="Exists('$(MSBuildThisFileDirectory)../native/wwise/build.sh')">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../native/wwise'))</_ParadiseWwiseNativeDir>
+    <_ParadiseWwiseNativeDir Condition="'$(_ParadiseWwiseNativeDir)' == '' AND Exists('$(MSBuildThisFileDirectory)../../../native/wwise/build.sh')">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../native/wwise'))</_ParadiseWwiseNativeDir>
+  </PropertyGroup>
+
+  <Target Name="ParadiseWwiseNative"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(ParadiseWwiseEnabled)' == 'true'">
+
+    <!--
+      Does this project actually use audio?
+
+      NuGet only imports this file for projects that reference the package, so the answer is
+      always yes on that path. The workspace source override imports it for EVERY project it
+      touches — MSBuild forbids item references in an Import condition — so the check lives here
+      instead, where items are legal. Without it, a test project with no audio would still build
+      and stage a native dylib it never loads.
+
+      Matched through an ItemGroup with %(Identity) batching rather than a string function over
+      @(ProjectReference): MSBuild does not expand item lists inside property-function arguments,
+      so the obvious one-liner silently evaluates to false and audio never builds.
+    -->
+    <ItemGroup>
+      <_ParadiseWwiseRef Include="@(ProjectReference)"
+                         Condition="$([System.String]::Copy('%(Identity)').Contains('Paradise.Audio.Wwise'))" />
+    </ItemGroup>
+
+    <PropertyGroup>
+      <_WwiseReferenced Condition="@(PackageReference->AnyHaveMetadataValue('Identity', 'Paradise.Audio.Wwise')) == 'true'">true</_WwiseReferenced>
+      <_WwiseReferenced Condition="'@(_ParadiseWwiseRef)' != ''">true</_WwiseReferenced>
+
+      <_WwiseSdkRoot Condition="'$(WwiseSdkRoot)' != ''">$(WwiseSdkRoot)</_WwiseSdkRoot>
+      <_WwiseSdkRoot Condition="'$(_WwiseSdkRoot)' == ''">$(WWISESDK)</_WwiseSdkRoot>
+    </PropertyGroup>
+
+    <!-- Newest install wins. MSBuild has no glob-to-property, so this goes through an item.
+         build.sh does the same discovery (with `sort -V`) when handed no explicit SDK path. -->
+    <ItemGroup Condition="'$(_WwiseReferenced)' == 'true' AND '$(_WwiseSdkRoot)' == ''">
+      <_WwiseCandidate Include="/Applications/Audiokinetic/Wwise_*/SDK/include/AK/SoundEngine/Common/AkSoundEngine.h" />
+    </ItemGroup>
+    <PropertyGroup Condition="'$(_WwiseSdkRoot)' == '' AND '@(_WwiseCandidate)' != ''">
+      <_WwiseNewestHeader>%(_WwiseCandidate.FullPath)</_WwiseNewestHeader>
+      <!-- Five levels up from .../SDK/include/AK/SoundEngine/Common/AkSoundEngine.h is the SDK
+           root. Six would be the Wwise install, whose include/ does not exist — and the Exists()
+           guard below would then quietly disable audio. -->
+      <_WwiseSdkRoot>$([System.IO.Path]::GetFullPath('$(_WwiseNewestHeader)/../../../../..'))</_WwiseSdkRoot>
+    </PropertyGroup>
+
+    <PropertyGroup>
+      <_WwiseUsable Condition="'$(_WwiseReferenced)' == 'true' AND '$(_ParadiseWwiseNativeDir)' != '' AND '$(_WwiseSdkRoot)' != '' AND Exists('$(_WwiseSdkRoot)/include/AK/SoundEngine/Common/AkSoundEngine.h')">true</_WwiseUsable>
+
+      <!-- Key the cache on SDK folder name + config: switching either must produce a different
+           artifact rather than silently reusing the previous one. -->
+      <_WwiseSdkTag Condition="'$(_WwiseUsable)' == 'true'">$([System.IO.Path]::GetFileName($([System.IO.Path]::GetDirectoryName('$(_WwiseSdkRoot)'))))</_WwiseSdkTag>
+      <_WwiseCacheRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)_paradise_wwise</_WwiseCacheRoot>
+      <_WwiseCacheRoot Condition="'$(_WwiseCacheRoot)' == ''">$(MSBuildProjectDirectory)/obj/paradise_wwise</_WwiseCacheRoot>
+      <ParadiseWwiseOutputDir>$([System.IO.Path]::GetFullPath('$(_WwiseCacheRoot)/$(_WwiseSdkTag)/$(ParadiseWwiseConfig)'))</ParadiseWwiseOutputDir>
+      <ParadiseWwiseLibrary>$(ParadiseWwiseOutputDir)/libParadiseWwise.dylib</ParadiseWwiseLibrary>
+    </PropertyGroup>
+
+    <Warning Condition="'$(_WwiseReferenced)' == 'true' AND '$(_WwiseUsable)' != 'true'"
+             Text="Wwise SDK not found — building without audio. Install it via the Audiokinetic Launcher, or set WwiseSdkRoot/WWISESDK. The game runs silent; nothing else is affected. Silence this with -p:ParadiseWwiseEnabled=false." />
+
+    <!-- build.sh is itself incremental (it compares the dylib against our sources and exits
+         early), so this runs unconditionally rather than through Inputs/Outputs, which would
+         have to be declared on the target and would then also gate the staging below. -->
+    <Exec Condition="'$(_WwiseUsable)' == 'true'"
+          Command="sh &quot;$(_ParadiseWwiseNativeDir)/build.sh&quot; --out &quot;$(ParadiseWwiseOutputDir)&quot; --config $(ParadiseWwiseConfig) --sdk &quot;$(_WwiseSdkRoot)&quot;"
+          ConsoleToMSBuild="true" />
+
+    <!-- Staged as Content rather than by a <Copy> so that `dotnet publish` takes it too — a
+         publish that drops the native half produces an app which builds, launches, and is
+         inexplicably silent. -->
+    <ItemGroup Condition="'$(_WwiseUsable)' == 'true' AND Exists('$(ParadiseWwiseLibrary)')">
+      <Content Include="$(ParadiseWwiseLibrary)">
+        <Link>libParadiseWwise.dylib</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
+
+</Project>
