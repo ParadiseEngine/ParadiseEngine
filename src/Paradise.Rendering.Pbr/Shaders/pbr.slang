@@ -333,8 +333,18 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
     float3 normalSample = float3(nxy, nz);
 
     float3 N = normalize(worldNormal);
-    float3 T = normalize(worldTangent.xyz);
-    T = normalize(T - N * dot(N, T));
+    // Degenerate tangent guard. Meshes without UVs get the loader's default +X tangent
+    // ("attribute gaps are default-filled"), and any face whose normal PARALLELS the
+    // transformed tangent makes the Gram-Schmidt below normalize a zero vector. That NaN
+    // is invisible in the lighting math (saturate() flushes it) but reaches the shadow
+    // lookup through the normal-offset bias, where a NaN uv slips past the range guards
+    // (NaN compares false) into SampleCmp — undefined, and in practice a per-frame coin
+    // flip that strobed every ±X-facing panel of a rotating caster. No tangent basis
+    // means no normal mapping: shade with the geometric normal instead.
+    float3 tRaw = worldTangent.xyz - N * dot(N, worldTangent.xyz);
+    if (dot(tRaw, tRaw) < 1e-8)
+        return N;
+    float3 T = normalize(tRaw);
     float3 B = cross(N, T) * worldTangent.w;
 
     return normalize(T * normalSample.x + B * normalSample.y + N * normalSample.z);
