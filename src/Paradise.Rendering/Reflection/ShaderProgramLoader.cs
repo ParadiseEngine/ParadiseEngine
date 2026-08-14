@@ -72,7 +72,26 @@ public static class ShaderProgramLoader
             if (!string.Equals(ep.Stage, "vertex", StringComparison.Ordinal)) continue;
             byEntryPoint[ep.Name] = ExtractVertexBuffers([ep]);
         }
-        var (layout, uniformBlocks) = BuildLayout(reflection.Parameters ?? Array.Empty<SlangParameter>());
+        // Visibility follows the file's stage mix (slangc lists ALL globals per entry point, so
+        // per-binding stage attribution is unavailable): compute-only files get Compute, raster
+        // files keep the historical Vertex|Fragment (byte-identical layouts to before compute
+        // existed), and mixed files get the union. RW entries are special-cased inside
+        // BuildLayout — write-access storage is never legal with Vertex visibility.
+        var hasCompute = false;
+        var hasRaster = false;
+        foreach (var ep in entryPoints)
+        {
+            if (string.Equals(ep.Stage, "compute", StringComparison.Ordinal)) hasCompute = true;
+            else hasRaster = true;
+        }
+        var defaultVisibility = (hasCompute, hasRaster) switch
+        {
+            (true, false) => ShaderStage.Compute,
+            (false, _) => ShaderStage.Vertex | ShaderStage.Fragment,
+            (true, true) => ShaderStage.Vertex | ShaderStage.Fragment | ShaderStage.Compute,
+        };
+        var (layout, uniformBlocks) = BuildLayout(
+            reflection.Parameters ?? Array.Empty<SlangParameter>(), defaultVisibility, hasCompute);
 
         return new ShaderProgramDesc(modules, layout, vertexBuffers)
         {
@@ -83,10 +102,13 @@ public static class ShaderProgramLoader
 
     /// <summary>Build bind-group layouts + uniform-block byte layouts from the reflection's
     /// top-level global parameters. Bindings are grouped by descriptor space (bind group),
-    /// ordered by binding index within each group. Visibility is Vertex|Fragment for every
-    /// entry: slangc's per-entry-point "bindings" lists ALL globals rather than per-stage usage
-    /// (verified against real output), and over-visible bindings are valid WebGPU.</summary>
-    private static (PipelineLayoutDesc Layout, UniformBlockDesc[] UniformBlocks) BuildLayout(SlangParameter[] parameters)
+    /// ordered by binding index within each group. Visibility is
+    /// <paramref name="defaultVisibility"/> for every entry (slangc's per-entry-point "bindings"
+    /// lists ALL globals rather than per-stage usage, and over-visible bindings are valid
+    /// WebGPU), except write-access storage resources, which drop Vertex visibility — WebGPU
+    /// rejects write storage in the vertex stage.</summary>
+    private static (PipelineLayoutDesc Layout, UniformBlockDesc[] UniformBlocks) BuildLayout(
+        SlangParameter[] parameters, ShaderStage defaultVisibility, bool hasCompute)
     {
         if (parameters.Length == 0)
         {
@@ -120,32 +142,48 @@ public static class ShaderProgramLoader
             // however, declares them as texture_depth_2d_array / sampler_comparison (the shadowTexture
             // type is patched at build time — see Slang.targets). The bind-group LAYOUT must match the
             // shader, so override by the well-known names.
+            // Write-access storage may never carry Vertex visibility (WebGPU validation error);
+            // give it Compute when the file has a compute entry, Fragment otherwise (fragment
+            // storage writes are legal for write-only access).
+            var writeVisibility = hasCompute ? ShaderStage.Compute : ShaderStage.Fragment;
+            var isRw = type.Access is "write" or "readWrite";
             var entry = type.Kind switch
             {
-                "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks),
+                "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks, defaultVisibility),
                 "resource" when p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTextureArray),
                 "resource" when p.Name == PositionTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
+                // WTexture2D / RWTexture2D → WGSL texture_storage_2d<format, access>. The
+                // [format("...")] attribute is REQUIRED: without it slangc silently defaults the
+                // WGSL to rgba32float while reflecting no format at all, and a guessed layout
+                // would mismatch the shader.
+                "resource" when type.BaseShape == "texture2D" && isRw => new BindGroupLayoutEntryDesc(
+                    binding.Index, writeVisibility, BindingResourceType.StorageTexture,
+                    StorageFormat: ParseStorageFormat(p),
+                    Access: type.Access == "readWrite" ? StorageTextureAccess.ReadWrite : StorageTextureAccess.WriteOnly),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.SampledTexture),
-                // StructuredBuffer<T> → WGSL var<storage, read> (read-only; no shader uses
-                // RWStructuredBuffer yet). Vertex|Fragment like every other over-visible entry:
-                // read-only storage is legal in the vertex stage (only read_write is prohibited
-                // there), and the joint-palette buffer is READ from it. This was Fragment-only
-                // once, sized to the Forward+ cluster masks — and a vertex-stage reader then
-                // failed createRenderPipeline, which Dawn reports only through the async error
-                // callback: the pipeline just silently dropped every frame that used it.
+                    binding.Index, defaultVisibility, BindingResourceType.SampledTexture),
+                // RWStructuredBuffer<T> → WGSL var<storage, read_write>.
+                "resource" when type.BaseShape == "structuredBuffer" && isRw => new BindGroupLayoutEntryDesc(
+                    binding.Index, writeVisibility, BindingResourceType.StorageBuffer),
+                // StructuredBuffer<T> → WGSL var<storage, read>. Default visibility like every
+                // other over-visible entry: read-only storage is legal in the vertex stage (only
+                // read_write is prohibited there), and the joint-palette buffer is READ from it.
+                // This was Fragment-only once, sized to the Forward+ cluster masks — and a
+                // vertex-stage reader then failed createRenderPipeline, which Dawn reports only
+                // through the async error callback: the pipeline just silently dropped every
+                // frame that used it.
                 "resource" when type.BaseShape == "structuredBuffer" => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.ReadonlyStorageBuffer),
+                    binding.Index, defaultVisibility, BindingResourceType.ReadonlyStorageBuffer),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.ComparisonSampler),
                 "samplerState" => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Vertex | ShaderStage.Fragment, BindingResourceType.Sampler),
+                    binding.Index, defaultVisibility, BindingResourceType.Sampler),
                 _ => throw new NotSupportedException(
                     $"Global shader parameter '{p.Name ?? "<unnamed>"}' has unsupported type kind " +
                     $"'{type.Kind}'{(type.BaseShape is null ? "" : $" (baseShape '{type.BaseShape}')")}. " +
-                    "Supported: ConstantBuffer<T>, Texture2D, SamplerState."),
+                    "Supported: ConstantBuffer<T>, Texture2D, (RW)StructuredBuffer, (R)WTexture2D, SamplerState."),
             };
 
             if (!groups.TryGetValue(group, out var entries))
@@ -168,12 +206,31 @@ public static class ShaderProgramLoader
         return (layout, uniformBlocks.ToArray());
     }
 
+    /// <summary>Map the GLSL image-format spelling of a storage texture's [format] attribute to
+    /// the storage-capable engine formats. Missing attribute → throw: slangc would have silently
+    /// defaulted the WGSL to rgba32float, and a guessed layout mismatches the shader.</summary>
+    private static TextureFormat ParseStorageFormat(SlangParameter parameter) => parameter.Format switch
+    {
+        "rgba8" => TextureFormat.Rgba8Unorm,
+        "rgba16f" => TextureFormat.Rgba16Float,
+        "rgba32f" => TextureFormat.Rgba32Float,
+        "r32f" => TextureFormat.R32Float,
+        null => throw new NotSupportedException(
+            $"Storage texture '{parameter.Name ?? "<unnamed>"}' has no [format(\"...\")] attribute. " +
+            "Annotate it (e.g. [format(\"rgba16f\")]) — without the attribute slangc silently emits " +
+            "rgba32float WGSL while reflecting no format, so the layout cannot be derived."),
+        _ => throw new NotSupportedException(
+            $"Storage texture '{parameter.Name ?? "<unnamed>"}' uses unsupported [format(\"{parameter.Format}\")]. " +
+            "Supported: rgba8, rgba16f, rgba32f, r32f."),
+    };
+
     private static BindGroupLayoutEntryDesc BuildConstantBufferEntry(
         SlangParameter parameter,
         SlangBinding binding,
         SlangTypeNode type,
         uint group,
-        List<UniformBlockDesc> uniformBlocks)
+        List<UniformBlockDesc> uniformBlocks,
+        ShaderStage visibility)
     {
         // Total GPU size of the buffer contents lives on the element var layout's uniform binding.
         var sizeBytes = type.ElementVarLayout?.Binding is { Kind: "uniform" } elementBinding
@@ -216,7 +273,7 @@ public static class ShaderProgramLoader
 
         return new BindGroupLayoutEntryDesc(
             binding.Index,
-            ShaderStage.Vertex | ShaderStage.Fragment,
+            visibility,
             BindingResourceType.UniformBuffer,
             MinBufferSize: sizeBytes);
     }

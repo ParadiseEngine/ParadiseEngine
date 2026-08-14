@@ -24,6 +24,9 @@ const G = {
     samplers: [],
     bindGroups: [],
     pipelines: [],
+    // Separate table from render pipelines: setPipeline is type-checked per pass kind, and the
+    // C# side allocates slots per table (slot index == array index here).
+    computePipelines: [],
     modules: [],
     // Canonical bind-group-layout JSON -> GPUBindGroupLayout. Pipelines and bind groups built from
     // the same layout content share one GPU object, which is what makes them compatible.
@@ -307,6 +310,21 @@ export function destroyPipeline(index) {
     G.pipelines[index] = null;
 }
 
+export function createComputePipeline(slot, descJson) {
+    const d = JSON.parse(descJson);
+    put(G.computePipelines, slot, G.device.createComputePipeline({
+        label: d.label,
+        layout: d.groups
+            ? G.device.createPipelineLayout({ bindGroupLayouts: d.groups.map((g) => getLayout(JSON.stringify(g))) })
+            : 'auto',
+        compute: { module: G.modules[d.cs], entryPoint: d.csEntry },
+    }));
+}
+
+export function destroyComputePipeline(index) {
+    G.computePipelines[index] = null;
+}
+
 // ---- frame submission ----
 
 // Binary record sizes; mirrored by BrowserRenderer.Submit.cs. The frame buffer is
@@ -402,6 +420,23 @@ export function submitFrame(frame, passCount, opCount) {
                 pass.setViewport(
                     dv.getFloat32(o + 4, true), dv.getFloat32(o + 8, true), dv.getFloat32(o + 12, true),
                     dv.getFloat32(o + 16, true), dv.getFloat32(o + 20, true), dv.getFloat32(o + 24, true));
+                break;
+            // Compute passes have no pass-table record (no attachments). `pass` holds either
+            // encoder kind — setBindGroup (case 5) is signature-identical on both, and the
+            // opcode (2 vs 9..11) selects the pipeline table, so no mode flag is needed.
+            case 9: // BeginComputePass
+                pass = encoder.beginComputePass();
+                break;
+            case 10: // EndComputePass
+                pass.end();
+                pass = null;
+                break;
+            case 11: // SetComputePipeline
+                pass.setPipeline(G.computePipelines[dv.getUint32(o + 4, true)]);
+                break;
+            case 12: // Dispatch
+                pass.dispatchWorkgroups(
+                    dv.getUint32(o + 4, true), dv.getUint32(o + 8, true), dv.getUint32(o + 12, true));
                 break;
             default:
                 throw new Error(`Unknown render command opcode ${dv.getUint8(o)}.`);

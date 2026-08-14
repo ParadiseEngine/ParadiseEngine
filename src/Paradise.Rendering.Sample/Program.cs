@@ -17,6 +17,7 @@ internal static class Program
         Triangle, // M1: clear + colored triangle
         Cube,     // M2: textured lit cube with depth (--cube)
         Pbr,      // PR-5: PBR viewer, procedural or GLB (--pbr [path.glb])
+        Compute,  // v0.9: compute-written plasma via SubmitOffscreen (--compute)
     }
 
     private static int Main(string[] args)
@@ -34,6 +35,10 @@ internal static class Program
         else if (Array.IndexOf(args, "--cube") >= 0)
         {
             kind = SceneKind.Cube;
+        }
+        else if (Array.IndexOf(args, "--compute") >= 0)
+        {
+            kind = SceneKind.Compute;
         }
 
         try
@@ -98,6 +103,13 @@ internal static class Program
                         scene.RenderFrame();
                     break;
                 }
+                case SceneKind.Compute:
+                {
+                    using var scene = new ComputeScene(renderer);
+                    for (var i = 0; i < frameCount; i++)
+                        scene.RenderFrame();
+                    break;
+                }
                 default:
                 {
                     using var scene = new TriangleScene(renderer);
@@ -139,6 +151,7 @@ internal static class Program
             renderer = new WebGpuRenderer(in surfaceDesc);
             using var triangleScene = kind == SceneKind.Triangle ? new TriangleScene(renderer) : null;
             using var cubeScene = kind == SceneKind.Cube ? new LitCubeScene(renderer, surfaceDesc.Width, surfaceDesc.Height) : null;
+            using var computeScene = kind == SceneKind.Compute ? new ComputeScene(renderer) : null;
             using var pbrScene = kind == SceneKind.Pbr ? new PbrViewerScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath) : null;
 
             var quit = false;
@@ -181,6 +194,7 @@ internal static class Program
                 }
                 if (pbrScene is not null) pbrScene.RenderFrame();
                 else if (cubeScene is not null) cubeScene.RenderFrame();
+                else if (computeScene is not null) computeScene.RenderFrame();
                 else triangleScene!.RenderFrame();
             }
 

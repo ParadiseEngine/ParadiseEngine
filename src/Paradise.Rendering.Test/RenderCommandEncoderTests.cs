@@ -61,6 +61,34 @@ public class RenderCommandEncoderTests
     }
 
     [Test]
+    public async Task compute_encoder_round_trip_preserves_command_kinds_and_payloads()
+    {
+        var writer = new ArrayBufferWriter<RenderCommand>(8);
+        var encoder = new RenderCommandEncoder(writer);
+
+        var pipeline = new ComputePipelineHandle(21, 4);
+        var group = new BindGroupHandle(17, 9);
+
+        encoder.BeginComputePass();
+        encoder.SetComputePipeline(pipeline);
+        encoder.SetBindGroup(0, group);
+        encoder.Dispatch(new DispatchCommand(WorkgroupCountX: 4, WorkgroupCountY: 3, WorkgroupCountZ: 2));
+        encoder.EndComputePass();
+
+        var commands = writer.WrittenMemory.ToArray();
+        await Assert.That(commands.Length).IsEqualTo(5);
+        await Assert.That(commands[0].Kind).IsEqualTo(RenderCommandKind.BeginComputePass);
+        await Assert.That(commands[1].Kind).IsEqualTo(RenderCommandKind.SetComputePipeline);
+        await Assert.That(commands[1].SetComputePipeline.Pipeline).IsEqualTo(pipeline);
+        await Assert.That(commands[2].Kind).IsEqualTo(RenderCommandKind.SetBindGroup);
+        await Assert.That(commands[3].Kind).IsEqualTo(RenderCommandKind.Dispatch);
+        await Assert.That(commands[3].Dispatch.WorkgroupCountX).IsEqualTo(4u);
+        await Assert.That(commands[3].Dispatch.WorkgroupCountY).IsEqualTo(3u);
+        await Assert.That(commands[3].Dispatch.WorkgroupCountZ).IsEqualTo(2u);
+        await Assert.That(commands[4].Kind).IsEqualTo(RenderCommandKind.EndComputePass);
+    }
+
+    [Test]
     public async Task encoder_throws_on_null_writer()
     {
         await Assert.That(() => new RenderCommandEncoder(null!)).Throws<ArgumentNullException>();

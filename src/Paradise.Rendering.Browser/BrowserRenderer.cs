@@ -32,6 +32,9 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     private readonly ResourceTable _samplers = new();
     private readonly ResourceTable _bindGroups = new();
     private readonly ResourceTable _pipelines = new();
+    // Compute pipelines have their own slot space (slot index == JS table index, and JS keeps
+    // render and compute pipelines in separate tables because setPipeline is type-checked).
+    private readonly ResourceTable _computePipelines = new();
 
     // Native shader modules are deduped by WGSL content and never released: the same insert-only,
     // renderer-lifetime policy as the Dawn backend's module cache. A program compiled for both a
@@ -405,6 +408,16 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
                 case BindingResourceType.DepthTextureArray:
                     json.Append(",\"texture\":{\"sampleType\":\"depth\",\"viewDimension\":\"2d-array\"}");
                     break;
+                case BindingResourceType.StorageTexture:
+                    // Only StorageTexture entries emit the new key, so every pre-existing layout's
+                    // JSON — and with it the JS-side layout-cache key — stays byte-identical.
+                    if (e.StorageFormat == TextureFormat.Undefined)
+                        throw new InvalidOperationException(
+                            $"StorageTexture binding {e.Binding} has no StorageFormat — the layout cannot be built.");
+                    json.Append(",\"storageTexture\":{\"access\":\"").Append(StorageAccessName(e.Access))
+                        .Append("\",\"format\":\"").Append(FormatName(e.StorageFormat))
+                        .Append("\",\"viewDimension\":\"2d\"}");
+                    break;
                 default:
                     throw new NotSupportedException($"Binding resource type '{e.Type}' is not supported.");
             }
@@ -412,6 +425,14 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         }
         json.Append(']');
     }
+
+    private static string StorageAccessName(StorageTextureAccess access) => access switch
+    {
+        StorageTextureAccess.WriteOnly => "write-only",
+        StorageTextureAccess.ReadOnly => "read-only",
+        StorageTextureAccess.ReadWrite => "read-write",
+        _ => throw new NotSupportedException($"Storage texture access '{access}' has no WebGPU mapping."),
+    };
 
     private static void AppendBufferBinding(StringBuilder json, string type, BindGroupLayoutEntryDesc entry)
     {

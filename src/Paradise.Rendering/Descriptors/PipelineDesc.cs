@@ -146,6 +146,8 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
             if (x.Type != y.Type) return false;
             if (x.MinBufferSize != y.MinBufferSize) return false;
             if (x.HasDynamicOffset != y.HasDynamicOffset) return false;
+            if (x.StorageFormat != y.StorageFormat) return false;
+            if (x.Access != y.Access) return false;
         }
         return true;
     }
@@ -186,6 +188,8 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
                 h.Add(entries[j].Type);
                 h.Add(entries[j].MinBufferSize);
                 h.Add(entries[j].HasDynamicOffset);
+                h.Add(entries[j].StorageFormat);
+                h.Add(entries[j].Access);
             }
         }
         var push = layout.PushConstants;

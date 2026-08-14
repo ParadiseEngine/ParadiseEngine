@@ -36,6 +36,8 @@ public ref struct RenderCommandEncoder
     public void SetIndexBuffer(BufferHandle buffer, IndexFormat format, ulong offset, ulong size) =>
         Write(RenderCommand.FromSetIndexBuffer(buffer, format, offset, size));
 
+    /// <summary>Bind a group in the CURRENT pass — render or compute; the payload is pass-kind
+    /// agnostic and both backends route it to whichever pass is open.</summary>
     public void SetBindGroup(uint groupIndex, BindGroupHandle group) =>
         Write(RenderCommand.FromSetBindGroup(groupIndex, group));
 
@@ -54,4 +56,18 @@ public ref struct RenderCommandEncoder
     /// (the shadow-atlas tile a light renders into). Depth range defaults to [0, 1].</summary>
     public void SetViewport(float x, float y, float width, float height, float minDepth = 0f, float maxDepth = 1f) =>
         Write(RenderCommand.FromSetViewport(x, y, width, height, minDepth, maxDepth));
+
+    /// <summary>Open a compute pass. Compute passes have no attachments, so there is no pass-table
+    /// entry — close with <see cref="EndComputePass"/>, never <see cref="EndPass"/>.</summary>
+    public void BeginComputePass() =>
+        Write(RenderCommand.FromBeginComputePass());
+
+    public void EndComputePass() =>
+        Write(RenderCommand.FromEndComputePass());
+
+    public void SetComputePipeline(ComputePipelineHandle pipeline) =>
+        Write(RenderCommand.FromSetComputePipeline(pipeline));
+
+    public void Dispatch(in DispatchCommand cmd) =>
+        Write(RenderCommand.FromDispatch(cmd));
 }

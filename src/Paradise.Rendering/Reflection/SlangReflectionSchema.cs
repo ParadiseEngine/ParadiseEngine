@@ -31,7 +31,12 @@ internal sealed record SlangParameter(
     [property: JsonPropertyName("name")] string? Name,
     [property: JsonPropertyName("binding")] SlangBinding? Binding,
     [property: JsonPropertyName("type")] SlangTypeNode? Type,
-    [property: JsonPropertyName("semanticName")] string? SemanticName);
+    [property: JsonPropertyName("semanticName")] string? SemanticName,
+    // The [format("...")] attribute of a storage texture, in GLSL image-format spelling
+    // ("rgba16f") — reflected at the PARAMETER level, not on the type node. Absent when the
+    // attribute is missing (in which case slangc silently defaults the WGSL to rgba32float —
+    // the loader throws instead of guessing).
+    [property: JsonPropertyName("format")] string? Format = null);
 
 internal sealed record SlangBinding(
     [property: JsonPropertyName("kind")] string? Kind,
@@ -51,7 +56,10 @@ internal sealed record SlangTypeNode(
     [property: JsonPropertyName("scalarType")] string? ScalarType,
     [property: JsonPropertyName("baseShape")] string? BaseShape = null,
     [property: JsonPropertyName("uniformStride")] uint? UniformStride = null,
-    [property: JsonPropertyName("elementVarLayout")] SlangVarLayout? ElementVarLayout = null);
+    [property: JsonPropertyName("elementVarLayout")] SlangVarLayout? ElementVarLayout = null,
+    // RW resource access: "write" (WTexture2D), "readWrite" (RWTexture2D / RWStructuredBuffer),
+    // "read", or absent for ordinary read-only resources.
+    [property: JsonPropertyName("access")] string? Access = null);
 
 internal sealed record SlangVarLayout(
     [property: JsonPropertyName("type")] SlangTypeNode? Type,
