@@ -21,9 +21,16 @@ public sealed class MaterialResourceCache : IDisposable
     // both referencing "image 0" would otherwise collide on one texture. Content keying also
     // dedupes byte-identical images across assets.
     private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
-    private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend)> _materials = [];
+    private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId)> _materials = [];
     private readonly List<TextureHandle> _ownedTextures = [];
+    // Group-2 layouts of registered custom programs (PbrRenderer.RegisterMaterialProgram): the
+    // standard seven entries plus that program's extras, in binding order.
+    private readonly Dictionary<int, BindGroupLayoutDesc> _programGroup2Layouts = new();
     private bool _disposed;
+
+    /// <summary>The built-in group-2 entries every material carries: the material UBO, five
+    /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
+    public const int StandardMaterialEntryCount = 7;
 
     /// <summary>Distinct GPU textures uploaded (excludes the two defaults) — dedupe metric.</summary>
     public int TextureCount => _textureCache.Count;
@@ -51,8 +58,51 @@ public sealed class MaterialResourceCache : IDisposable
     /// <summary>Create the GPU resources for one material and return its id. Textures resolve
     /// through <paramref name="images"/> (KTX2 payloads, PR #68's guarantee).</summary>
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images)
+        => AddMaterial(in material, images, programId: 0);
+
+    /// <summary>Create a material bound to a shader program registered via
+    /// <c>PbrRenderer.RegisterMaterialProgram</c> (programId 0 = the built-in PBR program). The
+    /// group-2 bind group is built from THAT program's layout: the standard seven entries first,
+    /// then <paramref name="extraEntries"/> in binding order (e.g.
+    /// <c>BindGroupEntryDesc.ForTextureView(7, heightfieldView)</c>). Extra-bound resources are
+    /// OWNED BY THE CALLER (never disposed here), and per-frame <c>IRenderer.WriteTexture</c> into
+    /// them is the caller's channel for dynamic shader data — the material UBO itself stays
+    /// immutable after creation.</summary>
+    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
+        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var layout = _materialGroupLayout;
+        if (programId != 0)
+        {
+            if (!_programGroup2Layouts.TryGetValue(programId, out layout!))
+                throw new ArgumentException(
+                    $"Unknown material program {programId}; register it via PbrRenderer.RegisterMaterialProgram first.",
+                    nameof(programId));
+        }
+        if (layout.Entries.Length != StandardMaterialEntryCount + extraEntries.Length)
+            throw new ArgumentException(
+                $"Material program {programId} declares {layout.Entries.Length - StandardMaterialEntryCount} extra " +
+                $"group-2 binding(s), but {extraEntries.Length} extra entr{(extraEntries.Length == 1 ? "y was" : "ies were")} supplied.",
+                nameof(extraEntries));
+        for (var i = 0; i < extraEntries.Length; i++)
+        {
+            var expected = layout.Entries[StandardMaterialEntryCount + i];
+            if (extraEntries[i].Binding != expected.Binding)
+                throw new ArgumentException(
+                    $"Extra entry {i} binds slot {extraEntries[i].Binding}, but material program {programId} " +
+                    $"declares binding {expected.Binding} at that position.",
+                    nameof(extraEntries));
+            // Kind-vs-type check here turns what would be a native CreateBindGroup validation
+            // error (e.g. a sampler supplied where the shader declares a texture) into the same
+            // clear ArgumentException the slot checks raise.
+            if (!EntryKindMatches(extraEntries[i].Kind, expected.Type))
+                throw new ArgumentException(
+                    $"Extra entry {i} (binding {expected.Binding}) supplies a {extraEntries[i].Kind}, " +
+                    $"but material program {programId} declares a {expected.Type} there.",
+                    nameof(extraEntries));
+        }
 
         var uniforms = new MaterialUniformsGpu
         {
@@ -80,23 +130,40 @@ public sealed class MaterialResourceCache : IDisposable
         var occlusion = ResolveTexture(material.OcclusionImage, images, CompressedTextureUsage.LinearData, _defaultWhite);
         var emissive = ResolveTexture(material.EmissiveImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite);
 
-        var groupDesc = new BindGroupDesc($"PbrMaterialGroup[{_materials.Count}]", _materialGroupLayout, new[]
+        var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraEntries.Length];
+        entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
+        entries[1] = BindGroupEntryDesc.ForTexture(1, baseColor);
+        entries[2] = BindGroupEntryDesc.ForSampler(2, _sampler);
+        entries[3] = BindGroupEntryDesc.ForTexture(3, metallicRoughness);
+        entries[4] = BindGroupEntryDesc.ForTexture(4, normal);
+        entries[5] = BindGroupEntryDesc.ForTexture(5, occlusion);
+        entries[6] = BindGroupEntryDesc.ForTexture(6, emissive);
+        for (var i = 0; i < extraEntries.Length; i++)
         {
-            BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>()),
-            BindGroupEntryDesc.ForTexture(1, baseColor),
-            BindGroupEntryDesc.ForSampler(2, _sampler),
-            BindGroupEntryDesc.ForTexture(3, metallicRoughness),
-            BindGroupEntryDesc.ForTexture(4, normal),
-            BindGroupEntryDesc.ForTexture(5, occlusion),
-            BindGroupEntryDesc.ForTexture(6, emissive),
-        });
+            entries[StandardMaterialEntryCount + i] = extraEntries[i];
+        }
+        var groupDesc = new BindGroupDesc($"PbrMaterialGroup[{_materials.Count}]", layout, entries);
         var group = _renderer.CreateBindGroup(in groupDesc);
 
         // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
-        _materials.Add((ubo, group, blend));
+        _materials.Add((ubo, group, blend, programId));
         return _materials.Count - 1;
     }
+
+    /// <summary>The shader program a material draws with — 0 for the built-in PBR program.</summary>
+    public int GetProgramId(int materialId) => _materials[materialId].ProgramId;
+
+    internal void RegisterProgramLayout(int programId, in BindGroupLayoutDesc group2Layout)
+        => _programGroup2Layouts[programId] = group2Layout;
+
+    private static bool EntryKindMatches(BindGroupEntryKind kind, BindingResourceType type) => type switch
+    {
+        BindingResourceType.UniformBuffer or BindingResourceType.StorageBuffer
+            or BindingResourceType.ReadonlyStorageBuffer => kind == BindGroupEntryKind.Buffer,
+        BindingResourceType.Sampler or BindingResourceType.ComparisonSampler => kind == BindGroupEntryKind.Sampler,
+        _ => kind is BindGroupEntryKind.Texture or BindGroupEntryKind.TextureView,
+    };
 
     /// <summary>A factor-only default material (used by procedural meshes and null slots).</summary>
     public int AddDefaultMaterial(Vector4 baseColorFactor, float metallic = 0f, float roughness = 0.8f)
@@ -195,7 +262,7 @@ public sealed class MaterialResourceCache : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        foreach (var (ubo, group, _) in _materials)
+        foreach (var (ubo, group, _, _) in _materials)
         {
             _renderer.DestroyBindGroup(group);
             _renderer.DestroyBuffer(ubo);

@@ -22,7 +22,11 @@
   <Import Project="$(MSBuildThisFileDirectory)../Slang.targets" />
 
   <ItemGroup>
-    <SlangShader Include="Shaders/**/*.slang" />
+    <!-- Top-level only: Shaders/Common/ holds include-only files (uniforms, pbrCore) that have no
+         entry points and must never be compiled standalone. They participate as SlangShaderInclude
+         so editing one still recompiles every dependent shader. -->
+    <SlangShader Include="Shaders/*.slang" />
+    <SlangShaderInclude Include="Shaders/Common/**/*.slang" />
   </ItemGroup>
 
   <ItemGroup>
@@ -39,6 +43,19 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Rendering.Pbr.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the shader sources plus the Slang toolchain so package consumers can compile
+         extension shaders against Common/pbrCore.slang; build/Paradise.Rendering.Pbr.targets is
+         NuGet-auto-imported and wires SlangShader items + the include path for them. -->
+    <!-- NuGet appends the glob's recursive dir itself, so the path is the bare folder. -->
+    <None Include="Shaders/**/*.slang" Pack="true" PackagePath="shaders" />
+    <None Include="build/Paradise.Rendering.Pbr.targets" Pack="true" PackagePath="build/" />
+    <None Include="$(MSBuildThisFileDirectory)../Slang.targets" Pack="true" PackagePath="build/Slang.targets" />
+    <None Include="$(MSBuildThisFileDirectory)../../tools/slang/slang.manifest.json" Pack="true" PackagePath="tools/slang/" />
+    <None Include="$(MSBuildThisFileDirectory)../../tools/slang/SlangBootstrap.cs" Pack="true" PackagePath="tools/slang/" />
+    <None Include="$(MSBuildThisFileDirectory)../../tools/slang/SlangBootstrap.csproj" Pack="true" PackagePath="tools/slang/" />
   </ItemGroup>
 
 </Project>

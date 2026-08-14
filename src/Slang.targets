@@ -23,6 +23,9 @@
   -->
 
   <PropertyGroup>
+    <!-- Sentinel for importers: both the NuGet build/ shim and a workspace source-override may
+         try to import this file; they condition on it so the targets are defined exactly once. -->
+    <SlangTargetsImported>true</SlangTargetsImported>
     <SlangManifestPath Condition="'$(SlangManifestPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/slang.manifest.json'))</SlangManifestPath>
     <SlangBootstrapProject Condition="'$(SlangBootstrapProject)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/SlangBootstrap.csproj'))</SlangBootstrapProject>
     <SlangBootstrapDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang'))</SlangBootstrapDir>
@@ -35,7 +38,11 @@
     <SlangVersion>$([System.Text.RegularExpressions.Regex]::Match($(_SlangManifestText), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</SlangVersion>
   </PropertyGroup>
 
-  <Target Name="_ResolveSlangRid">
+  <!-- All three restore-phase targets are gated on the consumer actually owning
+       .slang sources: the NuGet shim imports this file into EVERY package consumer, and one
+       without shaders must not pay the bootstrap build + slangc download. (The gate must sit on
+       each target: MSBuild runs DependsOnTargets before evaluating a target's own condition.) -->
+  <Target Name="_ResolveSlangRid" Condition="@(SlangShader-&gt;Count()) &gt; 0">
     <!-- slangc is a BUILD-TIME tool, so its RID is the build machine's, never the project's
          $(RuntimeIdentifier) (which describes the output). Those coincide for an ordinary desktop
          build, which is why reading RuntimeIdentifier worked until a project targeted something
@@ -63,7 +70,14 @@
     builds (the original SlangBootstrap.cs file-based-app approach hit MSB3491 in CI when two
     consumer projects ran RestoreSlang concurrently).
   -->
-  <Target Name="_BuildSlangBootstrap" DependsOnTargets="_ResolveSlangRid">
+  <Target Name="_BuildSlangBootstrap" DependsOnTargets="_ResolveSlangRid" Condition="@(SlangShader-&gt;Count()) &gt; 0">
+    <!-- When the bootstrap project lives inside the NuGet cache (package consumers), its obj/bin
+         must land somewhere writable and project-local instead: set SlangBootstrapOutputRoot
+         (the package's build/ shim points it at the consumer's IntermediateOutputPath). -->
+    <PropertyGroup>
+      <_SlangBootstrapProps>Configuration=Release</_SlangBootstrapProps>
+      <_SlangBootstrapProps Condition="'$(SlangBootstrapOutputRoot)' != ''">Configuration=Release;BaseIntermediateOutputPath=$(SlangBootstrapOutputRoot)obj/;BaseOutputPath=$(SlangBootstrapOutputRoot)bin/</_SlangBootstrapProps>
+    </PropertyGroup>
     <!-- RemoveProperties strips inherited globals (TreatWarningsAsErrors, EnableDefaultCompileItems
          from `dotnet restore` which sets it false in the SDK restore plumbing) so the bootstrap
          project sees a clean property bag and its own defaults apply. Without this, the parent
@@ -71,11 +85,11 @@
          and the SDK's restore-time EnableDefaultCompileItems=false suppresses the default *.cs
          glob, making csc complain that there's no Main method to find. -->
     <MSBuild Projects="$(SlangBootstrapProject)"
-             Properties="Configuration=Release"
+             Properties="$(_SlangBootstrapProps)"
              RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier"
              Targets="Restore" />
     <MSBuild Projects="$(SlangBootstrapProject)"
-             Properties="Configuration=Release"
+             Properties="$(_SlangBootstrapProps)"
              RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier"
              Targets="Build">
       <Output TaskParameter="TargetOutputs" ItemName="_SlangBootstrapAssemblies" />
@@ -87,7 +101,7 @@
 
   <Target Name="RestoreSlang"
           DependsOnTargets="_BuildSlangBootstrap"
-          BeforeTargets="CollectPackageReferences;CompileSlangShaders;CoreCompile;PrepareResources">
+          BeforeTargets="CollectPackageReferences;CompileSlangShaders;CoreCompile;PrepareResources" Condition="@(SlangShader-&gt;Count()) &gt; 0">
 
     <PropertyGroup>
       <_SlangCacheRoot Condition="'$(NuGetPackageRoot)' != ''">$(NuGetPackageRoot)_slang</_SlangCacheRoot>
@@ -114,7 +128,7 @@
           DependsOnTargets="RestoreSlang"
           BeforeTargets="BeforeBuild;PrepareResources;PrepareResourceNames"
           Condition="@(SlangShader-&gt;Count()) &gt; 0"
-          Inputs="@(SlangShader);$(SlangManifestPath)"
+          Inputs="@(SlangShader);@(SlangShaderInclude);$(SlangManifestPath)"
           Outputs="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).raw-reflection.json')">
 
     <PropertyGroup>
@@ -131,7 +145,10 @@
 
     <MakeDir Directories="$(_SlangOutputDir)" />
 
-    <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
+    <!-- @(SlangIncludeDir) -> -I search paths: how a game shader resolves
+         #include "Common/pbrCore.slang" against the engine's packaged (or source-checkout)
+         shader directory. slangc searches relative to the including file first, then -I. -->
+    <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; @(SlangIncludeDir-&gt;'-I &quot;%(FullPath)&quot;', ' ') -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
           ConsoleToMSBuild="true" />
 
     <!--

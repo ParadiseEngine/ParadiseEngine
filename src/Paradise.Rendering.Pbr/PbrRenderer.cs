@@ -32,7 +32,11 @@ public sealed class PbrRenderer : IDisposable
     private readonly BufferHandle _drawUniformRing;
     private BindGroupHandle _frameGroup; // rebuilt whenever the shadow array is (re)allocated
     private readonly BindGroupHandle _drawGroup;
-    private readonly Dictionary<BlendMode, PipelineHandle> _pipelines = new();
+    private readonly Dictionary<(int ProgramId, BlendMode Blend), PipelineHandle> _pipelines = new();
+    // Game-registered material programs (RegisterMaterialProgram): index + 1 = programId; 0 is the
+    // built-in PBR program. Each entry stores the MERGED desc (custom modules over the built-in
+    // pipeline layout, see RegisterMaterialProgram) plus its entry-point names.
+    private readonly List<(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry)> _customPrograms = [];
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
     // [0 .. shadowViews.Count-1] = one depth-only shadow pass per layer, [shadowViews.Count] = main.
@@ -1075,20 +1079,28 @@ public sealed class PbrRenderer : IDisposable
     {
         if (bucket.Count == 0) return;
 
-        // Pipeline is chosen per draw (rigid vs skinned need different vertex layouts) but only
-        // re-set on a change, so an all-rigid bucket still issues exactly one SetPipeline. Bind
-        // groups persist across SetPipeline within a pass — both pipelines share one layout.
+        // Pipeline is chosen per draw (rigid vs skinned need different vertex layouts, and a
+        // material may select a custom program) but only re-set on a change, so an all-rigid
+        // stock-material bucket still issues exactly one SetPipeline. Bind groups persist across
+        // SetPipeline within a pass — every pipeline shares the built-in groups 0/1/3.
         var skinnedActive = (bool?)null;
+        var programActive = -1;
         encoder.SetBindGroup(1, _frameGroup);
         encoder.SetBindGroup(3, _ssaoGroup); // SSAO uniforms + position pre-pass (group 3)
 
         foreach (var (instance, primitive, _) in bucket)
         {
             var skinned = primitive.Skinned && instance.JointOffset >= 0;
-            if (skinnedActive != skinned)
+            var programId = Materials.GetProgramId(primitive.MaterialId);
+            if (skinned && programId != 0)
+                throw new InvalidOperationException(
+                    $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
+                    "Custom material programs do not support the skinned vertex path (v1).");
+            if (skinnedActive != skinned || programActive != programId)
             {
-                encoder.SetPipeline(skinned ? GetSkinnedPipeline(blend) : GetPipeline(blend));
+                encoder.SetPipeline(skinned ? GetSkinnedPipeline(blend) : GetPipeline(programId, blend));
                 skinnedActive = skinned;
+                programActive = programId;
             }
 
             var uniforms = new DrawUniformsGpu
@@ -1287,17 +1299,135 @@ public sealed class PbrRenderer : IDisposable
     private SceneLightArray _lastFrameLightsForTest;
     internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
 
-    private PipelineHandle GetPipeline(BlendMode blend)
+    /// <summary>Register a game-supplied shader program for use by materials. The program is
+    /// typically an extension shader that <c>#include</c>s <c>Common/pbrCore.slang</c>, compiled
+    /// by the game's build (the NuGet ships the sources and the Slang targets) and loaded via
+    /// <see cref="ShaderProgramLoader"/> from the game assembly. It must consume the standard
+    /// rigid vertex stream and may declare extra group-2 bindings from slot
+    /// <see cref="MaterialResourceCache.StandardMaterialEntryCount"/> up (bind them per material
+    /// via the extraEntries overload of <see cref="MaterialResourceCache.AddMaterial(in GltfMaterialData, GltfImageData[], int, ReadOnlySpan{BindGroupEntryDesc})"/>).
+    /// Returns a programId (&gt; 0; 0 is the built-in PBR program).
+    ///
+    /// The pipeline is created with the BUILT-IN layout for groups 0/1/3 so the engine's draw-ring,
+    /// frame and SSAO bind groups stay compatible — WebGPU permits a pipeline layout to declare
+    /// bindings the shader never uses, and slangc dead-code-eliminates unreferenced globals from
+    /// the extension's reflection (e.g. jointMatrices when it has no skinned entry point).
+    /// Validation is therefore a subset check, and it throws here — at registration, not at first
+    /// draw, where a mismatch would only surface as an async pipeline error that silently drops
+    /// draws. Custom programs are rigid-only; shadow and SSAO-prepass passes always run the
+    /// built-in vertex shaders — for a BLEND material that is moot (excluded from both), but an
+    /// OPAQUE custom material casts shadows and writes prepass positions from its UNDISPLACED
+    /// geometry, so a vertex-displaced opaque surface will self-shadow as if flat.</summary>
+    public int RegisterMaterialProgram(
+        ShaderProgramDesc program,
+        string vertexEntryPoint = "vertexMain",
+        string fragmentEntryPoint = "fragmentMain")
     {
-        if (_pipelines.TryGetValue(blend, out var pipeline)) return pipeline;
+        UniformLayoutValidator.Validate(program);
+
+        var hasFragmentEntry = false;
+        foreach (var module in program.Modules)
+        {
+            hasFragmentEntry |= module.Stage == ShaderStage.Fragment && module.EntryPoint == fragmentEntryPoint;
+        }
+        if (!hasFragmentEntry)
+            throw new InvalidOperationException($"Custom material program has no fragment entry point '{fragmentEntryPoint}'.");
+
+        // Subset compatibility: every binding the custom program reflects in groups 0/1/3, and in
+        // group 2 below the extension slots, must exist in the built-in program with an identical
+        // entry. Group 0 is compared with the dynamic-offset ring flag applied, since the raw
+        // reflection cannot know about that renderer-side rewrite.
+        foreach (var group in program.Layout.Groups)
+        {
+            var builtIn = FindGroupOrNull(_program, group.GroupIndex);
+            foreach (var entry in group.Entries)
+            {
+                if (group.GroupIndex == 2 && entry.Binding >= MaterialResourceCache.StandardMaterialEntryCount)
+                    continue; // the extension's own bindings
+                var actual = group.GroupIndex == 0 ? entry with { HasDynamicOffset = true } : entry;
+                BindGroupLayoutEntryDesc? expected = null;
+                if (builtIn is not null)
+                {
+                    foreach (var candidate in builtIn.Entries)
+                    {
+                        if (candidate.Binding == entry.Binding) { expected = candidate; break; }
+                    }
+                }
+                if (expected is null || expected != actual)
+                    throw new InvalidOperationException(
+                        $"Custom material program is not layout-compatible with the PBR frame: group {group.GroupIndex} " +
+                        $"binding {entry.Binding} reflects [{actual}] but the built-in program expects " +
+                        $"[{expected?.ToString() ?? "no such binding"}]. Extension shaders must #include Common/pbrCore.slang " +
+                        "unmodified and add their own bindings only in group 2 at binding " +
+                        $"{MaterialResourceCache.StandardMaterialEntryCount}+.");
+            }
+        }
+
+        // The custom vertex entry must consume the standard rigid stream — primitives are uploaded
+        // once and shared across programs.
+        var vertexLayout = program.VertexBuffersByEntryPoint.TryGetValue(vertexEntryPoint, out var byEntry)
+            ? byEntry
+            : program.VertexBuffers;
+        if (vertexLayout.Length == 0)
+            throw new InvalidOperationException($"Custom material program reflects no vertex layout for entry point '{vertexEntryPoint}'.");
+        if (vertexLayout[0].Stride != _program.VertexBuffers[0].Stride)
+            throw new InvalidOperationException(
+                $"Custom material program's '{vertexEntryPoint}' consumes a {vertexLayout[0].Stride}-byte vertex, " +
+                $"but PBR primitives are {_program.VertexBuffers[0].Stride}-byte (pos3/normal3/uv2/tangent4). " +
+                "Custom programs are rigid-only.");
+
+        // Merge: built-in groups 0/1/3 verbatim (dynamic draw ring included); group 2 = the seven
+        // standard entries plus the extension's extras, sorted by binding.
+        var extras = new List<BindGroupLayoutEntryDesc>();
+        foreach (var group in program.Layout.Groups)
+        {
+            if (group.GroupIndex != 2) continue;
+            foreach (var entry in group.Entries)
+            {
+                if (entry.Binding >= MaterialResourceCache.StandardMaterialEntryCount) extras.Add(entry);
+            }
+        }
+        extras.Sort(static (a, b) => a.Binding.CompareTo(b.Binding));
+
+        var mergedGroups = (BindGroupLayoutDesc[])_program.Layout.Groups.Clone();
+        for (var i = 0; i < mergedGroups.Length; i++)
+        {
+            if (mergedGroups[i].GroupIndex != 2) continue;
+            var entries = new BindGroupLayoutEntryDesc[mergedGroups[i].Entries.Length + extras.Count];
+            mergedGroups[i].Entries.CopyTo(entries, 0);
+            extras.CopyTo(entries, mergedGroups[i].Entries.Length);
+            mergedGroups[i] = new BindGroupLayoutDesc(2, entries);
+        }
+        var merged = new ShaderProgramDesc(
+            program.Modules,
+            new PipelineLayoutDesc(mergedGroups, _program.Layout.PushConstants),
+            program.VertexBuffers)
+        {
+            UniformBlocks = program.UniformBlocks,
+            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
+        };
+
+        _customPrograms.Add((merged, vertexEntryPoint, fragmentEntryPoint));
+        var programId = _customPrograms.Count;
+        Materials.RegisterProgramLayout(programId, FindGroup(merged, 2));
+        return programId;
+    }
+
+    private PipelineHandle GetPipeline(int programId, BlendMode blend)
+    {
+        if (_pipelines.TryGetValue((programId, blend), out var pipeline)) return pipeline;
+        var (program, vertexEntry, fragmentEntry) = programId == 0
+            ? (_program, "vertexMain", "fragmentMain")
+            : _customPrograms[programId - 1];
         pipeline = _renderer.CreatePipeline(
-            _program,
+            program,
             HdrFormat, // main pass now emits LINEAR HDR into _hdrTexture; the composite pass tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
             blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque, // blended surfaces read but don't write depth
-            fragmentEntryPoint: "fragmentMain"); // always linear (the sRGB decision moved to composite)
-        _pipelines[blend] = pipeline;
+            fragmentEntryPoint: fragmentEntry, // always linear (the sRGB decision moved to composite)
+            vertexEntryPoint: vertexEntry);
+        _pipelines[(programId, blend)] = pipeline;
         return pipeline;
     }
 
@@ -1344,6 +1474,7 @@ public sealed class PbrRenderer : IDisposable
 
     internal int PipelineVariantCountForTest => _pipelines.Count;
     internal int SkinnedPipelineVariantCountForTest => _skinnedPipelines.Count;
+    internal int CustomProgramCountForTest => _customPrograms.Count;
     internal bool UsesSrgbEntryPointForTest => _useSrgbEntryPoint;
 
     private static bool IsSrgbFormat(TextureFormat format) =>
@@ -1639,6 +1770,15 @@ public sealed class PbrRenderer : IDisposable
     }
 
     private BindGroupLayoutDesc FindGroup(uint groupIndex) => FindGroup(_program, groupIndex);
+
+    private static BindGroupLayoutDesc? FindGroupOrNull(ShaderProgramDesc program, uint groupIndex)
+    {
+        foreach (var group in program.Layout.Groups)
+        {
+            if (group.GroupIndex == groupIndex) return group;
+        }
+        return null;
+    }
 
     private static BindGroupLayoutDesc FindGroup(ShaderProgramDesc program, uint groupIndex)
     {

@@ -1,0 +1,32 @@
+<Project>
+
+  <!--
+    NuGet build shim (auto-imported by consumers of the Paradise.Rendering.Pbr package): provides
+    the Slang -> WGSL shader pipeline (SlangShader items, packaged slangc bootstrap) plus the
+    engine's .slang sources on the include path, so a game can author an extension shader that
+    #includes "Common/pbrCore.slang" and register it via PbrRenderer.RegisterMaterialProgram.
+
+    A workspace engine-source override that already imported the repo's Slang.targets wins:
+    everything here is conditioned on the SlangTargetsImported sentinel that file sets.
+  -->
+
+  <PropertyGroup Condition="'$(SlangTargetsImported)' != 'true'">
+    <ParadisePbrShaderDir Condition="'$(ParadisePbrShaderDir)' == ''">$(MSBuildThisFileDirectory)../shaders/</ParadisePbrShaderDir>
+    <SlangManifestPath Condition="'$(SlangManifestPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/slang.manifest.json'))</SlangManifestPath>
+    <SlangBootstrapProject Condition="'$(SlangBootstrapProject)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/slang/SlangBootstrap.csproj'))</SlangBootstrapProject>
+    <!-- The bootstrap csproj lives in the NuGet cache; its obj/bin must land in the consumer's
+         intermediate dir, never beside the package. -->
+    <SlangBootstrapOutputRoot Condition="'$(SlangBootstrapOutputRoot)' == ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'slang-bootstrap'))))/</SlangBootstrapOutputRoot>
+  </PropertyGroup>
+
+  <!-- NOT sentinel-conditioned: properties evaluate before items, so by item-evaluation time the
+       Import below has already set SlangTargetsImported and the sentinel would drop this item.
+       Keyed on the property instead — unset means another wiring (workspace source override)
+       owns the include dir and adds its own item. -->
+  <ItemGroup Condition="'$(ParadisePbrShaderDir)' != ''">
+    <SlangIncludeDir Include="$(ParadisePbrShaderDir)" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Slang.targets" Condition="'$(SlangTargetsImported)' != 'true'" />
+
+</Project>
