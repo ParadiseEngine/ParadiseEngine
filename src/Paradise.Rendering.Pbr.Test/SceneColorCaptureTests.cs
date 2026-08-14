@@ -193,6 +193,37 @@ public class SceneColorCaptureTests
     }
 
     [Test]
+    public async Task disabling_capture_raises_the_event_with_an_invalid_view()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            pbr.SceneColorCapture = true;
+
+            var raised = 0;
+            var viewValidInHandler = true;
+            pbr.SceneColorViewChanged += () =>
+            {
+                raised++;
+                viewValidInHandler = pbr.SceneColorView.IsValid;
+            };
+
+            // Disable must notify too — a subscriber still bound to the old view is otherwise
+            // left holding a bind group over a destroyed resource. In the handler the view is
+            // already INVALID: unbind/repoint, never re-bind it.
+            pbr.SceneColorCapture = false;
+            await Assert.That(raised).IsEqualTo(1);
+            await Assert.That(viewValidInHandler).IsFalse();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task update_extra_entry_validates_binding_and_kind()
     {
         var renderer = TryCreateHeadlessOrSkip();

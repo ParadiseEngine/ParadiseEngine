@@ -467,8 +467,19 @@ public sealed class PbrRenderer : IDisposable
         {
             if (_sceneColorCapture == value) return;
             _sceneColorCapture = value;
-            if (value) CreateSceneColorResources();
-            else DestroySceneColorResources();
+            if (value)
+            {
+                CreateSceneColorResources();
+            }
+            else
+            {
+                // The disable path fires the event too — SceneColorView is INVALID inside the
+                // handler, and any material still bound to the old view must unbind or repoint
+                // (a bind group referencing the destroyed view is a Dawn validation error on its
+                // next SetBindGroup).
+                DestroySceneColorResources();
+                SceneColorViewChanged?.Invoke();
+            }
         }
     }
 
@@ -478,9 +489,11 @@ public sealed class PbrRenderer : IDisposable
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
     public TextureViewHandle SceneColorView => _sceneColorView;
 
-    /// <summary>Raised whenever <see cref="SceneColorView"/> is recreated (enabling capture, or
-    /// Resize while enabled), after every engine-side rebind — subscribers see a consistent
-    /// renderer.</summary>
+    /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
+    /// capture, or Resize while enabled — rebind material extra entries to the new view) or
+    /// destroyed (disabling capture — the view is INVALID in the handler; unbind or repoint
+    /// affected materials, never re-bind the stale view). Always fires after every engine-side
+    /// rebind, so subscribers see a consistent renderer.</summary>
     public event Action? SceneColorViewChanged;
 
     private void CreateSceneColorResources()
