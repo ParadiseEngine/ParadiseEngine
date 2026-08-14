@@ -1315,7 +1315,9 @@ public sealed class PbrRenderer : IDisposable
     /// Validation is therefore a subset check, and it throws here — at registration, not at first
     /// draw, where a mismatch would only surface as an async pipeline error that silently drops
     /// draws. Custom programs are rigid-only; shadow and SSAO-prepass passes always run the
-    /// built-in vertex shaders (moot for blend materials, which are excluded from both).</summary>
+    /// built-in vertex shaders — for a BLEND material that is moot (excluded from both), but an
+    /// OPAQUE custom material casts shadows and writes prepass positions from its UNDISPLACED
+    /// geometry, so a vertex-displaced opaque surface will self-shadow as if flat.</summary>
     public int RegisterMaterialProgram(
         ShaderProgramDesc program,
         string vertexEntryPoint = "vertexMain",

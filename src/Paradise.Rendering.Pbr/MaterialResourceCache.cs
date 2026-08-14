@@ -88,11 +88,19 @@ public sealed class MaterialResourceCache : IDisposable
                 nameof(extraEntries));
         for (var i = 0; i < extraEntries.Length; i++)
         {
-            var expected = layout.Entries[StandardMaterialEntryCount + i].Binding;
-            if (extraEntries[i].Binding != expected)
+            var expected = layout.Entries[StandardMaterialEntryCount + i];
+            if (extraEntries[i].Binding != expected.Binding)
                 throw new ArgumentException(
                     $"Extra entry {i} binds slot {extraEntries[i].Binding}, but material program {programId} " +
-                    $"declares binding {expected} at that position.",
+                    $"declares binding {expected.Binding} at that position.",
+                    nameof(extraEntries));
+            // Kind-vs-type check here turns what would be a native CreateBindGroup validation
+            // error (e.g. a sampler supplied where the shader declares a texture) into the same
+            // clear ArgumentException the slot checks raise.
+            if (!EntryKindMatches(extraEntries[i].Kind, expected.Type))
+                throw new ArgumentException(
+                    $"Extra entry {i} (binding {expected.Binding}) supplies a {extraEntries[i].Kind}, " +
+                    $"but material program {programId} declares a {expected.Type} there.",
                     nameof(extraEntries));
         }
 
@@ -148,6 +156,14 @@ public sealed class MaterialResourceCache : IDisposable
 
     internal void RegisterProgramLayout(int programId, in BindGroupLayoutDesc group2Layout)
         => _programGroup2Layouts[programId] = group2Layout;
+
+    private static bool EntryKindMatches(BindGroupEntryKind kind, BindingResourceType type) => type switch
+    {
+        BindingResourceType.UniformBuffer or BindingResourceType.StorageBuffer
+            or BindingResourceType.ReadonlyStorageBuffer => kind == BindGroupEntryKind.Buffer,
+        BindingResourceType.Sampler or BindingResourceType.ComparisonSampler => kind == BindGroupEntryKind.Sampler,
+        _ => kind is BindGroupEntryKind.Texture or BindGroupEntryKind.TextureView,
+    };
 
     /// <summary>A factor-only default material (used by procedural meshes and null slots).</summary>
     public int AddDefaultMaterial(Vector4 baseColorFactor, float metallic = 0f, float roughness = 0.8f)
