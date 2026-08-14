@@ -21,7 +21,7 @@ public sealed class MaterialResourceCache : IDisposable
     // both referencing "image 0" would otherwise collide on one texture. Content keying also
     // dedupes byte-identical images across assets.
     private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
-    private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId)> _materials = [];
+    private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
     private readonly List<TextureHandle> _ownedTextures = [];
     // Group-2 layouts of registered custom programs (PbrRenderer.RegisterMaterialProgram): the
     // standard seven entries plus that program's extras, in binding order.
@@ -147,8 +147,44 @@ public sealed class MaterialResourceCache : IDisposable
 
         // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
-        _materials.Add((ubo, group, blend, programId));
+        // Entries + layout are retained so UpdateExtraEntry can rebuild the group when an
+        // engine-owned view a material bound (PbrRenderer.SceneColorView) is recreated on Resize.
+        _materials.Add((ubo, group, blend, programId, entries, layout));
         return _materials.Count - 1;
+    }
+
+    /// <summary>Replace one EXTRA entry (binding >= <see cref="StandardMaterialEntryCount"/>) of a
+    /// material and rebuild its bind group — the resize path for engine-owned views like
+    /// <c>PbrRenderer.SceneColorView</c>: subscribe <c>SceneColorViewChanged</c> and rebind here.
+    /// The old group is destroyed synchronously (in-flight GPU work stays valid, the same contract
+    /// every engine-side rebuild relies on); <see cref="GetBindGroup"/> returns the new group from
+    /// the next frame.</summary>
+    public void UpdateExtraEntry(int materialId, in BindGroupEntryDesc entry)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var (ubo, group, blend, programId, entries, layout) = _materials[materialId];
+        if (entry.Binding < StandardMaterialEntryCount)
+            throw new ArgumentException(
+                $"Binding {entry.Binding} is a standard material entry (0..{StandardMaterialEntryCount - 1}) — " +
+                "only extra entries can be updated.", nameof(entry));
+        var index = -1;
+        for (var i = StandardMaterialEntryCount; i < entries.Length; i++)
+        {
+            if (entries[i].Binding == entry.Binding) { index = i; break; }
+        }
+        if (index < 0)
+            throw new ArgumentException(
+                $"Material {materialId} has no extra entry at binding {entry.Binding}.", nameof(entry));
+        var expected = layout.Entries[index];
+        if (!EntryKindMatches(entry.Kind, expected.Type))
+            throw new ArgumentException(
+                $"Extra entry at binding {entry.Binding} supplies a {entry.Kind}, but material program " +
+                $"{programId} declares a {expected.Type} there.", nameof(entry));
+
+        entries[index] = entry;
+        _renderer.DestroyBindGroup(group);
+        var rebuilt = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
+        _materials[materialId] = (ubo, rebuilt, blend, programId, entries, layout);
     }
 
     /// <summary>The shader program a material draws with — 0 for the built-in PBR program.</summary>
@@ -262,7 +298,7 @@ public sealed class MaterialResourceCache : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        foreach (var (ubo, group, _, _) in _materials)
+        foreach (var (ubo, group, _, _, _, _) in _materials)
         {
             _renderer.DestroyBindGroup(group);
             _renderer.DestroyBuffer(ubo);
