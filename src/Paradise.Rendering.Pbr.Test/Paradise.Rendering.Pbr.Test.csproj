@@ -9,6 +9,16 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <Import Project="$(MSBuildThisFileDirectory)../Slang.targets" />
+
+  <ItemGroup>
+    <!-- waterFixture.slang compiles the way a GAME extension shader does: the engine sources
+         arrive via the -I include dir, not by living beside the file. CI failing here means the
+         package-consumer story broke. -->
+    <SlangShader Include="Shaders/*.slang" />
+    <SlangIncludeDir Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="TUnit" />
   </ItemGroup>
