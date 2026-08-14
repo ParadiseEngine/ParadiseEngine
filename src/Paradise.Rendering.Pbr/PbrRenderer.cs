@@ -56,6 +56,15 @@ public sealed class PbrRenderer : IDisposable
     private readonly PipelineHandle _compositePipeline;
     private readonly BufferHandle _compositeUniformBuffer;
     private readonly SamplerHandle _compositeSampler;
+    // Scene-color capture (opt-in, SceneColorCapture): opaque+sky blitted into a sampleable
+    // texture between the two halves of the split main pass — the screen-space refraction source
+    // blend materials bind as a group-2 extra entry (the engine's screen_texture analog).
+    private bool _sceneColorCapture;
+    private TextureHandle _sceneColorTexture;
+    private TextureViewHandle _sceneColorView;
+    private PipelineHandle _blitPipeline;
+    private BindGroupLayoutDesc? _blitGroupLayout;
+    private BindGroupHandle _sceneBlitGroup;
     private BindGroupLayoutDesc _compositeGroupLayout;
     private TextureHandle _hdrTexture;
     private TextureViewHandle _hdrView;
@@ -445,6 +454,75 @@ public sealed class PbrRenderer : IDisposable
         _specularAaClamp = clamp;
     }
 
+    /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
+    /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
+    /// <see cref="SceneColorView"/> before the blend bucket renders — so a blend material
+    /// (water) can sample what is BEHIND it for screen-space refraction. Enable before creating
+    /// the materials that bind the view. Costs one fullscreen blit plus a color+depth reload
+    /// per frame while enabled.</summary>
+    public bool SceneColorCapture
+    {
+        get => _sceneColorCapture;
+        set
+        {
+            if (_sceneColorCapture == value) return;
+            _sceneColorCapture = value;
+            if (value) CreateSceneColorResources();
+            else DestroySceneColorResources();
+        }
+    }
+
+    /// <summary>The captured opaque scene, linear HDR, target-sized. Invalid while
+    /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
+    /// material extra entries from <see cref="SceneColorViewChanged"/> via
+    /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
+    public TextureViewHandle SceneColorView => _sceneColorView;
+
+    /// <summary>Raised whenever <see cref="SceneColorView"/> is recreated (enabling capture, or
+    /// Resize while enabled), after every engine-side rebind — subscribers see a consistent
+    /// renderer.</summary>
+    public event Action? SceneColorViewChanged;
+
+    private void CreateSceneColorResources()
+    {
+        if (!_blitPipeline.IsValid)
+        {
+            // One-time: the blit program/pipeline survive capture toggles (pipelines are cheap
+            // to keep, expensive to churn).
+            var blitProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.blit");
+            _blitGroupLayout = FindGroup(blitProgram, 0);
+            _blitPipeline = _renderer.CreatePipeline(blitProgram, HdrFormat); // linear HDR, no depth
+        }
+        _sceneColorTexture = _renderer.CreateTexture(new TextureDesc(
+            "PbrSceneColor", _width, _height, 1, 1, 1,
+            TextureDimension.D2, HdrFormat,
+            TextureUsage.RenderAttachment | TextureUsage.TextureBinding));
+        _sceneColorView = _renderer.CreateTextureView(new TextureViewDesc(
+            "PbrSceneColorView", _sceneColorTexture, TextureViewDimension.D2, 0, 1));
+        RebuildSceneBlitGroup();
+        SceneColorViewChanged?.Invoke();
+    }
+
+    private void DestroySceneColorResources()
+    {
+        if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
+        if (_sceneColorView.IsValid) _renderer.DestroyTextureView(_sceneColorView);
+        if (_sceneColorTexture.IsValid) _renderer.DestroyTexture(_sceneColorTexture);
+        _sceneBlitGroup = default;
+        _sceneColorView = default;
+        _sceneColorTexture = default;
+    }
+
+    private void RebuildSceneBlitGroup()
+    {
+        if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
+        _sceneBlitGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSceneBlitGroup", _blitGroupLayout!, new[]
+        {
+            BindGroupEntryDesc.ForTextureView(0, _hdrView),
+            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
+        }));
+    }
+
     public void Resize(uint width, uint height)
     {
         width = Math.Max(1, width);
@@ -465,6 +543,13 @@ public sealed class PbrRenderer : IDisposable
         RebuildSsaoGroup(); // position texture changed → rebind
         RebuildCompositeGroup(); // HDR + bloom result views changed → rebind
         EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
+        if (_sceneColorCapture)
+        {
+            // Recreate LAST, after every engine-side rebind, so SceneColorViewChanged subscribers
+            // observe a fully consistent renderer when they rebind their material entries.
+            DestroySceneColorResources();
+            CreateSceneColorResources();
+        }
         // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
 
@@ -745,7 +830,12 @@ public sealed class PbrRenderer : IDisposable
         // Bloom inserts 2·levels−1 passes (1 bright + (L−1) down + (L−1) additive up) between the
         // main HDR pass and the composite pass; disabled = zero passes, composite reads unused bloom.
         var bloomEnabled = scene.Bloom.Enabled && _bloomLevels > 1;
-        var bloomStart = mainPassIndex + 1;
+        // Scene-color capture splits the main pass in two around a blit: pass A (opaque+sky,
+        // Clear), the capture blit, pass B (blend bucket, Load color+depth).
+        var capturePasses = _sceneColorCapture ? 2 : 0;
+        var captureBlitIndex = mainPassIndex + 1;
+        var mainBlendIndex = mainPassIndex + 2;
+        var bloomStart = mainPassIndex + 1 + capturePasses;
         var bloomPassCount = bloomEnabled ? 2 * _bloomLevels - 1 : 0;
         var compositeIndex = bloomStart + bloomPassCount;
         if (_passes.Length < compositeIndex + 1) _passes = new RenderPassDesc[compositeIndex + 1];
@@ -775,6 +865,24 @@ public sealed class PbrRenderer : IDisposable
         // Main color pass → the offscreen HDR scene target (linear), not the swapchain.
         _passes[mainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
             RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+
+        if (_sceneColorCapture)
+        {
+            // Capture blit: HDR (opaque+sky so far) → the scene-color texture.
+            _passes[captureBlitIndex] = new RenderPassDesc(colorAttachmentCount: 1);
+            _passes[captureBlitIndex].Colors.Slot0 = new ColorAttachmentDesc(
+                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f),
+                ColorView: _sceneColorView);
+            // Pass B: the blend bucket back onto the SAME HDR + depth, loading both — blend
+            // pipelines already read-not-write depth, so the Load/Load pair is exactly the state
+            // they expect mid-pass today.
+            _passes[mainBlendIndex] = new RenderPassDesc(colorAttachmentCount: 1)
+            {
+                Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Load, StoreOp.Store, ClearDepth: 1f),
+            };
+            _passes[mainBlendIndex].Colors.Slot0 = new ColorAttachmentDesc(
+                RenderViewHandle.Invalid, LoadOp.Load, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+        }
 
         if (bloomEnabled)
         {
@@ -838,8 +946,28 @@ public sealed class PbrRenderer : IDisposable
         }
         var drawIndex = 0;
         EncodeBucket(ref encoder, _opaque, BlendMode.Opaque, viewProjection, ref drawIndex);
-        EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
-        encoder.EndPass();
+        if (_sceneColorCapture)
+        {
+            // Split: close the opaque half, blit it into the scene-color texture, then render the
+            // blend bucket over the loaded HDR+depth. drawIndex continues across — the draw ring
+            // does not care which pass consumes an offset.
+            encoder.EndPass();
+
+            encoder.BeginPass(captureBlitIndex);
+            encoder.SetPipeline(_blitPipeline);
+            encoder.SetBindGroup(0, _sceneBlitGroup);
+            encoder.Draw(new DrawCommand(3, 1, 0, 0));
+            encoder.EndPass();
+
+            encoder.BeginPass(mainBlendIndex);
+            EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
+            encoder.EndPass();
+        }
+        else
+        {
+            EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
+            encoder.EndPass();
+        }
 
         if (bloomEnabled)
         {
@@ -1794,6 +1922,8 @@ public sealed class PbrRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
         Materials.Dispose();
+        DestroySceneColorResources();
+        if (_blitPipeline.IsValid) _renderer.DestroyPipeline(_blitPipeline);
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
         if (_shadowSkinnedPipeline.IsValid) _renderer.DestroyPipeline(_shadowSkinnedPipeline);
