@@ -33,6 +33,7 @@ public static partial class Program
     private static BrowserRenderer? s_renderer;
     private static LitCubeScene? s_cubeScene;
     private static PbrShadowScene? s_pbrScene;
+    private static ComputeScene? s_computeScene;
     private static string s_sceneName = "cube";
     private static int s_frames;
     private static bool s_reported;
@@ -76,8 +77,11 @@ public static partial class Program
                 case "pbr":
                     s_pbrScene = new PbrShadowScene(s_renderer, (uint)width, (uint)height, extraBoxes);
                     break;
+                case "compute":
+                    s_computeScene = new ComputeScene(s_renderer);
+                    break;
                 default:
-                    throw new ArgumentException($"Unknown scene '{s_sceneName}' — expected 'cube' or 'pbr'.", nameof(scene));
+                    throw new ArgumentException($"Unknown scene '{s_sceneName}' — expected 'cube', 'pbr' or 'compute'.", nameof(scene));
             }
             SetStatusJs($"running scene={s_sceneName} adapter={s_renderer.AdapterInfo}");
             s_startMs = s_clock.Elapsed.TotalMilliseconds;
@@ -101,6 +105,7 @@ public static partial class Program
             var frameStartMs = s_clock.Elapsed.TotalMilliseconds;
             s_cubeScene?.RenderFrame();
             s_pbrScene?.RenderFrame();
+            s_computeScene?.RenderFrame();
             var nowMs = s_clock.Elapsed.TotalMilliseconds;
             s_frames++;
             s_framesInWindow++;

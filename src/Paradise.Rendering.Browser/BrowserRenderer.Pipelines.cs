@@ -94,6 +94,37 @@ public sealed partial class BrowserRenderer
     }
 
     /// <inheritdoc/>
+    public ComputePipelineHandle CreateComputePipeline(in ShaderProgramDesc program, string? entryPoint = null)
+    {
+        ThrowIfDisposed();
+
+        var csModule = SelectModule(program, ShaderStage.Compute, entryPoint);
+        if (csModule is null)
+            throw new InvalidOperationException(entryPoint is null
+                ? "ShaderProgramDesc has no compute module."
+                : $"ShaderProgramDesc has no compute module named '{entryPoint}'.");
+
+        var json = new StringBuilder(512);
+        json.Append("{\"label\":\"ComputePipeline\",\"cs\":").Append(GetOrCreateShaderModule(csModule))
+            .Append(",\"csEntry\":");
+        AppendJsonString(json, csModule.EntryPoint);
+        AppendPipelineLayout(json, program.Layout);
+        json.Append('}');
+
+        var slot = _computePipelines.Allocate(out var generation);
+        CreateComputePipelineJs((int)slot, json.ToString());
+        return new ComputePipelineHandle(slot, generation);
+    }
+
+    /// <inheritdoc/>
+    public void DestroyComputePipeline(ComputePipelineHandle handle)
+    {
+        ThrowIfDisposed();
+        if (!_computePipelines.Release(handle.Index, handle.Generation)) return;
+        DestroyComputePipelineJs((int)handle.Index);
+    }
+
+    /// <inheritdoc/>
     public void DestroyPipeline(PipelineHandle handle)
     {
         ThrowIfDisposed();

@@ -77,6 +77,37 @@ public class PipelineDescTests
     }
 
     [Test]
+    public async Task storage_texture_format_and_access_participate_in_layout_equality_and_hash()
+    {
+        static PipelineDesc WithStorageEntry(TextureFormat format, StorageTextureAccess access) =>
+            BuildSample() with
+            {
+                Layout = new PipelineLayoutDesc(
+                    Groups:
+                    [
+                        new BindGroupLayoutDesc(0,
+                        [
+                            new BindGroupLayoutEntryDesc(0, ShaderStage.Compute, BindingResourceType.StorageTexture,
+                                StorageFormat: format, Access: access),
+                        ]),
+                    ],
+                    PushConstants: Array.Empty<PushConstantRangeDesc>()),
+            };
+
+        var a = WithStorageEntry(TextureFormat.Rgba16Float, StorageTextureAccess.WriteOnly);
+        var same = WithStorageEntry(TextureFormat.Rgba16Float, StorageTextureAccess.WriteOnly);
+        var differentFormat = WithStorageEntry(TextureFormat.R32Float, StorageTextureAccess.WriteOnly);
+        var differentAccess = WithStorageEntry(TextureFormat.Rgba16Float, StorageTextureAccess.ReadWrite);
+
+        await Assert.That(a == same).IsTrue();
+        await Assert.That(a.ContentHash()).IsEqualTo(same.ContentHash());
+        await Assert.That(a == differentFormat).IsFalse();
+        await Assert.That(a.ContentHash()).IsNotEqualTo(differentFormat.ContentHash());
+        await Assert.That(a == differentAccess).IsFalse();
+        await Assert.That(a.ContentHash()).IsNotEqualTo(differentAccess.ContentHash());
+    }
+
+    [Test]
     public async Task name_does_not_participate_in_hash_or_equality()
     {
         var a = BuildSample("debug-1");

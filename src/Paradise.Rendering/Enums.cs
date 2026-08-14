@@ -54,6 +54,9 @@ public enum TextureFormat : uint
     Bc5RgUnorm,
     Bc7RgbaUnorm,
     Bc7RgbaUnormSrgb,
+    // 32-bit float single channel — the one format core WebGPU allows READ-WRITE storage access
+    // on (see StorageTextureAccess); appended so existing numeric values stay stable.
+    R32Float,
 }
 
 /// <summary>Depth/stencil comparison function. Mirrors WebGPU's GPUCompareFunction.</summary>
@@ -216,4 +219,14 @@ public enum BindingResourceType : byte
     DepthTextureArray,
     MultisampledTexture,
     StorageTexture,
+}
+
+/// <summary>Access mode of a <see cref="BindingResourceType.StorageTexture"/> binding. WriteOnly
+/// is the default (and the only mode core WebGPU allows for every storage-capable format —
+/// ReadWrite is core-legal only for r32float/r32uint/r32sint).</summary>
+public enum StorageTextureAccess : byte
+{
+    WriteOnly = 0,
+    ReadOnly,
+    ReadWrite,
 }

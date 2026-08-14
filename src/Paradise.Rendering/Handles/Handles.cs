@@ -56,6 +56,17 @@ public readonly record struct PipelineHandle(uint Index, uint Generation)
     public static readonly PipelineHandle Invalid = default;
 }
 
+/// <summary>Opaque handle to a backend GPU COMPUTE pipeline. A distinct type from
+/// <see cref="PipelineHandle"/> on purpose: compute pipelines live in their own backend slot
+/// space, and the split makes "draw with a compute pipeline" unrepresentable rather than a
+/// runtime error. Default value is invalid.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+public readonly record struct ComputePipelineHandle(uint Index, uint Generation)
+{
+    public bool IsValid => Generation != 0;
+    public static readonly ComputePipelineHandle Invalid = default;
+}
+
 /// <summary>Opaque handle to a backend GPU shader module. Default value is invalid.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly record struct ShaderHandle(uint Index, uint Generation)

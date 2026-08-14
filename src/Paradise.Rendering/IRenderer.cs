@@ -135,8 +135,28 @@ public interface IRenderer
     /// <summary>Destroy a pipeline.</summary>
     void DestroyPipeline(PipelineHandle handle);
 
+    /// <summary>Build a COMPUTE pipeline from a Slang-reflected program. Module selection: the
+    /// first <see cref="ShaderStage.Compute"/> module, or the one whose entry point matches
+    /// <paramref name="entryPoint"/>. The layout comes from <c>program.Layout</c> when it carries
+    /// groups (the reflected path), otherwise the backend's implicit layout — exactly like the
+    /// render path. Bind and dispatch inside a
+    /// <see cref="RenderCommandEncoder.BeginComputePass"/> block.</summary>
+    ComputePipelineHandle CreateComputePipeline(in ShaderProgramDesc program, string? entryPoint = null);
+
+    /// <summary>Destroy a compute pipeline.</summary>
+    void DestroyComputePipeline(ComputePipelineHandle handle);
+
     /// <summary>Submit a recorded <see cref="RenderCommandStream"/>: acquire the color target,
     /// execute every <see cref="RenderCommand"/>, present, and advance the frame counter so
-    /// deferred destructions can drain. One call per frame.</summary>
+    /// deferred destructions can drain. One PRESENTING call per frame — any number of
+    /// <see cref="SubmitOffscreen"/> calls may precede it, and queue order guarantees their
+    /// results are visible to it.</summary>
     void Submit(in RenderCommandStream stream);
+
+    /// <summary>Submit a stream that touches no backbuffer: every color attachment must carry a
+    /// valid <c>ColorView</c> (depth-only and compute passes are fine). Does not acquire or
+    /// present the swapchain and does not advance the frame counter — the channel for
+    /// game-owned simulation, caustics, and render-to-texture work, submitted any number of
+    /// times before the frame's presenting <see cref="Submit"/>.</summary>
+    void SubmitOffscreen(in RenderCommandStream stream);
 }

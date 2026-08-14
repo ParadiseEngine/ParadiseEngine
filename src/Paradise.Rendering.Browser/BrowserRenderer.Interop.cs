@@ -94,6 +94,12 @@ public sealed partial class BrowserRenderer
     [JSImport("destroyPipeline", ModuleName)]
     private static partial void DestroyPipelineJs(int index);
 
+    [JSImport("createComputePipeline", ModuleName)]
+    private static partial void CreateComputePipelineJs(int slot, string descJson);
+
+    [JSImport("destroyComputePipeline", ModuleName)]
+    private static partial void DestroyComputePipelineJs(int index);
+
     [JSImport("submitFrame", ModuleName)]
     private static partial void SubmitFrameJs(
         [JSMarshalAs<JSType.MemoryView>] ArraySegment<byte> frame, int passCount, int opCount);
@@ -113,6 +119,7 @@ public sealed partial class BrowserRenderer
         TextureFormat.Bgra8UnormSrgb => "bgra8unorm-srgb",
         TextureFormat.Rgba16Float => "rgba16float",
         TextureFormat.Rgba32Float => "rgba32float",
+        TextureFormat.R32Float => "r32float",
         TextureFormat.Depth32Float => "depth32float",
         TextureFormat.Depth24PlusStencil8 => "depth24plus-stencil8",
         TextureFormat.Bc1RgbaUnorm => "bc1-rgba-unorm",

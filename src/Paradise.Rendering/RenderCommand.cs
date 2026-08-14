@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 namespace Paradise.Rendering;
 
 /// <summary>Discriminator for <see cref="RenderCommand"/> — picks which payload field is live.</summary>
+/// <remarks>The numeric values are a WIRE CONTRACT with the browser backend's frame decoder
+/// (paradise-webgpu.js reads them as opcodes) — append new kinds at the end, never reorder.</remarks>
 public enum RenderCommandKind : byte
 {
     BeginPass = 0,
@@ -14,6 +16,14 @@ public enum RenderCommandKind : byte
     Draw,
     DrawIndexed,
     SetViewport,
+    // Compute passes carry no RenderPassDesc (no attachments), so BeginComputePass has no
+    // pass-table index; EndComputePass is distinct from EndPass so pass-kind mismatches throw
+    // eagerly; SetComputePipeline is distinct from SetPipeline because compute pipelines live
+    // in their own handle space (see ComputePipelineHandle).
+    BeginComputePass = 9,
+    EndComputePass,
+    SetComputePipeline,
+    Dispatch,
 }
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
@@ -33,6 +43,9 @@ public readonly record struct SetVertexBufferPayload(uint Slot, BufferHandle Buf
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetIndexBuffer"/>.</summary>
 public readonly record struct SetIndexBufferPayload(BufferHandle Buffer, IndexFormat Format, ulong Offset, ulong Size);
+
+/// <summary>Payload for <see cref="RenderCommandKind.SetComputePipeline"/>.</summary>
+public readonly record struct SetComputePipelinePayload(ComputePipelineHandle Pipeline);
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetBindGroup"/>: bind <paramref name="Group"/>
 /// at <paramref name="GroupIndex"/>. When <paramref name="HasDynamicOffset"/> is set, the group's
@@ -63,6 +76,8 @@ public readonly struct RenderCommand
     [FieldOffset(8)] public readonly DrawCommand Draw;
     [FieldOffset(8)] public readonly DrawIndexedCommand DrawIndexed;
     [FieldOffset(8)] public readonly SetViewportPayload SetViewport;
+    [FieldOffset(8)] public readonly SetComputePipelinePayload SetComputePipeline;
+    [FieldOffset(8)] public readonly DispatchCommand Dispatch;
 
     private RenderCommand(RenderCommandKind kind, BeginPassPayload p) : this()
     {
@@ -112,6 +127,18 @@ public readonly struct RenderCommand
         SetViewport = p;
     }
 
+    private RenderCommand(RenderCommandKind kind, SetComputePipelinePayload p) : this()
+    {
+        Kind = kind;
+        SetComputePipeline = p;
+    }
+
+    private RenderCommand(RenderCommandKind kind, DispatchCommand p) : this()
+    {
+        Kind = kind;
+        Dispatch = p;
+    }
+
     private RenderCommand(RenderCommandKind kind) : this()
     {
         Kind = kind;
@@ -146,6 +173,18 @@ public readonly struct RenderCommand
 
     public static RenderCommand FromSetViewport(float x, float y, float width, float height, float minDepth, float maxDepth) =>
         new(RenderCommandKind.SetViewport, new SetViewportPayload(x, y, width, height, minDepth, maxDepth));
+
+    public static RenderCommand FromBeginComputePass() =>
+        new(RenderCommandKind.BeginComputePass);
+
+    public static RenderCommand FromEndComputePass() =>
+        new(RenderCommandKind.EndComputePass);
+
+    public static RenderCommand FromSetComputePipeline(ComputePipelineHandle pipeline) =>
+        new(RenderCommandKind.SetComputePipeline, new SetComputePipelinePayload(pipeline));
+
+    public static RenderCommand FromDispatch(in DispatchCommand cmd) =>
+        new(RenderCommandKind.Dispatch, cmd);
 }
 
 /// <summary>Append-only sequence of <see cref="RenderCommand"/>s plus a side table of

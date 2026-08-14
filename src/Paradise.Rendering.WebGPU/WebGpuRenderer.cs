@@ -17,6 +17,7 @@ using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
+using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
 namespace Paradise.Rendering.WebGPU;
 
@@ -142,6 +143,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _device.Queue.Submit(commandBuffer);
         if (!_isHeadless) _surface!.Native.Present();
         _destructionQueue.AdvanceFrame();
+    }
+
+    /// <summary>Submit a stream that renders only into explicit offscreen targets. No backbuffer
+    /// acquire, no <see cref="OverlayPass"/>, no present — and critically no frame advance: the
+    /// deferred-destruction window is measured in PRESENTED frames, and advancing it per
+    /// offscreen submit would shrink the in-flight safety margin.</summary>
+    public void SubmitOffscreen(in RenderCommandStream stream)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var encoder = _device.Device.CreateCommandEncoder();
+        ExecuteStream(in stream, encoder, backbuffer: null);
+        var commandBuffer = encoder.Finish();
+        _device.Queue.Submit(commandBuffer);
     }
 
     // -------- Resource creation / destruction --------
@@ -511,6 +526,49 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _pipelineHasDepth.Remove(handle);
     }
 
+    public ComputePipelineHandle CreateComputePipeline(in ShaderProgramDesc program, string? entryPoint = null)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        ShaderModuleDesc? csModule = null;
+        foreach (var m in program.Modules)
+        {
+            if ((m.Stage & ShaderStage.Compute) == 0) continue;
+            // Same first-wins/named-selector rule as the render path's entry points.
+            if (entryPoint is null && csModule is null) csModule = m;
+            else if (entryPoint is not null && string.Equals(m.EntryPoint, entryPoint, StringComparison.Ordinal)) csModule = m;
+        }
+        if (csModule is null)
+            throw new InvalidOperationException(entryPoint is null
+                ? "ShaderProgramDesc has no compute module."
+                : $"ShaderProgramDesc has no compute module named '{entryPoint}'.");
+
+        // Temp shader handle, destroyed after the build — same slot-leak rationale as
+        // CreatePipeline's vs/fs handles. No content cache for compute pipelines: games create a
+        // handful once, and the native shader-module dedupe still applies underneath.
+        ShaderHandle csHandle = default;
+        try
+        {
+            csHandle = _device.CreateShaderModule(csModule);
+            var native = _device.BuildNativeComputePipeline(
+                _device.ResolveShader(csHandle), csModule.EntryPoint, program.Layout);
+            return _device.RegisterComputePipeline(native);
+        }
+        finally
+        {
+            if (csHandle.IsValid) DestroyShader(csHandle);
+        }
+    }
+
+    public void DestroyComputePipeline(ComputePipelineHandle handle)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        // Unlike render pipelines there is no content cache: detaching drops the only managed
+        // reference. Safe — WebGPU pipelines have no explicit destroy, and Dawn refcounts
+        // in-flight GPU use until the queue drains.
+        _device.DetachComputePipeline(handle);
+    }
+
     // -------- Command stream submission --------
 
     /// <summary>Optional overlay pass recorded into the frame encoder AFTER the scene passes and
@@ -623,12 +681,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         return pixels;
     }
 
-    private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView backbuffer)
+    private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer)
     {
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
 
         WgRenderPassEncoder? activePass = null;
+        // Compute passes get a parallel local: WgComputePassEncoder is an unrelated struct type,
+        // and the stream validation guarantees at most one of the two is open.
+        WgComputePassEncoder? activeComputePass = null;
         var passHasDepth = false;
         try
         {
@@ -642,6 +703,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         if (activePass is not null)
                             throw new InvalidOperationException(
                                 "Nested BeginPass — previous pass was not ended (missing EndPass).");
+                        if (activeComputePass is not null)
+                            throw new InvalidOperationException(
+                                "BeginPass inside an open compute pass — end it with EndComputePass first.");
                         var passIndex = cmd.BeginPass.PassIndex;
                         if ((uint)passIndex >= (uint)passes.Length)
                             throw new InvalidOperationException(
@@ -652,6 +716,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.EndPass:
                     {
+                        if (activeComputePass is not null)
+                            throw new InvalidOperationException(
+                                "EndPass inside a compute pass — compute passes close with EndComputePass.");
                         // Null activePass BEFORE calling End() so the finally-block safety net
                         // becomes idempotent: if End() throws (Dawn validation error at pass end),
                         // activePass is already null and the finally won't double-End the same
@@ -664,7 +731,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.SetPipeline:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var handle = cmd.SetPipeline.Pipeline;
                         // Surface pipeline↔pass depth mismatch synchronously and descriptively —
                         // Dawn would only report it asynchronously via the error callback.
@@ -679,23 +746,38 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.SetVertexBuffer:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var p = cmd.SetVertexBuffer;
                         pass.SetVertexBuffer(p.Slot, _device.ResolveBuffer(p.Buffer), p.Offset, p.Size);
                         break;
                     }
                     case RenderCommandKind.SetIndexBuffer:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var p = cmd.SetIndexBuffer;
                         pass.SetIndexBuffer(_device.ResolveBuffer(p.Buffer), FormatConversions.ToWgpu(p.Format), p.Offset, p.Size);
                         break;
                     }
                     case RenderCommandKind.SetBindGroup:
                     {
-                        var pass = RequireActivePass(activePass);
+                        // Pass-kind agnostic: binds into whichever pass is open (the compute
+                        // encoder's SetBindGroup has the same two shapes, dynamic offsets included).
                         var p = cmd.SetBindGroup;
                         var native = _device.ResolveBindGroup(p.Group);
+                        if (activeComputePass is { } computePass)
+                        {
+                            if (p.HasDynamicOffset)
+                            {
+                                ReadOnlySpan<uint> offsets = [p.DynamicOffset];
+                                computePass.SetBindGroup(p.GroupIndex, native, offsets);
+                            }
+                            else
+                            {
+                                computePass.SetBindGroup(p.GroupIndex, native);
+                            }
+                            break;
+                        }
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         if (p.HasDynamicOffset)
                         {
                             ReadOnlySpan<uint> offsets = [p.DynamicOffset];
@@ -709,23 +791,58 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.Draw:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var d = cmd.Draw;
                         pass.Draw(d.VertexCount, d.InstanceCount, d.FirstVertex, d.FirstInstance);
                         break;
                     }
                     case RenderCommandKind.DrawIndexed:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var d = cmd.DrawIndexed;
                         pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
                         break;
                     }
                     case RenderCommandKind.SetViewport:
                     {
-                        var pass = RequireActivePass(activePass);
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var v = cmd.SetViewport;
                         pass.SetViewport((uint)v.X, (uint)v.Y, (uint)v.Width, (uint)v.Height, v.MinDepth, v.MaxDepth);
+                        break;
+                    }
+                    case RenderCommandKind.BeginComputePass:
+                    {
+                        if (activePass is not null)
+                            throw new InvalidOperationException(
+                                "BeginComputePass inside an open render pass — end it with EndPass first.");
+                        if (activeComputePass is not null)
+                            throw new InvalidOperationException(
+                                "Nested BeginComputePass — previous compute pass was not ended (missing EndComputePass).");
+                        activeComputePass = encoder.BeginComputePass();
+                        break;
+                    }
+                    case RenderCommandKind.EndComputePass:
+                    {
+                        if (activePass is not null)
+                            throw new InvalidOperationException(
+                                "EndComputePass inside a render pass — render passes close with EndPass.");
+                        // Null-before-End for the same double-End reason as EndPass above.
+                        var computeToEnd = activeComputePass;
+                        activeComputePass = null;
+                        computeToEnd?.End();
+                        break;
+                    }
+                    case RenderCommandKind.SetComputePipeline:
+                    {
+                        var pass = RequireActiveComputePass(activeComputePass, activePass);
+                        pass.SetPipeline(_device.ResolveComputePipeline(cmd.SetComputePipeline.Pipeline));
+                        break;
+                    }
+                    case RenderCommandKind.Dispatch:
+                    {
+                        var pass = RequireActiveComputePass(activeComputePass, activePass);
+                        var d = cmd.Dispatch;
+                        pass.DispatchWorkgroups(d.WorkgroupCountX, d.WorkgroupCountY, d.WorkgroupCountZ);
                         break;
                     }
                     default:
@@ -735,6 +852,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
             if (activePass is not null)
                 throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
+            if (activeComputePass is not null)
+                throw new InvalidOperationException("RenderCommandStream ended with an open compute pass — missing EndComputePass.");
             activePass = null;
         }
         finally
@@ -744,13 +863,21 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             // BeginRenderPass to be matched with End before the encoder is finished). On the
             // happy path activePass was nulled before the try-block exited.
             activePass?.End();
+            activeComputePass?.End();
         }
     }
 
-    private static WgRenderPassEncoder RequireActivePass(WgRenderPassEncoder? pass) =>
-        pass ?? throw new InvalidOperationException("Render command issued outside of an active BeginPass/EndPass scope.");
+    private static WgRenderPassEncoder RequireActiveRenderPass(WgRenderPassEncoder? pass, WgComputePassEncoder? computePass) =>
+        pass ?? throw new InvalidOperationException(computePass is not null
+            ? "Render command issued inside a compute pass — use SetComputePipeline/Dispatch there."
+            : "Render command issued outside of an active BeginPass/EndPass scope.");
 
-    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView backbuffer)
+    private static WgComputePassEncoder RequireActiveComputePass(WgComputePassEncoder? pass, WgRenderPassEncoder? renderPass) =>
+        pass ?? throw new InvalidOperationException(renderPass is not null
+            ? "Compute command issued inside a render pass — compute commands need a BeginComputePass scope."
+            : "Compute command issued outside of an active BeginComputePass/EndComputePass scope.");
+
+    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView? backbuffer)
     {
         // Either ZERO color attachments (a depth-only pass, e.g. a shadow layer fill), or a SINGLE
         // color attachment — targeting either the backbuffer (ColorView invalid) or an offscreen
@@ -772,7 +899,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             var src = pass.Colors.Slot0;
             colors = new WgRenderPassColorAttachment[1];
             // Offscreen color target when a ColorView is supplied; otherwise the backbuffer.
-            var colorView = src.ColorView.IsValid ? _device.ResolveTextureView(src.ColorView) : backbuffer;
+            var colorView = src.ColorView.IsValid
+            ? _device.ResolveTextureView(src.ColorView)
+            : backbuffer ?? throw new InvalidOperationException(
+                "SubmitOffscreen streams must render only into explicit ColorView targets — " +
+                "this pass targets the backbuffer. Use Submit for the frame's presenting stream.");
             // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
             // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
             // surfaces as a build break here rather than silently routing through Clear/Discard.

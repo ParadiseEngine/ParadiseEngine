@@ -15,13 +15,19 @@ public sealed record ShaderModuleDesc(
 /// <summary>One binding entry in a bind group layout — maps a binding slot to a resource type and
 /// visibility. <paramref name="HasDynamicOffset"/> marks a uniform/storage buffer whose byte
 /// offset is supplied per SetBindGroup (the draw-UBO-ring pattern); it is a LAYOUT property, so
-/// consumers opting in must rebuild the layout, not just pass an offset.</summary>
+/// consumers opting in must rebuild the layout, not just pass an offset.
+/// <paramref name="StorageFormat"/>/<paramref name="Access"/> apply only to
+/// <see cref="BindingResourceType.StorageTexture"/> entries, where WebGPU requires both in the
+/// layout; a storage-texture entry with <see cref="TextureFormat.Undefined"/> format is rejected
+/// at layout build.</summary>
 public sealed record BindGroupLayoutEntryDesc(
     uint Binding,
     ShaderStage Visibility,
     BindingResourceType Type,
     ulong MinBufferSize = 0,
-    bool HasDynamicOffset = false);
+    bool HasDynamicOffset = false,
+    TextureFormat StorageFormat = TextureFormat.Undefined,
+    StorageTextureAccess Access = StorageTextureAccess.WriteOnly);
 
 /// <summary>One bind group layout (group index + ordered binding entries).</summary>
 public sealed record BindGroupLayoutDesc(

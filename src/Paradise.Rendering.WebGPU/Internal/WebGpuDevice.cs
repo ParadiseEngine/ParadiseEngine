@@ -44,6 +44,11 @@ using WgSamplerBindingLayout = WebGpuSharp.SamplerBindingLayout;
 using WgSamplerBindingType = WebGpuSharp.SamplerBindingType;
 using WgPipelineLayout = WebGpuSharp.PipelineLayout;
 using WgPipelineLayoutDescriptor = WebGpuSharp.PipelineLayoutDescriptor;
+using WgComputePipeline = WebGpuSharp.ComputePipeline;
+using WgComputePipelineDescriptor = WebGpuSharp.ComputePipelineDescriptor;
+using WgComputeState = WebGpuSharp.ComputeState;
+using WgStorageTextureBindingLayout = WebGpuSharp.StorageTextureBindingLayout;
+using WgStorageTextureAccess = WebGpuSharp.StorageTextureAccess;
 using WgDepthStencilState = WebGpuSharp.DepthStencilState;
 using WgOptionalBool = WebGpuSharp.OptionalBool;
 using WgBlendState = WebGpuSharp.BlendState;
@@ -69,6 +74,9 @@ internal sealed class WebGpuDevice : IDisposable
     public SlotTable<WgShaderModule> Shaders { get; } = new();
     public SlotTable<WgBuffer> Buffers { get; } = new();
     public SlotTable<WgRenderPipeline> Pipelines { get; } = new();
+    // Compute pipelines live in their own slot space (and their own public handle type) so the
+    // render-pipeline side tables — depth flags, content cache — never see them.
+    public SlotTable<WgComputePipeline> ComputePipelines { get; } = new();
     // One default view per texture covers the common sampled-2D + depth-attachment cases; explicit
     // TextureViews (below) provide per-layer / D2-array views for the shadow-map array.
     public SlotTable<TextureEntry> Textures { get; } = new();
@@ -473,6 +481,19 @@ internal sealed class WebGpuDevice : IDisposable
                         Multisampled = false,
                     };
                     break;
+                case BindingResourceType.StorageTexture:
+                    // WebGPU requires format + access in the LAYOUT for storage textures; the
+                    // loader guarantees a concrete format (it throws when [format] is missing).
+                    if (e.StorageFormat == TextureFormat.Undefined)
+                        throw new InvalidOperationException(
+                            $"StorageTexture binding {e.Binding} has no StorageFormat — the layout cannot be built.");
+                    entry.StorageTexture = new WgStorageTextureBindingLayout
+                    {
+                        Access = ToWgpuAccess(e.Access),
+                        Format = FormatConversions.ToWgpu(e.StorageFormat),
+                        ViewDimension = WgTextureViewDimension.D2,
+                    };
+                    break;
                 case BindingResourceType.Sampler:
                     entry.Sampler = new WgSamplerBindingLayout { Type = WgSamplerBindingType.Filtering };
                     break;
@@ -511,7 +532,9 @@ internal sealed class WebGpuDevice : IDisposable
               .Append((int)e.Visibility).Append(':')
               .Append((int)e.Type).Append(':')
               .Append(e.MinBufferSize).Append(':')
-              .Append(e.HasDynamicOffset ? '1' : '0').Append('|');
+              .Append(e.HasDynamicOffset ? '1' : '0').Append(':')
+              .Append((int)e.StorageFormat).Append(':')
+              .Append((int)e.Access).Append('|');
         }
         return sb.ToString();
     }
@@ -688,6 +711,50 @@ internal sealed class WebGpuDevice : IDisposable
     /// resulting public handle. Each call mints a fresh handle even when the same native pipeline
     /// is registered repeatedly — that's the point of the split: shared cache below, distinct
     /// public identity above.</summary>
+    private static WgStorageTextureAccess ToWgpuAccess(StorageTextureAccess access) => access switch
+    {
+        StorageTextureAccess.WriteOnly => WgStorageTextureAccess.WriteOnly,
+        StorageTextureAccess.ReadOnly => WgStorageTextureAccess.ReadOnly,
+        StorageTextureAccess.ReadWrite => WgStorageTextureAccess.ReadWrite,
+        _ => throw new NotSupportedException($"Storage texture access '{access}' has no WebGPU mapping."),
+    };
+
+    /// <summary>Build a native compute pipeline. Layout follows the render path's rule: explicit
+    /// when the program reflects groups, otherwise Dawn's implicit/auto layout.</summary>
+    public WgComputePipeline BuildNativeComputePipeline(WgShaderModule module, string entryPoint, PipelineLayoutDesc? layout)
+    {
+        var hasExplicitLayout = layout is { Groups.Length: > 0 };
+        var desc = new WgComputePipelineDescriptor
+        {
+            Layout = hasExplicitLayout ? BuildPipelineLayout(layout!) : null!,
+            Compute = new WgComputeState
+            {
+                Module = module,
+                EntryPoint = entryPoint,
+            },
+        };
+        return Device.CreateComputePipelineSync(in desc)
+            ?? throw new InvalidOperationException("ComputePipeline creation returned null.");
+    }
+
+    public ComputePipelineHandle RegisterComputePipeline(WgComputePipeline native)
+    {
+        var (index, generation) = ComputePipelines.Add(native);
+        return new ComputePipelineHandle(index, generation);
+    }
+
+    public WgComputePipeline ResolveComputePipeline(ComputePipelineHandle h)
+    {
+        if (!ComputePipelines.TryGet(h.Index, h.Generation, out var pipeline))
+            throw new StaleHandleException($"Compute pipeline handle ({h.Index},{h.Generation}) is stale or invalid.");
+        return pipeline;
+    }
+
+    /// <summary>Invalidate the slot. Compute pipelines have no content cache, so detaching drops
+    /// the only managed reference — safe: WebGPU pipelines have no explicit destroy, and Dawn
+    /// refcounts in-flight GPU use.</summary>
+    public bool DetachComputePipeline(ComputePipelineHandle h) => ComputePipelines.Remove(h.Index, h.Generation);
+
     public PipelineHandle RegisterPipeline(WgRenderPipeline native)
     {
         var (index, generation) = Pipelines.Add(native);
