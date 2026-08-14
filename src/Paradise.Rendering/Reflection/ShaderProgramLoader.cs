@@ -144,7 +144,11 @@ public static class ShaderProgramLoader
             // shader, so override by the well-known names.
             // Write-access storage may never carry Vertex visibility (WebGPU validation error);
             // give it Compute when the file has a compute entry, Fragment otherwise (fragment
-            // storage writes are legal for write-only access).
+            // storage writes are legal for write-only access). DELIBERATE CARVE-OUT from the
+            // defaultVisibility union: in a mixed compute+raster file an RW resource gets
+            // Compute-ONLY visibility, so a fragment stage writing the same storage resource a
+            // compute kernel uses would be rejected at pipeline creation — keep such a shader in
+            // its own file (or widen this to Compute|Fragment when the first real case lands).
             var writeVisibility = hasCompute ? ShaderStage.Compute : ShaderStage.Fragment;
             var isRw = type.Access is "write" or "readWrite";
             var entry = type.Kind switch
