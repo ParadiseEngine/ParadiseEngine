@@ -22,6 +22,9 @@ public static class ShaderProgramLoader
     private const string ShadowTextureName = "shadowTexture";
     private const string ShadowSamplerName = "shadowSampler";
     private const string PositionTextureName = "positionTexture"; // SSAO world-position pre-pass (Rgba32Float, unfilterable)
+    // The opaque scene depth read by the capture blit (Depth32Float viewed as unfilterable float,
+    // textureLoad only — WebGPU allows depth formats under the unfilterable-float sample type).
+    private const string CaptureDepthTextureName = "captureDepthTexture";
 
     /// <summary>Load <paramref name="logicalNamePrefix"/>.wgsl + .reflection.json from
     /// <paramref name="assembly"/>. Returns a <see cref="ShaderProgramDesc"/> with one
@@ -157,6 +160,8 @@ public static class ShaderProgramLoader
                 "resource" when p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTextureArray),
                 "resource" when p.Name == PositionTextureName => new BindGroupLayoutEntryDesc(
+                    binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
+                "resource" when p.Name == CaptureDepthTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
                 // WTexture2D / RWTexture2D → WGSL texture_storage_2d<format, access>. The
                 // [format("...")] attribute is REQUIRED: without it slangc silently defaults the
