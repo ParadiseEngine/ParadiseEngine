@@ -16,6 +16,9 @@ VertexOutput vertexMain(VertexInput input)
 float4 fragmentMain(FragmentInput input) : SV_Target
 {
     float2 screenUv = input.position.xy / material.procColorA.xy;
+    // Filtered sampling is fine for THIS flat-region probe, but real consumers must read the
+    // packed depth via textureLoad — bilinear across a depth edge interpolates a depth that
+    // belongs to no surface (see the SceneColorView doc).
     float capturedDepth = sceneColorTexture.SampleLevel(baseColorSampler, screenUv, 0.0).a;
     // Device-depth deltas are tiny (~0.04 between a mid-distance cube and the far plane) and an
     // 8-bit tonemapped readback flattens them — amplify: geometry (depth < 1) reads WHITE, the

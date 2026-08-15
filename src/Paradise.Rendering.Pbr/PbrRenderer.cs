@@ -487,7 +487,12 @@ public sealed class PbrRenderer : IDisposable
     /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
     /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
     /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
-    /// geometry in front of the surface — fall back to the unoffset sample). Invalid while
+    /// geometry in front of the surface — fall back to the unoffset sample). Two consumer
+    /// caveats: the fp16 alpha quantizes 32-bit device depth (~5e-4 steps near the far plane),
+    /// so treat it as a coarse near/mid-field signal, not a precise depth buffer; and READ THE
+    /// DEPTH VIA textureLoad, never a filtering sampler — bilinear across a depth discontinuity
+    /// interpolates a depth belonging to no real surface and mis-rejects at silhouettes (the
+    /// color half may stay filtered). Invalid while
     /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
     /// material extra entries from <see cref="SceneColorViewChanged"/> via
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
