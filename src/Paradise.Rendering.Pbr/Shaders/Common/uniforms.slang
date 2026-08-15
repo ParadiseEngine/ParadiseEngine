@@ -47,6 +47,7 @@ struct FrameUniforms
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
+    float4   shadowFilter;   // x: soft-shadow PCF disk radius in shadow texels, yzw unused
 };
 
 struct MaterialUniforms

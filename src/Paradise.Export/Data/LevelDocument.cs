@@ -425,6 +425,18 @@ namespace Paradise.Export.Data
     public sealed record LightingData
     {
         public string ActiveState { get; set; } = "Default";
+
+        /// <summary>Per-layer shadow map resolution the scene asks its renderer for, in texels
+        /// (authored in the Blender panel's Lighting section). Null leaves the renderer's own
+        /// default in place. Scene-wide rather than per lighting state: it sizes a GPU resource,
+        /// not a mood.</summary>
+        public int? ShadowMapSize { get; set; }
+
+        /// <summary>Soft-shadow blur: the PCF disk radius in shadow texels — the penumbra width
+        /// of every shadow edge (authored beside <see cref="ShadowMapSize"/>). Null leaves the
+        /// renderer's default.</summary>
+        public float? ShadowBlur { get; set; }
+
         public List<LightingStateData> States { get; set; } = new();
 
         public LightingStateData? ResolveActiveState()

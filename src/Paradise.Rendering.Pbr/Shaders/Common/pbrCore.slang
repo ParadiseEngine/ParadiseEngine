@@ -203,30 +203,37 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float lit;
     if (light.shadowAtlas.w > 0.5)
     {
-        // Soft shadows: Godot's SOFT_LOW PCF — a 4-sample Vogel disk (r = sqrt((i+0.5)/4),
-        // theta = 2.4i), radius 2 texels (quality radius x shadow_blur 1), randomly rotated per
-        // pixel with interleaved gradient noise exactly like sample_directional_pcf_shadow.
-        // The rotation trades the fixed-kernel banding for fine noise, which reads as a smooth
-        // penumbra at screen scale (and matches Godot's own edge texture).
-        static const float2 kVogel4[4] = {
-            float2(0.353553, 0.0),
-            float2(-0.451566, 0.413635),
-            float2(0.069177, -0.787537),
-            float2(0.569071, 0.742405),
+        // Soft shadows: Godot's SOFT_MEDIUM-class PCF — an 8-sample Vogel disk
+        // (r = sqrt((i+0.5)/8), theta = 2.4i), disk radius frame.shadowFilter.x shadow texels
+        // (scene-authored; see Lighting.ShadowBlur in the export contract), randomly rotated
+        // per pixel with interleaved gradient noise like sample_directional_pcf_shadow. The
+        // rotation trades fixed-kernel banding for fine noise; 8 taps over a >=3-texel disk is
+        // what keeps the map's texel staircase from showing through the penumbra — 4 taps at
+        // radius 2 (the old SOFT_LOW tier) visibly sawtoothed once the camera-fitted
+        // directional map made texels small enough to span several screen pixels.
+        static const float2 kVogel8[8] = {
+            float2(0.250000, 0.000000),
+            float2(-0.319301, 0.292484),
+            float2(0.048913, -0.556873),
+            float2(0.402387, 0.524962),
+            float2(-0.738516, -0.130745),
+            float2(0.699687, -0.444903),
+            float2(-0.234196, 0.870432),
+            float2(-0.446050, -0.859383),
         };
-        float s = texel * 2.0;
+        float s = texel * frame.shadowFilter.x;
         float r = shadowDiskHash(fragCoord) * 2.0 * PI;
         float cr = cos(r);
         float sr = sin(r);
         lit = 0.0;
-        [unroll] for (int k = 0; k < 4; k++)
+        [unroll] for (int k = 0; k < 8; k++)
         {
             // Godot's mat2(vec2(cr,-sr), vec2(sr,cr)) * offset (column-major GLSL).
-            float2 o = float2(cr * kVogel4[k].x + sr * kVogel4[k].y,
-                              -sr * kVogel4[k].x + cr * kVogel4[k].y);
+            float2 o = float2(cr * kVogel8[k].x + sr * kVogel8[k].y,
+                              -sr * kVogel8[k].x + cr * kVogel8[k].y);
             lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + o * s, layer), compare);
         }
-        lit *= 0.25;
+        lit *= 0.125;
     }
     else
     {
