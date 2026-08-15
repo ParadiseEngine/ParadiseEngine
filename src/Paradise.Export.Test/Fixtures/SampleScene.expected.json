@@ -21,6 +21,8 @@
   },
   "Lighting": {
     "ActiveState": "Default",
+    "ShadowMapSize": null,
+    "ShadowBlur": null,
     "States": [
       {
         "Name": "Default",
