@@ -193,6 +193,49 @@ public class SceneColorCaptureTests
     }
 
     [Test]
+    public async Task capture_alpha_carries_the_opaque_scene_depth()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            pbr.SceneColorCapture = true;
+
+            var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.depthProbeFixture");
+            var programId = pbr.RegisterMaterialProgram(program);
+            var material = BlendMaterial(64, 64);
+            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
+                [BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView)]);
+
+            // An opaque cube in the middle distance, and a fullscreen-ish probe quad in front of
+            // the camera visualizing captured DEPTH as grayscale.
+            var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
+            var (vertices, indices) = Procedural.UnitCube();
+            var probeMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]);
+            scene.Instances.Add(new PbrInstance
+            {
+                Mesh = probeMesh,
+                Model = Matrix4x4.CreateScale(new Vector3(6f, 6f, 0.02f))
+                    * Matrix4x4.CreateTranslation(0f, 0.6f, 1.2f),
+            });
+
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+            var pixels = renderer.ReadbackColor(out var w, out var h);
+
+            // The probe amplifies (1 - depth): over the cube it reads white, over the cleared
+            // background black — a contrast no tonemap flattens.
+            var center = pixels[(int)((h / 2) * w + (w / 2)) * 4 + 2];
+            var corner = pixels[(int)(2 * w + 2) * 4 + 2];
+            await Assert.That((int)center).IsGreaterThan(corner + 60);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    [Test]
     public async Task disabling_capture_raises_the_event_with_an_invalid_view()
     {
         var renderer = TryCreateHeadlessOrSkip();

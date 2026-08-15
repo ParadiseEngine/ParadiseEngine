@@ -65,6 +65,7 @@ public sealed class PbrRenderer : IDisposable
     private PipelineHandle _blitPipeline;
     private BindGroupLayoutDesc? _blitGroupLayout;
     private BindGroupHandle _sceneBlitGroup;
+    private TextureViewHandle _depthSampleView;
     private BindGroupLayoutDesc _compositeGroupLayout;
     private TextureHandle _hdrTexture;
     private TextureViewHandle _hdrView;
@@ -483,7 +484,10 @@ public sealed class PbrRenderer : IDisposable
         }
     }
 
-    /// <summary>The captured opaque scene, linear HDR, target-sized. Invalid while
+    /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
+    /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
+    /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
+    /// geometry in front of the surface — fall back to the unoffset sample). Invalid while
     /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
     /// material extra entries from <see cref="SceneColorViewChanged"/> via
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
@@ -529,11 +533,20 @@ public sealed class PbrRenderer : IDisposable
     private void RebuildSceneBlitGroup()
     {
         if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
+        EnsureDepthSampleView();
         _sceneBlitGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSceneBlitGroup", _blitGroupLayout!, new[]
         {
             BindGroupEntryDesc.ForTextureView(0, _hdrView),
             BindGroupEntryDesc.ForSampler(1, _compositeSampler),
+            BindGroupEntryDesc.ForTextureView(2, _depthSampleView),
         }));
+    }
+
+    private void EnsureDepthSampleView()
+    {
+        if (_depthSampleView.IsValid) _renderer.DestroyTextureView(_depthSampleView);
+        _depthSampleView = _renderer.CreateTextureView(new TextureViewDesc(
+            "PbrDepthSampleView", _depthTexture, TextureViewDimension.D2, 0, 1));
     }
 
     public void Resize(uint width, uint height)
@@ -1623,9 +1636,12 @@ public sealed class PbrRenderer : IDisposable
 
     private TextureHandle CreateDepthTexture(uint width, uint height)
     {
+        // TextureBinding so the capture blit can pack the opaque depth into SceneColorView's
+        // alpha (read as unfilterable float; never bound while also being written).
         var desc = new TextureDesc(
             "PbrDepth", width, height, 1, 1, 1,
-            TextureDimension.D2, TextureFormat.Depth32Float, TextureUsage.RenderAttachment);
+            TextureDimension.D2, TextureFormat.Depth32Float,
+            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
         return _renderer.CreateTexture(in desc);
     }
 
@@ -1936,6 +1952,7 @@ public sealed class PbrRenderer : IDisposable
         _disposed = true;
         Materials.Dispose();
         DestroySceneColorResources();
+        if (_depthSampleView.IsValid) _renderer.DestroyTextureView(_depthSampleView);
         if (_blitPipeline.IsValid) _renderer.DestroyPipeline(_blitPipeline);
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
