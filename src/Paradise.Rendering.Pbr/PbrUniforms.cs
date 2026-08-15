@@ -54,8 +54,8 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31008 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 31008)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31024 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 31024)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
@@ -73,6 +73,7 @@ public struct FrameUniformsGpu
     [FieldOffset(6400)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
     [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
     [FieldOffset(30992)] public Vector4 Time;                  // x elapsed seconds (procedural animation)
+    [FieldOffset(31008)] public Vector4 ShadowFilter;          // x soft-shadow PCF disk radius (texels)
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's

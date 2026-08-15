@@ -18,7 +18,7 @@ public sealed class PbrRenderer : IDisposable
     private const int FloatsPerVertex = 12;         // pos3/normal3/uv2/tan4 interleave
     private const int SkinFloatsPerVertex = 8;      // joint4 (indices as floats) + weight4
     private const int SkinnedFloatsPerVertex = FloatsPerVertex + SkinFloatsPerVertex; // vertexMainSkinned's stride
-    private const uint ShadowMapSize = 1024;        // per-layer shadow map resolution (Depth32Float)
+    private const uint DefaultShadowMapSize = 1024; // per-layer shadow map resolution (Depth32Float)
     // One array layer per shadow view: dir/spot = 1 layer, point = 6 cube-face layers. Cap = every
     // scene light casting a 6-face point shadow. The array is sized dynamically each frame (grow-only)
     // to the layers actually in use, so a scene with one directional light allocates a single layer.
@@ -28,6 +28,44 @@ public sealed class PbrRenderer : IDisposable
     private readonly ShaderProgramDesc _program;
     private readonly bool _useSrgbEntryPoint;
     private readonly uint _drawStride;
+    private uint _shadowMapSize = DefaultShadowMapSize;
+
+    /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
+    /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
+    /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
+    public uint ShadowMapSize
+    {
+        get => _shadowMapSize;
+        set
+        {
+            var clamped = Math.Clamp(value, 256u, 8192u);
+            if (clamped == _shadowMapSize) return;
+            _shadowMapSize = clamped;
+            DestroyShadowArray(); // recreated (and the frame group rebuilt) by the next EnsureShadowArray
+        }
+    }
+
+    /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
+    /// shadow edge). Scenes author this through the export contract's <c>Lighting.ShadowBlur</c>;
+    /// hosts apply it here. Clamped to [0.5, 8] — below ~2 the map's texel staircase shows
+    /// through the 8-tap Vogel filter, far above it contact shadows detach into mush.</summary>
+    public float ShadowBlurTexels
+    {
+        get => _shadowBlurTexels;
+        set => _shadowBlurTexels = Math.Clamp(value, 0.5f, 8f);
+    }
+
+    private float _shadowBlurTexels = 3f;
+
+    /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
+    /// shadow map covers. The fit used to be the whole scene AABB, which on a large world
+    /// stretches the map until its per-texel depth error exceeds the shadow bias and flat ground
+    /// self-shadows in diagonal bands. A camera-centred fit keeps texel density constant no
+    /// matter how big the scene grows; the box is snapped to whole texels so it does not shimmer
+    /// as the camera moves, and the depth range still spans the scene AABB so tall casters
+    /// outside the circle keep casting in. When the scene is smaller than the radius (or the
+    /// radius is 0) the legacy whole-scene fit applies — small scenes keep their tighter box.</summary>
+    public float DirectionalShadowRadius { get; set; } = 50f;
     private readonly BufferHandle _frameUniformBuffer;
     private readonly BufferHandle _drawUniformRing;
     private BindGroupHandle _frameGroup; // rebuilt whenever the shadow array is (re)allocated
@@ -406,7 +444,7 @@ public sealed class PbrRenderer : IDisposable
         DestroyShadowArray();
 
         var desc = new TextureDesc(
-            "PbrShadowArray", ShadowMapSize, ShadowMapSize, layerCount, 1, 1,
+            "PbrShadowArray", _shadowMapSize, _shadowMapSize, layerCount, 1, 1,
             TextureDimension.D2, TextureFormat.Depth32Float,
             TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
         _shadowArray = _renderer.CreateTexture(in desc);
@@ -776,6 +814,12 @@ public sealed class PbrRenderer : IDisposable
         if (_opaque.Count > 0)
         {
             ComputeWorldBounds(out var center, out var extent);
+            // The camera's world position anchors the directional fit (see
+            // ComputeDirectionalLightMatrix); a non-invertible view falls back to the scene centre,
+            // which degrades to the legacy whole-scene fit rather than anything wrong.
+            var cameraPosition = Matrix4x4.Invert(view, out var viewInverse)
+                ? viewInverse.Translation
+                : center;
             for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
             {
                 var light = scene.Lights[i];
@@ -786,7 +830,8 @@ public sealed class PbrRenderer : IDisposable
                 _shadowFaceCount[i] = faceCount;
                 for (var f = 0; f < faceCount; f++)
                 {
-                    _shadowViews.Add((i, f, (uint)(shadowLayerCount + f), ComputeLightMatrix(light, f, center, extent)));
+                    _shadowViews.Add((i, f, (uint)(shadowLayerCount + f),
+                        ComputeLightMatrix(light, f, center, extent, cameraPosition)));
                 }
                 shadowLayerCount += faceCount;
             }
@@ -1116,9 +1161,11 @@ public sealed class PbrRenderer : IDisposable
         _renderer.UpdateBuffer<SsaoUniformsGpu>(_ssaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref u, 1));
     }
 
-    // Light-space view-projection for one shadow face: directional = ortho fit to the scene AABB;
-    // spot = perspective down the cone; point = one of six 90°-FOV cube faces.
-    private static Matrix4x4 ComputeLightMatrix(PbrLight light, int face, Vector3 center, Vector3 extent)
+    // Light-space view-projection for one shadow face: directional = ortho fit to a camera-centred
+    // circle (falling back to the scene AABB for small scenes); spot = perspective down the cone;
+    // point = one of six 90°-FOV cube faces.
+    private Matrix4x4 ComputeLightMatrix(
+        PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition)
     {
         switch (light.Type)
         {
@@ -1139,7 +1186,9 @@ public sealed class PbrRenderer : IDisposable
                 return PbrMath.ViewProjection(view, proj);
             }
             default: // Directional
-                return ComputeDirectionalLightMatrix(light.Direction, center, extent);
+                return ComputeDirectionalLightMatrix(
+                    light.Direction, center, extent, cameraPosition,
+                    DirectionalShadowRadius, _shadowMapSize);
         }
     }
 
@@ -1178,37 +1227,92 @@ public sealed class PbrRenderer : IDisposable
         extent = (max - min) * 0.5f;
     }
 
-    // Directional light view-projection: place a camera along the light direction, looking at the
-    // scene center, and fit an off-center ortho box to the scene AABB in light space (RH, clip-Z
-    // [0,1]). Matches bank-heist (up-vector guard for near-vertical light, XY/Z padding).
-    private static Matrix4x4 ComputeDirectionalLightMatrix(Vector3 surfaceToLight, Vector3 center, Vector3 extent)
+    // Directional light view-projection (RH, clip-Z [0,1]).
+    //
+    // The XY footprint is a SQUARE of side 2·min(shadowRadius, sceneRadius), centred on the
+    // camera (clamped into the scene AABB) — not the scene AABB itself. Fitting the whole scene
+    // is what made a growing world quietly destroy its own shadow quality: texel size scales with
+    // the AABB, and past the shader's fixed bias the flat ground self-shadows in diagonal bands.
+    // A camera-centred fit keeps metres-per-texel constant forever. Two details carry it:
+    //
+    // * The centre is SNAPPED to whole shadow texels in the light's plane basis, so the box
+    //   translates in texel steps as the camera glides and shadow edges do not shimmer. The basis
+    //   is derived from the light direction alone, so it is stable frame to frame.
+    // * The DEPTH range still spans the scene AABB along the light, so a tall caster outside the
+    //   circle (a skyline tower, the highway deck) still lays its shadow across it.
+    //
+    // When the scene fits inside the radius anyway (or the radius is disabled with <= 0), the
+    // legacy whole-AABB fit applies — a small scene keeps its tighter, non-square box.
+    private static Matrix4x4 ComputeDirectionalLightMatrix(
+        Vector3 surfaceToLight, Vector3 center, Vector3 extent, Vector3 cameraPosition,
+        float shadowRadius, uint shadowMapSize)
     {
         var lightDir = surfaceToLight.LengthSquared() > 1e-6f ? Vector3.Normalize(surfaceToLight) : Vector3.UnitY;
         const float depthPad = 32f;
         const float xyPad = 1f;
-        var radius = MathF.Max(4f, 0.5f * extent.Length());
-        var eye = center + lightDir * (radius + depthPad);
+        var sceneRadius = MathF.Max(4f, 0.5f * extent.Length());
         var up = MathF.Abs(lightDir.Y) > 0.95f ? Vector3.UnitZ : Vector3.UnitY;
-        var lightView = PbrMath.LookAt(eye, center, up);
 
-        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-        for (var c = 0; c < 8; c++)
+        if (shadowRadius > 0f && shadowRadius < sceneRadius)
         {
-            var corner = center + new Vector3(
-                (c & 1) == 0 ? -extent.X : extent.X,
-                (c & 2) == 0 ? -extent.Y : extent.Y,
-                (c & 4) == 0 ? -extent.Z : extent.Z);
-            var lp = Vector3.Transform(corner, lightView);
-            minX = MathF.Min(minX, lp.X); maxX = MathF.Max(maxX, lp.X);
-            minY = MathF.Min(minY, lp.Y); maxY = MathF.Max(maxY, lp.Y);
-            minZ = MathF.Min(minZ, lp.Z); maxZ = MathF.Max(maxZ, lp.Z);
+            var radius = shadowRadius + xyPad;
+            var focus = Vector3.Clamp(cameraPosition, center - extent, center + extent);
+
+            // Snap the focus to the shadow-texel grid in the light's own plane basis.
+            var right = Vector3.Normalize(Vector3.Cross(up, lightDir));
+            var planeUp = Vector3.Cross(lightDir, right);
+            var texel = 2f * radius / shadowMapSize;
+            var focusRight = Vector3.Dot(focus, right);
+            var focusUp = Vector3.Dot(focus, planeUp);
+            focus += right * (MathF.Floor(focusRight / texel) * texel - focusRight)
+                   + planeUp * (MathF.Floor(focusUp / texel) * texel - focusUp);
+
+            var eye = focus + lightDir * (sceneRadius + depthPad);
+            var lightView = PbrMath.LookAt(eye, focus, up);
+
+            // Depth range from the scene AABB so out-of-circle casters still cast in.
+            float minZ = float.MaxValue, maxZ = float.MinValue;
+            for (var c = 0; c < 8; c++)
+            {
+                var corner = center + new Vector3(
+                    (c & 1) == 0 ? -extent.X : extent.X,
+                    (c & 2) == 0 ? -extent.Y : extent.Y,
+                    (c & 4) == 0 ? -extent.Z : extent.Z);
+                var lz = Vector3.Transform(corner, lightView).Z;
+                minZ = MathF.Min(minZ, lz); maxZ = MathF.Max(maxZ, lz);
+            }
+            // RH light space: the scene sits at negative Z. near/far are positive distances.
+            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
+            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
+            var proj = PbrMath.OrthographicOffCenter(-radius, radius, -radius, radius, nearPlane, farPlane);
+            return PbrMath.ViewProjection(lightView, proj);
         }
-        // RH light space: the scene sits at negative Z. near/far are positive distances.
-        var near = MathF.Max(0.01f, -maxZ - depthPad);
-        var far = MathF.Max(near + 1f, -minZ + depthPad);
-        var lightProj = PbrMath.OrthographicOffCenter(minX - xyPad, maxX + xyPad, minY - xyPad, maxY + xyPad, near, far);
-        return PbrMath.ViewProjection(lightView, lightProj);
+
+        // Legacy whole-scene fit. Matches bank-heist (up-vector guard, XY/Z padding).
+        {
+            var eye = center + lightDir * (sceneRadius + depthPad);
+            var lightView = PbrMath.LookAt(eye, center, up);
+
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            for (var c = 0; c < 8; c++)
+            {
+                var corner = center + new Vector3(
+                    (c & 1) == 0 ? -extent.X : extent.X,
+                    (c & 2) == 0 ? -extent.Y : extent.Y,
+                    (c & 4) == 0 ? -extent.Z : extent.Z);
+                var lp = Vector3.Transform(corner, lightView);
+                minX = MathF.Min(minX, lp.X); maxX = MathF.Max(maxX, lp.X);
+                minY = MathF.Min(minY, lp.Y); maxY = MathF.Max(maxY, lp.Y);
+                minZ = MathF.Min(minZ, lp.Z); maxZ = MathF.Max(maxZ, lp.Z);
+            }
+            // RH light space: the scene sits at negative Z. near/far are positive distances.
+            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
+            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
+            var proj = PbrMath.OrthographicOffCenter(
+                minX - xyPad, maxX + xyPad, minY - xyPad, maxY + xyPad, nearPlane, farPlane);
+            return PbrMath.ViewProjection(lightView, proj);
+        }
     }
 
     private void EncodeBucket(
@@ -1385,10 +1489,11 @@ public sealed class PbrRenderer : IDisposable
         frame.ClusterParams = new Vector4(_clusterTilesX, _clusterTilesY, ClusterZSlices, _clusterFar);
         // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
         frame.ShadowSettings = new Vector4(
-            1f / ShadowMapSize,
+            1f / _shadowMapSize,
             (float)scene.Tonemap.Mode,
             scene.Tonemap.Exposure,
             scene.Tonemap.White);
+        frame.ShadowFilter = new Vector4(_shadowBlurTexels, 0f, 0f, 0f);
         // L2 sky-SH ambient: coefficients pass through verbatim; [0].w flags the SH path on.
         if (scene.Ambient.Sh is { Length: 9 } sh)
         {
