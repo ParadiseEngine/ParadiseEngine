@@ -26,4 +26,17 @@
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
   </ItemGroup>
 
+  <!-- Ktx2.NET ships libktx natives for win-x64 and linux-x64 only. The vendored Apple
+       Silicon dylib (KTX-Software 4.4.2, Apache-2.0; see third_party/ktx) is staged into
+       source-build outputs by src/Ktx.targets — but that Import never reaches PACKAGE
+       consumers, so a macOS host restoring this package crashed on dlopen(libktx) the
+       moment it touched a texture. Packing it as a standard runtimes/ native asset lets
+       the .NET host resolve DllImport("ktx") from the package on osx-arm64 too. -->
+  <ItemGroup>
+    <None Include="..\..\third_party\ktx\osx-arm64\libktx.dylib"
+          Pack="true"
+          PackagePath="runtimes/osx-arm64/native"
+          Visible="false" />
+  </ItemGroup>
+
 </Project>
