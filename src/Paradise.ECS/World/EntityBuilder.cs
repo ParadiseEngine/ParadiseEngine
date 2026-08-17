@@ -49,6 +49,34 @@ public readonly struct EntityBuilder : IComponentsBuilder
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static EntityBuilder Create() => new();
 
+    /// <inheritdoc cref="EnsureComponentSet{TComponentSet, TInnerBuilder}"/>
+    /// <summary>
+    /// Ensures every component of an <see cref="IComponentSet"/> — typically a queryable —
+    /// exists on the entity with its default value.
+    ///
+    /// This is how an entity is built from what the systems actually query for:
+    /// <code>
+    /// world.CreateEntity(EntityBuilder.Create()
+    ///     .EnsureFrom&lt;PlayerPenguins&gt;()
+    ///     .EnsureFrom&lt;SwimPenguins&gt;()
+    ///     .Add(new Position { Value = spawn }));
+    /// </code>
+    /// Chain one call per queryable to compose the union; the mask is a set, so a component two
+    /// queryables share costs nothing and a later <c>Add</c> just seeds a value over the default.
+    ///
+    /// NOTE: this lives on each builder struct rather than beside Add/Ensure in
+    /// <see cref="ComponentsBuilderExtensions"/> because an extension member whose type parameter
+    /// carries <c>allows ref struct</c> is not found by extension lookup — and queryables are ref
+    /// structs, so that anti-constraint is required. Moving it back into the extension block
+    /// compiles the declaration fine and then fails every call site with CS1061.
+    /// </summary>
+    /// <typeparam name="TComponentSet">The component set to take types from.</typeparam>
+    /// <returns>A new builder with the set's component types added.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public EnsureComponentSet<TComponentSet, EntityBuilder> EnsureFrom<TComponentSet>()
+        where TComponentSet : IComponentSet, allows ref struct
+        => new() { InnerBuilder = this };
+
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CollectTypes<TMask>(ref TMask mask)
@@ -137,6 +165,12 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
         int offset = layout.GetBaseOffset(TComponent.TypeId) + indexInChunk * TComponent.Size;
         chunkManager.GetBytes(chunkHandle).GetRef<TComponent>(offset) = Value;
     }
+
+    /// <inheritdoc cref="EntityBuilder.EnsureFrom{TComponentSet}"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public EnsureComponentSet<TComponentSet, WithComponent<TComponent, TInnerBuilder>> EnsureFrom<TComponentSet>()
+        where TComponentSet : IComponentSet, allows ref struct
+        => new() { InnerBuilder = this };
 }
 
 /// <summary>
@@ -185,6 +219,73 @@ public readonly struct EnsureComponent<TComponent, TInnerBuilder> : IComponentsB
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
         // No write needed - chunk memory is zero-initialized, so component has default value
     }
+
+    /// <inheritdoc cref="EntityBuilder.EnsureFrom{TComponentSet}"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public EnsureComponentSet<TComponentSet, EnsureComponent<TComponent, TInnerBuilder>> EnsureFrom<TComponentSet>()
+        where TComponentSet : IComponentSet, allows ref struct
+        => new() { InnerBuilder = this };
+}
+
+/// <summary>
+/// Builder that wraps an inner builder and ensures every component of an
+/// <see cref="IComponentSet"/> exists with its default value — the whole set at once, where
+/// <see cref="EnsureComponent{TComponent, TInnerBuilder}"/> does one.
+///
+/// Created by calling the EnsureFrom extension method on a builder. Like EnsureComponent it
+/// stores no values and relies on zero-initialized chunk memory.
+/// </summary>
+/// <typeparam name="TComponentSet">The component set to take types from — typically a queryable.</typeparam>
+/// <typeparam name="TInnerBuilder">The wrapped builder type.</typeparam>
+public readonly struct EnsureComponentSet<TComponentSet, TInnerBuilder> : IComponentsBuilder
+    where TComponentSet : IComponentSet, allows ref struct
+    where TInnerBuilder : unmanaged, IComponentsBuilder
+{
+    /// <summary>
+    /// The inner builder that this wraps.
+    /// </summary>
+    public TInnerBuilder InnerBuilder
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        init;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CollectTypes<TMask>(ref TMask mask)
+        where TMask : unmanaged, IBitSet<TMask>
+    {
+        InnerBuilder.CollectTypes(ref mask);
+        // Static dispatch, so no instance of TComponentSet is ever needed — which is what lets a
+        // ref struct queryable be used as the type argument.
+        TComponentSet.CollectComponentTypes(ref mask);
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteComponents<TMask, TConfig, TChunkManager>(
+        TChunkManager chunkManager,
+        ImmutableArchetypeLayout<TMask, TConfig> layout,
+        ChunkHandle chunkHandle,
+        int indexInChunk)
+        where TMask : unmanaged, IBitSet<TMask>
+        where TConfig : IConfig, new()
+        where TChunkManager : IChunkManager
+    {
+        // Write inner components first
+        InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
+        // No writes - chunk memory is zero-initialized, so every component of the set is default.
+        // A component that needs a seeded value is written by chaining Add after this, which
+        // overwrites the default rather than duplicating the type in the mask.
+    }
+
+    /// <inheritdoc cref="EntityBuilder.EnsureFrom{TComponentSet}"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public EnsureComponentSet<TOtherComponentSet, EnsureComponentSet<TComponentSet, TInnerBuilder>> EnsureFrom<TOtherComponentSet>()
+        where TOtherComponentSet : IComponentSet, allows ref struct
+        => new() { InnerBuilder = this };
 }
 
 /// <summary>
@@ -227,5 +328,9 @@ public static class ComponentsBuilderExtensions
                 InnerBuilder = builder
             };
         }
+
+        // EnsureFrom is deliberately NOT here — see the note on EntityBuilder.EnsureFrom. An
+        // extension member with an `allows ref struct` type parameter is skipped by extension
+        // lookup, and queryables are ref structs, so it lives on each builder struct instead.
     }
 }
