@@ -40,11 +40,21 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Collect();
 
-        // The namespace comes from the COMPILATION, not a literal: this generator runs inside
+        // The namespace is the project's own, never a literal: this generator runs inside
         // Paradise.Export and inside every game that declares authored data, and a hardcoded
         // namespace would collide the moment two of them are loaded together.
-        var namespaceName = context.CompilationProvider.Select(
-            static (compilation, _) => Sanitize(compilation.AssemblyName));
+        //
+        // RootNamespace first, because that is where a project's hand-written code lives and
+        // generated PUBLIC API belongs beside it. Assembly name only as a fallback: a project named
+        // Game.Core with RootNamespace `Game` would otherwise publish `Game.Core.AuthoringSchema`,
+        // which no file in it can see without qualifying.
+        var namespaceName = context.AnalyzerConfigOptionsProvider
+            .Combine(context.CompilationProvider)
+            .Select(static (pair, _) =>
+            {
+                pair.Left.GlobalOptions.TryGetValue("build_property.RootNamespace", out var root);
+                return Sanitize(string.IsNullOrWhiteSpace(root) ? pair.Right.AssemblyName : root);
+            });
 
         context.RegisterSourceOutput(
             authored.Combine(namespaceName),
