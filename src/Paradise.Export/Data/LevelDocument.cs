@@ -102,6 +102,12 @@ namespace Paradise.Export.Data
         public ParticleEmitterComponentData? ParticleEmitter { get; set; }
         public AudioEmitterComponentData? AudioEmitter { get; set; }
 
+        /// <summary>A light this entity owns, authored by pointing at one. Null — and absent from
+        /// the document — when the entity authors none, which is every entity in every scene
+        /// written before lights could be authored this way.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SceneLightData? Light { get; set; }
+
         /// <summary>
         /// Components the ENGINE does not define: authored data declared by a game (or by a future
         /// engine module) with <c>[Authored]</c>, carried verbatim so neither the exporter nor this
@@ -110,12 +116,6 @@ namespace Paradise.Export.Data
         /// Null — and therefore absent from the written document — when nothing authored anything,
         /// which is what keeps every existing exported file byte-identical.
         /// </summary>
-        /// <summary>A light this entity owns, authored by pointing at one. Null — and absent from
-        /// the document — when the entity authors none, which is every entity in every scene
-        /// written before lights could be authored this way.</summary>
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public SceneLightData? Light { get; set; }
-
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<AuthoredComponentData>? Custom { get; set; }
     }

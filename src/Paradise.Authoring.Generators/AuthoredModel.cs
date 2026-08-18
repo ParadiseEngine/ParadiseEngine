@@ -154,7 +154,9 @@ internal static class AuthoredModel
             var schemaType = SchemaTypeOf(valueType);
             List<AuthoredField>? nested = null;
             List<string>? enumValues = null;
-            string? authoredBy = HostKindOf(valueType) ?? HostKindOfMember(member);
+            // PROPERTY first: it is the more specific declaration, so a field that wants a
+            // different kind from the one its type declares gets it. The type is the fallback.
+            string? authoredBy = HostKindOfMember(member) ?? HostKindOf(valueType);
 
             if (schemaType == "enum")
             {
