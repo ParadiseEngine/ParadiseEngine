@@ -1,3 +1,4 @@
+using System.Numerics;
 using Paradise.Authoring;
 
 namespace Paradise.Authoring.Test;
@@ -56,4 +57,62 @@ public sealed record EverythingFixture
 public sealed record MinimalFixture
 {
     public float Value { get; set; } = 1f;
+}
+
+
+/// <summary>A part authored by pointing at one shape; the fields are what gets baked out of it.</summary>
+[AuthoredByHost(AuthoredBySources.Shape)]
+public sealed record ShapeRefFixture
+{
+    public SampleShape Kind { get; set; } = SampleShape.Box;
+    public Vector3 Size { get; set; }
+    public Vector3 LocalCenter { get; set; }
+    public Quaternion LocalRotation { get; set; }
+    public float Radius { get; set; }
+}
+
+/// <summary>Everything schema v2 added, in one component: a LIST of shape references, the fixed-size
+/// aggregates, an asset reference with its accepted kinds, and two fields guarded by siblings.</summary>
+[Authored("test.v2", DisplayName = "Schema v2")]
+public sealed record V2Fixture
+{
+    /// <summary>An array of host-object references — the shape the engine's collider list has.</summary>
+    public List<ShapeRefFixture> Colliders { get; set; } = new();
+
+    [AuthoredByHost(AuthoredBySources.Mesh)]
+    public string MeshNode { get; set; } = "";
+
+    [AuthoredByHost(AuthoredBySources.Asset), AuthorAssetKinds(".glb", ".gltf")]
+    public string Model { get; set; } = "";
+
+    public Vector2 QuadSize { get; set; }
+    public Vector3 Offset { get; set; }
+    public Quaternion Rotation { get; set; }
+    public Vector4 Tint { get; set; }
+
+    /// <summary>Unsigned in C#, plain int in the schema — no editor has a separate control.</summary>
+    public uint Seed { get; set; } = 1;
+
+    public bool IsAgent { get; set; }
+
+    /// <summary>Hidden unless IsAgent — what EntityExport did in _ValidateProperty, as data.</summary>
+    [AuthorVisibleWhen(nameof(IsAgent), true)]
+    public float MoveSpeed { get; set; } = 1.4f;
+
+    public SampleShape Shape { get; set; } = SampleShape.Box;
+
+    /// <summary>Guarded by an ENUM sibling, compared by name.</summary>
+    [AuthorVisibleWhen(nameof(Shape), SampleShape.Sphere)]
+    public float SphereRadius { get; set; } = 0.5f;
+}
+
+
+/// <summary>A whole component authored by pointing at ONE host object — the shape the engine's
+/// sprite animation has, where sheet, grid and quad size are all read off the sprite.</summary>
+[Authored("test.by-sprite", DisplayName = "By sprite")]
+[AuthoredByHost(AuthoredBySources.Sprite)]
+public sealed record BySpriteFixture
+{
+    public string? Sheet { get; set; }
+    public Vector2 QuadSize { get; set; }
 }

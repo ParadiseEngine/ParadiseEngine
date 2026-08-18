@@ -146,15 +146,26 @@ namespace Paradise.Export.Data
     /// Schema v1 documents carry neither field (null = no mesh exported).
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000001")]
+    [Authored(ParadiseComponentIds.Renderable, DisplayName = "Renderable")]
     public sealed record RenderableComponentData
     {
+        /// <summary>Authored by pointing at the mesh in the host and BAKED to a data-relative path:
+        /// the editor resolves whichever source GLB that object came from.</summary>
+        [AuthoredByHost(AuthoredBySources.Mesh)]
+        [AuthorDoc("The mesh this entity renders.")]
         public string? Mesh { get; set; }
+
+        [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
         public string? MeshNode { get; set; }
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000002")]
+    [Authored(ParadiseComponentIds.Collider, DisplayName = "Collider")]
     public sealed record ColliderComponentData
     {
+        /// <summary>A list of shape references. Each is edited with the host's own handles and
+        /// baked into the numbers below it at export.</summary>
+        [AuthorDoc("Collision shapes, edited with the host's own handles.")]
         public List<ColliderShapeData> Colliders { get; set; } = new();
     }
 
@@ -167,13 +178,16 @@ namespace Paradise.Export.Data
     /// whose rigidbody fields keep working exactly as before. Retiring those is a separate,
     /// breaking migration across the games that consume this contract.
     /// </summary>
-    [Authored("paradise.rigidbody", DisplayName = "Rigidbody")]
+    [Authored(ParadiseComponentIds.Rigidbody, DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
         [AuthorDoc("Static bodies never move; dynamic ones are simulated.")]
         public PhysicsBodyType BodyType { get; set; }
 
         [Kilograms, AuthorRange(0.001, 10000)]
+        // The guard EntityExport could not express: mass means nothing on a static body, and a
+        // field that is meaningless most of the time is a field authors mis-set.
+        [AuthorVisibleWhen(nameof(BodyType), PhysicsBodyType.Dynamic)]
         [AuthorDoc("Mass in kilograms. Ignored for static bodies.")]
         public float Mass { get; set; } = 1f;
 
@@ -194,17 +208,27 @@ namespace Paradise.Export.Data
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000004")]
+    [Authored(ParadiseComponentIds.Agent, DisplayName = "Agent (movement)")]
     public sealed record AgentComponentData
     {
+        [AuthorRange(0.01, 100), AuthorDoc("Movement speed in metres per second.")]
         public float MoveSpeed { get; set; } = 1.4f;
+
+        [AuthorRange(0.01, 1000), AuthorDoc("How hard the agent accelerates toward its speed.")]
         public float Acceleration { get; set; } = 40f;
+
+        [AuthorDoc("Animation clip played while standing still.")]
         public string? IdleClip { get; set; }
+
+        [AuthorDoc("Animation clip played while moving.")]
         public string? WalkClip { get; set; }
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000005")]
+    [Authored(ParadiseComponentIds.Interactable, DisplayName = "Interactable")]
     public sealed record EntityInteractableComponentData
     {
+        [AuthorDoc("Name shown to the player when this can be interacted with.")]
         public string? DisplayName { get; set; }
     }
 
@@ -218,6 +242,10 @@ namespace Paradise.Export.Data
     /// clock (frame index lives in the world snapshot) so both hosts show the same frame.
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000006")]
+    [Authored(ParadiseComponentIds.SpriteAnimation, DisplayName = "Sprite animation")]
+    // The WHOLE record is authored by pointing at a sprite in the host: its sheet, grid and quad
+    // size are read off that object at export rather than retyped here.
+    [AuthoredByHost(AuthoredBySources.Sprite)]
     public sealed record SpriteAnimationComponentData
     {
         public string? Sheet { get; set; }
@@ -253,8 +281,10 @@ namespace Paradise.Export.Data
     /// +Y axis and live in WORLD space (a moving emitter leaves a trail).
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000007")]
+    [Authored(ParadiseComponentIds.ParticleEmitter, DisplayName = "Particle emitter")]
     public sealed record ParticleEmitterComponentData
     {
+        [AuthorDoc("Sprite = camera-facing flipbook quads; Voxel = solid tinted cubes.")]
         public ParticleRenderKind Kind { get; set; } = ParticleRenderKind.Sprite;
         /// <summary>Live-particle cap; clamped to the runtime's per-emitter buffer (64).</summary>
         public int MaxParticles { get; set; } = 64;
@@ -270,12 +300,16 @@ namespace Paradise.Export.Data
         public float StartSize { get; set; } = 0.25f;
         public float EndSize { get; set; } = 0.25f;
         /// <summary>RNG seed — same seed, same particle stream in both hosts.</summary>
+        [AuthorDoc("Same seed, same particle stream in every host.")]
         public uint Seed { get; set; } = 1;
         /// <summary>Tint (Sprite: multiplies the sheet; Voxel: the cube albedo).</summary>
         public Color32 Color { get; set; } = Color32.FromRgba(1f, 1f, 1f);
 
         // Sprite kind only: flipbook sheet (same conventions as SpriteAnimationComponentData).
         // Fps 0 stretches the flipbook once over each particle's lifetime.
+        [AuthoredByHost(AuthoredBySources.Asset), AuthorAssetKinds(".png", ".jpg", ".jpeg")]
+        [AuthorVisibleWhen(nameof(Kind), ParticleRenderKind.Sprite)]
+        [AuthorDoc("Flipbook spritesheet for the particles.")]
         public string? Sheet { get; set; }
         public int Columns { get; set; } = 1;
         public int Rows { get; set; } = 1;
@@ -621,6 +655,36 @@ namespace Paradise.Export.Data
         public string Group { get; set; } = "";
     }
 
+    /// <summary>
+    /// What an entity IS, as an authored component.
+    ///
+    /// Routed onto <see cref="LevelEntityData"/> itself rather than into
+    /// <see cref="EntityComponentsData"/> — these are not things an entity HAS. It exists as a
+    /// component so identity is declared in the same place as everything else and every editor
+    /// builds its control for it from the same document, rather than each hardcoding a "Kind" box.
+    ///
+    /// The entity's GUID is deliberately absent: minting one and keeping it unique across a scene
+    /// is behaviour, and behaviour is the one thing a schema cannot carry.
+    /// </summary>
+    [Authored(ParadiseComponentIds.Identity, DisplayName = "Identity")]
+    public sealed record IdentityComponentData
+    {
+        [AuthorDoc("Free-form label the runtime groups by, e.g. Prop, Character, Door.")]
+        public string Kind { get; set; } = "Prop";
+
+        [AuthorDoc("Spawn this entity when the level loads.")]
+        public bool IsActive { get; set; } = true;
+
+        [AuthorDoc("Animation clip to start on spawn; empty for none.")]
+        public string? InitialAnimation { get; set; }
+
+        [AuthorDoc("Name shown in tools; defaults to the node's own name.")]
+        public string? DisplayName { get; set; }
+
+        [AuthorDoc("When in the load sequence this entity appears.")]
+        public string? SpawnPhase { get; set; }
+    }
+
     public sealed record NavMeshAgentData
     {
         public float Speed { get; set; } = 2f;
@@ -648,6 +712,15 @@ namespace Paradise.Export.Data
         public float CooldownSeconds { get; set; } = 0.75f;
     }
 
+    /// <summary>
+    /// One collision shape, AUTHORED by pointing at the host's own shape object and edited with its
+    /// native handles — every field below is baked out of that object at export.
+    ///
+    /// Note this is a class with a subclass (<see cref="InteractableColliderData"/>). The authoring
+    /// schema has no notion of inheritance, so it describes the base only; interaction colliders
+    /// carry no extra geometry today, so nothing is lost yet.
+    /// </summary>
+    [AuthoredByHost(AuthoredBySources.Shape)]
     public class ColliderShapeData
     {
         public string? Id { get; set; }

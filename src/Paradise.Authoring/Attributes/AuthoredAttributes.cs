@@ -102,16 +102,60 @@ public sealed class AuthorBoxGizmoAttribute(
 }
 
 /// <summary>
-/// This record is authored by REFERENCING a native shape object, not by typing its numbers.
+/// This value is authored by REFERENCING one of the host's own objects, not by typing its numbers.
 ///
-/// The editor shows a picker — Godot a <c>CollisionShape3D</c> slot, Blender an object slot — and
-/// you edit the shape itself, with the host's own gizmo and handles. Nothing is mirrored and
-/// nothing syncs: the reference IS the authoring surface.
+/// The editor shows a picker — Godot a typed node slot, Blender an object slot — and you edit the
+/// referenced object with the host's own gizmo and handles. Nothing is mirrored and nothing syncs:
+/// the reference IS the authoring surface.
 ///
-/// The asymmetry to keep in mind: authored as a REFERENCE, exported as a VALUE. A NodePath means
-/// nothing to the runtime, so the exporter bakes the referenced shape into this record's fields.
-/// That is the same thing the addon already does for <c>EntityExport.PhysicsColliders</c> — this
-/// just makes it something a game can declare rather than something the addon hardcodes.
+/// The asymmetry to keep in mind: authored as a REFERENCE, exported as a VALUE. A host's node path
+/// means nothing to the runtime, so the exporter bakes whatever is referenced into this record's
+/// own fields.
+///
+/// Usable on a TYPE (the whole record is authored this way) or on a PROPERTY (just that field is).
+/// </summary>
+[AttributeUsage(
+    AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Property,
+    Inherited = false)]
+public sealed class AuthoredByHostAttribute(string kind) : Attribute
+{
+    /// <summary>One of <c>AuthoredBySources</c>: shape, mesh, sprite, asset.</summary>
+    public string Kind { get; } = kind;
+}
+
+/// <summary>
+/// This record is authored by referencing a collision shape. Shorthand for
+/// <c>[AuthoredByHost("shape")]</c>, and the original spelling of it.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
 public sealed class AuthorNativeShapeAttribute : Attribute;
+
+/// <summary>
+/// The file extensions an <c>asset</c> reference accepts, e.g. <c>[AuthorAssetKinds(".glb",
+/// ".gltf")]</c>.
+///
+/// What the file IS, never a host's filter syntax — Godot wants <c>"*.glb,*.gltf"</c> and Blender
+/// wants something else again, and each can build its own from this.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class AuthorAssetKindsAttribute(params string[] extensions) : Attribute
+{
+    public string[] Extensions { get; } = extensions;
+}
+
+/// <summary>
+/// Show this property only while a SIBLING property holds a given value.
+///
+/// Declared rather than coded because the alternative is what it replaces: a seventeen-field
+/// particle block permanently visible on every prop, or a host-specific visibility hook that every
+/// other editor has to reimplement in its own language.
+///
+/// <paramref name="value"/> is compared at the sibling's own type — pass <c>true</c> for a bool,
+/// the member name for an enum.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class AuthorVisibleWhenAttribute(string field, object value) : Attribute
+{
+    public string Field { get; } = field;
+    public object Value { get; } = value;
+}

@@ -92,13 +92,19 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         }
 
         var json = new StringBuilder();
-        json.Append("{\"version\":1,\"components\":[");
+        // Must track AuthoringSchemaDocument.CurrentVersion. Not referenced: this analyzer targets
+        // netstandard2.0 and deliberately does not link the runtime package it feeds.
+        json.Append("{\"version\":2,\"components\":[");
         for (var i = 0; i < present.Count; i++)
         {
             var type = present[i];
             if (i > 0) json.Append(',');
             json.Append("{\"id\":").Append(Quote(type.ComponentId));
             json.Append(",\"displayName\":").Append(Quote(type.DisplayName));
+            if (type.AuthoredBy is { } componentSource)
+            {
+                json.Append(",\"authoredBy\":").Append(Quote(componentSource));
+            }
             if (type.BoxGizmo is { } box)
             {
                 // How the component LOOKS while you edit it, declared with everything else - so an
@@ -141,42 +147,69 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         json.Append('[');
         for (var f = 0; f < fields.Count; f++)
         {
-            var field = fields[f];
             if (f > 0) json.Append(',');
-            json.Append("{\"name\":").Append(Quote(field.Name));
-            json.Append(",\"type\":").Append(Quote(field.SchemaType));
-            if (field.Unit is not null) json.Append(",\"unit\":").Append(Quote(field.Unit));
-            if (field.Doc is not null) json.Append(",\"doc\":").Append(Quote(field.Doc));
-            if (field.Minimum is { } min) json.Append(",\"minimum\":").Append(Number(min));
-            if (field.Maximum is { } max) json.Append(",\"maximum\":").Append(Number(max));
-            if (DefaultAsJson(field.Default, field.SchemaType) is { } literal)
-            {
-                json.Append(",\"default\":").Append(literal);
-            }
-            if (field.EnumValues is { Count: > 0 } values)
-            {
-                json.Append(",\"values\":[");
-                for (var v = 0; v < values.Count; v++)
-                {
-                    if (v > 0) json.Append(',');
-                    json.Append(Quote(values[v]));
-                }
-                json.Append(']');
-            }
-            if (field.NativeShape)
-            {
-                // Authored by pointing at the host's own shape object; the nested fields below are
-                // what gets BAKED out of it at export time.
-                json.Append(",\"authoredBy\":\"nativeShape\"");
-            }
-            if (field.Nested is { } nested)
-            {
-                json.Append(",\"fields\":");
-                AppendFields(json, nested);
-            }
-            json.Append('}');
+            AppendField(json, fields[f]);
         }
         json.Append(']');
+    }
+
+    /// <summary>One field object. Split out from <see cref="AppendFields"/> because an array's
+    /// element is a single field object, not a one-element list — an editor reads
+    /// <c>items.type</c>, never <c>items[0].type</c>.</summary>
+    private static void AppendField(StringBuilder json, AuthoredField field)
+    {
+        json.Append("{\"name\":").Append(Quote(field.Name));
+        json.Append(",\"type\":").Append(Quote(field.SchemaType));
+        if (field.Unit is not null) json.Append(",\"unit\":").Append(Quote(field.Unit));
+        if (field.Doc is not null) json.Append(",\"doc\":").Append(Quote(field.Doc));
+        if (field.Minimum is { } min) json.Append(",\"minimum\":").Append(Number(min));
+        if (field.Maximum is { } max) json.Append(",\"maximum\":").Append(Number(max));
+        if (DefaultAsJson(field.Default, field.SchemaType) is { } literal)
+        {
+            json.Append(",\"default\":").Append(literal);
+        }
+        if (field.EnumValues is { Count: > 0 } values)
+        {
+            json.Append(",\"values\":[");
+            for (var v = 0; v < values.Count; v++)
+            {
+                if (v > 0) json.Append(',');
+                json.Append(Quote(values[v]));
+            }
+            json.Append(']');
+        }
+        if (field.AuthoredBy is { } source)
+        {
+            // Authored by pointing at one of the host's own objects; any nested fields below are
+            // what gets BAKED out of it at export time.
+            json.Append(",\"authoredBy\":").Append(Quote(source));
+        }
+        if (field.AssetKinds is { Count: > 0 } kinds)
+        {
+            json.Append(",\"assetKinds\":[");
+            for (var k = 0; k < kinds.Count; k++)
+            {
+                if (k > 0) json.Append(',');
+                json.Append(Quote(kinds[k]));
+            }
+            json.Append(']');
+        }
+        if (field.VisibleWhenField is { } guard && field.VisibleWhenValue is { } guardValue)
+        {
+            json.Append(",\"visibleWhen\":{\"field\":").Append(Quote(guard))
+                .Append(",\"equals\":").Append(guardValue).Append('}');
+        }
+        if (field.Nested is { } nested)
+        {
+            json.Append(",\"fields\":");
+            AppendFields(json, nested);
+        }
+        if (field.Items is { } items)
+        {
+            json.Append(",\"items\":");
+            AppendField(json, items);
+        }
+        json.Append('}');
     }
 
     /// <summary>
