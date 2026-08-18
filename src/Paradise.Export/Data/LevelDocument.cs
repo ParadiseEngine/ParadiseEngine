@@ -3,6 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Paradise.Authoring;
 
 namespace Paradise.Export.Data
 {
@@ -98,6 +101,37 @@ namespace Paradise.Export.Data
         public SpriteAnimationComponentData? SpriteAnimation { get; set; }
         public ParticleEmitterComponentData? ParticleEmitter { get; set; }
         public AudioEmitterComponentData? AudioEmitter { get; set; }
+
+        /// <summary>
+        /// Components the ENGINE does not define: authored data declared by a game (or by a future
+        /// engine module) with <c>[Authored]</c>, carried verbatim so neither the exporter nor this
+        /// contract has to know the type.
+        ///
+        /// Null — and therefore absent from the written document — when nothing authored anything,
+        /// which is what keeps every existing exported file byte-identical.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<AuthoredComponentData>? Custom { get; set; }
+    }
+
+    /// <summary>
+    /// One game-defined component riding along with an entity: a stable id and an opaque payload.
+    ///
+    /// <see cref="Data"/> is a <see cref="JsonElement"/> on purpose. The engine cannot name the
+    /// type — that is the entire point of the mechanism — so it carries the payload untouched and
+    /// the GAME deserializes it into its own record through its own source-generated
+    /// <c>JsonSerializerContext</c>. Handing it over as a live object instead would force a
+    /// reflection serializer somewhere, which pins Godot's collectible AssemblyLoadContext and
+    /// breaks C# hot-reload (godotengine/godot#78513) — the documented reason this whole contract
+    /// is source-generated.
+    /// </summary>
+    public sealed record AuthoredComponentData
+    {
+        /// <summary>The <c>[Authored]</c> component id, e.g. <c>pingu.pool</c>.</summary>
+        public string Id { get; set; } = "";
+
+        /// <summary>The serialized record, exactly as the editor wrote it.</summary>
+        public JsonElement Data { get; set; }
     }
 
     /// <summary>
@@ -125,14 +159,37 @@ namespace Paradise.Export.Data
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000003")]
+    /// <summary>
+    /// The first engine component to declare its own authoring surface.
+    ///
+    /// <c>[Authored]</c> here is purely ADDITIVE: it publishes this component to the schema so a
+    /// data-driven editor can build a UI for it, and removes nothing from <c>EntityExport</c>,
+    /// whose rigidbody fields keep working exactly as before. Retiring those is a separate,
+    /// breaking migration across the games that consume this contract.
+    /// </summary>
+    [Authored("paradise.rigidbody", DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
+        [AuthorDoc("Static bodies never move; dynamic ones are simulated.")]
         public PhysicsBodyType BodyType { get; set; }
+
+        [Kilograms, AuthorRange(0.001, 10000)]
+        [AuthorDoc("Mass in kilograms. Ignored for static bodies.")]
         public float Mass { get; set; } = 1f;
+
+        [AuthorRange(0, 100), AuthorDoc("Linear velocity bleed-off per second.")]
         public float LinearDamping { get; set; } = 0.2f;
+
+        [Unit01, AuthorDoc("Bounciness: 0 absorbs the impact, 1 returns it.")]
         public float Restitution { get; set; } = 0.2f;
+
+        [Unit01, AuthorDoc("Surface friction: 0 is ice, 1 is grippy.")]
         public float Friction { get; set; } = 0.5f;
+
+        [AuthorDoc("Collision layer index. Prefer LayerName where the project defines one.")]
         public int Layer { get; set; }
+
+        [AuthorDoc("Named collision layer, resolved against the project's layer contract.")]
         public string? LayerName { get; set; }
     }
 

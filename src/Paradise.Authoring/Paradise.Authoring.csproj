@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The authored-data vocabulary: [Authored] and its semantic hints, plus the typed schema model
+    that C# editor hosts read.
+
+    ZERO dependencies, and that is the point. These attributes go on a GAME's own records, and a
+    game's simulation assembly (deterministic, wasm-targeted) must not inherit DotRecast or the
+    Blender/KTX process orchestration that Paradise.Export carries just to see an attribute. That
+    is why this is its own package rather than living in Paradise.Export — which references it,
+    not the other way round.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Title>Paradise.Authoring</Title>
+    <PackageId>Paradise.Authoring</PackageId>
+    <Description>Declare authoring data once and let every editor build its own UI: the [Authored] attribute vocabulary, a source generator that publishes an engine-neutral schema document, and the typed model for reading it. No engine, editor or serialization dependency.</Description>
+    <PackageTags>authoring;editor;schema;source-generator;game-dev</PackageTags>
+    <!-- Source-generated System.Text.Json keeps schema parsing reflection-free, which matters
+         because it is parsed inside the Godot editor's collectible AssemblyLoadContext. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the generator inside this package so consumers get the schema emitter by referencing
+         one thing. Same mechanism Paradise.ECS uses for its own generator. -->
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.Generators\bin\$(Configuration)\netstandard2.0\Paradise.Authoring.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+
+</Project>

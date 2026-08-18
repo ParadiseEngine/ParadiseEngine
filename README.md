@@ -16,6 +16,7 @@ All library packages are published to NuGet from a single version tag.
 | [Paradise.BLOB](src/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
 | [Paradise.Physics](src/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
 | [Paradise.Export](src/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
+| [Paradise.Authoring](src/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | Declare authoring data once with `[Authored]`; a source generator publishes an editor-neutral schema every editor builds its own UI from |
 
 ### ECS
 

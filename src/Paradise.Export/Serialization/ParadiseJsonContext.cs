@@ -19,6 +19,7 @@ namespace Paradise.Export.Serialization
     [JsonSerializable(typeof(ProjectSettingsData))]
     [JsonSerializable(typeof(LevelMaterialData))]
     [JsonSerializable(typeof(PrefabTemplateData))]
+    [JsonSerializable(typeof(AuthoredComponentData))]
     internal sealed partial class ParadiseJsonContext : JsonSerializerContext
     {
     }
