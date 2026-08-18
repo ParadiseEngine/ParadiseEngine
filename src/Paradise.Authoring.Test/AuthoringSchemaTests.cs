@@ -28,7 +28,7 @@ public class AuthoringSchemaTests
         var schema = Schema();
         await Assert.That(schema.Version).IsEqualTo(AuthoringSchemaDocument.CurrentVersion);
         await Assert.That(schema.Components.Select(c => c.Id))
-            .IsEquivalentTo(new[] { "test.a-minimal", "test.everything" });
+            .IsEquivalentTo(new[] { "test.a-minimal", "test.by-sprite", "test.everything", "test.v2" });
     }
 
     [Test]
@@ -149,8 +149,7 @@ public class AuthoringSchemaTests
     [Test]
     public async Task a_native_shape_part_is_marked_as_such()
     {
-        await Assert.That(Field(Everything(), "Box").AuthoredBy)
-            .IsEqualTo(AuthoredBySources.NativeShape);
+        await Assert.That(Field(Everything(), "Box").AuthoredBy).IsEqualTo(AuthoredBySources.Shape);
     }
 
     [Test]

@@ -23,9 +23,19 @@ internal sealed class AuthoredField
     /// <summary>Set when this field is itself a composed object — its own fields, recursively.
     /// An entity's authored data is a tree, not a row.</summary>
     public List<AuthoredField>? Nested;
-    /// <summary>True when the composed type is authored by REFERENCING a native shape rather than
-    /// by typing its numbers. The nested fields still describe what gets BAKED into the export.</summary>
-    public bool NativeShape;
+    /// <summary>Which kind of host object this value is authored by referencing (shape, mesh,
+    /// sprite, asset), or null when it is typed directly. Any nested fields still describe what
+    /// gets BAKED out of that reference at export.</summary>
+    public string? AuthoredBy;
+    /// <summary>Element model when this field is a list. Arrays are a repeated ROW in an editor,
+    /// not a composed group, so the element lives here rather than in Nested.</summary>
+    public AuthoredField? Items;
+    /// <summary>Accepted file extensions, when AuthoredBy is "asset".</summary>
+    public List<string>? AssetKinds;
+    /// <summary>Sibling field name this one is shown for, or null when always shown.</summary>
+    public string? VisibleWhenField;
+    /// <summary>The sibling value that reveals this field, already rendered as a JSON literal.</summary>
+    public string? VisibleWhenValue;
 }
 
 /// <summary>One authored record: an id, a display name, and its fields.</summary>
@@ -36,14 +46,41 @@ internal sealed class AuthoredType
     public List<AuthoredField> Fields = new();
     /// <summary>Optional wireframe box, as field names — see AuthorBoxGizmoAttribute.</summary>
     public string[]? BoxGizmo;
+    /// <summary>Host-object kind the whole component is authored by referencing, or null.</summary>
+    public string? AuthoredBy;
+}
+
+/// <summary>Just enough of an [Authored] type to build a registry entry: the id it travels under
+/// and the record it deserializes into.</summary>
+internal sealed class AuthoredIdentity
+{
+    public string ComponentId = "";
+    public string TypeName = "";
 }
 
 internal static class AuthoredModel
 {
+    /// <summary>The id and type name only. The registry does not care about fields, and reading the
+    /// whole tree for it would make every [Authored] edit re-run work nothing consumes.</summary>
+    public static AuthoredIdentity? ReadIdentity(INamedTypeSymbol type)
+    {
+        var attribute = type.GetAttributes().FirstOrDefault(
+            a => a.AttributeClass?.ToDisplayString() == AuthoredAttribute);
+        if (attribute is not { ConstructorArguments.Length: > 0 } ||
+            attribute.ConstructorArguments[0].Value is not string id || id.Length == 0)
+        {
+            return null;
+        }
+        return new AuthoredIdentity { ComponentId = id, TypeName = type.Name };
+    }
+
     private const string Namespace = "Paradise.Authoring";
     public const string AuthoredAttribute = Namespace + ".AuthoredAttribute";
     private const string BoxGizmoAttribute = Namespace + ".AuthorBoxGizmoAttribute";
     private const string NativeShapeAttribute = Namespace + ".AuthorNativeShapeAttribute";
+    private const string AuthoredByHostAttribute = Namespace + ".AuthoredByHostAttribute";
+    private const string AssetKindsAttribute = Namespace + ".AuthorAssetKindsAttribute";
+    private const string VisibleWhenAttribute = Namespace + ".AuthorVisibleWhenAttribute";
 
     /// <summary>Read an [Authored] record into the editor-neutral model. Returns null when the
     /// symbol is not usable, which the generator treats as "emit nothing" rather than crashing a
@@ -89,6 +126,7 @@ internal static class AuthoredModel
         {
             ComponentId = componentId,
             DisplayName = displayName,
+            AuthoredBy = HostKindOf(type),
         };
 
         var gizmo = type.GetAttributes().FirstOrDefault(
@@ -110,41 +148,55 @@ internal static class AuthoredModel
                 continue;
             }
 
-            var schemaType = SchemaTypeOf(member.Type);
+            var elementType = ElementTypeOf(member.Type);
+            var valueType = elementType ?? member.Type;
+
+            var schemaType = SchemaTypeOf(valueType);
             List<AuthoredField>? nested = null;
             List<string>? enumValues = null;
-            var nativeShape = false;
+            // PROPERTY first: it is the more specific declaration, so a field that wants a
+            // different kind from the one its type declares gets it. The type is the fallback.
+            string? authoredBy = HostKindOfMember(member) ?? HostKindOf(valueType);
 
             if (schemaType == "enum")
             {
-                enumValues = EnumValuesOf(member.Type);
+                enumValues = EnumValuesOf(valueType);
             }
             else if (schemaType is null)
             {
-                // Not a scalar - but it may be a COMPOSED type: another record whose fields are
+                // Not a leaf - but it may be a COMPOSED type: another record whose fields are
                 // themselves authorable. Recursing is what lets a component own a BoxCollider and
                 // have it appear nested rather than flattened by hand.
-                nested = ComposedFieldsOf(member.Type, depth);
+                nested = ComposedFieldsOf(valueType, depth);
                 if (nested is null)
                 {
                     // Genuinely unsupported: skipped rather than guessed at, because a schema that
                     // claims a control an editor cannot draw is worse than an absent one.
                     continue;
                 }
-                nativeShape = member.Type.GetAttributes().Any(
-                    a => a.AttributeClass?.ToDisplayString() == NativeShapeAttribute);
                 schemaType = "object";
             }
 
-            var field = new AuthoredField
+            var value = new AuthoredField
             {
                 Name = member.Name,
                 SchemaType = schemaType,
-                Default = DefaultOf(member),
+                Default = elementType is null ? DefaultOf(member) : null,
                 EnumValues = enumValues,
                 Nested = nested,
-                NativeShape = nativeShape,
+                AuthoredBy = authoredBy,
             };
+
+            // A list becomes an ARRAY field whose element carries everything just derived. The
+            // element is unnamed: an editor labels rows by index, not by the property name.
+            var field = elementType is null
+                ? value
+                : new AuthoredField
+                {
+                    Name = member.Name,
+                    SchemaType = "array",
+                    Items = value,
+                };
 
             foreach (var a in member.GetAttributes())
             {
@@ -165,6 +217,17 @@ internal static class AuthoredModel
                     case Namespace + ".AuthorRangeAttribute" when a.ConstructorArguments.Length == 2:
                         field.Minimum = ToDouble(a.ConstructorArguments[0].Value);
                         field.Maximum = ToDouble(a.ConstructorArguments[1].Value);
+                        break;
+                    case AssetKindsAttribute when a.ConstructorArguments.Length == 1:
+                        field.AssetKinds = a.ConstructorArguments[0].Values
+                            .Select(v => v.Value as string)
+                            .Where(v => !string.IsNullOrEmpty(v))
+                            .Select(v => v!)
+                            .ToList();
+                        break;
+                    case VisibleWhenAttribute when a.ConstructorArguments.Length == 2:
+                        field.VisibleWhenField = a.ConstructorArguments[0].Value as string;
+                        field.VisibleWhenValue = JsonLiteralOf(a.ConstructorArguments[1]);
                         break;
                 }
             }
@@ -195,6 +258,88 @@ internal static class AuthoredModel
         return composed is { Fields.Count: > 0 } ? composed.Fields : null;
     }
 
+    /// <summary>The element type of a list or array, or null when the type is not one. A list is
+    /// the only collection shape supported: a dictionary has no obvious control anywhere.</summary>
+    private static ITypeSymbol? ElementTypeOf(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol array)
+        {
+            return array.ElementType;
+        }
+        if (type is INamedTypeSymbol { IsGenericType: true } named)
+        {
+            var definition = named.ConstructedFrom.ToDisplayString();
+            if (definition == "System.Collections.Generic.List<T>" ||
+                definition == "System.Collections.Generic.IReadOnlyList<T>" ||
+                definition == "System.Collections.Generic.IList<T>")
+            {
+                return named.TypeArguments[0];
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The host-object kind a TYPE declares it is authored by referencing.</summary>
+    private static string? HostKindOf(ITypeSymbol type)
+    {
+        foreach (var a in type.GetAttributes())
+        {
+            var name = a.AttributeClass?.ToDisplayString();
+            if (name == NativeShapeAttribute)
+            {
+                return "shape";
+            }
+            if (name == AuthoredByHostAttribute && a.ConstructorArguments.Length == 1)
+            {
+                return a.ConstructorArguments[0].Value as string;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The host-object kind a PROPERTY declares, which wins over its type's.</summary>
+    private static string? HostKindOfMember(IPropertySymbol member)
+    {
+        foreach (var a in member.GetAttributes())
+        {
+            if (a.AttributeClass?.ToDisplayString() == AuthoredByHostAttribute &&
+                a.ConstructorArguments.Length == 1)
+            {
+                return a.ConstructorArguments[0].Value as string;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>An attribute argument as a JSON literal, for the visibility comparison value.</summary>
+    private static string? JsonLiteralOf(TypedConstant constant)
+    {
+        if (constant.Value is null)
+        {
+            return null;
+        }
+        // An enum arrives as its underlying integer; the schema compares enums BY NAME, matching
+        // how the contract serializes them, so the member name is recovered here.
+        if (constant.Type is { TypeKind: TypeKind.Enum } enumType)
+        {
+            foreach (var f in enumType.GetMembers().OfType<IFieldSymbol>())
+            {
+                if (f.ConstantValue is not null && f.ConstantValue.Equals(constant.Value))
+                {
+                    return "\"" + f.Name + "\"";
+                }
+            }
+            return null;
+        }
+        return constant.Value switch
+        {
+            bool b => b ? "true" : "false",
+            string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            _ => System.Convert.ToString(
+                constant.Value, System.Globalization.CultureInfo.InvariantCulture),
+        };
+    }
+
     /// <summary>Editor-neutral type names. Deliberately few: every one of these has an obvious
     /// control in Godot, Blender and HTML alike, and each addition is work in every editor.</summary>
     private static string? SchemaTypeOf(ITypeSymbol type)
@@ -206,10 +351,24 @@ internal static class AuthoredModel
             return "enum";
         }
 
+        // Small fixed-size aggregates are LEAVES, matched by name so this project keeps its
+        // zero-dependency promise (Color32 lives in Paradise.Export, which depends on us, not the
+        // other way round). Decomposing them into floats would discard the dedicated control every
+        // editor already has.
+        switch (type.ToDisplayString())
+        {
+            case "System.Numerics.Vector2": return "vector2";
+            case "System.Numerics.Vector3": return "vector3";
+            case "System.Numerics.Vector4": return "color";
+            case "System.Numerics.Quaternion": return "quaternion";
+            case "Paradise.Export.Data.Color32": return "color";
+        }
+
         return type.SpecialType switch
         {
             SpecialType.System_Single or SpecialType.System_Double => "float",
             SpecialType.System_Int32 or SpecialType.System_Int64 => "int",
+            SpecialType.System_UInt32 or SpecialType.System_UInt64 => "int",
             SpecialType.System_Boolean => "bool",
             SpecialType.System_String => "string",
             _ => null,

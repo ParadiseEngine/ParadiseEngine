@@ -102,6 +102,12 @@ namespace Paradise.Export.Data
         public ParticleEmitterComponentData? ParticleEmitter { get; set; }
         public AudioEmitterComponentData? AudioEmitter { get; set; }
 
+        /// <summary>A light this entity owns, authored by pointing at one. Null — and absent from
+        /// the document — when the entity authors none, which is every entity in every scene
+        /// written before lights could be authored this way.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SceneLightData? Light { get; set; }
+
         /// <summary>
         /// Components the ENGINE does not define: authored data declared by a game (or by a future
         /// engine module) with <c>[Authored]</c>, carried verbatim so neither the exporter nor this
@@ -146,34 +152,50 @@ namespace Paradise.Export.Data
     /// Schema v1 documents carry neither field (null = no mesh exported).
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000001")]
+    [Authored(ParadiseComponentIds.Renderable, DisplayName = "Renderable")]
     public sealed record RenderableComponentData
     {
+        /// <summary>
+        /// Authored by picking the source GLB, and BAKED to the data-relative path the runtime
+        /// resolves.
+        ///
+        /// An ASSET rather than a mesh-node reference, because that is how it was actually
+        /// authored: the field this replaces was a file picker, and in the sample scenes only 6 of
+        /// 28 entities with a mesh had a node to point at at all — the rest named a file. A node
+        /// reference would have been unauthorable for most of them.
+        /// </summary>
+        [AuthoredByHost(AuthoredBySources.Asset)]
+        [AuthorAssetKinds(".glb", ".gltf")]
+        [AuthorDoc("The source GLB this entity renders.")]
         public string? Mesh { get; set; }
+
+        [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
         public string? MeshNode { get; set; }
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000002")]
+    [Authored(ParadiseComponentIds.Collider, DisplayName = "Collider")]
     public sealed record ColliderComponentData
     {
+        /// <summary>A list of shape references. Each is edited with the host's own handles and
+        /// baked into the numbers below it at export.</summary>
+        [AuthorDoc("Collision shapes, edited with the host's own handles.")]
         public List<ColliderShapeData> Colliders { get; set; } = new();
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000003")]
-    /// <summary>
-    /// The first engine component to declare its own authoring surface.
-    ///
-    /// <c>[Authored]</c> here is purely ADDITIVE: it publishes this component to the schema so a
-    /// data-driven editor can build a UI for it, and removes nothing from <c>EntityExport</c>,
-    /// whose rigidbody fields keep working exactly as before. Retiring those is a separate,
-    /// breaking migration across the games that consume this contract.
-    /// </summary>
-    [Authored("paradise.rigidbody", DisplayName = "Rigidbody")]
+    /// <summary>The first engine component to declare its own authoring surface, and the template
+    /// the other eight followed.</summary>
+    [Authored(ParadiseComponentIds.Rigidbody, DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
         [AuthorDoc("Static bodies never move; dynamic ones are simulated.")]
         public PhysicsBodyType BodyType { get; set; }
 
         [Kilograms, AuthorRange(0.001, 10000)]
+        // The guard EntityExport could not express: mass means nothing on a static body, and a
+        // field that is meaningless most of the time is a field authors mis-set.
+        [AuthorVisibleWhen(nameof(BodyType), PhysicsBodyType.Dynamic)]
         [AuthorDoc("Mass in kilograms. Ignored for static bodies.")]
         public float Mass { get; set; } = 1f;
 
@@ -190,21 +212,34 @@ namespace Paradise.Export.Data
         public int Layer { get; set; }
 
         [AuthorDoc("Named collision layer, resolved against the project's layer contract.")]
-        public string? LayerName { get; set; }
+        public string? LayerName { get; set; } = "";
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000004")]
+    [Authored(ParadiseComponentIds.Agent, DisplayName = "Agent (movement)")]
     public sealed record AgentComponentData
     {
+        [AuthorRange(0.01, 100), AuthorDoc("Movement speed in metres per second.")]
         public float MoveSpeed { get; set; } = 1.4f;
+
+        [AuthorRange(0.01, 1000), AuthorDoc("How hard the agent accelerates toward its speed.")]
         public float Acceleration { get; set; } = 40f;
-        public string? IdleClip { get; set; }
-        public string? WalkClip { get; set; }
+
+        /// <summary>Defaulted here rather than substituted at export. The old authoring layer
+        /// swapped a blank clip for these names on the way out, which meant the fallback was
+        /// invisible to anyone reading the record — and unreachable to any editor but Godot's.</summary>
+        [AuthorDoc("Animation clip played while standing still.")]
+        public string? IdleClip { get; set; } = "Idle";
+
+        [AuthorDoc("Animation clip played while moving.")]
+        public string? WalkClip { get; set; } = "Walk";
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000005")]
+    [Authored(ParadiseComponentIds.Interactable, DisplayName = "Interactable")]
     public sealed record EntityInteractableComponentData
     {
+        [AuthorDoc("Name shown to the player when this can be interacted with.")]
         public string? DisplayName { get; set; }
     }
 
@@ -218,6 +253,10 @@ namespace Paradise.Export.Data
     /// clock (frame index lives in the world snapshot) so both hosts show the same frame.
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000006")]
+    [Authored(ParadiseComponentIds.SpriteAnimation, DisplayName = "Sprite animation")]
+    // The WHOLE record is authored by pointing at a sprite in the host: its sheet, grid and quad
+    // size are read off that object at export rather than retyped here.
+    [AuthoredByHost(AuthoredBySources.Sprite)]
     public sealed record SpriteAnimationComponentData
     {
         public string? Sheet { get; set; }
@@ -253,8 +292,10 @@ namespace Paradise.Export.Data
     /// +Y axis and live in WORLD space (a moving emitter leaves a trail).
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000007")]
+    [Authored(ParadiseComponentIds.ParticleEmitter, DisplayName = "Particle emitter")]
     public sealed record ParticleEmitterComponentData
     {
+        [AuthorDoc("Sprite = camera-facing flipbook quads; Voxel = solid tinted cubes.")]
         public ParticleRenderKind Kind { get; set; } = ParticleRenderKind.Sprite;
         /// <summary>Live-particle cap; clamped to the runtime's per-emitter buffer (64).</summary>
         public int MaxParticles { get; set; } = 64;
@@ -270,12 +311,16 @@ namespace Paradise.Export.Data
         public float StartSize { get; set; } = 0.25f;
         public float EndSize { get; set; } = 0.25f;
         /// <summary>RNG seed — same seed, same particle stream in both hosts.</summary>
+        [AuthorDoc("Same seed, same particle stream in every host.")]
         public uint Seed { get; set; } = 1;
         /// <summary>Tint (Sprite: multiplies the sheet; Voxel: the cube albedo).</summary>
         public Color32 Color { get; set; } = Color32.FromRgba(1f, 1f, 1f);
 
         // Sprite kind only: flipbook sheet (same conventions as SpriteAnimationComponentData).
         // Fps 0 stretches the flipbook once over each particle's lifetime.
+        [AuthoredByHost(AuthoredBySources.Asset), AuthorAssetKinds(".png", ".jpg", ".jpeg")]
+        [AuthorVisibleWhen(nameof(Kind), ParticleRenderKind.Sprite)]
+        [AuthorDoc("Flipbook spritesheet for the particles.")]
         public string? Sheet { get; set; }
         public int Columns { get; set; } = 1;
         public int Rows { get; set; } = 1;
@@ -316,10 +361,12 @@ namespace Paradise.Export.Data
     /// whose event was renamed goes quiet rather than failing the export.
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000008")]
+    [Authored(ParadiseComponentIds.AudioEmitter, DisplayName = "Audio emitter")]
     public sealed record AudioEmitterComponentData
     {
         /// <summary>Event posted for this emitter. Null or empty means the emitter exists as a
         /// positioned object but plays nothing until game code posts to it.</summary>
+        [AuthorDoc("Event posted for this emitter.")]
         public string? StartEvent { get; set; }
 
         /// <summary>Event posted to stop it. Optional: a one-shot needs none, and a loop can also
@@ -333,10 +380,14 @@ namespace Paradise.Export.Data
         /// <summary>False makes the emitter 2D — positioned in the scene for authoring
         /// convenience, but heard at full level regardless of where the listener is. Music and
         /// narration are the cases that want it.</summary>
+        [AuthorDoc("Off makes it 2D: positioned for convenience, heard at full level everywhere.")]
         public bool Is3D { get; set; } = true;
 
         /// <summary>Scales the attenuation curve authored on the sound, so one authored falloff
         /// can serve emitters of different physical size. 1 is the authored distance.</summary>
+        [AuthorRange(0.01, 100)]
+        [AuthorVisibleWhen(nameof(Is3D), true)]
+        [AuthorDoc("Scales the sound's authored falloff; 1 is the authored distance.")]
         public float AttenuationScale { get; set; } = 1f;
 
         public void ValidateAndNormalize()
@@ -589,6 +640,17 @@ namespace Paradise.Export.Data
         public float GlowThreshold { get; set; } = 1f;
     }
 
+    /// <summary>
+    /// A light. Reachable two ways, deliberately: as a scene-level entry under
+    /// <see cref="LightingStateData.Lights"/>, and as a component on an entity that AUTHORED one by
+    /// pointing at it.
+    ///
+    /// A light under an entity belongs to that entity and is not also listed at scene level, so a
+    /// light is only ever described once. Aiming is done by ROTATING the referenced object —
+    /// <see cref="Direction"/> is baked from its orientation, not typed.
+    /// </summary>
+    [Authored(ParadiseComponentIds.Light, DisplayName = "Light")]
+    [AuthoredByHost(AuthoredBySources.Light)]
     public sealed record SceneLightData
     {
         public string Id { get; set; } = "";
@@ -621,6 +683,48 @@ namespace Paradise.Export.Data
         public string Group { get; set; } = "";
     }
 
+    /// <summary>
+    /// What an entity IS, as an authored component.
+    ///
+    /// Routed onto <see cref="LevelEntityData"/> itself rather than into
+    /// <see cref="EntityComponentsData"/> — these are not things an entity HAS. It exists as a
+    /// component so identity is declared in the same place as everything else and every editor
+    /// builds its control for it from the same document, rather than each hardcoding a "Kind" box.
+    ///
+    /// The entity's GUID is deliberately absent: minting one and keeping it unique across a scene
+    /// is behaviour, and behaviour is the one thing a schema cannot carry.
+    /// </summary>
+    [Authored(ParadiseComponentIds.Identity, DisplayName = "Identity")]
+    public sealed record IdentityComponentData
+    {
+        [AuthorDoc("Free-form label the runtime groups by, e.g. Prop, Character, Door.")]
+        public string Kind { get; set; } = "Prop";
+
+        [AuthorDoc("Spawn this entity when the level loads.")]
+        public bool IsActive { get; set; } = true;
+
+        [AuthorDoc("Animation clip to start on spawn; empty for none.")]
+        public string? InitialAnimation { get; set; }
+
+        /// <summary>
+        /// The source asset this entity was placed from — provenance, not what renders.
+        ///
+        /// It lives on IDENTITY rather than on Renderable for a blunt reason: adding a field to
+        /// Renderable would change the shape of every exported document, and this had to move
+        /// without doing that. Identity never appears under Components (the router spreads it onto
+        /// the entity), so it is the one place a new authored field costs nothing.
+        /// </summary>
+        [AuthorAssetKinds(".glb", ".gltf", ".tscn", ".scn")]
+        [AuthorDoc("Source asset this entity was placed from.")]
+        public string? Prefab { get; set; }
+
+        [AuthorDoc("Name shown in tools; defaults to the node's own name.")]
+        public string? DisplayName { get; set; }
+
+        [AuthorDoc("When in the load sequence this entity appears.")]
+        public string? SpawnPhase { get; set; }
+    }
+
     public sealed record NavMeshAgentData
     {
         public float Speed { get; set; } = 2f;
@@ -648,6 +752,15 @@ namespace Paradise.Export.Data
         public float CooldownSeconds { get; set; } = 0.75f;
     }
 
+    /// <summary>
+    /// One collision shape, AUTHORED by pointing at the host's own shape object and edited with its
+    /// native handles — every field below is baked out of that object at export.
+    ///
+    /// Note this is a class with a subclass (<see cref="InteractableColliderData"/>). The authoring
+    /// schema has no notion of inheritance, so it describes the base only; interaction colliders
+    /// carry no extra geometry today, so nothing is lost yet.
+    /// </summary>
+    [AuthoredByHost(AuthoredBySources.Shape)]
     public class ColliderShapeData
     {
         public string? Id { get; set; }

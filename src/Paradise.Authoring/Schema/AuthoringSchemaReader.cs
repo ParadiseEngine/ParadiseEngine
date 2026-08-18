@@ -24,7 +24,39 @@ public static class AuthoringSchemaReader
                 $"Authoring schema is version {document.Version}, but this build understands at most "
                 + $"{AuthoringSchemaDocument.CurrentVersion}. Update the editor.");
         }
+        if (document.Version < AuthoringSchemaDocument.MinimumSupportedVersion)
+        {
+            throw new JsonException(
+                $"Authoring schema is version {document.Version}, older than the minimum supported "
+                + $"{AuthoringSchemaDocument.MinimumSupportedVersion}. Regenerate it.");
+        }
+
+        // v1 spelled the only host-object kind "nativeShape". Normalized on the way in so every
+        // consumer sees one vocabulary and no editor has to carry the old name.
+        foreach (var component in document.Components)
+        {
+            NormalizeLegacySources(component.Fields);
+        }
         return document;
+    }
+
+    private static void NormalizeLegacySources(List<AuthoredFieldSchema> fields)
+    {
+        foreach (var field in fields)
+        {
+            if (field.AuthoredBy == AuthoredBySources.NativeShape)
+            {
+                field.AuthoredBy = AuthoredBySources.Shape;
+            }
+            if (field.Fields is { } nested)
+            {
+                NormalizeLegacySources(nested);
+            }
+            if (field.Items is { } items)
+            {
+                NormalizeLegacySources([items]);
+            }
+        }
     }
 
     /// <summary>Serialize a document back out. Used by tests and by tooling that dumps the

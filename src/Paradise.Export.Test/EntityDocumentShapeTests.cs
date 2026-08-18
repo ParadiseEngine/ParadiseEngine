@@ -9,10 +9,11 @@ using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
-// Validates the entity export *shape* the Godot adapter produces — the DTO→JSON path for a
-// realistic entity (collider + rigidbody + agent). The Godot scene-walk that fills these DTOs is
-// verified manually in-editor; this pins the serialized structure the runtime consumes.
-public class EntityExportShapeTests
+// Validates the exported entity *shape* — the DTO→JSON path for a realistic entity (collider +
+// rigidbody + agent). It builds the DTOs directly, so it pins the serialized structure the runtime
+// consumes without depending on any editor. Named for the document, not for the node that used to
+// produce it: authoring now goes through [Authored] records and AuthoredComponentRouter.
+public class EntityDocumentShapeTests
 {
     private static LevelEntityData BuildBoxAgentEntity()
     {

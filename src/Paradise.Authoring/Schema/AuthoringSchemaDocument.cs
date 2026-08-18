@@ -14,8 +14,15 @@ namespace Paradise.Authoring;
 public sealed record AuthoringSchemaDocument
 {
     /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader would
-    /// misparse. Adding an optional member does not qualify.</summary>
-    public const int CurrentVersion = 1;
+    /// misparse. Adding an optional member does not qualify.
+    ///
+    /// v2 added the types the engine's own components need — arrays, vectors, quaternions, colour —
+    /// plus conditional visibility and host-object references beyond collision shapes. A v1 reader
+    /// would meet a <c>type</c> it has no control for, so the version had to move.</summary>
+    public const int CurrentVersion = 2;
+
+    /// <summary>The oldest document this build still understands.</summary>
+    public const int MinimumSupportedVersion = 1;
 
     public int Version { get; set; } = CurrentVersion;
     public List<AuthoredComponentSchema> Components { get; set; } = [];
@@ -32,6 +39,11 @@ public sealed record AuthoredComponentSchema
 
     /// <summary>How to draw the component while it is being edited, or null for no gizmo.</summary>
     public AuthoredGizmoSchema? Gizmo { get; set; }
+
+    /// <summary>Set when the WHOLE component is authored by pointing at one of the host's own
+    /// objects — see <see cref="AuthoredBySources"/>. Its fields are then what gets baked out of
+    /// that object, and an editor shows one picker instead of a form.</summary>
+    public string? AuthoredBy { get; set; }
 
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
 }
@@ -74,6 +86,37 @@ public sealed record AuthoredFieldSchema
     /// <summary>Set when this field is a composed object. An entity's authored data is a tree,
     /// not a row.</summary>
     public List<AuthoredFieldSchema>? Fields { get; set; }
+
+    /// <summary>The element schema when <see cref="Type"/> is <see cref="AuthoredFieldTypes.Array"/>.
+    /// An editor renders one row per element and lets the author add and remove them.</summary>
+    public AuthoredFieldSchema? Items { get; set; }
+
+    /// <summary>Show this field only while another field of the same component holds a given value,
+    /// or always when null.
+    ///
+    /// Data rather than behaviour on purpose: a seventeen-field particle block permanently visible
+    /// on every prop is the state this replaces, and each editor would otherwise reimplement the
+    /// same conditionals in its own language.</summary>
+    public AuthoredVisibilitySchema? VisibleWhen { get; set; }
+
+    /// <summary>File extensions this field accepts, when it is authored by picking an asset. What
+    /// the file IS — never a host's filter syntax.</summary>
+    public List<string>? AssetKinds { get; set; }
+}
+
+/// <summary>A field is shown only while <see cref="Field"/> equals <see cref="Equals"/>.</summary>
+public sealed record AuthoredVisibilitySchema
+{
+    /// <summary>Sibling field name within the same component.</summary>
+    public string Field { get; set; } = "";
+
+    /// <summary>The value that reveals the guarded field, as a JSON value at the sibling's own
+    /// type — <c>true</c> for a bool, a member name for an enum.
+    ///
+    /// Named <c>EqualTo</c> in C# because a record cannot declare a property called Equals, but the
+    /// document key stays <c>equals</c> so the schema reads naturally in every other language.</summary>
+    [JsonPropertyName("equals")]
+    public JsonElement EqualTo { get; set; }
 }
 
 /// <summary>A shape to draw in the viewport, sized from the component's own fields.</summary>
@@ -103,6 +146,17 @@ public static class AuthoredFieldTypes
 
     /// <summary>A composed value; read <see cref="AuthoredFieldSchema.Fields"/>.</summary>
     public const string Object = "object";
+
+    /// <summary>A repeated value; read <see cref="AuthoredFieldSchema.Items"/>.</summary>
+    public const string Array = "array";
+
+    // Small fixed-size numeric aggregates. Leaves, NOT composed objects: every editor has a
+    // dedicated control for them, and decomposing a Vector3 into three floats would throw that
+    // away and make the schema noisier at the same time.
+    public const string Vector2 = "vector2";
+    public const string Vector3 = "vector3";
+    public const string Quaternion = "quaternion";
+    public const string Color = "color";
 }
 
 /// <summary>The closed set of <see cref="AuthoredFieldSchema.Unit"/> values.</summary>
@@ -115,11 +169,35 @@ public static class AuthoredUnits
     public const string Unit01 = "unit01";
 }
 
-/// <summary>The closed set of <see cref="AuthoredFieldSchema.AuthoredBy"/> values.</summary>
+/// <summary>
+/// The closed set of <see cref="AuthoredFieldSchema.AuthoredBy"/> values: KINDS OF HOST OBJECT a
+/// value can be authored by pointing at, rather than by typing its numbers.
+///
+/// The asymmetry these all share is authored as a REFERENCE, exported as a VALUE — the editor bakes
+/// whatever it points at into the field's own numbers, because a host's node path means nothing to
+/// the runtime. Each editor maps a kind to its own picker: Godot a typed node slot, Blender an
+/// object slot. The kinds name what the object IS, never what any one editor calls it.
+/// </summary>
 public static class AuthoredBySources
 {
-    /// <summary>Authored by pointing at the host's own shape object and editing it with the host's
-    /// own handles; baked to values at export.</summary>
+    /// <summary>A collision shape, edited with the host's own handles.</summary>
+    public const string Shape = "shape";
+
+    /// <summary>A renderable mesh, whose source asset is resolved at export.</summary>
+    public const string Mesh = "mesh";
+
+    /// <summary>A 2D billboard sprite, whose sheet and quad geometry are read at export.</summary>
+    public const string Sprite = "sprite";
+
+    /// <summary>A light, whose colour, energy, shadows and aim are read at export. Its DIRECTION
+    /// comes from the referenced object's orientation, which is why you aim a light by rotating it
+    /// rather than by typing a vector.</summary>
+    public const string Light = "light";
+
+    /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
+    public const string Asset = "asset";
+
+    /// <summary>v1 spelling of <see cref="Shape"/>. Still accepted when reading an old document.</summary>
     public const string NativeShape = "nativeShape";
 }
 
