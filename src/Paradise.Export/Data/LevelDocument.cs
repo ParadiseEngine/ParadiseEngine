@@ -110,6 +110,12 @@ namespace Paradise.Export.Data
         /// Null — and therefore absent from the written document — when nothing authored anything,
         /// which is what keeps every existing exported file byte-identical.
         /// </summary>
+        /// <summary>A light this entity owns, authored by pointing at one. Null — and absent from
+        /// the document — when the entity authors none, which is every entity in every scene
+        /// written before lights could be authored this way.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SceneLightData? Light { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public List<AuthoredComponentData>? Custom { get; set; }
     }
@@ -634,6 +640,17 @@ namespace Paradise.Export.Data
         public float GlowThreshold { get; set; } = 1f;
     }
 
+    /// <summary>
+    /// A light. Reachable two ways, deliberately: as a scene-level entry under
+    /// <see cref="LightingStateData.Lights"/>, and as a component on an entity that AUTHORED one by
+    /// pointing at it.
+    ///
+    /// A light under an entity belongs to that entity and is not also listed at scene level, so a
+    /// light is only ever described once. Aiming is done by ROTATING the referenced object —
+    /// <see cref="Direction"/> is baked from its orientation, not typed.
+    /// </summary>
+    [Authored(ParadiseComponentIds.Light, DisplayName = "Light")]
+    [AuthoredByHost(AuthoredBySources.Light)]
     public sealed record SceneLightData
     {
         public string Id { get; set; } = "";

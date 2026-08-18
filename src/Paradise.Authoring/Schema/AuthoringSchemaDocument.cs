@@ -189,6 +189,11 @@ public static class AuthoredBySources
     /// <summary>A 2D billboard sprite, whose sheet and quad geometry are read at export.</summary>
     public const string Sprite = "sprite";
 
+    /// <summary>A light, whose colour, energy, shadows and aim are read at export. Its DIRECTION
+    /// comes from the referenced object's orientation, which is why you aim a light by rotating it
+    /// rather than by typing a vector.</summary>
+    public const string Light = "light";
+
     /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
 

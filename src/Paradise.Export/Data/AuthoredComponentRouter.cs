@@ -84,6 +84,9 @@ namespace Paradise.Export.Data
                     return Assign<SpriteAnimationComponentData>(component,
                         value => components.SpriteAnimation = value);
 
+                case ParadiseComponentIds.Light:
+                    return Assign<SceneLightData>(component, value => components.Light = value);
+
                 case ParadiseComponentIds.AudioEmitter:
                     return Assign<AudioEmitterComponentData>(component,
                         value => components.AudioEmitter = value);
@@ -148,6 +151,7 @@ namespace Paradise.Export.Data
             if (c.SpriteAnimation is { } sprite) instances.Add(sprite);
             if (c.ParticleEmitter is { } particles) instances.Add(particles);
             if (c.AudioEmitter is { } audio) instances.Add(audio);
+            if (c.Light is { } light) instances.Add(light);
 
             foreach (AuthoredComponentData custom in c.Custom ?? [])
             {
@@ -176,7 +180,8 @@ namespace Paradise.Export.Data
             ParadiseComponentIds.Interactable or
             ParadiseComponentIds.SpriteAnimation or
             ParadiseComponentIds.ParticleEmitter or
-            ParadiseComponentIds.AudioEmitter => true,
+            ParadiseComponentIds.AudioEmitter or
+            ParadiseComponentIds.Light => true,
             _ => false,
         };
 
