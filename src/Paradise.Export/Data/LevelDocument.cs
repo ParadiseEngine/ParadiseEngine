@@ -149,10 +149,18 @@ namespace Paradise.Export.Data
     [Authored(ParadiseComponentIds.Renderable, DisplayName = "Renderable")]
     public sealed record RenderableComponentData
     {
-        /// <summary>Authored by pointing at the mesh in the host and BAKED to a data-relative path:
-        /// the editor resolves whichever source GLB that object came from.</summary>
-        [AuthoredByHost(AuthoredBySources.Mesh)]
-        [AuthorDoc("The mesh this entity renders.")]
+        /// <summary>
+        /// Authored by picking the source GLB, and BAKED to the data-relative path the runtime
+        /// resolves.
+        ///
+        /// An ASSET rather than a mesh-node reference, because that is how it was actually
+        /// authored: the field this replaces was a file picker, and in the sample scenes only 6 of
+        /// 28 entities with a mesh had a node to point at at all — the rest named a file. A node
+        /// reference would have been unauthorable for most of them.
+        /// </summary>
+        [AuthoredByHost(AuthoredBySources.Asset)]
+        [AuthorAssetKinds(".glb", ".gltf")]
+        [AuthorDoc("The source GLB this entity renders.")]
         public string? Mesh { get; set; }
 
         [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
@@ -204,7 +212,7 @@ namespace Paradise.Export.Data
         public int Layer { get; set; }
 
         [AuthorDoc("Named collision layer, resolved against the project's layer contract.")]
-        public string? LayerName { get; set; }
+        public string? LayerName { get; set; } = "";
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000004")]
@@ -677,6 +685,18 @@ namespace Paradise.Export.Data
 
         [AuthorDoc("Animation clip to start on spawn; empty for none.")]
         public string? InitialAnimation { get; set; }
+
+        /// <summary>
+        /// The source asset this entity was placed from — provenance, not what renders.
+        ///
+        /// It lives on IDENTITY rather than on Renderable for a blunt reason: adding a field to
+        /// Renderable would change the shape of every exported document, and this had to move
+        /// without doing that. Identity never appears under Components (the router spreads it onto
+        /// the entity), so it is the one place a new authored field costs nothing.
+        /// </summary>
+        [AuthorAssetKinds(".glb", ".gltf", ".tscn", ".scn")]
+        [AuthorDoc("Source asset this entity was placed from.")]
+        public string? Prefab { get; set; }
 
         [AuthorDoc("Name shown in tools; defaults to the node's own name.")]
         public string? DisplayName { get; set; }

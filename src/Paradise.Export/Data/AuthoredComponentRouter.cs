@@ -48,6 +48,7 @@ namespace Paradise.Export.Data
                     entity.Kind = identity.Kind;
                     entity.IsActive = identity.IsActive;
                     entity.InitialAnimation = NullIfBlank(identity.InitialAnimation);
+                    entity.Prefab = NullIfBlank(identity.Prefab);
                     if (!string.IsNullOrWhiteSpace(identity.DisplayName))
                     {
                         entity.DisplayName = identity.DisplayName;
