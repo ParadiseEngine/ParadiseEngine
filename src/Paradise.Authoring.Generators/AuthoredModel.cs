@@ -50,8 +50,30 @@ internal sealed class AuthoredType
     public string? AuthoredBy;
 }
 
+/// <summary>Just enough of an [Authored] type to build a registry entry: the id it travels under
+/// and the record it deserializes into.</summary>
+internal sealed class AuthoredIdentity
+{
+    public string ComponentId = "";
+    public string TypeName = "";
+}
+
 internal static class AuthoredModel
 {
+    /// <summary>The id and type name only. The registry does not care about fields, and reading the
+    /// whole tree for it would make every [Authored] edit re-run work nothing consumes.</summary>
+    public static AuthoredIdentity? ReadIdentity(INamedTypeSymbol type)
+    {
+        var attribute = type.GetAttributes().FirstOrDefault(
+            a => a.AttributeClass?.ToDisplayString() == AuthoredAttribute);
+        if (attribute is not { ConstructorArguments.Length: > 0 } ||
+            attribute.ConstructorArguments[0].Value is not string id || id.Length == 0)
+        {
+            return null;
+        }
+        return new AuthoredIdentity { ComponentId = id, TypeName = type.Name };
+    }
+
     private const string Namespace = "Paradise.Authoring";
     public const string AuthoredAttribute = Namespace + ".AuthoredAttribute";
     private const string BoxGizmoAttribute = Namespace + ".AuthorBoxGizmoAttribute";

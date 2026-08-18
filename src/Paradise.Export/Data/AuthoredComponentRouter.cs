@@ -1,6 +1,7 @@
 #nullable enable
 using System.Collections.Generic;
 using System.Text.Json;
+using Paradise.Authoring;
 using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Data
@@ -116,6 +117,51 @@ namespace Paradise.Export.Data
                 }
             }
             return failed;
+        }
+
+        /// <summary>
+        /// Every authored component on an entity, as INSTANCES.
+        ///
+        /// The engine's own arrive already typed — that is what the typed slots are — and a game's
+        /// come back through its generated registry. The point is that the caller gets one list of
+        /// records rather than a mixture of typed properties and raw JSON it has to remember to
+        /// deserialize: a component nobody wrote an accessor for is otherwise authored, exported,
+        /// and silently never read.
+        ///
+        /// Payloads whose id the registry does not know are skipped and reported, not guessed at.
+        /// </summary>
+        public static IReadOnlyList<object> Materialize(
+            LevelEntityData entity,
+            IAuthoredComponentRegistry? registry = null,
+            IList<string>? unresolved = null)
+        {
+            var instances = new List<object>();
+            EntityComponentsData c = entity.Components;
+
+            // Ordered like the contract declares them, so a caller walking the list sees a stable
+            // shape rather than one that depends on how the document happened to be written.
+            if (c.Renderable is { } renderable) instances.Add(renderable);
+            if (c.Collider is { } collider) instances.Add(collider);
+            if (c.Rigidbody is { } rigidbody) instances.Add(rigidbody);
+            if (c.Interactable is { } interactable) instances.Add(interactable);
+            if (c.Agent is { } agent) instances.Add(agent);
+            if (c.SpriteAnimation is { } sprite) instances.Add(sprite);
+            if (c.ParticleEmitter is { } particles) instances.Add(particles);
+            if (c.AudioEmitter is { } audio) instances.Add(audio);
+
+            foreach (AuthoredComponentData custom in c.Custom ?? [])
+            {
+                if (registry is not null &&
+                    registry.TryRead(custom.Id, custom.Data, out object? value) &&
+                    value is not null)
+                {
+                    instances.Add(value);
+                    continue;
+                }
+                unresolved?.Add(custom.Id);
+            }
+
+            return instances;
         }
 
         /// <summary>True when an id belongs to the engine, i.e. it routes to a typed slot rather

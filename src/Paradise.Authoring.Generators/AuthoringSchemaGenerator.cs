@@ -63,7 +63,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 
     /// <summary>An assembly name is not necessarily a legal namespace (it may contain dashes, or
     /// start with a digit). Fix it up rather than emitting source that will not compile.</summary>
-    private static string Sanitize(string? assemblyName)
+    internal static string Sanitize(string? assemblyName)
     {
         if (string.IsNullOrWhiteSpace(assemblyName))
         {

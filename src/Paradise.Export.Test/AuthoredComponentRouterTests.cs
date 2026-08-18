@@ -91,6 +91,73 @@ public class AuthoredComponentRouterTests
         await Assert.That(custom.Data.GetProperty("IsTrigger").ValueKind).IsEqualTo(JsonValueKind.False);
     }
 
+    /// <summary>
+    /// The loading half. Engine components arrive already typed; a game's come back through its
+    /// registry — and the caller gets ONE list of records rather than typed properties mixed with
+    /// raw JSON it has to remember to deserialize.
+    /// </summary>
+    [Test]
+    public async Task materialize_returns_engine_and_game_components_as_instances()
+    {
+        var entity = Route(
+            Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
+            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
+            Payload("test.ledge", """{"Friction":0.35,"IsTrigger":true,"Label":"north"}"""));
+
+        var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry());
+
+        await Assert.That(instances.OfType<RigidbodyComponentData>().Single().Mass).IsEqualTo(2.5f);
+        await Assert.That(instances.OfType<RenderableComponentData>().Single().Mesh)
+            .IsEqualTo("Models/knight.glb");
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Friction).IsEqualTo(0.35f);
+    }
+
+    /// <summary>Without a registry the engine components still materialize — it cannot name a
+    /// game's types and does not pretend to.</summary>
+    [Test]
+    public async Task materialize_without_a_registry_still_yields_the_engine_components()
+    {
+        var entity = Route(
+            Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
+            Payload("test.ledge", """{"Friction":0.1}"""));
+
+        var unresolved = new List<string>();
+        var instances = AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
+
+        await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
+        await Assert.That(unresolved).IsEquivalentTo(new[] { "test.ledge" });
+    }
+
+    /// <summary>An id nobody claims is REPORTED. Silently dropping authored data is the failure
+    /// this whole mechanism exists to prevent, so the loader must not fail that way either.</summary>
+    [Test]
+    public async Task materialize_reports_an_id_no_registry_claims()
+    {
+        var entity = Route(Payload("someone.else", """{"X":1}"""));
+        var unresolved = new List<string>();
+
+        await Assert.That(AuthoredComponentRouter.Materialize(entity, new LedgeRegistry(), unresolved))
+            .IsEmpty();
+        await Assert.That(unresolved).IsEquivalentTo(new[] { "someone.else" });
+    }
+
+    /// <summary>Stands in for the registry a game's [Authored] records generate.</summary>
+    private sealed class LedgeRegistry : Paradise.Authoring.IAuthoredComponentRegistry
+    {
+        public IReadOnlyCollection<string> ComponentIds { get; } = new[] { "test.ledge" };
+
+        public bool TryRead(string componentId, JsonElement data, out object? component)
+        {
+            if (componentId != "test.ledge")
+            {
+                component = null;
+                return false;
+            }
+            component = data.Deserialize(LedgeFixtureJsonContext.Default.LedgeFixture);
+            return true;
+        }
+    }
+
     [Test]
     public async Task engine_ids_are_distinguishable_from_a_games_own()
     {
