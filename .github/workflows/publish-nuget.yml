@@ -77,11 +77,13 @@ jobs:
       # Every packable library in src/. Listed in rough dependency order so incremental
       # builds reuse shared ProjectReference outputs. Source generators are not published
       # standalone: Paradise.BT.Generators ships inside Paradise.BT, Paradise.ECS.Generators
-      # inside Paradise.ECS (analyzers/dotnet/cs).
+      # inside Paradise.ECS, Paradise.Authoring.Generators inside Paradise.Authoring
+      # (analyzers/dotnet/cs).
       - name: Pack all packages
         shell: bash
         run: |
           projects=(
+            Paradise.Authoring
             Paradise.BLOB
             Paradise.BT
             Paradise.BT.Builder

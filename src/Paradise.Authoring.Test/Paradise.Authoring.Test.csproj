@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests the authored-data mechanism against ITSELF: the fixtures below are real [Authored]
+    records in this assembly, the generator runs over them like any consumer's, and the assertions
+    read the const it emitted. That means the test exercises the whole path — attribute, generator,
+    document, typed reader — rather than a hand-written JSON string standing in for the generator.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- CA1707: underscore naming in test method names. CA1515: TUnit needs public test classes.
+         CA2007: ConfigureAwait is not relevant to test code. -->
+    <NoWarn>$(NoWarn);CA1707;CA1515;CA2007;NETSDK1188</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
+    <!-- For the engine-schema test: Paradise.Export is the first assembly to declare an
+         [Authored] component of its own. -->
+    <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
+    <!-- Analyzers do not flow across a ProjectReference, so the emitter is asked for by name. -->
+    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

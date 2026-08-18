@@ -3,6 +3,7 @@
     <Project Path="src/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/generators/">
+    <Project Path="src/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
     <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
     <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
   </Folder>
@@ -24,6 +25,7 @@
     <Project Path="src/Paradise.ECS.Jobs/Paradise.ECS.Jobs.csproj" />
     <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
+    <Project Path="src/Paradise.Authoring/Paradise.Authoring.csproj" />
     <Project Path="src/Paradise.Export/Paradise.Export.csproj" />
     <Project Path="src/Paradise.Physics/Paradise.Physics.csproj" />
     <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
@@ -41,6 +43,7 @@
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
     <Project Path="src/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
     <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
+    <Project Path="src/Paradise.Authoring.Test/Paradise.Authoring.Test.csproj" />
     <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
     <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
     <Project Path="src/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />

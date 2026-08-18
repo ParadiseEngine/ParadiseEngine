@@ -21,6 +21,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The [Authored] vocabulary and its schema emitter. A leaf with no dependencies of its own,
+         so referencing it here costs the export core nothing. -->
+    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
+    <!-- Also as an ANALYZER. Consumers of the published package get the schema emitter through
+         Paradise.Authoring's analyzers/dotnet/cs folder, but analyzers do not flow across a
+         ProjectReference, so an in-repo consumer has to ask for it by name or silently emit no
+         schema at all. -->
+    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Match the DotRecast version the original ParadiseUnityEditor vendored so the navmesh
          binary format stays identical to what the Paradise runtime expects. -->
     <PackageReference Include="DotRecast.Core" />
