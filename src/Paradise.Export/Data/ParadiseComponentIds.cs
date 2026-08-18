@@ -27,5 +27,6 @@ namespace Paradise.Export.Data
         public const string Interactable = "paradise.interactable";
         public const string SpriteAnimation = "paradise.sprite-animation";
         public const string ParticleEmitter = "paradise.particle-emitter";
+        public const string AudioEmitter = "paradise.audio-emitter";
     }
 }

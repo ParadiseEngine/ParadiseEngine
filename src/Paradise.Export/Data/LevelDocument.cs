@@ -358,10 +358,12 @@ namespace Paradise.Export.Data
     /// whose event was renamed goes quiet rather than failing the export.
     /// </summary>
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000008")]
+    [Authored(ParadiseComponentIds.AudioEmitter, DisplayName = "Audio emitter")]
     public sealed record AudioEmitterComponentData
     {
         /// <summary>Event posted for this emitter. Null or empty means the emitter exists as a
         /// positioned object but plays nothing until game code posts to it.</summary>
+        [AuthorDoc("Event posted for this emitter.")]
         public string? StartEvent { get; set; }
 
         /// <summary>Event posted to stop it. Optional: a one-shot needs none, and a loop can also
@@ -375,10 +377,14 @@ namespace Paradise.Export.Data
         /// <summary>False makes the emitter 2D — positioned in the scene for authoring
         /// convenience, but heard at full level regardless of where the listener is. Music and
         /// narration are the cases that want it.</summary>
+        [AuthorDoc("Off makes it 2D: positioned for convenience, heard at full level everywhere.")]
         public bool Is3D { get; set; } = true;
 
         /// <summary>Scales the attenuation curve authored on the sound, so one authored falloff
         /// can serve emitters of different physical size. 1 is the authored distance.</summary>
+        [AuthorRange(0.01, 100)]
+        [AuthorVisibleWhen(nameof(Is3D), true)]
+        [AuthorDoc("Scales the sound's authored falloff; 1 is the authored distance.")]
         public float AttenuationScale { get; set; } = 1f;
 
         public void ValidateAndNormalize()

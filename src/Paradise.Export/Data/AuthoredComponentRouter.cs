@@ -83,6 +83,10 @@ namespace Paradise.Export.Data
                     return Assign<SpriteAnimationComponentData>(component,
                         value => components.SpriteAnimation = value);
 
+                case ParadiseComponentIds.AudioEmitter:
+                    return Assign<AudioEmitterComponentData>(component,
+                        value => components.AudioEmitter = value);
+
                 case ParadiseComponentIds.ParticleEmitter:
                     return Assign<ParticleEmitterComponentData>(component,
                         value => components.ParticleEmitter = value);
@@ -125,7 +129,8 @@ namespace Paradise.Export.Data
             ParadiseComponentIds.Agent or
             ParadiseComponentIds.Interactable or
             ParadiseComponentIds.SpriteAnimation or
-            ParadiseComponentIds.ParticleEmitter => true,
+            ParadiseComponentIds.ParticleEmitter or
+            ParadiseComponentIds.AudioEmitter => true,
             _ => false,
         };
 

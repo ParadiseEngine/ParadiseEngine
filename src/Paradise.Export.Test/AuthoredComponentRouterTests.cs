@@ -58,6 +58,7 @@ public class AuthoredComponentRouterTests
             Payload(ParadiseComponentIds.Interactable, """{"DisplayName":"Lever"}"""),
             Payload(ParadiseComponentIds.SpriteAnimation, """{"Sheet":"sprites/torch.ktx2","Columns":4}"""),
             Payload(ParadiseComponentIds.ParticleEmitter, """{"Kind":"Voxel","EmitRate":12}"""),
+            Payload(ParadiseComponentIds.AudioEmitter, """{"StartEvent":"Play_Torch","Is3D":true}"""),
             Payload(ParadiseComponentIds.Collider,
                 """{"Colliders":[{"ShapeType":"Box","Size":[1,2,3],"IsTrigger":true}]}"""));
 
@@ -69,6 +70,7 @@ public class AuthoredComponentRouterTests
         await Assert.That(c.Interactable!.DisplayName).IsEqualTo("Lever");
         await Assert.That(c.SpriteAnimation!.Columns).IsEqualTo(4);
         await Assert.That(c.ParticleEmitter!.Kind).IsEqualTo(ParticleRenderKind.Voxel);
+        await Assert.That(c.AudioEmitter!.StartEvent).IsEqualTo("Play_Torch");
         await Assert.That(c.Collider!.Colliders.Single().ShapeType).IsEqualTo(PhysicsShapeType.Box);
         await Assert.That(c.Collider!.Colliders.Single().IsTrigger).IsTrue();
 

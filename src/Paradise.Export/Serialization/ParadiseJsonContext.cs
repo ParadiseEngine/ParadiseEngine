@@ -30,6 +30,7 @@ namespace Paradise.Export.Serialization
     [JsonSerializable(typeof(EntityInteractableComponentData))]
     [JsonSerializable(typeof(SpriteAnimationComponentData))]
     [JsonSerializable(typeof(ParticleEmitterComponentData))]
+    [JsonSerializable(typeof(AudioEmitterComponentData))]
     internal sealed partial class ParadiseJsonContext : JsonSerializerContext
     {
     }
