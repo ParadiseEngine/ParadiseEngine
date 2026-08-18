@@ -178,14 +178,8 @@ namespace Paradise.Export.Data
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000003")]
-    /// <summary>
-    /// The first engine component to declare its own authoring surface.
-    ///
-    /// <c>[Authored]</c> here is purely ADDITIVE: it publishes this component to the schema so a
-    /// data-driven editor can build a UI for it, and removes nothing from <c>EntityExport</c>,
-    /// whose rigidbody fields keep working exactly as before. Retiring those is a separate,
-    /// breaking migration across the games that consume this contract.
-    /// </summary>
+    /// <summary>The first engine component to declare its own authoring surface, and the template
+    /// the other eight followed.</summary>
     [Authored(ParadiseComponentIds.Rigidbody, DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
@@ -225,11 +219,14 @@ namespace Paradise.Export.Data
         [AuthorRange(0.01, 1000), AuthorDoc("How hard the agent accelerates toward its speed.")]
         public float Acceleration { get; set; } = 40f;
 
+        /// <summary>Defaulted here rather than substituted at export. The old authoring layer
+        /// swapped a blank clip for these names on the way out, which meant the fallback was
+        /// invisible to anyone reading the record — and unreachable to any editor but Godot's.</summary>
         [AuthorDoc("Animation clip played while standing still.")]
-        public string? IdleClip { get; set; }
+        public string? IdleClip { get; set; } = "Idle";
 
         [AuthorDoc("Animation clip played while moving.")]
-        public string? WalkClip { get; set; }
+        public string? WalkClip { get; set; } = "Walk";
     }
 
     [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000005")]
