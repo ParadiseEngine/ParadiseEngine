@@ -311,4 +311,73 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
         // Should show how to reference QueryableRegistry when suppressed
         await Assert.That(aliases).Contains("global::Paradise.ECS.QueryableRegistry<");
     }
+
+    /// <summary>
+    /// Every queryable is an IComponentSet, so an entity can be built from what the systems query
+    /// for. Only [With] contributes: [Without] would make the entity unmatchable by this very
+    /// queryable, and [WithAny]/[Optional] name no single required component.
+    /// </summary>
+    [Test]
+    public async Task Queryable_ImplementsComponentSet_FromWithComponentsOnly()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component("11111111-1111-1111-1111-111111111111")]
+            public partial struct Required { public int Value; }
+
+            [Component("22222222-2222-2222-2222-222222222222")]
+            public partial struct Excluded { public int Value; }
+
+            [Component("33333333-3333-3333-3333-333333333333")]
+            public partial struct Maybe { public int Value; }
+
+            [Queryable]
+            [With<Required>]
+            [Without<Excluded>]
+            [WithAny<Maybe>]
+            public readonly ref partial struct Mover;
+            """;
+
+        var sources = GeneratorTestHelper.GetQueryableGeneratedSources(source);
+        var generated = sources.FirstOrDefault(s =>
+            s.HintName.Contains("Mover", StringComparison.Ordinal)).Source;
+
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("partial struct Mover : global::Paradise.ECS.IComponentSet");
+        await Assert.That(generated).Contains("public static void CollectComponentTypes<TMask>(ref TMask mask)");
+        // ORed into the caller's mask, never reset, so several sets union.
+        await Assert.That(generated).Contains("mask = mask.Set(global::TestNamespace.Required.TypeId);");
+        await Assert.That(generated).DoesNotContain("Set(global::TestNamespace.Excluded.TypeId)");
+        await Assert.That(generated).DoesNotContain("Set(global::TestNamespace.Maybe.TypeId)");
+    }
+
+    /// <summary>A queryable with no [With] components still satisfies the interface, contributing
+    /// nothing — the alternative is a generated method that fails to compile.</summary>
+    [Test]
+    public async Task Queryable_WithNoRequiredComponents_CollectsNothing()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component("11111111-1111-1111-1111-111111111111")]
+            public partial struct Excluded { public int Value; }
+
+            [Queryable]
+            [Without<Excluded>]
+            public readonly ref partial struct Empty;
+            """;
+
+        var sources = GeneratorTestHelper.GetQueryableGeneratedSources(source);
+        var generated = sources.FirstOrDefault(s =>
+            s.HintName.Contains("Empty", StringComparison.Ordinal)).Source;
+
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("public static void CollectComponentTypes<TMask>(ref TMask mask)");
+        await Assert.That(generated).DoesNotContain("mask = mask.Set(");
+    }
 }

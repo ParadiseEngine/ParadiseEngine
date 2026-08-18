@@ -409,12 +409,17 @@ public class QueryableGenerator : IIncrementalGenerator
             indent += "    ";
         }
 
-        // Generate the partial ref struct with QueryableId and Query/ChunkQuery static methods
-        sb.AppendLine($"{indent}partial struct {queryable.TypeName}");
+        // Generate the partial ref struct with QueryableId and Query/ChunkQuery static methods.
+        // IComponentSet lets an entity be BUILT from this queryable (EntityBuilder.EnsureFrom),
+        // so the archetype follows what the systems query for instead of a parallel hand-written
+        // component list that can silently drift out of it.
+        sb.AppendLine($"{indent}partial struct {queryable.TypeName} : global::Paradise.ECS.IComponentSet");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    /// <summary>The unique queryable type ID.</summary>");
         sb.AppendLine($"{indent}    public static int QueryableId => {typeId};");
         sb.AppendLine();
+
+        GenerateCollectComponentTypes(sb, queryable, indent + "    ");
 
         // Generate static Query method
         sb.AppendLine($"{indent}    /// <summary>Builds a query that iterates over {queryable.TypeName}.Data instances.</summary>");
@@ -1079,6 +1084,40 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine("}");
 
         context.AddSource("QueryableRegistryInitializer.g.cs", sb.ToString());
+    }
+
+    /// <summary>
+    /// Emits <see cref="Paradise.ECS.IComponentSet"/>'s CollectComponentTypes: the queryable's
+    /// REQUIRED components, ORed into the caller's mask so several sets union cleanly.
+    ///
+    /// Only [With] contributes. [Without] would make the entity unmatchable by this very
+    /// queryable, and [WithAny]/[Optional] name no single required component — including either
+    /// would be a guess about what the author meant, so they are left out and documented.
+    /// </summary>
+    private static void GenerateCollectComponentTypes(StringBuilder sb, QueryableInfo queryable, string indent)
+    {
+        sb.AppendLine($"{indent}/// <summary>Adds this queryable's required ([With]) component types to <paramref name=\"mask\"/>.</summary>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
+        sb.AppendLine($"{indent}/// <param name=\"mask\">The mask to add component types to.</param>");
+        sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+        sb.AppendLine($"{indent}public static void CollectComponentTypes<TMask>(ref TMask mask)");
+        sb.AppendLine($"{indent}    where TMask : unmanaged, global::Paradise.ECS.IBitSet<TMask>");
+        sb.AppendLine($"{indent}{{");
+        if (queryable.WithComponents.IsEmpty)
+        {
+            sb.AppendLine($"{indent}    // No [With] components — contributes nothing to the archetype.");
+        }
+        else
+        {
+            sb.Append($"{indent}    mask = mask");
+            foreach (var component in queryable.WithComponents)
+            {
+                sb.Append($".Set(global::{component}.TypeId)");
+            }
+            sb.AppendLine(";");
+        }
+        sb.AppendLine($"{indent}}}");
+        sb.AppendLine();
     }
 
     private static void GenerateMask(StringBuilder sb, ImmutableArray<string> components)
