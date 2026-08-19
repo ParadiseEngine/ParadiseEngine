@@ -26,10 +26,11 @@ namespace Paradise.Authoring.Generators;
 ///
 /// The wire contract matches what the Godot addon writes (AuthoredEntityCore.ValueOf): property
 /// names are the schema's field names (compared case-insensitively, as the previous
-/// PropertyNameCaseInsensitive contexts did), composed groups are nested objects, enums are their
-/// integer values, Vector2/3 and Quaternion are float arrays, and Vector4 and Color32 author as a
-/// color and travel as the {r,g,b,a} object. A property absent from the payload keeps the record's
-/// own initializer — the constructor has already run.
+/// PropertyNameCaseInsensitive contexts did), composed groups are nested objects, enums travel by
+/// member name (a JSON string, parsed case-insensitively, matching JsonStringEnumConverter; the
+/// underlying integer value is also accepted), Vector2/3 and Quaternion are float arrays, and
+/// Vector4 and Color32 author as a color and travel as the {r,g,b,a} object. A property absent
+/// from the payload keeps the record's own initializer — the constructor has already run.
 /// </summary>
 [Generator]
 public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
@@ -348,8 +349,14 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             case "bool": return element + ".GetBoolean()";
             // GetString is null for a JSON null, which is what the addon writes for "no value".
             case "string": return element + ".GetString()!";
-            // The addon writes an enum's integer value; long-to-enum is an explicit conversion.
-            case "enum": return "(" + field.ClrType + ")" + element + ".GetInt64()";
+            // The addon writes an enum's member NAME (AuthoredEntityCore.ValueOf stores enums as
+            // strings, matching JsonStringEnumConverter); a bare integer underlying value is also
+            // accepted for tolerance. An unknown name throws — loud beats silently wrong.
+            case "enum":
+                return element + ".ValueKind == global::System.Text.Json.JsonValueKind.String"
+                    + " ? global::System.Enum.Parse<" + field.ClrType + ">("
+                    + element + ".GetString()!, ignoreCase: true)"
+                    + " : (" + field.ClrType + ")" + element + ".GetInt64()";
             case "vector2": helpers.Vector2 = true; return "ReadVector2(" + element + ")";
             case "vector3": helpers.Vector3 = true; return "ReadVector3(" + element + ")";
             case "quaternion": helpers.Quaternion = true; return "ReadQuaternion(" + element + ")";
