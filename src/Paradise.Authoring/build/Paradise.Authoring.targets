@@ -25,6 +25,13 @@
 
   <PropertyGroup>
     <ParadiseAuthoringSchemaDumpTool Condition="'$(ParadiseAuthoringSchemaDumpTool)' == ''">$(MSBuildThisFileDirectory)../tools/net10.0/Paradise.Authoring.SchemaDump.dll</ParadiseAuthoringSchemaDumpTool>
+    <!-- The dotnet muxer BY FULL PATH, never bare "dotnet": builds launched from a GUI process
+         (the Blender addon's rebuild-on-change watcher) run with a PATH that has no dotnet on
+         it, and a bare invocation dies with exit code 127 while the build that spawned this
+         very target was itself run by a perfectly good dotnet. DOTNET_HOST_PATH is that host,
+         set by the CLI for every build it runs. -->
+    <_ParadiseDotNetHost Condition="'$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</_ParadiseDotNetHost>
+    <_ParadiseDotNetHost Condition="'$(_ParadiseDotNetHost)' == ''">dotnet</_ParadiseDotNetHost>
   </PropertyGroup>
 
   <Target Name="ParadiseDumpAuthoringSchema"
@@ -34,7 +41,7 @@
           Outputs="$(ParadiseAuthoringSchemaPath)">
     <Message Importance="high"
              Text="Paradise: re-dumping the authoring schema (an [Authored] record changed)." />
-    <Exec Command="dotnet exec &quot;$(ParadiseAuthoringSchemaDumpTool)&quot; &quot;$(TargetPath)&quot; &quot;$(ParadiseAuthoringSchemaPath)&quot;" />
+    <Exec Command="&quot;$(_ParadiseDotNetHost)&quot; exec &quot;$(ParadiseAuthoringSchemaDumpTool)&quot; &quot;$(TargetPath)&quot; &quot;$(ParadiseAuthoringSchemaPath)&quot;" />
   </Target>
 
 </Project>
