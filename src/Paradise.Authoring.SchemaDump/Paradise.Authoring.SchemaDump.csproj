@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Writes a game's authoring schema to the JSON file its editors read.
+
+    The schema generator compiles the document INTO the game assembly as a constant
+    (AuthoringSchema.Json); the Godot addon, the Blender addon and the browser editor read it as a
+    FILE, at authoring time, before anything is built. Something has to move it from one to the
+    other, and until this existed each game grew its own way — Pingu hid it behind a launcher
+    flag, which meant dumping the schema required building and running the whole game host.
+
+    This reads the constant straight out of the assembly's METADATA (a const string is a literal
+    in the blob heap), so nothing is loaded, resolved or executed: it works on an assembly whose
+    dependencies are not restorable here, on any target the game builds for, and in the time a
+    file copy takes. It ships inside the Paradise.Authoring package under tools/, and the
+    package's build/ targets run it after any build of a project that sets
+    ParadiseAuthoringSchemaPath.
+
+    Not packable itself: its binary rides inside Paradise.Authoring the same way the generators
+    ride in analyzers/.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Paradise.Authoring.SchemaDump</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

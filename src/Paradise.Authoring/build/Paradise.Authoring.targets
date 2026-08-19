@@ -1,0 +1,40 @@
+<Project>
+
+  <!--
+    Keeps a game's authoring-schema FILE in step with its [Authored] records.
+
+    The schema generator compiles the document into the game assembly as a constant; the editors
+    (the Godot addon, the Blender addon, the browser editor) read it as a file, at authoring time,
+    before anything is built. Left to a hand-run command that file rots silently: the game keeps
+    working — it never reads it — while the editor's Add Component picker offers components that
+    no longer exist, or omits ones that do.
+
+    Opt in from the project whose assembly CARRIES the schema (the game core):
+
+        <ParadiseAuthoringSchemaPath>$(MSBuildProjectDirectory)/../data/authoring-schema.json</ParadiseAuthoringSchemaPath>
+
+    The dump reads the constant out of the built assembly's metadata (tools/ in this package), so
+    nothing is loaded or executed and it costs a file copy. Inputs/Outputs keep it to builds where
+    a source actually changed.
+
+    Deliberately skipped under ContinuousIntegrationBuild: a game's drift test asserts the
+    committed file matches what the generator emits, and CI regenerating the file first would make
+    that test compare it against itself and pass regardless. Locally this target keeps you honest;
+    in CI the test does.
+  -->
+
+  <PropertyGroup>
+    <ParadiseAuthoringSchemaDumpTool Condition="'$(ParadiseAuthoringSchemaDumpTool)' == ''">$(MSBuildThisFileDirectory)../tools/net10.0/Paradise.Authoring.SchemaDump.dll</ParadiseAuthoringSchemaDumpTool>
+  </PropertyGroup>
+
+  <Target Name="ParadiseDumpAuthoringSchema"
+          AfterTargets="Build"
+          Condition="'$(ParadiseAuthoringSchemaPath)' != '' and '$(ContinuousIntegrationBuild)' != 'true'"
+          Inputs="@(Compile);$(MSBuildAllProjects)"
+          Outputs="$(ParadiseAuthoringSchemaPath)">
+    <Message Importance="high"
+             Text="Paradise: re-dumping the authoring schema (an [Authored] record changed)." />
+    <Exec Command="dotnet exec &quot;$(ParadiseAuthoringSchemaDumpTool)&quot; &quot;$(TargetPath)&quot; &quot;$(ParadiseAuthoringSchemaPath)&quot;" />
+  </Target>
+
+</Project>

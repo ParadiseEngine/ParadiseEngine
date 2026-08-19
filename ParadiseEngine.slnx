@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/generators/">
     <Project Path="src/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
+    <Project Path="src/Paradise.Authoring.SchemaDump/Paradise.Authoring.SchemaDump.csproj" />
     <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
     <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
   </Folder>
