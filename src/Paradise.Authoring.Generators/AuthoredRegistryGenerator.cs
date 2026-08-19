@@ -50,6 +50,22 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             + "and property initializers.");
 
     /// <summary>
+    /// PAUT004: a composed field's type the reader cannot construct. Distinct from PAUT002
+    /// because the composed type is generally NOT itself [Authored] — only its container is —
+    /// and the diagnostic can only point at the container, so the message must name both.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ComposedNotConstructible = new(
+        id: "PAUT004",
+        title: "Composed authored field type needs a public parameterless constructor",
+        messageFormat: "'{0}', composed into '{1}', has no public parameterless constructor, so a reader cannot be generated for '{1}'",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated reader materializes a composed group by constructing its type and "
+            + "assigning each property present in the payload, exactly as it does the record itself. "
+            + "Give the composed type a parameterless constructor and property initializers.");
+
+    /// <summary>
     /// PAUT003: a property the reader cannot assign.
     /// </summary>
     public static readonly DiagnosticDescriptor NotAssignable = new(
@@ -102,6 +118,9 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             authored.Combine(settings),
             static (ctx, pair) =>
             {
+                // PAUT002/003/004 are also gated on the opt-in, deliberately: they diagnose
+                // shapes the READER cannot handle, and a schema-only assembly (no registry, no
+                // reader) has nothing to be incompatible with.
                 if (pair.Right.OptedIn)
                 {
                     Emit(ctx, pair.Left!, pair.Right.Namespace);
@@ -221,7 +240,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
                 if (!value.NestedConstructible)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(
-                        NotConstructible, type.Declaration, ShortName(value.ClrType)));
+                        ComposedNotConstructible, type.Declaration, ShortName(value.ClrType), owner));
                     ok = false;
                 }
                 ok &= ValidateFields(context, type, ShortName(value.ClrType), value.Nested);
@@ -274,21 +293,41 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
 
     private static void EmitAssignment(StringBuilder source, AuthoredField field, HelperSet helpers)
     {
-        if (field.Items is { } element)
+        // An explicit JSON null reads as ABSENT for everything except a string: the record's own
+        // initializer stands. Strings pass the null through (GetString() is null for a JSON null),
+        // matching what the PropertyNameCaseInsensitive contexts did. Without this guard a null
+        // against any other kind is an InvalidOperationException on the wrong ValueKind — the
+        // addon only writes null for valueless strings today, but the reader should not turn a
+        // future writer change into a crash.
+        var nullable = field.Items is null && field.ClrKind == "string";
+        if (!nullable)
         {
-            source.Append("                var items = new global::System.Collections.Generic.List<")
-                  .Append(element.ClrType).AppendLine(">();");
-            source.AppendLine("                foreach (var element in property.Value.EnumerateArray())");
+            source.AppendLine("                if (property.Value.ValueKind != global::System.Text.Json.JsonValueKind.Null)");
             source.AppendLine("                {");
-            source.Append("                    items.Add(").Append(ReadExpression(element, "element", helpers)).AppendLine(");");
-            source.AppendLine("                }");
-            source.Append("                value.").Append(field.Name).Append(" = items")
-                  .AppendLine(field.ListKind == "array" ? ".ToArray();" : ";");
-            return;
         }
 
-        source.Append("                value.").Append(field.Name).Append(" = ")
-              .Append(ReadExpression(field, "property.Value", helpers)).AppendLine(";");
+        if (field.Items is { } element)
+        {
+            source.Append("                    var items = new global::System.Collections.Generic.List<")
+                  .Append(element.ClrType).AppendLine(">();");
+            source.AppendLine("                    foreach (var element in property.Value.EnumerateArray())");
+            source.AppendLine("                    {");
+            source.Append("                        items.Add(").Append(ReadExpression(element, "element", helpers)).AppendLine(");");
+            source.AppendLine("                    }");
+            source.Append("                    value.").Append(field.Name).Append(" = items")
+                  .AppendLine(field.ListKind == "array" ? ".ToArray();" : ";");
+        }
+        else
+        {
+            source.Append(nullable ? "                " : "                    ")
+                  .Append("value.").Append(field.Name).Append(" = ")
+                  .Append(ReadExpression(field, "property.Value", helpers)).AppendLine(";");
+        }
+
+        if (!nullable)
+        {
+            source.AppendLine("                }");
+        }
     }
 
     /// <summary>The expression reading one value of the field's kind from a JsonElement.</summary>

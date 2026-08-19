@@ -259,6 +259,75 @@ public class AuthoredReaderTests
         await Assert.That(messages.Any(m => m.Contains("required"))).IsTrue();
     }
 
+    /// <summary>An explicit JSON null is ABSENT for everything except a string: initializers
+    /// stand, nothing throws. The addon only writes null for valueless strings today; the reader
+    /// must not turn a future writer change into a crash.</summary>
+    [Test]
+    public async Task explicit_nulls_keep_the_initializers_instead_of_throwing()
+    {
+        var (registry, _) = Run("""
+            using System.Collections.Generic;
+            using System.Numerics;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            public sealed record Part { public float Weight { get; set; } = 3f; }
+
+            [Authored("game.nully")]
+            public sealed record Nully
+            {
+                public float Speed { get; set; } = 2.5f;
+                public Vector3 Home { get; set; } = new(1f, 2f, 3f);
+                public Part Body { get; set; } = new() { Weight = 9f };
+                public List<float> Offsets { get; set; } = [4f];
+                public string Label { get; set; } = "kept-unless-nulled";
+            }
+            """);
+        var nully = ReadComponent(registry!, "game.nully", """
+            {"Speed": null, "Home": null, "Body": null, "Offsets": null, "Label": null}
+            """);
+
+        await Assert.That((float)Prop(nully, "Speed")!).IsEqualTo(2.5f);
+        await Assert.That((System.Numerics.Vector3)Prop(nully, "Home")!)
+            .IsEqualTo(new System.Numerics.Vector3(1f, 2f, 3f));
+        await Assert.That((float)Prop(Prop(nully, "Body")!, "Weight")!).IsEqualTo(9f);
+        await Assert.That((List<float>)Prop(nully, "Offsets")!).IsEquivalentTo([4f]);
+        // The one exception: a string null passes through, as it did with the contexts.
+        await Assert.That((string?)Prop(nully, "Label")).IsNull();
+    }
+
+    /// <summary>A composed field's type without a parameterless constructor gets its own message
+    /// naming both the composed type and the container — the container is where the squiggle can
+    /// sit, and it is generally NOT itself the broken type.</summary>
+    [Test]
+    public async Task a_composed_type_without_a_ctor_names_both_types()
+    {
+        var (registry, diagnostics) = Run("""
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            public sealed record Piece(float Weight);
+
+            [Authored("game.holder")]
+            public sealed record Holder
+            {
+                public Piece Body { get; set; } = new(1f);
+            }
+            """);
+
+        await Assert.That(registry).IsNull();
+        var composed = diagnostics.Single(d => d.Id == "PAUT004");
+        var message = composed.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
+        await Assert.That(message).Contains("'Piece'");
+        await Assert.That(message).Contains("'Holder'");
+    }
+
     /// <summary>No opt-in, no registry: an assembly that only publishes a schema for editors
     /// must not grow public loader surface. Paradise.Export itself is such an assembly.</summary>
     [Test]
