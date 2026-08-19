@@ -10,9 +10,10 @@ namespace Paradise.Authoring.Test;
 /// <summary>
 /// The generated readers, actually executed: each test compiles a tiny game assembly with the
 /// generator attached, loads it, and runs the registry against real payloads shaped exactly as
-/// the Godot addon writes them (AuthoredEntityCore.ValueOf) — enums as integers, vectors as float
-/// arrays, colors as the {r,g,b,a} object, composed groups as nested objects. Asserting on the
-/// generated TEXT would only prove the code looks right; these prove it reads right.
+/// the Godot addon writes them (AuthoredEntityCore.ValueOf) — enums as member-name strings,
+/// vectors as float arrays, colors as the {r,g,b,a} object, composed groups as nested objects.
+/// Asserting on the generated TEXT would only prove the code looks right; these prove it
+/// reads right.
 /// </summary>
 public class AuthoredReaderTests
 {
@@ -138,7 +139,7 @@ public class AuthoredReaderTests
     }
 
     /// <summary>The full wire vocabulary in one record, shaped exactly as the addon writes it:
-    /// enum as its integer, vectors and quaternions as float arrays, color as {r,g,b,a},
+    /// enum as its member name, vectors and quaternions as float arrays, color as {r,g,b,a},
     /// composed groups as nested objects, lists as arrays of values.</summary>
     [Test]
     public async Task the_whole_vocabulary_reads_from_the_addon_wire_format()
@@ -179,7 +180,7 @@ public class AuthoredReaderTests
         await Assert.That(diagnostics).IsEmpty();
         var rich = ReadComponent(registry!, "game.rich", """
             {
-                "Mode": 2,
+                "Mode": "Flee",
                 "Spot": [1.5, 2.5],
                 "Home": [1, 2, 3],
                 "Facing": [0, 0.7071068, 0, 0.7071068],
@@ -209,6 +210,42 @@ public class AuthoredReaderTests
 
         await Assert.That((List<float>)Prop(rich, "Offsets")!).IsEquivalentTo([0.1f, 0.2f, 0.3f]);
         await Assert.That((string[])Prop(rich, "Names")!).IsEquivalentTo(["a", "b"]);
+    }
+
+    private const string EnumSource = """
+        using Paradise.Authoring;
+
+        [assembly: AuthoredRegistry]
+
+        namespace Game;
+
+        public enum Mode { Idle = 0, Chase = 1, Flee = 2 }
+
+        [Authored("game.moody")]
+        public sealed record Moody
+        {
+            public Mode Mode { get; set; } = Mode.Idle;
+        }
+        """;
+
+    /// <summary>The addon stores enums as member-name strings (AuthoredEntityCore.ValueOf) and
+    /// the typed contract writes them through JsonStringEnumConverter, so the name is the wire
+    /// form — parsed case-insensitively, as hand-edited exports rely on for property names too.
+    /// The underlying integer is still accepted for tolerance.</summary>
+    [Test]
+    public async Task enums_read_by_member_name_case_insensitively_and_by_integer()
+    {
+        var (registry, diagnostics) = Run(EnumSource);
+
+        await Assert.That(diagnostics).IsEmpty();
+        var named = ReadComponent(registry!, "game.moody", """{"Mode": "Flee"}""");
+        await Assert.That(Prop(named, "Mode")!.ToString()).IsEqualTo("Flee");
+
+        var lowered = ReadComponent(registry!, "game.moody", """{"Mode": "chase"}""");
+        await Assert.That(Prop(lowered, "Mode")!.ToString()).IsEqualTo("Chase");
+
+        var numeric = ReadComponent(registry!, "game.moody", """{"Mode": 2}""");
+        await Assert.That(Prop(numeric, "Mode")!.ToString()).IsEqualTo("Flee");
     }
 
     /// <summary>A positional record cannot be constructed then assigned; the error names it and
