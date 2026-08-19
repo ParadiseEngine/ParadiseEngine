@@ -24,12 +24,20 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!-- Build ordering only: the schema-dump tool's binaries ride in tools/ below. No assembly
+         reference, so the ZERO-dependencies promise above still holds. -->
+    <ProjectReference Include="..\Paradise.Authoring.SchemaDump\Paradise.Authoring.SchemaDump.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Ship the generator inside this package so consumers get the schema emitter by referencing
          one thing. Same mechanism Paradise.ECS uses for its own generator. -->
     <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.Generators\bin\$(Configuration)\netstandard2.0\Paradise.Authoring.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <!-- And the schema-dump tool plus the targets that run it after a game-core build, so the
+         schema FILE the editors read cannot drift from the records — see build/. -->
+    <None Include="build\Paradise.Authoring.targets" Pack="true" PackagePath="build" />
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net10.0\Paradise.Authoring.SchemaDump.dll" Pack="true" PackagePath="tools/net10.0" Visible="false" />
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net10.0\Paradise.Authoring.SchemaDump.runtimeconfig.json" Pack="true" PackagePath="tools/net10.0" Visible="false" />
   </ItemGroup>
 
 </Project>

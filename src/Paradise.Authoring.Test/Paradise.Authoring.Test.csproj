@@ -26,6 +26,7 @@
     <!-- For the engine-schema test: Paradise.Export is the first assembly to declare an
          [Authored] component of its own. -->
     <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
+    <ProjectReference Include="..\Paradise.Authoring.SchemaDump\Paradise.Authoring.SchemaDump.csproj" />
     <!-- Analyzers do not flow across a ProjectReference, so the emitter is asked for by name.
          ReferenceOutputAssembly is TRUE here (unlike every other consumer) so the generator can
          also be INSTANTIATED and driven directly, which is the only way to test how it behaves
