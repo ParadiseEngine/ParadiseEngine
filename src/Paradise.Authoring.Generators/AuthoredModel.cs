@@ -36,6 +36,29 @@ internal sealed class AuthoredField
     public string? VisibleWhenField;
     /// <summary>The sibling value that reveals this field, already rendered as a JSON literal.</summary>
     public string? VisibleWhenValue;
+
+    // ---- CLR-facing half, used by the generated READER rather than by any editor. ----
+    // The schema deliberately collapses CLR widths (long and int are both "int"); the reader
+    // cannot, because it assigns real properties.
+
+    /// <summary>Reader kind: float/double/int/long/uint/ulong/bool/string/enum/vector2/vector3/
+    /// vector4color/quaternion/color32/object. For a list field this describes the ELEMENT and
+    /// lives on <see cref="Items"/>.</summary>
+    public string? ClrKind;
+    /// <summary>Fully qualified CLR type of the value (element type for lists) — what the reader
+    /// casts an enum to, constructs for a composed group, or instantiates a list of.</summary>
+    public string ClrType = "";
+    /// <summary>"array" (needs ToArray) or "list" (List&lt;T&gt; assigns to List/IList/
+    /// IReadOnlyList) — set only on the wrapper field of a list.</summary>
+    public string? ListKind;
+    /// <summary>The property has a plain setter. Init-only cannot be assigned after
+    /// construction, and the reader constructs first and assigns per JSON property.</summary>
+    public bool Settable;
+    /// <summary>C# `required`: `new T()` without it is a compile error, so the reader cannot
+    /// construct the type at all.</summary>
+    public bool Required;
+    /// <summary>For an object field: the composed type has a public parameterless constructor.</summary>
+    public bool NestedConstructible = true;
 }
 
 /// <summary>One authored record: an id, a display name, and its fields.</summary>
@@ -48,31 +71,21 @@ internal sealed class AuthoredType
     public string[]? BoxGizmo;
     /// <summary>Host-object kind the whole component is authored by referencing, or null.</summary>
     public string? AuthoredBy;
+    /// <summary>Fully qualified name, for the reader to construct.</summary>
+    public string FullTypeName = "";
+    /// <summary>Where the record is declared, so a diagnostic about it points AT it rather than
+    /// at the generated file that would otherwise fail to compile because of it.</summary>
+    public Location? Declaration;
+    /// <summary>The type has a public parameterless constructor the reader can call.</summary>
+    public bool Constructible;
 }
 
-/// <summary>Just enough of an [Authored] type to build a registry entry: the id it travels under
-/// and the record it deserializes into.</summary>
-internal sealed class AuthoredIdentity
-{
-    public string ComponentId = "";
-    public string TypeName = "";
-}
+
 
 internal static class AuthoredModel
 {
     /// <summary>The id and type name only. The registry does not care about fields, and reading the
     /// whole tree for it would make every [Authored] edit re-run work nothing consumes.</summary>
-    public static AuthoredIdentity? ReadIdentity(INamedTypeSymbol type)
-    {
-        var attribute = type.GetAttributes().FirstOrDefault(
-            a => a.AttributeClass?.ToDisplayString() == AuthoredAttribute);
-        if (attribute is not { ConstructorArguments.Length: > 0 } ||
-            attribute.ConstructorArguments[0].Value is not string id || id.Length == 0)
-        {
-            return null;
-        }
-        return new AuthoredIdentity { ComponentId = id, TypeName = type.Name };
-    }
 
     private const string Namespace = "Paradise.Authoring";
     public const string AuthoredAttribute = Namespace + ".AuthoredAttribute";
@@ -127,6 +140,9 @@ internal static class AuthoredModel
             ComponentId = componentId,
             DisplayName = displayName,
             AuthoredBy = HostKindOf(type),
+            FullTypeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            Declaration = type.Locations.FirstOrDefault(),
+            Constructible = HasParameterlessCtor(type),
         };
 
         var gizmo = type.GetAttributes().FirstOrDefault(
@@ -185,6 +201,11 @@ internal static class AuthoredModel
                 EnumValues = enumValues,
                 Nested = nested,
                 AuthoredBy = authoredBy,
+                ClrKind = nested is not null ? "object" : ClrKindOf(valueType),
+                ClrType = valueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                Settable = member.SetMethod is { IsInitOnly: false },
+                Required = member.IsRequired,
+                NestedConstructible = nested is null || HasParameterlessCtor(valueType),
             };
 
             // A list becomes an ARRAY field whose element carries everything just derived. The
@@ -196,6 +217,10 @@ internal static class AuthoredModel
                     Name = member.Name,
                     SchemaType = "array",
                     Items = value,
+                    ClrType = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    ListKind = member.Type is IArrayTypeSymbol ? "array" : "list",
+                    Settable = member.SetMethod is { IsInitOnly: false },
+                    Required = member.IsRequired,
                 };
 
             foreach (var a in member.GetAttributes())
@@ -342,6 +367,44 @@ internal static class AuthoredModel
 
     /// <summary>Editor-neutral type names. Deliberately few: every one of these has an obvious
     /// control in Godot, Blender and HTML alike, and each addition is work in every editor.</summary>
+    /// <summary>Reader kind for a leaf value — the CLR-exact partner of <see
+    /// cref="SchemaTypeOf"/>, which deliberately collapses widths for editors.</summary>
+    private static string? ClrKindOf(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol { TypeKind: TypeKind.Enum })
+        {
+            return "enum";
+        }
+        switch (type.ToDisplayString())
+        {
+            case "System.Numerics.Vector2": return "vector2";
+            case "System.Numerics.Vector3": return "vector3";
+            // A Vector4 authors as a COLOR (see SchemaTypeOf), so its wire shape is the color
+            // object {r,g,b,a}, not a 4-array.
+            case "System.Numerics.Vector4": return "vector4color";
+            case "System.Numerics.Quaternion": return "quaternion";
+            case "Paradise.Export.Data.Color32": return "color32";
+        }
+        return type.SpecialType switch
+        {
+            SpecialType.System_Single => "float",
+            SpecialType.System_Double => "double",
+            SpecialType.System_Int32 => "int",
+            SpecialType.System_Int64 => "long",
+            SpecialType.System_UInt32 => "uint",
+            SpecialType.System_UInt64 => "ulong",
+            SpecialType.System_Boolean => "bool",
+            SpecialType.System_String => "string",
+            _ => null,
+        };
+    }
+
+    /// <summary>Whether the generated reader can say <c>new T()</c>.</summary>
+    private static bool HasParameterlessCtor(ITypeSymbol type) =>
+        type.IsValueType ||
+        (type is INamedTypeSymbol named && named.InstanceConstructors.Any(
+            c => c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public));
+
     private static string? SchemaTypeOf(ITypeSymbol type)
     {
         // Checked before SpecialType: an enum's SpecialType is None, but its UNDERLYING type is an
