@@ -56,6 +56,9 @@ internal sealed class AuthoredIdentity
 {
     public string ComponentId = "";
     public string TypeName = "";
+    /// <summary>Where the record is declared, so a diagnostic about it can point AT it rather
+    /// than at the generated file that failed to compile because of it.</summary>
+    public Location? Declaration;
 }
 
 internal static class AuthoredModel
@@ -71,7 +74,12 @@ internal static class AuthoredModel
         {
             return null;
         }
-        return new AuthoredIdentity { ComponentId = id, TypeName = type.Name };
+        return new AuthoredIdentity
+        {
+            ComponentId = id,
+            TypeName = type.Name,
+            Declaration = type.Locations.FirstOrDefault(),
+        };
     }
 
     private const string Namespace = "Paradise.Authoring";
