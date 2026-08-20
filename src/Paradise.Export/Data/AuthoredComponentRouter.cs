@@ -121,7 +121,7 @@ namespace Paradise.Export.Data
         ///
         /// The components themselves rather than their ids, so a caller's message can name the
         /// <see cref="AuthoredComponentData.Type"/> as well. "Could not read
-        /// a1d3f6b0-0000-4000-8000-000000000003" is not a diagnostic anyone can act on.
+        /// b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11" is not a diagnostic anyone can act on.
         /// </summary>
         public static IReadOnlyList<AuthoredComponentData> ApplyAll(
             LevelEntityData entity, IEnumerable<AuthoredComponentData> components)

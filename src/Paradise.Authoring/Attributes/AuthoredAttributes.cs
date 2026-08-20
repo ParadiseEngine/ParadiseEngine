@@ -23,10 +23,15 @@ namespace Paradise.Authoring;
 /// <see cref="System.Runtime.InteropServices.GuidAttribute"/> on the same type:
 /// </para>
 /// <code>
-/// [Guid("a1d3f6b0-0000-4000-8000-000000000003")]
+/// [Guid("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11")]
 /// [Authored(DisplayName = "Rigidbody")]
 /// public sealed record RigidbodyComponentData { ... }
 /// </code>
+/// <para>
+/// Generate that value with <c>uuidgen</c> or <c>Guid.NewGuid()</c>. Do not hand-type one, and do
+/// not derive it from the id of the component next to it — a readable pattern invites the next
+/// person to continue it, and two components that continue the same pattern collide.
+/// </para>
 /// <para>
 /// A GUID rather than a name, because a name is two things at once and they have different
 /// lifetimes: <c>paradise.rigidbody</c> was both "which component is this" and "what do we call

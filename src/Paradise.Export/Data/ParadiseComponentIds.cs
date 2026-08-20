@@ -11,9 +11,7 @@ namespace Paradise.Export.Data
     ///
     /// They are GUIDs, and they are the SAME GUIDs the records carry in their
     /// <see cref="System.Runtime.InteropServices.GuidAttribute"/> — one component, one identity,
-    /// rather than an authoring id and an ECS id that can drift apart. <see cref="Light"/> and
-    /// <see cref="Identity"/> are the two that had no ECS counterpart to borrow from and continue
-    /// the same series.
+    /// rather than an authoring id and an ECS id that can drift apart.
     ///
     /// Note what is NOT here: an "is this enabled" flag for anything. Presence of the component is
     /// the flag, which is why the old EntityExport booleans (IsAgent, IsDynamicBody, a particle
@@ -44,19 +42,31 @@ namespace Paradise.Export.Data
         /// <see cref="Guid"/> cannot be one. Everything that is not an attribute should use the
         /// <see cref="Guid"/> above, so that a typo is a compile error rather than a lookup that
         /// quietly finds nothing.
+        ///
+        /// GENERATED, every one of them, by an actual UUID generator. Adding a component means
+        /// running <c>uuidgen</c> (or <c>Guid.NewGuid()</c>) and pasting the result — never
+        /// hand-typing a value, and never continuing a visible pattern.
+        ///
+        /// These were a counted sequence once, all sharing a prefix and differing in the last
+        /// digit, and the sequence is what made them dangerous. It reads as an invitation: the
+        /// obvious way to add the eleventh component is to type the next number, which is both
+        /// how the tenth got its id and how a game repo would mint one that collides with the
+        /// engine. A generated id has no next, so the only way to get another is to generate it.
+        /// The numbering also lied — the version nibble claimed random while the value carried
+        /// almost no entropy at all.
         /// </summary>
         public static class Raw
         {
-            public const string Identity = "a1d3f6b0-0000-4000-8000-00000000000a";
-            public const string Renderable = "a1d3f6b0-0000-4000-8000-000000000001";
-            public const string Collider = "a1d3f6b0-0000-4000-8000-000000000002";
-            public const string Rigidbody = "a1d3f6b0-0000-4000-8000-000000000003";
-            public const string Agent = "a1d3f6b0-0000-4000-8000-000000000004";
-            public const string Interactable = "a1d3f6b0-0000-4000-8000-000000000005";
-            public const string SpriteAnimation = "a1d3f6b0-0000-4000-8000-000000000006";
-            public const string ParticleEmitter = "a1d3f6b0-0000-4000-8000-000000000007";
-            public const string AudioEmitter = "a1d3f6b0-0000-4000-8000-000000000008";
-            public const string Light = "a1d3f6b0-0000-4000-8000-000000000009";
+            public const string Identity = "0c068bf4-495f-495b-be8d-9b02042a41c2";
+            public const string Renderable = "f2c0357e-94dd-4a5a-9803-518066cb54b2";
+            public const string Collider = "e1cd1bc8-86f2-4225-adc9-4a324c70ebf9";
+            public const string Rigidbody = "b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11";
+            public const string Agent = "5801915b-3d0c-4940-8970-7d1487b991cf";
+            public const string Interactable = "0283ee5f-775b-412b-a91c-03ecd9b61165";
+            public const string SpriteAnimation = "d3e53cd4-89c6-4ca8-851e-7596da889c68";
+            public const string ParticleEmitter = "1b4d1bdd-dea1-4b86-9b6a-879c46346b9e";
+            public const string AudioEmitter = "e6ec7f42-df09-4ec9-af06-128ddf3eda8e";
+            public const string Light = "fc886b84-c48c-4415-afd9-b03d6faf5ab7";
         }
     }
 }
