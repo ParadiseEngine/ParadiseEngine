@@ -195,9 +195,9 @@ namespace Paradise.Export.Data
         public List<ColliderShapeData> Colliders { get; set; } = new();
     }
 
-    [Guid(ParadiseComponentIds.Raw.Rigidbody)]
     /// <summary>The first engine component to declare its own authoring surface, and the template
     /// the other eight followed.</summary>
+    [Guid(ParadiseComponentIds.Raw.Rigidbody)]
     [Authored(DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {

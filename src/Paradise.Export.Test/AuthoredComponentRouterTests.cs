@@ -153,6 +153,35 @@ public class AuthoredComponentRouterTests
         await Assert.That(unresolved).IsEmpty();
     }
 
+    /// <summary>
+    /// And a payload with NO id at all repairs the same way, which is the case the type name was
+    /// really added for: a document written before its component had an id.
+    ///
+    /// Worth pinning because the routing half is what makes or breaks it — dropping an id-less
+    /// payload on the way in would leave the fallback below correct and unreachable.
+    /// </summary>
+    [Test]
+    public async Task a_payload_with_no_id_at_all_still_repairs_by_type_name()
+    {
+        var entity = Route(Payload(Guid.Empty, """{"Friction":0.5,"Label":"north"}""", LedgeType));
+
+        var unresolved = new List<AuthoredComponentData>();
+        var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry(), unresolved);
+
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Label).IsEqualTo("north");
+        await Assert.That(unresolved).IsEmpty();
+    }
+
+    /// <summary>A payload with neither an id nor a type name is dropped: there is nothing to
+    /// identify it by, and carrying it would only defer the same dead end to the caller.</summary>
+    [Test]
+    public async Task a_payload_with_neither_an_id_nor_a_type_is_dropped()
+    {
+        var entity = Route(Payload(Guid.Empty, """{"Friction":0.5}"""));
+
+        await Assert.That(entity.Components.Custom).IsNull();
+    }
+
     /// <summary>An id nobody claims is REPORTED. Silently dropping authored data is the failure
     /// this whole mechanism exists to prevent, so the loader must not fail that way either.</summary>
     [Test]

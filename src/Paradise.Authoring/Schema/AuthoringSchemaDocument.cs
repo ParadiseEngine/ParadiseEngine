@@ -41,7 +41,8 @@ public sealed record AuthoringSchemaDocument
 /// <summary>One authored component: the id it travels under, and the fields a human edits.</summary>
 public sealed record AuthoredComponentSchema
 {
-    /// <summary>Stable id, from <see cref="AuthoredAttribute.Id"/>. What the exported payload is
+    /// <summary>Stable id, from the record's
+    /// <see cref="System.Runtime.InteropServices.GuidAttribute"/>. What the exported payload is
     /// keyed by, and the only member here an editor may match on.</summary>
     public Guid Id { get; set; }
 

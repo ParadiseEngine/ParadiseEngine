@@ -129,7 +129,12 @@ namespace Paradise.Export.Data
             var failed = new List<AuthoredComponentData>();
             foreach (AuthoredComponentData component in components)
             {
-                if (component.Id == Guid.Empty)
+                // Dropped only when there is NOTHING to identify it by. An id-less payload that
+                // still names its type is the case the type name exists for — a document written
+                // before its component had an id — so it rides through to Custom, where
+                // Materialize repairs it. Dropping it here would make that fallback unreachable
+                // for the one document that most needs it.
+                if (component.Id == Guid.Empty && string.IsNullOrWhiteSpace(component.Type))
                 {
                     continue;
                 }
