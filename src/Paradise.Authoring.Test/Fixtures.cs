@@ -1,7 +1,27 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Paradise.Authoring;
 
 namespace Paradise.Authoring.Test;
+
+/// <summary>
+/// The ids the fixtures below are authored under.
+///
+/// Constants because a <c>[Guid]</c> argument must be one, and because a test that asserts against
+/// a GUID typed out a second time is a test that eventually asserts against a typo.
+/// </summary>
+public static class FixtureIds
+{
+    public const string Everything = "e0000000-0000-4000-8000-000000000001";
+    public const string Minimal = "e0000000-0000-4000-8000-000000000002";
+    public const string V2 = "e0000000-0000-4000-8000-000000000003";
+    public const string BySprite = "e0000000-0000-4000-8000-000000000004";
+
+    public static readonly Guid EverythingId = new(Everything);
+    public static readonly Guid MinimalId = new(Minimal);
+    public static readonly Guid V2Id = new(V2);
+    public static readonly Guid BySpriteId = new(BySprite);
+}
 
 /// <summary>An enum the schema has to describe by NAME, matching how the export contract
 /// serializes enums.</summary>
@@ -24,7 +44,8 @@ public sealed record SampleColliderFixture
 
 /// <summary>Exercises every schema feature at once: units, advisory ranges, docs, defaults of
 /// three different types, an enum, composition, and a declared gizmo.</summary>
-[Authored("test.everything", DisplayName = "Everything")]
+[Guid(FixtureIds.Everything)]
+[Authored(DisplayName = "Everything")]
 [AuthorBoxGizmo(nameof(HalfExtentX), nameof(HalfExtentZ), nameof(Depth))]
 public sealed record EverythingFixture
 {
@@ -51,9 +72,10 @@ public sealed record EverythingFixture
     public SampleColliderFixture Box { get; set; } = new();
 }
 
-/// <summary>A second component, declared out of alphabetical order relative to the first, so the
-/// ordering guarantee is actually tested.</summary>
-[Authored("test.a-minimal")]
+/// <summary>A second component, whose TYPE NAME sorts before the first's, so the ordering
+/// guarantee is actually tested.</summary>
+[Guid(FixtureIds.Minimal)]
+[Authored]
 public sealed record MinimalFixture
 {
     public float Value { get; set; } = 1f;
@@ -73,7 +95,8 @@ public sealed record ShapeRefFixture
 
 /// <summary>Everything schema v2 added, in one component: a LIST of shape references, the fixed-size
 /// aggregates, an asset reference with its accepted kinds, and two fields guarded by siblings.</summary>
-[Authored("test.v2", DisplayName = "Schema v2")]
+[Guid(FixtureIds.V2)]
+[Authored(DisplayName = "Schema v2")]
 public sealed record V2Fixture
 {
     /// <summary>An array of host-object references — the shape the engine's collider list has.</summary>
@@ -109,7 +132,8 @@ public sealed record V2Fixture
 
 /// <summary>A whole component authored by pointing at ONE host object — the shape the engine's
 /// sprite animation has, where sheet, grid and quad size are all read off the sprite.</summary>
-[Authored("test.by-sprite", DisplayName = "By sprite")]
+[Guid(FixtureIds.BySprite)]
+[Authored(DisplayName = "By sprite")]
 [AuthoredByHost(AuthoredBySources.Sprite)]
 public sealed record BySpriteFixture
 {

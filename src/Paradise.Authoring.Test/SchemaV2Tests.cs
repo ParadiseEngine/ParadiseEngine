@@ -12,15 +12,16 @@ namespace Paradise.Authoring.Test;
 public class SchemaV2Tests
 {
     private static AuthoredComponentSchema V2() =>
-        AuthoringSchemaReader.Read(AuthoringSchema.Json).Components.Single(c => c.Id == "test.v2");
+        AuthoringSchemaReader.Read(AuthoringSchema.Json).Components
+            .Single(c => c.Id == FixtureIds.V2Id);
 
     private static AuthoredFieldSchema Field(string name) => V2().Fields.Single(f => f.Name == name);
 
     [Test]
-    public async Task the_document_declares_version_two()
+    public async Task the_document_declares_the_current_version()
     {
         var schema = AuthoringSchemaReader.Read(AuthoringSchema.Json);
-        await Assert.That(schema.Version).IsEqualTo(2);
+        await Assert.That(schema.Version).IsEqualTo(AuthoringSchemaDocument.CurrentVersion);
     }
 
     /// <summary>A list is a repeated ROW, not a composed group: the element schema hangs off
@@ -105,7 +106,7 @@ public class SchemaV2Tests
     public async Task a_whole_component_can_be_authored_by_a_host_object()
     {
         var schema = AuthoringSchemaReader.Read(AuthoringSchema.Json);
-        await Assert.That(schema.Components.Single(c => c.Id == "test.by-sprite").AuthoredBy)
+        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.BySpriteId).AuthoredBy)
             .IsEqualTo(AuthoredBySources.Sprite);
 
         // A component authored as a form says so by omission.
@@ -118,18 +119,17 @@ public class SchemaV2Tests
         await Assert.That(Field("Seed").VisibleWhen).IsNull();
     }
 
-    /// <summary>v1 documents still read, and their single host-object spelling is normalized so no
-    /// editor carries two names for one concept.</summary>
+    /// <summary><c>[AuthorNativeShape]</c> is shorthand for the shape kind, and publishes as that
+    /// one name — the v1 <c>nativeShape</c> spelling is not written by anything now that no
+    /// document older than v3 is readable.</summary>
     [Test]
-    public async Task a_v1_document_still_reads_and_its_legacy_source_is_normalized()
+    public async Task the_native_shape_shorthand_publishes_as_the_shape_kind()
     {
-        const string v1 = """
-        {"version":1,"components":[{"id":"old.thing","displayName":"Old","fields":[
-          {"name":"Box","type":"object","authoredBy":"nativeShape","fields":[
-            {"name":"SizeX","type":"float"}]}]}]}
-        """;
+        var box = AuthoringSchemaReader.Read(AuthoringSchema.Json).Components
+            .Single(c => c.Id == FixtureIds.EverythingId)
+            .Fields.Single(f => f.Name == "Box");
 
-        var component = AuthoringSchemaReader.Read(v1).Components.Single();
-        await Assert.That(component.Fields.Single().AuthoredBy).IsEqualTo(AuthoredBySources.Shape);
+        await Assert.That(box.AuthoredBy).IsEqualTo(AuthoredBySources.Shape);
+        await Assert.That(AuthoringSchema.Json.Contains("nativeShape")).IsFalse();
     }
 }

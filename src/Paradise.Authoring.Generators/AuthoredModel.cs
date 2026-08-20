@@ -64,7 +64,19 @@ internal sealed class AuthoredField
 /// <summary>One authored record: an id, a display name, and its fields.</summary>
 internal sealed class AuthoredType
 {
+    /// <summary>The declared id in canonical 8-4-4-4-12 form, or "" when the type is nested (a
+    /// part, which needs no id) or its <c>[Guid]</c> is missing or malformed.</summary>
     public string ComponentId = "";
+    /// <summary>The id exactly as it was written, kept only so a diagnostic can quote it back.</summary>
+    public string DeclaredId = "";
+    /// <summary>Set when the type is <c>[Authored]</c> with no <c>[Guid]</c> beside it.</summary>
+    public bool IdMissing;
+    /// <summary>Set when the <c>[Guid]</c> is present but <see cref="DeclaredId"/> is not a GUID.</summary>
+    public bool IdMalformed;
+
+    /// <summary>Either problem: the type is declared authored but has no usable identity, so
+    /// PAUT005 is reported and nothing is emitted for it.</summary>
+    public bool IdUnusable => IdMissing || IdMalformed;
     public string DisplayName = "";
     public List<AuthoredField> Fields = new();
     /// <summary>Optional wireframe box, as field names — see AuthorBoxGizmoAttribute.</summary>
@@ -73,6 +85,12 @@ internal sealed class AuthoredType
     public string? AuthoredBy;
     /// <summary>Fully qualified name, for the reader to construct.</summary>
     public string FullTypeName = "";
+
+    /// <summary><see cref="FullTypeName"/> without the <c>global::</c> prefix: the name as a human
+    /// writes it, which is what the schema publishes and what the reader's fallback matches on.</summary>
+    public string TypeName => FullTypeName.StartsWith("global::", System.StringComparison.Ordinal)
+        ? FullTypeName.Substring("global::".Length)
+        : FullTypeName;
     /// <summary>Where the record is declared, so a diagnostic about it points AT it rather than
     /// at the generated file that would otherwise fail to compile because of it.</summary>
     public Location? Declaration;
@@ -89,6 +107,11 @@ internal static class AuthoredModel
 
     private const string Namespace = "Paradise.Authoring";
     public const string AuthoredAttribute = Namespace + ".AuthoredAttribute";
+
+    /// <summary>Where a component's IDENTITY comes from. The BCL's own attribute rather than a
+    /// parameter of ours: .NET already has "the stable GUID of this type", and a second spelling
+    /// would let one type carry two GUIDs and be right about neither.</summary>
+    private const string GuidAttribute = "System.Runtime.InteropServices.GuidAttribute";
     private const string BoxGizmoAttribute = Namespace + ".AuthorBoxGizmoAttribute";
     private const string NativeShapeAttribute = Namespace + ".AuthorNativeShapeAttribute";
     private const string AuthoredByHostAttribute = Namespace + ".AuthoredByHostAttribute";
@@ -104,19 +127,44 @@ internal static class AuthoredModel
     {
         var attribute = type.GetAttributes().FirstOrDefault(
             a => a.AttributeClass?.ToDisplayString() == AuthoredAttribute);
-        // A NESTED type is a part, not a component: it needs no id of its own, and demanding one
-        // would force every composed struct to invent a name nothing ever looks up.
-        if (depth == 0 && (attribute is null || attribute.ConstructorArguments.Length == 0))
+        if (depth == 0 && attribute is null)
         {
             return null;
         }
 
-        var componentId = attribute is { ConstructorArguments.Length: > 0 }
-            ? attribute.ConstructorArguments[0].Value as string ?? ""
+        // Identity comes from [Guid], and only at the top level: a NESTED type is a part, not a
+        // component, so demanding one would force every composed struct to mint a GUID nothing
+        // ever looks up.
+        var guid = type.GetAttributes().FirstOrDefault(
+            a => a.AttributeClass?.ToDisplayString() == GuidAttribute);
+        var declaredId = guid is { ConstructorArguments.Length: > 0 }
+            ? guid.ConstructorArguments[0].Value as string ?? ""
             : "";
-        if (depth == 0 && componentId.Length == 0)
+
+        // Canonicalized so an id typed in the other case cannot become a second entry in the
+        // registry. Case is the only variation to defend against — the compiler rejects every
+        // other form of [Guid] argument itself with CS0591, braces included — but PAUT005 still
+        // covers the malformed value, because CS0591 does not say which component it broke.
+        var componentId = "";
+        var missing = depth == 0 && guid is null;
+        var malformed = false;
+        if (declaredId.Length > 0)
         {
-            return null;
+            if (System.Guid.TryParse(declaredId, out var parsed))
+            {
+                componentId = parsed.ToString("D");
+            }
+            else
+            {
+                malformed = depth == 0;
+            }
+        }
+        else if (guid is not null && depth == 0)
+        {
+            // [Guid] with an empty or non-string argument. Malformed rather than missing: the
+            // author clearly meant to declare one, and "you have no [Guid]" would send them
+            // looking for an attribute that is right there.
+            malformed = true;
         }
 
         var displayName = type.Name;
@@ -138,6 +186,9 @@ internal static class AuthoredModel
         var result = new AuthoredType
         {
             ComponentId = componentId,
+            DeclaredId = declaredId,
+            IdMissing = missing,
+            IdMalformed = malformed,
             DisplayName = displayName,
             AuthoredBy = HostKindOf(type),
             FullTypeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),

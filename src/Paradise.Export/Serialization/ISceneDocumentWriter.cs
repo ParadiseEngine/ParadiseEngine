@@ -11,7 +11,8 @@ namespace Paradise.Export.Serialization
     /// Today the only implementation is <see cref="JsonSceneDocumentWriter"/> (JSON). A
     /// future BLOB/ECS writer can be injected without changing any exporter code: each DTO
     /// that maps to a Paradise Engine ECS component carries a
-    /// <see cref="ParadiseComponentAttribute"/> with a stable component GUID.
+    /// <see cref="System.Runtime.InteropServices.GuidAttribute"/> with a stable component GUID —
+    /// the same one it is authored and exported under, so the writer has nothing to map.
     /// </summary>
     public interface ISceneDocumentWriter
     {

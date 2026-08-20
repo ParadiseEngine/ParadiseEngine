@@ -17,11 +17,13 @@ namespace Paradise.Authoring.Test;
 public class GeneratorNamespaceTests
 {
     private const string Source = """
+        using System.Runtime.InteropServices;
         using Paradise.Authoring;
 
         namespace Whatever;
 
-        [Authored("test.thing")]
+        [Guid("d1000000-0000-4000-8000-000000000001")]
+        [Authored]
         public sealed record Thing
         {
             public float Value { get; set; } = 1f;

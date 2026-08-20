@@ -37,10 +37,14 @@ public class AuthoredComponentContractTests
         return level;
     }
 
+    private static readonly Guid LedgeId = new("f0000000-0000-4000-8000-000000000001");
+    private static readonly Guid OtherId = new("f0000000-0000-4000-8000-000000000002");
+
     private static AuthoredComponentData Ledge(LedgeFixture ledge) =>
         new()
         {
-            Id = "test.ledge",
+            Id = LedgeId,
+            Type = "Paradise.Export.Tests.LedgeFixture",
             Data = JsonSerializer.SerializeToElement(ledge, LedgeFixtureJsonContext.Default.LedgeFixture),
         };
 
@@ -51,10 +55,20 @@ public class AuthoredComponentContractTests
         var json = ExportJsonWriter.SerializeToString(LevelWith(Ledge(authored)));
 
         var custom = ExportJsonReader.ReadLevel(json).Entities.Single().Components.Custom!.Single();
-        await Assert.That(custom.Id).IsEqualTo("test.ledge");
+        await Assert.That(custom.Id).IsEqualTo(LedgeId);
+        await Assert.That(custom.Type).IsEqualTo("Paradise.Export.Tests.LedgeFixture");
 
         var restored = custom.Data.Deserialize(LedgeFixtureJsonContext.Default.LedgeFixture)!;
         await Assert.That(restored).IsEqualTo(authored);
+    }
+
+    /// <summary>The id travels as its canonical string, not as a number or a byte array — the
+    /// document has to stay something a non-C# host can write with its own GUID library.</summary>
+    [Test]
+    public async Task the_id_travels_as_a_canonical_guid_string()
+    {
+        var json = ExportJsonWriter.SerializeToString(LevelWith(Ledge(new LedgeFixture())));
+        await Assert.That(json).Contains(LedgeId.ToString("D"));
     }
 
     /// <summary>The bug this exists to prevent: the prototype serialized every authored value as a
@@ -77,11 +91,25 @@ public class AuthoredComponentContractTests
     {
         var level = LevelWith(
             Ledge(new LedgeFixture { Label = "a" }),
-            new AuthoredComponentData { Id = "test.other", Data = JsonSerializer.SerializeToElement(7) });
+            new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
 
         var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
             .Entities.Single().Components.Custom!;
-        await Assert.That(custom.Select(c => c.Id)).IsEquivalentTo(new[] { "test.ledge", "test.other" });
+        await Assert.That(custom.Select(c => c.Id)).IsEquivalentTo(new[] { LedgeId, OtherId });
+    }
+
+    /// <summary>The type name is optional on the wire, so a payload written without it still
+    /// reads — it is a repair path, not a second required key.</summary>
+    [Test]
+    public async Task a_payload_without_a_type_name_still_reads()
+    {
+        var level = LevelWith(
+            new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
+
+        var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
+            .Entities.Single().Components.Custom!.Single();
+        await Assert.That(custom.Id).IsEqualTo(OtherId);
+        await Assert.That(custom.Type).IsNull();
     }
 
     /// <summary>

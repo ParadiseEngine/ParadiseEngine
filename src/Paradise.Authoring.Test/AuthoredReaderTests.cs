@@ -17,6 +17,17 @@ namespace Paradise.Authoring.Test;
 /// </summary>
 public class AuthoredReaderTests
 {
+    // One id per fixture record below. Declared once and interpolated into both the source and the
+    // lookup, because a GUID typed out twice is a GUID that eventually differs in one character and
+    // fails as "registry did not read it" rather than as the typo it is.
+    private const string ThingId = "d0000000-0000-4000-8000-000000000001";
+    private const string RichId = "d0000000-0000-4000-8000-000000000002";
+    private const string MoodyId = "d0000000-0000-4000-8000-000000000003";
+    private const string PositionalId = "d0000000-0000-4000-8000-000000000004";
+    private const string FrozenId = "d0000000-0000-4000-8000-000000000005";
+    private const string NullyId = "d0000000-0000-4000-8000-000000000006";
+    private const string HolderId = "d0000000-0000-4000-8000-000000000007";
+
     private static (object? Registry, ImmutableArray<Diagnostic> Diagnostics) Run(string source)
     {
         var references = new List<MetadataReference>
@@ -37,7 +48,10 @@ public class AuthoredReaderTests
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
+        // BOTH generators, as a real build runs them. The identity diagnostics (PAUT005/006) come
+        // from the schema generator, because that is the one that runs without the registry opt-in.
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            new AuthoringSchemaGenerator().AsSourceGenerator(),
             new AuthoredRegistryGenerator().AsSourceGenerator());
         driver = driver.RunGeneratorsAndUpdateCompilation(
             compilation, out var updated, out _);
@@ -68,10 +82,23 @@ public class AuthoredReaderTests
     {
         using var document = JsonDocument.Parse(json);
         var typed = (IAuthoredComponentRegistry)registry;
-        var found = typed.TryRead(id, document.RootElement.Clone(), out var component);
+        var found = typed.TryRead(new Guid(id), document.RootElement.Clone(), out var component);
         if (!found || component is null)
         {
             throw new InvalidOperationException($"registry did not read '{id}'");
+        }
+        return component;
+    }
+
+    /// <summary>The fallback path: resolved by fully qualified type name rather than by id.</summary>
+    private static object ReadComponentByType(object registry, string fullTypeName, string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var typed = (IAuthoredComponentRegistry)registry;
+        if (!typed.TryReadByType(fullTypeName, document.RootElement.Clone(), out var component) ||
+            component is null)
+        {
+            throw new InvalidOperationException($"registry did not read '{fullTypeName}'");
         }
         return component;
     }
@@ -81,14 +108,16 @@ public class AuthoredReaderTests
 
     // ----------------------------------------------------------------------------------------
 
-    private const string PrimitivesSource = """
+    private const string PrimitivesSource = $$"""
+        using System.Runtime.InteropServices;
         using Paradise.Authoring;
 
         [assembly: AuthoredRegistry]
 
         namespace Game;
 
-        [Authored("game.thing")]
+        [Guid("{{ThingId}}")]
+        [Authored]
         public sealed record Thing
         {
             public float Speed { get; set; } = 2.5f;
@@ -106,7 +135,7 @@ public class AuthoredReaderTests
         var (registry, diagnostics) = Run(PrimitivesSource);
 
         await Assert.That(diagnostics).IsEmpty();
-        var thing = ReadComponent(registry!, "game.thing", """{"Speed": 9.5, "Armed": false}""");
+        var thing = ReadComponent(registry!, ThingId, """{"Speed": 9.5, "Armed": false}""");
 
         await Assert.That((float)Prop(thing, "Speed")!).IsEqualTo(9.5f);
         await Assert.That((bool)Prop(thing, "Armed")!).IsFalse();
@@ -121,7 +150,7 @@ public class AuthoredReaderTests
     public async Task property_names_match_case_insensitively()
     {
         var (registry, _) = Run(PrimitivesSource);
-        var thing = ReadComponent(registry!, "game.thing", """{"speed": 1.5, "COUNT": 3}""");
+        var thing = ReadComponent(registry!, ThingId, """{"speed": 1.5, "COUNT": 3}""");
 
         await Assert.That((float)Prop(thing, "Speed")!).IsEqualTo(1.5f);
         await Assert.That((int)Prop(thing, "Count")!).IsEqualTo(3);
@@ -133,9 +162,39 @@ public class AuthoredReaderTests
     public async Task a_null_string_assigns_null()
     {
         var (registry, _) = Run(PrimitivesSource);
-        var thing = ReadComponent(registry!, "game.thing", """{"Label": null}""");
+        var thing = ReadComponent(registry!, ThingId, """{"Label": null}""");
 
         await Assert.That((string?)Prop(thing, "Label")).IsNull();
+    }
+
+    /// <summary>
+    /// The repair path. A payload whose id matches nothing still loads when it names its type —
+    /// which is the whole reason the type name travels beside an id no human can read.
+    /// </summary>
+    [Test]
+    public async Task a_payload_resolves_by_type_name_when_the_id_is_unknown()
+    {
+        var (registry, _) = Run(PrimitivesSource);
+
+        var thing = ReadComponentByType(registry!, "Game.Thing", """{"Speed": 4.5}""");
+        await Assert.That((float)Prop(thing, "Speed")!).IsEqualTo(4.5f);
+
+        // ...and an unknown id really is unknown: the fallback is a second attempt, not a first.
+        var typed = (IAuthoredComponentRegistry)registry!;
+        using var payload = JsonDocument.Parse("""{"Speed": 4.5}""");
+        await Assert.That(typed.TryRead(Guid.NewGuid(), payload.RootElement.Clone(), out _)).IsFalse();
+        await Assert.That(typed.TryReadByType("Game.Missing", payload.RootElement.Clone(), out _))
+            .IsFalse();
+    }
+
+    /// <summary>The registry publishes ids as GUIDs, so a caller can ask what it can materialize
+    /// without parsing anything.</summary>
+    [Test]
+    public async Task the_registry_publishes_its_ids()
+    {
+        var (registry, _) = Run(PrimitivesSource);
+        await Assert.That(((IAuthoredComponentRegistry)registry!).ComponentIds)
+            .IsEquivalentTo(new[] { new Guid(ThingId) });
     }
 
     /// <summary>The full wire vocabulary in one record, shaped exactly as the addon writes it:
@@ -144,9 +203,10 @@ public class AuthoredReaderTests
     [Test]
     public async Task the_whole_vocabulary_reads_from_the_addon_wire_format()
     {
-        var (registry, diagnostics) = Run("""
+        var (registry, diagnostics) = Run($$"""
             using System.Collections.Generic;
             using System.Numerics;
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
             using Paradise.Export.Data;
 
@@ -162,7 +222,8 @@ public class AuthoredReaderTests
                 public string Tag { get; set; } = "";
             }
 
-            [Authored("game.rich")]
+            [Guid("{{RichId}}")]
+            [Authored]
             public sealed record Rich
             {
                 public Mode Mode { get; set; } = Mode.Idle;
@@ -178,7 +239,7 @@ public class AuthoredReaderTests
             """);
 
         await Assert.That(diagnostics).IsEmpty();
-        var rich = ReadComponent(registry!, "game.rich", """
+        var rich = ReadComponent(registry!, RichId, """
             {
                 "Mode": "Flee",
                 "Spot": [1.5, 2.5],
@@ -212,7 +273,8 @@ public class AuthoredReaderTests
         await Assert.That((string[])Prop(rich, "Names")!).IsEquivalentTo(["a", "b"]);
     }
 
-    private const string EnumSource = """
+    private const string EnumSource = $$"""
+        using System.Runtime.InteropServices;
         using Paradise.Authoring;
 
         [assembly: AuthoredRegistry]
@@ -221,7 +283,8 @@ public class AuthoredReaderTests
 
         public enum Mode { Idle = 0, Chase = 1, Flee = 2 }
 
-        [Authored("game.moody")]
+        [Guid("{{MoodyId}}")]
+        [Authored]
         public sealed record Moody
         {
             public Mode Mode { get; set; } = Mode.Idle;
@@ -238,13 +301,13 @@ public class AuthoredReaderTests
         var (registry, diagnostics) = Run(EnumSource);
 
         await Assert.That(diagnostics).IsEmpty();
-        var named = ReadComponent(registry!, "game.moody", """{"Mode": "Flee"}""");
+        var named = ReadComponent(registry!, MoodyId, """{"Mode": "Flee"}""");
         await Assert.That(Prop(named, "Mode")!.ToString()).IsEqualTo("Flee");
 
-        var lowered = ReadComponent(registry!, "game.moody", """{"Mode": "chase"}""");
+        var lowered = ReadComponent(registry!, MoodyId, """{"Mode": "chase"}""");
         await Assert.That(Prop(lowered, "Mode")!.ToString()).IsEqualTo("Chase");
 
-        var numeric = ReadComponent(registry!, "game.moody", """{"Mode": 2}""");
+        var numeric = ReadComponent(registry!, MoodyId, """{"Mode": 2}""");
         await Assert.That(Prop(numeric, "Mode")!.ToString()).IsEqualTo("Flee");
     }
 
@@ -253,14 +316,16 @@ public class AuthoredReaderTests
     [Test]
     public async Task a_positional_record_is_reported_not_guessed_at()
     {
-        var (registry, diagnostics) = Run("""
+        var (registry, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
 
             [assembly: AuthoredRegistry]
 
             namespace Game;
 
-            [Authored("game.pos")]
+            [Guid("{{PositionalId}}")]
+            [Authored]
             public sealed record Positional(float Speed);
             """);
 
@@ -273,14 +338,16 @@ public class AuthoredReaderTests
     [Test]
     public async Task init_only_and_required_properties_are_reported()
     {
-        var (_, diagnostics) = Run("""
+        var (_, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
 
             [assembly: AuthoredRegistry]
 
             namespace Game;
 
-            [Authored("game.frozen")]
+            [Guid("{{FrozenId}}")]
+            [Authored]
             public sealed record Frozen
             {
                 public float Locked { get; init; } = 1f;
@@ -302,9 +369,10 @@ public class AuthoredReaderTests
     [Test]
     public async Task explicit_nulls_keep_the_initializers_instead_of_throwing()
     {
-        var (registry, _) = Run("""
+        var (registry, _) = Run($$"""
             using System.Collections.Generic;
             using System.Numerics;
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
 
             [assembly: AuthoredRegistry]
@@ -313,7 +381,8 @@ public class AuthoredReaderTests
 
             public sealed record Part { public float Weight { get; set; } = 3f; }
 
-            [Authored("game.nully")]
+            [Guid("{{NullyId}}")]
+            [Authored]
             public sealed record Nully
             {
                 public float Speed { get; set; } = 2.5f;
@@ -323,7 +392,7 @@ public class AuthoredReaderTests
                 public string Label { get; set; } = "kept-unless-nulled";
             }
             """);
-        var nully = ReadComponent(registry!, "game.nully", """
+        var nully = ReadComponent(registry!, NullyId, """
             {"Speed": null, "Home": null, "Body": null, "Offsets": null, "Label": null}
             """);
 
@@ -342,7 +411,8 @@ public class AuthoredReaderTests
     [Test]
     public async Task a_composed_type_without_a_ctor_names_both_types()
     {
-        var (registry, diagnostics) = Run("""
+        var (registry, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
 
             [assembly: AuthoredRegistry]
@@ -351,7 +421,8 @@ public class AuthoredReaderTests
 
             public sealed record Piece(float Weight);
 
-            [Authored("game.holder")]
+            [Guid("{{HolderId}}")]
+            [Authored]
             public sealed record Holder
             {
                 public Piece Body { get; set; } = new(1f);
@@ -370,12 +441,14 @@ public class AuthoredReaderTests
     [Test]
     public async Task without_the_opt_in_no_registry_is_emitted()
     {
-        var (registry, diagnostics) = Run("""
+        var (registry, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
             using Paradise.Authoring;
 
             namespace Game;
 
-            [Authored("game.thing")]
+            [Guid("{{ThingId}}")]
+            [Authored]
             public sealed record Thing
             {
                 public float Speed { get; set; } = 2.5f;
@@ -386,4 +459,155 @@ public class AuthoredReaderTests
         await Assert.That(diagnostics).IsEmpty();
     }
 
+    /// <summary>
+    /// <c>[Authored]</c> with no <c>[Guid]</c> beside it fails the BUILD.
+    ///
+    /// The pair IS the declaration: without the second half the component has no identity, and
+    /// every payload it ever produced would resolve to nothing. Caught here rather than at load
+    /// time, where the symptom is an empty entity and no message naming this type.
+    /// </summary>
+    [Test]
+    public async Task authored_without_a_guid_beside_it_fails_the_build()
+    {
+        var (registry, diagnostics) = Run("""
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Authored]
+            public sealed record Thing
+            {
+                public float Speed { get; set; } = 2.5f;
+            }
+            """);
+
+        await Assert.That(registry).IsNull();
+        var reported = diagnostics.Single(d => d.Id == "PAUT005");
+        var message = reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
+        await Assert.That(message).Contains("'Thing'");
+        await Assert.That(message).Contains("Guid");
+    }
+
+    /// <summary>And a <c>[Guid]</c> that is not a GUID fails it too, quoting what was written —
+    /// otherwise the failure is a FormatException raised whenever something happens to reflect
+    /// over the type, arbitrarily far from the declaration.</summary>
+    [Test]
+    public async Task a_guid_attribute_that_is_not_a_guid_fails_the_build()
+    {
+        var (registry, diagnostics) = Run("""
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Guid("game.thing")]
+            [Authored]
+            public sealed record Thing
+            {
+                public float Speed { get; set; } = 2.5f;
+            }
+            """);
+
+        await Assert.That(registry).IsNull();
+        var reported = diagnostics.Single(d => d.Id == "PAUT005");
+        await Assert.That(reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
+            .Contains("game.thing");
+    }
+
+    /// <summary>A <c>[Guid]</c> with no <c>[Authored]</c> is just a type with a GUID — plenty of
+    /// those exist, and none of them is authored data.</summary>
+    [Test]
+    public async Task a_guid_alone_declares_nothing()
+    {
+        var (registry, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Guid("{{ThingId}}")]
+            public sealed record Thing
+            {
+                public float Speed { get; set; } = 2.5f;
+            }
+            """);
+
+        await Assert.That(registry).IsNull();
+        await Assert.That(diagnostics).IsEmpty();
+    }
+
+    /// <summary>
+    /// An uppercase id is the SAME id — otherwise a copy typed in the other case would quietly
+    /// register as a second component.
+    ///
+    /// Case is the only spelling left to get wrong: the C# compiler rejects every other form of
+    /// <c>[Guid]</c> argument itself (CS0591), braces included, so the generator never sees one.
+    /// </summary>
+    [Test]
+    public async Task id_spellings_are_canonicalized_before_they_are_compared()
+    {
+        var shouted = ThingId.ToUpperInvariant();
+        var (registry, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Guid("{{shouted}}")]
+            [Authored]
+            public sealed record Thing
+            {
+                public float Speed { get; set; } = 2.5f;
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        // Declared uppercase, found by the canonical lowercase form.
+        var thing = ReadComponent(registry!, ThingId, """{"Speed": 8}""");
+        await Assert.That((float)Prop(thing, "Speed")!).IsEqualTo(8f);
+    }
+
+    /// <summary>Two records sharing an id is almost always a copy-paste, and silent: the registry
+    /// would keep one reader and materialize the wrong record for half the payloads. Both are
+    /// named in full, because only one of them gets the squiggle — and a copy-paste that lands in
+    /// another namespace shares its short name, so short names would print the pair twice.</summary>
+    [Test]
+    public async Task two_components_sharing_an_id_fail_the_build()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            // Same short name in two namespaces: the shape a copy-paste actually takes, and the
+            // one a short-name message would render as "'Health' and 'Health'".
+            namespace Game.Combat
+            {
+                [Guid("{{ThingId}}")]
+                [Authored]
+                public sealed record Health { public float Speed { get; set; } }
+            }
+
+            namespace Game.Ui
+            {
+                [Guid("{{ThingId}}")]
+                [Authored]
+                public sealed record Health { public float Speed { get; set; } }
+            }
+            """);
+
+        var reported = diagnostics.Single(d => d.Id == "PAUT006");
+        var message = reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
+        await Assert.That(message).Contains("Game.Combat.Health");
+        await Assert.That(message).Contains("Game.Ui.Health");
+    }
 }

@@ -66,6 +66,12 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             + "assigning each property present in the payload, exactly as it does the record itself. "
             + "Give the composed type a parameterless constructor and property initializers.");
 
+    // PAUT005 (no usable [Guid]) and PAUT006 (two types sharing one) are NOT here. They belong to
+    // AuthoringSchemaGenerator, which runs for every assembly declaring [Authored] types — this one
+    // is gated on [assembly: AuthoredRegistry], and a schema-only assembly (Paradise.Export is one)
+    // would otherwise publish a component with no identity and never hear a word about it.
+    // Types they reject are skipped here silently rather than diagnosed twice.
+
     /// <summary>
     /// PAUT003: a property the reader cannot assign.
     /// </summary>
@@ -135,15 +141,21 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
         string namespaceName)
     {
         var present = new List<AuthoredType>();
+        var claimed = new HashSet<string>(System.StringComparer.Ordinal);
         foreach (var type in types.Where(t => t is not null).Select(t => t!)
-                     .OrderBy(t => t.ComponentId, System.StringComparer.Ordinal))
+                     // By TYPE NAME, not by id: the emitted file should reorder when the code does,
+                     // not when someone regenerates a GUID.
+                     .OrderBy(t => t.TypeName, System.StringComparer.Ordinal))
         {
             // Report and SKIP the whole component: a reader for half a record would read the other
             // half silently wrong, and the emitted code would not compile anyway.
-            if (Validate(context, type))
+            // Identity problems are the schema generator's to report; skipped quietly here so the
+            // same mistake is not diagnosed twice at the same location.
+            if (type.IdUnusable || !claimed.Add(type.ComponentId) || !Validate(context, type))
             {
-                present.Add(type);
+                continue;
             }
+            present.Add(type);
         }
         if (present.Count == 0)
         {
@@ -163,23 +175,50 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
         source.AppendLine("    /// <summary>A shared instance: the registry is stateless.</summary>");
         source.AppendLine("    public static readonly AuthoredComponents Default = new();");
         source.AppendLine();
-        source.AppendLine("    private static readonly string[] Ids =");
+        // One static per id. A Guid cannot be `const`, so it cannot be a `case` label either —
+        // which is why TryRead below is an if-chain where the string version was a switch.
+        foreach (var type in present)
+        {
+            source.Append("    /// <summary>").Append(type.TypeName).AppendLine("</summary>");
+            source.Append("    private static readonly global::System.Guid ").Append(IdFieldName(type))
+                  .Append(" = new global::System.Guid(").Append(Quote(type.ComponentId)).AppendLine(");");
+        }
+        source.AppendLine();
+        source.AppendLine("    private static readonly global::System.Guid[] Ids =");
         source.AppendLine("    [");
         foreach (var type in present)
         {
-            source.Append("        ").Append(Quote(type.ComponentId)).AppendLine(",");
+            source.Append("        ").Append(IdFieldName(type)).AppendLine(",");
         }
         source.AppendLine("    ];");
         source.AppendLine();
-        source.AppendLine("    public global::System.Collections.Generic.IReadOnlyCollection<string> ComponentIds => Ids;");
+        source.AppendLine("    public global::System.Collections.Generic.IReadOnlyCollection<global::System.Guid> ComponentIds => Ids;");
         source.AppendLine();
-        source.AppendLine("    public bool TryRead(string componentId, global::System.Text.Json.JsonElement data, out object? component)");
+        source.AppendLine("    public bool TryRead(global::System.Guid id, global::System.Text.Json.JsonElement data, out object? component)");
         source.AppendLine("    {");
-        source.AppendLine("        switch (componentId)");
+        var firstId = true;
+        foreach (var type in present)
+        {
+            source.Append("        ").Append(firstId ? "if" : "else if")
+                  .Append(" (id == ").Append(IdFieldName(type)).AppendLine(")");
+            source.AppendLine("        {");
+            source.Append("            component = ").Append(ReaderName(type.FullTypeName)).AppendLine("(data);");
+            source.AppendLine("            return true;");
+            source.AppendLine("        }");
+            firstId = false;
+        }
+        source.AppendLine("        component = null;");
+        source.AppendLine("        return false;");
+        source.AppendLine("    }");
+        source.AppendLine();
+        // The fallback. A type name IS a valid `case` label, so this half stays a switch.
+        source.AppendLine("    public bool TryReadByType(string fullTypeName, global::System.Text.Json.JsonElement data, out object? component)");
+        source.AppendLine("    {");
+        source.AppendLine("        switch (fullTypeName)");
         source.AppendLine("        {");
         foreach (var type in present)
         {
-            source.Append("            case ").Append(Quote(type.ComponentId)).AppendLine(":");
+            source.Append("            case ").Append(Quote(type.TypeName)).AppendLine(":");
             source.Append("                component = ").Append(ReaderName(type.FullTypeName)).AppendLine("(data);");
             source.AppendLine("                return true;");
         }
@@ -463,6 +502,11 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             }
         }
     }
+
+    /// <summary>"global::Pingu.PoolConfig" → "Id_Pingu_PoolConfig". Named after the TYPE rather
+    /// than the id, because a GUID makes a hostile identifier and a useless thing to read.</summary>
+    private static string IdFieldName(AuthoredType type) =>
+        "Id_" + ReaderName(type.FullTypeName).Substring("Read_".Length);
 
     /// <summary>"global::Pingu.PoolConfig" → "Read_Pingu_PoolConfig".</summary>
     private static string ReaderName(string fullTypeName)
