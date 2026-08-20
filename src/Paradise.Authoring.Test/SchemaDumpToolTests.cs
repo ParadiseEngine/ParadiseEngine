@@ -46,12 +46,15 @@ public class SchemaDumpToolTests
         var directory = Directory.CreateTempSubdirectory("schemadump").FullName;
         try
         {
-            var dll = CompileTo(directory, """
+            const string id = "d2000000-0000-4000-8000-000000000001";
+            var dll = CompileTo(directory, $$"""
+                using System.Runtime.InteropServices;
                 using Paradise.Authoring;
 
                 namespace Game;
 
-                [Authored("game.thing", DisplayName = "Thing")]
+                [Guid("{{id}}")]
+                [Authored(DisplayName = "Thing")]
                 public sealed record Thing
                 {
                     public float Speed { get; set; } = 2.5f;
@@ -66,7 +69,9 @@ public class SchemaDumpToolTests
             var expected = (string)loaded.GetType("Game.AuthoringSchema")!
                 .GetField("Json")!.GetRawConstantValue()!;
             await Assert.That(File.ReadAllText(output)).IsEqualTo(expected);
-            await Assert.That(expected).Contains("game.thing");
+            await Assert.That(expected).Contains(id);
+            // The type name rides along, so a dumped schema is still readable by a human.
+            await Assert.That(expected).Contains("Game.Thing");
         }
         finally
         {

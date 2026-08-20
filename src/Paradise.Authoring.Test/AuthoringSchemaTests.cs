@@ -17,7 +17,7 @@ public class AuthoringSchemaTests
     private static AuthoringSchemaDocument Schema() => AuthoringSchemaReader.Read(RawJson());
 
     private static AuthoredComponentSchema Everything() =>
-        Schema().Components.Single(c => c.Id == "test.everything");
+        Schema().Components.Single(c => c.Id == FixtureIds.EverythingId);
 
     private static AuthoredFieldSchema Field(AuthoredComponentSchema component, string name) =>
         component.Fields.Single(f => f.Name == name);
@@ -27,24 +27,38 @@ public class AuthoringSchemaTests
     {
         var schema = Schema();
         await Assert.That(schema.Version).IsEqualTo(AuthoringSchemaDocument.CurrentVersion);
-        await Assert.That(schema.Components.Select(c => c.Id))
-            .IsEquivalentTo(new[] { "test.a-minimal", "test.by-sprite", "test.everything", "test.v2" });
+        await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
+        {
+            FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
+        });
     }
 
+    /// <summary>The fallback key, and the only thing in the document that says which component a
+    /// bare GUID is. Without it a schema is unreviewable and a broken payload is undiagnosable.</summary>
     [Test]
-    public async Task components_are_ordered_by_id_so_rebuilds_do_not_diff()
+    public async Task every_component_publishes_its_fully_qualified_type_name()
     {
-        var ids = Schema().Components.Select(c => c.Id).ToList();
-        await Assert.That(ids).IsEquivalentTo(ids.OrderBy(id => id, StringComparer.Ordinal).ToList());
+        await Assert.That(Everything().Type).IsEqualTo("Paradise.Authoring.Test.EverythingFixture");
+        await Assert.That(Schema().Components.Select(c => c.Type))
+            .All().Satisfy(type => type!.StartsWith("Paradise.Authoring.Test."));
+    }
+
+    /// <summary>By TYPE NAME rather than by id: ordering by GUID would be equally stable and
+    /// completely arbitrary, and would reshuffle the whole document over one regenerated id.</summary>
+    [Test]
+    public async Task components_are_ordered_by_type_name_so_rebuilds_do_not_diff()
+    {
+        var types = Schema().Components.Select(c => c.Type).ToList();
+        await Assert.That(types).IsEquivalentTo(types.OrderBy(t => t, StringComparer.Ordinal).ToList());
     }
 
     [Test]
     public async Task display_name_falls_back_to_the_type_name()
     {
         var schema = Schema();
-        await Assert.That(schema.Components.Single(c => c.Id == "test.everything").DisplayName)
+        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.EverythingId).DisplayName)
             .IsEqualTo("Everything");
-        await Assert.That(schema.Components.Single(c => c.Id == "test.a-minimal").DisplayName)
+        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.MinimalId).DisplayName)
             .IsEqualTo("MinimalFixture");
     }
 
@@ -161,7 +175,7 @@ public class AuthoringSchemaTests
         await Assert.That(gizmo.HalfExtentX).IsEqualTo("HalfExtentX");
         await Assert.That(gizmo.HalfExtentZ).IsEqualTo("HalfExtentZ");
         await Assert.That(gizmo.Depth).IsEqualTo("Depth");
-        await Assert.That(Schema().Components.Single(c => c.Id == "test.a-minimal").Gizmo).IsNull();
+        await Assert.That(Schema().Components.Single(c => c.Id == FixtureIds.MinimalId).Gizmo).IsNull();
     }
 
     [Test]

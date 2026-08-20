@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Paradise.Export.Data;
 using Paradise.Export.Serialization;
@@ -11,8 +12,14 @@ namespace Paradise.Export.Tests;
 /// </summary>
 public class AuthoredComponentRouterTests
 {
-    private static AuthoredComponentData Payload(string id, string json) =>
-        new() { Id = id, Data = JsonDocument.Parse(json).RootElement.Clone() };
+    /// <summary>A game's own component: an id the engine does not know, plus the type name that
+    /// makes the payload identifiable when the id resolves to nothing.</summary>
+    private static readonly Guid LedgeId = new("f0000000-0000-4000-8000-000000000001");
+
+    private const string LedgeType = "Paradise.Export.Tests.LedgeFixture";
+
+    private static AuthoredComponentData Payload(Guid id, string json, string? type = null) =>
+        new() { Id = id, Type = type, Data = JsonDocument.Parse(json).RootElement.Clone() };
 
     private static LevelEntityData Route(params AuthoredComponentData[] components)
     {
@@ -83,10 +90,11 @@ public class AuthoredComponentRouterTests
     [Test]
     public async Task an_unknown_id_is_carried_verbatim_in_custom()
     {
-        var entity = Route(Payload("mygame.ledge", """{"Friction":0.35,"IsTrigger":false}"""));
+        var entity = Route(Payload(LedgeId, """{"Friction":0.35,"IsTrigger":false}""", LedgeType));
 
         var custom = entity.Components.Custom!.Single();
-        await Assert.That(custom.Id).IsEqualTo("mygame.ledge");
+        await Assert.That(custom.Id).IsEqualTo(LedgeId);
+        await Assert.That(custom.Type).IsEqualTo(LedgeType);
         await Assert.That(custom.Data.GetProperty("Friction").GetSingle()).IsEqualTo(0.35f);
         await Assert.That(custom.Data.GetProperty("IsTrigger").ValueKind).IsEqualTo(JsonValueKind.False);
     }
@@ -102,7 +110,7 @@ public class AuthoredComponentRouterTests
         var entity = Route(
             Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
             Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
-            Payload("test.ledge", """{"Friction":0.35,"IsTrigger":true,"Label":"north"}"""));
+            Payload(LedgeId, """{"Friction":0.35,"IsTrigger":true,"Label":"north"}"""));
 
         var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry());
 
@@ -119,13 +127,30 @@ public class AuthoredComponentRouterTests
     {
         var entity = Route(
             Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
-            Payload("test.ledge", """{"Friction":0.1}"""));
+            Payload(LedgeId, """{"Friction":0.1}"""));
 
-        var unresolved = new List<string>();
+        var unresolved = new List<AuthoredComponentData>();
         var instances = AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
 
         await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
-        await Assert.That(unresolved).IsEquivalentTo(new[] { "test.ledge" });
+        await Assert.That(unresolved.Select(c => c.Id)).IsEquivalentTo(new[] { LedgeId });
+    }
+
+    /// <summary>
+    /// The repair path, end to end. A payload whose id nothing claims still materializes when it
+    /// names its type — the reason a GUID id is survivable rather than a one-way door.
+    /// </summary>
+    [Test]
+    public async Task a_payload_with_an_unknown_id_falls_back_to_its_type_name()
+    {
+        var entity = Route(Payload(
+            Guid.NewGuid(), """{"Friction":0.5,"Label":"south"}""", LedgeType));
+
+        var unresolved = new List<AuthoredComponentData>();
+        var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry(), unresolved);
+
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Label).IsEqualTo("south");
+        await Assert.That(unresolved).IsEmpty();
     }
 
     /// <summary>An id nobody claims is REPORTED. Silently dropping authored data is the failure
@@ -133,22 +158,38 @@ public class AuthoredComponentRouterTests
     [Test]
     public async Task materialize_reports_an_id_no_registry_claims()
     {
-        var entity = Route(Payload("someone.else", """{"X":1}"""));
-        var unresolved = new List<string>();
+        var stranger = Guid.NewGuid();
+        var entity = Route(Payload(stranger, """{"X":1}""", "Someone.Else"));
+        var unresolved = new List<AuthoredComponentData>();
 
         await Assert.That(AuthoredComponentRouter.Materialize(entity, new LedgeRegistry(), unresolved))
             .IsEmpty();
-        await Assert.That(unresolved).IsEquivalentTo(new[] { "someone.else" });
+        // Reported as the whole component, so the caller's message can name the type as well as
+        // the id — "could not read <guid>" is not something anyone can act on.
+        var reported = unresolved.Single();
+        await Assert.That(reported.Id).IsEqualTo(stranger);
+        await Assert.That(reported.Type).IsEqualTo("Someone.Else");
     }
 
     /// <summary>Stands in for the registry a game's [Authored] records generate.</summary>
     private sealed class LedgeRegistry : Paradise.Authoring.IAuthoredComponentRegistry
     {
-        public IReadOnlyCollection<string> ComponentIds { get; } = new[] { "test.ledge" };
+        public IReadOnlyCollection<Guid> ComponentIds { get; } = new[] { LedgeId };
 
-        public bool TryRead(string componentId, JsonElement data, out object? component)
+        public bool TryRead(Guid id, JsonElement data, out object? component)
         {
-            if (componentId != "test.ledge")
+            if (id != LedgeId)
+            {
+                component = null;
+                return false;
+            }
+            component = data.Deserialize(LedgeFixtureJsonContext.Default.LedgeFixture);
+            return true;
+        }
+
+        public bool TryReadByType(string fullTypeName, JsonElement data, out object? component)
+        {
+            if (fullTypeName != LedgeType)
             {
                 component = null;
                 return false;
@@ -162,7 +203,25 @@ public class AuthoredComponentRouterTests
     public async Task engine_ids_are_distinguishable_from_a_games_own()
     {
         await Assert.That(AuthoredComponentRouter.IsEngineComponent(ParadiseComponentIds.Rigidbody)).IsTrue();
-        await Assert.That(AuthoredComponentRouter.IsEngineComponent("mygame.ledge")).IsFalse();
+        await Assert.That(AuthoredComponentRouter.IsEngineComponent(LedgeId)).IsFalse();
+    }
+
+    /// <summary>
+    /// The id a record is AUTHORED under is the id the router DISPATCHES on.
+    ///
+    /// Two halves of the same wiring that live in different files: the schema and registry
+    /// generators read the record's <c>[Guid]</c>, while the router switches on
+    /// <see cref="ParadiseComponentIds"/>. Both spell it through the same constant today, so this
+    /// only fails if someone pastes a literal into one of them — which is exactly the mistake that
+    /// is otherwise invisible until a payload silently routes nowhere.
+    /// </summary>
+    [Test]
+    public async Task an_engine_record_is_authored_under_the_id_the_router_dispatches_on()
+    {
+        var authored = (GuidAttribute)Attribute.GetCustomAttribute(
+            typeof(RigidbodyComponentData), typeof(GuidAttribute))!;
+
+        await Assert.That(Guid.Parse(authored.Value)).IsEqualTo(ParadiseComponentIds.Rigidbody);
     }
 
     /// <summary>A payload that cannot be read as the component it claims to be is REPORTED, not
@@ -177,7 +236,8 @@ public class AuthoredComponentRouterTests
             Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
         });
 
-        await Assert.That(failed).IsEquivalentTo(new[] { ParadiseComponentIds.Rigidbody });
+        await Assert.That(failed.Select(c => c.Id))
+            .IsEquivalentTo(new[] { ParadiseComponentIds.Rigidbody });
         await Assert.That(entity.Components.Rigidbody).IsNull();
         // The good one still applied: one bad component does not cost the entity the rest.
         await Assert.That(entity.Components.Agent!.MoveSpeed).IsEqualTo(3f);

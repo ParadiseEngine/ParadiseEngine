@@ -18,11 +18,21 @@ public sealed record AuthoringSchemaDocument
     ///
     /// v2 added the types the engine's own components need — arrays, vectors, quaternions, colour —
     /// plus conditional visibility and host-object references beyond collision shapes. A v1 reader
-    /// would meet a <c>type</c> it has no control for, so the version had to move.</summary>
-    public const int CurrentVersion = 2;
+    /// would meet a <c>type</c> it has no control for, so the version had to move.
+    ///
+    /// v3 made <c>id</c> a GUID and added <c>type</c>. This one is not merely additive in the other
+    /// direction either: every v1 and v2 document keys its components by a NAME, and there is no
+    /// way to derive a component's GUID from <c>paradise.rigidbody</c>, so such a document cannot be
+    /// upgraded on the way in — only regenerated.</summary>
+    public const int CurrentVersion = 3;
 
-    /// <summary>The oldest document this build still understands.</summary>
-    public const int MinimumSupportedVersion = 1;
+    /// <summary>The oldest document this build still understands.
+    ///
+    /// Equal to <see cref="CurrentVersion"/> since v3, and that is the point rather than an
+    /// oversight: a v2 document's string ids would each have to become a GUID this build has no
+    /// mapping for. Rejecting it names the problem; accepting it would silently produce components
+    /// with empty ids that resolve to nothing.</summary>
+    public const int MinimumSupportedVersion = 3;
 
     public int Version { get; set; } = CurrentVersion;
     public List<AuthoredComponentSchema> Components { get; set; } = [];
@@ -31,8 +41,20 @@ public sealed record AuthoringSchemaDocument
 /// <summary>One authored component: the id it travels under, and the fields a human edits.</summary>
 public sealed record AuthoredComponentSchema
 {
-    /// <summary>Stable id, e.g. <c>paradise.rigidbody</c>. What the exported payload is keyed by.</summary>
-    public string Id { get; set; } = "";
+    /// <summary>Stable id, from <see cref="AuthoredAttribute.Id"/>. What the exported payload is
+    /// keyed by, and the only member here an editor may match on.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>
+    /// Fully qualified CLR name of the record, e.g. <c>Pingu.Core.Authoring.PoolConfig</c>.
+    ///
+    /// The FALLBACK key, and the thing that makes a GUID id survivable in a text document: it is
+    /// what lets a human reading the schema, a diff, or a broken payload tell which component a
+    /// bare GUID refers to. Editors show it and may resolve by it when the id misses; nothing
+    /// should prefer it, because a type rename moves it and the GUID exists precisely so identity
+    /// does not move.
+    /// </summary>
+    public string Type { get; set; } = "";
 
     /// <summary>Human-facing name. Falls back to the type name when nothing was declared.</summary>
     public string DisplayName { get; set; } = "";
@@ -196,9 +218,6 @@ public static class AuthoredBySources
 
     /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
-
-    /// <summary>v1 spelling of <see cref="Shape"/>. Still accepted when reading an old document.</summary>
-    public const string NativeShape = "nativeShape";
 }
 
 /// <summary>

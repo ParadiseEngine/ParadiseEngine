@@ -17,15 +17,38 @@ namespace Paradise.Authoring;
 /// <c>JsonSerializerContext</c>. The schema is an ADDITIONAL publication of the same declaration,
 /// for hosts that cannot link against the type. Both, not either.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The component's IDENTITY is not declared here. It comes from the BCL's own
+/// <see cref="System.Runtime.InteropServices.GuidAttribute"/> on the same type:
+/// </para>
+/// <code>
+/// [Guid("a1d3f6b0-0000-4000-8000-000000000003")]
+/// [Authored(DisplayName = "Rigidbody")]
+/// public sealed record RigidbodyComponentData { ... }
+/// </code>
+/// <para>
+/// A GUID rather than a name, because a name is two things at once and they have different
+/// lifetimes: <c>paradise.rigidbody</c> was both "which component is this" and "what do we call
+/// it", so renaming the component to something clearer orphaned every document that had already
+/// authored it. The GUID is only the first of those, and is free to never change while the
+/// <see cref="DisplayName"/> above it does.
+/// </para>
+/// <para>
+/// <c>[Guid]</c> rather than an id parameter of our own, because .NET already has exactly this
+/// attribute — "the stable GUID of this type" — and every tool that generates one already knows
+/// where to put it. A second spelling would mean a type could carry two different GUIDs and be
+/// right about neither.
+/// </para>
+/// <para>
+/// A missing or malformed <c>[Guid]</c> is PAUT005, reported at compile time.
+/// </para>
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
-public sealed class AuthoredAttribute(string componentId) : Attribute
+public sealed class AuthoredAttribute : Attribute
 {
-    /// <summary>The id this object travels under in the scene export, e.g. <c>paradise.rigidbody</c>.
-    /// A contract shared by the editor that writes it and the runtime that reads it — renaming it
-    /// orphans every exported document.</summary>
-    public string ComponentId { get; } = componentId;
-
-    /// <summary>Human-facing name for editors. Defaults to the type name.</summary>
+    /// <summary>Human-facing name for editors. Defaults to the type name. Safe to change: it is
+    /// not what anything is looked up by.</summary>
     public string? DisplayName { get; set; }
 }
 

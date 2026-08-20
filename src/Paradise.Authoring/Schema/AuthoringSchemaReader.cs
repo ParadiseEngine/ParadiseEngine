@@ -28,35 +28,11 @@ public static class AuthoringSchemaReader
         {
             throw new JsonException(
                 $"Authoring schema is version {document.Version}, older than the minimum supported "
-                + $"{AuthoringSchemaDocument.MinimumSupportedVersion}. Regenerate it.");
-        }
-
-        // v1 spelled the only host-object kind "nativeShape". Normalized on the way in so every
-        // consumer sees one vocabulary and no editor has to carry the old name.
-        foreach (var component in document.Components)
-        {
-            NormalizeLegacySources(component.Fields);
+                + $"{AuthoringSchemaDocument.MinimumSupportedVersion}. Its components are keyed by "
+                + "name rather than by id, and no mapping from one to the other exists — rebuild "
+                + "the assembly and re-dump the schema.");
         }
         return document;
-    }
-
-    private static void NormalizeLegacySources(List<AuthoredFieldSchema> fields)
-    {
-        foreach (var field in fields)
-        {
-            if (field.AuthoredBy == AuthoredBySources.NativeShape)
-            {
-                field.AuthoredBy = AuthoredBySources.Shape;
-            }
-            if (field.Fields is { } nested)
-            {
-                NormalizeLegacySources(nested);
-            }
-            if (field.Items is { } items)
-            {
-                NormalizeLegacySources([items]);
-            }
-        }
     }
 
     /// <summary>Serialize a document back out. Used by tests and by tooling that dumps the
@@ -68,18 +44,21 @@ public static class AuthoringSchemaReader
     /// Combine documents into one, earlier sources winning on a duplicate id.
     ///
     /// Earlier-wins so a host can pass the ENGINE schema first and have it be authoritative: a game
-    /// that accidentally reuses <c>paradise.rigidbody</c> should not be able to redefine what the
-    /// engine's own exporter will bake. Components come out ordered by id, so an editor's dropdown
-    /// is stable across runs.
+    /// that accidentally copies the rigidbody's id should not be able to redefine what the engine's
+    /// own exporter will bake.
+    ///
+    /// Components come out ordered by TYPE NAME, not by id, so an editor's dropdown is both stable
+    /// across runs and in an order a human can predict. Ordering by a GUID would be equally stable
+    /// and completely arbitrary.
     /// </summary>
     public static AuthoringSchemaDocument Merge(params IEnumerable<AuthoringSchemaDocument> documents)
     {
-        var byId = new Dictionary<string, AuthoredComponentSchema>(StringComparer.Ordinal);
+        var byId = new Dictionary<Guid, AuthoredComponentSchema>();
         foreach (var document in documents)
         {
             foreach (var component in document.Components)
             {
-                if (component.Id.Length > 0)
+                if (component.Id != Guid.Empty)
                 {
                     // TryAdd, not [], so the FIRST source of an id is the one that survives.
                     byId.TryAdd(component.Id, component);
@@ -89,7 +68,7 @@ public static class AuthoringSchemaReader
 
         return new AuthoringSchemaDocument
         {
-            Components = [.. byId.Values.OrderBy(c => c.Id, StringComparer.Ordinal)],
+            Components = [.. byId.Values.OrderBy(c => c.Type, StringComparer.Ordinal)],
         };
     }
 }

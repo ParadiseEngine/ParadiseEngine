@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Paradise.Authoring;
@@ -133,8 +134,19 @@ namespace Paradise.Export.Data
     /// </summary>
     public sealed record AuthoredComponentData
     {
-        /// <summary>The <c>[Authored]</c> component id, e.g. <c>pingu.pool</c>.</summary>
-        public string Id { get; set; } = "";
+        /// <summary>The <c>[Authored]</c> component id. What this payload is resolved by.</summary>
+        public Guid Id { get; set; }
+
+        /// <summary>
+        /// Fully qualified CLR name of the record, e.g. <c>Pingu.Core.Authoring.PoolConfig</c>.
+        ///
+        /// Written by every editor and read only when <see cref="Id"/> fails to resolve. It is what
+        /// keeps this document diagnosable by a human: a GUID alone tells a reader — and the person
+        /// staring at a payload that loaded as nothing — precisely nothing about what was meant.
+        ///
+        /// Optional on the wire so a document that predates it still reads.
+        /// </summary>
+        public string? Type { get; set; }
 
         /// <summary>The serialized record, exactly as the editor wrote it.</summary>
         public JsonElement Data { get; set; }
@@ -151,8 +163,8 @@ namespace Paradise.Export.Data
     /// optionally names a single node inside the GLB (reserved; null = whole default scene).
     /// Schema v1 documents carry neither field (null = no mesh exported).
     /// </summary>
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000001")]
-    [Authored(ParadiseComponentIds.Renderable, DisplayName = "Renderable")]
+    [Guid(ParadiseComponentIds.Raw.Renderable)]
+    [Authored(DisplayName = "Renderable")]
     public sealed record RenderableComponentData
     {
         /// <summary>
@@ -173,8 +185,8 @@ namespace Paradise.Export.Data
         public string? MeshNode { get; set; }
     }
 
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000002")]
-    [Authored(ParadiseComponentIds.Collider, DisplayName = "Collider")]
+    [Guid(ParadiseComponentIds.Raw.Collider)]
+    [Authored(DisplayName = "Collider")]
     public sealed record ColliderComponentData
     {
         /// <summary>A list of shape references. Each is edited with the host's own handles and
@@ -183,10 +195,10 @@ namespace Paradise.Export.Data
         public List<ColliderShapeData> Colliders { get; set; } = new();
     }
 
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000003")]
+    [Guid(ParadiseComponentIds.Raw.Rigidbody)]
     /// <summary>The first engine component to declare its own authoring surface, and the template
     /// the other eight followed.</summary>
-    [Authored(ParadiseComponentIds.Rigidbody, DisplayName = "Rigidbody")]
+    [Authored(DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
         [AuthorDoc("Static bodies never move; dynamic ones are simulated.")]
@@ -215,8 +227,8 @@ namespace Paradise.Export.Data
         public string? LayerName { get; set; } = "";
     }
 
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000004")]
-    [Authored(ParadiseComponentIds.Agent, DisplayName = "Agent (movement)")]
+    [Guid(ParadiseComponentIds.Raw.Agent)]
+    [Authored(DisplayName = "Agent (movement)")]
     public sealed record AgentComponentData
     {
         [AuthorRange(0.01, 100), AuthorDoc("Movement speed in metres per second.")]
@@ -235,8 +247,8 @@ namespace Paradise.Export.Data
         public string? WalkClip { get; set; } = "Walk";
     }
 
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000005")]
-    [Authored(ParadiseComponentIds.Interactable, DisplayName = "Interactable")]
+    [Guid(ParadiseComponentIds.Raw.Interactable)]
+    [Authored(DisplayName = "Interactable")]
     public sealed record EntityInteractableComponentData
     {
         [AuthorDoc("Name shown to the player when this can be interacted with.")]
@@ -252,8 +264,8 @@ namespace Paradise.Export.Data
     /// means the full <see cref="Columns"/>×<see cref="Rows"/> grid. The SIMULATION owns the
     /// clock (frame index lives in the world snapshot) so both hosts show the same frame.
     /// </summary>
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000006")]
-    [Authored(ParadiseComponentIds.SpriteAnimation, DisplayName = "Sprite animation")]
+    [Guid(ParadiseComponentIds.Raw.SpriteAnimation)]
+    [Authored(DisplayName = "Sprite animation")]
     // The WHOLE record is authored by pointing at a sprite in the host: its sheet, grid and quad
     // size are read off that object at export rather than retyped here.
     [AuthoredByHost(AuthoredBySources.Sprite)]
@@ -291,8 +303,8 @@ namespace Paradise.Export.Data
     /// Particles emit in a cone of <see cref="SpreadDegrees"/> half-angle around the entity's
     /// +Y axis and live in WORLD space (a moving emitter leaves a trail).
     /// </summary>
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000007")]
-    [Authored(ParadiseComponentIds.ParticleEmitter, DisplayName = "Particle emitter")]
+    [Guid(ParadiseComponentIds.Raw.ParticleEmitter)]
+    [Authored(DisplayName = "Particle emitter")]
     public sealed record ParticleEmitterComponentData
     {
         [AuthorDoc("Sprite = camera-facing flipbook quads; Voxel = solid tinted cubes.")]
@@ -360,8 +372,8 @@ namespace Paradise.Export.Data
     /// names only exist inside the audio project, which the exporter cannot see — so an emitter
     /// whose event was renamed goes quiet rather than failing the export.
     /// </summary>
-    [ParadiseComponent("a1d3f6b0-0000-4000-8000-000000000008")]
-    [Authored(ParadiseComponentIds.AudioEmitter, DisplayName = "Audio emitter")]
+    [Guid(ParadiseComponentIds.Raw.AudioEmitter)]
+    [Authored(DisplayName = "Audio emitter")]
     public sealed record AudioEmitterComponentData
     {
         /// <summary>Event posted for this emitter. Null or empty means the emitter exists as a
@@ -649,7 +661,8 @@ namespace Paradise.Export.Data
     /// light is only ever described once. Aiming is done by ROTATING the referenced object —
     /// <see cref="Direction"/> is baked from its orientation, not typed.
     /// </summary>
-    [Authored(ParadiseComponentIds.Light, DisplayName = "Light")]
+    [Guid(ParadiseComponentIds.Raw.Light)]
+    [Authored(DisplayName = "Light")]
     [AuthoredByHost(AuthoredBySources.Light)]
     public sealed record SceneLightData
     {
@@ -694,7 +707,8 @@ namespace Paradise.Export.Data
     /// The entity's GUID is deliberately absent: minting one and keeping it unique across a scene
     /// is behaviour, and behaviour is the one thing a schema cannot carry.
     /// </summary>
-    [Authored(ParadiseComponentIds.Identity, DisplayName = "Identity")]
+    [Guid(ParadiseComponentIds.Raw.Identity)]
+    [Authored(DisplayName = "Identity")]
     public sealed record IdentityComponentData
     {
         [AuthorDoc("Free-form label the runtime groups by, e.g. Prop, Character, Door.")]

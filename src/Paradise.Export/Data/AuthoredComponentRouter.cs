@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using Paradise.Authoring;
@@ -16,13 +17,13 @@ namespace Paradise.Export.Data
     ///
     /// Three destinations:
     ///
-    /// - <c>paradise.identity</c> lands on <see cref="LevelEntityData"/> itself. Identity is what an
-    ///   entity IS, not something it has.
+    /// - <see cref="ParadiseComponentIds.Identity"/> lands on <see cref="LevelEntityData"/> itself.
+    ///   Identity is what an entity IS, not something it has.
     /// - Every other engine id lands in its typed <see cref="EntityComponentsData"/> slot.
     /// - Anything else is a GAME's own component and lands in
     ///   <see cref="EntityComponentsData.Custom"/>, untouched.
     ///
-    /// Reflection-free throughout: the switch selects a source-generated
+    /// Reflection-free throughout: the dispatch selects a source-generated
     /// <see cref="JsonTypeInfo{T}"/>, because a reflection deserializer would pin Godot's
     /// collectible AssemblyLoadContext and break C# hot-reload (godotengine/godot#78513).
     /// </summary>
@@ -33,90 +34,108 @@ namespace Paradise.Export.Data
         /// engine id but cannot be read as that component — the caller should report it rather than
         /// silently drop authored data.
         /// </summary>
+        /// <remarks>
+        /// An if-chain rather than the switch this used to be: a <see cref="Guid"/> cannot be
+        /// <c>const</c>, so it cannot be a <c>case</c> label. The order is the contract's own.
+        /// </remarks>
         public static bool Apply(LevelEntityData entity, AuthoredComponentData component)
         {
             EntityComponentsData components = entity.Components;
-            switch (component.Id)
+            Guid id = component.Id;
+
+            if (id == ParadiseComponentIds.Identity)
             {
-                case ParadiseComponentIds.Identity:
-                    if (Read<IdentityComponentData>(component) is not { } identity)
-                    {
-                        return false;
-                    }
-                    // Spread across the entity's own fields. DisplayName and SpawnPhase are left
-                    // alone when unauthored so the exporter's own defaults (node name, LevelStart)
-                    // survive rather than being overwritten with null.
-                    entity.Kind = identity.Kind;
-                    entity.IsActive = identity.IsActive;
-                    entity.InitialAnimation = NullIfBlank(identity.InitialAnimation);
-                    entity.Prefab = NullIfBlank(identity.Prefab);
-                    if (!string.IsNullOrWhiteSpace(identity.DisplayName))
-                    {
-                        entity.DisplayName = identity.DisplayName;
-                    }
-                    if (!string.IsNullOrWhiteSpace(identity.SpawnPhase))
-                    {
-                        entity.SpawnPhase = identity.SpawnPhase;
-                    }
-                    return true;
-
-                case ParadiseComponentIds.Renderable:
-                    return Assign<RenderableComponentData>(component,
-                        value => components.Renderable = value);
-
-                case ParadiseComponentIds.Collider:
-                    return Assign<ColliderComponentData>(component,
-                        value => components.Collider = value);
-
-                case ParadiseComponentIds.Rigidbody:
-                    return Assign<RigidbodyComponentData>(component,
-                        value => components.Rigidbody = value);
-
-                case ParadiseComponentIds.Agent:
-                    return Assign<AgentComponentData>(component,
-                        value => components.Agent = value);
-
-                case ParadiseComponentIds.Interactable:
-                    return Assign<EntityInteractableComponentData>(component,
-                        value => components.Interactable = value);
-
-                case ParadiseComponentIds.SpriteAnimation:
-                    return Assign<SpriteAnimationComponentData>(component,
-                        value => components.SpriteAnimation = value);
-
-                case ParadiseComponentIds.Light:
-                    return Assign<SceneLightData>(component, value => components.Light = value);
-
-                case ParadiseComponentIds.AudioEmitter:
-                    return Assign<AudioEmitterComponentData>(component,
-                        value => components.AudioEmitter = value);
-
-                case ParadiseComponentIds.ParticleEmitter:
-                    return Assign<ParticleEmitterComponentData>(component,
-                        value => components.ParticleEmitter = value);
-
-                default:
-                    // A game's own component. The engine cannot name the type and does not try —
-                    // the payload rides along and the game reads it with its own context.
-                    (components.Custom ??= new List<AuthoredComponentData>()).Add(component);
-                    return true;
+                if (Read<IdentityComponentData>(component) is not { } identity)
+                {
+                    return false;
+                }
+                // Spread across the entity's own fields. DisplayName and SpawnPhase are left
+                // alone when unauthored so the exporter's own defaults (node name, LevelStart)
+                // survive rather than being overwritten with null.
+                entity.Kind = identity.Kind;
+                entity.IsActive = identity.IsActive;
+                entity.InitialAnimation = NullIfBlank(identity.InitialAnimation);
+                entity.Prefab = NullIfBlank(identity.Prefab);
+                if (!string.IsNullOrWhiteSpace(identity.DisplayName))
+                {
+                    entity.DisplayName = identity.DisplayName;
+                }
+                if (!string.IsNullOrWhiteSpace(identity.SpawnPhase))
+                {
+                    entity.SpawnPhase = identity.SpawnPhase;
+                }
+                return true;
             }
+            if (id == ParadiseComponentIds.Renderable)
+            {
+                return Assign<RenderableComponentData>(component,
+                    value => components.Renderable = value);
+            }
+            if (id == ParadiseComponentIds.Collider)
+            {
+                return Assign<ColliderComponentData>(component,
+                    value => components.Collider = value);
+            }
+            if (id == ParadiseComponentIds.Rigidbody)
+            {
+                return Assign<RigidbodyComponentData>(component,
+                    value => components.Rigidbody = value);
+            }
+            if (id == ParadiseComponentIds.Agent)
+            {
+                return Assign<AgentComponentData>(component, value => components.Agent = value);
+            }
+            if (id == ParadiseComponentIds.Interactable)
+            {
+                return Assign<EntityInteractableComponentData>(component,
+                    value => components.Interactable = value);
+            }
+            if (id == ParadiseComponentIds.SpriteAnimation)
+            {
+                return Assign<SpriteAnimationComponentData>(component,
+                    value => components.SpriteAnimation = value);
+            }
+            if (id == ParadiseComponentIds.Light)
+            {
+                return Assign<SceneLightData>(component, value => components.Light = value);
+            }
+            if (id == ParadiseComponentIds.AudioEmitter)
+            {
+                return Assign<AudioEmitterComponentData>(component,
+                    value => components.AudioEmitter = value);
+            }
+            if (id == ParadiseComponentIds.ParticleEmitter)
+            {
+                return Assign<ParticleEmitterComponentData>(component,
+                    value => components.ParticleEmitter = value);
+            }
+
+            // A game's own component. The engine cannot name the type and does not try — the
+            // payload rides along and the game reads it with its own context.
+            (components.Custom ??= new List<AuthoredComponentData>()).Add(component);
+            return true;
         }
 
-        /// <summary>Apply many, reporting the ids that could not be read.</summary>
-        public static IReadOnlyList<string> ApplyAll(
+        /// <summary>
+        /// Apply many, returning the components that could not be read.
+        ///
+        /// The components themselves rather than their ids, so a caller's message can name the
+        /// <see cref="AuthoredComponentData.Type"/> as well. "Could not read
+        /// a1d3f6b0-0000-4000-8000-000000000003" is not a diagnostic anyone can act on.
+        /// </summary>
+        public static IReadOnlyList<AuthoredComponentData> ApplyAll(
             LevelEntityData entity, IEnumerable<AuthoredComponentData> components)
         {
-            var failed = new List<string>();
+            var failed = new List<AuthoredComponentData>();
             foreach (AuthoredComponentData component in components)
             {
-                if (string.IsNullOrWhiteSpace(component.Id))
+                if (component.Id == Guid.Empty)
                 {
                     continue;
                 }
                 if (!Apply(entity, component))
                 {
-                    failed.Add(component.Id);
+                    failed.Add(component);
                 }
             }
             return failed;
@@ -131,12 +150,13 @@ namespace Paradise.Export.Data
         /// deserialize: a component nobody wrote an accessor for is otherwise authored, exported,
         /// and silently never read.
         ///
-        /// Payloads whose id the registry does not know are skipped and reported, not guessed at.
+        /// Payloads whose id the registry does not know are retried against
+        /// <see cref="AuthoredComponentData.Type"/>, then skipped and reported — never guessed at.
         /// </summary>
         public static IReadOnlyList<object> Materialize(
             LevelEntityData entity,
             IAuthoredComponentRegistry? registry = null,
-            IList<string>? unresolved = null)
+            IList<AuthoredComponentData>? unresolved = null)
         {
             var instances = new List<object>();
             EntityComponentsData c = entity.Components;
@@ -155,35 +175,64 @@ namespace Paradise.Export.Data
 
             foreach (AuthoredComponentData custom in c.Custom ?? [])
             {
-                if (registry is not null &&
-                    registry.TryRead(custom.Id, custom.Data, out object? value) &&
-                    value is not null)
+                if (Resolve(registry, custom) is { } value)
                 {
                     instances.Add(value);
                     continue;
                 }
-                unresolved?.Add(custom.Id);
+                unresolved?.Add(custom);
             }
 
             return instances;
         }
 
+        /// <summary>
+        /// One payload as an instance: by id, else by type name, else null.
+        ///
+        /// The second attempt is what makes an opaque id survivable. A component whose id was
+        /// regenerated, or whose document was written by a host with a stale schema, still loads —
+        /// and the alternative is a payload nobody can even identify, because the only thing it
+        /// says about itself is a number that matches nothing.
+        /// </summary>
+        private static object? Resolve(
+            IAuthoredComponentRegistry? registry, AuthoredComponentData component)
+        {
+            if (registry is null)
+            {
+                return null;
+            }
+            if (component.Id != Guid.Empty &&
+                registry.TryRead(component.Id, component.Data, out object? byId) && byId is not null)
+            {
+                return byId;
+            }
+            if (!string.IsNullOrWhiteSpace(component.Type) &&
+                registry.TryReadByType(component.Type!, component.Data, out object? byType))
+            {
+                return byType;
+            }
+            return null;
+        }
+
         /// <summary>True when an id belongs to the engine, i.e. it routes to a typed slot rather
         /// than into <see cref="EntityComponentsData.Custom"/>.</summary>
-        public static bool IsEngineComponent(string id) => id switch
-        {
-            ParadiseComponentIds.Identity or
-            ParadiseComponentIds.Renderable or
-            ParadiseComponentIds.Collider or
-            ParadiseComponentIds.Rigidbody or
-            ParadiseComponentIds.Agent or
-            ParadiseComponentIds.Interactable or
-            ParadiseComponentIds.SpriteAnimation or
-            ParadiseComponentIds.ParticleEmitter or
-            ParadiseComponentIds.AudioEmitter or
-            ParadiseComponentIds.Light => true,
-            _ => false,
-        };
+        public static bool IsEngineComponent(Guid id) => EngineIds.Contains(id);
+
+        /// <summary>A set rather than the chain <see cref="Apply"/> uses: this one answers a
+        /// membership question, and there is no per-id behaviour to hang off the branches.</summary>
+        private static readonly HashSet<Guid> EngineIds =
+        [
+            ParadiseComponentIds.Identity,
+            ParadiseComponentIds.Renderable,
+            ParadiseComponentIds.Collider,
+            ParadiseComponentIds.Rigidbody,
+            ParadiseComponentIds.Agent,
+            ParadiseComponentIds.Interactable,
+            ParadiseComponentIds.SpriteAnimation,
+            ParadiseComponentIds.ParticleEmitter,
+            ParadiseComponentIds.AudioEmitter,
+            ParadiseComponentIds.Light,
+        ];
 
         private static bool Assign<T>(AuthoredComponentData component, System.Action<T> assign)
             where T : class

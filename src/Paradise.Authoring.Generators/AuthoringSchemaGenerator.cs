@@ -28,6 +28,49 @@ namespace Paradise.Authoring.Generators;
 [Generator]
 public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 {
+    // The identity diagnostics live HERE rather than on the registry generator because this one
+    // runs for every assembly declaring [Authored] types. The registry is opt-in, and a
+    // schema-only assembly (Paradise.Export is one) would otherwise publish a component with no
+    // identity, or two sharing one, and never hear a word about it.
+
+    /// <summary>
+    /// PAUT005: <c>[Authored]</c> without a usable <c>[Guid]</c> beside it.
+    ///
+    /// The attribute pair IS the declaration — <c>[Authored]</c> says "a human edits this" and
+    /// <c>[Guid]</c> says which component it is — so a type carrying only the first has no
+    /// identity, and every payload it ever produced would resolve to nothing.
+    /// </summary>
+    public static readonly DiagnosticDescriptor IdNotAGuid = new(
+        id: "PAUT005",
+        title: "Authored type needs a [Guid] beside it",
+        messageFormat: "'{0}' is [Authored] but {1}",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "An authored component is identified by the GUID in its "
+            + "System.Runtime.InteropServices.GuidAttribute, so that renaming the component, or the "
+            + "type behind it, cannot orphan documents that already author it. Add [Guid(\"...\")] "
+            + "to the type. Any form Guid.Parse accepts will do; the canonical 8-4-4-4-12 spelling "
+            + "is what the generator emits. Generate a fresh GUID rather than reusing another "
+            + "component's.");
+
+    /// <summary>
+    /// PAUT006: two <c>[Authored]</c> types in one assembly share an id.
+    ///
+    /// Almost always a copy-paste, and silent without this: the component that loses the race is
+    /// dropped from the schema and unreachable in the registry, so half the payloads materialize
+    /// as the wrong record.
+    /// </summary>
+    public static readonly DiagnosticDescriptor DuplicateId = new(
+        id: "PAUT006",
+        title: "Two authored types share an id",
+        messageFormat: "'{0}' and '{1}' are both [Guid(\"{2}\")]; an id identifies exactly one component",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Authored ids are looked up in one table per assembly, so a duplicate makes "
+            + "the component that loses unreachable. Give the newer type a freshly generated GUID.");
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var authored = context.SyntaxProvider
@@ -82,10 +125,44 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     private static void Emit(
         SourceProductionContext context, ImmutableArray<AuthoredType?> types, string namespaceName)
     {
-        var present = types.Where(t => t is not null).Select(t => t!)
+        var candidates = types.Where(t => t is not null).Select(t => t!)
             // Ordered so the schema is stable: an unordered generator makes every rebuild a diff.
-            .OrderBy(t => t.ComponentId, System.StringComparer.Ordinal)
+            // By type name rather than by id, so the document a human reviews is in an order they
+            // can predict and a regenerated GUID does not reshuffle it. It also fixes WHICH of two
+            // types sharing an id is reported as the duplicate, rather than leaving it to
+            // whichever order the compiler happened to hand them over in.
+            .OrderBy(t => t.TypeName, System.StringComparer.Ordinal)
             .ToList();
+
+        var present = new List<AuthoredType>();
+        var claimed = new Dictionary<string, AuthoredType>(System.StringComparer.Ordinal);
+        foreach (var type in candidates)
+        {
+            if (type.IdUnusable)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    IdNotAGuid, type.Declaration, ShortName(type.TypeName),
+                    type.IdMissing
+                        ? "has no [System.Runtime.InteropServices.Guid] attribute to identify it"
+                        : "its [Guid(\"" + type.DeclaredId + "\")] is not a GUID"));
+                continue;
+            }
+            if (claimed.TryGetValue(type.ComponentId, out var owner))
+            {
+                // Both named in FULL, unlike the single-type diagnostics above. A collision is a
+                // comparison, and the reader needs to see how the two differ — which short names
+                // hide exactly when it matters most, since two types that collide on an id are
+                // often a copy-paste and therefore share a short name too. Only one of the pair
+                // gets the squiggle; the other is reachable only through this text.
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DuplicateId, type.Declaration,
+                    owner.TypeName, type.TypeName, type.ComponentId));
+                continue;
+            }
+            claimed.Add(type.ComponentId, type);
+            present.Add(type);
+        }
+
         if (present.Count == 0)
         {
             return;
@@ -94,12 +171,15 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         var json = new StringBuilder();
         // Must track AuthoringSchemaDocument.CurrentVersion. Not referenced: this analyzer targets
         // netstandard2.0 and deliberately does not link the runtime package it feeds.
-        json.Append("{\"version\":2,\"components\":[");
+        json.Append("{\"version\":3,\"components\":[");
         for (var i = 0; i < present.Count; i++)
         {
             var type = present[i];
             if (i > 0) json.Append(',');
             json.Append("{\"id\":").Append(Quote(type.ComponentId));
+            // The fallback key, and the only thing in this document that tells a human which
+            // component the GUID above belongs to.
+            json.Append(",\"type\":").Append(Quote(type.TypeName));
             json.Append(",\"displayName\":").Append(Quote(type.DisplayName));
             if (type.AuthoredBy is { } componentSource)
             {
@@ -130,7 +210,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         source.AppendLine("/// do not edit. Parse it with Paradise.Authoring.AuthoringSchemaReader.</summary>");
         source.AppendLine("public static class AuthoringSchema");
         source.AppendLine("{");
-        source.AppendLine("    /// <summary>The schema document. Stable across rebuilds: components are ordered by id.</summary>");
+        source.AppendLine("    /// <summary>The schema document. Stable across rebuilds: components are ordered by type name.</summary>");
         // A VERBATIM literal, so the JSON is escaped exactly once (for JSON) and then only quotes
         // are doubled (for C#). Nesting two escape passes over the same text is how a generator
         // ends up emitting a document that parses locally and not on the other side.
@@ -267,4 +347,11 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     }
 
     private static string Number(double value) => value.ToString("R", CultureInfo.InvariantCulture);
+
+    /// <summary>"Pingu.Core.PoolConfig" → "PoolConfig", for a diagnostic that reads naturally.</summary>
+    private static string ShortName(string typeName)
+    {
+        var dot = typeName.LastIndexOf('.');
+        return dot < 0 ? typeName : typeName.Substring(dot + 1);
+    }
 }
