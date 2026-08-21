@@ -8,6 +8,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Paradise.Authoring;
 
+// Ask the generator for this assembly's own AuthoredComponents registry.
+//
+// The attribute's own docs used to name Paradise.Export as the example of an assembly that
+// should NOT have one — it published a schema for editors, and its components arrived already
+// typed in their slots, so a loader would have had nothing to load. Schema v3 removed the slots:
+// the engine's components come back as payloads exactly like a game's, and something has to read
+// them. That something is now the same generated registry a game gets, rather than a hand-written
+// dispatch that had to be kept in step with the component list by hand.
+[assembly: Paradise.Authoring.AuthoredRegistry]
+
 namespace Paradise.Export.Data
 {
     // Engine-neutral level/scene data produced by the Paradise Engine export tools

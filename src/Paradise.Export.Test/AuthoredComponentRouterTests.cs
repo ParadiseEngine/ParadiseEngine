@@ -233,13 +233,6 @@ public class AuthoredComponentRouterTests
         }
     }
 
-    [Test]
-    public async Task engine_ids_are_distinguishable_from_a_games_own()
-    {
-        await Assert.That(AuthoredComponentRouter.IsEngineComponent(ParadiseComponentIds.Rigidbody)).IsTrue();
-        await Assert.That(AuthoredComponentRouter.IsEngineComponent(LedgeId)).IsFalse();
-    }
-
     /// <summary>
     /// The id a record is AUTHORED under is the id the router DISPATCHES on.
     ///

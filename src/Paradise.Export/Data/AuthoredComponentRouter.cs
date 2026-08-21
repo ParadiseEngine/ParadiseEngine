@@ -147,17 +147,46 @@ namespace Paradise.Export.Data
         private static object? Resolve(
             IAuthoredComponentRegistry? registry, AuthoredComponentData component)
         {
-            // The engine's own first, and without a registry: Paradise.Export deliberately has no
-            // generated one, and an engine component must materialize for a caller that passed no
-            // registry at all (a host reading a scene it does not add components to).
-            if (ReadEngineComponent(component) is { } engineComponent)
+            // This assembly's own registry first, so a caller that passed none still gets the
+            // engine's components back — a host reading a scene it does not itself add components
+            // to. It is the SAME generated registry a game gets, consulted the same way: there is
+            // no engine tier left, only registries, and the one that knows the id wins.
+            return ReadFrom(AuthoredComponents.Default, component)
+                ?? (registry is null ? null : ReadFrom(registry, component));
+        }
+
+        /// <summary>One payload out of one registry: by id, else by type name, else null.
+        ///
+        /// The second attempt is what makes an opaque id survivable. A component whose id was
+        /// regenerated, or whose document was written by a host with a stale schema, still loads —
+        /// and the alternative is a payload nobody can even identify, because the only thing it
+        /// says about itself is a number that matches nothing.</summary>
+        private static object? ReadFrom(
+            IAuthoredComponentRegistry registry, AuthoredComponentData component)
+        {
+            try
             {
-                return engineComponent;
+                return ReadOrThrow(registry, component);
             }
-            if (registry is null)
+            catch (JsonException)
             {
+                // A payload that is not valid JSON for this record. Reported by the caller, which
+                // knows which entity it was; throwing here would cost the whole scene.
                 return null;
             }
+            catch (InvalidOperationException)
+            {
+                // Same outcome, different messenger: the GENERATED readers parse the JsonElement
+                // directly rather than through a serializer, so a field of the wrong KIND (a
+                // string where a float belongs) surfaces as this rather than as a JsonException.
+                // Both mean "this payload is not that component".
+                return null;
+            }
+        }
+
+        private static object? ReadOrThrow(
+            IAuthoredComponentRegistry registry, AuthoredComponentData component)
+        {
             if (component.Id != Guid.Empty &&
                 registry.TryRead(component.Id, component.Data, out object? byId) && byId is not null)
             {
@@ -168,55 +197,6 @@ namespace Paradise.Export.Data
             {
                 return byType;
             }
-            return null;
-        }
-
-        /// <summary>True when an id belongs to the engine rather than to a game.
-        ///
-        /// A question about OWNERSHIP now, not about destination — every component goes to the
-        /// same place. Kept because hosts still ask it, and because it is the set
-        /// <see cref="ReadEngineComponent"/> must stay in step with.</summary>
-        public static bool IsEngineComponent(Guid id) => EngineIds.Contains(id);
-
-        /// <summary>A set rather than the chain <see cref="Apply"/> uses: this one answers a
-        /// membership question, and there is no per-id behaviour to hang off the branches.</summary>
-        private static readonly HashSet<Guid> EngineIds =
-        [
-            ParadiseComponentIds.Identity,
-            ParadiseComponentIds.Renderable,
-            ParadiseComponentIds.Collider,
-            ParadiseComponentIds.Rigidbody,
-            ParadiseComponentIds.Agent,
-            ParadiseComponentIds.Interactable,
-            ParadiseComponentIds.SpriteAnimation,
-            ParadiseComponentIds.ParticleEmitter,
-            ParadiseComponentIds.AudioEmitter,
-            ParadiseComponentIds.Light,
-        ];
-
-        /// <summary>One of the engine's own components as its record, or null when the id is not
-        /// the engine's (or the payload will not read as it).
-        ///
-        /// A closed if-chain, deliberately. <c>ReadElement&lt;T&gt;</c> needs T at compile time, and
-        /// the obvious alternative — <c>Type.GetType(component.Type)</c> — is an IL2057/IL3050
-        /// error under this assembly's <c>IsAotCompatible</c> with warnings-as-errors, not merely
-        /// a slower path. A Guid cannot be a <c>case</c> label, hence ifs rather than a switch.
-        ///
-        /// Must list exactly <see cref="EngineIds"/>. A component in one and not the other either
-        /// never materializes or claims to be the engine's and is not.</summary>
-        private static object? ReadEngineComponent(AuthoredComponentData component)
-        {
-            Guid id = component.Id;
-            if (id == ParadiseComponentIds.Identity) return Read<IdentityComponentData>(component);
-            if (id == ParadiseComponentIds.Renderable) return Read<RenderableComponentData>(component);
-            if (id == ParadiseComponentIds.Collider) return Read<ColliderComponentData>(component);
-            if (id == ParadiseComponentIds.Rigidbody) return Read<RigidbodyComponentData>(component);
-            if (id == ParadiseComponentIds.Agent) return Read<AgentComponentData>(component);
-            if (id == ParadiseComponentIds.Interactable) return Read<EntityInteractableComponentData>(component);
-            if (id == ParadiseComponentIds.SpriteAnimation) return Read<SpriteAnimationComponentData>(component);
-            if (id == ParadiseComponentIds.ParticleEmitter) return Read<ParticleEmitterComponentData>(component);
-            if (id == ParadiseComponentIds.AudioEmitter) return Read<AudioEmitterComponentData>(component);
-            if (id == ParadiseComponentIds.Light) return Read<SceneLightData>(component);
             return null;
         }
 

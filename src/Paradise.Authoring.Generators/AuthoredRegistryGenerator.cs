@@ -107,8 +107,9 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
                 var ns = string.IsNullOrWhiteSpace(root) ? pair.Left.AssemblyName : root;
 
                 // The registry is opt-in: it is public surface, and an assembly that only
-                // publishes a schema for editors (Paradise.Export itself is one) declares
-                // [Authored] types with no business shipping a loader for them.
+                // publishes a schema for editors declares [Authored] types with no business
+                // shipping a loader for them. (Paradise.Export was that example until v3 gave its
+                // own components payloads to read; it opts in now.)
                 var optedIn = false;
                 foreach (var attribute in pair.Left.Assembly.GetAttributes())
                 {
