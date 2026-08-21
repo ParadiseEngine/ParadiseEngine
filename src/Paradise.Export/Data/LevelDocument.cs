@@ -8,6 +8,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Paradise.Authoring;
 
+// Ask the generator for this assembly's own AuthoredComponents registry.
+//
+// The attribute's own docs used to name Paradise.Export as the example of an assembly that
+// should NOT have one — it published a schema for editors, and its components arrived already
+// typed in their slots, so a loader would have had nothing to load. Schema v3 removed the slots:
+// the engine's components come back as payloads exactly like a game's, and something has to read
+// them. That something is now the same generated registry a game gets, rather than a hand-written
+// dispatch that had to be kept in step with the component list by hand.
+[assembly: Paradise.Authoring.AuthoredRegistry]
+
 namespace Paradise.Export.Data
 {
     // Engine-neutral level/scene data produced by the Paradise Engine export tools
@@ -27,8 +37,21 @@ namespace Paradise.Export.Data
     // conversion (see CONVENTIONS.md).
     public sealed record LevelData
     {
-        public const int UnversionedSchemaVersion = 1;
-        public const int CurrentSchemaVersion = 2;
+        /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader
+        /// would misparse.
+        ///
+        /// v3 replaced the entity's nine named component slots with ONE list of
+        /// <see cref="AuthoredComponentData"/>. Not additive in either direction: a v2 document's
+        /// <c>"Components": {"Rigidbody": {...}}</c> is an object where this build expects an
+        /// array, and there is no mapping back. Such a document is REJECTED on read rather than
+        /// deserialized into an entity with no components at all — see
+        /// <see cref="Serialization.ExportJsonReader.ReadLevel"/>. Re-export it.</summary>
+        public const int CurrentSchemaVersion = 3;
+
+        /// <summary>The oldest document this build still understands. Equal to
+        /// <see cref="CurrentSchemaVersion"/>, and that is the point rather than an oversight:
+        /// there is no upgrade path from the named slots to the list.</summary>
+        public const int MinimumSupportedVersion = 3;
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
         public CameraData? Camera { get; set; }
@@ -82,7 +105,18 @@ namespace Paradise.Export.Data
         public Matrix4x4? WorldMatrix { get; set; }
         public List<string?> Materials { get; set; } = new();
         public PrefabOverrideData Overrides { get; set; } = new();
-        public EntityComponentsData Components { get; set; } = new();
+        /// <summary>Every component authored on this entity, engine's and game's alike, each as
+        /// an id + type + opaque payload.
+        ///
+        /// One list rather than the named slots this used to be. A slot could only ever exist for
+        /// a component the CONTRACT knew about, which made the engine's components a privileged
+        /// tier and every game's components a second one — and meant adding an engine component
+        /// changed this record, both editors, and the router in each of them. Now it changes
+        /// nothing: a component is a record with a <c>[Guid]</c>.
+        ///
+        /// Read one with <see cref="LevelEntityExtensions.Get{T}"/>, or all of them at once with
+        /// <see cref="AuthoredComponentRouter.Materialize"/>.</summary>
+        public List<AuthoredComponentData> Components { get; set; } = new();
     }
 
     public sealed record EntityParentData
@@ -90,35 +124,6 @@ namespace Paradise.Export.Data
         public string Id { get; set; } = "";
         public string? BonePath { get; set; }
         public int BoneIndex { get; set; } = -1;
-    }
-
-    public sealed record EntityComponentsData
-    {
-        public RenderableComponentData? Renderable { get; set; }
-        public ColliderComponentData? Collider { get; set; }
-        public RigidbodyComponentData? Rigidbody { get; set; }
-        public EntityInteractableComponentData? Interactable { get; set; }
-        public AgentComponentData? Agent { get; set; }
-        public SpriteAnimationComponentData? SpriteAnimation { get; set; }
-        public ParticleEmitterComponentData? ParticleEmitter { get; set; }
-        public AudioEmitterComponentData? AudioEmitter { get; set; }
-
-        /// <summary>A light this entity owns, authored by pointing at one. Null — and absent from
-        /// the document — when the entity authors none, which is every entity in every scene
-        /// written before lights could be authored this way.</summary>
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public SceneLightData? Light { get; set; }
-
-        /// <summary>
-        /// Components the ENGINE does not define: authored data declared by a game (or by a future
-        /// engine module) with <c>[Authored]</c>, carried verbatim so neither the exporter nor this
-        /// contract has to know the type.
-        ///
-        /// Null — and therefore absent from the written document — when nothing authored anything,
-        /// which is what keeps every existing exported file byte-identical.
-        /// </summary>
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public List<AuthoredComponentData>? Custom { get; set; }
     }
 
     /// <summary>
@@ -699,8 +704,8 @@ namespace Paradise.Export.Data
     /// <summary>
     /// What an entity IS, as an authored component.
     ///
-    /// Routed onto <see cref="LevelEntityData"/> itself rather than into
-    /// <see cref="EntityComponentsData"/> — these are not things an entity HAS. It exists as a
+    /// Spread onto <see cref="LevelEntityData"/>'s own fields rather than kept in its component
+    /// list — these are not things an entity HAS. It exists as a
     /// component so identity is declared in the same place as everything else and every editor
     /// builds its control for it from the same document, rather than each hardcoding a "Kind" box.
     ///

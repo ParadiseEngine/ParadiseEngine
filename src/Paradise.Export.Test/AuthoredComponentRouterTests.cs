@@ -40,7 +40,9 @@ public class AuthoredComponentRouterTests
         await Assert.That(entity.IsActive).IsFalse();
         await Assert.That(entity.InitialAnimation).IsEqualTo("Open");
         await Assert.That(entity.DisplayName).IsEqualTo("Front door");
-        await Assert.That(entity.Components.Custom).IsNull();
+        // Identity is spread onto the entity's own fields and leaves NO entry behind — it is what
+        // the entity is, not something it has.
+        await Assert.That(entity.Components).IsEmpty();
     }
 
     /// <summary>An unauthored DisplayName must not overwrite the exporter's own default with
@@ -69,20 +71,23 @@ public class AuthoredComponentRouterTests
             Payload(ParadiseComponentIds.Collider,
                 """{"Colliders":[{"ShapeType":"Box","Size":[1,2,3],"IsTrigger":true}]}"""));
 
-        var c = entity.Components;
-        await Assert.That(c.Renderable!.Mesh).IsEqualTo("Models/knight.glb");
-        await Assert.That(c.Rigidbody!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
-        await Assert.That(c.Rigidbody!.Mass).IsEqualTo(2.5f);
-        await Assert.That(c.Agent!.MoveSpeed).IsEqualTo(3.5f);
-        await Assert.That(c.Interactable!.DisplayName).IsEqualTo("Lever");
-        await Assert.That(c.SpriteAnimation!.Columns).IsEqualTo(4);
-        await Assert.That(c.ParticleEmitter!.Kind).IsEqualTo(ParticleRenderKind.Voxel);
-        await Assert.That(c.AudioEmitter!.StartEvent).IsEqualTo("Play_Torch");
-        await Assert.That(c.Collider!.Colliders.Single().ShapeType).IsEqualTo(PhysicsShapeType.Box);
-        await Assert.That(c.Collider!.Colliders.Single().IsTrigger).IsTrue();
+        await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("Models/knight.glb");
+        await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
+        await Assert.That(entity.Get<RigidbodyComponentData>()!.Mass).IsEqualTo(2.5f);
+        await Assert.That(entity.Get<AgentComponentData>()!.MoveSpeed).IsEqualTo(3.5f);
+        await Assert.That(entity.Get<EntityInteractableComponentData>()!.DisplayName).IsEqualTo("Lever");
+        await Assert.That(entity.Get<SpriteAnimationComponentData>()!.Columns).IsEqualTo(4);
+        await Assert.That(entity.Get<ParticleEmitterComponentData>()!.Kind).IsEqualTo(ParticleRenderKind.Voxel);
+        await Assert.That(entity.Get<AudioEmitterComponentData>()!.StartEvent).IsEqualTo("Play_Torch");
+        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders.Single().ShapeType)
+            .IsEqualTo(PhysicsShapeType.Box);
+        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders.Single().IsTrigger).IsTrue();
 
-        // ...and none of them leaked into Custom on the way.
-        await Assert.That(c.Custom).IsNull();
+        // Eight payloads in, eight entries out. This used to assert the opposite shape — that none
+        // of them "leaked into Custom" — back when an engine component landed in a typed slot and
+        // Custom was where a game's went. There is one destination now, so the property worth
+        // pinning is that routing neither drops nor duplicates.
+        await Assert.That(entity.Components.Count).IsEqualTo(8);
     }
 
     /// <summary>The reason Custom exists. A game's component is carried verbatim, because the
@@ -92,7 +97,7 @@ public class AuthoredComponentRouterTests
     {
         var entity = Route(Payload(LedgeId, """{"Friction":0.35,"IsTrigger":false}""", LedgeType));
 
-        var custom = entity.Components.Custom!.Single();
+        var custom = entity.Components!.Single();
         await Assert.That(custom.Id).IsEqualTo(LedgeId);
         await Assert.That(custom.Type).IsEqualTo(LedgeType);
         await Assert.That(custom.Data.GetProperty("Friction").GetSingle()).IsEqualTo(0.35f);
@@ -179,7 +184,7 @@ public class AuthoredComponentRouterTests
     {
         var entity = Route(Payload(Guid.Empty, """{"Friction":0.5}"""));
 
-        await Assert.That(entity.Components.Custom).IsNull();
+        await Assert.That(entity.Components).IsEmpty();
     }
 
     /// <summary>An id nobody claims is REPORTED. Silently dropping authored data is the failure
@@ -228,13 +233,6 @@ public class AuthoredComponentRouterTests
         }
     }
 
-    [Test]
-    public async Task engine_ids_are_distinguishable_from_a_games_own()
-    {
-        await Assert.That(AuthoredComponentRouter.IsEngineComponent(ParadiseComponentIds.Rigidbody)).IsTrue();
-        await Assert.That(AuthoredComponentRouter.IsEngineComponent(LedgeId)).IsFalse();
-    }
-
     /// <summary>
     /// The id a record is AUTHORED under is the id the router DISPATCHES on.
     ///
@@ -254,22 +252,34 @@ public class AuthoredComponentRouterTests
     }
 
     /// <summary>A payload that cannot be read as the component it claims to be is REPORTED, not
-    /// silently dropped — losing authored data without a word is the worst outcome here.</summary>
+    /// silently dropped — losing authored data without a word is the worst outcome here.
+    ///
+    /// WHERE it is reported moved with unification. Routing no longer deserializes anything (it
+    /// appends an entry and is done), so ApplyAll cannot know a payload is bad; Materialize, which
+    /// is the thing that actually reads, is where it surfaces. The guarantee is the same one —
+    /// the bad component is named and the good ones still arrive — checked one step later.</summary>
     [Test]
     public async Task an_unreadable_engine_payload_is_reported()
     {
         var entity = new LevelEntityData { Id = "Thing" };
-        var failed = AuthoredComponentRouter.ApplyAll(entity, new[]
+        var routed = AuthoredComponentRouter.ApplyAll(entity, new[]
         {
             Payload(ParadiseComponentIds.Rigidbody, """{"Mass":"not a number"}"""),
             Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
         });
 
-        await Assert.That(failed.Select(c => c.Id))
+        // Nothing fails at route time any more, and both entries are on the entity.
+        await Assert.That(routed).IsEmpty();
+        await Assert.That(entity.Components.Count).IsEqualTo(2);
+
+        var unresolved = new List<AuthoredComponentData>();
+        IReadOnlyList<object> instances =
+            AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
+
+        await Assert.That(unresolved.Select(c => c.Id))
             .IsEquivalentTo(new[] { ParadiseComponentIds.Rigidbody });
-        await Assert.That(entity.Components.Rigidbody).IsNull();
-        // The good one still applied: one bad component does not cost the entity the rest.
-        await Assert.That(entity.Components.Agent!.MoveSpeed).IsEqualTo(3f);
+        // The good one still materialized: one bad component does not cost the entity the rest.
+        await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
     }
 
     /// <summary>Routing must not disturb the written shape: an entity built this way serializes to
@@ -288,9 +298,14 @@ public class AuthoredComponentRouterTests
             Id = "Thing",
             Kind = "Prop",
             IsActive = true,
-            Components = new EntityComponentsData
+            // The SAME entry, not an equivalent one rebuilt from a record. Routing carries the
+            // editor's payload verbatim; Entry(new RenderableComponentData { Mesh = ... }) would
+            // re-serialize it and write every other property too (MeshNode: null). Both are
+            // correct documents, and the difference is the point: routing does not rewrite what an
+            // editor wrote.
+            Components =
             {
-                Renderable = new RenderableComponentData { Mesh = "Models/knight.glb" },
+                Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
             },
         });
 

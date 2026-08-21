@@ -64,6 +64,19 @@ namespace Paradise.Export.Serialization
             return JsonSerializer.Serialize(document, typeInfo);
         }
 
+        /// <summary>
+        /// One record as the <c>Data</c> of an authored component entry.
+        ///
+        /// Goes through the same options as everything else, which is the point: a payload
+        /// serialized with bare STJ loses every enum-by-name and every vector, silently, and the
+        /// symptom appears much later as a component that reads back with default values.
+        /// </summary>
+        internal static JsonElement SerializeToElement<T>(T value) where T : class
+        {
+            JsonTypeInfo typeInfo = Options.GetTypeInfo(typeof(T));
+            return JsonSerializer.SerializeToElement(value, typeInfo);
+        }
+
         public static void WriteTextAtomically(string outputPath, string text)
         {
             string directory = Path.GetDirectoryName(outputPath) ?? ".";

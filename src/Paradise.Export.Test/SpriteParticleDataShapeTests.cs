@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using System.Text.Json.Nodes;
 using Paradise.Export.Data;
@@ -17,9 +18,9 @@ public class SpriteParticleDataShapeTests
         level.Entities.Add(new LevelEntityData
         {
             Id = "Torch",
-            Components = new EntityComponentsData
+            Components =
             {
-                SpriteAnimation = new SpriteAnimationComponentData
+                LevelEntityExtensions.Entry(new SpriteAnimationComponentData
                 {
                     Sheet = "sprites/torch.ktx2",
                     Columns = 4,
@@ -29,13 +30,13 @@ public class SpriteParticleDataShapeTests
                     Loop = true,
                     QuadSize = new Vector2(0.5f, 1f),
                     Billboard = true,
-                },
+                }),
             },
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
         JsonNode node = JsonNode.Parse(json)!;
-        JsonNode sprite = node["Entities"]![0]!["Components"]!["SpriteAnimation"]!;
+        JsonNode sprite = Payload(node["Entities"]![0]!, typeof(SpriteAnimationComponentData));
         await Assert.That((string?)sprite["Sheet"]).IsEqualTo("sprites/torch.ktx2");
         await Assert.That((int)sprite["Columns"]!).IsEqualTo(4);
         await Assert.That((int)sprite["Rows"]!).IsEqualTo(2);
@@ -44,7 +45,7 @@ public class SpriteParticleDataShapeTests
         await Assert.That((bool)sprite["Loop"]!).IsTrue();
 
         LevelData read = ExportJsonReader.ReadLevel(json);
-        SpriteAnimationComponentData round = read.Entities[0].Components.SpriteAnimation!;
+        SpriteAnimationComponentData round = read.Entities[0].Get<SpriteAnimationComponentData>()!;
         await Assert.That(round.Sheet).IsEqualTo("sprites/torch.ktx2");
         await Assert.That(round.QuadSize).IsEqualTo(new Vector2(0.5f, 1f));
         await Assert.That(round.Billboard).IsTrue();
@@ -57,9 +58,9 @@ public class SpriteParticleDataShapeTests
         level.Entities.Add(new LevelEntityData
         {
             Id = "Dust",
-            Components = new EntityComponentsData
+            Components =
             {
-                ParticleEmitter = new ParticleEmitterComponentData
+                LevelEntityExtensions.Entry(new ParticleEmitterComponentData
                 {
                     Kind = ParticleRenderKind.Voxel,
                     MaxParticles = 32,
@@ -73,19 +74,20 @@ public class SpriteParticleDataShapeTests
                     EndSize = 0.02f,
                     Seed = 99,
                     Color = Color32.FromRgba(1f, 0.5f, 0f),
-                },
+                }),
             },
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
-        JsonNode emitter = JsonNode.Parse(json)!["Entities"]![0]!["Components"]!["ParticleEmitter"]!;
+        JsonNode emitter = Payload(
+            JsonNode.Parse(json)!["Entities"]![0]!, typeof(ParticleEmitterComponentData));
         // Enum-by-name is the contract convention (a bare int would silently pass STJ defaults).
         await Assert.That((string?)emitter["Kind"]).IsEqualTo("Voxel");
         await Assert.That((int)emitter["MaxParticles"]!).IsEqualTo(32);
         await Assert.That((float)emitter["Gravity"]!).IsEqualTo(-4f);
 
         ParticleEmitterComponentData round =
-            ExportJsonReader.ReadLevel(json).Entities[0].Components.ParticleEmitter!;
+            ExportJsonReader.ReadLevel(json).Entities[0].Get<ParticleEmitterComponentData>()!;
         await Assert.That(round.Kind).IsEqualTo(ParticleRenderKind.Voxel);
         await Assert.That(round.Seed).IsEqualTo(99u);
         await Assert.That(round.Drag).IsEqualTo(0.5f);
@@ -94,11 +96,12 @@ public class SpriteParticleDataShapeTests
     [Test]
     public async Task absent_components_stay_null_for_older_documents()
     {
-        // A pre-existing (schema v2) document without the new component keys must read as null
-        // components — the additions are backward-compatible.
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":2,"Entities":[{"Id":"E"}]}""");
-        await Assert.That(read.Entities[0].Components.SpriteAnimation).IsNull();
-        await Assert.That(read.Entities[0].Components.ParticleEmitter).IsNull();
+        // An entity that authors nothing has an empty list, and asking it for a component it does
+        // not have is null rather than a throw. (This used to say "absent slot reads as null" —
+        // same property, one less way to express absence.)
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":3,"Entities":[{"Id":"E"}]}""");
+        await Assert.That(read.Entities[0].Get<SpriteAnimationComponentData>()).IsNull();
+        await Assert.That(read.Entities[0].Get<ParticleEmitterComponentData>()).IsNull();
     }
 
     [Test]
@@ -122,5 +125,19 @@ public class SpriteParticleDataShapeTests
         await Assert.That(emitter.MaxParticles).IsEqualTo(64); // runtime inline-pool cap
         await Assert.That(emitter.Seed).IsEqualTo(1u);         // xorshift must not seed 0
         await Assert.That(emitter.EndSize).IsEqualTo(0.3f);    // invalid end → start (no growth)
+    }
+
+    /// <summary>One component's Data, found by the CLR name its entry carries — the list has no
+    /// fixed positions, so indexing it would pin the writer's order, not the shape.</summary>
+    private static JsonNode Payload(JsonNode entity, Type type)
+    {
+        foreach (JsonNode? component in entity["Components"]!.AsArray())
+        {
+            if ((string?)component!["Type"] == type.FullName)
+            {
+                return component["Data"]!;
+            }
+        }
+        throw new InvalidOperationException($"no {type.Name} entry on this entity");
     }
 }

@@ -33,8 +33,8 @@ public class EntityDocumentShapeTests
             LocalScale = Vector3.One,
             LocalMatrix = ContractMatrix.Trs(pos, rot, Vector3.One),
         };
-        entity.Components.Renderable = new RenderableComponentData();
-        entity.Components.Collider = new ColliderComponentData
+        entity.Set(new RenderableComponentData());
+        entity.Set(new ColliderComponentData
         {
             Colliders = new List<ColliderShapeData>
             {
@@ -46,8 +46,8 @@ public class EntityDocumentShapeTests
                     Size = ColliderScaleFold.BoxSize(new Vector3(2f, 4f, 6f), Vector3.One),
                 },
             },
-        };
-        entity.Components.Rigidbody = new RigidbodyComponentData { BodyType = PhysicsBodyType.Static, Mass = 0f };
+        });
+        entity.Set(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static, Mass = 0f });
         return entity;
     }
 
@@ -62,13 +62,34 @@ public class EntityDocumentShapeTests
         await Assert.That((string?)entity["Kind"]).IsEqualTo("Prop");
         await Assert.That((string?)entity["Prefab"]).IsEqualTo("models/crate.glb");
 
-        JsonNode collider = entity["Components"]!["Collider"]!["Colliders"]![0]!;
+        JsonNode collider = Payload(entity, typeof(ColliderComponentData))["Colliders"]![0]!;
         await Assert.That((string?)collider["ShapeType"]).IsEqualTo("Box");
         await Assert.That((float)collider["Size"]![1]!).IsEqualTo(4f);
 
-        await Assert.That((string?)entity["Components"]!["Rigidbody"]!["BodyType"]).IsEqualTo("Static");
-        // Renderable is a present (empty) component object, since the entity has a model.
-        await Assert.That(entity["Components"]!["Renderable"]!.GetValueKind()).IsEqualTo(JsonValueKind.Object);
+        await Assert.That((string?)Payload(entity, typeof(RigidbodyComponentData))["BodyType"])
+            .IsEqualTo("Static");
+
+        // Renderable is a present (empty) payload, since the entity has a model. It used to be a
+        // named key whose absence meant "no mesh"; now its ENTRY's absence means that, which is
+        // the same statement made once instead of by a null in a fixed slot.
+        await Assert.That(Payload(entity, typeof(RenderableComponentData)).GetValueKind())
+            .IsEqualTo(JsonValueKind.Object);
+        await Assert.That(entity["Components"]!.GetValueKind()).IsEqualTo(JsonValueKind.Array);
+    }
+
+    /// <summary>One component's Data, found by the CLR name the entry carries. The list has no
+    /// fixed positions, so a test that indexed it would pin the editor's emission order rather
+    /// than the shape it means to assert.</summary>
+    private static JsonNode Payload(JsonNode entity, Type type)
+    {
+        foreach (JsonNode? component in entity["Components"]!.AsArray())
+        {
+            if ((string?)component!["Type"] == type.FullName)
+            {
+                return component["Data"]!;
+            }
+        }
+        throw new InvalidOperationException($"no {type.Name} entry on this entity");
     }
 
     [Test]

@@ -18,11 +18,12 @@ public sealed record LedgeFixture
 internal sealed partial class LedgeFixtureJsonContext : JsonSerializerContext;
 
 /// <summary>
-/// <see cref="EntityComponentsData.Custom"/>: game-defined components riding along with an entity.
+/// Game-defined components riding along with an entity in <see cref="LevelEntityData.Components"/>.
 ///
 /// The engine never deserializes these into a type — it carries the payload verbatim and the game
-/// reads it back through its own source-generated context. These tests pin both halves of that,
-/// and the promise that a document authoring nothing is unchanged from before the field existed.
+/// reads it back through its own source-generated context. These tests pin both halves of that.
+/// They used to also pin "a document authoring nothing does not mention Custom", which was about
+/// keeping the key absent from older files; there is no separate key to be absent now.
 /// </summary>
 public class AuthoredComponentContractTests
 {
@@ -32,7 +33,7 @@ public class AuthoredComponentContractTests
         level.Entities.Add(new LevelEntityData
         {
             Id = "IceLedge",
-            Components = new EntityComponentsData { Custom = [.. custom] },
+            Components = [.. custom],
         });
         return level;
     }
@@ -54,7 +55,7 @@ public class AuthoredComponentContractTests
         var authored = new LedgeFixture { Friction = 0.35f, IsTrigger = true, Label = "north" };
         var json = ExportJsonWriter.SerializeToString(LevelWith(Ledge(authored)));
 
-        var custom = ExportJsonReader.ReadLevel(json).Entities.Single().Components.Custom!.Single();
+        var custom = ExportJsonReader.ReadLevel(json).Entities.Single().Components!.Single();
         await Assert.That(custom.Id).IsEqualTo(LedgeId);
         await Assert.That(custom.Type).IsEqualTo("Paradise.Export.Tests.LedgeFixture");
 
@@ -80,7 +81,7 @@ public class AuthoredComponentContractTests
         var json = ExportJsonWriter.SerializeToString(
             LevelWith(Ledge(new LedgeFixture { Friction = 0f, IsTrigger = false, Label = "x" })));
 
-        var data = ExportJsonReader.ReadLevel(json).Entities.Single().Components.Custom!.Single().Data;
+        var data = ExportJsonReader.ReadLevel(json).Entities.Single().Components!.Single().Data;
         await Assert.That(data.GetProperty("IsTrigger").ValueKind).IsEqualTo(JsonValueKind.False);
         await Assert.That(data.GetProperty("Friction").ValueKind).IsEqualTo(JsonValueKind.Number);
         await Assert.That(data.GetProperty("Label").ValueKind).IsEqualTo(JsonValueKind.String);
@@ -94,7 +95,7 @@ public class AuthoredComponentContractTests
             new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
 
         var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities.Single().Components.Custom!;
+            .Entities.Single().Components!;
         await Assert.That(custom.Select(c => c.Id)).IsEquivalentTo(new[] { LedgeId, OtherId });
     }
 
@@ -107,7 +108,7 @@ public class AuthoredComponentContractTests
             new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
 
         var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities.Single().Components.Custom!.Single();
+            .Entities.Single().Components!.Single();
         await Assert.That(custom.Id).IsEqualTo(OtherId);
         await Assert.That(custom.Type).IsNull();
     }
@@ -119,30 +120,28 @@ public class AuthoredComponentContractTests
     /// consume this contract; this is what makes "purely additive" a fact rather than a claim.
     /// </summary>
     [Test]
-    public async Task a_document_that_authors_nothing_does_not_mention_custom()
+    public async Task a_document_that_authors_nothing_carries_an_empty_list()
     {
+        // This used to assert the word "Custom" was absent from the written file — the trick that
+        // kept scenes exported before authored components existed byte-identical. There is no
+        // separate key to be absent any more: an entity that authors nothing has an empty array,
+        // which says the same thing in the one place components are described.
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
-        {
-            Id = "Ground",
-            Components = new EntityComponentsData
-            {
-                Rigidbody = new RigidbodyComponentData { BodyType = PhysicsBodyType.Static },
-            },
-        });
+        level.Entities.Add(new LevelEntityData { Id = "Ground" });
 
-        var json = ExportJsonWriter.SerializeToString(level);
-        await Assert.That(json).DoesNotContain("Custom");
-
-        // ...and reading it back leaves the field null rather than an empty list, so a consumer
-        // can still tell "nothing was authored" from "an empty list was authored".
-        await Assert.That(ExportJsonReader.ReadLevel(json).Entities.Single().Components.Custom).IsNull();
+        string json = ExportJsonWriter.SerializeToString(level);
+        await Assert.That(json).Contains("\"Components\": []");
+        await Assert.That(ExportJsonReader.ReadLevel(json).Entities.Single().Components).IsEmpty();
     }
 
-    /// <summary>An older document, written before the field existed, must still read.</summary>
     [Test]
-    public async Task a_document_from_before_the_field_existed_still_reads()
+    public async Task a_document_from_before_the_component_list_is_refused_by_version()
     {
+        // v3 is the first change to this document that is NOT additive: v2 wrote "Components" as
+        // an object of named slots, v3 writes an array. There is no way back — a slot cannot be
+        // mapped to the id it came from without the very table this change deleted — so the
+        // document is refused by version, naming it, rather than deserialized into entities that
+        // silently author nothing.
         const string legacy = """
         {
           "SchemaVersion": 2,
@@ -152,7 +151,16 @@ public class AuthoredComponentContractTests
         }
         """;
 
-        var level = ExportJsonReader.ReadLevel(legacy);
-        await Assert.That(level.Entities.Single().Components.Custom).IsNull();
+        var thrown = Assert.Throws<JsonException>(() => ExportJsonReader.ReadLevel(legacy));
+        await Assert.That(thrown!.Message).Contains("version 2");
+        await Assert.That(thrown.Message).Contains("Re-export");
+    }
+
+    [Test]
+    public async Task a_document_from_a_newer_build_is_refused_too()
+    {
+        var thrown = Assert.Throws<JsonException>(
+            () => ExportJsonReader.ReadLevel("""{"SchemaVersion":99,"Entities":[]}"""));
+        await Assert.That(thrown!.Message).Contains("version 99");
     }
 }
