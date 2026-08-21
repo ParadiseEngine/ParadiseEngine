@@ -10,18 +10,18 @@ namespace Paradise.Export.Data
     /// <summary>
     /// Puts an authored payload where the runtime expects to find it.
     ///
-    /// This is what lets the engine's components be DECLARED (with <c>[Authored]</c>) without the
-    /// exported document changing shape. An editor knows only ids and JSON — it has no idea that
-    /// <c>paradise.rigidbody</c> belongs in <see cref="EntityComponentsData.Rigidbody"/> — so the
-    /// mapping lives here, on the contract, where both halves can see it.
-    ///
-    /// Three destinations:
+    /// TWO destinations, and the second is "the list":
     ///
     /// - <see cref="ParadiseComponentIds.Identity"/> lands on <see cref="LevelEntityData"/> itself.
-    ///   Identity is what an entity IS, not something it has.
-    /// - Every other engine id lands in its typed <see cref="EntityComponentsData"/> slot.
-    /// - Anything else is a GAME's own component and lands in
-    ///   <see cref="EntityComponentsData.Custom"/>, untouched.
+    ///   Identity is what an entity IS, not something it has, so it has no entry of its own.
+    /// - EVERYTHING else — the engine's components and a game's alike — is appended to
+    ///   <see cref="LevelEntityData.Components"/> untouched.
+    ///
+    /// There used to be a third: nine typed slots the engine's own components were unpacked into.
+    /// That tier is gone. It bought typed access at the cost of a GUID-to-slot mapping that had to
+    /// exist in this file, in the Godot editor, and again in the Blender addon's Python mirror —
+    /// so an engine component could not be added without editing all three. Reading a component
+    /// back is now <see cref="LevelEntityExtensions.Get{T}"/> or <see cref="Materialize"/>.
     ///
     /// Reflection-free throughout: the dispatch selects a source-generated
     /// <see cref="JsonTypeInfo{T}"/>, because a reflection deserializer would pin Godot's
@@ -40,7 +40,6 @@ namespace Paradise.Export.Data
         /// </remarks>
         public static bool Apply(LevelEntityData entity, AuthoredComponentData component)
         {
-            EntityComponentsData components = entity.Components;
             Guid id = component.Id;
 
             if (id == ParadiseComponentIds.Identity)
@@ -66,53 +65,10 @@ namespace Paradise.Export.Data
                 }
                 return true;
             }
-            if (id == ParadiseComponentIds.Renderable)
-            {
-                return Assign<RenderableComponentData>(component,
-                    value => components.Renderable = value);
-            }
-            if (id == ParadiseComponentIds.Collider)
-            {
-                return Assign<ColliderComponentData>(component,
-                    value => components.Collider = value);
-            }
-            if (id == ParadiseComponentIds.Rigidbody)
-            {
-                return Assign<RigidbodyComponentData>(component,
-                    value => components.Rigidbody = value);
-            }
-            if (id == ParadiseComponentIds.Agent)
-            {
-                return Assign<AgentComponentData>(component, value => components.Agent = value);
-            }
-            if (id == ParadiseComponentIds.Interactable)
-            {
-                return Assign<EntityInteractableComponentData>(component,
-                    value => components.Interactable = value);
-            }
-            if (id == ParadiseComponentIds.SpriteAnimation)
-            {
-                return Assign<SpriteAnimationComponentData>(component,
-                    value => components.SpriteAnimation = value);
-            }
-            if (id == ParadiseComponentIds.Light)
-            {
-                return Assign<SceneLightData>(component, value => components.Light = value);
-            }
-            if (id == ParadiseComponentIds.AudioEmitter)
-            {
-                return Assign<AudioEmitterComponentData>(component,
-                    value => components.AudioEmitter = value);
-            }
-            if (id == ParadiseComponentIds.ParticleEmitter)
-            {
-                return Assign<ParticleEmitterComponentData>(component,
-                    value => components.ParticleEmitter = value);
-            }
-
-            // A game's own component. The engine cannot name the type and does not try — the
-            // payload rides along and the game reads it with its own context.
-            (components.Custom ??= new List<AuthoredComponentData>()).Add(component);
+            // Everything else rides in the list exactly as the editor wrote it. Nothing is
+            // deserialized here, which is why this can no longer fail for anything but identity:
+            // an unreadable payload is now found by Materialize, which is the thing that reads it.
+            entity.Components.Add(component);
             return true;
         }
 
@@ -149,11 +105,10 @@ namespace Paradise.Export.Data
         /// <summary>
         /// Every authored component on an entity, as INSTANCES.
         ///
-        /// The engine's own arrive already typed — that is what the typed slots are — and a game's
-        /// come back through its generated registry. The point is that the caller gets one list of
-        /// records rather than a mixture of typed properties and raw JSON it has to remember to
-        /// deserialize: a component nobody wrote an accessor for is otherwise authored, exported,
-        /// and silently never read.
+        /// The engine's own come back through the closed switch below; a game's through its
+        /// generated registry. The point is that the caller gets one list of records rather than
+        /// raw JSON it has to remember to deserialize: a component nobody wrote an accessor for is
+        /// otherwise authored, exported, and silently never read.
         ///
         /// Payloads whose id the registry does not know are retried against
         /// <see cref="AuthoredComponentData.Type"/>, then skipped and reported — never guessed at.
@@ -164,28 +119,18 @@ namespace Paradise.Export.Data
             IList<AuthoredComponentData>? unresolved = null)
         {
             var instances = new List<object>();
-            EntityComponentsData c = entity.Components;
 
-            // Ordered like the contract declares them, so a caller walking the list sees a stable
-            // shape rather than one that depends on how the document happened to be written.
-            if (c.Renderable is { } renderable) instances.Add(renderable);
-            if (c.Collider is { } collider) instances.Add(collider);
-            if (c.Rigidbody is { } rigidbody) instances.Add(rigidbody);
-            if (c.Interactable is { } interactable) instances.Add(interactable);
-            if (c.Agent is { } agent) instances.Add(agent);
-            if (c.SpriteAnimation is { } sprite) instances.Add(sprite);
-            if (c.ParticleEmitter is { } particles) instances.Add(particles);
-            if (c.AudioEmitter is { } audio) instances.Add(audio);
-            if (c.Light is { } light) instances.Add(light);
-
-            foreach (AuthoredComponentData custom in c.Custom ?? [])
+            // Document order. It used to be "the order the contract declares the slots in", which
+            // no longer exists — so the editor's order is the only order there is, and both
+            // editors are explicit about emitting a stable one.
+            foreach (AuthoredComponentData component in entity.Components)
             {
-                if (Resolve(registry, custom) is { } value)
+                if (Resolve(registry, component) is { } value)
                 {
                     instances.Add(value);
                     continue;
                 }
-                unresolved?.Add(custom);
+                unresolved?.Add(component);
             }
 
             return instances;
@@ -202,6 +147,13 @@ namespace Paradise.Export.Data
         private static object? Resolve(
             IAuthoredComponentRegistry? registry, AuthoredComponentData component)
         {
+            // The engine's own first, and without a registry: Paradise.Export deliberately has no
+            // generated one, and an engine component must materialize for a caller that passed no
+            // registry at all (a host reading a scene it does not add components to).
+            if (ReadEngineComponent(component) is { } engineComponent)
+            {
+                return engineComponent;
+            }
             if (registry is null)
             {
                 return null;
@@ -219,8 +171,11 @@ namespace Paradise.Export.Data
             return null;
         }
 
-        /// <summary>True when an id belongs to the engine, i.e. it routes to a typed slot rather
-        /// than into <see cref="EntityComponentsData.Custom"/>.</summary>
+        /// <summary>True when an id belongs to the engine rather than to a game.
+        ///
+        /// A question about OWNERSHIP now, not about destination — every component goes to the
+        /// same place. Kept because hosts still ask it, and because it is the set
+        /// <see cref="ReadEngineComponent"/> must stay in step with.</summary>
         public static bool IsEngineComponent(Guid id) => EngineIds.Contains(id);
 
         /// <summary>A set rather than the chain <see cref="Apply"/> uses: this one answers a
@@ -239,15 +194,30 @@ namespace Paradise.Export.Data
             ParadiseComponentIds.Light,
         ];
 
-        private static bool Assign<T>(AuthoredComponentData component, System.Action<T> assign)
-            where T : class
+        /// <summary>One of the engine's own components as its record, or null when the id is not
+        /// the engine's (or the payload will not read as it).
+        ///
+        /// A closed if-chain, deliberately. <c>ReadElement&lt;T&gt;</c> needs T at compile time, and
+        /// the obvious alternative — <c>Type.GetType(component.Type)</c> — is an IL2057/IL3050
+        /// error under this assembly's <c>IsAotCompatible</c> with warnings-as-errors, not merely
+        /// a slower path. A Guid cannot be a <c>case</c> label, hence ifs rather than a switch.
+        ///
+        /// Must list exactly <see cref="EngineIds"/>. A component in one and not the other either
+        /// never materializes or claims to be the engine's and is not.</summary>
+        private static object? ReadEngineComponent(AuthoredComponentData component)
         {
-            if (Read<T>(component) is not { } value)
-            {
-                return false;
-            }
-            assign(value);
-            return true;
+            Guid id = component.Id;
+            if (id == ParadiseComponentIds.Identity) return Read<IdentityComponentData>(component);
+            if (id == ParadiseComponentIds.Renderable) return Read<RenderableComponentData>(component);
+            if (id == ParadiseComponentIds.Collider) return Read<ColliderComponentData>(component);
+            if (id == ParadiseComponentIds.Rigidbody) return Read<RigidbodyComponentData>(component);
+            if (id == ParadiseComponentIds.Agent) return Read<AgentComponentData>(component);
+            if (id == ParadiseComponentIds.Interactable) return Read<EntityInteractableComponentData>(component);
+            if (id == ParadiseComponentIds.SpriteAnimation) return Read<SpriteAnimationComponentData>(component);
+            if (id == ParadiseComponentIds.ParticleEmitter) return Read<ParticleEmitterComponentData>(component);
+            if (id == ParadiseComponentIds.AudioEmitter) return Read<AudioEmitterComponentData>(component);
+            if (id == ParadiseComponentIds.Light) return Read<SceneLightData>(component);
+            return null;
         }
 
         private static T? Read<T>(AuthoredComponentData component) where T : class

@@ -23,9 +23,9 @@ public class RenderableDataShapeTests
     {
         // Deliberate constant pin: the exported-data schema version is a cross-repo contract.
 #pragma warning disable TUnitAssertions0005
-        await Assert.That(LevelData.CurrentSchemaVersion).IsEqualTo(2);
+        await Assert.That(LevelData.CurrentSchemaVersion).IsEqualTo(3);
 #pragma warning restore TUnitAssertions0005
-        await Assert.That(new LevelData().SchemaVersion).IsEqualTo(2);
+        await Assert.That(new LevelData().SchemaVersion).IsEqualTo(3);
     }
 
     [Test]

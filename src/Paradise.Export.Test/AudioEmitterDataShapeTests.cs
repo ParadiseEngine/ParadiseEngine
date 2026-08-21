@@ -18,21 +18,21 @@ public class AudioEmitterDataShapeTests
         level.Entities.Add(new LevelEntityData
         {
             Id = "ArcadeCabinet",
-            Components = new EntityComponentsData
+            Components =
             {
-                AudioEmitter = new AudioEmitterComponentData
+                LevelEntityExtensions.Entry(new AudioEmitterComponentData
                 {
                     StartEvent = "Play_Arcade_Bed",
                     StopEvent = "Stop_Arcade_Bed",
                     PlayOnStart = true,
                     Is3D = true,
                     AttenuationScale = 2.5f,
-                },
+                }),
             },
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
-        JsonNode audio = JsonNode.Parse(json)!["Entities"]![0]!["Components"]!["AudioEmitter"]!;
+        JsonNode audio = JsonNode.Parse(json)!["Entities"]![0]!["Components"]![0]!["Data"]!;
         await Assert.That((string?)audio["StartEvent"]).IsEqualTo("Play_Arcade_Bed");
         await Assert.That((string?)audio["StopEvent"]).IsEqualTo("Stop_Arcade_Bed");
         await Assert.That((bool)audio["PlayOnStart"]!).IsTrue();
@@ -40,7 +40,7 @@ public class AudioEmitterDataShapeTests
         await Assert.That((float)audio["AttenuationScale"]!).IsEqualTo(2.5f);
 
         AudioEmitterComponentData round =
-            ExportJsonReader.ReadLevel(json).Entities[0].Components.AudioEmitter!;
+            ExportJsonReader.ReadLevel(json).Entities[0].Get<AudioEmitterComponentData>()!;
         await Assert.That(round.StartEvent).IsEqualTo("Play_Arcade_Bed");
         await Assert.That(round.StopEvent).IsEqualTo("Stop_Arcade_Bed");
         await Assert.That(round.AttenuationScale).IsEqualTo(2.5f);
@@ -49,10 +49,11 @@ public class AudioEmitterDataShapeTests
     [Test]
     public async Task audio_emitter_is_absent_from_older_documents()
     {
-        // Every scene exported before audio existed must still read: the component is an
-        // addition, not a schema break.
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":2,"Entities":[{"Id":"E"}]}""");
-        await Assert.That(read.Entities[0].Components.AudioEmitter).IsNull();
+        // An entity that authors nothing has an empty list, not a component that reads as null.
+        // (This used to prove "absent slot deserializes to null"; the slot is gone, but the
+        // property it protected — a scene without audio still reads — is the same one.)
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":3,"Entities":[{"Id":"E"}]}""");
+        await Assert.That(read.Entities[0].Get<AudioEmitterComponentData>()).IsNull();
     }
 
     [Test]
@@ -63,20 +64,20 @@ public class AudioEmitterDataShapeTests
         level.Entities.Add(new LevelEntityData
         {
             Id = "Music",
-            Components = new EntityComponentsData
+            Components =
             {
-                AudioEmitter = new AudioEmitterComponentData
+                LevelEntityExtensions.Entry(new AudioEmitterComponentData
                 {
                     StartEvent = "Play_CityPop",
                     PlayOnStart = false,
                     Is3D = false,
-                },
+                }),
             },
         });
 
         AudioEmitterComponentData round = ExportJsonReader
             .ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities[0].Components.AudioEmitter!;
+            .Entities[0].Get<AudioEmitterComponentData>()!;
         await Assert.That(round.StopEvent).IsNull();
         await Assert.That(round.PlayOnStart).IsFalse();
         await Assert.That(round.Is3D).IsFalse();

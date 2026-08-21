@@ -25,10 +25,10 @@ public class ExportJsonReaderTests
         {
             Id = "Ground",
             WorldMatrix = Matrix4x4.Identity,
-            Components = new EntityComponentsData
+            Components =
             {
-                Rigidbody = new RigidbodyComponentData { BodyType = PhysicsBodyType.Static },
-                Collider = new ColliderComponentData
+                LevelEntityExtensions.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static }),
+                LevelEntityExtensions.Entry(new ColliderComponentData
                 {
                     Colliders =
                     [
@@ -43,7 +43,7 @@ public class ExportJsonReaderTests
                             Size = new Vector3(20f, 1f, 20f),
                         },
                     ],
-                },
+                }),
             },
         });
         document.Entities.Add(new LevelEntityData
@@ -51,14 +51,14 @@ public class ExportJsonReaderTests
             Id = "Ball1",
             WorldMatrix = Matrix4x4.CreateTranslation(1f, 0.85f, 2f),
             Materials = ["materials/mat_ball1.json"],
-            Components = new EntityComponentsData
+            Components =
             {
-                Renderable = new RenderableComponentData { Mesh = "meshes/abc.glb" },
-                Rigidbody = new RigidbodyComponentData { BodyType = PhysicsBodyType.Dynamic, Mass = 2f },
-                Collider = new ColliderComponentData
+                LevelEntityExtensions.Entry(new RenderableComponentData { Mesh = "meshes/abc.glb" }),
+                LevelEntityExtensions.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Dynamic, Mass = 2f }),
+                LevelEntityExtensions.Entry(new ColliderComponentData
                 {
                     Colliders = [new ColliderShapeData { ShapeType = PhysicsShapeType.Sphere, Radius = 0.35f }],
-                },
+                }),
             },
         });
 
@@ -68,15 +68,15 @@ public class ExportJsonReaderTests
         await Assert.That(parsed.Camera!.Position).IsEqualTo(new Vector3(1.5f, 2.25f, -3.125f));
 
         var ground = parsed.Entities[0];
-        await Assert.That(ground.Components.Rigidbody!.BodyType).IsEqualTo(PhysicsBodyType.Static);
-        await Assert.That(ground.Components.Collider!.Colliders[0].Size).IsEqualTo(new Vector3(20f, 1f, 20f));
-        await Assert.That(ground.Components.Collider!.Colliders[0].ShapeType).IsEqualTo(PhysicsShapeType.Box);
+        await Assert.That(ground.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Static);
+        await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].Size).IsEqualTo(new Vector3(20f, 1f, 20f));
+        await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].ShapeType).IsEqualTo(PhysicsShapeType.Box);
 
         var entity = parsed.Entities[1];
         await Assert.That(entity.WorldMatrix!.Value.Translation).IsEqualTo(new Vector3(1f, 0.85f, 2f));
-        await Assert.That(entity.Components.Renderable!.Mesh).IsEqualTo("meshes/abc.glb");
-        await Assert.That(entity.Components.Rigidbody!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
-        await Assert.That(entity.Components.Collider!.Colliders[0].Radius).IsEqualTo(0.35f);
+        await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("meshes/abc.glb");
+        await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
+        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders[0].Radius).IsEqualTo(0.35f);
     }
 
     // The committed_sample_scene_parses cross-check against a real editor export lives in the

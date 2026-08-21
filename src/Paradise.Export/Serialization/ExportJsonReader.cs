@@ -51,7 +51,44 @@ namespace Paradise.Export.Serialization
         internal static T? ReadElement<T>(JsonElement element) where T : class =>
             element.Deserialize((JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T)));
 
-        public static LevelData ReadLevel(string json) => Deserialize<LevelData>(json);
+        /// <summary>
+        /// Read a level document, refusing one this build cannot understand.
+        ///
+        /// The version gate is new with v3 and exists because v3 is the first change to this
+        /// document that is NOT additive: v1 and v2 carry <c>"Components"</c> as an OBJECT of
+        /// named slots, v3 as an array. Without the check, a stale document either throws a raw
+        /// JsonException naming a token position, or — worse, for a v3 reader meeting a v2
+        /// document whose entities happen to parse — yields entities with no components at all,
+        /// which reads as "the scene authored nothing" rather than "the scene is old".
+        ///
+        /// There is no upgrade path on purpose: a named slot cannot be mapped back to the id it
+        /// came from without the very table this change deleted. Re-export the scene.
+        /// </summary>
+        public static LevelData ReadLevel(string json)
+        {
+            // The version is read BEFORE the body, not after. A v2 document does not survive
+            // deserialization far enough to be asked its version: its "Components" is an object
+            // where this build expects an array, so STJ throws first, naming a token position and
+            // nothing about why. Peeking costs one parse of a small prefix and buys an error that
+            // says what to do.
+            using (JsonDocument peek = JsonDocument.Parse(json))
+            {
+                int version = peek.RootElement.TryGetProperty("SchemaVersion", out JsonElement element)
+                    && element.TryGetInt32(out int parsed)
+                        ? parsed
+                        : LevelData.CurrentSchemaVersion;
+                if (version < LevelData.MinimumSupportedVersion ||
+                    version > LevelData.CurrentSchemaVersion)
+                {
+                    throw new JsonException(
+                        $"Level document is schema version {version}; this build reads "
+                        + $"{LevelData.MinimumSupportedVersion}..{LevelData.CurrentSchemaVersion}. "
+                        + "Re-export the scene from its editor — there is no upgrade path from the "
+                        + "named component slots v2 used.");
+                }
+            }
+            return Deserialize<LevelData>(json);
+        }
 
         public static LevelMaterialData ReadMaterial(string json) => Deserialize<LevelMaterialData>(json);
 
