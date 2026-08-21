@@ -116,6 +116,34 @@ namespace Paradise.Export.Data
         public static IReadOnlyList<object> Materialize(
             LevelEntityData entity,
             IAuthoredComponentRegistry? registry = null,
+            IList<AuthoredComponentData>? unresolved = null) =>
+            Materialize(entity.Components, registry, unresolved);
+
+        /// <summary>
+        /// Every authored component in a LIST, as instances — the same reading, for payloads that
+        /// did not come off an entity.
+        ///
+        /// An authored component is not an entity's private business: the same
+        /// <c>{"Id", "Data"}</c> shape is how a game's CONFIG DOCUMENT stores its tuning groups,
+        /// a file with no entities in it at all. Reading one used to mean hand-rolling this loop
+        /// against <see cref="IAuthoredComponentRegistry"/> — which is how it was done, and it
+        /// arrived without the <see cref="AuthoredComponentData.Type"/> fallback, so a document
+        /// whose ids were regenerated was unreadable where the identical payloads on an entity
+        /// still loaded. One reader, one set of rules, both callers.
+        ///
+        /// This does not ENFORCE anything: it materializes what it can and reports the rest
+        /// through <paramref name="unresolved"/>. A caller that needs a payload to be present, to
+        /// be unique, or to be of a kind that document may carry, checks that itself — the router
+        /// cannot know which of those a given document requires.
+        /// </summary>
+        /// <param name="components">The payloads, read in order.</param>
+        /// <param name="registry">The game's generated registry. The engine's own is always
+        /// consulted first, so a caller that passes none still gets the engine's components.</param>
+        /// <param name="unresolved">Collects payloads no registry could read. Null discards
+        /// them, which is what a caller that has already validated its document wants.</param>
+        public static IReadOnlyList<object> Materialize(
+            IEnumerable<AuthoredComponentData> components,
+            IAuthoredComponentRegistry? registry = null,
             IList<AuthoredComponentData>? unresolved = null)
         {
             var instances = new List<object>();
@@ -123,7 +151,7 @@ namespace Paradise.Export.Data
             // Document order. It used to be "the order the contract declares the slots in", which
             // no longer exists — so the editor's order is the only order there is, and both
             // editors are explicit about emitting a stable one.
-            foreach (AuthoredComponentData component in entity.Components)
+            foreach (AuthoredComponentData component in components)
             {
                 if (Resolve(registry, component) is { } value)
                 {
