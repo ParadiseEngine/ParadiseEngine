@@ -205,6 +205,111 @@ public class AuthoredComponentRouterTests
         await Assert.That(reported.Type).IsEqualTo("Someone.Else");
     }
 
+    // ---- materializing a LIST, with no entity in sight ------------------------------------
+    //
+    // The same {"Id", "Data"} payloads are how a game's CONFIG DOCUMENT stores its tuning groups
+    // — a file with no entities in it at all. These pin that the list overload is the same
+    // reading, so a config document and an entity cannot drift apart on what a payload means.
+
+    /// <summary>The shape a config document holds: payloads, no entity.</summary>
+    [Test]
+    public async Task a_bare_list_materializes_the_same_as_an_entity_would()
+    {
+        AuthoredComponentData[] document =
+        [
+            Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
+            Payload(LedgeId, """{"Friction":0.35,"Label":"north"}"""),
+        ];
+
+        var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry());
+
+        await Assert.That(instances.OfType<RigidbodyComponentData>().Single().Mass).IsEqualTo(2.5f);
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Label).IsEqualTo("north");
+    }
+
+    /// <summary>The two overloads are one reader. An entity's components and the same payloads as
+    /// a plain list must come back identically, or a config document and a scene would disagree
+    /// about what a payload means.</summary>
+    [Test]
+    public async Task the_entity_overload_reads_exactly_what_the_list_overload_does()
+    {
+        AuthoredComponentData[] payloads =
+        [
+            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
+            Payload(LedgeId, """{"Friction":0.5,"Label":"south"}"""),
+        ];
+
+        var fromList = AuthoredComponentRouter.Materialize(payloads, new LedgeRegistry());
+        var fromEntity = AuthoredComponentRouter.Materialize(Route(payloads), new LedgeRegistry());
+
+        // Compared by NAME rather than by Type: the assertion library reflects into whatever it
+        // is given, and a Type is not an ordinary value to it.
+        await Assert.That(fromList.Select(i => i.GetType().Name).ToArray())
+            .IsEquivalentTo(fromEntity.Select(i => i.GetType().Name).ToArray());
+        await Assert.That(fromList.OfType<LedgeFixture>().Single().Label)
+            .IsEqualTo(fromEntity.OfType<LedgeFixture>().Single().Label);
+    }
+
+    /// <summary>The gain over a hand-rolled loop, and the reason to share this reader at all: a
+    /// payload whose id no registry knows still loads by TYPE NAME. A config document that
+    /// hand-rolled its own reading did not get this, so regenerating a [Guid] made the file
+    /// unreadable where the identical payload on an entity survived.</summary>
+    [Test]
+    public async Task a_list_payload_with_an_unknown_id_still_loads_by_type_name()
+    {
+        var stale = Guid.Parse("ffffffff-0000-0000-0000-00000000ffff");
+        AuthoredComponentData[] document =
+            [Payload(stale, """{"Friction":0.75,"Label":"west"}""", LedgeType)];
+
+        var unresolved = new List<AuthoredComponentData>();
+        var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry(), unresolved);
+
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Friction).IsEqualTo(0.75f);
+        await Assert.That(unresolved).IsEmpty();
+    }
+
+    /// <summary>It materializes and REPORTS; it does not enforce. A document that requires a
+    /// payload to be present, unique, or of a kind that document may carry checks that itself —
+    /// the router cannot know which of those any given document requires.</summary>
+    [Test]
+    public async Task a_list_reports_what_it_could_not_read_rather_than_throwing()
+    {
+        var stranger = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        AuthoredComponentData[] document =
+        [
+            Payload(LedgeId, """{"Label":"kept"}"""),
+            Payload(stranger, """{"Whatever":1}""", "Someone.Else"),
+        ];
+
+        var unresolved = new List<AuthoredComponentData>();
+        var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry(), unresolved);
+
+        await Assert.That(instances.OfType<LedgeFixture>().Single().Label).IsEqualTo("kept");
+        await Assert.That(unresolved.Single().Id).IsEqualTo(stranger);
+    }
+
+    /// <summary>Duplicates are the caller's problem, and stating it here is the point: a config
+    /// document rejects them, a scene may not, and the router must not decide that for either.</summary>
+    [Test]
+    public async Task a_list_materializes_duplicates_rather_than_deciding_about_them()
+    {
+        AuthoredComponentData[] document =
+            [Payload(LedgeId, """{"Label":"first"}"""), Payload(LedgeId, """{"Label":"second"}""")];
+
+        var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry());
+
+        await Assert.That(instances.OfType<LedgeFixture>().Select(l => l.Label))
+            .IsEquivalentTo(new[] { "first", "second" });
+    }
+
+    /// <summary>An empty document is empty, not an error — a config file may legitimately declare
+    /// no components and lean entirely on the records' own defaults.</summary>
+    [Test]
+    public async Task an_empty_list_materializes_to_nothing()
+    {
+        await Assert.That(AuthoredComponentRouter.Materialize([], new LedgeRegistry())).IsEmpty();
+    }
+
     /// <summary>Stands in for the registry a game's [Authored] records generate.</summary>
     private sealed class LedgeRegistry : Paradise.Authoring.IAuthoredComponentRegistry
     {
