@@ -55,15 +55,19 @@ namespace Paradise.Export.Data
 
         private AuthoredDocument(
             ImmutableDictionary<Type, object> components,
+            IReadOnlyList<object> ordered,
             IReadOnlyList<AuthoredComponentData> unresolved)
         {
             _components = components;
+            Components = ordered;
             Unresolved = unresolved;
         }
 
         /// <summary>An empty document — every <see cref="Get{T}"/> returns record defaults.</summary>
-        public static AuthoredDocument Empty { get; } =
-            new(ImmutableDictionary<Type, object>.Empty, Array.Empty<AuthoredComponentData>());
+        public static AuthoredDocument Empty { get; } = new(
+            ImmutableDictionary<Type, object>.Empty,
+            Array.Empty<object>(),
+            Array.Empty<AuthoredComponentData>());
 
         /// <summary>
         /// The payloads no registry could read, as they appeared in the file.
@@ -74,8 +78,14 @@ namespace Paradise.Export.Data
         /// </summary>
         public IReadOnlyList<AuthoredComponentData> Unresolved { get; }
 
-        /// <summary>The component records this document declared, in document order.</summary>
-        public IReadOnlyCollection<object> Components => _components.Values.ToArray();
+        /// <summary>
+        /// The component records this document declared, in DOCUMENT order.
+        ///
+        /// Held as its own list rather than projected from the map: a map keyed by type
+        /// enumerates in hash order, so reading it back would report an order the file never had
+        /// — and would allocate a fresh array on every access besides.
+        /// </summary>
+        public IReadOnlyList<object> Components { get; }
 
         /// <summary>Read a document from disk. <paramref name="path"/> names it in any error.</summary>
         public static AuthoredDocument Load(
@@ -136,14 +146,51 @@ namespace Paradise.Export.Data
             IReadOnlyList<object> instances =
                 AuthoredComponentRouter.Materialize(payloads, registry, unresolved);
 
+            // Resolved instances line up with the payloads that produced them, minus the
+            // unresolved ones — Materialize preserves order and appends misses to `unresolved`
+            // in that same order, so walking both together names the id behind each instance.
+            var idOf = new Dictionary<Type, Guid>();
             ImmutableDictionary<Type, object>.Builder builder =
                 ImmutableDictionary.CreateBuilder<Type, object>();
-            foreach (object instance in instances)
+
+            // Walked with two cursors, matched by REFERENCE. Materialize keeps document order and
+            // appends each miss to `unresolved` in that same order, so stepping the two together
+            // names the id behind every instance. Reference equality rather than the record's
+            // own: AuthoredComponentData carries a JsonElement, and comparing those structurally
+            // is both unreliable and needlessly expensive when the objects are literally the ones
+            // we handed in.
+            int miss = 0;
+            int resolved = 0;
+            foreach (AuthoredComponentData payload in payloads)
             {
-                builder[instance.GetType()] = instance;
+                if (miss < unresolved.Count && ReferenceEquals(unresolved[miss], payload))
+                {
+                    miss++;
+                    continue;
+                }
+
+                object instance = instances[resolved++];
+                Guid id = payload.Id;
+                Type type = instance.GetType();
+
+                // The guard above catches a repeated ID; this catches a repeated RECORD, which is
+                // not the same thing. Two distinct ids reach one type whenever the second resolves
+                // through the Type-name fallback — the stale-guid case this reader exists to
+                // support — and the map is keyed by type, so the second would quietly replace the
+                // first. That is the failure refusing duplicates is FOR, so it is refused here too.
+                if (idOf.TryGetValue(type, out Guid first))
+                {
+                    throw new InvalidDataException(
+                        $"'{source}': components '{first}' and '{id}' both resolve to "
+                        + $"{type.Name}. A document holds one payload per component, so the "
+                        + "second has nowhere to go — delete one.");
+                }
+
+                idOf[type] = id;
+                builder[type] = instance;
             }
 
-            return new AuthoredDocument(builder.ToImmutable(), unresolved);
+            return new AuthoredDocument(builder.ToImmutable(), instances, unresolved);
         }
 
         private static AuthoredComponentData ReadPayload(JsonElement entry, string source)
@@ -182,11 +229,36 @@ namespace Paradise.Export.Data
                 // CLONED, and it has to be: the JsonDocument these elements belong to is disposed
                 // when parsing ends, and anything reaching Unresolved would otherwise carry a
                 // Data that throws the moment a caller reads it.
-                Data = entry.TryGetProperty("Data", out JsonElement data)
-                    ? data.Clone()
-                    : default,
+                //
+                // An ABSENT Data reads as an empty object, not as a malformed payload: it is the
+                // same statement as an absent member keeping its initializer, one level up, so a
+                // component with no fields worth writing is just its id. Left as
+                // default(JsonElement) it would instead fail to deserialize and land in
+                // Unresolved — neither read nor reported as wrong, which is the worst of both.
+                Data = ReadData(entry, id, source),
             };
         }
+
+        private static JsonElement ReadData(JsonElement entry, string id, string source)
+        {
+            if (!entry.TryGetProperty("Data", out JsonElement data))
+            {
+                return EmptyObject;
+            }
+            if (data.ValueKind != JsonValueKind.Object)
+            {
+                // PRESENT and wrong is a different thing from absent, and worth saying so: an
+                // author who wrote a Data meant something by it.
+                throw new InvalidDataException(
+                    $"'{source}': component '{id}' has a Data that is not an object.");
+            }
+            return data.Clone();
+        }
+
+        /// <summary>Stands in for an omitted Data. Parsed once; JsonElement is a struct over a
+        /// document, so it needs one to point at.</summary>
+        private static readonly JsonElement EmptyObject =
+            JsonDocument.Parse("{}").RootElement.Clone();
 
         /// <summary>
         /// This document's <typeparamref name="T"/>, or its record defaults when none was declared.
@@ -197,9 +269,7 @@ namespace Paradise.Export.Data
         /// <see cref="Has{T}"/>.
         /// </summary>
         public T Get<T>() where T : new() =>
-            _components.TryGetValue(typeof(T), out object? component)
-                ? (T)component
-                : Default<T>.Instance;
+            _components.TryGetValue(typeof(T), out object? component) ? (T)component : new T();
 
         /// <summary>Whether the document actually declared a <typeparamref name="T"/>, as opposed
         /// to <see cref="Get{T}"/> being about to hand back defaults.</summary>
@@ -215,18 +285,33 @@ namespace Paradise.Export.Data
         public AuthoredDocument With(object component)
         {
             ArgumentNullException.ThrowIfNull(component);
+            Type type = component.GetType();
+
+            // Order is maintained rather than recomputed: a replacement keeps the position the
+            // file gave it, and something new goes on the end. Rebuilding from the map would
+            // shuffle every other component as a side effect of touching one.
+            var ordered = new List<object>(Components.Count + 1);
+            bool replaced = false;
+            foreach (object existing in Components)
+            {
+                if (existing.GetType() == type)
+                {
+                    ordered.Add(component);
+                    replaced = true;
+                }
+                else
+                {
+                    ordered.Add(existing);
+                }
+            }
+            if (!replaced)
+            {
+                ordered.Add(component);
+            }
+
             return new AuthoredDocument(
-                _components.SetItem(component.GetType(), component), Unresolved);
+                _components.SetItem(type, component), ordered, Unresolved);
         }
 
-        /// <summary>One shared defaults instance per component type.
-        ///
-        /// A fresh <c>new T()</c> per miss would allocate on every read of a component the
-        /// document omits, and these are read from systems that run per frame. Safe to share
-        /// because an authored component is replaced wholesale, never mutated in place.</summary>
-        private static class Default<T> where T : new()
-        {
-            public static readonly T Instance = new();
-        }
     }
 }

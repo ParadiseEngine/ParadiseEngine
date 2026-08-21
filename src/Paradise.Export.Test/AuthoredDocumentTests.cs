@@ -49,14 +49,23 @@ public class AuthoredDocumentTests
         await Assert.That(document.Has<LedgeFixture>()).IsFalse();
     }
 
-    /// <summary>Defaults are SHARED, not freshly allocated per read: these are read from systems
-    /// that run per frame, and a miss must not allocate.</summary>
+    /// <summary>
+    /// Defaults are a FRESH instance per miss, deliberately.
+    ///
+    /// Sharing one would save an allocation on a path that barely runs — a document declaring the
+    /// component is the normal case — and would cost an aliasing hazard that does not announce
+    /// itself: these records need settable properties for the generated reader, so a caller that
+    /// adjusted a defaulted result in place would corrupt every other document's defaults too.
+    /// </summary>
     [Test]
-    public async Task defaults_are_the_same_instance_every_time()
+    public async Task a_defaulted_component_is_not_shared_between_reads()
     {
         var document = Parse("""{ "Components": [] }""");
 
-        await Assert.That(document.Get<LedgeFixture>()).IsSameReferenceAs(document.Get<LedgeFixture>());
+        var first = document.Get<LedgeFixture>();
+        first.Label = "mutated";
+
+        await Assert.That(document.Get<LedgeFixture>().Label).IsEqualTo("");
     }
 
     [Test]
@@ -236,6 +245,110 @@ public class AuthoredDocumentTests
             File.Delete(path);
         }
     }
+
+
+    /// <summary>
+    /// The duplicate guard has to key on the RESOLVED TYPE, not on the id in the file.
+    ///
+    /// Two different ids can land on one record: the first resolves by id, the second by the
+    /// Type-name fallback. The id guard waves both through, and the second then overwrites the
+    /// first in a map keyed by type — silently, which is the exact failure this document refuses
+    /// duplicates to prevent. Reachable precisely BECAUSE of the stale-guid fallback this reader
+    /// exists to provide.
+    /// </summary>
+    [Test]
+    public async Task two_ids_resolving_to_one_record_are_refused_rather_than_silently_merged()
+    {
+        var thrown = Assert.Throws<InvalidDataException>(() => Parse($$"""
+            {
+              "Components": [
+                { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
+                { "Id": "ffffffff-0000-4000-8000-00000000ffff", "Type": "{{LedgeType}}",
+                  "Data": {"Label":"second"} }
+              ]
+            }
+            """));
+
+        // Both ids named: the fix is to delete one, and the author needs to know which two collided.
+        await Assert.That(thrown!.Message).Contains(LedgeId.ToString());
+        await Assert.That(thrown.Message).Contains("ffffffff-0000-4000-8000-00000000ffff");
+        await Assert.That(thrown.Message).Contains(nameof(LedgeFixture));
+    }
+
+
+    /// <summary>Order is the file's, not the map's: a dictionary keyed by type enumerates in hash
+    /// order, so this has to be tracked rather than projected.</summary>
+    [Test]
+    public async Task components_come_back_in_document_order()
+    {
+        var document = Parse($$"""
+            {
+              "Components": [
+                { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
+                { "Id": "{{ParadiseComponentIds.Rigidbody}}", "Data": {"Mass":1} }
+              ]
+            }
+            """);
+
+        await Assert.That(document.Components.Select(c => c.GetType().Name).ToArray())
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(RigidbodyComponentData) });
+    }
+
+    [Test]
+    public async Task components_is_the_same_list_on_every_read()
+    {
+        var document = Parse($$"""
+            { "Components": [ { "Id": "{{LedgeId}}", "Data": {"Label":"x"} } ] }
+            """);
+
+        await Assert.That(document.Components).IsSameReferenceAs(document.Components);
+    }
+
+    /// <summary>A component with nothing worth writing is just its id. An absent Data is the same
+    /// statement as an absent member keeping its initializer, one level up.</summary>
+    [Test]
+    public async Task an_omitted_data_materializes_the_record_with_its_defaults()
+    {
+        var document = Parse($$"""
+            { "Components": [ { "Id": "{{LedgeId}}" } ] }
+            """);
+
+        await Assert.That(document.Has<LedgeFixture>()).IsTrue();
+        await Assert.That(document.Get<LedgeFixture>().Label).IsEqualTo("");
+        await Assert.That(document.Unresolved).IsEmpty();
+    }
+
+    /// <summary>Present and wrong is not the same as absent — an author who wrote a Data meant
+    /// something by it.</summary>
+    [Test]
+    public async Task a_data_that_is_not_an_object_is_refused()
+    {
+        var thrown = Assert.Throws<InvalidDataException>(() => Parse($$"""
+            { "Components": [ { "Id": "{{LedgeId}}", "Data": 5 } ] }
+            """));
+
+        await Assert.That(thrown!.Message).Contains("not an object");
+    }
+
+    [Test]
+    public async Task with_keeps_a_replaced_component_in_its_original_position()
+    {
+        var document = Parse($$"""
+            {
+              "Components": [
+                { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
+                { "Id": "{{ParadiseComponentIds.Rigidbody}}", "Data": {"Mass":1} }
+              ]
+            }
+            """);
+
+        var amended = document.With(new LedgeFixture { Label = "replaced" });
+
+        await Assert.That(amended.Components.Select(c => c.GetType().Name).ToArray())
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(RigidbodyComponentData) });
+        await Assert.That(amended.Components.Count).IsEqualTo(2);
+    }
+
 
     /// <summary>Stands in for the registry a game's [Authored] records generate.</summary>
     private sealed class LedgeRegistry : IAuthoredComponentRegistry
