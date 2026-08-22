@@ -15,5 +15,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
+    <ProjectReference Include="..\Paradise.Windowing\Paradise.Windowing.csproj" />
   </ItemGroup>
 </Project>

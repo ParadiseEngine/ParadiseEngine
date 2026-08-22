@@ -20,6 +20,10 @@
 
   <ItemGroup>
     <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+    <!-- SurfaceDescriptor lives with the windowing contract it describes; a backend that
+         presents into a window consumes it. Paradise.Windowing has no dependencies of its
+         own, so this edge costs nothing beyond the type. -->
+    <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 using System;
 using WebGpuSharp.FFI;
 using WgInstance = WebGpuSharp.Instance;

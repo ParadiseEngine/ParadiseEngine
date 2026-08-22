@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 using WebGpuSharp;
 
 namespace Paradise.Ui.Noesis.Host.Test;
@@ -140,14 +141,14 @@ public class NoesisViewCoreTests
         root.Focus();
         core.Input.Tick(1.0 / 60.0);
 
-        _ = core.Input.Handle(UiEvent.KeyDown(UiKey.Enter));
-        _ = core.Input.Handle(UiEvent.KeyUp(UiKey.Enter));
-        _ = core.Input.Handle(UiEvent.KeyDown(UiKey.Backspace));
+        _ = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.Enter));
+        _ = core.Input.Handle(UiEvent.KeyUp(KeyboardKey.Enter));
+        _ = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.Backspace));
         _ = core.Input.Handle(UiEvent.Text('A'));
 
         // Unmapped: no member of UiKey maps to it, so nothing may be routed and the verdict
         // must be "not handled".
-        var unmappedHandled = core.Input.Handle(UiEvent.KeyDown(UiKey.None));
+        var unmappedHandled = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.None));
         // A lone surrogate is not a character — it must not be forwarded as one.
         var surrogateHandled = core.Input.Handle(UiEvent.Text(0xD800));
 

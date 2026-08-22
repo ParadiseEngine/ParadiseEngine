@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 namespace Paradise.Ui.Test;
 
 /// <summary>CompositeUiInput fan-out semantics: pointer downs/ups stop at the first consumer
@@ -26,7 +27,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: true);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, UiPointerButton.Left, default, default));
+        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, PointerButton.Left, default, default));
 
         await Assert.That(consumed).IsTrue();
         await Assert.That(first.Seen).Count().IsEqualTo(1);
@@ -40,7 +41,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: false);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, UiPointerButton.Left, default, default));
+        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, PointerButton.Left, default, default));
 
         await Assert.That(consumed).IsFalse();
         await Assert.That(first.Seen).Count().IsEqualTo(1);

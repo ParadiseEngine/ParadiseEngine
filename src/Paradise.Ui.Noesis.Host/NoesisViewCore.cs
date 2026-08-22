@@ -1,4 +1,5 @@
 using Noesis;
+using Paradise.Windowing;
 using IoPath = System.IO.Path;
 
 namespace Paradise.Ui.Noesis.Host;
@@ -263,43 +264,97 @@ public sealed class NoesisViewCore
             return rotation;
         }
 
-        private static MouseButton ToNoesis(UiPointerButton button) => button switch
+        private static MouseButton ToNoesis(PointerButton button) => button switch
         {
-            UiPointerButton.Right => MouseButton.Right,
-            UiPointerButton.Middle => MouseButton.Middle,
+            PointerButton.Right => MouseButton.Right,
+            PointerButton.Middle => MouseButton.Middle,
+            PointerButton.X1 => MouseButton.XButton1,
+            PointerButton.X2 => MouseButton.XButton2,
             _ => MouseButton.Left,
         };
 
-        /// <summary>The contract's key vocabulary → Noesis's. Deliberately partial: the
-        /// <see cref="UiKey"/> set is only what a text field and a menu need, and anything
-        /// outside it (including <see cref="UiKey.None"/>) returns null so the caller reports
-        /// "not handled" WITHOUT touching the view — an unmapped key must not consume input.
-        /// Noesis follows WPF's naming, so Enter is <c>Return</c> and Backspace is
-        /// <c>Back</c>.</summary>
-        private static Key? ToNoesis(UiKey key) => key switch
+        /// <summary>The windowing contract's keys → Noesis's. Total over the vocabulary a UI
+        /// can act on, so a host forwards whatever it already has and nothing has to be
+        /// re-mapped downstream. Anything outside it — and <see cref="KeyboardKey.None"/> —
+        /// returns null so the caller reports "not handled" WITHOUT touching the view; an
+        /// unmapped key must never consume input. Noesis follows WPF's naming, so Enter is
+        /// <c>Return</c>, Backspace is <c>Back</c> and the digits are <c>D0</c>-<c>D9</c>.
+        ///
+        /// WHICH keys a UI is allowed to see is deliberately NOT decided here — that is the
+        /// host's policy, and a game that forwards [W] has handed movement to whatever holds
+        /// focus.</summary>
+        private static Key? ToNoesis(KeyboardKey key) => key switch
         {
-            UiKey.Enter => Key.Return,
-            UiKey.Escape => Key.Escape,
-            UiKey.Backspace => Key.Back,
-            UiKey.Delete => Key.Delete,
-            UiKey.Tab => Key.Tab,
-            UiKey.Left => Key.Left,
-            UiKey.Right => Key.Right,
-            UiKey.Up => Key.Up,
-            UiKey.Down => Key.Down,
-            UiKey.Home => Key.Home,
-            UiKey.End => Key.End,
-            UiKey.Ctrl => Key.LeftCtrl,
-            UiKey.Shift => Key.LeftShift,
-            UiKey.A => Key.A,
-            UiKey.C => Key.C,
-            UiKey.D => Key.D,
-            UiKey.S => Key.S,
-            UiKey.V => Key.V,
-            UiKey.W => Key.W,
-            UiKey.X => Key.X,
-            UiKey.Y => Key.Y,
-            UiKey.Z => Key.Z,
+            KeyboardKey.Enter => Key.Return,
+            KeyboardKey.NumpadEnter => Key.Return,
+            KeyboardKey.Escape => Key.Escape,
+            KeyboardKey.Backspace => Key.Back,
+            KeyboardKey.Delete => Key.Delete,
+            KeyboardKey.Insert => Key.Insert,
+            KeyboardKey.Tab => Key.Tab,
+            KeyboardKey.Space => Key.Space,
+            KeyboardKey.Left => Key.Left,
+            KeyboardKey.Right => Key.Right,
+            KeyboardKey.Up => Key.Up,
+            KeyboardKey.Down => Key.Down,
+            KeyboardKey.Home => Key.Home,
+            KeyboardKey.End => Key.End,
+            KeyboardKey.PageUp => Key.PageUp,
+            KeyboardKey.PageDown => Key.PageDown,
+            KeyboardKey.LeftControl => Key.LeftCtrl,
+            KeyboardKey.RightControl => Key.RightCtrl,
+            KeyboardKey.LeftShift => Key.LeftShift,
+            KeyboardKey.RightShift => Key.RightShift,
+            KeyboardKey.LeftAlt => Key.LeftAlt,
+            KeyboardKey.RightAlt => Key.RightAlt,
+            KeyboardKey.Digit0 => Key.D0,
+            KeyboardKey.Digit1 => Key.D1,
+            KeyboardKey.Digit2 => Key.D2,
+            KeyboardKey.Digit3 => Key.D3,
+            KeyboardKey.Digit4 => Key.D4,
+            KeyboardKey.Digit5 => Key.D5,
+            KeyboardKey.Digit6 => Key.D6,
+            KeyboardKey.Digit7 => Key.D7,
+            KeyboardKey.Digit8 => Key.D8,
+            KeyboardKey.Digit9 => Key.D9,
+            KeyboardKey.F1 => Key.F1,
+            KeyboardKey.F2 => Key.F2,
+            KeyboardKey.F3 => Key.F3,
+            KeyboardKey.F4 => Key.F4,
+            KeyboardKey.F5 => Key.F5,
+            KeyboardKey.F6 => Key.F6,
+            KeyboardKey.F7 => Key.F7,
+            KeyboardKey.F8 => Key.F8,
+            KeyboardKey.F9 => Key.F9,
+            KeyboardKey.F10 => Key.F10,
+            KeyboardKey.F11 => Key.F11,
+            KeyboardKey.F12 => Key.F12,
+            KeyboardKey.A => Key.A,
+            KeyboardKey.B => Key.B,
+            KeyboardKey.C => Key.C,
+            KeyboardKey.D => Key.D,
+            KeyboardKey.E => Key.E,
+            KeyboardKey.F => Key.F,
+            KeyboardKey.G => Key.G,
+            KeyboardKey.H => Key.H,
+            KeyboardKey.I => Key.I,
+            KeyboardKey.J => Key.J,
+            KeyboardKey.K => Key.K,
+            KeyboardKey.L => Key.L,
+            KeyboardKey.M => Key.M,
+            KeyboardKey.N => Key.N,
+            KeyboardKey.O => Key.O,
+            KeyboardKey.P => Key.P,
+            KeyboardKey.Q => Key.Q,
+            KeyboardKey.R => Key.R,
+            KeyboardKey.S => Key.S,
+            KeyboardKey.T => Key.T,
+            KeyboardKey.U => Key.U,
+            KeyboardKey.V => Key.V,
+            KeyboardKey.W => Key.W,
+            KeyboardKey.X => Key.X,
+            KeyboardKey.Y => Key.Y,
+            KeyboardKey.Z => Key.Z,
             _ => null,
         };
 

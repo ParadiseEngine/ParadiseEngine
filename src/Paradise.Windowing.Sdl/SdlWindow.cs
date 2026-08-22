@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Paradise.Rendering;
 using SDL;
 using static SDL.SDL3;
 

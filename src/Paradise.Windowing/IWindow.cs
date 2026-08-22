@@ -1,5 +1,3 @@
-using Paradise.Rendering;
-
 namespace Paradise.Windowing;
 
 /// <summary>What a window is created from. Width and height are in PIXELS (the surface size a

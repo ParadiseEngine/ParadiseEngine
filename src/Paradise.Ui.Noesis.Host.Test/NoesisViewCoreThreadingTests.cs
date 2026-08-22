@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 namespace Paradise.Ui.Noesis.Host.Test;
 
 /// <summary>
@@ -45,8 +46,8 @@ public class NoesisViewCoreThreadingTests
     private static void Click(NoesisViewCore core, out bool down, out bool up)
     {
         _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
-        down = core.Input.Handle(UiEvent.PointerDown(100f, 50f, UiPointerButton.Left, default, default));
-        up = core.Input.Handle(UiEvent.PointerUp(100f, 50f, UiPointerButton.Left));
+        down = core.Input.Handle(UiEvent.PointerDown(100f, 50f, PointerButton.Left, default, default));
+        up = core.Input.Handle(UiEvent.PointerUp(100f, 50f, PointerButton.Left));
     }
 
     /// <summary>The baseline the cross-thread case is compared against — without it, a false

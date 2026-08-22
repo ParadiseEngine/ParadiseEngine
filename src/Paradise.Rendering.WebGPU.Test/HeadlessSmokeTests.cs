@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 using TUnit.Core;
 
 namespace Paradise.Rendering.WebGPU.Test;

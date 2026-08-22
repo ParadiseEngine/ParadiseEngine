@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 namespace Paradise.Ui.Noesis.Host.Test;
 
 /// <summary>
@@ -42,7 +43,7 @@ public class HitTestVisibilityTests
         core.Input.Tick(1.0 / 60.0);
         _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
         var handled = core.Input.Handle(
-            UiEvent.PointerDown(100f, 50f, UiPointerButton.Left, default, default));
+            UiEvent.PointerDown(100f, 50f, PointerButton.Left, default, default));
         return (handled, reached);
     }
 

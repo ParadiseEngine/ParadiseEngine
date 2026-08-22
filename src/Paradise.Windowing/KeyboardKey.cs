@@ -6,6 +6,10 @@ namespace Paradise.Windowing;
 /// state a game keeps is its own, sized to its own action vocabulary.</summary>
 public enum KeyboardKey : byte
 {
+    /// <summary>No key. Zero so that a defaulted field means "nothing" rather than [A] —
+    /// consumers that carry a key alongside other data (<c>UiEvent</c>) rely on it.</summary>
+    None = 0,
+
     // Letters.
     A, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
