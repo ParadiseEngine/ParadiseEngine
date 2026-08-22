@@ -106,7 +106,6 @@ jobs:
             Paradise.Ui
             Paradise.Ui.ImGui
             Paradise.Ui.Noesis
-            Paradise.Ui.Noesis.Host
           )
 
           for project in "${projects[@]}"; do
