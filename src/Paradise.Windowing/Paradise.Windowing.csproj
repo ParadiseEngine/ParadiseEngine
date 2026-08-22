@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Windowing</AssemblyName>
+    <RootNamespace>Paradise.Windowing</RootNamespace>
+    <PackageId>Paradise.Windowing</PackageId>
+    <Title>Paradise.Windowing</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Backend-agnostic windowing contract: create and control a window, obtain a render surface, and receive timestamped raw device input. Implemented by Paradise.Windowing.* backends (SDL today).</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>windowing;input;surface;nativeaot;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- For SurfaceDescriptor/SurfacePlatform: a window's one rendering-facing product. -->
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+  </ItemGroup>
+
+</Project>

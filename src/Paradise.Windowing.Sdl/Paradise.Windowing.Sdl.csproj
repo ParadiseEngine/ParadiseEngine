@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Windowing.Sdl</AssemblyName>
+    <RootNamespace>Paradise.Windowing.Sdl</RootNamespace>
+    <PackageId>Paradise.Windowing.Sdl</PackageId>
+    <Title>Paradise.Windowing.Sdl</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>SDL3 implementation of the Paradise.Windowing contract: window lifecycle, the event pump, timestamped raw keyboard input, and WebGPU-ready surface descriptors for Win32/Cocoa/Wayland/X11.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>windowing;sdl;sdl3;input;surface;game-dev</PackageTags>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+
+</Project>
