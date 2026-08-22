@@ -88,6 +88,11 @@ public class NoesisViewCoreTests
         var contextApplied = ReferenceEquals(content?.DataContext, dataContext);
         var resizeConsumed = core.Input.Handle(UiEvent.Resize(640f, 480f));
         _ = core.Input.Handle(UiEvent.PointerMove(10f, 10f));
+        // Collect the first tick's frame before asking for a second. Tick is gated on the render
+        // side having taken the last snapshot — an unmatched Update queues one nobody collects,
+        // which Noesis documents as unbounded allocation — so back-to-back ticks with no render
+        // between them produce ONE hook invocation, not two. See BalanceGuardTests.
+        core.TryUpdateRenderTree(out _);
         core.Input.Tick(1.0 / 60.0);
 
         await Assert.That(beforeCreation).IsFalse();

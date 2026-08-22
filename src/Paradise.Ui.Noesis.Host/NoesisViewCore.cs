@@ -41,6 +41,7 @@ public sealed class NoesisViewCore
     private readonly string? _licenseKey;
     private static bool s_globalInitialized; // GUI.Init/license/log are process-global, once
     private volatile View? _view; // published by the sim thread once created there
+    private bool _pendingSnapshot; // an Update produced a frame the render side has not taken
     private volatile uint _width;
     private volatile uint _height;
 
@@ -78,16 +79,29 @@ public sealed class NoesisViewCore
         Input = new UiInputHalf(this);
     }
 
-    /// <summary>The single sync point between the halves: pick up the last sim-thread view
-    /// update into the render tree. False while the view does not exist yet. Call from the
-    /// render/main thread once per frame, before recording the UI passes.</summary>
-    public bool TryUpdateRenderTree()
+    /// <summary>The single sync point between the halves: pick up the last view update into the
+    /// render tree. False while the view does not exist yet. Call from the render thread once
+    /// per frame, before recording the UI passes.</summary>
+    public bool TryUpdateRenderTree() => TryUpdateRenderTree(out _);
+
+    /// <summary>As <see cref="TryUpdateRenderTree()"/>, and reports whether the render tree
+    /// actually CHANGED since the last frame.
+    ///
+    /// Use it to skip work only if you are drawing into a target that PERSISTS between frames.
+    /// A host compositing through an OverlayPass must not: its backbuffer is a fresh swapchain
+    /// texture every frame, so skipping the UI passes on an unchanged frame does not reuse the
+    /// last image, it presents one with no UI at all — a flicker whose rate depends on how
+    /// still the UI is, which is a memorable way to spend an afternoon.</summary>
+    public bool TryUpdateRenderTree(out bool changed)
     {
+        changed = false;
         var view = _view;
         if (view is null) return false;
         lock (_sync)
         {
-            view.Renderer.UpdateRenderTree();
+            changed = view.Renderer.UpdateRenderTree();
+            // The snapshot (if any) has been taken; the UI thread may produce the next one.
+            _pendingSnapshot = false;
         }
         return true;
     }
@@ -210,13 +224,28 @@ public sealed class NoesisViewCore
             }
         }
 
+        /// <summary>Advance UI time, unless the render side has not taken the last frame yet.
+        ///
+        /// That guard is the documented contract, not caution: Noesis says <c>Update</c> "never
+        /// blocks and allocates memory when not synchronized with UpdateRenderTree", so every
+        /// Update that returns true and is not matched by an UpdateRenderTree queues a snapshot
+        /// that is never collected. A host can drop frames for ordinary reasons — a minimized
+        /// window, a lost swapchain, any frame that returns before its overlay pass — and with
+        /// a UI that changes every tick (a clock, a counter) those unmatched Updates accumulate
+        /// for as long as it stays minimized. Skipping instead is free and correct: there is no
+        /// one to show the frame to, and time is passed absolutely, so the next Update that does
+        /// run lands on the right moment rather than replaying the backlog.</summary>
         public void Tick(double simTimeSeconds)
         {
             lock (owner._sync)
             {
-                var view = SimView;
+                var view = SimView; // created here on first touch, before the pending check
+                if (owner._pendingSnapshot)
+                {
+                    return;
+                }
                 owner._simTick?.Invoke();
-                view.Update(simTimeSeconds);
+                owner._pendingSnapshot = view.Update(simTimeSeconds);
             }
         }
 
