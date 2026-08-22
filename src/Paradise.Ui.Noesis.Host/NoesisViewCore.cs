@@ -7,8 +7,10 @@ namespace Paradise.Ui.Noesis.Host;
 /// shared by every host (an SDL/WebGPU runtime, a Godot play-mode bridge):
 ///
 /// - <see cref="Input"/> (<see cref="IUiInput"/>) runs on the SIM thread — the simulation
-///   drains pointer events into the view and advances view time each fixed tick, so hover,
-///   focus, animations and bindings step in lockstep with game state.
+///   drains pointer, key and text events into the view and advances view time each fixed tick,
+///   so hover, focus, animations and bindings step in lockstep with game state. Handle's return
+///   value is the view's own verdict — true only when the UI actually consumed the event — which
+///   is what lets a host route unconsumed input onward to gameplay without guessing.
 /// - The host's render half (a WebGPU overlay pass, or an offscreen render + readback) reads
 ///   <see cref="View"/> once published, initializes its own <c>RenderDevice</c> against it,
 ///   and calls <see cref="TryUpdateRenderTree"/> once per frame before recording the passes
@@ -128,7 +130,12 @@ public sealed class NoesisViewCore
         var view = GUI.CreateView(rootElement);
         view.SetFlags(RenderFlags.PPAA);
         view.SetSize((int)_width, (int)_height);
-        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_root} ({_width}x{_height}) on the sim thread.");
+        // Name the OWNING thread, not "the sim thread": which thread creates the view is the
+        // host's choice (a sim-thread UI, or a render-thread one whose ViewModel reads
+        // presentation state directly), and it is pinned here for the view's whole life — so
+        // the log has to say which one it actually was.
+        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_root} ({_width}x{_height}) "
+            + $"on thread '{Thread.CurrentThread.Name ?? "unnamed"}' — the view is pinned to it.");
         return view;
     }
 
@@ -183,6 +190,20 @@ public sealed class NoesisViewCore
                         owner._height = (uint)uiEvent.Y;
                         view.SetSize((int)uiEvent.X, (int)uiEvent.Y);
                         return false;
+
+                    // Keyboard and text are what make a Noesis menu focusable rather than
+                    // merely clickable — and the verdict they return is the whole point: Noesis
+                    // answers true only when a FOCUSED element handled the key, so with nothing
+                    // focused a gameplay key passes straight through to the game. The host
+                    // never has to guess whether the UI wanted it.
+                    case UiEventKind.KeyDown:
+                        return ToNoesis(uiEvent.Key) is { } down && view.KeyDown(down);
+                    case UiEventKind.KeyUp:
+                        return ToNoesis(uiEvent.Key) is { } up && view.KeyUp(up);
+                    case UiEventKind.Text:
+                        // A lone surrogate is not a character; Noesis would read it as one.
+                        return IsUnicodeScalar(uiEvent.Character) && view.Char(uiEvent.Character);
+
                     default:
                         return false;
                 }
@@ -219,6 +240,42 @@ public sealed class NoesisViewCore
             UiPointerButton.Middle => MouseButton.Middle,
             _ => MouseButton.Left,
         };
+
+        /// <summary>The contract's key vocabulary → Noesis's. Deliberately partial: the
+        /// <see cref="UiKey"/> set is only what a text field and a menu need, and anything
+        /// outside it (including <see cref="UiKey.None"/>) returns null so the caller reports
+        /// "not handled" WITHOUT touching the view — an unmapped key must not consume input.
+        /// Noesis follows WPF's naming, so Enter is <c>Return</c> and Backspace is
+        /// <c>Back</c>.</summary>
+        private static Key? ToNoesis(UiKey key) => key switch
+        {
+            UiKey.Enter => Key.Return,
+            UiKey.Escape => Key.Escape,
+            UiKey.Backspace => Key.Back,
+            UiKey.Delete => Key.Delete,
+            UiKey.Tab => Key.Tab,
+            UiKey.Left => Key.Left,
+            UiKey.Right => Key.Right,
+            UiKey.Up => Key.Up,
+            UiKey.Down => Key.Down,
+            UiKey.Home => Key.Home,
+            UiKey.End => Key.End,
+            UiKey.Ctrl => Key.LeftCtrl,
+            UiKey.Shift => Key.LeftShift,
+            UiKey.A => Key.A,
+            UiKey.C => Key.C,
+            UiKey.D => Key.D,
+            UiKey.S => Key.S,
+            UiKey.V => Key.V,
+            UiKey.W => Key.W,
+            UiKey.X => Key.X,
+            UiKey.Y => Key.Y,
+            UiKey.Z => Key.Z,
+            _ => null,
+        };
+
+        private static bool IsUnicodeScalar(uint value) =>
+            value <= 0x10FFFF && value is not (>= 0xD800 and <= 0xDFFF);
     }
 
     // ---- file-system resource providers rooted at the XAML's directory ----

@@ -16,8 +16,11 @@ namespace Paradise.Windowing.Sdl;
 /// <see cref="CreateSurface"/> maps the native window to a WebGPU-ready
 /// <see cref="SurfaceDescriptor"/> per platform.
 ///
-/// Keyboard only, today: the <see cref="GamepadButton"/> vocabulary is declared in the
-/// contract, and this backend grows SDL's gamepad subsystem the day a consumer needs it.
+/// Keyboard, pointer, typed text and gamepad (buttons and analog axes). Two conversions happen
+/// here and nowhere else, because only this class knows the platform well enough: pointer
+/// positions are scaled from SDL's window POINTS into the contract's PIXELS (see
+/// <see cref="_pixelDensity"/>), and an analog trigger is reported BOTH as its axis and, across
+/// a threshold, as the <see cref="GamepadButton"/> the contract promises.
 ///
 /// <see cref="Handle"/> exposes the native window for consumers that reference this backend
 /// DIRECTLY and want more than the contract — a debug overlay renderer, an OS-specific
@@ -32,6 +35,24 @@ public sealed unsafe class SdlWindow : IWindow
     private IntPtr _metalView;
     private volatile bool _closeRequested;
     private bool _disposed;
+
+    /// <summary>Pixels per point, tracked alongside the pixel size. SDL reports pointer
+    /// positions in window POINTS while <see cref="Width"/>/<see cref="Height"/> and the
+    /// surface are in pixels; on a Retina display those differ by 2, and forwarding SDL's
+    /// numbers unscaled puts every click at half its true position — which looks like a
+    /// hit-testing bug in whatever consumes it, several layers away from the cause.</summary>
+    private float _pixelDensity = 1f;
+
+    /// <summary>Which triggers are currently past <see cref="TriggerPressThreshold"/>, one bit
+    /// per slot pair — the state behind the digital half of a trigger (see
+    /// <see cref="OnGamepadAxis"/>).</summary>
+    private readonly Dictionary<(byte Slot, GamepadAxis Axis), bool> _triggerHeld = [];
+
+    /// <summary>Where an analog trigger starts reading as a pressed BUTTON, and where it stops.
+    /// Two values, not one: a trigger resting near the threshold would otherwise chatter out
+    /// hundreds of press/release pairs a second, and the contract promises transitions.</summary>
+    private const float TriggerPressThreshold = 0.6f;
+    private const float TriggerReleaseThreshold = 0.4f;
 
     internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform)
     {
@@ -50,6 +71,17 @@ public sealed unsafe class SdlWindow : IWindow
             throw new InvalidOperationException($"SDL_GetWindowID failed: {SDL_GetError()}");
         }
         ReadSizeInPixels();
+
+        // SDL3 delivers no SDL_EVENT_TEXT_INPUT until asked, so a window that never calls this
+        // simply never sees typed text — silently, which is the hard way to discover it. On
+        // desktop it costs nothing; the reason SDL makes it opt-in is mobile, where it is what
+        // raises the on-screen keyboard.
+        if (!SDL_StartTextInput(_window))
+        {
+            Console.Error.WriteLine(
+                $"[Paradise.Windowing.Sdl] SDL_StartTextInput failed: {SDL_GetError()}; "
+                + "typed text will not be reported.");
+        }
     }
 
     /// <summary>The native SDL window, for consumers that opt into this backend directly.</summary>
@@ -83,6 +115,93 @@ public sealed unsafe class SdlWindow : IWindow
         if (ToKeyboardKey(scancode) is { } key)
         {
             _inputs.Enqueue(new TimedRawInput(now, RawInput.Keyboard(key, pressed)));
+        }
+    }
+
+    internal void OnPointerMove(float x, float y, TimeSpan now) =>
+        _inputs.Enqueue(new TimedRawInput(now,
+            RawInput.PointerMove(x * _pixelDensity, y * _pixelDensity)));
+
+    internal void OnPointerButton(SDLButton button, bool pressed, float x, float y, TimeSpan now)
+    {
+        if (ToPointerButton(button) is { } mapped)
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Mouse(
+                mapped, pressed, x * _pixelDensity, y * _pixelDensity)));
+        }
+    }
+
+    internal void OnScroll(float deltaX, float deltaY, TimeSpan now) =>
+        _inputs.Enqueue(new TimedRawInput(now, RawInput.Scroll(deltaX, deltaY)));
+
+    /// <summary>SDL hands text composition back as a NUL-terminated UTF-8 buffer, which for an
+    /// IME is a whole phrase rather than a keystroke — so this enqueues one event per CODEPOINT
+    /// (and per codepoint, not per UTF-16 char: an emoji is one <see cref="RawInput.Text"/>,
+    /// not a surrogate pair the consumer would have to reassemble).</summary>
+    internal void OnText(byte* utf8, TimeSpan now)
+    {
+        var text = Marshal.PtrToStringUTF8((IntPtr)utf8);
+        if (string.IsNullOrEmpty(text)) return;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Text((uint)rune.Value)));
+        }
+    }
+
+    internal void OnGamepadButton(SDL_GamepadButton button, bool pressed, byte slot, TimeSpan now)
+    {
+        if (ToGamepadButton(button) is { } mapped)
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(mapped, pressed, slot)));
+        }
+    }
+
+    /// <summary>An axis settled at a new value. SDL reports a signed 16-bit reading, and the
+    /// negative end reaches one further than the positive (-32768 vs 32767) — dividing by
+    /// 32767 and clamping is what makes a stick pushed fully left report exactly -1 rather
+    /// than -1.00003. Triggers rest at 0 and only ever go positive, so the same scale gives
+    /// them 0..1 for free.</summary>
+    internal void OnGamepadAxis(SDL_GamepadAxis axis, short value, byte slot, TimeSpan now)
+    {
+        if (ToGamepadAxis(axis) is not { } mapped) return;
+
+        var normalized = Math.Clamp(value / 32767f, -1f, 1f);
+        _inputs.Enqueue(new TimedRawInput(now, RawInput.Axis(mapped, normalized, slot)));
+
+        // A trigger is the one control the contract names TWICE: GamepadButton declares
+        // Left/RightTrigger and says "the digital threshold is the backend's", while SDL only
+        // ever reports triggers as axes. So the analog reading above is the truth, and this is
+        // the promised digital view of it — emitted alongside, not instead, so a binder can use
+        // either without knowing which device produced it.
+        if (ToTriggerButton(mapped) is not { } triggerButton) return;
+        var key = (slot, mapped);
+        var wasHeld = _triggerHeld.GetValueOrDefault(key);
+        var held = wasHeld
+            ? normalized > TriggerReleaseThreshold
+            : normalized >= TriggerPressThreshold;
+        if (held != wasHeld)
+        {
+            _triggerHeld[key] = held;
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(triggerButton, held, slot)));
+        }
+    }
+
+    /// <summary>A gamepad went away mid-input. Everything it was holding has to be let go
+    /// explicitly: the contract is transitions, so a consumer that saw the press and never sees
+    /// the release holds the action forever — a controller unplugged mid-push would leave the
+    /// player walking for the rest of the run. Releasing every button and centring every axis
+    /// is cheap and unconditional; a button that was not held reads as a redundant release,
+    /// which every refcounting binder already tolerates.</summary>
+    internal void OnGamepadRemoved(byte slot, TimeSpan now)
+    {
+        for (var button = GamepadButton.South; button <= GamepadButton.Guide; button++)
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(button, pressed: false, slot)));
+        }
+        for (var axis = GamepadAxis.LeftX; axis <= GamepadAxis.RightTrigger; axis++)
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Axis(axis, 0f, slot)));
+            _triggerHeld.Remove((slot, axis));
         }
     }
 
@@ -156,7 +275,69 @@ public sealed unsafe class SdlWindow : IWindow
         }
         Width = (uint)Math.Max(1, w);
         Height = (uint)Math.Max(1, h);
+
+        // Read here rather than per event: it only changes when the window moves between
+        // displays, and that always arrives as a pixel-size change. A failed query (0) means
+        // "unknown", and 1 is the only safe guess — it leaves coordinates unscaled rather than
+        // multiplying them by zero, which would pin every pointer event to the origin.
+        var density = SDL_GetWindowPixelDensity(_window);
+        _pixelDensity = density > 0f ? density : 1f;
     }
+
+    /// <summary>SDL's mouse button → the contract's. Anything past X2 is dropped: the contract
+    /// covers the buttons a game plausibly binds, not every button a mouse can have.</summary>
+    private static PointerButton? ToPointerButton(SDLButton button) => (uint)button switch
+    {
+        SDL_BUTTON_LEFT => PointerButton.Left,
+        SDL_BUTTON_RIGHT => PointerButton.Right,
+        SDL_BUTTON_MIDDLE => PointerButton.Middle,
+        SDL_BUTTON_X1 => PointerButton.X1,
+        SDL_BUTTON_X2 => PointerButton.X2,
+        _ => null,
+    };
+
+    /// <summary>SDL's gamepad button → the contract's, which names buttons by POSITION, so an
+    /// Xbox A and a DualShock cross arrive as the same <see cref="GamepadButton.South"/>. The
+    /// paddles, touchpad and misc buttons are dropped — same rule as the keyboard's.</summary>
+    private static GamepadButton? ToGamepadButton(SDL_GamepadButton button) => button switch
+    {
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_SOUTH => GamepadButton.South,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_EAST => GamepadButton.East,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_WEST => GamepadButton.West,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_NORTH => GamepadButton.North,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_SHOULDER => GamepadButton.LeftShoulder,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER => GamepadButton.RightShoulder,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_LEFT_STICK => GamepadButton.LeftStick,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_RIGHT_STICK => GamepadButton.RightStick,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_UP => GamepadButton.DpadUp,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_DOWN => GamepadButton.DpadDown,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_LEFT => GamepadButton.DpadLeft,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_DPAD_RIGHT => GamepadButton.DpadRight,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_START => GamepadButton.Start,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_BACK => GamepadButton.Back,
+        SDL_GamepadButton.SDL_GAMEPAD_BUTTON_GUIDE => GamepadButton.Guide,
+        _ => null,
+    };
+
+    /// <summary>SDL's gamepad axis → the contract's.</summary>
+    private static GamepadAxis? ToGamepadAxis(SDL_GamepadAxis axis) => axis switch
+    {
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTX => GamepadAxis.LeftX,
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTY => GamepadAxis.LeftY,
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTX => GamepadAxis.RightX,
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTY => GamepadAxis.RightY,
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFT_TRIGGER => GamepadAxis.LeftTrigger,
+        SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER => GamepadAxis.RightTrigger,
+        _ => null,
+    };
+
+    /// <summary>The button an axis doubles as, for the two that do. Null for a stick.</summary>
+    private static GamepadButton? ToTriggerButton(GamepadAxis axis) => axis switch
+    {
+        GamepadAxis.LeftTrigger => GamepadButton.LeftTrigger,
+        GamepadAxis.RightTrigger => GamepadButton.RightTrigger,
+        _ => null,
+    };
 
     /// <summary>Scancode → contract key, full coverage of <see cref="KeyboardKey"/>. Anything
     /// SDL reports beyond the contract's vocabulary is dropped here, silently — the contract

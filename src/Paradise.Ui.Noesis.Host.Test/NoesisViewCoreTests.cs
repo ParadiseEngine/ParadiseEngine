@@ -99,6 +99,61 @@ public class NoesisViewCoreTests
         await Assert.That(core.Height).IsEqualTo(480u);
     }
 
+    /// <summary>Key and text UiEvents must reach the view — the events that make a Noesis menu
+    /// FOCUSABLE rather than merely clickable, and which the core silently dropped until they
+    /// were mapped. Asserted on the routed Noesis events (the root Grid is made focusable and
+    /// focused first, because keyboard input goes to the focused element and a bare view has no
+    /// theme to give anything else a template).
+    ///
+    /// The negative half matters as much: an unmapped UiKey must return false WITHOUT touching
+    /// the view, because a host reads that false as "the game may have this key".</summary>
+    [Test]
+    public async Task key_and_text_events_reach_the_view_and_unmapped_keys_do_not()
+    {
+        var xamlPath = WriteXamlToTempDir();
+        var core = new NoesisViewCore(xamlPath, 200, 100);
+
+        try
+        {
+            core.Input.Tick(0.0);
+        }
+        catch (DllNotFoundException ex)
+        {
+            Skip.Test($"Noesis native library not loadable on this host: {ex.Message}");
+            return;
+        }
+
+        var root = (global::Noesis.FrameworkElement)core.View!.Content;
+        var keyDowns = new List<global::Noesis.Key>();
+        var keyUps = new List<global::Noesis.Key>();
+        var text = new List<string>();
+        root.KeyDown += (_, args) => keyDowns.Add(args.Key);
+        root.KeyUp += (_, args) => keyUps.Add(args.Key);
+        root.TextInput += (_, args) => text.Add(args.Text);
+
+        root.Focusable = true;
+        root.Focus();
+        core.Input.Tick(1.0 / 60.0);
+
+        _ = core.Input.Handle(UiEvent.KeyDown(UiKey.Enter));
+        _ = core.Input.Handle(UiEvent.KeyUp(UiKey.Enter));
+        _ = core.Input.Handle(UiEvent.KeyDown(UiKey.Backspace));
+        _ = core.Input.Handle(UiEvent.Text('A'));
+
+        // Unmapped: no member of UiKey maps to it, so nothing may be routed and the verdict
+        // must be "not handled".
+        var unmappedHandled = core.Input.Handle(UiEvent.KeyDown(UiKey.None));
+        // A lone surrogate is not a character — it must not be forwarded as one.
+        var surrogateHandled = core.Input.Handle(UiEvent.Text(0xD800));
+
+        await Assert.That(keyDowns).Contains(global::Noesis.Key.Return);
+        await Assert.That(keyDowns).Contains(global::Noesis.Key.Back);
+        await Assert.That(keyUps).Contains(global::Noesis.Key.Return);
+        await Assert.That(text).Contains("A");
+        await Assert.That(unmappedHandled).IsFalse();
+        await Assert.That(surrogateHandled).IsFalse();
+    }
+
     /// <summary>A Scroll UiEvent must arrive in the view as a Noesis wheel event — one notch is
     /// 120 units — and the sub-notch deltas a MacBook trackpad reports must accumulate instead of
     /// truncating to nothing. Asserted on the routed MouseWheel event rather than a ScrollViewer's
