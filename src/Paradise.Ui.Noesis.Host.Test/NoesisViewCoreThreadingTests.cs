@@ -45,9 +45,9 @@ public class NoesisViewCoreThreadingTests
 
     private static void Click(NoesisViewCore core, out bool down, out bool up)
     {
-        _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
-        down = core.Input.Handle(UiEvent.PointerDown(100f, 50f, PointerButton.Left, default, default));
-        up = core.Input.Handle(UiEvent.PointerUp(100f, 50f, PointerButton.Left));
+        _ = core.Input.Handle(WindowEvent.PointerMove(100f, 50f));
+        down = core.Input.Handle(WindowEvent.Mouse(PointerButton.Left, pressed: true, 100f, 50f));
+        up = core.Input.Handle(WindowEvent.Mouse(PointerButton.Left, pressed: false, 100f, 50f));
     }
 
     /// <summary>The baseline the cross-thread case is compared against — without it, a false

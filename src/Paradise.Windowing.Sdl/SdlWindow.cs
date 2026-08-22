@@ -10,7 +10,7 @@ namespace Paradise.Windowing.Sdl;
 /// One SDL3 window: the state and the surface. Events arrive from
 /// <see cref="SdlWindowPlatform.Pump"/>, which owns the process-wide queue and routes each
 /// event here by window id; this class turns what it is handed into the contract's vocabulary
-/// — timestamped <see cref="RawInput"/> transitions (scancodes rather than keycodes, so
+/// — timestamped <see cref="WindowEvent"/> transitions (scancodes rather than keycodes, so
 /// physical position survives keyboard layouts), resizes, the close latch — and
 /// <see cref="CreateSurface"/> maps the native window to a WebGPU-ready
 /// <see cref="SurfaceDescriptor"/> per platform.
@@ -29,7 +29,7 @@ public sealed unsafe class SdlWindow : IWindow
 {
     private readonly SDL_Window* _window;
     private readonly SdlWindowPlatform _platform;
-    private readonly ConcurrentQueue<TimedRawInput> _inputs = new();
+    private readonly ConcurrentQueue<TimedWindowEvent> _events = new();
 
     private IntPtr _metalView;
     private volatile bool _closeRequested;
@@ -46,6 +46,10 @@ public sealed unsafe class SdlWindow : IWindow
     /// per slot pair — the state behind the digital half of a trigger (see
     /// <see cref="OnGamepadAxis"/>).</summary>
     private readonly Dictionary<(byte Slot, GamepadAxis Axis), bool> _triggerHeld = [];
+
+    /// <summary>SDL finger id → contract slot, so a two-finger gesture is slots 0 and 1 rather
+    /// than two opaque 64-bit handles a consumer would have to intern itself.</summary>
+    private readonly Dictionary<ulong, byte> _fingers = [];
 
     /// <summary>Where an analog trigger starts reading as a pressed BUTTON, and where it stops.
     /// Two values, not one: a trigger resting near the threshold would otherwise chatter out
@@ -103,39 +107,74 @@ public sealed unsafe class SdlWindow : IWindow
 
     internal void OnClose() => _closeRequested = true;
 
-    internal void OnPixelSizeChanged()
+    internal void OnPixelSizeChanged(TimeSpan now)
     {
         ReadSizeInPixels();
+        // BOTH, and they are not redundant. The stream copy is ordered against the pointer
+        // events around it, which is what a UI needs to lay out before hit-testing the next
+        // click; the event is for consumers that never drain the stream — a renderer rebuilding
+        // its swapchain on another thread.
+        _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Resize(Width, Height)));
         Resized?.Invoke(Width, Height);
+    }
+
+    /// <summary>A finger moved, went down or came up. SDL reports touch positions NORMALIZED to
+    /// 0..1 across the window, unlike the mouse — so they are scaled to pixels here, where the
+    /// window size is known, rather than leaving every consumer to discover the difference.</summary>
+    internal void OnTouch(SDL_FingerID finger, TouchPhase phase, float normalizedX, float normalizedY, TimeSpan now)
+    {
+        var x = normalizedX * Width;
+        var y = normalizedY * Height;
+        // SDL's finger id is a 64-bit opaque handle; the contract's slot is a small index, so
+        // ids are interned per window in first-touch order and released on the up.
+        var slot = SlotFor(finger, phase);
+        _events.Enqueue(new TimedWindowEvent(now, phase switch
+        {
+            TouchPhase.Move => WindowEvent.TouchMove(slot, x, y),
+            _ => WindowEvent.Touch(slot, phase == TouchPhase.Down, x, y),
+        }));
+    }
+
+    private byte SlotFor(SDL_FingerID finger, TouchPhase phase)
+    {
+        var id = (ulong)finger;
+        if (!_fingers.TryGetValue(id, out var slot))
+        {
+            slot = 0;
+            while (_fingers.ContainsValue(slot) && slot < byte.MaxValue) slot++;
+            _fingers[id] = slot;
+        }
+        if (phase == TouchPhase.Up) _fingers.Remove(id);
+        return slot;
     }
 
     internal void OnKey(SDL_Scancode scancode, bool pressed, TimeSpan now)
     {
         if (ToKeyboardKey(scancode) is { } key)
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Keyboard(key, pressed)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Keyboard(key, pressed)));
         }
     }
 
     internal void OnPointerMove(float x, float y, TimeSpan now) =>
-        _inputs.Enqueue(new TimedRawInput(now,
-            RawInput.PointerMove(x * _pixelDensity, y * _pixelDensity)));
+        _events.Enqueue(new TimedWindowEvent(now,
+            WindowEvent.PointerMove(x * _pixelDensity, y * _pixelDensity)));
 
     internal void OnPointerButton(SDLButton button, bool pressed, float x, float y, TimeSpan now)
     {
         if (ToPointerButton(button) is { } mapped)
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Mouse(
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Mouse(
                 mapped, pressed, x * _pixelDensity, y * _pixelDensity)));
         }
     }
 
     internal void OnScroll(float deltaX, float deltaY, TimeSpan now) =>
-        _inputs.Enqueue(new TimedRawInput(now, RawInput.Scroll(deltaX, deltaY)));
+        _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Scroll(deltaX, deltaY)));
 
     /// <summary>SDL hands text composition back as a NUL-terminated UTF-8 buffer, which for an
     /// IME is a whole phrase rather than a keystroke — so this enqueues one event per CODEPOINT
-    /// (and per codepoint, not per UTF-16 char: an emoji is one <see cref="RawInput.Text"/>,
+    /// (and per codepoint, not per UTF-16 char: an emoji is one <see cref="WindowEvent.Text"/>,
     /// not a surrogate pair the consumer would have to reassemble).</summary>
     internal void OnText(byte* utf8, TimeSpan now)
     {
@@ -143,7 +182,7 @@ public sealed unsafe class SdlWindow : IWindow
         if (string.IsNullOrEmpty(text)) return;
         foreach (var rune in text.EnumerateRunes())
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Text((uint)rune.Value)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Text((uint)rune.Value)));
         }
     }
 
@@ -151,7 +190,7 @@ public sealed unsafe class SdlWindow : IWindow
     {
         if (ToGamepadButton(button) is { } mapped)
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(mapped, pressed, slot)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Gamepad(mapped, pressed, slot)));
         }
     }
 
@@ -165,7 +204,7 @@ public sealed unsafe class SdlWindow : IWindow
         if (ToGamepadAxis(axis) is not { } mapped) return;
 
         var normalized = Math.Clamp(value / 32767f, -1f, 1f);
-        _inputs.Enqueue(new TimedRawInput(now, RawInput.Axis(mapped, normalized, slot)));
+        _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Axis(mapped, normalized, slot)));
 
         // A trigger is the one control the contract names TWICE: GamepadButton declares
         // Left/RightTrigger and says "the digital threshold is the backend's", while SDL only
@@ -181,7 +220,7 @@ public sealed unsafe class SdlWindow : IWindow
         if (held != wasHeld)
         {
             _triggerHeld[key] = held;
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(triggerButton, held, slot)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Gamepad(triggerButton, held, slot)));
         }
     }
 
@@ -195,16 +234,16 @@ public sealed unsafe class SdlWindow : IWindow
     {
         for (var button = GamepadButton.South; button <= GamepadButton.Guide; button++)
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Gamepad(button, pressed: false, slot)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Gamepad(button, pressed: false, slot)));
         }
         for (var axis = GamepadAxis.LeftX; axis <= GamepadAxis.RightTrigger; axis++)
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Axis(axis, 0f, slot)));
+            _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Axis(axis, 0f, slot)));
             _triggerHeld.Remove((slot, axis));
         }
     }
 
-    public bool TryReadInput(out TimedRawInput input) => _inputs.TryDequeue(out input);
+    public bool TryReadEvent(out TimedWindowEvent input) => _events.TryDequeue(out input);
 
     public SurfaceDescriptor CreateSurface()
     {

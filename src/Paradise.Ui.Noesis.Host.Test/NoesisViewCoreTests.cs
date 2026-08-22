@@ -87,8 +87,8 @@ public class NoesisViewCoreTests
         var view = core.View;
         var content = view?.Content as global::Noesis.FrameworkElement;
         var contextApplied = ReferenceEquals(content?.DataContext, dataContext);
-        var resizeConsumed = core.Input.Handle(UiEvent.Resize(640f, 480f));
-        _ = core.Input.Handle(UiEvent.PointerMove(10f, 10f));
+        var resizeConsumed = core.Input.Handle(WindowEvent.Resize(640f, 480f));
+        _ = core.Input.Handle(WindowEvent.PointerMove(10f, 10f));
         // Collect the first tick's frame before asking for a second. Tick is gated on the render
         // side having taken the last snapshot — an unmatched Update queues one nobody collects,
         // which Noesis documents as unbounded allocation — so back-to-back ticks with no render
@@ -141,16 +141,16 @@ public class NoesisViewCoreTests
         root.Focus();
         core.Input.Tick(1.0 / 60.0);
 
-        _ = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.Enter));
-        _ = core.Input.Handle(UiEvent.KeyUp(KeyboardKey.Enter));
-        _ = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.Backspace));
-        _ = core.Input.Handle(UiEvent.Text('A'));
+        _ = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.Enter));
+        _ = core.Input.Handle(WindowEvent.KeyUpOf(KeyboardKey.Enter));
+        _ = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.Backspace));
+        _ = core.Input.Handle(WindowEvent.Text('A'));
 
         // Unmapped: no member of UiKey maps to it, so nothing may be routed and the verdict
         // must be "not handled".
-        var unmappedHandled = core.Input.Handle(UiEvent.KeyDown(KeyboardKey.None));
+        var unmappedHandled = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.None));
         // A lone surrogate is not a character — it must not be forwarded as one.
-        var surrogateHandled = core.Input.Handle(UiEvent.Text(0xD800));
+        var surrogateHandled = core.Input.Handle(WindowEvent.Text(0xD800));
 
         await Assert.That(keyDowns).Contains(global::Noesis.Key.Return);
         await Assert.That(keyDowns).Contains(global::Noesis.Key.Back);
@@ -160,7 +160,7 @@ public class NoesisViewCoreTests
         await Assert.That(surrogateHandled).IsFalse();
     }
 
-    /// <summary>A Scroll UiEvent must arrive in the view as a Noesis wheel event — one notch is
+    /// <summary>A Scroll WindowEvent must arrive in the view as a Noesis wheel event — one notch is
     /// 120 units — and the sub-notch deltas a MacBook trackpad reports must accumulate instead of
     /// truncating to nothing. Asserted on the routed MouseWheel event rather than a ScrollViewer's
     /// offset because a bare view has no theme, so ScrollViewer gets no template (and therefore no
@@ -186,20 +186,20 @@ public class NoesisViewCoreTests
             (_, args) => deltas.Add((args.Delta, args.Orientation));
 
         // Park the pointer over the content: Noesis hit-tests a wheel event at a point, and the
-        // Scroll UiEvent carries only a delta.
-        _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
+        // Scroll WindowEvent carries only a delta.
+        _ = core.Input.Handle(WindowEvent.PointerMove(100f, 50f));
         core.Input.Tick(1.0 / 60.0);
 
         // One whole notch down, the way a discrete mouse wheel reports it.
-        _ = core.Input.Handle(UiEvent.Scroll(0f, -1f));
+        _ = core.Input.Handle(WindowEvent.Scroll(0f, -1f));
         // ...then twenty fractions of a notch, the way a trackpad does. Each is worth 6 units, so
         // truncating per event would lose every one of them.
         for (var i = 0; i < 20; i++)
         {
-            _ = core.Input.Handle(UiEvent.Scroll(0f, -0.05f));
+            _ = core.Input.Handle(WindowEvent.Scroll(0f, -0.05f));
         }
         // ...and a horizontal notch, which must route as a horizontal wheel, not a vertical one.
-        _ = core.Input.Handle(UiEvent.Scroll(1f, 0f));
+        _ = core.Input.Handle(WindowEvent.Scroll(1f, 0f));
 
         var vertical = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Vertical);
         var horizontal = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Horizontal);

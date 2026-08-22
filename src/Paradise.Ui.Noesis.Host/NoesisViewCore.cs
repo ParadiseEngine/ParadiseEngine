@@ -160,7 +160,7 @@ public sealed class NoesisViewCore
         /// scrolling. Hosts report scroll deltas in notches, so this is the conversion.</summary>
         private const float NotchUnits = 120f;
 
-        // Noesis hit-tests a wheel event at a point, but the UiEvent contract reuses X/Y for the
+        // Noesis hit-tests a wheel event at a point, but the WindowEvent contract reuses X/Y for the
         // scroll delta — so the last pointer position is what a scroll is aimed at.
         private int _pointerX;
         private int _pointerY;
@@ -172,55 +172,56 @@ public sealed class NoesisViewCore
 
         private View SimView => owner._view ??= owner.CreateViewOnSimThread();
 
-        public bool Handle(in UiEvent uiEvent)
+        public bool Handle(in WindowEvent raw)
         {
             lock (owner._sync)
             {
                 var view = SimView;
-                switch (uiEvent.Kind)
+                switch (raw.Kind)
                 {
-                    case UiEventKind.PointerMove:
-                        return view.MouseMove(TrackX(uiEvent.X), TrackY(uiEvent.Y));
-                    case UiEventKind.PointerDown:
-                        return view.MouseButtonDown(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
-                    case UiEventKind.PointerUp:
-                        return view.MouseButtonUp(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
-                    case UiEventKind.Scroll:
+                    case WindowEventKind.PointerMove:
+                        return view.MouseMove(TrackX(raw.X), TrackY(raw.Y));
+
+                    case WindowEventKind.Button when raw.Source is EventSource.Mouse or EventSource.Touch:
+                        return raw.Pressed
+                            ? view.MouseButtonDown(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton))
+                            : view.MouseButtonUp(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton));
+
+                    case WindowEventKind.Button when raw.Source == EventSource.Keyboard:
+                        // Only a mapped key may consume: an unmapped one must report "not
+                        // handled" WITHOUT touching the view, or the host reads a false
+                        // consumption and withholds the key from the game.
+                        return ToNoesis(raw.KeyboardKey) is { } key
+                            && (raw.Pressed ? view.KeyDown(key) : view.KeyUp(key));
+
+                    case WindowEventKind.Scroll:
                     {
                         // X/Y are the delta in notches: +Y is a wheel rotated forward (scroll up),
                         // +X is a wheel rotated right — both matching Noesis's own sign convention.
                         var handled = false;
-                        if (TakeRotation(uiEvent.Y, ref _pendingVertical) is { } vertical)
+                        if (TakeRotation(raw.Y, ref _pendingVertical) is { } vertical)
                         {
                             handled |= view.MouseWheel(_pointerX, _pointerY, vertical);
                         }
-                        if (TakeRotation(uiEvent.X, ref _pendingHorizontal) is { } horizontal)
+                        if (TakeRotation(raw.X, ref _pendingHorizontal) is { } horizontal)
                         {
                             handled |= view.MouseHWheel(_pointerX, _pointerY, horizontal);
                         }
                         return handled;
                     }
-                    case UiEventKind.Resize:
-                        owner._width = (uint)uiEvent.X;
-                        owner._height = (uint)uiEvent.Y;
-                        view.SetSize((int)uiEvent.X, (int)uiEvent.Y);
-                        return false;
 
-                    // Keyboard and text are what make a Noesis menu focusable rather than
-                    // merely clickable — and the verdict they return is the whole point: Noesis
-                    // answers true only when a FOCUSED element handled the key, so with nothing
-                    // focused a gameplay key passes straight through to the game. The host
-                    // never has to guess whether the UI wanted it.
-                    case UiEventKind.KeyDown:
-                        return ToNoesis(uiEvent.Key) is { } down && view.KeyDown(down);
-                    case UiEventKind.KeyUp:
-                        return ToNoesis(uiEvent.Key) is { } up && view.KeyUp(up);
-                    case UiEventKind.Text:
+                    case WindowEventKind.Text:
                         // A lone surrogate is not a character; Noesis would read it as one.
-                        return IsUnicodeScalar(uiEvent.Character) && view.Char(uiEvent.Character);
+                        return IsUnicodeScalar(raw.Character) && view.Char(raw.Character);
+
+                    case WindowEventKind.Resize:
+                        owner._width = (uint)raw.X;
+                        owner._height = (uint)raw.Y;
+                        view.SetSize((int)raw.X, (int)raw.Y);
+                        return false;
 
                     default:
-                        return false;
+                        return false; // axes and gamepad buttons have no UI meaning
                 }
             }
         }

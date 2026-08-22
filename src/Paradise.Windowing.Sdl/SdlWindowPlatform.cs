@@ -20,7 +20,7 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
 {
     /// <summary>One clock for every window this platform creates, so timestamps from two
     /// windows share an epoch and compare directly — the contract on
-    /// <see cref="TimedRawInput"/>.</summary>
+    /// <see cref="TimedWindowEvent"/>.</summary>
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private readonly Dictionary<uint, SdlWindow> _windows = [];
@@ -77,7 +77,7 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
                     break;
 
                 case SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    Route(ev.window.windowID)?.OnPixelSizeChanged();
+                    Route(ev.window.windowID)?.OnPixelSizeChanged(now);
                     break;
 
                 // Auto-repeat is filtered: a held key must not read as a stream of presses.
@@ -111,6 +111,23 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
 
                 case SDL_EventType.SDL_EVENT_TEXT_INPUT:
                     Route(ev.text.windowID)?.OnText(ev.text.text, now);
+                    break;
+
+                // ---- touch ---------------------------------------------------------------
+
+                case SDL_EventType.SDL_EVENT_FINGER_DOWN:
+                    Route(ev.tfinger.windowID)?.OnTouch(
+                        ev.tfinger.fingerID, TouchPhase.Down, ev.tfinger.x, ev.tfinger.y, now);
+                    break;
+
+                case SDL_EventType.SDL_EVENT_FINGER_MOTION:
+                    Route(ev.tfinger.windowID)?.OnTouch(
+                        ev.tfinger.fingerID, TouchPhase.Move, ev.tfinger.x, ev.tfinger.y, now);
+                    break;
+
+                case SDL_EventType.SDL_EVENT_FINGER_UP:
+                    Route(ev.tfinger.windowID)?.OnTouch(
+                        ev.tfinger.fingerID, TouchPhase.Up, ev.tfinger.x, ev.tfinger.y, now);
                     break;
 
                 // ---- gamepad -------------------------------------------------------------

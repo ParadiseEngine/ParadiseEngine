@@ -8,10 +8,10 @@ public class CompositeUiInputTests
 {
     private sealed class RecordingInput(bool consumes) : IUiInput
     {
-        public List<UiEventKind> Seen { get; } = [];
+        public List<WindowEventKind> Seen { get; } = [];
         public int Ticks { get; private set; }
 
-        public bool Handle(in UiEvent uiEvent)
+        public bool Handle(in WindowEvent uiEvent)
         {
             Seen.Add(uiEvent.Kind);
             return consumes;
@@ -27,7 +27,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: true);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, PointerButton.Left, default, default));
+        var consumed = composite.Handle(WindowEvent.Mouse(PointerButton.Left, pressed: true, 1f, 2f));
 
         await Assert.That(consumed).IsTrue();
         await Assert.That(first.Seen).Count().IsEqualTo(1);
@@ -41,7 +41,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: false);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.PointerDown(1f, 2f, PointerButton.Left, default, default));
+        var consumed = composite.Handle(WindowEvent.Mouse(PointerButton.Left, pressed: true, 1f, 2f));
 
         await Assert.That(consumed).IsFalse();
         await Assert.That(first.Seen).Count().IsEqualTo(1);
@@ -55,7 +55,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: false);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.PointerMove(5f, 6f));
+        var consumed = composite.Handle(WindowEvent.PointerMove(5f, 6f));
 
         await Assert.That(consumed).IsTrue();
         await Assert.That(first.Seen).Count().IsEqualTo(1);
@@ -69,7 +69,7 @@ public class CompositeUiInputTests
         var second = new RecordingInput(consumes: false);
         var composite = new CompositeUiInput(first, second);
 
-        var consumed = composite.Handle(UiEvent.Resize(640f, 480f));
+        var consumed = composite.Handle(WindowEvent.Resize(640f, 480f));
 
         await Assert.That(consumed).IsFalse();
         await Assert.That(first.Seen).Count().IsEqualTo(1);

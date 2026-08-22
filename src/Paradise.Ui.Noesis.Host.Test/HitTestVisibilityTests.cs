@@ -41,9 +41,9 @@ public class HitTestVisibilityTests
 
         core.TryUpdateRenderTree(out _);
         core.Input.Tick(1.0 / 60.0);
-        _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
+        _ = core.Input.Handle(WindowEvent.PointerMove(100f, 50f));
         var handled = core.Input.Handle(
-            UiEvent.PointerDown(100f, 50f, PointerButton.Left, default, default));
+            WindowEvent.Mouse(PointerButton.Left, pressed: true, 100f, 50f));
         return (handled, reached);
     }
 
