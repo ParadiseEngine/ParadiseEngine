@@ -35,11 +35,11 @@ public static class EntityInjectionSample
         Debug.Assert(world.EntityCount == 4, $"Expected 4 entities before despawn, got {world.EntityCount}");
         Console.WriteLine($"    Before: {world.EntityCount} entities (2 healthy, 2 dead)");
 
-        var despawnSchedule = SystemSchedule.Create(world)
+        var despawnSchedule = SystemSchedule.Create()
             .Add<DespawnDeadSystem>()
             .Build<SequentialWaveScheduler>();
 
-        despawnSchedule.Run();
+        despawnSchedule.Run(world);
 
         Debug.Assert(world.IsAlive(alive1), "alive1 should still be alive");
         Debug.Assert(world.IsAlive(alive2), "alive2 should still be alive");
@@ -65,11 +65,11 @@ public static class EntityInjectionSample
 
         Debug.Assert(world.EntityCount == 2, $"Expected 2 entities before clone, got {world.EntityCount}");
 
-        var cloneSchedule = SystemSchedule.Create(world)
+        var cloneSchedule = SystemSchedule.Create()
             .Add<SpawnCloneWhenLowHealthSystem>()
             .Build<SequentialWaveScheduler>();
 
-        cloneSchedule.Run();
+        cloneSchedule.Run(world);
 
         Debug.Assert(world.EntityCount == 3, $"Expected 3 entities after clone (2 + 1 clone), got {world.EntityCount}");
 
@@ -92,11 +92,11 @@ public static class EntityInjectionSample
         Debug.Assert(world.EntityCount == 3, $"Expected 3 entities before chunk despawn, got {world.EntityCount}");
         Console.WriteLine($"    Before: {world.EntityCount} entities (1 dead)");
 
-        var chunkDespawnSchedule = SystemSchedule.Create(world)
+        var chunkDespawnSchedule = SystemSchedule.Create()
             .Add<ChunkDespawnDeadSystem>()
             .Build<SequentialWaveScheduler>();
 
-        chunkDespawnSchedule.Run();
+        chunkDespawnSchedule.Run(world);
 
         Debug.Assert(world.IsAlive(ca), "ca should still be alive");
         Debug.Assert(!world.IsAlive(cb), "cb should be despawned");

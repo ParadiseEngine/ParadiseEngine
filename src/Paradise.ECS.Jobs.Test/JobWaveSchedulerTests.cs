@@ -27,12 +27,12 @@ public sealed class JobWaveSchedulerTests : IDisposable
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var seqSchedule = SystemSchedule.Create(_world)
+        var seqSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build<SequentialWaveScheduler>();
 
-        seqSchedule.Run();
+        seqSchedule.Run(_world);
         var seqPos = _world.GetComponent<TestPosition>(e1);
         var seqVel = _world.GetComponent<TestVelocity>(e1);
 
@@ -43,12 +43,12 @@ public sealed class JobWaveSchedulerTests : IDisposable
         _world.AddComponent(e2, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
         using var pool = new JobWorkerPool(2);
-        var jobSchedule = SystemSchedule.Create(_world)
+        var jobSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new JobWaveScheduler(pool));
 
-        jobSchedule.Run();
+        jobSchedule.Run(_world);
         var jobPos = _world.GetComponent<TestPosition>(e2);
         var jobVel = _world.GetComponent<TestVelocity>(e2);
 
@@ -73,13 +73,13 @@ public sealed class JobWaveSchedulerTests : IDisposable
             _world.AddComponent(entities[i], new TestVelocity { X = 1, Y = 1, Z = 0 });
         }
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new JobWaveScheduler(pool));
 
         for (int frame = 0; frame < frameCount; frame++)
-            schedule.Run();
+            schedule.Run(_world);
 
         // Verify all entities were processed — positions should have increased
         for (int i = 0; i < entityCount; i++)

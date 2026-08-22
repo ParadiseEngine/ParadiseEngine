@@ -71,11 +71,11 @@ public sealed class SystemEventDispatchTests : IDisposable
     public async Task Writer_injection_commits_events_in_schedule_order()
     {
         var world = _sharedWorld.CreateWorld();
-        using var schedule = SystemSchedule.Create(world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<PingProducerA>()
             .AddWorld<PingProducerB>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(world);
 
         var expected = new[] { 1, 2 };
         await Assert.That(Values(world.Events.Incoming<Ping>())).IsEquivalentTo(expected);
@@ -92,10 +92,10 @@ public sealed class SystemEventDispatchTests : IDisposable
                 var e = world.Spawn();
                 world.AddComponent(e, new TestPosition { X = i, Y = 0, Z = 0 });
             }
-            using var schedule = SystemSchedule.Create(world)
+            using var schedule = SystemSchedule.Create()
                 .Add<PingEntityProducer>()
                 .Build<TScheduler>();
-            schedule.Run();
+            schedule.Run(world);
             return Values(world.Events.Incoming<Ping>());
         }
 
@@ -111,21 +111,21 @@ public sealed class SystemEventDispatchTests : IDisposable
     {
         // Frame N: producer emits into `produced`.
         var produced = _sharedWorld.CreateWorld();
-        using (var producerSchedule = SystemSchedule.Create(produced)
+        using (var producerSchedule = SystemSchedule.Create()
                    .AddWorld<PingProducerA>()
                    .AddWorld<PingProducerB>()
                    .Build<SequentialWaveScheduler>())
         {
-            producerSchedule.Run();
+            producerSchedule.Run(produced);
         }
 
         // Frame N+1: a consumer whose read world is the previous frame's snapshot sees those events.
         var consumerWorld = _sharedWorld.CreateWorld();
-        using (var consumerSchedule = SystemSchedule.Create(consumerWorld)
+        using (var consumerSchedule = SystemSchedule.Create()
                    .AddWorld<PingConsumer>()
                    .Build<SequentialWaveScheduler>())
         {
-            consumerSchedule.Run(readWorld: produced);
+            consumerSchedule.Run(consumerWorld, readWorld: produced);
         }
 
         var expected = new[] { 1, 2 };

@@ -138,7 +138,7 @@ public sealed class DeterministicPlaybackTests
         var world = sharedWorld.CreateWorld();
         Seed(world);
 
-        using var schedule = SystemSchedule.Create(world)
+        using var schedule = SystemSchedule.Create()
             .Add<DetSpawnChainSystem>()
             .Add<DetDespawnDeadSystem>()
             .Add<DetFirstDamageWriterSystem>()
@@ -147,7 +147,7 @@ public sealed class DeterministicPlaybackTests
             .Build(scheduler);
 
         for (int run = 0; run < RunsPerScenario; run++)
-            schedule.Run();
+            schedule.Run(world);
 
         return Snapshot(world);
     }
@@ -229,12 +229,12 @@ public sealed class DeterministicPlaybackTests
 
         foreach (IWaveScheduler scheduler in new IWaveScheduler[] { new SequentialWaveScheduler(), new ParallelWaveScheduler() })
         {
-            using var schedule = SystemSchedule.Create(world)
+            using var schedule = SystemSchedule.Create()
                 .Add<DetFirstDamageWriterSystem>()
                 .Add<DetSecondDamageWriterSystem>()
                 .Build(scheduler);
 
-            schedule.Run();
+            schedule.Run(world);
 
             // Wave 1 wrote Amount=1, wave 2 wrote Amount=2; playback in schedule order → 2 wins
             await Assert.That(world.GetComponent<TestDamage>(first).Amount).IsEqualTo(2);
@@ -250,11 +250,11 @@ public sealed class DeterministicPlaybackTests
         var seed = world.Spawn();
         world.AddComponent(seed, new TestHealth { Current = 7, Max = 9 });
 
-        using var schedule = SystemSchedule.Create(world)
+        using var schedule = SystemSchedule.Create()
             .Add<DetSpawnChainSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(world);
 
         // The spawned entity took the next fresh ID at playback time
         var spawned = world.World.GetEntity(seed.Id + 1);

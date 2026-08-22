@@ -232,11 +232,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // TestGravitySystem not in schedule, so vel is unchanged
         // But TestMovementSystem reads Velocity and writes Position
@@ -262,11 +262,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e3, new TestPosition { X = 3, Y = 0, Z = 0 });
         _world.AddComponent(e3, new TestVelocity { X = 30, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         await Assert.That(_world.GetComponent<TestPosition>(e1).X).IsEqualTo(11f);
         await Assert.That(_world.GetComponent<TestPosition>(e2).X).IsEqualTo(22f);
@@ -280,11 +280,11 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Position should be unchanged
         var pos = _world.GetComponent<TestPosition>(e);
@@ -302,11 +302,11 @@ public sealed class SystemTests : IDisposable
         var e2 = _world.Spawn();
         _world.AddComponent(e2, new TestVelocity { X = 2, Y = 10, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestGravityBatchSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         await Assert.That(_world.GetComponent<TestVelocity>(e1).Y).IsEqualTo(10f);
         await Assert.That(_world.GetComponent<TestVelocity>(e2).Y).IsEqualTo(20f);
@@ -322,12 +322,12 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 90, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 20, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestBoundsSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Movement: 90 + 20 = 110, then Bounds: clamp(110, 0, 100) = 100
         var pos = _world.GetComponent<TestPosition>(e);
@@ -342,12 +342,12 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 0, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 0, Y = 5, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestGravitySystem>()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // GravitySystem doubles vel.Y: 5 → 10
         // Then MovementSystem adds vel to pos: 0 + 10 = 10
@@ -364,12 +364,12 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 0, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 1, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .AddAll()
             .Build<SequentialWaveScheduler>();
 
         // Should not throw
-        schedule.Run();
+        schedule.Run(_world);
 
         // Position should have changed (at least MovementSystem ran)
         var pos = _world.GetComponent<TestPosition>(e);
@@ -384,12 +384,12 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
         var seqPos = _world.GetComponent<TestPosition>(e1);
         var seqVel = _world.GetComponent<TestVelocity>(e1);
 
@@ -399,12 +399,12 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e2, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e2, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule2 = SystemSchedule.Create(_world)
+        var schedule2 = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build<ParallelWaveScheduler>();
 
-        schedule2.Run();
+        schedule2.Run(_world);
         var parPos = _world.GetComponent<TestPosition>(e2);
         var parVel = _world.GetComponent<TestVelocity>(e2);
 
@@ -416,13 +416,13 @@ public sealed class SystemTests : IDisposable
     [Test]
     public async Task Schedule_EmptySchedule_DoesNotCrash()
     {
-        var seqSchedule = SystemSchedule.Create(_world)
+        var seqSchedule = SystemSchedule.Create()
             .Build<SequentialWaveScheduler>();
-        var parSchedule = SystemSchedule.Create(_world)
+        var parSchedule = SystemSchedule.Create()
             .Build<ParallelWaveScheduler>();
 
-        seqSchedule.Run();
-        parSchedule.Run();
+        seqSchedule.Run(_world);
+        parSchedule.Run(_world);
 
         // just verifying no exception thrown
         await Assert.That(_world.EntityCount).IsGreaterThanOrEqualTo(0);
@@ -437,11 +437,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestUnderscoreFieldSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         var pos = _world.GetComponent<TestPosition>(e);
         await Assert.That(pos.X).IsEqualTo(11f);
@@ -458,11 +458,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Only movement ran, no gravity doubling
         var vel = _world.GetComponent<TestVelocity>(e);
@@ -479,11 +479,11 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestPosition { X = 200, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestBoundsSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // BoundsSystem clamps to [0,100]
         var pos = _world.GetComponent<TestPosition>(e);
@@ -497,11 +497,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 0, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 5, Y = 5, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build(new DefaultDagScheduler(), new SequentialWaveScheduler());
 
-        schedule.Run();
+        schedule.Run(_world);
 
         var pos = _world.GetComponent<TestPosition>(e);
         await Assert.That(pos.X).IsEqualTo(5f);
@@ -568,14 +568,14 @@ public sealed class SystemTests : IDisposable
 
         // TestSpawnOnUpdateSystem only queries Position, but we add Velocity so
         // the existing TestMovementSystem doesn't interfere if AddAll is used.
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
 
         int countBefore = _world.EntityCount;
 
         // Act
-        schedule.Run();
+        schedule.Run(_world);
 
         // Assert: two new entities spawned (one per original entity)
         await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 2);
@@ -588,11 +588,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e1, new TestPosition { X = 42, Y = 0, Z = 0 });
         _world.AddComponent(e1, new TestVelocity());
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // The spawned entity has TestVelocity with X = 42 (copied from Position.X)
         // Find it by querying all entities — spawned entity has a higher ID
@@ -612,12 +612,12 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestVelocity { X = 7, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestChunkSpawnSystem>()
             .Build<SequentialWaveScheduler>();
 
         int countBefore = _world.EntityCount;
-        schedule.Run();
+        schedule.Run(_world);
 
         // TestChunkSpawnSystem spawns one entity per entity in chunk
         await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 1);
@@ -631,11 +631,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         var pos = _world.GetComponent<TestPosition>(e);
         await Assert.That(pos.X).IsEqualTo(11f);
@@ -649,13 +649,13 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 5, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity { X = 1, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
 
         int countBefore = _world.EntityCount;
-        schedule.Run();
+        schedule.Run(_world);
 
         // MovementSystem updated position, SpawnOnUpdateSystem spawned an entity
         var pos = _world.GetComponent<TestPosition>(e);
@@ -674,11 +674,11 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e, new TestPosition { X = 1, Y = 0, Z = 0 });
         _world.AddComponent(e, new TestVelocity());
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Only 1 entity should be spawned (from the original entity), not more
         await Assert.That(_world.EntityCount).IsEqualTo(2);
@@ -693,12 +693,12 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestPosition { X = 10, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Add<TestDoubleVelocityAfterSpawnSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         var spawnedEntity = new Entity(1, 1);
         await Assert.That(_world.IsAlive(spawnedEntity)).IsTrue();
@@ -713,16 +713,16 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestPosition { X = 5, Y = 0, Z = 0 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
         await Assert.That(_world.EntityCount).IsEqualTo(2); // original + 1 spawned
 
         // Second run: original has Position, spawned has Velocity.
         // SpawnOnUpdateSystem queries Position, so only original triggers a spawn.
-        schedule.Run();
+        schedule.Run(_world);
         await Assert.That(_world.EntityCount).IsEqualTo(3); // +1 more spawned
     }
 
@@ -744,11 +744,11 @@ public sealed class SystemTests : IDisposable
         var dead2 = _world.Spawn();
         _world.AddComponent(dead2, new TestHealth { Current = -10, Max = 100 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestDespawnDeadSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Only entities with health <= 0 should be despawned
         await Assert.That(_world.IsAlive(alive1)).IsTrue();
@@ -765,11 +765,11 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestHealth { Current = 42, Max = 100 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestRecordEntitySystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // The system should have recorded the entity's ID in TestDamage.Amount
         await Assert.That(_world.HasComponent<TestDamage>(e)).IsTrue();
@@ -787,11 +787,11 @@ public sealed class SystemTests : IDisposable
         var dead = _world.Spawn();
         _world.AddComponent(dead, new TestHealth { Current = 0, Max = 100 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestChunkEntitySpanSystem>()
             .Build<SequentialWaveScheduler>();
 
-        schedule.Run();
+        schedule.Run(_world);
 
         // Only entity with health <= 0 should be despawned
         await Assert.That(_world.IsAlive(alive)).IsTrue();
@@ -806,12 +806,12 @@ public sealed class SystemTests : IDisposable
         var e = _world.Spawn();
         _world.AddComponent(e, new TestHealth { Current = 100, Max = 100 });
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestDespawnDeadSystem>()
             .Build<SequentialWaveScheduler>();
 
         int countBefore = _world.EntityCount;
-        schedule.Run();
+        schedule.Run(_world);
 
         // No despawns since health > 0
         await Assert.That(_world.EntityCount).IsEqualTo(countBefore);

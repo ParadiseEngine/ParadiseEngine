@@ -35,21 +35,21 @@ public class WaveSchedulerBenchmarks
             _world.AddComponent(e, new BenchVelocity { X = 1, Y = 1, Z = 0 });
         }
 
-        _seqSchedule = SystemSchedule.Create(_world)
+        _seqSchedule = SystemSchedule.Create()
             .Add<BenchMovementSystem>()
             .Build<SequentialWaveScheduler>();
 
-        _parSchedule = SystemSchedule.Create(_world)
+        _parSchedule = SystemSchedule.Create()
             .Add<BenchMovementSystem>()
             .Build<ParallelWaveScheduler>();
 
         _jobPool = new JobWorkerPool();
-        _jobSchedule = SystemSchedule.Create(_world)
+        _jobSchedule = SystemSchedule.Create()
             .Add<BenchMovementSystem>()
             .Build(new JobWaveScheduler(_jobPool));
 
         _wsPool = new WorkStealingPool();
-        _wsSchedule = SystemSchedule.Create(_world)
+        _wsSchedule = SystemSchedule.Create()
             .Add<BenchMovementSystem>()
             .Build(new WorkStealingWaveScheduler(_wsPool));
     }
@@ -67,14 +67,14 @@ public class WaveSchedulerBenchmarks
     }
 
     [Benchmark(Baseline = true)]
-    public void Sequential() => _seqSchedule.Run();
+    public void Sequential() => _seqSchedule.Run(_world);
 
     [Benchmark]
-    public void ParallelFor() => _parSchedule.Run();
+    public void ParallelFor() => _parSchedule.Run(_world);
 
     [Benchmark]
-    public void JobPool() => _jobSchedule.Run();
+    public void JobPool() => _jobSchedule.Run(_world);
 
     [Benchmark]
-    public void WorkStealing() => _wsSchedule.Run();
+    public void WorkStealing() => _wsSchedule.Run(_world);
 }

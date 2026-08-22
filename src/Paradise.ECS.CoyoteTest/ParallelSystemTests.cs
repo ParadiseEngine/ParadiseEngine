@@ -97,7 +97,7 @@ public ref partial struct HealSystem : IEntitySystem
 
 /// <summary>
 /// Concurrent tests for parallel system execution using Coyote systematic testing.
-/// Verifies that <see cref="SystemSchedule{TMask,TConfig}.Run()"/> with <see cref="ParallelWaveScheduler"/>
+/// Verifies that <see cref="SystemSchedule{TMask,TConfig}"/> with <see cref="ParallelWaveScheduler"/>
 /// produces correct results under all thread interleavings — especially the flattened chunk-level parallelism.
 /// </summary>
 public static class ParallelSystemTests
@@ -153,23 +153,23 @@ public static class ParallelSystemTests
 
         // Sequential baseline
         var (seqShared, seqWorld) = SetupWorld(entityCount);
-        var seqSchedule = SystemSchedule.Create(seqWorld)
+        var seqSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<ScaleVelocitySystem>()
             .Add<HealSystem>()
             .Build<SequentialWaveScheduler>();
-        seqSchedule.Run();
+        seqSchedule.Run(seqWorld);
         var (seqPosX, seqVelY, seqHealth) = CollectResults(seqWorld, entityCount);
         seqShared.Dispose();
 
         // Parallel run
         var (parShared, parWorld) = SetupWorld(entityCount);
-        var parSchedule = SystemSchedule.Create(parWorld)
+        var parSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<ScaleVelocitySystem>()
             .Add<HealSystem>()
             .Build<ParallelWaveScheduler>();
-        parSchedule.Run();
+        parSchedule.Run(parWorld);
         var (parPosX, parVelY, parHealth) = CollectResults(parWorld, entityCount);
         parShared.Dispose();
 
@@ -196,23 +196,23 @@ public static class ParallelSystemTests
 
         // Sequential baseline
         var (seqShared, seqWorld) = SetupWorld(entityCount);
-        var seqSchedule = SystemSchedule.Create(seqWorld)
+        var seqSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<ScaleVelocitySystem>()
             .Add<ApplyVelocitySystem>()
             .Build<SequentialWaveScheduler>();
-        seqSchedule.Run();
+        seqSchedule.Run(seqWorld);
         var (seqPosX, seqVelY, _) = CollectResults(seqWorld, entityCount);
         seqShared.Dispose();
 
         // Parallel run
         var (parShared, parWorld) = SetupWorld(entityCount);
-        var parSchedule = SystemSchedule.Create(parWorld)
+        var parSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<ScaleVelocitySystem>()
             .Add<ApplyVelocitySystem>()
             .Build<ParallelWaveScheduler>();
-        parSchedule.Run();
+        parSchedule.Run(parWorld);
         var (parPosX, parVelY, _) = CollectResults(parWorld, entityCount);
         parShared.Dispose();
 
@@ -236,23 +236,23 @@ public static class ParallelSystemTests
 
         // Sequential baseline
         var (seqShared, seqWorld) = SetupWorld(entityCount);
-        var seqSchedule = SystemSchedule.Create(seqWorld)
+        var seqSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<HealSystem>()
             .Build<SequentialWaveScheduler>();
         for (int iter = 0; iter < iterations; iter++)
-            seqSchedule.Run();
+            seqSchedule.Run(seqWorld);
         var (seqPosX, _, seqHealth) = CollectResults(seqWorld, entityCount);
         seqShared.Dispose();
 
         // Parallel run
         var (parShared, parWorld) = SetupWorld(entityCount);
-        var parSchedule = SystemSchedule.Create(parWorld)
+        var parSchedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<HealSystem>()
             .Build<ParallelWaveScheduler>();
         for (int iter = 0; iter < iterations; iter++)
-            parSchedule.Run();
+            parSchedule.Run(parWorld);
         var (parPosX, _, parHealth) = CollectResults(parWorld, entityCount);
         parShared.Dispose();
 
@@ -275,19 +275,19 @@ public static class ParallelSystemTests
 
         // Sequential baseline
         var (seqShared, seqWorld) = SetupWorld(entityCount);
-        var seqSchedule = SystemSchedule.Create(seqWorld)
+        var seqSchedule = SystemSchedule.Create()
             .AddAll()
             .Build<SequentialWaveScheduler>();
-        seqSchedule.Run();
+        seqSchedule.Run(seqWorld);
         var (seqPosX, seqVelY, seqHealth) = CollectResults(seqWorld, entityCount);
         seqShared.Dispose();
 
         // Parallel run
         var (parShared, parWorld) = SetupWorld(entityCount);
-        var parSchedule = SystemSchedule.Create(parWorld)
+        var parSchedule = SystemSchedule.Create()
             .AddAll()
             .Build<ParallelWaveScheduler>();
-        parSchedule.Run();
+        parSchedule.Run(parWorld);
         var (parPosX, parVelY, parHealth) = CollectResults(parWorld, entityCount);
         parShared.Dispose();
 
@@ -311,7 +311,7 @@ public static class ParallelSystemTests
         const int entityCount = 200;
 
         var (shared, world) = SetupWorld(entityCount);
-        var schedule = SystemSchedule.Create(world)
+        var schedule = SystemSchedule.Create()
             .Add<IncrementPositionSystem>()
             .Add<ScaleVelocitySystem>()
             .Add<ApplyVelocitySystem>()
@@ -320,7 +320,7 @@ public static class ParallelSystemTests
 
         // Run multiple iterations
         for (int iter = 0; iter < 3; iter++)
-            schedule.Run();
+            schedule.Run(world);
 
         // Verify no corruption: all entities should have consistent state
         for (int i = 0; i < entityCount; i++)
