@@ -144,11 +144,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         Entity e = SeedAgent(position: 10f);
         _write.CopyFrom(_current);
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Add<SnapReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // Writer mutated the WRITE world starting from the copied value…
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
@@ -167,11 +167,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
 
         // Classic Run(): the read source IS the write world, and the default DAG scheduler
         // orders the RAW pair into separate waves — the reader sees this tick's write.
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Add<SnapReaderSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_write);
 
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
         await Assert.That(_write.GetComponent<SnapMarker>(e).Observed).IsEqualTo(11f);
@@ -190,10 +190,10 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         _write.AddComponent(newcomer, new SnapMarker());
         _write.AddComponent(newcomer, new SnapExtra());
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         await Assert.That(_write.GetComponent<SnapMarker>(old).Observed).IsEqualTo(10f);      // snapshot
         await Assert.That(_write.GetComponent<SnapMarker>(newcomer).Observed).IsEqualTo(100f); // fallback
@@ -208,11 +208,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         Entity e = SeedAgent(position: 10f);
         _write.CopyFrom(_current);
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Add<SnapMixedEntityReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
         // Pre-fix, the whole mixed composition bound to the write chunk → Observed read 11.
@@ -225,11 +225,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         Entity e = SeedAgent(position: 10f);
         _write.CopyFrom(_current);
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Add<SnapMixedChunkReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
         await Assert.That(_write.GetComponent<SnapMarker>(e).Observed).IsEqualTo(10f);
@@ -244,11 +244,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
 
         // Writer (entity system) bumps positions in the write world; the world system's
         // read-only segments are bound to the CURRENT world's paired chunks.
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .AddWorld<SnapWorldReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         await Assert.That(_write.GetComponent<SnapPosition>(a).X).IsEqualTo(11f);
         await Assert.That(_write.GetComponent<SnapPosition>(b).X).IsEqualTo(21f);
@@ -296,11 +296,11 @@ public sealed class SnapshotReadScheduleTests : IDisposable
             }
 
             // Ping-pong double buffer, one schedule per world — the runner's model in miniature.
-            using var scheduleA = SystemSchedule.Create(worldA)
+            using var scheduleA = SystemSchedule.Create()
                 .Add<SnapWriterSystem>()
                 .Add<SnapReaderSystem>()
                 .Build(new SnapshotDagScheduler(), new ParallelWaveScheduler());
-            using var scheduleB = SystemSchedule.Create(worldB)
+            using var scheduleB = SystemSchedule.Create()
                 .Add<SnapWriterSystem>()
                 .Add<SnapReaderSystem>()
                 .Build(new SnapshotDagScheduler(), new ParallelWaveScheduler());
@@ -310,8 +310,8 @@ public sealed class SnapshotReadScheduleTests : IDisposable
             {
                 (World current, World write) = tick % 2 == 0 ? (worldA, worldB) : (worldB, worldA);
                 write.CopyFrom(current);
-                if (tick % 2 == 0) scheduleB.Run(current);
-                else scheduleA.Run(current);
+                if (tick % 2 == 0) scheduleB.Run(worldB, current);
+                else scheduleA.Run(worldA, current);
                 last = write;
             }
 
@@ -328,16 +328,12 @@ public sealed class SnapshotReadScheduleTests : IDisposable
     }
 
     // ========================================================================
-    // Worldless schedules: SystemSchedule.Create() + RunOn(...)
-    //
-    // A worldless schedule is a reusable PROGRAM over systems — no world is stored, and each
-    // run names the worlds it acts on. Which run methods apply is decided at Create: a
-    // worldless schedule refuses Run(), a bound one refuses RunOn(), and neither can be
-    // talked out of it.
+    // A schedule is a PURE program over systems: it stores no world, and every run names the
+    // worlds it acts on. These pin that the same schedule object can be pointed anywhere.
     // ========================================================================
 
     [Test]
-    public async Task worldless_run_on_two_worlds_matches_bound_snapshot_run()
+    public async Task two_world_run_reads_the_snapshot_and_writes_the_other()
     {
         Entity e = SeedAgent(position: 10f);
         _write.CopyFrom(_current);
@@ -346,7 +342,7 @@ public sealed class SnapshotReadScheduleTests : IDisposable
             .Add<SnapWriterSystem>()
             .Add<SnapReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.RunOn(_write, _current);
+        schedule.Run(_write, _current);
 
         // Identical to snapshot_run_reads_previous_tick_and_writes_new_tick, which is the
         // point: naming the world per run changes nothing about what a run means.
@@ -357,7 +353,7 @@ public sealed class SnapshotReadScheduleTests : IDisposable
     }
 
     [Test]
-    public async Task worldless_run_on_one_world_is_a_classic_run()
+    public async Task one_world_run_is_a_classic_run()
     {
         Entity e = SeedAgent(position: 10f);
         _write.CopyFrom(_current);
@@ -366,7 +362,7 @@ public sealed class SnapshotReadScheduleTests : IDisposable
             .Add<SnapWriterSystem>()
             .Add<SnapReaderSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.RunOn(_write);
+        schedule.Run(_write);
 
         // Classic semantics: the read source IS the write world, so the reader sees this
         // tick's write — same as bound Run().
@@ -375,10 +371,10 @@ public sealed class SnapshotReadScheduleTests : IDisposable
     }
 
     [Test]
-    public async Task one_worldless_schedule_runs_against_several_worlds()
+    public async Task the_same_schedule_drives_several_worlds()
     {
-        // The reuse the worldless form exists for: one program, many worlds. A stored world
-        // could never do this.
+        // The reuse a world-free schedule exists for: one program, many worlds — a pooled
+        // snapshot, a rewound copy, a headless replica. A stored world could never do this.
         Entity e = SeedAgent(position: 10f);
         var second = _shared.CreateWorld();
         _write.CopyFrom(_current);
@@ -387,61 +383,24 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.RunOn(_write, _current);
-        schedule.RunOn(second, _current);
-        schedule.RunOn(second, _current);
+        schedule.Run(_write, _current);
+        schedule.Run(second, _current);
+        schedule.Run(second, _current);
 
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
         await Assert.That(second.GetComponent<SnapPosition>(e).X).IsEqualTo(12f);
     }
 
     [Test]
-    public async Task worldless_schedule_refuses_the_bound_run_methods()
+    public async Task run_rejects_null_worlds()
     {
         using var schedule = SystemSchedule.Create()
             .Add<SnapWriterSystem>()
             .Build<SequentialWaveScheduler>();
 
-        await Assert.That(schedule.Run).Throws<InvalidOperationException>();
-        await Assert.That(() => schedule.Run(_current)).Throws<InvalidOperationException>();
-    }
-
-    [Test]
-    public async Task bound_schedule_refuses_to_run_on_another_world()
-    {
-        // The binding is immutable: a bound schedule will not be redirected, silently or
-        // otherwise. This is the regression guard for that seam.
-        Entity e = SeedAgent(position: 10f);
-        var other = _shared.CreateWorld();
-        _write.CopyFrom(_current);
-        other.CopyFrom(_current);
-
-        using var schedule = SystemSchedule.Create(_write)
-            .Add<SnapWriterSystem>()
-            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-
-        await Assert.That(() => schedule.RunOn(other)).Throws<InvalidOperationException>();
-        await Assert.That(() => schedule.RunOn(other, _current)).Throws<InvalidOperationException>();
-
-        // Neither world moved: a refused run is a run that did not happen.
-        await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(10f);
-        await Assert.That(other.GetComponent<SnapPosition>(e).X).IsEqualTo(10f);
-    }
-
-    [Test]
-    public async Task run_methods_reject_null_worlds()
-    {
-        using var bound = SystemSchedule.Create(_write)
-            .Add<SnapWriterSystem>()
-            .Build<SequentialWaveScheduler>();
-        using var worldless = SystemSchedule.Create()
-            .Add<SnapWriterSystem>()
-            .Build<SequentialWaveScheduler>();
-
-        await Assert.That(() => bound.Run(null!)).Throws<ArgumentNullException>();
-        await Assert.That(() => worldless.RunOn(null!)).Throws<ArgumentNullException>();
-        await Assert.That(() => worldless.RunOn(_write, null!)).Throws<ArgumentNullException>();
-        await Assert.That(() => worldless.RunOn(null!, _current)).Throws<ArgumentNullException>();
+        await Assert.That(() => schedule.Run(null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => schedule.Run(_write, null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => schedule.Run(null!, _current)).Throws<ArgumentNullException>();
     }
 
     private static SystemMetadata<SmallBitSet<uint>> Meta<T>()

@@ -55,11 +55,11 @@ public sealed class StructuralChangeGuardTests : IDisposable
     [Test]
     public async Task structural_call_inside_running_system_throws_and_flag_is_cleared_afterwards()
     {
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<DirectSpawnOffenderSystem>()
             .Build<SequentialWaveScheduler>();
 
-        await Assert.That(schedule.Run).Throws<InvalidOperationException>();
+        await Assert.That(() => schedule.Run(_world)).Throws<InvalidOperationException>();
 
         // Exception-safe clearing (try/finally): the world must be usable again after the
         // failed run — structural calls outside a run are legal.
@@ -131,12 +131,12 @@ public sealed class StructuralChangeGuardTests : IDisposable
         _world.AddComponent(seedEntity, new TestPosition());
         _world.AddComponent(seedEntity, new TestVelocity());
 
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<TestWorldSpawnSystem>()
             .Build<SequentialWaveScheduler>();
 
         int countBefore = _world.EntityCount;
-        schedule.Run();
+        schedule.Run(_world);
 
         await Assert.That(_world.EntityCount).IsEqualTo(countBefore + 1);
         var spawned = _world.World.GetEntity(seedEntity.Id + 1);

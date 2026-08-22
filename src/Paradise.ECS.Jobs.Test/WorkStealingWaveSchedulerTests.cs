@@ -27,12 +27,12 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
-        var seqSchedule = SystemSchedule.Create(_world)
+        var seqSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build<SequentialWaveScheduler>();
 
-        seqSchedule.Run();
+        seqSchedule.Run(_world);
         var seqPos = _world.GetComponent<TestPosition>(e1);
         var seqVel = _world.GetComponent<TestVelocity>(e1);
 
@@ -43,12 +43,12 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         _world.AddComponent(e2, new TestVelocity { X = 1, Y = 2, Z = 0 });
 
         using var pool = new WorkStealingPool(2);
-        var wsSchedule = SystemSchedule.Create(_world)
+        var wsSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new WorkStealingWaveScheduler(pool));
 
-        wsSchedule.Run();
+        wsSchedule.Run(_world);
         var wsPos = _world.GetComponent<TestPosition>(e2);
         var wsVel = _world.GetComponent<TestVelocity>(e2);
 
@@ -72,13 +72,13 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
             _world.AddComponent(entities[i], new TestVelocity { X = 1, Y = 1, Z = 0 });
         }
 
-        var schedule = SystemSchedule.Create(_world)
+        var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new WorkStealingWaveScheduler(pool));
 
         for (int frame = 0; frame < frameCount; frame++)
-            schedule.Run();
+            schedule.Run(_world);
 
         for (int i = 0; i < entityCount; i++)
         {
@@ -102,12 +102,12 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         }
 
         using var jobPool = new JobWorkerPool(2);
-        var jobSchedule = SystemSchedule.Create(_world)
+        var jobSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new JobWaveScheduler(jobPool));
 
-        jobSchedule.Run();
+        jobSchedule.Run(_world);
         var jobPositions = new TestPosition[entityCount];
         for (int i = 0; i < entityCount; i++)
             jobPositions[i] = _world.GetComponent<TestPosition>(entities1[i]);
@@ -123,12 +123,12 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         }
 
         using var wsPool = new WorkStealingPool(2);
-        var wsSchedule = SystemSchedule.Create(_world)
+        var wsSchedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .Add<TestGravitySystem>()
             .Build(new WorkStealingWaveScheduler(wsPool));
 
-        wsSchedule.Run();
+        wsSchedule.Run(_world);
 
         for (int i = 0; i < entityCount; i++)
         {

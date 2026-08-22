@@ -119,10 +119,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         Entity a = SeedMarker();
         Entity b = SeedMarker();
 
-        using var schedule = SystemSchedule.Create(_current)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxStaleReaderSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_current);
 
         await Assert.That(_current.GetComponent<SnapMarker>(a).Observed).IsEqualTo(5f);
         await Assert.That(_current.GetComponent<SnapMarker>(b).Observed).IsEqualTo(5f);
@@ -134,10 +134,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         SeedContext(7f);
         Entity a = SeedMarker();
 
-        using var schedule = SystemSchedule.Create(_current)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxChunkReaderSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_current);
 
         await Assert.That(_current.GetComponent<SnapMarker>(a).Observed).IsEqualTo(7f);
     }
@@ -147,10 +147,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
     {
         Entity ctx = SeedContext(1f);
 
-        using var schedule = SystemSchedule.Create(_current)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<SnapCtxWorldWriterSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_current);
 
         await Assert.That(_current.GetComponent<SnapContext>(ctx).Value).IsEqualTo(1001f);
     }
@@ -162,12 +162,12 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
     {
         SeedMarker(); // the reader's own query matches, forcing singleton resolution
 
-        using var schedule = SystemSchedule.Create(_current)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxStaleReaderSystem>()
             .Build<SequentialWaveScheduler>();
 
         InvalidOperationException? exception = null;
-        try { schedule.Run(); }
+        try { schedule.Run(_current); }
         catch (InvalidOperationException e) { exception = e; }
 
         await Assert.That(exception).IsNotNull();
@@ -182,12 +182,12 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         SeedContext(2f);
         SeedMarker();
 
-        using var schedule = SystemSchedule.Create(_current)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxStaleReaderSystem>()
             .Build<SequentialWaveScheduler>();
 
         InvalidOperationException? exception = null;
-        try { schedule.Run(); }
+        try { schedule.Run(_current); }
         catch (InvalidOperationException e) { exception = e; }
 
         await Assert.That(exception).IsNotNull();
@@ -207,10 +207,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         // Managed pre-pass write: THIS tick's value, only in the write world.
         _write.GetComponent<SnapContext>(ctx).Value = 99f;
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxStaleReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // Standard rule: the read-only singleton binds to the READ world → previous tick.
         await Assert.That(_write.GetComponent<SnapMarker>(agent).Observed).IsEqualTo(10f);
@@ -225,10 +225,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
 
         _write.GetComponent<SnapContext>(ctx).Value = 99f;
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxFreshReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // [CurrentTick]: the singleton binds to the WRITE world → same-tick value.
         await Assert.That(_write.GetComponent<SnapMarker>(agent).Observed).IsEqualTo(99f);
@@ -244,10 +244,10 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
 
         _write.GetComponent<SnapPosition>(agent).X = 42f;
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapFreshInlineReaderSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         await Assert.That(_write.GetComponent<SnapMarker>(agent).Observed).IsEqualTo(42f);
     }
@@ -263,11 +263,11 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         _write.CopyFrom(_current);
 
         // Reader added FIRST: only the fresh-read edge can order it after the writer.
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapFreshInlineReaderSystem>()
             .Add<SnapWriterSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // Writer bumped 10 → 11; the CurrentTick reader observed THIS tick's write.
         await Assert.That(_write.GetComponent<SnapPosition>(agent).X).IsEqualTo(11f);
@@ -281,11 +281,11 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         Entity agent = SeedMarker();
         _write.CopyFrom(_current);
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxFreshReaderSystem>()
             .Add<SnapCtxBumpSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // Bump wrote 10 → 11 in the write world; the fresh reader saw it same-tick.
         await Assert.That(_write.GetComponent<SnapMarker>(agent).Observed).IsEqualTo(11f);
@@ -298,11 +298,11 @@ public sealed class SingletonCurrentTickSnapshotTests : IDisposable
         Entity agent = SeedMarker();
         _write.CopyFrom(_current);
 
-        using var schedule = SystemSchedule.Create(_write)
+        using var schedule = SystemSchedule.Create()
             .Add<SnapCtxStaleReaderSystem>()
             .Add<SnapCtxBumpSystem>()
             .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
-        schedule.Run(_current);
+        schedule.Run(_write, _current);
 
         // The stale reader binds to the READ world — it never sees the same-tick bump (10 → 11).
         await Assert.That(_write.GetComponent<SnapMarker>(agent).Observed).IsEqualTo(10f);

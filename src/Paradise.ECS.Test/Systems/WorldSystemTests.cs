@@ -97,10 +97,10 @@ public sealed class WorldSystemTests : IDisposable
             entities.Add(SpawnMovable(x: i, vx: 0.5f));
         }
 
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<TestWorldSumSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_world);
 
         for (int i = 0; i < count; i += 97) // sample across chunk boundaries
         {
@@ -116,10 +116,10 @@ public sealed class WorldSystemTests : IDisposable
         var b = SpawnMovable(42f, 0f);
         var c = SpawnMovable(7f, 0f);
 
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<TestWorldMaxBroadcastSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_world);
 
         await Assert.That(_world.GetComponent<TestPosition>(a).Y).IsEqualTo(42f);
         await Assert.That(_world.GetComponent<TestPosition>(b).Y).IsEqualTo(42f);
@@ -133,10 +133,10 @@ public sealed class WorldSystemTests : IDisposable
         SpawnMovable(2f, 0f);
         int before = _world.EntityCount;
 
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .AddWorld<TestWorldSpawnSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_world);
 
         await Assert.That(_world.EntityCount).IsEqualTo(before + 1);
     }
@@ -148,11 +148,11 @@ public sealed class WorldSystemTests : IDisposable
 
         // TestMovementSystem (entity, writes TestPosition) and TestWorldSumSystem (world, writes
         // TestPosition) overlap on writes → the DAG orders them into separate waves, both run.
-        using var schedule = SystemSchedule.Create(_world)
+        using var schedule = SystemSchedule.Create()
             .Add<TestMovementSystem>()
             .AddWorld<TestWorldSumSystem>()
             .Build<SequentialWaveScheduler>();
-        schedule.Run();
+        schedule.Run(_world);
 
         // Movement: +vel (1) then WorldSum: +vel (1) — or the reverse; either way +2 total.
         await Assert.That(_world.GetComponent<TestPosition>(e).X).IsEqualTo(12f);
