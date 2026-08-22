@@ -1,7 +1,7 @@
 using Paradise.Windowing;
 using WebGpuSharp;
 
-namespace Paradise.Ui.Noesis.Host.Test;
+namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>NoesisViewCore + NoesisOverlayRenderer against real Noesis and a real (headless)
 /// WebGPU adapter: the sim-thread tick must lazily create the view (applying the MVVM
@@ -52,7 +52,7 @@ public class NoesisViewCoreTests
             if (adapter is null) return null;
             var desc = new DeviceDescriptor
             {
-                Label = "Paradise.Ui.Noesis.Host.Test",
+                Label = "Paradise.Ui.Noesis.Test",
                 UncapturedErrorCallback = static (type, message) =>
                     Console.Error.WriteLine($"[NoesisHostTest][wgpu {type}] {message.ToString()}"),
             };

@@ -1,4 +1,4 @@
-namespace Paradise.Ui.Noesis.Host.Test;
+namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
 /// The documented pairing rule: "Update never blocks and allocates memory when not synchronized

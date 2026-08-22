@@ -1,5 +1,5 @@
 using Paradise.Windowing;
-namespace Paradise.Ui.Noesis.Host.Test;
+namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
 /// How a game overlay must be authored, and the trap that reads as "the menu is dead".

@@ -2,7 +2,7 @@ using Noesis;
 using Paradise.Windowing;
 using IoPath = System.IO.Path;
 
-namespace Paradise.Ui.Noesis.Host;
+namespace Paradise.Ui.Noesis;
 
 /// <summary>The renderer-independent half of NoesisGUI in the two-half UI architecture,
 /// shared by every host (an SDL/WebGPU runtime, a Godot play-mode bridge):

@@ -1,5 +1,5 @@
 using Paradise.Windowing;
-namespace Paradise.Ui.Noesis.Host.Test;
+namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
 /// The threading invariant a two-thread host depends on: a View created and updated on one

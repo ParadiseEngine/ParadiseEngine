@@ -1,4 +1,4 @@
-namespace Paradise.Ui.Noesis.Host;
+namespace Paradise.Ui.Noesis;
 
 /// <summary>The WebGPU render half of a NoesisGUI overlay: lazily initializes a
 /// <see cref="NoesisRenderDevice"/> against the shared <see cref="NoesisViewCore"/> once the
