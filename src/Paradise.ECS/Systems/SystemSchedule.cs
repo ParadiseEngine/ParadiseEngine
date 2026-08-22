@@ -68,7 +68,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    private readonly IWorld<TMask, TConfig> _world;
+    private readonly IWorld<TMask, TConfig>? _world;
     private readonly ImmutableArray<ImmutableArray<int>> _waves;
     private readonly ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
     private readonly ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
@@ -79,7 +79,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     private readonly List<WorkItem<TMask, TConfig>> _workItems = new();
 
     internal SystemSchedule(
-        IWorld<TMask, TConfig> world,
+        IWorld<TMask, TConfig>? world,
         ImmutableArray<ImmutableArray<int>> waves,
         ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> dispatchers,
         ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> worldDispatchers,
@@ -97,7 +97,9 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     }
 
     /// <summary>
-    /// Creates a schedule builder for the given world.
+    /// Creates a schedule builder BOUND to the given world: <see cref="Run()"/> runs on it,
+    /// and <see cref="Run(IWorld{TMask,TConfig})"/> runs on it in snapshot-read mode against
+    /// the given read world. A bound schedule refuses <c>RunOn</c> — the binding is immutable.
     /// </summary>
     /// <param name="world">The world to create a schedule for.</param>
     /// <returns>A new schedule builder.</returns>
@@ -105,63 +107,131 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         => new(world);
 
     /// <summary>
-    /// Runs all enabled systems using the scheduler provided at build time.
-    /// Work items are built for all waves upfront, then handed to
-    /// <see cref="IWaveScheduler.Execute{TMask,TConfig}"/> for execution.
-    /// ECB playback happens once after all execution completes.
+    /// Creates a schedule builder bound to NO world — the schedule is a reusable program over
+    /// systems, and every run names its world explicitly:
+    /// <see cref="RunOn(IWorld{TMask,TConfig})"/> for a classic run, or
+    /// <see cref="RunOn(IWorld{TMask,TConfig}, IWorld{TMask,TConfig})"/> for snapshot-read
+    /// mode. The same schedule may be run against any world of the same registry (they share
+    /// system metadata; queries are per-world either way). A worldless schedule refuses
+    /// <see cref="Run()"/>, and a bound one refuses <c>RunOn</c>: which methods apply is
+    /// decided once, at Create.
     /// </summary>
-    public void Run() => RunInternal(readWorld: null);
+    /// <returns>A new schedule builder.</returns>
+    public static SystemScheduleBuilder<TMask, TConfig> Create() => new(null);
 
     /// <summary>
-    /// Runs all systems in SNAPSHOT-READ mode: systems generated with
-    /// <c>[assembly: SnapshotReadSystems]</c> bind their read-only fields
-    /// (<c>ref readonly T</c> / <c>ReadOnlySpan&lt;T&gt;</c> / all-readonly composition data) to
-    /// <paramref name="readWorld"/>'s corresponding chunk — typically the immutable previous-tick
-    /// snapshot this world was <c>CopyFrom</c>'d — while writable fields bind to this world.
-    /// Reads then never alias in-flight writes, so with single-writer components every system can
-    /// execute in one fully parallel wave (see <c>SnapshotDagScheduler</c>).
+    /// Runs all enabled systems against the world this schedule was BOUND to, using the
+    /// scheduler provided at build time. Work items are built for all waves upfront, then
+    /// handed to <see cref="IWaveScheduler.Execute{TMask,TConfig}"/> for execution.
+    /// ECB playback happens once after all execution completes.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The schedule was built worldless (the
+    /// parameterless <see cref="Create()"/>); use <see cref="RunOn(IWorld{TMask,TConfig})"/>.</exception>
+    public void Run() => RunInternal(BoundWorld(), readWorld: null);
+
+    /// <summary>
+    /// Runs all systems in SNAPSHOT-READ mode against the world this schedule was BOUND to:
+    /// systems generated with <c>[assembly: SnapshotReadSystems]</c> bind their read-only
+    /// fields (<c>ref readonly T</c> / <c>ReadOnlySpan&lt;T&gt;</c> / all-readonly composition
+    /// data) to <paramref name="readWorld"/>'s corresponding chunk — typically the immutable
+    /// previous-tick snapshot the bound world was <c>CopyFrom</c>'d from — while writable
+    /// fields bind to the bound world. Reads then never alias in-flight writes, so with
+    /// single-writer components every system can execute in one fully parallel wave (see
+    /// <c>SnapshotDagScheduler</c>).
     ///
-    /// CONTRACT: <paramref name="readWorld"/> must be the structural twin of this schedule's world
+    /// CONTRACT: <paramref name="readWorld"/> must be the structural twin of the bound world
     /// (no structural changes since <c>CopyFrom</c> — structural ops go through the ECB, which
     /// plays back after this call, or happen before the copy). Chunks are paired by
-    /// (archetype id, chunk index); a chunk with no read-world counterpart (entity spawned after
-    /// the copy) falls back to reading its own write chunk. Systems from assemblies WITHOUT the
-    /// codegen attribute keep classic single-world semantics regardless of this overload.
+    /// (archetype id, chunk index); a chunk with no read-world counterpart (entity spawned
+    /// after the copy) falls back to reading its own write chunk. Systems from assemblies
+    /// WITHOUT the codegen attribute keep classic single-world semantics regardless of this
+    /// overload.
     /// </summary>
     /// <param name="readWorld">The immutable world read-only fields bind to.</param>
+    /// <exception cref="InvalidOperationException">The schedule was built worldless; use
+    /// <see cref="RunOn(IWorld{TMask,TConfig}, IWorld{TMask,TConfig})"/>.</exception>
     public void Run(IWorld<TMask, TConfig> readWorld)
     {
         ArgumentNullException.ThrowIfNull(readWorld);
-        RunInternal(readWorld);
+        RunInternal(BoundWorld(), readWorld);
     }
 
-    private void RunInternal(IWorld<TMask, TConfig>? readWorld)
+    /// <summary>
+    /// Runs all enabled systems against <paramref name="world"/> — the classic single-world
+    /// form for a WORLDLESS schedule (the parameterless <see cref="Create()"/>), which names
+    /// its world per run rather than storing one.
+    /// </summary>
+    /// <param name="world">The world the systems run against.</param>
+    /// <exception cref="InvalidOperationException">The schedule is bound to a world; use
+    /// <see cref="Run()"/>. A binding is immutable: running a bound schedule somewhere else
+    /// is refused rather than silently honoured.</exception>
+    public void RunOn(IWorld<TMask, TConfig> world)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        RequireWorldless();
+        RunInternal(world, readWorld: null);
+    }
+
+    /// <summary>
+    /// Runs all systems in SNAPSHOT-READ mode with both worlds named — the form a WORLDLESS
+    /// schedule (the parameterless <see cref="Create()"/>) uses every tick. Same contract as
+    /// <see cref="Run(IWorld{TMask,TConfig})"/> on a bound schedule:
+    /// <paramref name="readWorld"/> must be the structural twin <paramref name="world"/> was
+    /// <c>CopyFrom</c>'d from.
+    /// </summary>
+    /// <param name="world">The write world the systems mutate.</param>
+    /// <param name="readWorld">The immutable world read-only fields bind to.</param>
+    /// <exception cref="InvalidOperationException">The schedule is bound to a world; use
+    /// <see cref="Run(IWorld{TMask,TConfig})"/>.</exception>
+    public void RunOn(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig> readWorld)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(readWorld);
+        RequireWorldless();
+        RunInternal(world, readWorld);
+    }
+
+    private IWorld<TMask, TConfig> BoundWorld() => _world ?? throw new InvalidOperationException(
+        "This schedule was built without a world (SystemSchedule.Create()); name one: "
+        + "RunOn(world) or RunOn(world, readWorld).");
+
+    private void RequireWorldless()
+    {
+        if (_world is not null)
+        {
+            throw new InvalidOperationException(
+                "This schedule is bound to a world (SystemSchedule.Create(world)); run it with "
+                + "Run() or Run(readWorld). A binding is immutable.");
+        }
+    }
+
+    private void RunInternal(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)
     {
         // DEBUG structural-change guard: while waves execute, direct structural World calls
         // (Spawn/Despawn/Add-/RemoveComponent/…) throw — systems must use their injected
         // EntityCommandBuffer. try/finally keeps the flag exception-safe (a throwing system
         // must not wedge the world), and it is cleared BEFORE _ecbPool.PlaybackAll below so
         // playback's Spawn/structural work is not blocked.
-        _world.SetSystemRunInProgress(true);
+        world.SetSystemRunInProgress(true);
         try
         {
-            RunWaves(readWorld);
+            RunWaves(world, readWorld);
         }
         finally
         {
-            _world.SetSystemRunInProgress(false);
+            world.SetSystemRunInProgress(false);
         }
 
-        _ecbPool.PlaybackAll(_world);
+        _ecbPool.PlaybackAll(world);
         _ecbPool.ClearAll();
 
         // Merge this run's per-work-item event writers into the world's event store, in schedule
         // order (deterministic). Always runs — with no writer this expires last frame's events.
-        _eventPool.CommitTo(_world.Events);
+        _eventPool.CommitTo(world.Events);
         _eventPool.ClearAll();
     }
 
-    private void RunWaves(IWorld<TMask, TConfig>? readWorld)
+    private void RunWaves(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)
     {
         // Work items are constructed on this thread in (wave, position-in-wave, chunk) order,
         // and each rents its own ECB from the pool at construction time. Rent order therefore
@@ -176,15 +246,15 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                 if (_worldDispatchers[systemId] is { } worldDispatcher)
                 {
                     _workItems.Add(new WorkItem<TMask, TConfig>(
-                        systemId, worldDispatcher, _world, readWorld, _ecbPool.Rent(), _eventPool.Rent()));
+                        systemId, worldDispatcher, world, readWorld, _ecbPool.Rent(), _eventPool.Rent()));
                     continue;
                 }
 
                 var dispatcher = _dispatchers[systemId]!;
-                var q = _world.ArchetypeRegistry.GetOrCreateQuery(_metadata[systemId].QueryDescription);
+                var q = world.ArchetypeRegistry.GetOrCreateQuery(_metadata[systemId].QueryDescription);
                 foreach (var ci in q.Chunks)
                 {
-                    SnapshotChunkPairing.Resolve(_world, readWorld, ci.Archetype.Id, ci.ChunkIndex,
+                    SnapshotChunkPairing.Resolve(world, readWorld, ci.Archetype.Id, ci.ChunkIndex,
                         ci.Handle, ci.EntityCount, out ChunkManager readChunkManager, out ChunkHandle readChunk);
 
                     _workItems.Add(new WorkItem<TMask, TConfig>(
@@ -193,7 +263,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
                         readChunkManager,
                         readChunk,
                         dispatcher,
-                        _world,
+                        world,
                         readWorld,
                         ci.Archetype.Layout.DataPointer,
                         ci.EntityCount,
@@ -220,12 +290,12 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    private readonly IWorld<TMask, TConfig> _world;
+    private readonly IWorld<TMask, TConfig>? _world;
     private readonly List<SystemMetadata<TMask>> _metadata;
     private readonly List<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
     private readonly List<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
 
-    internal SystemScheduleBuilder(IWorld<TMask, TConfig> world)
+    internal SystemScheduleBuilder(IWorld<TMask, TConfig>? world)
     {
         _world = world;
         _metadata = new List<SystemMetadata<TMask>>();
