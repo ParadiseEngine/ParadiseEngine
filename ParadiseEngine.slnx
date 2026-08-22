@@ -32,6 +32,8 @@
     <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
     <Project Path="src/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
     <Project Path="src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <Project Path="src/Paradise.Windowing/Paradise.Windowing.csproj" />
+    <Project Path="src/Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
     <Project Path="src/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
     <Project Path="src/Paradise.Ui/Paradise.Ui.csproj" />
     <Project Path="src/Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
