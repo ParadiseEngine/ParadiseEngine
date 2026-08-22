@@ -1566,9 +1566,14 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine("/// </summary>");
         sb.AppendLine("public static class SystemSchedule");
         sb.AppendLine("{");
-        sb.AppendLine("    /// <summary>Creates a schedule builder for the given world.</summary>");
+        sb.AppendLine("    /// <summary>Creates a schedule builder BOUND to the given world.</summary>");
         sb.AppendLine($"    public static {builderType} Create({worldType} world)");
         sb.AppendLine($"        => {scheduleType}.Create(world);");
+        sb.AppendLine();
+        sb.AppendLine("    /// <summary>Creates a schedule builder bound to NO world — every run names its");
+        sb.AppendLine("    /// world explicitly: Run(world), or Run(world, readWorld) for snapshot mode.</summary>");
+        sb.AppendLine($"    public static {builderType} Create()");
+        sb.AppendLine($"        => {scheduleType}.Create();");
         sb.AppendLine("}");
         sb.AppendLine();
 
