@@ -8,8 +8,10 @@ using static SDL.SDL3;
 namespace Paradise.Windowing.Sdl;
 
 /// <summary>
-/// One SDL3 window. The pump converts SDL events into the contract's vocabulary — timestamped
-/// <see cref="RawInput"/> transitions (auto-repeat filtered, scancodes rather than keycodes so
+/// One SDL3 window: the state and the surface. Events arrive from
+/// <see cref="SdlWindowPlatform.Pump"/>, which owns the process-wide queue and routes each
+/// event here by window id; this class turns what it is handed into the contract's vocabulary
+/// — timestamped <see cref="RawInput"/> transitions (scancodes rather than keycodes, so
 /// physical position survives keyboard layouts), resizes, the close latch — and
 /// <see cref="CreateSurface"/> maps the native window to a WebGPU-ready
 /// <see cref="SurfaceDescriptor"/> per platform.
@@ -24,15 +26,16 @@ namespace Paradise.Windowing.Sdl;
 public sealed unsafe class SdlWindow : IWindow
 {
     private readonly SDL_Window* _window;
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private readonly SdlWindowPlatform _platform;
     private readonly ConcurrentQueue<TimedRawInput> _inputs = new();
 
     private IntPtr _metalView;
     private volatile bool _closeRequested;
     private bool _disposed;
 
-    internal SdlWindow(in WindowOptions options)
+    internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform)
     {
+        _platform = platform;
         var flags = options.Resizable ? SDL_WindowFlags.SDL_WINDOW_RESIZABLE : 0;
         _window = SDL_CreateWindow(options.Title, (int)options.Width, (int)options.Height, flags);
         if (_window == null)
@@ -40,14 +43,20 @@ public sealed unsafe class SdlWindow : IWindow
             throw new InvalidOperationException($"SDL_CreateWindow failed: {SDL_GetError()}");
         }
 
-        int w = 0, h = 0;
-        SDL_GetWindowSizeInPixels(_window, &w, &h);
-        Width = (uint)Math.Max(1, w);
-        Height = (uint)Math.Max(1, h);
+        Id = (uint)SDL_GetWindowID(_window);
+        if (Id == 0)
+        {
+            SDL_DestroyWindow(_window);
+            throw new InvalidOperationException($"SDL_GetWindowID failed: {SDL_GetError()}");
+        }
+        ReadSizeInPixels();
     }
 
     /// <summary>The native SDL window, for consumers that opt into this backend directly.</summary>
     public SDL_Window* Handle => _window;
+
+    /// <summary>SDL's id for this window — how <see cref="SdlWindowPlatform.Pump"/> routes.</summary>
+    internal uint Id { get; }
 
     public uint Width { get; private set; }
 
@@ -57,38 +66,25 @@ public sealed unsafe class SdlWindow : IWindow
 
     public event Action<uint, uint>? Resized;
 
-    public void Pump()
+    public void RequestClose() => _closeRequested = true;
+
+    // ---- routed from SdlWindowPlatform.Pump, main thread ---------------------------------
+
+    internal void OnClose() => _closeRequested = true;
+
+    internal void OnPixelSizeChanged()
     {
-        var now = _clock.Elapsed;
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev))
-        {
-            var type = (SDL_EventType)ev.type;
-            if (type is SDL_EventType.SDL_EVENT_QUIT
-                or SDL_EventType.SDL_EVENT_WINDOW_CLOSE_REQUESTED)
-            {
-                _closeRequested = true;
-            }
-            else if (type is SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
-            {
-                int w = 0, h = 0;
-                SDL_GetWindowSizeInPixels(_window, &w, &h);
-                Width = (uint)Math.Max(1, w);
-                Height = (uint)Math.Max(1, h);
-                Resized?.Invoke(Width, Height);
-            }
-            else if (type is SDL_EventType.SDL_EVENT_KEY_DOWN && !ev.key.repeat)
-            {
-                Enqueue(ev.key.scancode, pressed: true, now);
-            }
-            else if (type is SDL_EventType.SDL_EVENT_KEY_UP)
-            {
-                Enqueue(ev.key.scancode, pressed: false, now);
-            }
-        }
+        ReadSizeInPixels();
+        Resized?.Invoke(Width, Height);
     }
 
-    public void RequestClose() => _closeRequested = true;
+    internal void OnKey(SDL_Scancode scancode, bool pressed, TimeSpan now)
+    {
+        if (ToKeyboardKey(scancode) is { } key)
+        {
+            _inputs.Enqueue(new TimedRawInput(now, RawInput.Keyboard(key, pressed)));
+        }
+    }
 
     public bool TryReadInput(out TimedRawInput input) => _inputs.TryDequeue(out input);
 
@@ -141,12 +137,25 @@ public sealed unsafe class SdlWindow : IWindow
             $"Surface mapping for the current OS ({RuntimeInformation.OSDescription}) is not implemented.");
     }
 
-    private void Enqueue(SDL_Scancode scancode, bool pressed, TimeSpan now)
+    /// <summary>Read the pixel size SDL reports, clamped to at least 1×1. A failed query
+    /// (only possible on an invalid window) leaves the last known size standing rather than
+    /// collapsing the surface to 1×1 — and says so, because silently rendering at the wrong
+    /// size is the kind of thing that gets blamed on the renderer.</summary>
+    private void ReadSizeInPixels()
     {
-        if (ToKeyboardKey(scancode) is { } key)
+        int w = 0, h = 0;
+        if (!SDL_GetWindowSizeInPixels(_window, &w, &h))
         {
-            _inputs.Enqueue(new TimedRawInput(now, RawInput.Keyboard(key, pressed)));
+            Console.Error.WriteLine(
+                $"[Paradise.Windowing.Sdl] SDL_GetWindowSizeInPixels failed: {SDL_GetError()}");
+            if (Width != 0)
+            {
+                return;
+            }
+            w = h = 1;
         }
+        Width = (uint)Math.Max(1, w);
+        Height = (uint)Math.Max(1, h);
     }
 
     /// <summary>Scancode → contract key, full coverage of <see cref="KeyboardKey"/>. Anything
@@ -220,6 +229,7 @@ public sealed unsafe class SdlWindow : IWindow
         }
         _disposed = true;
         _closeRequested = true;
+        _platform.Forget(Id);
 
         // The Metal view (and its CAMetalLayer) must outlive the renderer's surface — the
         // ordering contract on IWindow.CreateSurface.

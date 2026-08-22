@@ -30,7 +30,8 @@ public readonly record struct RawInput(InputDevice Device, byte Code, bool Press
 }
 
 /// <summary>One raw device transition and when it happened. The timestamp is stamped AT THE
-/// PUMP — the closest a host gets to when the key actually moved — on the window's own
-/// monotonic clock (elapsed since the platform came up), so a consumer draining the queue
-/// late still records real timings.</summary>
+/// PUMP — the closest a host gets to when the key actually moved — on the PLATFORM's
+/// monotonic clock (elapsed since the platform came up), one epoch for every window it
+/// created, so a consumer draining the queue late still records real timings and two windows'
+/// streams are directly comparable.</summary>
 public readonly record struct TimedRawInput(TimeSpan Timestamp, RawInput Input);
