@@ -96,6 +96,8 @@ jobs:
             Paradise.Physics
             Paradise.Audio.Wwise
             Paradise.Rendering
+            Paradise.Windowing
+            Paradise.Windowing.Sdl
             Paradise.Rendering.WebGPU
             Paradise.Rendering.Browser
             Paradise.Assets.Gltf
