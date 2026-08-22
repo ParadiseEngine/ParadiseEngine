@@ -1,14 +1,17 @@
 using Noesis;
+using Paradise.Windowing;
 using IoPath = System.IO.Path;
 
-namespace Paradise.Ui.Noesis.Host;
+namespace Paradise.Ui.Noesis;
 
 /// <summary>The renderer-independent half of NoesisGUI in the two-half UI architecture,
 /// shared by every host (an SDL/WebGPU runtime, a Godot play-mode bridge):
 ///
 /// - <see cref="Input"/> (<see cref="IUiInput"/>) runs on the SIM thread — the simulation
-///   drains pointer events into the view and advances view time each fixed tick, so hover,
-///   focus, animations and bindings step in lockstep with game state.
+///   drains pointer, key and text events into the view and advances view time each fixed tick,
+///   so hover, focus, animations and bindings step in lockstep with game state. Handle's return
+///   value is the view's own verdict — true only when the UI actually consumed the event — which
+///   is what lets a host route unconsumed input onward to gameplay without guessing.
 /// - The host's render half (a WebGPU overlay pass, or an offscreen render + readback) reads
 ///   <see cref="View"/> once published, initializes its own <c>RenderDevice</c> against it,
 ///   and calls <see cref="TryUpdateRenderTree"/> once per frame before recording the passes
@@ -39,6 +42,7 @@ public sealed class NoesisViewCore
     private readonly string? _licenseKey;
     private static bool s_globalInitialized; // GUI.Init/license/log are process-global, once
     private volatile View? _view; // published by the sim thread once created there
+    private bool _pendingSnapshot; // an Update produced a frame the render side has not taken
     private volatile uint _width;
     private volatile uint _height;
 
@@ -76,16 +80,29 @@ public sealed class NoesisViewCore
         Input = new UiInputHalf(this);
     }
 
-    /// <summary>The single sync point between the halves: pick up the last sim-thread view
-    /// update into the render tree. False while the view does not exist yet. Call from the
-    /// render/main thread once per frame, before recording the UI passes.</summary>
-    public bool TryUpdateRenderTree()
+    /// <summary>The single sync point between the halves: pick up the last view update into the
+    /// render tree. False while the view does not exist yet. Call from the render thread once
+    /// per frame, before recording the UI passes.</summary>
+    public bool TryUpdateRenderTree() => TryUpdateRenderTree(out _);
+
+    /// <summary>As <see cref="TryUpdateRenderTree()"/>, and reports whether the render tree
+    /// actually CHANGED since the last frame.
+    ///
+    /// Use it to skip work only if you are drawing into a target that PERSISTS between frames.
+    /// A host compositing through an OverlayPass must not: its backbuffer is a fresh swapchain
+    /// texture every frame, so skipping the UI passes on an unchanged frame does not reuse the
+    /// last image, it presents one with no UI at all — a flicker whose rate depends on how
+    /// still the UI is, which is a memorable way to spend an afternoon.</summary>
+    public bool TryUpdateRenderTree(out bool changed)
     {
+        changed = false;
         var view = _view;
         if (view is null) return false;
         lock (_sync)
         {
-            view.Renderer.UpdateRenderTree();
+            changed = view.Renderer.UpdateRenderTree();
+            // The snapshot (if any) has been taken; the UI thread may produce the next one.
+            _pendingSnapshot = false;
         }
         return true;
     }
@@ -128,7 +145,12 @@ public sealed class NoesisViewCore
         var view = GUI.CreateView(rootElement);
         view.SetFlags(RenderFlags.PPAA);
         view.SetSize((int)_width, (int)_height);
-        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_root} ({_width}x{_height}) on the sim thread.");
+        // Name the OWNING thread, not "the sim thread": which thread creates the view is the
+        // host's choice (a sim-thread UI, or a render-thread one whose ViewModel reads
+        // presentation state directly), and it is pinned here for the view's whole life — so
+        // the log has to say which one it actually was.
+        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_root} ({_width}x{_height}) "
+            + $"on thread '{Thread.CurrentThread.Name ?? "unnamed"}' — the view is pinned to it.");
         return view;
     }
 
@@ -138,7 +160,7 @@ public sealed class NoesisViewCore
         /// scrolling. Hosts report scroll deltas in notches, so this is the conversion.</summary>
         private const float NotchUnits = 120f;
 
-        // Noesis hit-tests a wheel event at a point, but the UiEvent contract reuses X/Y for the
+        // Noesis hit-tests a wheel event at a point, but the WindowEvent contract reuses X/Y for the
         // scroll delta — so the last pointer position is what a scroll is aimed at.
         private int _pointerX;
         private int _pointerY;
@@ -150,52 +172,82 @@ public sealed class NoesisViewCore
 
         private View SimView => owner._view ??= owner.CreateViewOnSimThread();
 
-        public bool Handle(in UiEvent uiEvent)
+        public bool Handle(in WindowEvent raw)
         {
             lock (owner._sync)
             {
                 var view = SimView;
-                switch (uiEvent.Kind)
+                switch (raw.Kind)
                 {
-                    case UiEventKind.PointerMove:
-                        return view.MouseMove(TrackX(uiEvent.X), TrackY(uiEvent.Y));
-                    case UiEventKind.PointerDown:
-                        return view.MouseButtonDown(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
-                    case UiEventKind.PointerUp:
-                        return view.MouseButtonUp(TrackX(uiEvent.X), TrackY(uiEvent.Y), ToNoesis(uiEvent.Button));
-                    case UiEventKind.Scroll:
+                    case WindowEventKind.PointerMove:
+                        return view.MouseMove(TrackX(raw.X), TrackY(raw.Y));
+
+                    case WindowEventKind.Button when raw.Source is EventSource.Mouse or EventSource.Touch:
+                        return raw.Pressed
+                            ? view.MouseButtonDown(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton))
+                            : view.MouseButtonUp(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton));
+
+                    case WindowEventKind.Button when raw.Source == EventSource.Keyboard:
+                        // Only a mapped key may consume: an unmapped one must report "not
+                        // handled" WITHOUT touching the view, or the host reads a false
+                        // consumption and withholds the key from the game.
+                        return ToNoesis(raw.KeyboardKey) is { } key
+                            && (raw.Pressed ? view.KeyDown(key) : view.KeyUp(key));
+
+                    case WindowEventKind.Scroll:
                     {
                         // X/Y are the delta in notches: +Y is a wheel rotated forward (scroll up),
                         // +X is a wheel rotated right — both matching Noesis's own sign convention.
                         var handled = false;
-                        if (TakeRotation(uiEvent.Y, ref _pendingVertical) is { } vertical)
+                        if (TakeRotation(raw.Y, ref _pendingVertical) is { } vertical)
                         {
                             handled |= view.MouseWheel(_pointerX, _pointerY, vertical);
                         }
-                        if (TakeRotation(uiEvent.X, ref _pendingHorizontal) is { } horizontal)
+                        if (TakeRotation(raw.X, ref _pendingHorizontal) is { } horizontal)
                         {
                             handled |= view.MouseHWheel(_pointerX, _pointerY, horizontal);
                         }
                         return handled;
                     }
-                    case UiEventKind.Resize:
-                        owner._width = (uint)uiEvent.X;
-                        owner._height = (uint)uiEvent.Y;
-                        view.SetSize((int)uiEvent.X, (int)uiEvent.Y);
+
+                    case WindowEventKind.Text:
+                        // A lone surrogate is not a character; Noesis would read it as one.
+                        return IsUnicodeScalar(raw.Character) && view.Char(raw.Character);
+
+                    case WindowEventKind.Resize:
+                        owner._width = (uint)raw.X;
+                        owner._height = (uint)raw.Y;
+                        view.SetSize((int)raw.X, (int)raw.Y);
                         return false;
+
                     default:
-                        return false;
+                        return false; // axes and gamepad buttons have no UI meaning
                 }
             }
         }
 
+        /// <summary>Advance UI time, unless the render side has not taken the last frame yet.
+        ///
+        /// That guard is the documented contract, not caution: Noesis says <c>Update</c> "never
+        /// blocks and allocates memory when not synchronized with UpdateRenderTree", so every
+        /// Update that returns true and is not matched by an UpdateRenderTree queues a snapshot
+        /// that is never collected. A host can drop frames for ordinary reasons — a minimized
+        /// window, a lost swapchain, any frame that returns before its overlay pass — and with
+        /// a UI that changes every tick (a clock, a counter) those unmatched Updates accumulate
+        /// for as long as it stays minimized. Skipping instead is free and correct: there is no
+        /// one to show the frame to, and time is passed absolutely, so the next Update that does
+        /// run lands on the right moment rather than replaying the backlog.</summary>
         public void Tick(double simTimeSeconds)
         {
             lock (owner._sync)
             {
-                var view = SimView;
+                var view = SimView; // created here on first touch, before the pending check
+                if (owner._pendingSnapshot)
+                {
+                    return;
+                }
                 owner._simTick?.Invoke();
-                view.Update(simTimeSeconds);
+                owner._pendingSnapshot = view.Update(simTimeSeconds);
             }
         }
 
@@ -213,12 +265,102 @@ public sealed class NoesisViewCore
             return rotation;
         }
 
-        private static MouseButton ToNoesis(UiPointerButton button) => button switch
+        private static MouseButton ToNoesis(PointerButton button) => button switch
         {
-            UiPointerButton.Right => MouseButton.Right,
-            UiPointerButton.Middle => MouseButton.Middle,
+            PointerButton.Right => MouseButton.Right,
+            PointerButton.Middle => MouseButton.Middle,
+            PointerButton.X1 => MouseButton.XButton1,
+            PointerButton.X2 => MouseButton.XButton2,
             _ => MouseButton.Left,
         };
+
+        /// <summary>The windowing contract's keys → Noesis's. Total over the vocabulary a UI
+        /// can act on, so a host forwards whatever it already has and nothing has to be
+        /// re-mapped downstream. Anything outside it — and <see cref="KeyboardKey.None"/> —
+        /// returns null so the caller reports "not handled" WITHOUT touching the view; an
+        /// unmapped key must never consume input. Noesis follows WPF's naming, so Enter is
+        /// <c>Return</c>, Backspace is <c>Back</c> and the digits are <c>D0</c>-<c>D9</c>.
+        ///
+        /// WHICH keys a UI is allowed to see is deliberately NOT decided here — that is the
+        /// host's policy, and a game that forwards [W] has handed movement to whatever holds
+        /// focus.</summary>
+        private static Key? ToNoesis(KeyboardKey key) => key switch
+        {
+            KeyboardKey.Enter => Key.Return,
+            KeyboardKey.NumpadEnter => Key.Return,
+            KeyboardKey.Escape => Key.Escape,
+            KeyboardKey.Backspace => Key.Back,
+            KeyboardKey.Delete => Key.Delete,
+            KeyboardKey.Insert => Key.Insert,
+            KeyboardKey.Tab => Key.Tab,
+            KeyboardKey.Space => Key.Space,
+            KeyboardKey.Left => Key.Left,
+            KeyboardKey.Right => Key.Right,
+            KeyboardKey.Up => Key.Up,
+            KeyboardKey.Down => Key.Down,
+            KeyboardKey.Home => Key.Home,
+            KeyboardKey.End => Key.End,
+            KeyboardKey.PageUp => Key.PageUp,
+            KeyboardKey.PageDown => Key.PageDown,
+            KeyboardKey.LeftControl => Key.LeftCtrl,
+            KeyboardKey.RightControl => Key.RightCtrl,
+            KeyboardKey.LeftShift => Key.LeftShift,
+            KeyboardKey.RightShift => Key.RightShift,
+            KeyboardKey.LeftAlt => Key.LeftAlt,
+            KeyboardKey.RightAlt => Key.RightAlt,
+            KeyboardKey.Digit0 => Key.D0,
+            KeyboardKey.Digit1 => Key.D1,
+            KeyboardKey.Digit2 => Key.D2,
+            KeyboardKey.Digit3 => Key.D3,
+            KeyboardKey.Digit4 => Key.D4,
+            KeyboardKey.Digit5 => Key.D5,
+            KeyboardKey.Digit6 => Key.D6,
+            KeyboardKey.Digit7 => Key.D7,
+            KeyboardKey.Digit8 => Key.D8,
+            KeyboardKey.Digit9 => Key.D9,
+            KeyboardKey.F1 => Key.F1,
+            KeyboardKey.F2 => Key.F2,
+            KeyboardKey.F3 => Key.F3,
+            KeyboardKey.F4 => Key.F4,
+            KeyboardKey.F5 => Key.F5,
+            KeyboardKey.F6 => Key.F6,
+            KeyboardKey.F7 => Key.F7,
+            KeyboardKey.F8 => Key.F8,
+            KeyboardKey.F9 => Key.F9,
+            KeyboardKey.F10 => Key.F10,
+            KeyboardKey.F11 => Key.F11,
+            KeyboardKey.F12 => Key.F12,
+            KeyboardKey.A => Key.A,
+            KeyboardKey.B => Key.B,
+            KeyboardKey.C => Key.C,
+            KeyboardKey.D => Key.D,
+            KeyboardKey.E => Key.E,
+            KeyboardKey.F => Key.F,
+            KeyboardKey.G => Key.G,
+            KeyboardKey.H => Key.H,
+            KeyboardKey.I => Key.I,
+            KeyboardKey.J => Key.J,
+            KeyboardKey.K => Key.K,
+            KeyboardKey.L => Key.L,
+            KeyboardKey.M => Key.M,
+            KeyboardKey.N => Key.N,
+            KeyboardKey.O => Key.O,
+            KeyboardKey.P => Key.P,
+            KeyboardKey.Q => Key.Q,
+            KeyboardKey.R => Key.R,
+            KeyboardKey.S => Key.S,
+            KeyboardKey.T => Key.T,
+            KeyboardKey.U => Key.U,
+            KeyboardKey.V => Key.V,
+            KeyboardKey.W => Key.W,
+            KeyboardKey.X => Key.X,
+            KeyboardKey.Y => Key.Y,
+            KeyboardKey.Z => Key.Z,
+            _ => null,
+        };
+
+        private static bool IsUnicodeScalar(uint value) =>
+            value <= 0x10FFFF && value is not (>= 0xD800 and <= 0xDFFF);
     }
 
     // ---- file-system resource providers rooted at the XAML's directory ----

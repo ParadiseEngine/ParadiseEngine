@@ -1,6 +1,7 @@
+using Paradise.Windowing;
 using WebGpuSharp;
 
-namespace Paradise.Ui.Noesis.Host.Test;
+namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>NoesisViewCore + NoesisOverlayRenderer against real Noesis and a real (headless)
 /// WebGPU adapter: the sim-thread tick must lazily create the view (applying the MVVM
@@ -51,7 +52,7 @@ public class NoesisViewCoreTests
             if (adapter is null) return null;
             var desc = new DeviceDescriptor
             {
-                Label = "Paradise.Ui.Noesis.Host.Test",
+                Label = "Paradise.Ui.Noesis.Test",
                 UncapturedErrorCallback = static (type, message) =>
                     Console.Error.WriteLine($"[NoesisHostTest][wgpu {type}] {message.ToString()}"),
             };
@@ -86,8 +87,13 @@ public class NoesisViewCoreTests
         var view = core.View;
         var content = view?.Content as global::Noesis.FrameworkElement;
         var contextApplied = ReferenceEquals(content?.DataContext, dataContext);
-        var resizeConsumed = core.Input.Handle(UiEvent.Resize(640f, 480f));
-        _ = core.Input.Handle(UiEvent.PointerMove(10f, 10f));
+        var resizeConsumed = core.Input.Handle(WindowEvent.Resize(640f, 480f));
+        _ = core.Input.Handle(WindowEvent.PointerMove(10f, 10f));
+        // Collect the first tick's frame before asking for a second. Tick is gated on the render
+        // side having taken the last snapshot — an unmatched Update queues one nobody collects,
+        // which Noesis documents as unbounded allocation — so back-to-back ticks with no render
+        // between them produce ONE hook invocation, not two. See BalanceGuardTests.
+        core.TryUpdateRenderTree(out _);
         core.Input.Tick(1.0 / 60.0);
 
         await Assert.That(beforeCreation).IsFalse();
@@ -99,7 +105,62 @@ public class NoesisViewCoreTests
         await Assert.That(core.Height).IsEqualTo(480u);
     }
 
-    /// <summary>A Scroll UiEvent must arrive in the view as a Noesis wheel event — one notch is
+    /// <summary>Key and text UiEvents must reach the view — the events that make a Noesis menu
+    /// FOCUSABLE rather than merely clickable, and which the core silently dropped until they
+    /// were mapped. Asserted on the routed Noesis events (the root Grid is made focusable and
+    /// focused first, because keyboard input goes to the focused element and a bare view has no
+    /// theme to give anything else a template).
+    ///
+    /// The negative half matters as much: an unmapped UiKey must return false WITHOUT touching
+    /// the view, because a host reads that false as "the game may have this key".</summary>
+    [Test]
+    public async Task key_and_text_events_reach_the_view_and_unmapped_keys_do_not()
+    {
+        var xamlPath = WriteXamlToTempDir();
+        var core = new NoesisViewCore(xamlPath, 200, 100);
+
+        try
+        {
+            core.Input.Tick(0.0);
+        }
+        catch (DllNotFoundException ex)
+        {
+            Skip.Test($"Noesis native library not loadable on this host: {ex.Message}");
+            return;
+        }
+
+        var root = (global::Noesis.FrameworkElement)core.View!.Content;
+        var keyDowns = new List<global::Noesis.Key>();
+        var keyUps = new List<global::Noesis.Key>();
+        var text = new List<string>();
+        root.KeyDown += (_, args) => keyDowns.Add(args.Key);
+        root.KeyUp += (_, args) => keyUps.Add(args.Key);
+        root.TextInput += (_, args) => text.Add(args.Text);
+
+        root.Focusable = true;
+        root.Focus();
+        core.Input.Tick(1.0 / 60.0);
+
+        _ = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.Enter));
+        _ = core.Input.Handle(WindowEvent.KeyUpOf(KeyboardKey.Enter));
+        _ = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.Backspace));
+        _ = core.Input.Handle(WindowEvent.Text('A'));
+
+        // Unmapped: no member of UiKey maps to it, so nothing may be routed and the verdict
+        // must be "not handled".
+        var unmappedHandled = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.None));
+        // A lone surrogate is not a character — it must not be forwarded as one.
+        var surrogateHandled = core.Input.Handle(WindowEvent.Text(0xD800));
+
+        await Assert.That(keyDowns).Contains(global::Noesis.Key.Return);
+        await Assert.That(keyDowns).Contains(global::Noesis.Key.Back);
+        await Assert.That(keyUps).Contains(global::Noesis.Key.Return);
+        await Assert.That(text).Contains("A");
+        await Assert.That(unmappedHandled).IsFalse();
+        await Assert.That(surrogateHandled).IsFalse();
+    }
+
+    /// <summary>A Scroll WindowEvent must arrive in the view as a Noesis wheel event — one notch is
     /// 120 units — and the sub-notch deltas a MacBook trackpad reports must accumulate instead of
     /// truncating to nothing. Asserted on the routed MouseWheel event rather than a ScrollViewer's
     /// offset because a bare view has no theme, so ScrollViewer gets no template (and therefore no
@@ -125,20 +186,20 @@ public class NoesisViewCoreTests
             (_, args) => deltas.Add((args.Delta, args.Orientation));
 
         // Park the pointer over the content: Noesis hit-tests a wheel event at a point, and the
-        // Scroll UiEvent carries only a delta.
-        _ = core.Input.Handle(UiEvent.PointerMove(100f, 50f));
+        // Scroll WindowEvent carries only a delta.
+        _ = core.Input.Handle(WindowEvent.PointerMove(100f, 50f));
         core.Input.Tick(1.0 / 60.0);
 
         // One whole notch down, the way a discrete mouse wheel reports it.
-        _ = core.Input.Handle(UiEvent.Scroll(0f, -1f));
+        _ = core.Input.Handle(WindowEvent.Scroll(0f, -1f));
         // ...then twenty fractions of a notch, the way a trackpad does. Each is worth 6 units, so
         // truncating per event would lose every one of them.
         for (var i = 0; i < 20; i++)
         {
-            _ = core.Input.Handle(UiEvent.Scroll(0f, -0.05f));
+            _ = core.Input.Handle(WindowEvent.Scroll(0f, -0.05f));
         }
         // ...and a horizontal notch, which must route as a horizontal wheel, not a vertical one.
-        _ = core.Input.Handle(UiEvent.Scroll(1f, 0f));
+        _ = core.Input.Handle(WindowEvent.Scroll(1f, 0f));
 
         var vertical = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Vertical);
         var horizontal = deltas.FindAll(d => d.Orientation == global::Noesis.Orientation.Horizontal);

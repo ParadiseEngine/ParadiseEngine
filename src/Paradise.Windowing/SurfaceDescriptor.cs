@@ -1,11 +1,17 @@
 using System;
 
-namespace Paradise.Rendering;
+namespace Paradise.Windowing;
 
 /// <summary>
-/// Encoding-agnostic native surface descriptor. The consumer (sample / engine glue) populates
-/// the platform tag and raw native handles read from its windowing library; the rendering
-/// backend OS-dispatches on <see cref="Platform"/> to wrap the right native surface variant.
+/// Encoding-agnostic native surface descriptor: the handles a renderer needs in order to
+/// present into a window. A window PRODUCES one (<see cref="IWindow.CreateSurface"/>) and a
+/// rendering backend CONSUMES it, OS-dispatching on <see cref="Platform"/> to wrap the right
+/// native surface variant.
+///
+/// It lives with the windowing contract rather than the rendering one because that is what it
+/// describes — an HWND, a CAMetalLayer, a wl_surface. Having it the other way round made
+/// Paradise.Windowing depend on all of Paradise.Rendering for this one struct, which in turn
+/// put a renderer in the dependency closure of anything that merely wanted the key vocabulary.
 /// <para>
 /// <see cref="DisplayHandle"/> meaning is platform-specific:
 /// Wayland — <c>wl_display*</c>; Xlib — <c>Display*</c>; otherwise unused.

@@ -19,5 +19,8 @@
   <ItemGroup>
     <PackageReference Include="Noesis.GUI" />
     <PackageReference Include="WebGPUSharp" />
+    <!-- The view half (NoesisViewCore) implements IUiInput, so the package that was
+         Paradise.Ui.Noesis.Host folded in here brings its one dependency with it. -->
+    <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
   </ItemGroup>
 </Project>

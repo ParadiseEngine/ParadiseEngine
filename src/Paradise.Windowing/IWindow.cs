@@ -1,5 +1,3 @@
-using Paradise.Rendering;
-
 namespace Paradise.Windowing;
 
 /// <summary>What a window is created from. Width and height are in PIXELS (the surface size a
@@ -28,7 +26,7 @@ public interface IWindowPlatform : IDisposable
     IWindow CreateWindow(in WindowOptions options);
 
     /// <summary>Drain the OS event queue and route: input events are timestamped and queued
-    /// for the addressed window's <see cref="IWindow.TryReadInput"/>, resizes update its size
+    /// for the addressed window's <see cref="IWindow.TryReadEvent"/>, resizes update its size
     /// and raise <see cref="IWindow.Resized"/>, a close request latches its
     /// <see cref="IWindow.CloseRequested"/>. MAIN THREAD, every frame.</summary>
     void Pump();
@@ -40,8 +38,8 @@ public interface IWindowPlatform : IDisposable
 /// queue is the platform's, and it routes.
 ///
 /// Input is TRANSPORT, not meaning: the window reports timestamped device transitions
-/// (<see cref="TimedRawInput"/>) and never learns what a key does — bindings, held state and
-/// chords belong to the consumer's input layer. <see cref="TryReadInput"/> and
+/// (<see cref="TimedWindowEvent"/>) and never learns what a key does — bindings, held state and
+/// chords belong to the consumer's input layer. <see cref="TryReadEvent"/> and
 /// <see cref="RequestClose"/> are thread-safe; everything else is main-thread.
 /// </summary>
 public interface IWindow : IDisposable
@@ -66,7 +64,7 @@ public interface IWindow : IDisposable
 
     /// <summary>Dequeue one raw device transition, oldest first. Thread-safe — this is the
     /// one-way stream a sim thread drains at its own pace.</summary>
-    bool TryReadInput(out TimedRawInput input);
+    bool TryReadEvent(out TimedWindowEvent input);
 
     /// <summary>The window's render surface, for a GPU renderer. Call once, on the main
     /// thread, and dispose the renderer BEFORE the window — the surface's native resources

@@ -1,4 +1,4 @@
-namespace Paradise.Ui.Noesis.Host;
+namespace Paradise.Ui.Noesis;
 
 /// <summary>The WebGPU render half of a NoesisGUI overlay: lazily initializes a
 /// <see cref="NoesisRenderDevice"/> against the shared <see cref="NoesisViewCore"/> once the
@@ -39,6 +39,11 @@ public sealed class NoesisOverlayRenderer(
             _device.PrewarmPipelines();
         }
 
+        // Deliberately ignores the changed-flag and re-records every frame. The backbuffer is a
+        // fresh swapchain texture each time and the scene passes have just painted over it, so
+        // "nothing changed in the UI" does NOT mean the last UI image is still there — skipping
+        // would present a frame with no UI on it. The flag is for hosts drawing into a target
+        // that persists; see NoesisViewCore.TryUpdateRenderTree(out bool).
         if (!core.TryUpdateRenderTree()) return;
         _device.BeginFrame(encoder, backbuffer, core.Width, core.Height);
         view.Renderer.RenderOffscreen();

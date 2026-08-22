@@ -2,17 +2,6 @@ using System;
 
 namespace Paradise.Rendering;
 
-/// <summary>Native windowing platform of a <see cref="SurfaceDescriptor"/>. Selects which native handle the backend consumes.</summary>
-public enum SurfacePlatform : byte
-{
-    Unknown = 0,
-    Win32,
-    Xlib,
-    Wayland,
-    Cocoa,
-    Headless,
-}
-
 /// <summary>How a buffer may be used by the GPU. Combine with bitwise OR.</summary>
 [Flags]
 public enum BufferUsage : uint

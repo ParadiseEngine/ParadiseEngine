@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 namespace Paradise.Rendering.Test;
 
 public class SurfaceDescriptorTests

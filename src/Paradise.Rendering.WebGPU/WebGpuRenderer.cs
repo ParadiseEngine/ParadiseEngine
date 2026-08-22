@@ -1,3 +1,4 @@
+using Paradise.Windowing;
 using System;
 using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;

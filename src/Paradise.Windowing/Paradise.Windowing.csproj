@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <!-- For SurfaceDescriptor/SurfacePlatform: a window's one rendering-facing product. -->
-    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,11 +1,15 @@
 namespace Paradise.Windowing;
 
 /// <summary>Every keyboard key a window backend can report. Raw identity, not meaning — full
-/// fidelity is free here because raw keys are only TRANSPORTED (as <see cref="RawInput"/>
+/// fidelity is free here because raw keys are only TRANSPORTED (as <see cref="WindowEvent"/>
 /// events); what a key does is the consuming game's binding to decide, and whatever held
 /// state a game keeps is its own, sized to its own action vocabulary.</summary>
 public enum KeyboardKey : byte
 {
+    /// <summary>No key. Zero so that a defaulted field means "nothing" rather than [A] —
+    /// consumers that carry a key alongside other data (<c>WindowEvent</c>) rely on it.</summary>
+    None = 0,
+
     // Letters.
     A, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,

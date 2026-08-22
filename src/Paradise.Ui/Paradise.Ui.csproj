@@ -10,4 +10,12 @@
     <Description>Engine-neutral UI input contract for Paradise Engine hosts: the UiEvent stream, the sim-thread IUiInput half, and CompositeUiInput fan-out for stacking UI systems.</Description>
     <PackageTags>ui;input;game-dev</PackageTags>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- For the input vocabulary — KeyboardKey and friends. One table for the whole engine
+         rather than a parallel UI-only enum that drifts from it. Paradise.Windowing has NO
+         dependencies of its own, so a Godot or browser host that consumes this contract and
+         owns no window still pays only for the enums. -->
+    <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
+  </ItemGroup>
+
 </Project>
