@@ -52,7 +52,7 @@ public class AudioEmitterDataShapeTests
         // An entity that authors nothing has an empty list, not a component that reads as null.
         // (This used to prove "absent slot deserializes to null"; the slot is gone, but the
         // property it protected — a scene without audio still reads — is the same one.)
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":3,"Entities":[{"Id":"E"}]}""");
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":4,"Entities":[{"Id":"E"}]}""");
         await Assert.That(read.Entities[0].Get<AudioEmitterComponentData>()).IsNull();
     }
 

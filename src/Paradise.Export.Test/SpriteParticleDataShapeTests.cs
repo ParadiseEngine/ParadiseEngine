@@ -99,7 +99,7 @@ public class SpriteParticleDataShapeTests
         // An entity that authors nothing has an empty list, and asking it for a component it does
         // not have is null rather than a throw. (This used to say "absent slot reads as null" —
         // same property, one less way to express absence.)
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":3,"Entities":[{"Id":"E"}]}""");
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":4,"Entities":[{"Id":"E"}]}""");
         await Assert.That(read.Entities[0].Get<SpriteAnimationComponentData>()).IsNull();
         await Assert.That(read.Entities[0].Get<ParticleEmitterComponentData>()).IsNull();
     }

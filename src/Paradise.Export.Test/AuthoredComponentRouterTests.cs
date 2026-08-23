@@ -33,7 +33,7 @@ public class AuthoredComponentRouterTests
     [Test]
     public async Task identity_lands_on_the_entity_not_under_components()
     {
-        var entity = Route(Payload(ParadiseComponentIds.Identity,
+        var entity = Route(Payload(typeof(IdentityComponentData).GUID,
             """{"Kind":"Door","IsActive":false,"InitialAnimation":"Open","DisplayName":"Front door"}"""));
 
         await Assert.That(entity.Kind).IsEqualTo("Door");
@@ -51,7 +51,7 @@ public class AuthoredComponentRouterTests
     public async Task identity_leaves_unauthored_optional_fields_alone()
     {
         var entity = new LevelEntityData { Id = "Thing", DisplayName = "From the node", SpawnPhase = "LevelStart" };
-        AuthoredComponentRouter.Apply(entity, Payload(ParadiseComponentIds.Identity, """{"Kind":"Prop"}"""));
+        AuthoredComponentRouter.Apply(entity, Payload(typeof(IdentityComponentData).GUID, """{"Kind":"Prop"}"""));
 
         await Assert.That(entity.DisplayName).IsEqualTo("From the node");
         await Assert.That(entity.SpawnPhase).IsEqualTo("LevelStart");
@@ -61,14 +61,14 @@ public class AuthoredComponentRouterTests
     public async Task every_engine_component_reaches_its_typed_slot()
     {
         var entity = Route(
-            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
-            Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
-            Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3.5,"IdleClip":"Idle"}"""),
-            Payload(ParadiseComponentIds.Interactable, """{"DisplayName":"Lever"}"""),
-            Payload(ParadiseComponentIds.SpriteAnimation, """{"Sheet":"sprites/torch.ktx2","Columns":4}"""),
-            Payload(ParadiseComponentIds.ParticleEmitter, """{"Kind":"Voxel","EmitRate":12}"""),
-            Payload(ParadiseComponentIds.AudioEmitter, """{"StartEvent":"Play_Torch","Is3D":true}"""),
-            Payload(ParadiseComponentIds.Collider,
+            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
+            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
+            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3.5,"IdleClip":"Idle"}"""),
+            Payload(typeof(EntityInteractableComponentData).GUID, """{"DisplayName":"Lever"}"""),
+            Payload(typeof(SpriteAnimationComponentData).GUID, """{"Sheet":"sprites/torch.ktx2","Columns":4}"""),
+            Payload(typeof(ParticleEmitterComponentData).GUID, """{"Kind":"Voxel","EmitRate":12}"""),
+            Payload(typeof(AudioEmitterComponentData).GUID, """{"StartEvent":"Play_Torch","Is3D":true}"""),
+            Payload(typeof(ColliderComponentData).GUID,
                 """{"Colliders":[{"ShapeType":"Box","Size":[1,2,3],"IsTrigger":true}]}"""));
 
         await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("Models/knight.glb");
@@ -113,8 +113,8 @@ public class AuthoredComponentRouterTests
     public async Task materialize_returns_engine_and_game_components_as_instances()
     {
         var entity = Route(
-            Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
-            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
+            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
+            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
             Payload(LedgeId, """{"Friction":0.35,"IsTrigger":true,"Label":"north"}"""));
 
         var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry());
@@ -131,7 +131,7 @@ public class AuthoredComponentRouterTests
     public async Task materialize_without_a_registry_still_yields_the_engine_components()
     {
         var entity = Route(
-            Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
+            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3}"""),
             Payload(LedgeId, """{"Friction":0.1}"""));
 
         var unresolved = new List<AuthoredComponentData>();
@@ -217,7 +217,7 @@ public class AuthoredComponentRouterTests
     {
         AuthoredComponentData[] document =
         [
-            Payload(ParadiseComponentIds.Rigidbody, """{"BodyType":"Dynamic","Mass":2.5}"""),
+            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
             Payload(LedgeId, """{"Friction":0.35,"Label":"north"}"""),
         ];
 
@@ -235,7 +235,7 @@ public class AuthoredComponentRouterTests
     {
         AuthoredComponentData[] payloads =
         [
-            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
+            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
             Payload(LedgeId, """{"Friction":0.5,"Label":"south"}"""),
         ];
 
@@ -339,21 +339,49 @@ public class AuthoredComponentRouterTests
     }
 
     /// <summary>
-    /// The id a record is AUTHORED under is the id the router DISPATCHES on.
+    /// The engine's ten component ids, pinned to their literal values.
     ///
-    /// Two halves of the same wiring that live in different files: the schema and registry
-    /// generators read the record's <c>[Guid]</c>, while the router switches on
-    /// <see cref="ParadiseComponentIds"/>. Both spell it through the same constant today, so this
-    /// only fails if someone pastes a literal into one of them — which is exactly the mistake that
-    /// is otherwise invisible until a payload silently routes nowhere.
+    /// These are WIRE CONTRACT. Every committed scene in every game repo stores them as the
+    /// <c>Id</c> of each authored payload, so changing one does not fail a build — it makes every
+    /// document that carries the old value route nowhere, which surfaces as a component that
+    /// silently stopped being read. Nothing else in the engine would notice: the generator, the
+    /// registry and the router all read the same <c>[Guid]</c>, so they agree with each other
+    /// about a value that is now wrong everywhere else.
+    ///
+    /// This replaced a test asserting the router's constant matched the record's attribute. That
+    /// pairing was real while <c>ParadiseComponentIds</c> held a second copy; once the attribute
+    /// became the only source, the assertion reduced to "Type.GUID reads GuidAttribute" — a test
+    /// of the BCL. The risk it was aimed at (an id drifting unnoticed) is the one pinned here.
+    ///
+    /// A NEW component adds a line. A CHANGED line is the thing to stop and think about.
     /// </summary>
     [Test]
-    public async Task an_engine_record_is_authored_under_the_id_the_router_dispatches_on()
+    public async Task the_engine_component_ids_are_what_every_exported_document_already_says()
     {
-        var authored = (GuidAttribute)Attribute.GetCustomAttribute(
-            typeof(RigidbodyComponentData), typeof(GuidAttribute))!;
+        (Type Record, string Id)[] contract =
+        [
+            (typeof(IdentityComponentData), "0c068bf4-495f-495b-be8d-9b02042a41c2"),
+            (typeof(RenderableComponentData), "f2c0357e-94dd-4a5a-9803-518066cb54b2"),
+            (typeof(ColliderComponentData), "e1cd1bc8-86f2-4225-adc9-4a324c70ebf9"),
+            (typeof(RigidbodyComponentData), "b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"),
+            (typeof(AgentComponentData), "5801915b-3d0c-4940-8970-7d1487b991cf"),
+            (typeof(EntityInteractableComponentData), "0283ee5f-775b-412b-a91c-03ecd9b61165"),
+            (typeof(SpriteAnimationComponentData), "d3e53cd4-89c6-4ca8-851e-7596da889c68"),
+            (typeof(ParticleEmitterComponentData), "1b4d1bdd-dea1-4b86-9b6a-879c46346b9e"),
+            (typeof(AudioEmitterComponentData), "e6ec7f42-df09-4ec9-af06-128ddf3eda8e"),
+            (typeof(SceneLightData), "fc886b84-c48c-4415-afd9-b03d6faf5ab7"),
+        ];
 
-        await Assert.That(Guid.Parse(authored.Value)).IsEqualTo(ParadiseComponentIds.Rigidbody);
+        foreach ((Type record, string id) in contract)
+        {
+            await Assert.That(record.GUID).IsEqualTo(Guid.Parse(id))
+                .Because($"{record.Name}'s id is stored in every exported document");
+        }
+
+        // Distinct, because two records sharing an id makes whichever the registry reaches first
+        // answer for both. The generator raises PAUT006 for that inside one assembly; this covers
+        // the list above being edited by copy-paste, which is how a duplicate gets written.
+        await Assert.That(contract.Select(c => c.Id).Distinct().Count()).IsEqualTo(contract.Length);
     }
 
     /// <summary>A payload that cannot be read as the component it claims to be is REPORTED, not
@@ -369,8 +397,8 @@ public class AuthoredComponentRouterTests
         var entity = new LevelEntityData { Id = "Thing" };
         var routed = AuthoredComponentRouter.ApplyAll(entity, new[]
         {
-            Payload(ParadiseComponentIds.Rigidbody, """{"Mass":"not a number"}"""),
-            Payload(ParadiseComponentIds.Agent, """{"MoveSpeed":3}"""),
+            Payload(typeof(RigidbodyComponentData).GUID, """{"Mass":"not a number"}"""),
+            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3}"""),
         });
 
         // Nothing fails at route time any more, and both entries are on the entity.
@@ -382,7 +410,7 @@ public class AuthoredComponentRouterTests
             AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
 
         await Assert.That(unresolved.Select(c => c.Id))
-            .IsEquivalentTo(new[] { ParadiseComponentIds.Rigidbody });
+            .IsEquivalentTo(new[] { typeof(RigidbodyComponentData).GUID });
         // The good one still materialized: one bad component does not cost the entity the rest.
         await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
     }
@@ -394,8 +422,8 @@ public class AuthoredComponentRouterTests
     {
         var routed = new LevelData();
         routed.Entities.Add(Route(
-            Payload(ParadiseComponentIds.Identity, """{"Kind":"Prop","IsActive":true}"""),
-            Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}""")));
+            Payload(typeof(IdentityComponentData).GUID, """{"Kind":"Prop","IsActive":true}"""),
+            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}""")));
 
         var handBuilt = new LevelData();
         handBuilt.Entities.Add(new LevelEntityData
@@ -410,7 +438,7 @@ public class AuthoredComponentRouterTests
             // editor wrote.
             Components =
             {
-                Payload(ParadiseComponentIds.Renderable, """{"Mesh":"Models/knight.glb"}"""),
+                Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
             },
         });
 

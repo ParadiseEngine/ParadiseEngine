@@ -28,7 +28,7 @@ public class AuthoredDocumentTests
         var document = Parse($$"""
             {
               "Components": [
-                { "Id": "{{ParadiseComponentIds.Rigidbody}}", "Data": {"BodyType":"Dynamic","Mass":2.5} },
+                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"BodyType":"Dynamic","Mass":2.5} },
                 { "Id": "{{LedgeId}}", "Data": {"Friction":0.35,"Label":"north"} }
               ]
             }
@@ -285,7 +285,7 @@ public class AuthoredDocumentTests
             {
               "Components": [
                 { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
-                { "Id": "{{ParadiseComponentIds.Rigidbody}}", "Data": {"Mass":1} }
+                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"Mass":1} }
               ]
             }
             """);
@@ -337,7 +337,7 @@ public class AuthoredDocumentTests
             {
               "Components": [
                 { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
-                { "Id": "{{ParadiseComponentIds.Rigidbody}}", "Data": {"Mass":1} }
+                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"Mass":1} }
               ]
             }
             """);

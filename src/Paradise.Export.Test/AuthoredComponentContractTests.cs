@@ -156,6 +156,44 @@ public class AuthoredComponentContractTests
         await Assert.That(thrown.Message).Contains("Re-export");
     }
 
+    /// <summary>
+    /// v3 is refused too — and this is the one that would otherwise pass.
+    ///
+    /// A v3 document deserializes PERFECTLY under a v4 reader. Its entity-level "Materials" simply
+    /// matches no property and STJ drops it, so the scene loads with every entity, every mesh and
+    /// no material overrides at all: the district renders in the GLBs' own colours and nothing
+    /// anywhere says why. The version gate is the only thing standing between that document and a
+    /// silently wrong render, which is why the break is enforced rather than shimmed.
+    /// </summary>
+    [Test]
+    public async Task a_document_from_before_materials_moved_is_refused_by_version()
+    {
+        const string v3 = """
+        {
+          "SchemaVersion": 3,
+          "Entities": [
+            {
+              "Id": "Ground",
+              "Materials": ["materials/mat_ground.json"],
+              "Components": [
+                {
+                  "Id": "f2c0357e-94dd-4a5a-9803-518066cb54b2",
+                  "Type": "Paradise.Export.Data.RenderableComponentData",
+                  "Data": { "Mesh": "Models/Ground.glb", "MeshNode": null }
+                }
+              ]
+            }
+          ]
+        }
+        """;
+
+        var thrown = Assert.Throws<JsonException>(() => ExportJsonReader.ReadLevel(v3));
+        await Assert.That(thrown!.Message).Contains("version 3");
+        // The message must name the way OUT, not just the problem: this break, unlike v2's, has a
+        // one-pass conversion, and a reader who is not told that will re-export by hand instead.
+        await Assert.That(thrown.Message).Contains("migrate_level_v3_to_v4.py");
+    }
+
     [Test]
     public async Task a_document_from_a_newer_build_is_refused_too()
     {

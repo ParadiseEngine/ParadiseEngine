@@ -39,13 +39,13 @@ public class AuthoringSchemaMergeTests
     {
         var engine = Doc(new AuthoredComponentSchema
         {
-            Id = Paradise.Export.Data.ParadiseComponentIds.Rigidbody,
+            Id = typeof(Paradise.Export.Data.RigidbodyComponentData).GUID,
             Type = "Paradise.Export.Data.RigidbodyComponentData",
             DisplayName = "Engine",
         });
         var game = Doc(new AuthoredComponentSchema
         {
-            Id = Paradise.Export.Data.ParadiseComponentIds.Rigidbody,
+            Id = typeof(Paradise.Export.Data.RigidbodyComponentData).GUID,
             Type = "MyGame.Rigidbody",
             DisplayName = "Game",
         });
@@ -80,7 +80,7 @@ public class AuthoringSchemaMergeTests
         var engineJson = global::Paradise.Export.AuthoringSchema.Json;
         var engine = AuthoringSchemaReader.Read(engineJson);
         var rigidbody = engine.Components.Single(
-            c => c.Id == Paradise.Export.Data.ParadiseComponentIds.Rigidbody);
+            c => c.Id == typeof(Paradise.Export.Data.RigidbodyComponentData).GUID);
         await Assert.That(rigidbody.Type).IsEqualTo("Paradise.Export.Data.RigidbodyComponentData");
         await Assert.That(rigidbody.Fields.Select(f => f.Name)).Contains("Mass");
         await Assert.That(rigidbody.Fields.Single(f => f.Name == "Mass").Unit)
