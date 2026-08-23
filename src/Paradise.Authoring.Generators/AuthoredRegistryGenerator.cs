@@ -350,7 +350,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
         if (field.Items is { } element)
         {
             source.Append("                    var items = new global::System.Collections.Generic.List<")
-                  .Append(element.ClrType).AppendLine(">();");
+                  .Append(element.ClrType).Append(element.ClrNullable ? "?" : "").AppendLine(">();");
             source.AppendLine("                    foreach (var element in property.Value.EnumerateArray())");
             source.AppendLine("                    {");
             source.Append("                        items.Add(").Append(ReadExpression(element, "element", helpers)).AppendLine(");");

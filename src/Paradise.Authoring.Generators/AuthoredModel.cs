@@ -46,8 +46,19 @@ internal sealed class AuthoredField
     /// lives on <see cref="Items"/>.</summary>
     public string? ClrKind;
     /// <summary>Fully qualified CLR type of the value (element type for lists) — what the reader
-    /// casts an enum to, constructs for a composed group, or instantiates a list of.</summary>
+    /// casts an enum to, constructs for a composed group, or instantiates a list of.
+    ///
+    /// UNANNOTATED: no trailing <c>?</c> even for a nullable reference type, because this string
+    /// is also a reader-method name fragment and an <c>Enum.Parse&lt;T&gt;</c> argument, and
+    /// neither tolerates one. Nullability travels separately in <see cref="ClrNullable"/>.</summary>
     public string ClrType = "";
+    /// <summary>The value is a NULLABLE reference type (<c>string?</c>, not <c>string</c>).
+    ///
+    /// Needed for exactly one emission: <c>new List&lt;T&gt;</c> for a list field, which must
+    /// match the property's declared element annotation or the assignment is CS8619. A
+    /// <c>List&lt;string?&gt;</c> property — material slots, where null means "the mesh's own
+    /// material wins" — does not accept a <c>List&lt;string&gt;</c>.</summary>
+    public bool ClrNullable;
     /// <summary>"array" (needs ToArray) or "list" (List&lt;T&gt; assigns to List/IList/
     /// IReadOnlyList) — set only on the wrapper field of a list.</summary>
     public string? ListKind;
@@ -254,6 +265,7 @@ internal static class AuthoredModel
                 AuthoredBy = authoredBy,
                 ClrKind = nested is not null ? "object" : ClrKindOf(valueType),
                 ClrType = valueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                ClrNullable = valueType is { IsReferenceType: true, NullableAnnotation: NullableAnnotation.Annotated },
                 Settable = member.SetMethod is { IsInitOnly: false },
                 Required = member.IsRequired,
                 NestedConstructible = nested is null || HasParameterlessCtor(valueType),

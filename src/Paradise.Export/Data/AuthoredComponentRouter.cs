@@ -12,7 +12,7 @@ namespace Paradise.Export.Data
     ///
     /// TWO destinations, and the second is "the list":
     ///
-    /// - <see cref="ParadiseComponentIds.Identity"/> lands on <see cref="LevelEntityData"/> itself.
+    /// - <see cref="IdentityComponentData"/> lands on <see cref="LevelEntityData"/> itself.
     ///   Identity is what an entity IS, not something it has, so it has no entry of its own.
     /// - EVERYTHING else — the engine's components and a game's alike — is appended to
     ///   <see cref="LevelEntityData.Components"/> untouched.
@@ -30,6 +30,15 @@ namespace Paradise.Export.Data
     public static class AuthoredComponentRouter
     {
         /// <summary>
+        /// The one id this class compares against, read off the record's own <c>[Guid]</c>.
+        ///
+        /// Cached rather than written <c>typeof(IdentityComponentData).GUID</c> at the comparison:
+        /// <see cref="Apply"/> runs once per component per entity, and that expression is a
+        /// metadata lookup, not a field read.
+        /// </summary>
+        private static readonly Guid IdentityId = typeof(IdentityComponentData).GUID;
+
+        /// <summary>
         /// Apply one authored component to an entity. Returns false when the payload names an
         /// engine id but cannot be read as that component — the caller should report it rather than
         /// silently drop authored data.
@@ -42,7 +51,7 @@ namespace Paradise.Export.Data
         {
             Guid id = component.Id;
 
-            if (id == ParadiseComponentIds.Identity)
+            if (id == IdentityId)
             {
                 if (Read<IdentityComponentData>(component) is not { } identity)
                 {

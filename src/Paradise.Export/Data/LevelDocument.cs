@@ -40,18 +40,30 @@ namespace Paradise.Export.Data
         /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader
         /// would misparse.
         ///
+        /// v4 moved the entity's <c>Materials</c> slot list onto
+        /// <see cref="RenderableComponentData"/>. A v3 document parses cleanly here and loses the
+        /// slots in silence — every entity keeps its mesh and renders in the GLB's own embedded
+        /// materials — which is exactly the failure a version gate exists to prevent, so v3 is
+        /// refused rather than read.
+        ///
         /// v3 replaced the entity's nine named component slots with ONE list of
         /// <see cref="AuthoredComponentData"/>. Not additive in either direction: a v2 document's
         /// <c>"Components": {"Rigidbody": {...}}</c> is an object where this build expects an
-        /// array, and there is no mapping back. Such a document is REJECTED on read rather than
-        /// deserialized into an entity with no components at all — see
-        /// <see cref="Serialization.ExportJsonReader.ReadLevel"/>. Re-export it.</summary>
-        public const int CurrentSchemaVersion = 3;
+        /// array.
+        ///
+        /// Both are REJECTED on read — see
+        /// <see cref="Serialization.ExportJsonReader.ReadLevel"/>.</summary>
+        public const int CurrentSchemaVersion = 4;
 
         /// <summary>The oldest document this build still understands. Equal to
-        /// <see cref="CurrentSchemaVersion"/>, and that is the point rather than an oversight:
-        /// there is no upgrade path from the named slots to the list.</summary>
-        public const int MinimumSupportedVersion = 3;
+        /// <see cref="CurrentSchemaVersion"/>, and that is the point rather than an oversight.
+        ///
+        /// v3 COULD have been read with a shim — moving a key is mechanical, unlike v2's named
+        /// slots. It is refused anyway, because a shim is a second reading of the format that
+        /// lives forever: every reader after it has to know both shapes, and the migration nobody
+        /// is forced to do is the one nobody does. <c>tools/migrate_level_v3_to_v4.py</c> converts
+        /// a document in one pass, and re-exporting is better still.</summary>
+        public const int MinimumSupportedVersion = 4;
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
         public CameraData? Camera { get; set; }
@@ -103,7 +115,9 @@ namespace Paradise.Export.Data
         public Vector3 LocalScale { get; set; } = Vector3.One;
         public Matrix4x4? LocalMatrix { get; set; }
         public Matrix4x4? WorldMatrix { get; set; }
-        public List<string?> Materials { get; set; } = new();
+        // Materials used to sit here. It moved onto RenderableComponentData in v4 — see that
+        // record for why. Nothing replaces it at this level: an entity that renders nothing has
+        // no slots to override.
         public PrefabOverrideData Overrides { get; set; } = new();
         /// <summary>Every component authored on this entity, engine's and game's alike, each as
         /// an id + type + opaque payload.
@@ -157,18 +171,36 @@ namespace Paradise.Export.Data
         public JsonElement Data { get; set; }
     }
 
+    // ---- the components ---------------------------------------------------------------------
+    //
+    // Each carries its identity in its own [Guid], and that attribute is the ONLY place the id
+    // exists: the Roslyn generator in Paradise.Authoring.Generators reads it to build the registry
+    // and the authoring schema, and every runtime comparison goes through typeof(T).GUID. There
+    // was a ParadiseComponentIds table holding a second copy of all ten; it was the last remnant
+    // of the two-tier design v3 deleted, and a second copy of an identity is a thing that can
+    // disagree with the first.
+    //
+    // ADDING ONE: run `uuidgen` (or Guid.NewGuid()) and paste the result. Never hand-type a value
+    // and never continue a visible pattern. These were a counted sequence once — same prefix,
+    // last digit incremented — and the sequence read as an invitation: the obvious way to add the
+    // eleventh component was to type the next number, which is both how the tenth got its id and
+    // how a game repo would mint one that collides with the engine. A generated id has no next.
+
     /// <summary>
-    /// Renderable marker + mesh reference (schema v2). <see cref="Mesh"/> is a GLB path
+    /// Renderable marker, mesh reference and material slots. <see cref="Mesh"/> is a GLB path
     /// relative to <c>data/</c> (e.g. <c>meshes/&lt;key&gt;.glb</c>) holding the entity's visual
-    /// subtree in ENTITY-LOCAL space (the entity's WorldMatrix places it). Contract rule: the
-    /// GLB's primitive order equals <see cref="LevelEntityData.Materials"/> slot order — both
-    /// walk the same MeshInstance3D traversal; a null slot means the GLB's own embedded
-    /// material is authoritative. Textures inside the GLB are ALWAYS KTX2 (the toktx pass is
-    /// mandatory for textured meshes; the engine reader rejects PNG/JPEG). <see cref="MeshNode"/>
-    /// optionally names a single node inside the GLB (reserved; null = whole default scene).
-    /// Schema v1 documents carry neither field (null = no mesh exported).
+    /// subtree in ENTITY-LOCAL space (the entity's WorldMatrix places it). Textures inside the GLB
+    /// are ALWAYS KTX2 (the toktx pass is mandatory for textured meshes; the engine reader rejects
+    /// PNG/JPEG). <see cref="MeshNode"/> optionally names a single node inside the GLB (reserved;
+    /// null = whole default scene).
+    ///
+    /// <see cref="Materials"/> joined this record in schema v4. It was a field on the ENTITY, one
+    /// level up, which made the contract's central rule — slot order equals the GLB's primitive
+    /// order — a statement about two fields that nothing held together: an entity could carry
+    /// slots with no mesh to index them against, and every reader had to fetch the renderable
+    /// anyway to know what the slots meant. They are one thing, so they are one record.
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.Renderable)]
+    [Guid("f2c0357e-94dd-4a5a-9803-518066cb54b2")]
     [Authored(DisplayName = "Renderable")]
     public sealed record RenderableComponentData
     {
@@ -188,9 +220,24 @@ namespace Paradise.Export.Data
 
         [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
         public string? MeshNode { get; set; }
+
+        /// <summary>
+        /// Per-primitive material overrides, positionally paired with <see cref="Mesh"/>.
+        ///
+        /// <b>Slot order IS the contract:</b> the GLB's primitive order equals this list's order —
+        /// both hosts walk the same MeshInstance3D traversal to produce it. A null slot means the
+        /// GLB's own embedded material is authoritative, which is why the list is of nullable
+        /// strings and why a shorter list is legal: it simply overrides fewer primitives.
+        ///
+        /// DERIVED, not typed. Both editors read it off the object's material slots at export and
+        /// overwrite whatever is here, so an authored edit does not survive a re-export.
+        /// </summary>
+        [AuthoredByHost(AuthoredBySources.Mesh)]
+        [AuthorDoc("Material overrides, one per GLB primitive. Derived from the mesh at export.")]
+        public List<string?> Materials { get; set; } = new();
     }
 
-    [Guid(ParadiseComponentIds.Raw.Collider)]
+    [Guid("e1cd1bc8-86f2-4225-adc9-4a324c70ebf9")]
     [Authored(DisplayName = "Collider")]
     public sealed record ColliderComponentData
     {
@@ -202,7 +249,7 @@ namespace Paradise.Export.Data
 
     /// <summary>The first engine component to declare its own authoring surface, and the template
     /// the other eight followed.</summary>
-    [Guid(ParadiseComponentIds.Raw.Rigidbody)]
+    [Guid("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11")]
     [Authored(DisplayName = "Rigidbody")]
     public sealed record RigidbodyComponentData
     {
@@ -232,7 +279,7 @@ namespace Paradise.Export.Data
         public string? LayerName { get; set; } = "";
     }
 
-    [Guid(ParadiseComponentIds.Raw.Agent)]
+    [Guid("5801915b-3d0c-4940-8970-7d1487b991cf")]
     [Authored(DisplayName = "Agent (movement)")]
     public sealed record AgentComponentData
     {
@@ -252,7 +299,7 @@ namespace Paradise.Export.Data
         public string? WalkClip { get; set; } = "Walk";
     }
 
-    [Guid(ParadiseComponentIds.Raw.Interactable)]
+    [Guid("0283ee5f-775b-412b-a91c-03ecd9b61165")]
     [Authored(DisplayName = "Interactable")]
     public sealed record EntityInteractableComponentData
     {
@@ -269,7 +316,7 @@ namespace Paradise.Export.Data
     /// means the full <see cref="Columns"/>×<see cref="Rows"/> grid. The SIMULATION owns the
     /// clock (frame index lives in the world snapshot) so both hosts show the same frame.
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.SpriteAnimation)]
+    [Guid("d3e53cd4-89c6-4ca8-851e-7596da889c68")]
     [Authored(DisplayName = "Sprite animation")]
     // The WHOLE record is authored by pointing at a sprite in the host: its sheet, grid and quad
     // size are read off that object at export rather than retyped here.
@@ -308,7 +355,7 @@ namespace Paradise.Export.Data
     /// Particles emit in a cone of <see cref="SpreadDegrees"/> half-angle around the entity's
     /// +Y axis and live in WORLD space (a moving emitter leaves a trail).
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.ParticleEmitter)]
+    [Guid("1b4d1bdd-dea1-4b86-9b6a-879c46346b9e")]
     [Authored(DisplayName = "Particle emitter")]
     public sealed record ParticleEmitterComponentData
     {
@@ -377,7 +424,7 @@ namespace Paradise.Export.Data
     /// names only exist inside the audio project, which the exporter cannot see — so an emitter
     /// whose event was renamed goes quiet rather than failing the export.
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.AudioEmitter)]
+    [Guid("e6ec7f42-df09-4ec9-af06-128ddf3eda8e")]
     [Authored(DisplayName = "Audio emitter")]
     public sealed record AudioEmitterComponentData
     {
@@ -666,7 +713,7 @@ namespace Paradise.Export.Data
     /// light is only ever described once. Aiming is done by ROTATING the referenced object —
     /// <see cref="Direction"/> is baked from its orientation, not typed.
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.Light)]
+    [Guid("fc886b84-c48c-4415-afd9-b03d6faf5ab7")]
     [Authored(DisplayName = "Light")]
     [AuthoredByHost(AuthoredBySources.Light)]
     public sealed record SceneLightData
@@ -712,7 +759,7 @@ namespace Paradise.Export.Data
     /// The entity's GUID is deliberately absent: minting one and keeping it unique across a scene
     /// is behaviour, and behaviour is the one thing a schema cannot carry.
     /// </summary>
-    [Guid(ParadiseComponentIds.Raw.Identity)]
+    [Guid("0c068bf4-495f-495b-be8d-9b02042a41c2")]
     [Authored(DisplayName = "Identity")]
     public sealed record IdentityComponentData
     {

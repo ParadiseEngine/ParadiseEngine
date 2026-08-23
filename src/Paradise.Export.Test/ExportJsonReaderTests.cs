@@ -50,10 +50,13 @@ public class ExportJsonReaderTests
         {
             Id = "Ball1",
             WorldMatrix = Matrix4x4.CreateTranslation(1f, 0.85f, 2f),
-            Materials = ["materials/mat_ball1.json"],
             Components =
             {
-                LevelEntityExtensions.Entry(new RenderableComponentData { Mesh = "meshes/abc.glb" }),
+                LevelEntityExtensions.Entry(new RenderableComponentData
+                {
+                    Mesh = "meshes/abc.glb",
+                    Materials = ["materials/mat_ball1.json"],
+                }),
                 LevelEntityExtensions.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Dynamic, Mass = 2f }),
                 LevelEntityExtensions.Entry(new ColliderComponentData
                 {
