@@ -7,7 +7,14 @@
     <LangVersion>14.0</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- ON so the compiler VALIDATES doc comments: a <see cref="..."/> naming something that no
+         longer exists is CS1574, and with warnings-as-errors that breaks the build instead of
+         rotting silently. Three dangling crefs were found by hand before this was turned on.
+         CS1591/CS1573 (missing comment, missing param tag) are suppressed deliberately: the goal
+         is references that RESOLVE, not blanket doc coverage, and requiring the latter across the
+         engine would be a different decision made by accident. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Version>0.1.1</Version>
   </PropertyGroup>

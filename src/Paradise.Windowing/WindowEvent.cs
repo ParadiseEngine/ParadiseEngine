@@ -77,7 +77,7 @@ public enum GamepadAxis : byte
 /// <summary>
 /// One raw input event, verbatim as the window backend reported it. One event type across
 /// devices and kinds (a tape is one stream) — <see cref="Kind"/> says which fields mean
-/// anything, <see cref="Device"/> discriminates <see cref="Code"/>. Construct through the
+/// anything, <see cref="Source"/> discriminates <see cref="Code"/>. Construct through the
 /// factories and read through the typed accessors rather than touching <see cref="Code"/>
 /// directly.
 ///
@@ -170,13 +170,13 @@ public readonly record struct WindowEvent(
     public static WindowEvent Resize(float width, float height) =>
         new(WindowEventKind.Resize, EventSource.Window, 0, 0, false, width, height, 0u);
 
-    /// <summary>The code as a keyboard key. Meaningful only when <see cref="Device"/> says so.</summary>
+    /// <summary>The code as a keyboard key. Meaningful only when <see cref="Source"/> says so.</summary>
     public KeyboardKey KeyboardKey => (KeyboardKey)Code;
 
-    /// <summary>The code as a gamepad button. Meaningful only when <see cref="Device"/> says so.</summary>
+    /// <summary>The code as a gamepad button. Meaningful only when <see cref="Source"/> says so.</summary>
     public GamepadButton GamepadButton => (GamepadButton)Code;
 
-    /// <summary>The code as a pointer button. Meaningful only when <see cref="Device"/> says so.</summary>
+    /// <summary>The code as a pointer button. Meaningful only when <see cref="Source"/> says so.</summary>
     public PointerButton PointerButton => (PointerButton)Code;
 
     /// <summary>The code as a gamepad axis. Meaningful only when <see cref="Kind"/> says so.</summary>

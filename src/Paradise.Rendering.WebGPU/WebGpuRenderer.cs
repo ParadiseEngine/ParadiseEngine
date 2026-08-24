@@ -1166,7 +1166,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         ShaderProgramLoader.Load(assembly, logicalNamePrefix);
 
     /// <summary>Test-only accessor for the live-shader-slot count. Used by regression tests that
-    /// assert repeated high-level <see cref="CreatePipeline(in ShaderProgramDesc, TextureFormat)"/>
+    /// assert repeated high-level <c>CreatePipeline</c>
     /// calls don't grow the shader slot table (iter-6 fix for the slot-leak OpenCara flagged on
     /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
     /// take a dependency on internal device counters.</summary>
