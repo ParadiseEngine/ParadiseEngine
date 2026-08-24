@@ -65,6 +65,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <see cref="_captureGate"/> — but every other guard in this file is a plain read of it.</summary>
     private volatile bool _disposed;
 
+    /// <summary>Claimed exactly once, by whichever thread reaches <see cref="Dispose"/> first.
+    /// Separate from <see cref="_disposed"/>, which stays a bool because every other guard in this
+    /// file reads it as one.</summary>
+    private int _disposeGate;
+
     /// <summary>
     /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
     /// or — for <see cref="SurfacePlatform.Headless"/> — an offscreen <c>BGRA8Unorm</c> target of
@@ -1162,7 +1167,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        // ONE-SHOT. Check-then-set was two steps, so two threads could both pass it and both tear
+        // down — and teardown ends in _target.Dispose() and _device.Dispose(), which is a native
+        // double-free rather than a harmless second pass. IDisposable is not conventionally
+        // thread-safe, but this class invites cross-thread use (CaptureFrameAsync says so), and an
+        // atomic exchange costs nothing.
+        //
+        // A separate gate from _disposed because Interlocked has no bool overload, and _disposed
+        // stays a volatile bool for the ObjectDisposedException guards that read it everywhere.
+        if (Interlocked.Exchange(ref _disposeGate, 1) != 0) return;
         _disposed = true;
         // Closed before anything else is torn down: nothing queued can ever be served now, and the
         // queue refuses arrivals from here on, so no request can be stranded by landing late.
