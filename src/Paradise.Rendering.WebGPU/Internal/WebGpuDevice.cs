@@ -574,7 +574,7 @@ internal sealed class WebGpuDevice : IDisposable
     }
 
     /// <summary>Build a native WebGPU pipeline from <paramref name="desc"/> without allocating a
-    /// slot-table entry. Used by <see cref="WebGpuRenderer.CreatePipeline"/> in conjunction with
+    /// slot-table entry. Used by <c>WebGpuRenderer.CreatePipeline</c> in conjunction with
     /// the cache + <see cref="RegisterPipeline"/>: the cache stores the native pipeline once per
     /// content hash, every CreatePipeline call mints its own public handle pointing at the
     /// shared native pipeline.</summary>
@@ -707,10 +707,9 @@ internal sealed class WebGpuDevice : IDisposable
             ?? throw new InvalidOperationException("RenderPipeline creation returned null.");
     }
 
-    /// <summary>Allocate a slot-table entry pointing at <paramref name="native"/> and return the
-    /// resulting public handle. Each call mints a fresh handle even when the same native pipeline
-    /// is registered repeatedly — that's the point of the split: shared cache below, distinct
-    /// public identity above.</summary>
+    /// <summary>The backend's spelling of a storage-texture access mode. (The comment that used
+    /// to sit here described minting a pipeline handle — it had been orphaned from another method
+    /// and documented this one incorrectly.)</summary>
     private static WgStorageTextureAccess ToWgpuAccess(StorageTextureAccess access) => access switch
     {
         StorageTextureAccess.WriteOnly => WgStorageTextureAccess.WriteOnly,

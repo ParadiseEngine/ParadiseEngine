@@ -127,7 +127,7 @@ public sealed record AuthoredFieldSchema
     public List<string>? AssetKinds { get; set; }
 }
 
-/// <summary>A field is shown only while <see cref="Field"/> equals <see cref="Equals"/>.</summary>
+/// <summary>A field is shown only while <see cref="Field"/> equals <c>Equals</c>.</summary>
 public sealed record AuthoredVisibilitySchema
 {
     /// <summary>Sibling field name within the same component.</summary>

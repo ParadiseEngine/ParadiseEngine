@@ -14,12 +14,12 @@ namespace Paradise.Ui.Noesis;
 ///   is what lets a host route unconsumed input onward to gameplay without guessing.
 /// - The host's render half (a WebGPU overlay pass, or an offscreen render + readback) reads
 ///   <see cref="View"/> once published, initializes its own <c>RenderDevice</c> against it,
-///   and calls <see cref="TryUpdateRenderTree"/> once per frame before recording the passes
+///   and calls <c>TryUpdateRenderTree</c> once per frame before recording the passes
 ///   (<see cref="NoesisOverlayRenderer"/> packages that half for OverlayPass hosts).
 ///
 /// The two halves meet at exactly one point, per Noesis's threading model: view updates
 /// (sim) and <c>UpdateRenderTree</c> (render) are mutually excluded by the internal sync
-/// lock — which is why the render half goes through <see cref="TryUpdateRenderTree"/> instead
+/// lock — which is why the render half goes through <c>TryUpdateRenderTree</c> instead
 /// of touching the renderer directly; <c>Renderer.Init/RenderOffscreen/Render</c> touch only
 /// render-side state and deliberately stay outside the lock.
 ///

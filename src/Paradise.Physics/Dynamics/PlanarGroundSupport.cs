@@ -4,7 +4,7 @@ namespace Paradise.Physics;
 
 /// <summary>
 /// Support containment for planar movers: a position is "supported" when a downward ray from it
-/// hits support geometry (e.g. the floor layer). <see cref="Clamp"/> keeps a horizontal move on
+/// hits support geometry (e.g. the floor layer). <c>Clamp</c> keeps a horizontal move on
 /// supported ground — accept the full move, else try each horizontal axis alone (so movers slide
 /// along slab edges instead of sticking), else stay. Y is never modified.
 /// </summary>

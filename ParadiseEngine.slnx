@@ -48,6 +48,7 @@
     <Project Path="src/Paradise.Authoring.Test/Paradise.Authoring.Test.csproj" />
     <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
     <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
+    <Project Path="src/Paradise.Rendering.WebGPU.CoyoteTest/Paradise.Rendering.WebGPU.CoyoteTest.csproj" />
     <Project Path="src/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />
     <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
     <Project Path="src/Paradise.ECS.SnapshotTest/Paradise.ECS.SnapshotTest.csproj" />

@@ -129,7 +129,7 @@ namespace Paradise.Export.Data
         /// nothing: a component is a record with a <c>[Guid]</c>.
         ///
         /// Read one with <see cref="LevelEntityExtensions.Get{T}"/>, or all of them at once with
-        /// <see cref="AuthoredComponentRouter.Materialize"/>.</summary>
+        /// <c>AuthoredComponentRouter.Materialize</c>.</summary>
         public List<AuthoredComponentData> Components { get; set; } = new();
     }
 

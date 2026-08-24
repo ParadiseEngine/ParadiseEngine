@@ -11,11 +11,11 @@ namespace Paradise.Export.Data
     /// This is what replaced the typed slots. <c>entity.Components.Renderable?.Mesh</c> is now
     /// <c>entity.Get&lt;RenderableComponentData&gt;()?.Mesh</c>, and the interesting part is that
     /// the call site names no id: the key is <c>typeof(T).GUID</c>, the same
-    /// <see cref="GuidAttribute"/> the record already carries for
+    /// <c>GuidAttribute</c> the record already carries for
     /// <c>[Authored]</c>. One component, one identity, and no constant to keep in step with it.
     ///
     /// One sharp edge, because it fails silently rather than loudly: a type with NO
-    /// <see cref="GuidAttribute"/> still has a <c>GUID</c> — the runtime derives a stable one from
+    /// <c>GuidAttribute</c> still has a <c>GUID</c> — the runtime derives a stable one from
     /// the type name and assembly, not <see cref="Guid.Empty"/> — so
     /// <c>Get&lt;SomethingUntagged&gt;()</c> compiles, looks up an id nothing ever wrote, and
     /// returns null forever. Every authored record carries the attribute (a missing one is
@@ -29,7 +29,7 @@ namespace Paradise.Export.Data
         ///
         /// For the ENGINE's components. A game's records are not in this assembly's serializer
         /// context, so reading one here would throw rather than return null — use
-        /// <see cref="AuthoredComponentRouter.Materialize"/> with the game's generated registry,
+        /// <c>AuthoredComponentRouter.Materialize</c> with the game's generated registry,
         /// which is what a game host wants anyway (it gets every component in one pass instead of
         /// one lookup per type).
         ///

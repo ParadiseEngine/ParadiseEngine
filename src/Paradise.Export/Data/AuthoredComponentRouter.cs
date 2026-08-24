@@ -21,10 +21,10 @@ namespace Paradise.Export.Data
     /// That tier is gone. It bought typed access at the cost of a GUID-to-slot mapping that had to
     /// exist in this file, in the Godot editor, and again in the Blender addon's Python mirror —
     /// so an engine component could not be added without editing all three. Reading a component
-    /// back is now <see cref="LevelEntityExtensions.Get{T}"/> or <see cref="Materialize"/>.
+    /// back is now <see cref="LevelEntityExtensions.Get{T}"/> or <c>Materialize</c>.
     ///
     /// Reflection-free throughout: the dispatch selects a source-generated
-    /// <see cref="JsonTypeInfo{T}"/>, because a reflection deserializer would pin Godot's
+    /// <c>JsonTypeInfo&lt;T&gt;</c>, because a reflection deserializer would pin Godot's
     /// collectible AssemblyLoadContext and break C# hot-reload (godotengine/godot#78513).
     /// </summary>
     public static class AuthoredComponentRouter

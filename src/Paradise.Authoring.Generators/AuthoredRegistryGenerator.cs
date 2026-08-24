@@ -14,7 +14,7 @@ namespace Paradise.Authoring.Generators;
 /// accessor per component, and forgetting one means a component that authors, exports, and is then
 /// silently never read.
 ///
-/// The readers parse <see cref="System.Text.Json.JsonElement"/> directly rather than delegating to
+/// The readers parse <c>System.Text.Json.JsonElement</c> directly rather than delegating to
 /// a <c>JsonSerializerContext</c>. Delegating required every [Authored] record to ALSO be listed as
 /// [JsonSerializable] on the game's context — a registration this generator could neither add (a
 /// generator's output is invisible to System.Text.Json's generator; dotnet/roslyn#57239) nor

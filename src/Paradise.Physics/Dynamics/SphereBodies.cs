@@ -40,7 +40,7 @@ public struct DynamicSphere
     public float Friction;
 
     /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
-    /// during the last <see cref="RigidSphereDynamics.Step"/> (zeroed at step start). Game
+    /// during the last <c>RigidSphereDynamics.Step</c> (zeroed at step start). Game
     /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
     public float ContactImpulse;
 
@@ -73,7 +73,7 @@ public struct KinematicCapsule
     public float HalfLength;
 }
 
-/// <summary>Tuning for <see cref="RigidSphereDynamics.Step"/>.</summary>
+/// <summary>Tuning for <c>RigidSphereDynamics.Step</c>.</summary>
 public struct SphereDynamicsSettings
 {
     /// <summary>Gravity acceleration (m/s²), applied to every sphere each step. Default points −Y.</summary>

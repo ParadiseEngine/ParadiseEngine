@@ -1,5 +1,8 @@
 using Paradise.Windowing;
 using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;
 using WgWebGPU = WebGpuSharp.WebGPU;
@@ -17,15 +20,22 @@ using WgColor = WebGpuSharp.Color;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
+using WgBuffer = WebGpuSharp.Buffer;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
 using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
 namespace Paradise.Rendering.WebGPU;
 
-/// <summary>WebGPU (Dawn) backend entry point. Constructed with a <see cref="SurfaceDescriptor"/>
-/// for windowed rendering, or via <see cref="CreateHeadless"/> for the offscreen adapter path
-/// used by CI smoke tests. Exposes resource Create/Destroy plus the
-/// <see cref="Submit(in RenderCommandStream)"/> path that drives a real frame.</summary>
+/// <summary>WebGPU (Dawn) backend entry point. Constructed from a <see cref="SurfaceDescriptor"/>,
+/// which decides what it draws INTO: a window's swapchain, or — for
+/// <see cref="SurfacePlatform.Headless"/> — an offscreen texture it owns. Exposes resource
+/// Create/Destroy plus the <see cref="Submit(in RenderCommandStream)"/> path that drives a real
+/// frame.
+///
+/// That difference lives in one place, <c>IPresentationTarget</c>, and nothing in the frame path
+/// consults it: acquire a view, draw, present. "Headless" is a kind of TARGET, not a kind of
+/// renderer — this class used to carry a <c>bool</c> for it and branch at six points (colour
+/// format, resize, both presents, the readback guard, the backbuffer acquire).</summary>
 /// <remarks>Implements <see cref="IRenderer"/>, the backend-agnostic slice consumed by
 /// <c>Paradise.Rendering.Pbr</c>. The members beyond it — <see cref="OverlayPass"/>,
 /// <see cref="NativeDevice"/>, <see cref="ReadbackColor"/>, <see cref="RenderClearFrame"/>, and
@@ -37,8 +47,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private const int DefaultFramesInFlight = 2;
 
     private readonly WebGpuDevice _device;
-    private readonly SurfaceState? _surface;
-    private readonly bool _isHeadless;
+    private readonly IPresentationTarget _target;
+
+    /// <summary>Capture requests awaiting a frame — the ONE seam other threads may touch, and the
+    /// only part of this class with genuine cross-thread rules. They live in
+    /// <see cref="CaptureQueue"/> rather than here so they can be tested apart from Dawn.</summary>
+    private readonly CaptureQueue _captureRequests = new();
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
@@ -46,77 +60,82 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
-    private WgTexture? _offscreenTarget;
-    private uint _offscreenWidth;
-    private uint _offscreenHeight;
-    private bool _disposed;
+    /// <summary>Volatile because it is read on any thread that calls in and written by whichever
+    /// thread disposes. It is an ADVISORY guard: every <c>ObjectDisposedException.ThrowIf</c> in
+    /// this file reads it, and each of those is a check-then-act that a concurrent disposal can
+    /// still slip through. The two places where that would actually strand something do not rely
+    /// on it — a capture request is accepted or refused atomically by
+    /// <see cref="Internal.CaptureQueue"/>, and teardown runs once by way of
+    /// <see cref="_disposeGate"/>.</summary>
+    private volatile bool _disposed;
 
-    /// <summary>Create a surface-backed renderer. The descriptor's platform tag selects the native
-    /// surface variant; <see cref="SurfacePlatform.Headless"/> is rejected — use
-    /// <see cref="CreateHeadless"/> instead.</summary>
-    public WebGpuRenderer(in SurfaceDescriptor surface)
+    /// <summary>Claimed exactly once, by whichever thread reaches <see cref="Dispose"/> first.
+    /// Separate from <see cref="_disposed"/>, which stays a bool because every other guard in this
+    /// file reads it as one.</summary>
+    private int _disposeGate;
+
+    /// <summary>
+    /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
+    /// or — for <see cref="SurfacePlatform.Headless"/> — an offscreen <c>BGRA8Unorm</c> target of
+    /// the descriptor's size, with no surface created at all.
+    ///
+    /// This used to refuse the headless descriptor and point callers at
+    /// <see cref="CreateHeadless"/>, which left <see cref="SurfaceDescriptor"/> able to STATE a
+    /// case the only constructor taking one would not build. Every host holding a descriptor then
+    /// had to know the rule and branch on it — so the branch lived in as many places as there were
+    /// hosts, instead of here, in the type that owns the distinction.
+    /// </summary>
+    /// <param name="allowCapture">Configure a window's swapchain so its frames can be copied
+    /// (<see cref="CaptureFrameAsync"/>). OFF by default and a CONSTRUCTION-time choice, both
+    /// deliberately: a backbuffer that must be copyable can cost the driver optimisations on every
+    /// frame, and changing it later would mean reconfiguring the swapchain mid-run — a visible
+    /// hitch. Ignored for a headless target, whose texture is always copyable.</param>
+    public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false)
     {
-        if (surface.Platform == SurfacePlatform.Headless)
-            throw new ArgumentException(
-                "Headless platform must use WebGpuRenderer.CreateHeadless(); the surface ctor requires a real native window.",
-                nameof(surface));
-
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
+
+        // The ONE decision, and it is construction rather than behaviour: which target to build.
+        // Everything after this line asks the target and never asks which kind it is.
+        if (surface.Platform == SurfacePlatform.Headless)
+        {
+            _device = WebGpuDevice.Create(instance, compatibleSurface: null);
+            _target = new OffscreenTarget(_device, surface.Width, surface.Height);
+            return;
+        }
+
         var nativeSurface = SurfaceFactory.Create(instance, surface);
         _device = WebGpuDevice.Create(instance, nativeSurface);
-        _surface = new SurfaceState(_device, nativeSurface, surface.Width, surface.Height);
-        _isHeadless = false;
-    }
-
-    private WebGpuRenderer(uint width, uint height)
-    {
-        var instance = WgWebGPU.CreateInstance()
-            ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
-        _device = WebGpuDevice.Create(instance, compatibleSurface: null);
-        _isHeadless = true;
-        _offscreenWidth = width == 0 ? 1 : width;
-        _offscreenHeight = height == 0 ? 1 : height;
-        _offscreenTarget = CreateOffscreenTarget(_offscreenWidth, _offscreenHeight);
+        _target = new SurfaceTarget(
+            new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
     }
 
     /// <summary>Construct the renderer using the headless adapter path. No native surface is
     /// created; clear frames render into an offscreen <c>BGRA8Unorm</c> texture sized
     /// <paramref name="width"/> x <paramref name="height"/>. The CI smoke test driver consumes
-    /// this path with <c>SDL_VIDEODRIVER=dummy</c>.</summary>
-    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) => new(width, height);
+    /// this path with <c>SDL_VIDEODRIVER=dummy</c>.
+    ///
+    /// Kept as the NAME for that intent — it reads better than a descriptor at a call site that
+    /// only wants an offscreen target — but it is now the same constructor underneath.</summary>
+    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) =>
+        new(SurfaceDescriptor.Headless(width, height));
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
-    /// for the headless offscreen target. Pipeline color targets must match this format or the
-    /// backend will reject the pipeline at draw time.</summary>
-    public TextureFormat ColorFormat =>
-        _isHeadless
-            ? TextureFormat.Bgra8Unorm
-            : FormatConversions.FromWgpu(_surface!.Format);
+    /// for an offscreen target. Pipeline color targets must match this format or the backend will
+    /// reject the pipeline at draw time.</summary>
+    public TextureFormat ColorFormat => _target.ColorFormat;
 
     /// <summary>Resize the surface (or offscreen target) to <paramref name="width"/> x
     /// <paramref name="height"/>. Zero-sized requests are clamped to 1.</summary>
     public void Resize(uint width, uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_isHeadless)
-        {
-            if (width == 0) width = 1;
-            if (height == 0) height = 1;
-            if (width == _offscreenWidth && height == _offscreenHeight) return;
-            _offscreenTarget?.Destroy();
-            _offscreenWidth = width;
-            _offscreenHeight = height;
-            _offscreenTarget = CreateOffscreenTarget(width, height);
-        }
-        else
-        {
-            _surface!.Resize(width, height);
-        }
+        _target.Resize(width, height);
     }
 
     /// <summary>Acquire the next color attachment, run a single render pass that clears it to
-    /// <paramref name="clearColor"/>, submit, and present (windowed) or simply discard (headless).</summary>
+    /// <paramref name="clearColor"/>, submit, and present — which for a target with no display is
+    /// a no-op, leaving the frame in the texture.</summary>
     public void RenderClearFrame(in ColorRgba clearColor)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -140,9 +159,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         };
         var pass = encoder.BeginRenderPass(in passDesc);
         pass.End();
+        // EVERY path that presents a frame serves the capture queue. Miss one and a caller that
+        // happens to drive the renderer through it waits forever on a task nothing will complete.
+        var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
-        if (!_isHeadless) _surface!.Native.Present();
+        _target.Present();
+        CompletePendingCaptures(pending);
         _destructionQueue.AdvanceFrame();
     }
 
@@ -604,25 +627,35 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         var encoder = _device.Device.CreateCommandEncoder();
         ExecuteStream(in stream, encoder, view);
         OverlayPass?.Invoke(encoder, view);
+        // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
+        // without its UI — and before Finish, so the copy rides the frame's own command buffer.
+        var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
-        if (!_isHeadless) _surface!.Native.Present();
+        _target.Present();
+        CompletePendingCaptures(pending);
         _destructionQueue.AdvanceFrame();
     }
 
-    /// <summary>Read the headless offscreen color target back to CPU memory as tightly-packed,
+    /// <summary>Read the color target back to CPU memory as tightly-packed,
     /// top-down <c>BGRA8</c> (4 bytes/pixel, <see cref="ColorFormat"/> = <see cref="TextureFormat.Bgra8Unorm"/>).
     /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
-    /// Headless renderers only (windowed swapchain textures aren't CopySrc).</summary>
+    /// Requires a target the renderer OWNS, because it reads AFTER the frame: a swapchain's texture
+    /// is valid only until its present, so a windowed run has nothing left to copy by the time this
+    /// is called — so this needs a renderer built from a headless <see cref="SurfaceDescriptor"/>,
+    /// and callers that know they did so want the throw when they did not. A caller that does NOT
+    /// know which kind of run it is in should ask for a frame instead, with
+    /// <see cref="CaptureFrameAsync"/>, which works either way.</summary>
     public byte[] ReadbackColor(out uint width, out uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_isHeadless || _offscreenTarget is null)
-            throw new InvalidOperationException(
-                "ReadbackColor is only available on a headless renderer (CreateHeadless).");
+        var readable = _target.Readable
+            ?? throw new InvalidOperationException(
+                "ReadbackColor needs a target that can be copied out of. A surface's swapchain "
+                + "texture is not CopySrc; build the renderer from a headless SurfaceDescriptor.");
 
-        width = _offscreenWidth;
-        height = _offscreenHeight;
+        width = _target.Width;
+        height = _target.Height;
         const uint bytesPerPixel = 4;
         var unpaddedBytesPerRow = width * bytesPerPixel;
         // WebGPU requires a texture→buffer copy's BytesPerRow to be a multiple of 256.
@@ -639,7 +672,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }) ?? throw new InvalidOperationException("Readback buffer creation returned null.");
 
         var encoder = _device.Device.CreateCommandEncoder();
-        var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = _offscreenTarget, MipLevel = 0 };
+        var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = readable, MipLevel = 0 };
         var destination = new WebGpuSharp.TexelCopyBufferInfo
         {
             Buffer = readback,
@@ -680,6 +713,168 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             readback.Destroy();
         }
         return pixels;
+    }
+
+    /// <summary>
+    /// Ask for the next frame, as an image.
+    ///
+    /// Callable from ANY thread and at any time. The request is queued and serviced by the render
+    /// thread inside its next frame — the copy is recorded onto that frame's own command buffer,
+    /// after the overlay and before the present — so what comes back is exactly what was shown,
+    /// UI included. That deferral is the point: a caller reading the target itself would race the
+    /// frame in progress, and for a swapchain there is no texture left to read once the frame is
+    /// over.
+    ///
+    /// The task completes when the GPU copy lands and the staging buffer maps, which is at least
+    /// one frame away and possibly more.
+    /// </summary>
+    /// <exception cref="NotSupportedException">This renderer's target cannot be copied from. For a
+    /// window that means it was not constructed with <c>allowCapture: true</c>, or the surface does
+    /// not advertise <c>CopySrc</c>. Thrown rather than returned as a faulted task, because it is a
+    /// fact about the renderer that is true before the call and will not change by retrying.</exception>
+    public Task<ColorReadback> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_target.SupportsCapture)
+        {
+            throw new NotSupportedException(
+                "This target cannot be captured. A window must be built with allowCapture: true "
+                + "and the surface must advertise CopySrc.");
+        }
+
+        var request = new TaskCompletionSource<ColorReadback>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (cancellationToken.CanBeCanceled)
+        {
+            // Released when the request settles. A fresh token per call would not care, but a
+            // long-lived source reused across a recording session would otherwise accumulate a
+            // registration per capture for the renderer's lifetime.
+            var registration = cancellationToken.Register(
+                static state => ((TaskCompletionSource<ColorReadback>)state!).TrySetCanceled(), request);
+            request.Task.ContinueWith(
+                static (_, state) => ((CancellationTokenRegistration)state!).Dispose(),
+                registration,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        // Refused rather than stranded: the queue closes atomically with its drain, so a request
+        // that loses the race to Dispose is told, not left holding a task nothing will complete.
+        // The analyser wants ObjectDisposedException.ThrowIf here, which cannot express this: the
+        // authority is the queue's own closed state, taken atomically with the enqueue, not a
+        // separately-read flag. Reading _disposed again would be the very race this replaced.
+#pragma warning disable CA1513
+        if (!_captureRequests.TryEnqueue(request))
+        {
+            throw new ObjectDisposedException(nameof(WebGpuRenderer));
+        }
+#pragma warning restore CA1513
+        return request.Task;
+    }
+
+    /// <summary>Whether this renderer may be asked for a frame — see
+    /// <see cref="CaptureFrameAsync"/> for why a window has to opt in.</summary>
+    public bool CanCaptureFrame => _target.SupportsCapture;
+
+    /// <summary>Drain the request queue onto this frame's encoder. Returns the staging buffers and
+    /// the requests waiting on them, or null when nothing was asked for — the common case, which
+    /// costs one queue check.</summary>
+    private List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>?
+        RecordPendingCaptures(WgCommandEncoder encoder)
+    {
+        if (_captureRequests.IsEmpty || _target.CurrentTexture is not { } texture)
+        {
+            return null;
+        }
+
+        List<(TaskCompletionSource<ColorReadback>, WgBuffer, uint, uint, uint)>? pending = null;
+        while (_captureRequests.TryDequeue(out var request))
+        {
+            // Already cancelled while queued: no copy, no buffer.
+            if (request.Task.IsCompleted)
+            {
+                continue;
+            }
+
+            var width = _target.Width;
+            var height = _target.Height;
+            var paddedRow = (width * 4u + 255u) & ~255u;
+            var staging = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+            {
+                Label = "ParadiseCaptureStaging",
+                Size = (ulong)paddedRow * height,
+                Usage = WebGpuSharp.BufferUsage.MapRead | WebGpuSharp.BufferUsage.CopyDst,
+                MappedAtCreation = false,
+            });
+            if (staging is null)
+            {
+                request.TrySetException(new InvalidOperationException("Capture staging buffer creation returned null."));
+                continue;
+            }
+
+            var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = texture, MipLevel = 0 };
+            var destination = new WebGpuSharp.TexelCopyBufferInfo
+            {
+                Buffer = staging,
+                Layout = new WebGpuSharp.TexelCopyBufferLayout
+                {
+                    Offset = 0,
+                    BytesPerRow = paddedRow,
+                    RowsPerImage = height,
+                },
+            };
+            encoder.CopyTextureToBuffer(in source, in destination, new WgExtent3D(width, height, 1));
+            (pending ??= []).Add((request, staging, width, height, paddedRow));
+        }
+
+        return pending;
+    }
+
+    /// <summary>Map each staged copy and complete its request. Synchronous per capture, which is
+    /// what keeps this free of a device-event pump: a capture is rare and deliberate, so paying a
+    /// stall on the frame that serves one is cheaper than ticking the instance every frame forever
+    /// to service callbacks that almost never exist.</summary>
+    private void CompletePendingCaptures(
+        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending)
+    {
+        if (pending is null)
+        {
+            return;
+        }
+
+        // ONE wait for the whole frame: every copy in `pending` rode the same command buffer, which
+        // has already been submitted, so waiting again per capture buys nothing.
+        const ulong timeoutNs = 5_000_000_000;
+        _device.Queue.OnSubmittedWorkSync(timeoutNs);
+
+        foreach (var (request, staging, width, height, paddedRow) in pending)
+        {
+            try
+            {
+                var size = (nuint)((ulong)paddedRow * height);
+                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000);
+                var tight = width * 4u;
+                var pixels = new byte[tight * height];
+                staging.GetConstMappedRange(0, size, (ReadOnlySpan<byte> mapped) =>
+                {
+                    for (var y = 0u; y < height; y++)
+                    {
+                        mapped.Slice((int)(y * paddedRow), (int)tight).CopyTo(pixels.AsSpan((int)(y * tight)));
+                    }
+                });
+                request.TrySetResult(new ColorReadback(pixels, width, height));
+            }
+            catch (Exception ex)
+            {
+                request.TrySetException(ex);
+            }
+            finally
+            {
+                if (staging.GetMapState() == WebGpuSharp.BufferMapState.Mapped) staging.Unmap();
+                staging.Destroy();
+            }
+        }
     }
 
     private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer)
@@ -960,49 +1155,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         return encoder.BeginRenderPass(in desc);
     }
 
-    private bool TryAcquireBackbufferView(out WgTextureView view)
-    {
-        if (_isHeadless)
-        {
-            view = _offscreenTarget!.CreateView();
-            return true;
-        }
-
-        var current = _surface!.Native.GetCurrentTexture();
-        switch (current.Status)
-        {
-            case WgSurfaceGetCurrentTextureStatus.SuccessOptimal:
-            case WgSurfaceGetCurrentTextureStatus.SuccessSuboptimal:
-                break;
-            case WgSurfaceGetCurrentTextureStatus.Outdated:
-            case WgSurfaceGetCurrentTextureStatus.Lost:
-                _surface.Reconfigure();
-                view = null!;
-                return false;
-            default:
-                throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");
-        }
-        var surfaceTexture = current.Texture
-            ?? throw new InvalidOperationException(
-                $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
-        view = surfaceTexture.CreateView();
-        return true;
-    }
-
-    private WgTexture CreateOffscreenTarget(uint width, uint height)
-    {
-        var desc = new WgTextureDescriptor
-        {
-            Label = "ParadiseHeadlessTarget",
-            Size = new WgExtent3D(width, height, 1),
-            MipLevelCount = 1,
-            SampleCount = 1,
-            Dimension = WgTextureDimension.D2,
-            Format = WgTextureFormat.BGRA8Unorm,
-            Usage = WgTextureUsage.RenderAttachment | WgTextureUsage.CopySrc,
-        };
-        return _device.Device.CreateTexture(in desc);
-    }
+    private bool TryAcquireBackbufferView(out WgTextureView view) => _target.TryAcquireView(out view);
 
     /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>, which now
     /// lives in the backend-agnostic <c>Paradise.Rendering</c> package (loading a Slang-compiled
@@ -1013,7 +1166,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         ShaderProgramLoader.Load(assembly, logicalNamePrefix);
 
     /// <summary>Test-only accessor for the live-shader-slot count. Used by regression tests that
-    /// assert repeated high-level <see cref="CreatePipeline(in ShaderProgramDesc, TextureFormat)"/>
+    /// assert repeated high-level <c>CreatePipeline</c>
     /// calls don't grow the shader slot table (iter-6 fix for the slot-leak OpenCara flagged on
     /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
     /// take a dependency on internal device counters.</summary>
@@ -1021,12 +1174,23 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
+        // ONE-SHOT. Check-then-set was two steps, so two threads could both pass it and both tear
+        // down — and teardown ends in _target.Dispose() and _device.Dispose(), which is a native
+        // double-free rather than a harmless second pass. IDisposable is not conventionally
+        // thread-safe, but this class invites cross-thread use (CaptureFrameAsync says so), and an
+        // atomic exchange costs nothing.
+        //
+        // A separate gate from _disposed because Interlocked has no bool overload, and _disposed
+        // stays a volatile bool for the ObjectDisposedException guards that read it everywhere.
+        if (Interlocked.Exchange(ref _disposeGate, 1) != 0) return;
         _disposed = true;
+        // Closed before anything else is torn down: nothing queued can ever be served now, and the
+        // queue refuses arrivals from here on, so no request can be stranded by landing late.
+        _captureRequests.CloseAndFault(new ObjectDisposedException(
+            nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();
-        _offscreenTarget?.Destroy();
-        _surface?.Dispose();
+        _target.Dispose();
         _device.Dispose();
     }
 }

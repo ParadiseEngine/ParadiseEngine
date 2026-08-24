@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.Test" />
+    <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.CoyoteTest" />
   </ItemGroup>
 
 </Project>

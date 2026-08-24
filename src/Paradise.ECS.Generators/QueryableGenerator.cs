@@ -1087,7 +1087,7 @@ public class QueryableGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Emits <see cref="Paradise.ECS.IComponentSet"/>'s CollectComponentTypes: the queryable's
+    /// Emits <c>Paradise.ECS.IComponentSet</c>'s CollectComponentTypes: the queryable's
     /// REQUIRED components, ORed into the caller's mask so several sets union cleanly.
     ///
     /// Only [With] contributes. [Without] would make the entity unmatchable by this very
