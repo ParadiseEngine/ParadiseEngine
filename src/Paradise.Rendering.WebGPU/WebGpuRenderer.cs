@@ -703,22 +703,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <summary>
-    /// The finished frame, or NULL when this renderer's target cannot be read after rendering.
-    ///
-    /// The twin of <see cref="ReadbackColor"/>, for the caller that does not know which kind of
-    /// target it was given — a host that renders the same way either way, and wants the image if
-    /// there is one. Returning nothing IS the answer, so such a caller neither asks a capability
-    /// question first nor catches an exception to find out.
-    ///
-    /// <see cref="ReadbackColor"/> remains for callers that DO know: a test that built a headless
-    /// renderer on purpose wants a missing image to be a failure, not a null.
-    /// </summary>
-    public ColorReadback? TryReadbackColor() =>
-        _target.Readable is null
-            ? null
-            : new ColorReadback(ReadbackColor(out var width, out var height), width, height);
-
-    /// <summary>
     /// Ask for the next frame, as an image.
     ///
     /// Callable from ANY thread and at any time. The request is queued and serviced by the render
