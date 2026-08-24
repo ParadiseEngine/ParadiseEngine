@@ -1,5 +1,8 @@
 using Paradise.Windowing;
 using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;
 using WgWebGPU = WebGpuSharp.WebGPU;
@@ -17,6 +20,7 @@ using WgColor = WebGpuSharp.Color;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
+using WgBuffer = WebGpuSharp.Buffer;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
 using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
@@ -44,6 +48,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     private readonly WebGpuDevice _device;
     private readonly IPresentationTarget _target;
+
+    /// <summary>Capture requests awaiting a frame. Concurrent because this is the ONE seam other
+    /// threads may touch: everything else on this renderer is the render thread's, and a request
+    /// posted from elsewhere is serviced on the render thread at a point where the frame's texture
+    /// is alive. The alternative — letting a caller read the target directly — races the frame in
+    /// progress.</summary>
+    private readonly ConcurrentQueue<TaskCompletionSource<ColorReadback>> _captureRequests = new();
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
@@ -64,7 +75,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// had to know the rule and branch on it — so the branch lived in as many places as there were
     /// hosts, instead of here, in the type that owns the distinction.
     /// </summary>
-    public WebGpuRenderer(in SurfaceDescriptor surface)
+    /// <param name="allowCapture">Configure a window's swapchain so its frames can be copied
+    /// (<see cref="CaptureFrameAsync"/>). OFF by default and a CONSTRUCTION-time choice, both
+    /// deliberately: a backbuffer that must be copyable can cost the driver optimisations on every
+    /// frame, and changing it later would mean reconfiguring the swapchain mid-run — a visible
+    /// hitch. Ignored for a headless target, whose texture is always copyable.</param>
+    public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false)
     {
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
@@ -80,7 +96,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
         var nativeSurface = SurfaceFactory.Create(instance, surface);
         _device = WebGpuDevice.Create(instance, nativeSurface);
-        _target = new SurfaceTarget(new SurfaceState(_device, nativeSurface, surface.Width, surface.Height));
+        _target = new SurfaceTarget(
+            new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
     }
 
     /// <summary>Construct the renderer using the headless adapter path. No native surface is
@@ -132,9 +149,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         };
         var pass = encoder.BeginRenderPass(in passDesc);
         pass.End();
+        // EVERY path that presents a frame serves the capture queue. Miss one and a caller that
+        // happens to drive the renderer through it waits forever on a task nothing will complete.
+        var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
         _target.Present();
+        CompletePendingCaptures(pending);
         _destructionQueue.AdvanceFrame();
     }
 
@@ -596,9 +617,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         var encoder = _device.Device.CreateCommandEncoder();
         ExecuteStream(in stream, encoder, view);
         OverlayPass?.Invoke(encoder, view);
+        // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
+        // without its UI — and before Finish, so the copy rides the frame's own command buffer.
+        var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
         _target.Present();
+        CompletePendingCaptures(pending);
         _destructionQueue.AdvanceFrame();
     }
 
@@ -692,6 +717,146 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _target.Readable is null
             ? null
             : new ColorReadback(ReadbackColor(out var width, out var height), width, height);
+
+    /// <summary>
+    /// Ask for the next frame, as an image.
+    ///
+    /// Callable from ANY thread and at any time. The request is queued and serviced by the render
+    /// thread inside its next frame — the copy is recorded onto that frame's own command buffer,
+    /// after the overlay and before the present — so what comes back is exactly what was shown,
+    /// UI included. That deferral is the point: a caller reading the target itself would race the
+    /// frame in progress, and for a swapchain there is no texture left to read once the frame is
+    /// over.
+    ///
+    /// The task completes when the GPU copy lands and the staging buffer maps, which is at least
+    /// one frame away and possibly more.
+    /// </summary>
+    /// <exception cref="NotSupportedException">This renderer's target cannot be copied from. For a
+    /// window that means <see cref="CaptureEnabled"/> was never turned on, or the surface does not
+    /// advertise <c>CopySrc</c>. Thrown rather than returned as a faulted task, because it is a
+    /// fact about the renderer that is true before the call and will not change by retrying.</exception>
+    public Task<ColorReadback> CaptureFrameAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_target.SupportsCapture)
+        {
+            throw new NotSupportedException(
+                "This target cannot be captured. A window must be built with capture enabled "
+                + "(SurfaceDescriptor + CaptureEnabled) and the surface must advertise CopySrc.");
+        }
+
+        var request = new TaskCompletionSource<ColorReadback>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (cancellationToken.CanBeCanceled)
+        {
+            // Registration disposed by the completion path is not worth the bookkeeping here: the
+            // token simply abandons the wait, and the frame's copy is discarded when it lands.
+            cancellationToken.Register(() => request.TrySetCanceled(cancellationToken));
+        }
+        _captureRequests.Enqueue(request);
+        return request.Task;
+    }
+
+    /// <summary>Whether this renderer may be asked for a frame — see
+    /// <see cref="CaptureFrameAsync"/> for why a window has to opt in.</summary>
+    public bool CanCaptureFrame => _target.SupportsCapture;
+
+    /// <summary>Drain the request queue onto this frame's encoder. Returns the staging buffers and
+    /// the requests waiting on them, or null when nothing was asked for — the common case, which
+    /// costs one queue check.</summary>
+    private List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>?
+        RecordPendingCaptures(WgCommandEncoder encoder)
+    {
+        if (_captureRequests.IsEmpty || _target.CurrentTexture is not { } texture)
+        {
+            return null;
+        }
+
+        List<(TaskCompletionSource<ColorReadback>, WgBuffer, uint, uint, uint)>? pending = null;
+        while (_captureRequests.TryDequeue(out var request))
+        {
+            // Already cancelled while queued: no copy, no buffer.
+            if (request.Task.IsCompleted)
+            {
+                continue;
+            }
+
+            var width = _target.Width;
+            var height = _target.Height;
+            var paddedRow = (width * 4u + 255u) & ~255u;
+            var staging = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+            {
+                Label = "ParadiseCaptureStaging",
+                Size = (ulong)paddedRow * height,
+                Usage = WebGpuSharp.BufferUsage.MapRead | WebGpuSharp.BufferUsage.CopyDst,
+                MappedAtCreation = false,
+            });
+            if (staging is null)
+            {
+                request.TrySetException(new InvalidOperationException("Capture staging buffer creation returned null."));
+                continue;
+            }
+
+            var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = texture, MipLevel = 0 };
+            var destination = new WebGpuSharp.TexelCopyBufferInfo
+            {
+                Buffer = staging,
+                Layout = new WebGpuSharp.TexelCopyBufferLayout
+                {
+                    Offset = 0,
+                    BytesPerRow = paddedRow,
+                    RowsPerImage = height,
+                },
+            };
+            encoder.CopyTextureToBuffer(in source, in destination, new WgExtent3D(width, height, 1));
+            (pending ??= []).Add((request, staging, width, height, paddedRow));
+        }
+
+        return pending;
+    }
+
+    /// <summary>Map each staged copy and complete its request. Synchronous per capture, which is
+    /// what keeps this free of a device-event pump: a capture is rare and deliberate, so paying a
+    /// stall on the frame that serves one is cheaper than ticking the instance every frame forever
+    /// to service callbacks that almost never exist.</summary>
+    private void CompletePendingCaptures(
+        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending)
+    {
+        if (pending is null)
+        {
+            return;
+        }
+
+        foreach (var (request, staging, width, height, paddedRow) in pending)
+        {
+            try
+            {
+                const ulong timeoutNs = 5_000_000_000;
+                _device.Queue.OnSubmittedWorkSync(timeoutNs);
+                var size = (nuint)((ulong)paddedRow * height);
+                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000);
+                var tight = width * 4u;
+                var pixels = new byte[tight * height];
+                staging.GetConstMappedRange(0, size, (ReadOnlySpan<byte> mapped) =>
+                {
+                    for (var y = 0u; y < height; y++)
+                    {
+                        mapped.Slice((int)(y * paddedRow), (int)tight).CopyTo(pixels.AsSpan((int)(y * tight)));
+                    }
+                });
+                request.TrySetResult(new ColorReadback(pixels, width, height));
+            }
+            catch (Exception ex)
+            {
+                request.TrySetException(ex);
+            }
+            finally
+            {
+                if (staging.GetMapState() == WebGpuSharp.BufferMapState.Mapped) staging.Unmap();
+                staging.Destroy();
+            }
+        }
+    }
 
     private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer)
     {
@@ -992,6 +1157,14 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        // Anything still queued can never be served — there will be no further frame. Faulting is
+        // the only honest answer: a task left pending here is a caller hung forever, which is how
+        // this surfaced in the first place.
+        while (_captureRequests.TryDequeue(out var abandoned))
+        {
+            abandoned.TrySetException(new ObjectDisposedException(
+                nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
+        }
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();
         _target.Dispose();

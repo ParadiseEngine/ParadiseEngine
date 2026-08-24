@@ -40,6 +40,12 @@ internal sealed class OffscreenTarget : IPresentationTarget
 
     public WgTexture? Readable => _texture;
 
+    /// <summary>The same texture every frame — it is ours, so "current" and "readable" coincide.</summary>
+    public WgTexture? CurrentTexture => _texture;
+
+    /// <summary>Always: <see cref="Create"/> asks for <c>CopySrc</c> unconditionally.</summary>
+    public bool SupportsCapture => true;
+
     public void Resize(uint width, uint height)
     {
         if (width == 0) width = 1;

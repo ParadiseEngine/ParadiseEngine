@@ -61,4 +61,19 @@ internal interface IPresentationTarget : IDisposable
     /// <summary>The texture a caller may copy out of AFTER rendering, or null when this target has
     /// none that outlives a frame.</summary>
     WgTexture? Readable { get; }
+
+    /// <summary>The texture the CURRENT frame is being drawn into — valid only between a
+    /// successful <see cref="TryAcquireView"/> and the <see cref="Present"/> that follows it, which
+    /// is exactly the window in which a frame can be copied. Null before the first acquire.
+    ///
+    /// Distinct from <see cref="Readable"/>, and the distinction is the whole point: a swapchain
+    /// has a current texture every frame but nothing that survives one, so it can be captured
+    /// mid-frame and not afterwards.</summary>
+    WgTexture? CurrentTexture { get; }
+
+    /// <summary>Whether a mid-frame copy out of <see cref="CurrentTexture"/> is permitted. False
+    /// when the target's textures were not created <c>CopySrc</c> — for a swapchain that depends on
+    /// what the surface was configured to allow, and on whether the platform allows it at
+    /// all.</summary>
+    bool SupportsCapture { get; }
 }

@@ -22,6 +22,12 @@ internal sealed class SurfaceTarget(SurfaceState surface) : IPresentationTarget
 
     public WgTexture? Readable => null;
 
+    /// <summary>The texture acquired for this frame, dropped again at <see cref="Present"/> so a
+    /// stale one can never be handed out — the surface will have rotated it back into the chain.</summary>
+    public WgTexture? CurrentTexture { get; private set; }
+
+    public bool SupportsCapture => surface.CanCopyFrom;
+
     public void Resize(uint width, uint height) => surface.Resize(width, height);
 
     public bool TryAcquireView(out WgTextureView view)
@@ -46,11 +52,17 @@ internal sealed class SurfaceTarget(SurfaceState surface) : IPresentationTarget
         var texture = current.Texture
             ?? throw new InvalidOperationException(
                 $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
+        CurrentTexture = texture;
         view = texture.CreateView();
         return true;
     }
 
-    public void Present() => surface.Native.Present();
+    public void Present()
+    {
+        surface.Native.Present();
+        // The texture belongs to the compositor again from here.
+        CurrentTexture = null;
+    }
 
     public void Dispose() => surface.Dispose();
 }
