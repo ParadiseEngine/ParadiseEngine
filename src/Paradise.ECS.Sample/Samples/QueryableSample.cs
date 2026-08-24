@@ -20,10 +20,10 @@ public static class QueryableSample
         Console.WriteLine("  Entity-level iteration (Movable.Query):");
 
         var movableQuery = world.Query(default(Movable));
-        Console.WriteLine($"    Movable entity count: {movableQuery.EntityCount}");
+        Console.WriteLine($"    Movable entity count: {movableQuery.Count()}");
         // Note: Player was overwritten in EntityOverwriteSample and lost Velocity,
         // so only 4 enemies match (1 enemy was despawned in EntityLifecycleSample)
-        Debug.Assert(movableQuery.EntityCount == 4);
+        Debug.Assert(movableQuery.Count() == 4);
 
         foreach (var data in movableQuery)
         {
@@ -41,7 +41,7 @@ public static class QueryableSample
         Console.WriteLine("  Optional component access (Damageable.Query):");
 
         var damageableQuery = world.Query(default(Damageable));
-        Console.WriteLine($"    Damageable entity count: {damageableQuery.EntityCount}");
+        Console.WriteLine($"    Damageable entity count: {damageableQuery.Count()}");
 
         foreach (var data in damageableQuery)
         {

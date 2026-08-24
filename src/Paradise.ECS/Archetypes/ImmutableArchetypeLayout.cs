@@ -27,6 +27,15 @@ public struct ArchetypeLayoutHeader<TMask> where TMask : unmanaged, IBitSet<TMas
     /// <summary>Byte offset to BaseOffsets array (short[]) relative to data start.</summary>
     public int BaseOffsetsOffset;
 
+    /// <summary>Bytes reserved at the END of every chunk of this archetype for per-chunk
+    /// aggregates. Zero unless some component asked for one.</summary>
+    public int ChunkAggregateBytes;
+
+    /// <summary>How many of this archetype's components reserve a per-chunk aggregate. Stored so
+    /// the overwhelmingly common shape — exactly one — can be answered without walking the mask;
+    /// see <see cref="ImmutableArchetypeLayout{TMask,TConfig}.GetChunkAggregateOffset"/>.</summary>
+    public int ChunkAggregateCount;
+
     /// <summary>The component mask for this archetype.</summary>
     public TMask ComponentMask;
 
@@ -90,6 +99,78 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Header.EntitiesPerChunk;
+    }
+
+    /// <summary>
+    /// Byte offset, within a chunk, of the per-chunk aggregate slot reserved for
+    /// <paramref name="componentId"/> — or −1 when that component reserves no slot HERE, whether
+    /// because it reserves none at all or because it is not part of this archetype.
+    /// </summary>
+    /// <remarks>
+    /// Slots are packed into the tail of the chunk in COMPONENT ID ORDER, which is the same order
+    /// <c>IBitSet.ForEach</c> walks, so this walk and the reservation above cannot disagree about
+    /// who owns which bytes.
+    ///
+    /// The slot is per CHUNK, not per entity: every entity in the chunk shares it. What lives there
+    /// is a summary of the chunk — the union of its entities' tag masks, today — and its point is
+    /// that it is inside the chunk, so <c>Archetype.CopyChunksFrom</c> carries it with the data it
+    /// describes rather than leaving it to be maintained alongside.
+    /// </remarks>
+    /// <param name="componentId">The component whose aggregate slot is wanted.</param>
+    /// <param name="typeInfos">The registry's type infos — passed in because a layout is a raw
+    /// pointer into unmanaged memory and cannot hold a managed array.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int GetChunkAggregateOffset(
+        ComponentId componentId, ImmutableArray<ComponentTypeInfo> typeInfos)
+    {
+        int reserved = Header.ChunkAggregateBytes;
+        if (reserved == 0)
+            return -1;
+
+        // Does the component being ASKED ABOUT reserve anything here? Both halves are needed and
+        // neither implies the other: a component can reserve globally while being absent from this
+        // archetype, and one present in this archetype may reserve nothing. Answering that first is
+        // what keeps the shortcut below honest — it is also O(1), so it costs the fast path nothing.
+        if (!Header.ComponentMask.Get(componentId.Value)
+            || typeInfos[componentId.Value].ChunkAggregateSize == 0)
+        {
+            return -1;
+        }
+
+        // Past those guards the component reserves a slot in this archetype, so if it is the ONLY
+        // reserver here it owns the whole reservation and its slot starts exactly where the
+        // reservation does. That is the whole of today's usage, and worth the branch: this sits on
+        // the structural-change and despawn paths as well as on every chunk a tag-filtered query
+        // considers, while the general answer costs a mask walk.
+        if (Header.ChunkAggregateCount == 1)
+            return TConfig.ChunkSize - reserved;
+
+        var action = new FindChunkAggregateOffsetAction
+        {
+            TypeInfos = typeInfos,
+            Target = componentId.Value,
+            Offset = TConfig.ChunkSize - reserved,
+            Result = -1,
+        };
+        Header.ComponentMask.ForEach(ref action);
+        return action.Result;
+    }
+
+    private struct FindChunkAggregateOffsetAction : IBitAction
+    {
+        public ImmutableArray<ComponentTypeInfo> TypeInfos;
+        public int Target;
+        public int Offset;
+        public int Result;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(int bitIndex)
+        {
+            int size = TypeInfos[bitIndex].ChunkAggregateSize;
+            if (size == 0) return;
+            if (bitIndex == Target) Result = Offset;
+            Offset += size;
+        }
     }
 
     /// <summary>
@@ -200,6 +281,15 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
             return;
         }
 
+        // Per-chunk aggregates live in the TAIL of the chunk, and everything below simply carves a
+        // smaller chunk. Placing them last is what keeps this change invisible: every column offset
+        // and every entity-id read is measured from offset 0 as before, so only the capacity moves.
+        var aggregateAction = new SumChunkAggregatesAction { TypeInfos = typeInfos, TotalSize = 0, Count = 0 };
+        componentMask.ForEach(ref aggregateAction);
+        header.ChunkAggregateBytes = aggregateAction.TotalSize;
+        header.ChunkAggregateCount = aggregateAction.Count;
+        int usableChunkSize = TConfig.ChunkSize - aggregateAction.TotalSize;
+
         // Calculate total size per entity (entity ID + components, without alignment)
         var sumAction = new SumComponentSizesAction { TypeInfos = typeInfos, TotalSize = TConfig.EntityIdByteSize };
         componentMask.ForEach(ref sumAction);
@@ -208,7 +298,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         // Tag-only archetype: only entity IDs
         if (totalSizePerEntity == TConfig.EntityIdByteSize)
         {
-            header.EntitiesPerChunk = TConfig.ChunkSize / TConfig.EntityIdByteSize;
+            header.EntitiesPerChunk = usableChunkSize / TConfig.EntityIdByteSize;
             // Mark all tag components as present (offset after entity IDs, but size 0)
             var zeroAction = new SetZeroOffsetsAction { BaseOffsets = baseOffsets, MinId = minId };
             componentMask.ForEach(ref zeroAction);
@@ -216,7 +306,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         }
 
         // Start with optimistic estimate
-        int entitiesPerChunk = TConfig.ChunkSize / totalSizePerEntity;
+        int entitiesPerChunk = usableChunkSize / totalSizePerEntity;
         if (entitiesPerChunk == 0)
             entitiesPerChunk = 1;
 
@@ -224,7 +314,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         while (entitiesPerChunk > 1)
         {
             int totalSize = CalculateAndStoreOffsets(componentMask, typeInfos, baseOffsets, minId, entitiesPerChunk);
-            if (totalSize <= TConfig.ChunkSize)
+            if (totalSize <= usableChunkSize)
                 break;
             entitiesPerChunk--;
         }
@@ -267,6 +357,25 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         public void Invoke(int bitIndex)
         {
             TotalSize += TypeInfos[bitIndex].Size;
+        }
+    }
+
+    /// <summary>Sums the per-chunk reservations of an archetype's components, and records where
+    /// each one's slot begins — measured back from the end of the chunk, so nothing a chunk
+    /// already contains has to move.</summary>
+    private struct SumChunkAggregatesAction : IBitAction
+    {
+        public ImmutableArray<ComponentTypeInfo> TypeInfos;
+        public int TotalSize;
+        public int Count;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(int bitIndex)
+        {
+            int size = TypeInfos[bitIndex].ChunkAggregateSize;
+            if (size == 0) return;
+            TotalSize += size;
+            Count++;
         }
     }
 

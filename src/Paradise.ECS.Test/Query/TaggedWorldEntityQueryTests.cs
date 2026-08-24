@@ -8,19 +8,17 @@ public sealed class TaggedWorldEntityQueryTests : IDisposable
     private static readonly DefaultConfig s_config = new();
     private readonly ChunkManager _chunkManager = ChunkManager.Create(s_config);
     private readonly SharedArchetypeMetadata _sharedMetadata = new(ComponentRegistry.Shared.TypeInfos, s_config);
-    private readonly ChunkTagRegistry<TagMask> _chunkTagRegistry = new(s_config.ChunkAllocator, DefaultConfig.MaxMetaBlocks, DefaultConfig.ChunkSize);
     private readonly World _world;
 
     public TaggedWorldEntityQueryTests()
     {
-        _world = new World(s_config, _chunkManager, _sharedMetadata, _chunkTagRegistry);
+        _world = new World(s_config, _chunkManager, _sharedMetadata);
     }
 
     public void Dispose()
     {
         _sharedMetadata.Dispose();
         _chunkManager.Dispose();
-        _chunkTagRegistry.Dispose();
     }
 
     #region TaggedWorldEntity Tests
@@ -403,25 +401,16 @@ public sealed class TaggedWorldEntityQueryTests : IDisposable
     }
 
     [Test]
-    public async Task TaggedWorldEntityChunk_Handle_CanQueryChunkTagRegistry()
+    public async Task TaggedWorldEntityChunk_TagsAreReadableFromTheChunk()
     {
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 1 });
         _world.AddTag<TestIsActive>(e1);
         _world.AddTag<TestIsEnemy>(e1);
 
-        var query = QueryBuilder<SmallBitSet<uint>>.Create()
-            .With<TestPosition>()
-            .BuildChunk(_world);
-
-        ChunkHandle handle = default;
-        foreach (var chunk in query)
-        {
-            handle = chunk.Handle;
-        }
-
-        // Use the handle to query the ChunkTagRegistry
-        var chunkMask = _world.ChunkTagRegistry.GetChunkMask(handle);
+        // The chunk's tag summary lives in the chunk itself now, so it is read through any entity
+        // sitting in it rather than by carrying a handle to a side table.
+        var chunkMask = _world.GetChunkMask(e1);
         await Assert.That(chunkMask.Get(TestIsActive.TagId.Value)).IsTrue();
         await Assert.That(chunkMask.Get(TestIsEnemy.TagId.Value)).IsTrue();
     }
@@ -546,7 +535,7 @@ public sealed class TaggedWorldEntityQueryTests : IDisposable
         var query = QueryBuilder<SmallBitSet<uint>>.Create()
             .Build(_world);
 
-        await Assert.That(query.EntityCount).IsEqualTo(3);
+        await Assert.That(query.Count()).IsEqualTo(3);
     }
 
     [Test]

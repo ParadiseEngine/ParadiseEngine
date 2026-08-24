@@ -375,7 +375,7 @@ public sealed class WorldEntityQueryTests : IDisposable
         var query = QueryBuilder<SmallBitSet<ulong>>.Create()
             .Build(_world);
 
-        await Assert.That(query.EntityCount).IsEqualTo(3);
+        await Assert.That(query.Count()).IsEqualTo(3);
     }
 
     [Test]

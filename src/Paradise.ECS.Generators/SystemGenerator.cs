@@ -1118,6 +1118,17 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
         sb.AppendLine($"{indent}{{");
 
+        // Row-level constraints the scheduler's archetype match cannot express: a queryable
+        // declaring [WithTag<T>] yields only rows carrying it. Routed through QueryHelpers because
+        // a static virtual with a default body resolves only through a constrained type parameter
+        // — so this one line is emitted for every composition claim, and folds away for the ones
+        // that declare no filter.
+        foreach (var field in compositionFields)
+        {
+            var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
+            sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
+        }
+
         // Extract entity handle if needed
         if (hasEntityHandle)
         {
@@ -1191,6 +1202,13 @@ public class SystemGenerator : IIncrementalGenerator
 
         sb.AppendLine($"{indent}for (int __i = 0; __i < entityCount; __i++)");
         sb.AppendLine($"{indent}{{");
+
+        // Same row filter as the classic path above — see the note there.
+        foreach (var field in compositionFields)
+        {
+            var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
+            sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
+        }
 
         if (hasEntityHandle)
         {

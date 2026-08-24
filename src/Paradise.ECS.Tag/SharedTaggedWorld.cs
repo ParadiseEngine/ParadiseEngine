@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace Paradise.ECS;
 
 /// <summary>
-/// Manages shared resources (ChunkManager, SharedArchetypeMetadata, ChunkTagRegistry) that can be used across multiple tagged worlds.
+/// Manages shared resources (ChunkManager, SharedArchetypeMetadata) that can be used across multiple tagged worlds.
 /// Disposing this instance will dispose all owned resources.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
@@ -20,7 +20,6 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
     private readonly TConfig _config;
     private readonly ChunkManager _chunkManager;
     private readonly SharedArchetypeMetadata<TMask, TConfig> _sharedMetadata;
-    private readonly ChunkTagRegistry<TTagMask> _chunkTagRegistry;
     private ThreadAffinity _threadAffinity;
     private bool _disposed;
 
@@ -33,11 +32,6 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
     /// Gets the shared archetype metadata.
     /// </summary>
     public SharedArchetypeMetadata<TMask, TConfig> SharedMetadata => _sharedMetadata;
-
-    /// <summary>
-    /// Gets the chunk tag registry shared across all worlds.
-    /// </summary>
-    public ChunkTagRegistry<TTagMask> ChunkTagRegistry => _chunkTagRegistry;
 
     /// <summary>
     /// Gets the configuration instance.
@@ -63,10 +57,6 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
         _config = config;
         _chunkManager = ChunkManager.Create(config);
         _sharedMetadata = new SharedArchetypeMetadata<TMask, TConfig>(typeInfos, config);
-        _chunkTagRegistry = new ChunkTagRegistry<TTagMask>(
-            config.ChunkAllocator,
-            TConfig.MaxMetaBlocks,
-            TConfig.ChunkSize);
     }
 
     /// <summary>
@@ -81,14 +71,13 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
         var world = new TaggedWorld<TMask, TConfig, TEntityTags, TTagMask>(
             _config,
             _chunkManager,
-            _sharedMetadata,
-            _chunkTagRegistry);
+            _sharedMetadata);
         _worlds.Add(world);
         return world;
     }
 
     /// <summary>
-    /// Clears all created worlds and disposes all owned resources including the ChunkManager, SharedArchetypeMetadata, and ChunkTagRegistry.
+    /// Clears all created worlds and disposes all owned resources including the ChunkManager and SharedArchetypeMetadata.
     /// </summary>
     public void Dispose()
     {
@@ -100,7 +89,6 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
         foreach (var world in _worlds)
             world.Clear();
         _worlds.Clear();
-        _chunkTagRegistry.Dispose();
         _sharedMetadata.Dispose();
         _chunkManager.Dispose();
     }

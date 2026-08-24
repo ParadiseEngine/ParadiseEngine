@@ -85,7 +85,6 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     where TTagMask : unmanaged, IBitSet<TTagMask>
 {
     private readonly World<TMask, TConfig> _world;
-    private readonly ChunkTagRegistry<TTagMask> _chunkTagRegistry;
 
     /// <summary>
     /// Creates a new TaggedWorld with externally provided subsystems.
@@ -94,14 +93,17 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <param name="config">The configuration instance with runtime settings.</param>
     /// <param name="chunkManager">The chunk manager for memory allocation.</param>
     /// <param name="sharedMetadata">The shared archetype metadata.</param>
-    /// <param name="chunkTagRegistry">The chunk tag registry for per-chunk tag filtering.</param>
+    /// <remarks>
+    /// Per-chunk tag masks are not passed in and not owned: they live in a slot reserved at the end
+    /// of every chunk whose archetype carries <typeparamref name="TEntityTags"/>, which the layout
+    /// reserves automatically. That is what makes them travel with <c>World.CopyFrom</c> and what
+    /// removes the side table this used to take.
+    /// </remarks>
     public TaggedWorld(
         TConfig config,
         ChunkManager chunkManager,
-        SharedArchetypeMetadata<TMask, TConfig> sharedMetadata,
-        ChunkTagRegistry<TTagMask> chunkTagRegistry)
+        SharedArchetypeMetadata<TMask, TConfig> sharedMetadata)
     {
-        _chunkTagRegistry = chunkTagRegistry;
         _world = new World<TMask, TConfig>(config, sharedMetadata, chunkManager);
     }
 
@@ -127,11 +129,6 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
 
     /// <inheritdoc/>
     public EntityIdAllocator EntityIdAllocator => _world.EntityIdAllocator;
-
-    /// <summary>
-    /// Gets the chunk tag registry for per-chunk tag filtering.
-    /// </summary>
-    public ChunkTagRegistry<TTagMask> ChunkTagRegistry => _chunkTagRegistry;
 
     /// <summary>
     /// Gets the current number of live entities.
@@ -163,9 +160,50 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         if (!_world.IsAlive(entity))
             return false;
 
-        // Despawn the entity - chunk mask not recomputed (sticky mask optimization)
+        CoverSwapVictim(entity);
         _world.Despawn(entity);
         return true;
+    }
+
+    /// <summary>
+    /// Cover, in advance, the tags of whichever entity a despawn is about to drag into this one's
+    /// slot.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Despawn is a swap-remove: the archetype's LAST entity is moved into the hole. When the hole
+    /// is in an earlier chunk that entity crosses chunks, carrying tags the destination has never
+    /// seen — and unlike every other move, the entity that moves is not the one the caller named,
+    /// so there is nothing to call <see cref="CoverTags"/> on afterwards. Which entity it will be
+    /// is the world's business, not this wrapper's.
+    /// </para>
+    /// <para>
+    /// So this covers the whole SOURCE CHUNK's mask instead of one entity's tags — a superset of
+    /// whatever moves, which is exactly what a conservative mask is allowed to be. It costs the
+    /// destination chunk some bits it may not strictly need (a scan, never a wrong answer) and it
+    /// needs no cooperation from the layer below. Done BEFORE the despawn, while both chunks are
+    /// still where they are.
+    /// </para>
+    /// <para>
+    /// Nothing to do when the victim is already in the same chunk — the common case, and the reason
+    /// a single-chunk archetype hides this defect completely.
+    /// </para>
+    /// </remarks>
+    private void CoverSwapVictim(Entity entity)
+    {
+        var location = _world.GetLocation(entity);
+        var archetype = _world.ArchetypeRegistry.GetById(location.ArchetypeId);
+        if (archetype is null || !archetype.Layout.ComponentMask.Get(TEntityTags.TypeId.Value))
+            return;
+
+        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
+        int lastChunkIndex = archetype.ChunkCount - 1;
+        if (lastChunkIndex <= chunkIndex)
+            return;
+
+        var sourceMask = ChunkMask(archetype.GetChunk(lastChunkIndex), archetype.Layout);
+        ref var destinationMask = ref ChunkMask(archetype.GetChunk(chunkIndex), archetype.Layout);
+        destinationMask = destinationMask.Or(sourceMask);
     }
 
     /// <inheritdoc/>
@@ -212,8 +250,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
             int chunkCount = archetype.ChunkCount;
             for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
             {
-                var chunkHandle = archetype.GetChunk(chunkIndex);
-                var currentMask = _chunkTagRegistry.GetChunkMask(chunkHandle);
+                var currentMask = ChunkMask(archetype.GetChunk(chunkIndex), archetype.Layout);
                 var actualMask = ComputeActualChunkMask(archetype, chunkIndex);
 
                 int currentBits = currentMask.PopCount();
@@ -249,9 +286,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// </remarks>
     public void RebuildChunkMasks()
     {
-        // Clear all existing masks
-        _chunkTagRegistry.Clear();
-
+        // No global clear: every slot lives in the chunk it describes and is overwritten below, so
+        // there is nothing to reset first — and nothing belonging to another world to destroy. That
+        // hazard was real while the masks lived in a registry shared across worlds.
         // Iterate all archetypes that have EntityTags component
         for (int index = 0; index < _world.Archetypes.Count; index++)
         {
@@ -288,10 +325,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         // TODO: use mutable tag mask?
         tags.Mask = tags.Mask.Set(TTag.TagId);
 
-        // Update chunk tag mask (OR the tag bit into the chunk's mask)
-        var tagBit = default(TTagMask).Set(TTag.TagId);
-        var chunkHandle = GetEntityChunkHandle(entity);
-        _chunkTagRegistry.OrChunkMask(chunkHandle, tagBit);
+        // OR the bit into the chunk's own summary slot.
+        ref var chunkMask = ref ChunkMaskOf(entity);
+        chunkMask = chunkMask.Or(default(TTagMask).Set(TTag.TagId));
     }
 
     /// <summary>
@@ -315,6 +351,65 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     }
 
     /// <summary>
+    /// Replaces this world's contents with a copy of <paramref name="source"/>, tags included.
+    /// </summary>
+    /// <param name="source">The world to copy from. Must share this world's SharedArchetypeMetadata.</param>
+    /// <remarks>
+    /// <para>
+    /// The tagged counterpart of <see cref="World{TMask,TConfig}.CopyFrom"/>, and the reason a
+    /// tagged world can take part in snapshot execution at all: a host that publishes each step by
+    /// copying the stepped world into a pooled twin needs this, and without it referencing
+    /// Paradise.ECS.Tag cost a consumer its snapshot loop.
+    /// </para>
+    /// <para>
+    /// <b>Per-entity tags need no special handling.</b> They live in the <c>EntityTags</c>
+    /// COMPONENT, which sits in the chunks that <see cref="World{TMask,TConfig}.CopyFrom"/> copies,
+    /// so every entity arrives already carrying its mask.
+    /// </para>
+    /// <para>
+    /// <b>Chunk masks do.</b> the per-chunk mask table was keyed by
+    /// <c>ChunkHandle.Id</c>, and the copy puts the data in DIFFERENT chunks — so this world's new
+    /// chunks arrive with no entries at all. Leaving them that way would not be a slow answer but a
+    /// WRONG one: <c>ChunkMayMatch</c> reads a clear bit as proof the chunk holds no such tag, so
+    /// an empty mask makes a consumer skip chunks whose entities really are tagged. Whatever this
+    /// method does, it cannot do nothing.
+    /// </para>
+    /// <para>
+    /// <b>The masks are COPIED, not recomputed.</b> Source chunk j pairs with destination chunk j —
+    /// the archetype ids match through the shared metadata and <c>CopyChunksFrom</c> copies in index
+    /// order, which is the same pairing <see cref="SnapshotChunkPairing"/> already relies on. So the
+    /// answer is already known and costs O(chunks) to move; recomputing it would re-read every
+    /// entity's tag mask, O(entities), on every publish — and a host publishing a snapshot per step
+    /// pays that per step.
+    /// </para>
+    /// <para>
+    /// What copying gives up is that stale bits ride along. Masks are sticky —
+    /// <see cref="RemoveTag{TTag}"/> clears the entity's bit and leaves the chunk's — so a source
+    /// carrying bits no entity has any more hands them to the copy. That is deliberate: it is
+    /// faithful (a copy should hold what its source holds), it is safe in the only direction that
+    /// matters (an extra bit costs a scan, a missing one costs a correct answer), and recomputing
+    /// here would not have fixed the real problem anyway — it would clean the SNAPSHOTS while the
+    /// live world, the one systems actually query, kept accumulating. That is what
+    /// <see cref="RebuildChunkMasks"/> and <see cref="StaleBitStatistics.SuggestsRebuild"/> are for.
+    /// </para>
+    /// <para>
+    /// <b>Deliberately not <see cref="RebuildChunkMasks"/>.</b> That method CLEARS the registry
+    /// first, and under <see cref="SharedTaggedWorld{TMask,TConfig,TEntityTags,TTagMask}"/> the
+    /// registry is shared by every world made from one shared — so rebuilding "this world's" masks
+    /// that way would erase its siblings' and rebuild only its own. Publishing a snapshot would then
+    /// blank the live world's masks on every step. This writes only this world's entries.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">Copying a world to itself, or between worlds
+    /// that do not share metadata (both surfaced by the inner world).</exception>
+    public void CopyFrom(TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        _world.CopyFrom(source._world);
+    }
+
+    /// <summary>
     /// Checks if an entity has a specific tag.
     /// </summary>
     /// <typeparam name="TTag">The tag type to check.</typeparam>
@@ -326,6 +421,19 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         ref var tags = ref _world.GetComponent<TEntityTags>(entity);
         return tags.Mask.Get(TTag.TagId);
     }
+
+    /// <summary>
+    /// The tag mask of the CHUNK <paramref name="entity"/> lives in: the union of the tags of every
+    /// entity in it.
+    /// </summary>
+    /// <remarks>
+    /// A conservative summary, not an exact one. Bits are OR-ed in when a tag is added and left
+    /// alone when one is removed (see <see cref="RemoveTag{TTag}"/>), so a set bit means "some
+    /// entity here may carry this" and only a clear bit is proof of absence. That asymmetry is what
+    /// makes it safe to skip a chunk on a clear bit and never safe to trust a set one.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public TTagMask GetChunkMask(Entity entity) => ChunkMaskOf(entity);
 
     /// <summary>
     /// Gets the full tag mask for an entity.
@@ -358,8 +466,8 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
 
         if (!addedTags.Equals(default(TTagMask)))
         {
-            var chunkHandle = GetEntityChunkHandle(entity);
-            _chunkTagRegistry.OrChunkMask(chunkHandle, addedTags);
+            ref var chunkMask = ref ChunkMaskOf(entity);
+            chunkMask = chunkMask.Or(addedTags);
         }
         // Removed tags: chunk mask not recomputed (sticky) - may have stale bits
     }
@@ -383,22 +491,35 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent
-        => _world.AddComponent(entity, value);
+    {
+        // Changes archetype, so the entity moves to a chunk that knows nothing of its tags.
+        _world.AddComponent(entity, value);
+        CoverTags(entity);
+    }
 
     /// <summary>
     /// Removes a component from an entity.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
-        => _world.RemoveComponent<T>(entity);
+    {
+        _world.RemoveComponent<T>(entity);
+        CoverTags(entity);
+    }
 
     /// <inheritdoc/>
     public void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
-        => _world.AddComponentRaw(entity, componentId, data);
+    {
+        _world.AddComponentRaw(entity, componentId, data);
+        CoverTags(entity);
+    }
 
     /// <inheritdoc/>
     public void RemoveComponentRaw(Entity entity, ComponentId componentId)
-        => _world.RemoveComponentRaw(entity, componentId);
+    {
+        _world.RemoveComponentRaw(entity, componentId);
+        CoverTags(entity);
+    }
 
     /// <inheritdoc/>
     public void SetComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data)
@@ -409,7 +530,11 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public Entity CreateEntity<TBuilder>(TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder
     {
         var wrappedBuilder = new EnsureComponent<TEntityTags, TBuilder> { InnerBuilder = builder };
-        return _world.CreateEntity(wrappedBuilder);
+        var entity = _world.CreateEntity(wrappedBuilder);
+        // A builder can carry tags (AddTag composes onto it), so a brand-new entity may already be
+        // tagged before its chunk has been told.
+        CoverTags(entity);
+        return entity;
     }
 
     /// <inheritdoc/>
@@ -417,24 +542,76 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public Entity OverwriteEntity<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder
     {
         var wrappedBuilder = new EnsureComponent<TEntityTags, TBuilder> { InnerBuilder = builder };
-        return _world.OverwriteEntity(entity, wrappedBuilder);
+        var result = _world.OverwriteEntity(entity, wrappedBuilder);
+        CoverTags(result);
+        return result;
     }
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity AddComponents<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder
-        => _world.AddComponents(entity, builder);
+    {
+        var result = _world.AddComponents(entity, builder);
+        CoverTags(result);
+        return result;
+    }
 
     /// <summary>
-    /// Gets the chunk handle for an entity.
+    /// Make this entity's chunk admit to the tags the entity carries.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called after anything that can move an entity between chunks. The entity's tags travel with
+    /// it — they live in its <typeparamref name="TEntityTags"/> component — but the chunk it lands
+    /// in has never heard of them, and a chunk mask that is missing bits is the one kind of wrong
+    /// that costs correctness: a consumer skipping a chunk on a clear bit steps straight over
+    /// entities that do carry the tag.
+    /// </para>
+    /// <para>
+    /// Only ever ORs, which is what makes it cheap to call defensively: the mask is a conservative
+    /// superset by design, so adding bits can never make an answer wrong, only make a scan longer.
+    /// </para>
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ChunkHandle GetEntityChunkHandle(Entity entity)
+    private void CoverTags(Entity entity)
+    {
+        if (!_world.HasComponent<TEntityTags>(entity))
+            return;
+
+        var tags = _world.GetComponent<TEntityTags>(entity).Mask;
+        if (tags.Equals(default(TTagMask)))
+            return;
+
+        ref var chunkMask = ref ChunkMaskOf(entity);
+        chunkMask = chunkMask.Or(tags);
+    }
+
+    /// <summary>
+    /// The chunk's tag mask: the union of the tag masks of the entities it holds, living in the
+    /// slot the layout reserved at the end of the chunk.
+    /// </summary>
+    /// <remarks>
+    /// A <c>ref</c> into chunk memory rather than a lookup, so OR-ing a bit in is a read-modify-
+    /// write on the bytes themselves. It also means the value is carried by any operation that
+    /// copies chunks — which is the whole reason it lives here rather than in a table beside the
+    /// world.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref TTagMask ChunkMask(
+        ChunkHandle chunk, scoped in ImmutableArchetypeLayout<TMask, TConfig> layout)
+    {
+        int offset = layout.GetChunkAggregateOffset(TEntityTags.TypeId, _world.TypeInfos);
+        return ref _world.ChunkManager.GetBytes(chunk).GetRef<TTagMask>(offset);
+    }
+
+    /// <summary>The chunk mask of the chunk <paramref name="entity"/> lives in.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref TTagMask ChunkMaskOf(Entity entity)
     {
         var location = _world.GetLocation(entity);
         var archetype = _world.ArchetypeRegistry.GetById(location.ArchetypeId)!;
         var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        return archetype.GetChunk(chunkIndex);
+        return ref ChunkMask(archetype.GetChunk(chunkIndex), archetype.Layout);
     }
 
     /// <summary>
@@ -445,8 +622,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <param name="chunkIndex">The chunk index within the archetype.</param>
     private void RecomputeChunkMask(ChunkHandle chunkHandle, Archetype<TMask, TConfig> archetype, int chunkIndex)
     {
-        var newMask = ComputeActualChunkMask(archetype, chunkIndex);
-        _chunkTagRegistry.SetChunkMask(chunkHandle, newMask);
+        ChunkMask(chunkHandle, archetype.Layout) = ComputeActualChunkMask(archetype, chunkIndex);
     }
 
     /// <summary>
