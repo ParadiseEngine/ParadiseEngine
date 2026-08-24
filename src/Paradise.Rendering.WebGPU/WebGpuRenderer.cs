@@ -93,10 +93,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) =>
         new(SurfaceDescriptor.Headless(width, height));
 
-    /// <summary>Whether <see cref="ReadbackColor"/> can produce an image, which is a fact about
-    /// the TARGET rather than the renderer: a swapchain texture belongs to the presentation engine
-    /// and is not created <c>CopySrc</c>, so a run that presents to a window cannot be read back at
-    /// all. Ask this instead of catching the exception the other case throws.</summary>
+    /// <summary>Whether <see cref="ReadbackColor"/> can produce an image, which is a fact about the
+    /// TARGET rather than the renderer: only a target that owns a texture outliving the frame can
+    /// be read after rendering. Ask this instead of catching the exception the other case
+    /// throws.</summary>
     public bool CanReadbackColor => _target.Readable is not null;
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
@@ -611,9 +611,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <summary>Read the color target back to CPU memory as tightly-packed,
     /// top-down <c>BGRA8</c> (4 bytes/pixel, <see cref="ColorFormat"/> = <see cref="TextureFormat.Bgra8Unorm"/>).
     /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
-    /// Requires a target the renderer OWNS: a swapchain texture belongs to the presentation engine
-    /// and is not created <c>CopySrc</c>, so a windowed run cannot be read at all. Check
-    /// <see cref="CanReadbackColor"/> rather than catching the throw.</summary>
+    /// Requires a target the renderer OWNS, because it reads AFTER the frame: a swapchain's texture
+    /// is valid only until its present, so a windowed run has nothing left to copy by the time this
+    /// is called. Check <see cref="CanReadbackColor"/> rather than catching the throw.</summary>
     public byte[] ReadbackColor(out uint width, out uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

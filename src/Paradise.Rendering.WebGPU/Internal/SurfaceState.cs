@@ -58,6 +58,11 @@ internal sealed class SurfaceState : IDisposable
         {
             Device = _device.Device,
             Format = Format,
+            // RenderAttachment only. The chain's textures are therefore not copyable — which is a
+            // CHOICE, not a platform rule: GetCapabilities above reports the usages this surface
+            // supports and we read only its formats. Adding CopySrc (guarded by that capability)
+            // is what a windowed screenshot would need, and it would have to be recorded mid-frame,
+            // before the present that ends the texture's life.
             Usage = WgTextureUsage.RenderAttachment,
             AlphaMode = WgCompositeAlphaMode.Auto,
             PresentMode = WgPresentMode.Fifo,

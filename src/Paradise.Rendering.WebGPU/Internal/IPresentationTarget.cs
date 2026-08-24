@@ -22,10 +22,19 @@ namespace Paradise.Rendering.WebGPU.Internal;
 /// nothing to present to.</item>
 /// </list>
 ///
-/// <see cref="Readable"/> is where that difference stops being an implementation detail: a
-/// swapchain texture belongs to the presentation engine and is not created <c>CopySrc</c>, so it
-/// cannot be copied out of. An owned one is. That is the whole reason a played session cannot be
-/// screenshotted from inside the engine while a headless run can.
+/// <see cref="Readable"/> is where that difference stops being an implementation detail — and the
+/// reason is LIFETIME, not permission. An owned texture is the same object every frame and stays
+/// valid until the target is disposed, so it can be read whenever. A borrowed one is valid only
+/// between its acquire and its present: afterwards it belongs to the compositor and is rotated
+/// back into the chain, so by the time a caller has finished rendering there is nothing left to
+/// read.
+///
+/// (The swapchain's textures are also configured <c>RenderAttachment</c> only — see
+/// <see cref="SurfaceState"/> — so they are not copyable today either. That part IS ours to
+/// change: <c>GetCapabilities</c> reports which usages the surface supports and we currently read
+/// only its formats. Adding <c>CopySrc</c> would make a WINDOWED capture possible, but only as a
+/// mid-frame one, recorded before the present that ends the texture's life. It would not make
+/// <see cref="Readable"/> meaningful here.)
 /// </summary>
 internal interface IPresentationTarget : IDisposable
 {
@@ -49,7 +58,7 @@ internal interface IPresentationTarget : IDisposable
     /// exactly what a headless run is.</summary>
     void Present();
 
-    /// <summary>The texture a caller may copy out of, or null when this target's texture belongs
-    /// to the presentation engine and cannot be read.</summary>
+    /// <summary>The texture a caller may copy out of AFTER rendering, or null when this target has
+    /// none that outlives a frame.</summary>
     WgTexture? Readable { get; }
 }
