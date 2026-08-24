@@ -93,12 +93,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) =>
         new(SurfaceDescriptor.Headless(width, height));
 
-    /// <summary>Whether <see cref="ReadbackColor"/> can produce an image, which is a fact about the
-    /// TARGET rather than the renderer: only a target that owns a texture outliving the frame can
-    /// be read after rendering. Ask this instead of catching the exception the other case
-    /// throws.</summary>
-    public bool CanReadbackColor => _target.Readable is not null;
-
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
     /// for an offscreen target. Pipeline color targets must match this format or the backend will
     /// reject the pipeline at draw time.</summary>
@@ -682,6 +676,22 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
         return pixels;
     }
+
+    /// <summary>
+    /// The finished frame, or NULL when this renderer's target cannot be read after rendering.
+    ///
+    /// The twin of <see cref="ReadbackColor"/>, for the caller that does not know which kind of
+    /// target it was given — a host that renders the same way either way, and wants the image if
+    /// there is one. Returning nothing IS the answer, so such a caller neither asks a capability
+    /// question first nor catches an exception to find out.
+    ///
+    /// <see cref="ReadbackColor"/> remains for callers that DO know: a test that built a headless
+    /// renderer on purpose wants a missing image to be a failure, not a null.
+    /// </summary>
+    public ColorReadback? TryReadbackColor() =>
+        _target.Readable is null
+            ? null
+            : new ColorReadback(ReadbackColor(out var width, out var height), width, height);
 
     private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer)
     {
