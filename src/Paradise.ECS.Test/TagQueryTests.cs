@@ -213,6 +213,37 @@ public sealed class TagQueryTests : IDisposable
     }
 
     [Test]
+    public async Task TheSingletonBindsThroughSnapshotPairingAtANonZeroRow()
+    {
+        // The path review flagged as untested, and the one most likely to regress in silence.
+        //
+        // A tag-filtered singleton can bind ANY row of a chunk, unlike an unfiltered one which is
+        // always row 0. Under snapshot-read execution its read-only components then resolve against
+        // the paired chunk in another world at that same index — so both the pairing's bounds check
+        // and the captured index have to be right, and neither is exercised by resolving against a
+        // live world with readWorld: null.
+        //
+        // Untagged neighbours first, so the match sits at index 2 rather than 0.
+        SpawnPositioned(1);
+        SpawnPositioned(2);
+        var target = SpawnPositioned(3);
+        _world.AddTag<TestIsPlayer>(target);
+
+        var readWorld = new World(s_config, _chunkManager, _sharedMetadata);
+        readWorld.CopyFrom(_world);
+
+        // Diverge the WRITE world after the copy. TestPosition is a read-only claim, so a correctly
+        // paired singleton reports the READ world's value; binding the wrong index — or the wrong
+        // world — shows up as one of the other numbers.
+        _world.GetComponent<TestPosition>(target).X = 99f;
+
+        var singleton = TestTaggedSingleton.Singleton<ComponentMask, DefaultConfig>
+            .Resolve(_world, readWorld);
+
+        await Assert.That(singleton.TestPosition.X).IsEqualTo(3f);
+    }
+
+    [Test]
     public async Task RetaggingMovesTheSingletonWithoutAStructuralChange()
     {
         // The property the whole tag route exists for: WHICH entity the singleton resolves to is a

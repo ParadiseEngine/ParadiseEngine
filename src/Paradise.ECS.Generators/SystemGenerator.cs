@@ -1210,7 +1210,6 @@ public class SystemGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
         }
 
-
         if (hasEntityHandle)
         {
             sb.AppendLine($"{indent}    int __entityId = global::Paradise.ECS.ImmutableArchetypeLayout<{maskType}, {configType}>.ReadEntityId(bytes, __i);");

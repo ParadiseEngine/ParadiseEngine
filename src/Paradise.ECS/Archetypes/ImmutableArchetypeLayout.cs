@@ -31,6 +31,11 @@ public struct ArchetypeLayoutHeader<TMask> where TMask : unmanaged, IBitSet<TMas
     /// aggregates. Zero unless some component asked for one.</summary>
     public int ChunkAggregateBytes;
 
+    /// <summary>How many of this archetype's components reserve a per-chunk aggregate. Stored so
+    /// the overwhelmingly common shape — exactly one — can be answered without walking the mask;
+    /// see <see cref="ImmutableArchetypeLayout{TMask,TConfig}.GetChunkAggregateOffset"/>.</summary>
+    public int ChunkAggregateCount;
+
     /// <summary>The component mask for this archetype.</summary>
     public TMask ComponentMask;
 
@@ -120,6 +125,13 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         int reserved = Header.ChunkAggregateBytes;
         if (reserved == 0)
             return -1;
+
+        // One aggregating component is the whole of today's usage and, being alone, it owns the
+        // entire reservation — so its slot starts exactly where the reservation does. Worth the
+        // branch because this sits on the structural-change and despawn paths as well as on every
+        // chunk a tag-filtered query considers, and the general answer costs a mask walk.
+        if (Header.ChunkAggregateCount == 1)
+            return TConfig.ChunkSize - reserved;
 
         var action = new FindChunkAggregateOffsetAction
         {
@@ -260,9 +272,10 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         // Per-chunk aggregates live in the TAIL of the chunk, and everything below simply carves a
         // smaller chunk. Placing them last is what keeps this change invisible: every column offset
         // and every entity-id read is measured from offset 0 as before, so only the capacity moves.
-        var aggregateAction = new SumChunkAggregatesAction { TypeInfos = typeInfos, TotalSize = 0 };
+        var aggregateAction = new SumChunkAggregatesAction { TypeInfos = typeInfos, TotalSize = 0, Count = 0 };
         componentMask.ForEach(ref aggregateAction);
         header.ChunkAggregateBytes = aggregateAction.TotalSize;
+        header.ChunkAggregateCount = aggregateAction.Count;
         int usableChunkSize = TConfig.ChunkSize - aggregateAction.TotalSize;
 
         // Calculate total size per entity (entity ID + components, without alignment)
@@ -342,11 +355,15 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
     {
         public ImmutableArray<ComponentTypeInfo> TypeInfos;
         public int TotalSize;
+        public int Count;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Invoke(int bitIndex)
         {
-            TotalSize += TypeInfos[bitIndex].ChunkAggregateSize;
+            int size = TypeInfos[bitIndex].ChunkAggregateSize;
+            if (size == 0) return;
+            TotalSize += size;
+            Count++;
         }
     }
 

@@ -947,6 +947,11 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}        int writeEntityCount = 1;");
             sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
             sb.AppendLine($"{indent}        {{");
+            // Same coarse pass the enumerator does. It matters most HERE: a singleton resolves once
+            // per step for the lifetime of a run, so skipping chunks that cannot hold the match is
+            // the difference between scanning an archetype every tick and glancing at its chunks.
+            sb.AppendLine($"{indent}            if (!Data<TMask, TConfig>.ChunkMatches(world.ChunkManager, ci.Archetype.Layout, ci.Handle))");
+            sb.AppendLine($"{indent}                continue;");
             sb.AppendLine($"{indent}            for (int i = 0; i < ci.EntityCount; i++)");
             sb.AppendLine($"{indent}            {{");
             sb.AppendLine($"{indent}                if (!Data<TMask, TConfig>.Matches(world.ChunkManager, ci.Archetype.Layout, ci.Handle, i))");
