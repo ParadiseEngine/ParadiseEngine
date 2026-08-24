@@ -36,6 +36,26 @@ public class HeadlessSmokeTests
         }
     }
 
+    /// <summary>The descriptor route's twin of <see cref="TryCreateHeadlessOrSkip"/>. Same two
+    /// host-unavailability conditions, because it is the same constructor underneath.</summary>
+    private static WebGpuRenderer? TryCreateOrSkip(in SurfaceDescriptor surface)
+    {
+        try
+        {
+            return new WebGpuRenderer(in surface);
+        }
+        catch (AdapterUnavailableException ex)
+        {
+            Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
+            return null;
+        }
+        catch (DllNotFoundException ex)
+        {
+            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            return null;
+        }
+    }
+
     [Test]
     public async Task headless_renderer_initializes_and_disposes()
     {
@@ -133,16 +153,24 @@ public class HeadlessSmokeTests
     public async Task surface_ctor_builds_a_headless_renderer_from_a_headless_descriptor()
     {
         var desc = SurfaceDescriptor.Headless(64, 32);
-        using var renderer = new WebGpuRenderer(in desc);
+        var renderer = TryCreateOrSkip(in desc);
+        if (renderer is null) return;
 
-        // Headless for real, not merely constructed: the offscreen path reports the offscreen
-        // format, and only a headless renderer permits a readback at all.
-        await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
-        renderer.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
-        var pixels = renderer.ReadbackColor(out var width, out var height);
-        await Assert.That(width).IsEqualTo(64u);
-        await Assert.That(height).IsEqualTo(32u);
-        await Assert.That(pixels.Length).IsEqualTo(64 * 32 * 4);
+        try
+        {
+            // Headless for real, not merely constructed: the offscreen path reports the offscreen
+            // format, and only a headless renderer permits a readback at all.
+            await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
+            renderer.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+            var pixels = renderer.ReadbackColor(out var width, out var height);
+            await Assert.That(width).IsEqualTo(64u);
+            await Assert.That(height).IsEqualTo(32u);
+            await Assert.That(pixels.Length).IsEqualTo(64 * 32 * 4);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
     }
 
     /// <summary>A capture is the frame the renderer actually drew, delivered through a task the
@@ -151,21 +179,30 @@ public class HeadlessSmokeTests
     [Test]
     public async Task capture_frame_async_returns_the_frame_that_was_drawn()
     {
-        using var renderer = WebGpuRenderer.CreateHeadless(16, 8);
-        await Assert.That(renderer.CanCaptureFrame).IsTrue();
+        var renderer = TryCreateHeadlessOrSkip(16, 8);
+        if (renderer is null) return;
 
-        // Requested BEFORE the frame: the request queues and the next frame services it, which is
-        // the whole shape of the API — a caller never has to know where the render loop is.
-        var pending = renderer.CaptureFrameAsync();
-        renderer.RenderClearFrame(new ColorRgba(0f, 0f, 1f, 1f));
-        var image = await pending.ConfigureAwait(false);
+        try
+        {
+            await Assert.That(renderer.CanCaptureFrame).IsTrue();
 
-        await Assert.That(image.Width).IsEqualTo(16u);
-        await Assert.That(image.Height).IsEqualTo(8u);
-        await Assert.That(image.Pixels.Length).IsEqualTo(16 * 8 * 4);
-        // BGRA: pure blue is B=255, R=0. Checks the channel order as well as the content.
-        await Assert.That(image.Pixels[0]).IsEqualTo((byte)255);
-        await Assert.That(image.Pixels[2]).IsEqualTo((byte)0);
+            // Requested BEFORE the frame: the request queues and the next frame services it, which
+            // is the whole shape of the API — a caller never has to know where the loop is.
+            var pending = renderer.CaptureFrameAsync();
+            renderer.RenderClearFrame(new ColorRgba(0f, 0f, 1f, 1f));
+            var image = await pending.ConfigureAwait(false);
+
+            await Assert.That(image.Width).IsEqualTo(16u);
+            await Assert.That(image.Height).IsEqualTo(8u);
+            await Assert.That(image.Pixels.Length).IsEqualTo(16 * 8 * 4);
+            // BGRA: pure blue is B=255, R=0. Checks channel order as well as content.
+            await Assert.That(image.Pixels[0]).IsEqualTo((byte)255);
+            await Assert.That(image.Pixels[2]).IsEqualTo((byte)0);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
     }
 
     /// <summary>Two requests posted before a single frame are both served BY that frame, rather
@@ -173,17 +210,26 @@ public class HeadlessSmokeTests
     [Test]
     public async Task several_requests_are_served_by_one_frame()
     {
-        using var renderer = WebGpuRenderer.CreateHeadless(8, 8);
-        var first = renderer.CaptureFrameAsync();
-        var second = renderer.CaptureFrameAsync();
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
 
-        renderer.RenderClearFrame(new ColorRgba(0f, 1f, 0f, 1f));
+        try
+        {
+            var first = renderer.CaptureFrameAsync();
+            var second = renderer.CaptureFrameAsync();
 
-        var a = await first.ConfigureAwait(false);
-        var b = await second.ConfigureAwait(false);
-        await Assert.That(a.Pixels.Length).IsEqualTo(b.Pixels.Length);
-        await Assert.That(a.Pixels[1]).IsEqualTo((byte)255); // green
-        await Assert.That(b.Pixels[1]).IsEqualTo((byte)255);
+            renderer.RenderClearFrame(new ColorRgba(0f, 1f, 0f, 1f));
+
+            var a = await first.ConfigureAwait(false);
+            var b = await second.ConfigureAwait(false);
+            await Assert.That(a.Pixels.Length).IsEqualTo(b.Pixels.Length);
+            await Assert.That(a.Pixels[1]).IsEqualTo((byte)255); // green
+            await Assert.That(b.Pixels[1]).IsEqualTo((byte)255);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
     }
 
     /// <summary>A request with nothing rendering behind it stays pending — it is not silently
@@ -191,12 +237,21 @@ public class HeadlessSmokeTests
     [Test]
     public async Task a_request_waits_for_a_frame()
     {
-        using var renderer = WebGpuRenderer.CreateHeadless(8, 8);
-        var pending = renderer.CaptureFrameAsync();
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
 
-        var finished = await Task.WhenAny(pending, Task.Delay(250)).ConfigureAwait(false);
-        await Assert.That(finished).IsNotEqualTo((Task)pending);
-        await Assert.That(pending.IsCompleted).IsFalse();
+        try
+        {
+            var pending = renderer.CaptureFrameAsync();
+
+            var finished = await Task.WhenAny(pending, Task.Delay(250)).ConfigureAwait(false);
+            await Assert.That(finished).IsNotEqualTo((Task)pending);
+            await Assert.That(pending.IsCompleted).IsFalse();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
     }
 
     /// <summary>...but it does not stay pending FOREVER. Disposal faults what it can no longer
@@ -205,7 +260,9 @@ public class HeadlessSmokeTests
     [Test]
     public async Task disposal_faults_a_request_no_frame_will_serve()
     {
-        var renderer = WebGpuRenderer.CreateHeadless(8, 8);
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
+
         var pending = renderer.CaptureFrameAsync();
         renderer.Dispose();
 
@@ -219,13 +276,22 @@ public class HeadlessSmokeTests
     [Test]
     public async Task the_clear_frame_path_serves_captures_as_well()
     {
-        using var renderer = WebGpuRenderer.CreateHeadless(8, 8);
-        var pending = renderer.CaptureFrameAsync();
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
 
-        renderer.RenderClearFrame(new ColorRgba(1f, 0f, 0f, 1f));
+        try
+        {
+            var pending = renderer.CaptureFrameAsync();
 
-        var image = await pending.ConfigureAwait(false);
-        await Assert.That(image.Pixels[2]).IsEqualTo((byte)255); // BGRA: red
+            renderer.RenderClearFrame(new ColorRgba(1f, 0f, 0f, 1f));
+
+            var image = await pending.ConfigureAwait(false);
+            await Assert.That(image.Pixels[2]).IsEqualTo((byte)255); // BGRA: red
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
     }
 
     /// <summary>The named factory still works and still means the same thing — it is the same
@@ -233,17 +299,31 @@ public class HeadlessSmokeTests
     [Test]
     public async Task create_headless_agrees_with_the_descriptor_route()
     {
-        using var named = WebGpuRenderer.CreateHeadless(48, 24);
+        var named = TryCreateHeadlessOrSkip(48, 24);
+        if (named is null) return;
         var desc = SurfaceDescriptor.Headless(48, 24);
-        using var described = new WebGpuRenderer(in desc);
+        var described = TryCreateOrSkip(in desc);
+        if (described is null)
+        {
+            named.Dispose();
+            return;
+        }
 
-        await Assert.That(named.ColorFormat).IsEqualTo(described.ColorFormat);
-        named.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
-        described.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
-        var a = named.ReadbackColor(out var aw, out var ah);
-        var b = described.ReadbackColor(out var bw, out var bh);
-        await Assert.That(aw).IsEqualTo(bw);
-        await Assert.That(ah).IsEqualTo(bh);
-        await Assert.That(a.Length).IsEqualTo(b.Length);
+        try
+        {
+            await Assert.That(named.ColorFormat).IsEqualTo(described.ColorFormat);
+            named.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+            described.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+            var a = named.ReadbackColor(out var aw, out var ah);
+            var b = described.ReadbackColor(out var bw, out var bh);
+            await Assert.That(aw).IsEqualTo(bw);
+            await Assert.That(ah).IsEqualTo(bh);
+            await Assert.That(a.Length).IsEqualTo(b.Length);
+        }
+        finally
+        {
+            described.Dispose();
+            named.Dispose();
+        }
     }
 }
