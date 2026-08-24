@@ -160,7 +160,7 @@ public class ComponentGeneratorManualIdTests
         var registry = GeneratorTestHelper.GetGeneratedSource(source, "ComponentRegistry.g.cs");
 
         // Verify the manual ID is included in the component tuple with inline lambda
-        await Assert.That(registry).Contains("100, (global::Paradise.ECS.ComponentId id) => global::TestNamespace.ManualIdComponent.TypeId = id");
+        await Assert.That(registry).Contains("100, 0, (global::Paradise.ECS.ComponentId id) => global::TestNamespace.ManualIdComponent.TypeId = id");
     }
 
     [Test]
@@ -178,7 +178,7 @@ public class ComponentGeneratorManualIdTests
         var registry = GeneratorTestHelper.GetGeneratedSource(source, "ComponentRegistry.g.cs");
 
         // Verify auto-assign components use -1 as manual ID with inline lambda
-        await Assert.That(registry).Contains("-1, (global::Paradise.ECS.ComponentId id) => global::TestNamespace.AutoIdComponent.TypeId = id");
+        await Assert.That(registry).Contains("-1, 0, (global::Paradise.ECS.ComponentId id) => global::TestNamespace.AutoIdComponent.TypeId = id");
     }
 
     [Test]
