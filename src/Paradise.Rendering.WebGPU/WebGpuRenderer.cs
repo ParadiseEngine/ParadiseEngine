@@ -22,10 +22,16 @@ using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
 namespace Paradise.Rendering.WebGPU;
 
-/// <summary>WebGPU (Dawn) backend entry point. Constructed with a <see cref="SurfaceDescriptor"/>
-/// for windowed rendering, or via <see cref="CreateHeadless"/> for the offscreen adapter path
-/// used by CI smoke tests. Exposes resource Create/Destroy plus the
-/// <see cref="Submit(in RenderCommandStream)"/> path that drives a real frame.</summary>
+/// <summary>WebGPU (Dawn) backend entry point. Constructed from a <see cref="SurfaceDescriptor"/>,
+/// which decides what it draws INTO: a window's swapchain, or — for
+/// <see cref="SurfacePlatform.Headless"/> — an offscreen texture it owns. Exposes resource
+/// Create/Destroy plus the <see cref="Submit(in RenderCommandStream)"/> path that drives a real
+/// frame.
+///
+/// That difference lives in one place, <c>IPresentationTarget</c>, and nothing in the frame path
+/// consults it: acquire a view, draw, present. "Headless" is a kind of TARGET, not a kind of
+/// renderer — this class used to carry a <c>bool</c> for it and branch at six points (colour
+/// format, resize, both presents, the readback guard, the backbuffer acquire).</summary>
 /// <remarks>Implements <see cref="IRenderer"/>, the backend-agnostic slice consumed by
 /// <c>Paradise.Rendering.Pbr</c>. The members beyond it — <see cref="OverlayPass"/>,
 /// <see cref="NativeDevice"/>, <see cref="ReadbackColor"/>, <see cref="RenderClearFrame"/>, and
@@ -37,8 +43,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private const int DefaultFramesInFlight = 2;
 
     private readonly WebGpuDevice _device;
-    private readonly SurfaceState? _surface;
-    private readonly bool _isHeadless;
+    private readonly IPresentationTarget _target;
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
@@ -46,77 +51,70 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
-    private WgTexture? _offscreenTarget;
-    private uint _offscreenWidth;
-    private uint _offscreenHeight;
     private bool _disposed;
 
-    /// <summary>Create a surface-backed renderer. The descriptor's platform tag selects the native
-    /// surface variant; <see cref="SurfacePlatform.Headless"/> is rejected — use
-    /// <see cref="CreateHeadless"/> instead.</summary>
+    /// <summary>
+    /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
+    /// or — for <see cref="SurfacePlatform.Headless"/> — an offscreen <c>BGRA8Unorm</c> target of
+    /// the descriptor's size, with no surface created at all.
+    ///
+    /// This used to refuse the headless descriptor and point callers at
+    /// <see cref="CreateHeadless"/>, which left <see cref="SurfaceDescriptor"/> able to STATE a
+    /// case the only constructor taking one would not build. Every host holding a descriptor then
+    /// had to know the rule and branch on it — so the branch lived in as many places as there were
+    /// hosts, instead of here, in the type that owns the distinction.
+    /// </summary>
     public WebGpuRenderer(in SurfaceDescriptor surface)
     {
-        if (surface.Platform == SurfacePlatform.Headless)
-            throw new ArgumentException(
-                "Headless platform must use WebGpuRenderer.CreateHeadless(); the surface ctor requires a real native window.",
-                nameof(surface));
-
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
+
+        // The ONE decision, and it is construction rather than behaviour: which target to build.
+        // Everything after this line asks the target and never asks which kind it is.
+        if (surface.Platform == SurfacePlatform.Headless)
+        {
+            _device = WebGpuDevice.Create(instance, compatibleSurface: null);
+            _target = new OffscreenTarget(_device, surface.Width, surface.Height);
+            return;
+        }
+
         var nativeSurface = SurfaceFactory.Create(instance, surface);
         _device = WebGpuDevice.Create(instance, nativeSurface);
-        _surface = new SurfaceState(_device, nativeSurface, surface.Width, surface.Height);
-        _isHeadless = false;
-    }
-
-    private WebGpuRenderer(uint width, uint height)
-    {
-        var instance = WgWebGPU.CreateInstance()
-            ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
-        _device = WebGpuDevice.Create(instance, compatibleSurface: null);
-        _isHeadless = true;
-        _offscreenWidth = width == 0 ? 1 : width;
-        _offscreenHeight = height == 0 ? 1 : height;
-        _offscreenTarget = CreateOffscreenTarget(_offscreenWidth, _offscreenHeight);
+        _target = new SurfaceTarget(new SurfaceState(_device, nativeSurface, surface.Width, surface.Height));
     }
 
     /// <summary>Construct the renderer using the headless adapter path. No native surface is
     /// created; clear frames render into an offscreen <c>BGRA8Unorm</c> texture sized
     /// <paramref name="width"/> x <paramref name="height"/>. The CI smoke test driver consumes
-    /// this path with <c>SDL_VIDEODRIVER=dummy</c>.</summary>
-    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) => new(width, height);
+    /// this path with <c>SDL_VIDEODRIVER=dummy</c>.
+    ///
+    /// Kept as the NAME for that intent — it reads better than a descriptor at a call site that
+    /// only wants an offscreen target — but it is now the same constructor underneath.</summary>
+    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) =>
+        new(SurfaceDescriptor.Headless(width, height));
+
+    /// <summary>Whether <see cref="ReadbackColor"/> can produce an image, which is a fact about
+    /// the TARGET rather than the renderer: a swapchain texture belongs to the presentation engine
+    /// and is not created <c>CopySrc</c>, so a run that presents to a window cannot be read back at
+    /// all. Ask this instead of catching the exception the other case throws.</summary>
+    public bool CanReadbackColor => _target.Readable is not null;
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
-    /// for the headless offscreen target. Pipeline color targets must match this format or the
-    /// backend will reject the pipeline at draw time.</summary>
-    public TextureFormat ColorFormat =>
-        _isHeadless
-            ? TextureFormat.Bgra8Unorm
-            : FormatConversions.FromWgpu(_surface!.Format);
+    /// for an offscreen target. Pipeline color targets must match this format or the backend will
+    /// reject the pipeline at draw time.</summary>
+    public TextureFormat ColorFormat => _target.ColorFormat;
 
     /// <summary>Resize the surface (or offscreen target) to <paramref name="width"/> x
     /// <paramref name="height"/>. Zero-sized requests are clamped to 1.</summary>
     public void Resize(uint width, uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_isHeadless)
-        {
-            if (width == 0) width = 1;
-            if (height == 0) height = 1;
-            if (width == _offscreenWidth && height == _offscreenHeight) return;
-            _offscreenTarget?.Destroy();
-            _offscreenWidth = width;
-            _offscreenHeight = height;
-            _offscreenTarget = CreateOffscreenTarget(width, height);
-        }
-        else
-        {
-            _surface!.Resize(width, height);
-        }
+        _target.Resize(width, height);
     }
 
     /// <summary>Acquire the next color attachment, run a single render pass that clears it to
-    /// <paramref name="clearColor"/>, submit, and present (windowed) or simply discard (headless).</summary>
+    /// <paramref name="clearColor"/>, submit, and present — which for a target with no display is
+    /// a no-op, leaving the frame in the texture.</summary>
     public void RenderClearFrame(in ColorRgba clearColor)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -142,7 +140,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         pass.End();
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
-        if (!_isHeadless) _surface!.Native.Present();
+        _target.Present();
         _destructionQueue.AdvanceFrame();
     }
 
@@ -606,23 +604,26 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         OverlayPass?.Invoke(encoder, view);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
-        if (!_isHeadless) _surface!.Native.Present();
+        _target.Present();
         _destructionQueue.AdvanceFrame();
     }
 
-    /// <summary>Read the headless offscreen color target back to CPU memory as tightly-packed,
+    /// <summary>Read the color target back to CPU memory as tightly-packed,
     /// top-down <c>BGRA8</c> (4 bytes/pixel, <see cref="ColorFormat"/> = <see cref="TextureFormat.Bgra8Unorm"/>).
     /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
-    /// Headless renderers only (windowed swapchain textures aren't CopySrc).</summary>
+    /// Requires a target the renderer OWNS: a swapchain texture belongs to the presentation engine
+    /// and is not created <c>CopySrc</c>, so a windowed run cannot be read at all. Check
+    /// <see cref="CanReadbackColor"/> rather than catching the throw.</summary>
     public byte[] ReadbackColor(out uint width, out uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_isHeadless || _offscreenTarget is null)
-            throw new InvalidOperationException(
-                "ReadbackColor is only available on a headless renderer (CreateHeadless).");
+        var readable = _target.Readable
+            ?? throw new InvalidOperationException(
+                "ReadbackColor needs a target that can be copied out of. A surface's swapchain "
+                + "texture is not CopySrc; build the renderer from a headless SurfaceDescriptor.");
 
-        width = _offscreenWidth;
-        height = _offscreenHeight;
+        width = _target.Width;
+        height = _target.Height;
         const uint bytesPerPixel = 4;
         var unpaddedBytesPerRow = width * bytesPerPixel;
         // WebGPU requires a texture→buffer copy's BytesPerRow to be a multiple of 256.
@@ -639,7 +640,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }) ?? throw new InvalidOperationException("Readback buffer creation returned null.");
 
         var encoder = _device.Device.CreateCommandEncoder();
-        var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = _offscreenTarget, MipLevel = 0 };
+        var source = new WebGpuSharp.TexelCopyTextureInfo { Texture = readable, MipLevel = 0 };
         var destination = new WebGpuSharp.TexelCopyBufferInfo
         {
             Buffer = readback,
@@ -960,49 +961,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         return encoder.BeginRenderPass(in desc);
     }
 
-    private bool TryAcquireBackbufferView(out WgTextureView view)
-    {
-        if (_isHeadless)
-        {
-            view = _offscreenTarget!.CreateView();
-            return true;
-        }
-
-        var current = _surface!.Native.GetCurrentTexture();
-        switch (current.Status)
-        {
-            case WgSurfaceGetCurrentTextureStatus.SuccessOptimal:
-            case WgSurfaceGetCurrentTextureStatus.SuccessSuboptimal:
-                break;
-            case WgSurfaceGetCurrentTextureStatus.Outdated:
-            case WgSurfaceGetCurrentTextureStatus.Lost:
-                _surface.Reconfigure();
-                view = null!;
-                return false;
-            default:
-                throw new InvalidOperationException($"Surface texture acquisition failed: {current.Status}");
-        }
-        var surfaceTexture = current.Texture
-            ?? throw new InvalidOperationException(
-                $"Surface texture was null despite status {current.Status} — WebGPUSharp invariant violation.");
-        view = surfaceTexture.CreateView();
-        return true;
-    }
-
-    private WgTexture CreateOffscreenTarget(uint width, uint height)
-    {
-        var desc = new WgTextureDescriptor
-        {
-            Label = "ParadiseHeadlessTarget",
-            Size = new WgExtent3D(width, height, 1),
-            MipLevelCount = 1,
-            SampleCount = 1,
-            Dimension = WgTextureDimension.D2,
-            Format = WgTextureFormat.BGRA8Unorm,
-            Usage = WgTextureUsage.RenderAttachment | WgTextureUsage.CopySrc,
-        };
-        return _device.Device.CreateTexture(in desc);
-    }
+    private bool TryAcquireBackbufferView(out WgTextureView view) => _target.TryAcquireView(out view);
 
     /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>, which now
     /// lives in the backend-agnostic <c>Paradise.Rendering</c> package (loading a Slang-compiled
@@ -1025,8 +984,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _disposed = true;
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();
-        _offscreenTarget?.Destroy();
-        _surface?.Dispose();
+        _target.Dispose();
         _device.Dispose();
     }
 }

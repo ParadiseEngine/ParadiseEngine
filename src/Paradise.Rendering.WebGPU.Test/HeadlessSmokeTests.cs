@@ -119,10 +119,48 @@ public class HeadlessSmokeTests
         }
     }
 
+    /// <summary>
+    /// The surface constructor BUILDS a headless renderer from a headless descriptor, rather than
+    /// refusing it.
+    ///
+    /// It used to throw and direct the caller to <see cref="WebGpuRenderer.CreateHeadless"/>, which
+    /// left <see cref="SurfaceDescriptor"/> able to state a case the only constructor taking one
+    /// would not build — so every host holding a descriptor had to know the rule and branch on it,
+    /// and the branch lived in as many places as there were hosts. The descriptor is the question;
+    /// this is the answer.
+    /// </summary>
     [Test]
-    public async Task surface_ctor_rejects_headless_platform()
+    public async Task surface_ctor_builds_a_headless_renderer_from_a_headless_descriptor()
     {
-        var desc = SurfaceDescriptor.Headless();
-        await Assert.That(() => new WebGpuRenderer(in desc)).Throws<ArgumentException>();
+        var desc = SurfaceDescriptor.Headless(64, 32);
+        using var renderer = new WebGpuRenderer(in desc);
+
+        // Headless for real, not merely constructed: the offscreen path reports the offscreen
+        // format, and only a headless renderer permits a readback at all.
+        await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
+        renderer.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+        var pixels = renderer.ReadbackColor(out var width, out var height);
+        await Assert.That(width).IsEqualTo(64u);
+        await Assert.That(height).IsEqualTo(32u);
+        await Assert.That(pixels.Length).IsEqualTo(64 * 32 * 4);
+    }
+
+    /// <summary>The named factory still works and still means the same thing — it is the same
+    /// constructor underneath now, which is exactly what must not regress.</summary>
+    [Test]
+    public async Task create_headless_agrees_with_the_descriptor_route()
+    {
+        using var named = WebGpuRenderer.CreateHeadless(48, 24);
+        var desc = SurfaceDescriptor.Headless(48, 24);
+        using var described = new WebGpuRenderer(in desc);
+
+        await Assert.That(named.ColorFormat).IsEqualTo(described.ColorFormat);
+        named.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+        described.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
+        var a = named.ReadbackColor(out var aw, out var ah);
+        var b = described.ReadbackColor(out var bw, out var bh);
+        await Assert.That(aw).IsEqualTo(bw);
+        await Assert.That(ah).IsEqualTo(bh);
+        await Assert.That(a.Length).IsEqualTo(b.Length);
     }
 }
