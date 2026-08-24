@@ -14,7 +14,6 @@ internal sealed class SurfaceState : IDisposable
 {
     private readonly WebGpuDevice _device;
     private readonly WgSurface _surface;
-    private readonly bool _captureRequested;
     private bool _disposed;
 
     /// <summary>Whether the swapchain's textures were configured <c>CopySrc</c>, and can therefore
@@ -37,7 +36,6 @@ internal sealed class SurfaceState : IDisposable
     {
         _device = device;
         _surface = surface;
-        _captureRequested = allowCapture;
         Width = width == 0 ? 1 : width;
         Height = height == 0 ? 1 : height;
 

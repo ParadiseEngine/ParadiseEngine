@@ -62,7 +62,17 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
-    private bool _disposed;
+    /// <summary>Volatile because it is read on any thread that calls in and written by whichever
+    /// thread disposes. The capture path does not rely on that alone — see
+    /// <see cref="_captureGate"/> — but every other guard in this file is a plain read of it.</summary>
+    private volatile bool _disposed;
+
+    /// <summary>Makes "am I disposed?" and "enqueue this request" ONE step with respect to
+    /// disposal's "set the flag, then drain". Without it a request can pass the check, lose the
+    /// race to a Dispose that drains and returns, and then enqueue into a queue nothing will ever
+    /// look at again — an await that never returns, which is the exact failure this capture path
+    /// was built to eliminate.</summary>
+    private readonly object _captureGate = new();
 
     /// <summary>
     /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
@@ -716,8 +726,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// one frame away and possibly more.
     /// </summary>
     /// <exception cref="NotSupportedException">This renderer's target cannot be copied from. For a
-    /// window that means <see cref="CaptureEnabled"/> was never turned on, or the surface does not
-    /// advertise <c>CopySrc</c>. Thrown rather than returned as a faulted task, because it is a
+    /// window that means it was not constructed with <c>allowCapture: true</c>, or the surface does
+    /// not advertise <c>CopySrc</c>. Thrown rather than returned as a faulted task, because it is a
     /// fact about the renderer that is true before the call and will not change by retrying.</exception>
     public Task<ColorReadback> CaptureFrameAsync(CancellationToken cancellationToken = default)
     {
@@ -725,19 +735,34 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         if (!_target.SupportsCapture)
         {
             throw new NotSupportedException(
-                "This target cannot be captured. A window must be built with capture enabled "
-                + "(SurfaceDescriptor + CaptureEnabled) and the surface must advertise CopySrc.");
+                "This target cannot be captured. A window must be built with allowCapture: true "
+                + "and the surface must advertise CopySrc.");
         }
 
         var request = new TaskCompletionSource<ColorReadback>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         if (cancellationToken.CanBeCanceled)
         {
-            // Registration disposed by the completion path is not worth the bookkeeping here: the
-            // token simply abandons the wait, and the frame's copy is discarded when it lands.
-            cancellationToken.Register(() => request.TrySetCanceled(cancellationToken));
+            // Released when the request settles. A fresh token per call would not care, but a
+            // long-lived source reused across a recording session would otherwise accumulate a
+            // registration per capture for the renderer's lifetime.
+            var registration = cancellationToken.Register(
+                static state => ((TaskCompletionSource<ColorReadback>)state!).TrySetCanceled(), request);
+            request.Task.ContinueWith(
+                static (_, state) => ((CancellationTokenRegistration)state!).Dispose(),
+                registration,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
-        _captureRequests.Enqueue(request);
+
+        // The check and the enqueue are one step against disposal's flag-then-drain; see
+        // _captureGate. Re-checked INSIDE because the guard above can be stale by now.
+        lock (_captureGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _captureRequests.Enqueue(request);
+        }
         return request.Task;
     }
 
@@ -811,12 +836,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             return;
         }
 
+        // ONE wait for the whole frame: every copy in `pending` rode the same command buffer, which
+        // has already been submitted, so waiting again per capture buys nothing.
+        const ulong timeoutNs = 5_000_000_000;
+        _device.Queue.OnSubmittedWorkSync(timeoutNs);
+
         foreach (var (request, staging, width, height, paddedRow) in pending)
         {
             try
             {
-                const ulong timeoutNs = 5_000_000_000;
-                _device.Queue.OnSubmittedWorkSync(timeoutNs);
                 var size = (nuint)((ulong)paddedRow * height);
                 staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000);
                 var tight = width * 4u;
@@ -1139,15 +1167,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        // Anything still queued can never be served — there will be no further frame. Faulting is
-        // the only honest answer: a task left pending here is a caller hung forever, which is how
-        // this surfaced in the first place.
-        while (_captureRequests.TryDequeue(out var abandoned))
+        // Flag and drain together, under the gate CaptureFrameAsync enqueues beneath: a request
+        // that passes its check is guaranteed to be either drained here or already queued before
+        // this ran. Anything still queued can never be served — there will be no further frame —
+        // and faulting is the only honest answer, since a task left pending is a caller hung for
+        // the life of the process.
+        lock (_captureGate)
         {
-            abandoned.TrySetException(new ObjectDisposedException(
-                nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
+            if (_disposed) return;
+            _disposed = true;
+            while (_captureRequests.TryDequeue(out var abandoned))
+            {
+                abandoned.TrySetException(new ObjectDisposedException(
+                    nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
+            }
         }
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();

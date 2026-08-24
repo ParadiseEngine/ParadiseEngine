@@ -270,6 +270,78 @@ public class HeadlessSmokeTests
             .Throws<ObjectDisposedException>();
     }
 
+    /// <summary>
+    /// A request racing disposal is never left pending.
+    ///
+    /// The hazard is a torn check-then-enqueue: a caller passes the disposed guard, Dispose runs to
+    /// completion on another thread (setting the flag and draining what it can see), and the caller
+    /// then enqueues into a queue nothing will ever look at again. That task would hang for the
+    /// life of the process — the same "my await never returns" failure this capture path exists to
+    /// prevent, reintroduced for the concurrent case the API advertises.
+    ///
+    /// Every handed-out task must SETTLE: faulted by the drain if it got in, while the call itself
+    /// may legally throw if it did not. What must never happen is a task that does neither.
+    ///
+    /// <b>What this does NOT do is reproduce the race.</b> It was run against the unguarded version
+    /// and passed there too — the window between reading the disposed flag and enqueuing is a few
+    /// instructions, and disposal has to set the flag AND finish draining inside it. So this pins
+    /// the POST-CONDITION rather than catching the defect; correctness rests on the enqueue and the
+    /// drain sharing a lock, which is a property of the code and not of this test. Widening the
+    /// window enough to catch it would mean a test hook in the production path, which costs more
+    /// than it proves.
+    /// </summary>
+    [Test]
+    public async Task a_request_racing_disposal_never_hangs()
+    {
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            var renderer = TryCreateHeadlessOrSkip(8, 8);
+            if (renderer is null) return;
+
+            using var start = new ManualResetEventSlim();
+            var poster = Task.Run(() =>
+            {
+                var handed = new List<Task<ColorReadback>>();
+                start.Wait();
+                for (var i = 0; i < 64; i++)
+                {
+                    try
+                    {
+                        handed.Add(renderer.CaptureFrameAsync());
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break; // the legal outcome for a call that lost the race
+                    }
+                }
+                return handed;
+            });
+
+            start.Set();
+            renderer.Dispose();
+            var requested = await poster.ConfigureAwait(false);
+
+            foreach (var task in requested)
+            {
+                var settled = await Task.WhenAny(task, Task.Delay(2000)).ConfigureAwait(false);
+                await Assert.That(ReferenceEquals(settled, task)).IsTrue();
+            }
+        }
+    }
+
+    /// <summary>Asking a disposed renderer is a refusal, not a task that quietly never
+    /// completes.</summary>
+    [Test]
+    public async Task capturing_after_disposal_throws()
+    {
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
+
+        renderer.Dispose();
+
+        await Assert.That(() => renderer.CaptureFrameAsync()).Throws<ObjectDisposedException>();
+    }
+
     /// <summary>The clear-frame path serves captures too. It presents a frame, so it owes the
     /// queue one — the bug this pins was a request queued against a renderer driven only through
     /// RenderClearFrame, which waited on a frame that never looked.</summary>
