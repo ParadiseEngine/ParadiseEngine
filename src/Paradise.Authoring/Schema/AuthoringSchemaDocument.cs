@@ -219,6 +219,22 @@ public static class AuthoredBySources
 
     /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
+
+    /// <summary>
+    /// An object whose WORLD POSE is the value: point at an empty (or anything else placeable) and
+    /// the exporter bakes where it stands into this record's own fields.
+    ///
+    /// What you are aiming is the host's own move/rotate gizmo, which is the entire reason this is
+    /// a reference rather than three floats — a destination you can SEE is a destination you can
+    /// place correctly, and a vector typed into a panel is one nobody can check without running the
+    /// game.
+    ///
+    /// Baked BY FIELD NAME, so the record decides how much of the pose it wants: an exporter fills
+    /// whichever of <c>Position</c> (vector3), <c>Rotation</c> (quaternion), <c>Yaw</c> (float) and
+    /// <c>Scale</c> (vector3) are declared, and ignores the rest. That keeps the host general — it
+    /// never learns what any particular record MEANS by a pose.
+    /// </summary>
+    public const string Transform = "transform";
 }
 
 /// <summary>
