@@ -103,7 +103,8 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
 
     /// <summary>
     /// Byte offset, within a chunk, of the per-chunk aggregate slot reserved for
-    /// <paramref name="componentId"/> — or −1 if that component reserved none.
+    /// <paramref name="componentId"/> — or −1 when that component reserves no slot HERE, whether
+    /// because it reserves none at all or because it is not part of this archetype.
     /// </summary>
     /// <remarks>
     /// Slots are packed into the tail of the chunk in COMPONENT ID ORDER, which is the same order
@@ -126,10 +127,21 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         if (reserved == 0)
             return -1;
 
-        // One aggregating component is the whole of today's usage and, being alone, it owns the
-        // entire reservation — so its slot starts exactly where the reservation does. Worth the
-        // branch because this sits on the structural-change and despawn paths as well as on every
-        // chunk a tag-filtered query considers, and the general answer costs a mask walk.
+        // Does the component being ASKED ABOUT reserve anything here? Both halves are needed and
+        // neither implies the other: a component can reserve globally while being absent from this
+        // archetype, and one present in this archetype may reserve nothing. Answering that first is
+        // what keeps the shortcut below honest — it is also O(1), so it costs the fast path nothing.
+        if (!Header.ComponentMask.Get(componentId.Value)
+            || typeInfos[componentId.Value].ChunkAggregateSize == 0)
+        {
+            return -1;
+        }
+
+        // Past those guards the component reserves a slot in this archetype, so if it is the ONLY
+        // reserver here it owns the whole reservation and its slot starts exactly where the
+        // reservation does. That is the whole of today's usage, and worth the branch: this sits on
+        // the structural-change and despawn paths as well as on every chunk a tag-filtered query
+        // considers, while the general answer costs a mask walk.
         if (Header.ChunkAggregateCount == 1)
             return TConfig.ChunkSize - reserved;
 

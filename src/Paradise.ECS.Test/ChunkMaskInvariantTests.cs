@@ -36,6 +36,51 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     private bool ChunkMaskCovers(Entity entity) =>
         _world.GetChunkMask(entity).ContainsAll(_world.GetTags(entity));
 
+    /// <summary>The layout of the archetype this entity lives in.</summary>
+    private ImmutableArchetypeLayout<ComponentMask, DefaultConfig> LayoutOf(Entity entity)
+    {
+        var location = _world.World.GetLocation(entity);
+        return _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!.Layout;
+    }
+
+    [Test]
+    public async Task OnlyTheReservingComponentGetsAnAggregateOffset()
+    {
+        // GetChunkAggregateOffset answers for the component it is ASKED about. The archetype below
+        // holds two components and exactly one of them (EntityTags) reserves a per-chunk slot — the
+        // shape that makes a shortcut keyed on "this archetype has one reserver" look right while
+        // being wrong, because it would hand EntityTags' offset to anyone who asked about the other.
+        var entity = _world.Spawn();
+        _world.AddComponent(entity, new TestPosition { X = 1, Y = 0 });
+        var typeInfos = ComponentRegistry.Shared.TypeInfos;
+        // Read before asserting: a layout is a ref struct over unmanaged memory and cannot be held
+        // across an await.
+        int tagsOffset = LayoutOf(entity).GetChunkAggregateOffset(EntityTags.TypeId, typeInfos);
+        int positionOffset = LayoutOf(entity).GetChunkAggregateOffset(TestPosition.TypeId, typeInfos);
+        int healthOffset = LayoutOf(entity).GetChunkAggregateOffset(TestHealth.TypeId, typeInfos);
+
+        await Assert.That(tagsOffset).IsGreaterThanOrEqualTo(0);
+        // Present in the archetype, reserves nothing: −1, not somebody else's slot.
+        await Assert.That(positionOffset).IsEqualTo(-1);
+        // Reserves nothing AND absent from the archetype.
+        await Assert.That(healthOffset).IsEqualTo(-1);
+    }
+
+    [Test]
+    public async Task AnArchetypeWithoutTheReservingComponentHasNoAggregate()
+    {
+        // The other direction: EntityTags reserves globally, but an archetype it is not part of
+        // reserves nothing for it. Reached through the plain inner world, since every entity a
+        // TaggedWorld spawns carries EntityTags by construction.
+        var bare = _world.World.Spawn();
+        _world.World.AddComponent(bare, new TestPosition { X = 1, Y = 0 });
+        var location = _world.World.GetLocation(bare);
+        int offset = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!.Layout
+            .GetChunkAggregateOffset(EntityTags.TypeId, ComponentRegistry.Shared.TypeInfos);
+
+        await Assert.That(offset).IsEqualTo(-1);
+    }
+
     [Test]
     public async Task TaggingAnEntityCoversIt()
     {
