@@ -35,7 +35,7 @@ internal sealed class DeferredDestructionQueue
 
     public int PendingCount => _pending.Count;
 
-    /// <summary>Queue a release to run after <see cref="MaxFramesInFlight"/> frames have advanced.</summary>
+    /// <summary>Queue a release to run after <c>maxFramesInFlight</c> frames have advanced.</summary>
     public void Schedule(Action release)
     {
         ArgumentNullException.ThrowIfNull(release);

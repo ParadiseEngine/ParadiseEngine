@@ -61,8 +61,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
     /// <summary>Volatile because it is read on any thread that calls in and written by whichever
-    /// thread disposes. The capture path does not rely on that alone — see
-    /// <see cref="_captureGate"/> — but every other guard in this file is a plain read of it.</summary>
+    /// thread disposes. It is an ADVISORY guard: every <c>ObjectDisposedException.ThrowIf</c> in
+    /// this file reads it, and each of those is a check-then-act that a concurrent disposal can
+    /// still slip through. The two places where that would actually strand something do not rely
+    /// on it — a capture request is accepted or refused atomically by
+    /// <see cref="Internal.CaptureQueue"/>, and teardown runs once by way of
+    /// <see cref="_disposeGate"/>.</summary>
     private volatile bool _disposed;
 
     /// <summary>Claimed exactly once, by whichever thread reaches <see cref="Dispose"/> first.
@@ -638,7 +642,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
     /// Requires a target the renderer OWNS, because it reads AFTER the frame: a swapchain's texture
     /// is valid only until its present, so a windowed run has nothing left to copy by the time this
-    /// is called. Check <see cref="CanReadbackColor"/> rather than catching the throw.</summary>
+    /// is called — so this needs a renderer built from a headless <see cref="SurfaceDescriptor"/>,
+    /// and callers that know they did so want the throw when they did not. A caller that does NOT
+    /// know which kind of run it is in should ask for a frame instead, with
+    /// <see cref="CaptureFrameAsync"/>, which works either way.</summary>
     public byte[] ReadbackColor(out uint width, out uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
