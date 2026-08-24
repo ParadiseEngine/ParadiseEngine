@@ -21,6 +21,40 @@ dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 
 AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
 
+### Concurrent code gets a Coyote test
+
+**Anything with cross-thread rules — a lock, a shared flag, a queue two threads touch — gets a
+systematic test in the matching `*.CoyoteTest` project, not only a stress loop.** Coyote schedules
+interleavings deliberately; a stress loop reaches the bad one by luck or not at all. This is not
+theoretical: a hand-written race test for the renderer's capture queue passed **three runs out of
+three** against code with a real check-then-enqueue defect, while the Coyote test on the same
+broken build failed inside 200 iterations.
+
+```bash
+# Release, because the `coyote rewrite` target only runs there (needs the coyote CLI)
+dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest/... -c Release
+dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
+```
+
+Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`.
+
+Three things worth knowing before writing one:
+
+- **Extract the managed part first.** Coyote schedules `Task`, `lock` and concurrent collections —
+  it cannot see inside a native call. The renderer's capture path is mostly Dawn
+  (`OnSubmittedWorkSync`, `MapSync`, `RequestAdapterSync`), so the queue, its flag and its drain
+  were pulled into `CaptureQueue`, which has no native calls at all. Testability was the reason,
+  and it is usually the reason such an extraction is worth it.
+- **Await joins; do not block on them.** `Task.WaitAll` parks a thread, which Coyote cannot
+  distinguish from a deadlock — it reports every such test as a potential hang even when the code
+  is correct. Making the tests `async` keeps hang detection ON and meaningful, instead of switching
+  it off with `WithPotentialDeadlocksReportedAsBugs(false)`.
+- **Prove the test fails without the fix.** Reintroduce the defect, watch it fail, restore. A
+  concurrency test that has never failed is a guard nobody has checked the lock on.
+
+These projects are deliberately NOT `IsTestProject` — they are standalone runners with their own
+`Main`, so `dotnet test` skips them and they must be run explicitly.
+
 ## Project Overview
 
 Paradise Engine is a .NET behavior tree runtime library inspired by EntitiesBT, with a companion binary blob serialization library. It targets `net10.0`, uses C# 14, and is NativeAOT/trimming compatible.

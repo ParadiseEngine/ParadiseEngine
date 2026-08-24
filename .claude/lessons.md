@@ -175,6 +175,32 @@
   (`element.MouseWheel += …`, reading `MouseWheelEventArgs.Delta`/`.Orientation`), not against a
   templated control's state — it is the honest assertion AND needs no WebGPU device.
 
+## Concurrency testing
+
+- `[hits: 1]` **A stress-loop race test can pass against genuinely broken code — use Coyote and
+  prove the test fails without the fix.** A check-then-enqueue defect in the renderer's capture
+  queue (a request could be accepted after the drain had passed, leaving a task nobody would ever
+  complete) survived a hand-written test that spawned a poster thread racing `Dispose` 64 times per
+  attempt over 6 attempts: **3 runs out of 3 passed** against the broken build. The window is a few
+  instructions and disposal must both flag and drain inside it. The Coyote test on the same build
+  failed inside 200 iterations with the exact invariant violation. Write the systematic test, then
+  reintroduce the defect to confirm it actually catches it — otherwise the guard is unverified.
+
+- `[hits: 1]` **Coyote reports blocking joins as potential deadlocks, even for correct code.**
+  `Task.WaitAll` parks a thread and Coyote cannot tell that from a hang, so every test came back
+  "Potential deadlock or hang detected" against a correct implementation, and a 200-iteration run
+  took over 10 minutes against the 5s deadlock timeout. `Paradise.ECS.CoyoteTest` works around it
+  with `WithPotentialDeadlocksReportedAsBugs(false)`; the better fix is `async` tests that `await
+  Task.WhenAll`, which lets Coyote schedule the join, keeps hang detection meaningful, and runs in
+  seconds.
+
+- `[hits: 1]` **Coyote can only schedule MANAGED concurrency — extract it away from native calls
+  first.** `Paradise.Rendering.WebGPU` blocks in several places, but all of them are Dawn
+  (`OnSubmittedWorkSync`, `MapSync`, `RequestAdapterSync`, `CreateRenderPipelineSync`) and are
+  invisible to the scheduler. Only the capture queue's lock/flag/drain were managed, so they moved
+  into `Internal/CaptureQueue.cs` with zero native calls. Check what is actually schedulable before
+  planning a systematic test.
+
 ## WebAssembly / browser backend
 
 - [hits: 1] **`JSHost.ImportAsync` resolves a RELATIVE module URL against `_framework/`, not
