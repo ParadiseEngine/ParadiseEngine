@@ -9,7 +9,7 @@ Console.WriteLine("=== Paradise.ECS Sample Application ===");
 Console.WriteLine();
 
 // Create the SharedWorld using the generated SharedWorldFactory - handles all dependencies automatically!
-// SharedWorld owns ChunkManager, SharedArchetypeMetadata, and ChunkTagRegistry internally.
+// SharedWorld owns ChunkManager and SharedArchetypeMetadata internally.
 // Multiple World instances can be created from a single SharedWorld to share resources.
 // SharedWorld is IDisposable and cleans up all resources when disposed.
 using var sharedWorld = SharedWorldFactory.Create();

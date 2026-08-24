@@ -37,19 +37,63 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
     /// <summary>
     /// Gets the total number of entities matching this query.
     /// </summary>
-    public int EntityCount
+    /// <remarks>
+    /// <para>
+    /// How many entities live in the archetypes this query matches — an UPPER BOUND on what
+    /// iteration will yield, and exactly equal to it when <typeparamref name="TData"/> applies no
+    /// row filter (which is almost every queryable). A queryable declaring <c>[WithTag&lt;T&gt;]</c>
+    /// yields a subset, because whether a row carries a tag is not something an archetype knows.
+    /// </para>
+    /// <para>
+    /// It is a bound rather than a count so that it can be a PROPERTY. Answering exactly means
+    /// walking the rows, and a property that sometimes iterates — depending on a queryable's
+    /// declaration, invisibly at the call site — is the kind of cost that gets discovered in a
+    /// profiler rather than in review. <see cref="Count"/> is that walk, spelled as a method
+    /// because it is one.
+    /// </para>
+    /// </remarks>
+    public int EntityCapacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _query.EntityCount;
     }
 
     /// <summary>
+    /// Counts what this query will actually yield, filters included.
+    /// </summary>
+    /// <remarks>
+    /// A method, not a property, because it iterates: O(1) archetype bookkeeping cannot answer it
+    /// for a filtered queryable. Prefer <see cref="EntityCapacity"/> when a bound will do, and
+    /// <see cref="IsEmpty"/> when the question is merely whether anything matches.
+    /// </remarks>
+    /// <returns>The number of rows iteration would produce.</returns>
+    public int Count()
+    {
+        if (!TData.IsFiltered) return _query.EntityCount;
+        var count = 0;
+        var enumerator = GetEnumerator();
+        while (enumerator.MoveNext()) count++;
+        return count;
+    }
+
+    /// <summary>
     /// Gets whether this query has any matching entities.
     /// </summary>
+    /// <remarks>
+    /// Cheap in both directions, which is why it stays a property while <see cref="Count"/> did
+    /// not. Unfiltered it is archetype bookkeeping. Filtered it stops at the FIRST match, and the
+    /// empty case — the one that has to look everywhere — skips whole chunks whose summary rules
+    /// them out, so "nothing carries this tag" costs chunks rather than entities.
+    /// </remarks>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _query.IsEmpty;
+        get
+        {
+            if (!TData.IsFiltered) return _query.IsEmpty;
+            var enumerator = GetEnumerator();
+            return !enumerator.MoveNext();
+        }
     }
 
     /// <summary>
@@ -99,16 +143,33 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         public bool MoveNext()
         {
             _indexInChunk++;
-            while (_indexInChunk >= _entitiesInChunk)
+            while (true)
             {
-                if (!_chunkEnumerator.MoveNext()) return false;
-                var info = _chunkEnumerator.Current;
-                _currentLayout = info.Archetype.Layout;
-                _currentChunk = info.Handle;
-                _entitiesInChunk = info.EntityCount;
-                _indexInChunk = 0;
+                while (_indexInChunk >= _entitiesInChunk)
+                {
+                    if (!_chunkEnumerator.MoveNext()) return false;
+                    var info = _chunkEnumerator.Current;
+                    // Coarse pass: a chunk that provably holds no match is stepped over without
+                    // reading a single row. Conservative by contract — see IQueryData.ChunkMatches.
+                    if (!TData.ChunkMatches(_chunkManager, info.Archetype.Layout, info.Handle))
+                    {
+                        continue;
+                    }
+                    _currentLayout = info.Archetype.Layout;
+                    _currentChunk = info.Handle;
+                    _entitiesInChunk = info.EntityCount;
+                    _indexInChunk = 0;
+                }
+
+                // Row-level constraints the archetype mask cannot carry — tags, today. The default
+                // is a literal true reached through a struct type parameter, so for every queryable
+                // that declares none this compiles away and the loop is the one it replaced.
+                if (TData.Matches(_chunkManager, _currentLayout, _currentChunk, _indexInChunk))
+                {
+                    return true;
+                }
+                _indexInChunk++;
             }
-            return true;
         }
     }
 }
@@ -116,6 +177,12 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
 /// <summary>
 /// A generic chunk query result that iterates over chunks and returns typed chunk data instances.
 /// This struct is reused across all queryable types, reducing generated code.
+///
+/// <para><b>Row filters do not apply here.</b> This yields CHUNKS, and a chunk-level filter is a
+/// different question from a row-level one — a chunk holds matching and non-matching entities
+/// alike. A queryable declaring <c>[WithTag&lt;T&gt;]</c> therefore still hands out whole chunks
+/// through this path, and a caller batching over the spans must test the rows itself. See
+/// ParadiseEngine#166.</para>
 /// </summary>
 /// <typeparam name="TChunkData">The chunk data type providing span access, must implement IQueryChunkData.</typeparam>
 /// <typeparam name="TArchetype">The archetype type implementing IArchetype.</typeparam>

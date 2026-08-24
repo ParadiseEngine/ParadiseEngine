@@ -19,8 +19,8 @@ public static class ComponentQuerySample
             .With<Velocity>()
             .Build(world);
 
-        Console.WriteLine($"  Movable query entity count: {movableQuery.EntityCount}");
-        Debug.Assert(movableQuery.EntityCount == 5); // player + 4 enemies (1 despawned)
+        Console.WriteLine($"  Movable query entity count: {movableQuery.Count()}");
+        Debug.Assert(movableQuery.Count() == 5); // player + 4 enemies (1 despawned)
 
         foreach (var entity in movableQuery)
         {

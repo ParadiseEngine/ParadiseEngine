@@ -304,19 +304,17 @@ public sealed class TaggedWorldTests : IDisposable
     private static readonly DefaultConfig s_config = new();
     private readonly ChunkManager _chunkManager = ChunkManager.Create(s_config);
     private readonly SharedArchetypeMetadata _sharedMetadata = new(ComponentRegistry.Shared.TypeInfos, s_config);
-    private readonly ChunkTagRegistry<TagMask> _chunkTagRegistry = new(s_config.ChunkAllocator, DefaultConfig.MaxMetaBlocks, DefaultConfig.ChunkSize);
     private readonly World _world;
 
     public TaggedWorldTests()
     {
-        _world = new World(s_config, _chunkManager, _sharedMetadata, _chunkTagRegistry);
+        _world = new World(s_config, _chunkManager, _sharedMetadata);
     }
 
     public void Dispose()
     {
         _sharedMetadata.Dispose();
         _chunkManager.Dispose();
-        _chunkTagRegistry.Dispose();
     }
 
     [Test]
@@ -438,24 +436,18 @@ public sealed class TaggedWorldTests : IDisposable
     }
 
     [Test]
-    public async Task ChunkTagRegistry_AddTag_UpdatesChunkMask()
+    public async Task ChunkMask_AddTag_UpdatesChunkMask()
     {
         var entity = _world.Spawn();
 
         _world.AddTag<TestIsActive>(entity);
 
-        // Get entity's chunk handle
-        var location = _world.World.GetLocation(entity);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
-        var chunkMask = _world.ChunkTagRegistry.GetChunkMask(chunkHandle);
+        var chunkMask = _world.GetChunkMask(entity);
         await Assert.That(chunkMask.Get(TestIsActive.TagId.Value)).IsTrue();
     }
 
     [Test]
-    public async Task ChunkTagRegistry_MultipleEntitiesSameChunk_CombinesTags()
+    public async Task ChunkMask_MultipleEntitiesSameChunk_CombinesTags()
     {
         var e1 = _world.Spawn();
         var e2 = _world.Spawn();
@@ -463,19 +455,14 @@ public sealed class TaggedWorldTests : IDisposable
         _world.AddTag<TestIsActive>(e1);
         _world.AddTag<TestIsEnemy>(e2);
 
-        // Both should be in same chunk
-        var location = _world.World.GetLocation(e1);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
-        var chunkMask = _world.ChunkTagRegistry.GetChunkMask(chunkHandle);
+        // Both are in the same chunk, so either one names it.
+        var chunkMask = _world.GetChunkMask(e1);
         await Assert.That(chunkMask.Get(TestIsActive.TagId.Value)).IsTrue();
         await Assert.That(chunkMask.Get(TestIsEnemy.TagId.Value)).IsTrue();
     }
 
     [Test]
-    public async Task ChunkTagRegistry_RemoveTag_RecomputesChunkMask()
+    public async Task ChunkMask_RemoveTag_RecomputesChunkMask()
     {
         var e1 = _world.Spawn();
         var e2 = _world.Spawn();
@@ -507,18 +494,13 @@ public sealed class TaggedWorldTests : IDisposable
         var e2TagsAfter = _world.GetTags(e2);
         await Assert.That(e2TagsAfter.Get(TestIsActive.TagId.Value)).IsTrue();
 
-        var location = _world.World.GetLocation(e1);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
-        var chunkMask = _world.ChunkTagRegistry.GetChunkMask(chunkHandle);
+        var chunkMask = _world.GetChunkMask(e1);
         await Assert.That(chunkMask.Get(TestIsActive.TagId.Value)).IsTrue(); // Still set from e2
         await Assert.That(chunkMask.Get(TestIsEnemy.TagId.Value)).IsTrue();
     }
 
     [Test]
-    public async Task ChunkTagRegistry_RemoveLastTagOfType_StickyMaskRetainsBit()
+    public async Task ChunkMask_RemoveLastTagOfType_StickyMaskRetainsBit()
     {
         var e1 = _world.Spawn();
         var e2 = _world.Spawn();
@@ -529,54 +511,43 @@ public sealed class TaggedWorldTests : IDisposable
         // Remove the only TestIsActive tag
         _world.RemoveTag<TestIsActive>(e1);
 
-        var location = _world.World.GetLocation(e1);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
         // Sticky mask: bit remains set even after removing last entity with that tag
-        var chunkMask = _world.ChunkTagRegistry.GetChunkMask(chunkHandle);
+        var chunkMask = _world.GetChunkMask(e1);
         await Assert.That(chunkMask.Get(TestIsActive.TagId.Value)).IsTrue(); // Sticky - still set
         await Assert.That(chunkMask.Get(TestIsEnemy.TagId.Value)).IsTrue();
 
         // After RebuildChunkMasks, the stale bit is cleared
         _world.RebuildChunkMasks();
-        var rebuiltMask = _world.ChunkTagRegistry.GetChunkMask(chunkHandle);
+        var rebuiltMask = _world.GetChunkMask(e1);
         await Assert.That(rebuiltMask.Get(TestIsActive.TagId.Value)).IsFalse(); // Now cleared
         await Assert.That(rebuiltMask.Get(TestIsEnemy.TagId.Value)).IsTrue();
     }
 
     [Test]
-    public async Task ChunkTagRegistry_ChunkMayMatch_WithMatchingTags_ReturnsTrue()
+    public async Task ChunkMask_ChunkMayMatch_WithMatchingTags_ReturnsTrue()
     {
         var entity = _world.Spawn();
         _world.AddTag<TestIsActive>(entity);
         _world.AddTag<TestIsEnemy>(entity);
 
-        var location = _world.World.GetLocation(entity);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
         var requiredMask = TagMask.Empty.Set(TestIsActive.TagId.Value);
-        await Assert.That(_world.ChunkTagRegistry.ChunkMayMatch(chunkHandle, requiredMask)).IsTrue();
+        // ChunkMayMatch, asked of the mask directly now that it lives in the chunk: a set bit
+        // means \"maybe\", a clear one is proof of absence.
+        await Assert.That(_world.GetChunkMask(entity).ContainsAll(requiredMask)).IsTrue();
     }
 
     [Test]
-    public async Task ChunkTagRegistry_ChunkMayMatch_WithMissingTags_ReturnsFalse()
+    public async Task ChunkMask_ChunkMayMatch_WithMissingTags_ReturnsFalse()
     {
         var entity = _world.Spawn();
         _world.AddTag<TestIsActive>(entity);
 
-        var location = _world.World.GetLocation(entity);
-        var archetype = _world.World.ArchetypeRegistry.GetById(location.ArchetypeId)!;
-        var (chunkIndex, _) = archetype.GetChunkLocation(location.GlobalIndex);
-        var chunkHandle = archetype.GetChunk(chunkIndex);
-
         var requiredMask = TagMask.Empty
             .Set(TestIsActive.TagId.Value)
             .Set(TestIsEnemy.TagId.Value); // Entity doesn't have TestIsEnemy
-        await Assert.That(_world.ChunkTagRegistry.ChunkMayMatch(chunkHandle, requiredMask)).IsFalse();
+        // A clear bit is proof: no entity in this chunk carries TestIsEnemy, so the chunk can be
+        // skipped outright.
+        await Assert.That(_world.GetChunkMask(entity).ContainsAll(requiredMask)).IsFalse();
     }
 
     [Test]
