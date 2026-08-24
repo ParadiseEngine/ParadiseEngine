@@ -282,13 +282,14 @@ public class HeadlessSmokeTests
     /// Every handed-out task must SETTLE: faulted by the drain if it got in, while the call itself
     /// may legally throw if it did not. What must never happen is a task that does neither.
     ///
-    /// <b>What this does NOT do is reproduce the race.</b> It was run against the unguarded version
-    /// and passed there too — the window between reading the disposed flag and enqueuing is a few
-    /// instructions, and disposal has to set the flag AND finish draining inside it. So this pins
-    /// the POST-CONDITION rather than catching the defect; correctness rests on the enqueue and the
-    /// drain sharing a lock, which is a property of the code and not of this test. Widening the
-    /// window enough to catch it would mean a test hook in the production path, which costs more
-    /// than it proves.
+    /// <b>This does not reproduce the race, and is not what guards it.</b> Run against the
+    /// unguarded build it passed three times out of three — the window is a few instructions wide
+    /// and disposal has to both flag and drain inside it. What it pins is the post-condition
+    /// through the REAL renderer, end to end.
+    ///
+    /// The race itself is guarded by <c>Paradise.Rendering.WebGPU.CoyoteTest</c>, which schedules
+    /// the interleavings rather than hoping for one: against the same broken code it fails in
+    /// under 200 iterations with "a request the queue accepted was left pending after close".
     /// </summary>
     [Test]
     public async Task a_request_racing_disposal_never_hangs()

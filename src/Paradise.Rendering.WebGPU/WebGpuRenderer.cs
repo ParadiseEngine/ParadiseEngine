@@ -49,12 +49,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private readonly WebGpuDevice _device;
     private readonly IPresentationTarget _target;
 
-    /// <summary>Capture requests awaiting a frame. Concurrent because this is the ONE seam other
-    /// threads may touch: everything else on this renderer is the render thread's, and a request
-    /// posted from elsewhere is serviced on the render thread at a point where the frame's texture
-    /// is alive. The alternative — letting a caller read the target directly — races the frame in
-    /// progress.</summary>
-    private readonly ConcurrentQueue<TaskCompletionSource<ColorReadback>> _captureRequests = new();
+    /// <summary>Capture requests awaiting a frame — the ONE seam other threads may touch, and the
+    /// only part of this class with genuine cross-thread rules. They live in
+    /// <see cref="CaptureQueue"/> rather than here so they can be tested apart from Dawn.</summary>
+    private readonly CaptureQueue _captureRequests = new();
     private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
     private readonly PipelineCache _pipelineCache = new();
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
@@ -66,13 +64,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// thread disposes. The capture path does not rely on that alone — see
     /// <see cref="_captureGate"/> — but every other guard in this file is a plain read of it.</summary>
     private volatile bool _disposed;
-
-    /// <summary>Makes "am I disposed?" and "enqueue this request" ONE step with respect to
-    /// disposal's "set the flag, then drain". Without it a request can pass the check, lose the
-    /// race to a Dispose that drains and returns, and then enqueue into a queue nothing will ever
-    /// look at again — an await that never returns, which is the exact failure this capture path
-    /// was built to eliminate.</summary>
-    private readonly object _captureGate = new();
 
     /// <summary>
     /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
@@ -756,13 +747,17 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 TaskScheduler.Default);
         }
 
-        // The check and the enqueue are one step against disposal's flag-then-drain; see
-        // _captureGate. Re-checked INSIDE because the guard above can be stale by now.
-        lock (_captureGate)
+        // Refused rather than stranded: the queue closes atomically with its drain, so a request
+        // that loses the race to Dispose is told, not left holding a task nothing will complete.
+        // The analyser wants ObjectDisposedException.ThrowIf here, which cannot express this: the
+        // authority is the queue's own closed state, taken atomically with the enqueue, not a
+        // separately-read flag. Reading _disposed again would be the very race this replaced.
+#pragma warning disable CA1513
+        if (!_captureRequests.TryEnqueue(request))
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            _captureRequests.Enqueue(request);
+            throw new ObjectDisposedException(nameof(WebGpuRenderer));
         }
+#pragma warning restore CA1513
         return request.Task;
     }
 
@@ -1167,21 +1162,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     public void Dispose()
     {
-        // Flag and drain together, under the gate CaptureFrameAsync enqueues beneath: a request
-        // that passes its check is guaranteed to be either drained here or already queued before
-        // this ran. Anything still queued can never be served — there will be no further frame —
-        // and faulting is the only honest answer, since a task left pending is a caller hung for
-        // the life of the process.
-        lock (_captureGate)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            while (_captureRequests.TryDequeue(out var abandoned))
-            {
-                abandoned.TrySetException(new ObjectDisposedException(
-                    nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
-            }
-        }
+        if (_disposed) return;
+        _disposed = true;
+        // Closed before anything else is torn down: nothing queued can ever be served now, and the
+        // queue refuses arrivals from here on, so no request can be stranded by landing late.
+        _captureRequests.CloseAndFault(new ObjectDisposedException(
+            nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
         _destructionQueue.DrainAll();
         _pipelineCache.Clear();
         _target.Dispose();

@@ -1,0 +1,12 @@
+{
+	"AssembliesPath": ".",
+	"Assemblies": [
+		"Paradise.Rendering.WebGPU.CoyoteTest.dll",
+		"Paradise.Rendering.WebGPU.dll"
+	],
+	"OutputPath": ".",
+	"IsRewritingConcurrentCollections": true,
+	"IsRewritingUnitTests": false,
+	"IsRewritingThreads": true,
+	"IsDataRaceCheckingEnabled": true
+}
