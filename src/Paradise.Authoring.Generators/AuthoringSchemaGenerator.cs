@@ -71,6 +71,74 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         description: "Authored ids are looked up in one table per assembly, so a duplicate makes "
             + "the component that loses unreachable. Give the newer type a freshly generated GUID.");
 
+    /// <summary>
+    /// PAUT007: a referenced assembly publishes a schema this build cannot read.
+    ///
+    /// Only reachable with reference scanning on. The version is the document's whole
+    /// compatibility story, so a mismatch means the two assemblies were built against different
+    /// engines — merging half of it would publish components whose fields this build would
+    /// describe wrongly, which is worse than leaving them out and saying so.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ReferenceVersionUnsupported = new(
+        id: "PAUT007",
+        title: "Referenced assembly publishes an unreadable authoring schema",
+        messageFormat: "'{0}' publishes an authoring schema at version {1}; this build reads version {2}, so its components are not merged",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "ParadiseAuthoringScanReferences merges the schema documents referenced "
+            + "assemblies already published. A document at another version describes its fields by "
+            + "another set of rules, so it is skipped rather than half-read. Rebuild that assembly "
+            + "against this engine version.");
+
+    /// <summary>
+    /// PAUT008: two of the merged assemblies claim one component id.
+    ///
+    /// The cross-assembly twin of PAUT006, and a warning rather than an error because neither
+    /// declaration is necessarily this project's to fix.
+    ///
+    /// <b>The REFERENCE wins, including against this project's own declaration.</b> That is the
+    /// rule <c>AuthoringSchemaReader.Merge</c> and the editors already apply — first source wins,
+    /// and every host passes the engine's document first — mapped onto the only ordering a
+    /// compilation has. The engine is always a reference here and the game is always local, so
+    /// resolving it the other way would make this document disagree with every consumer that
+    /// loads it about what component X is.
+    ///
+    /// Reported only when the two declarations actually DIFFER. A project between this one and the
+    /// declaring assembly may also scan references, in which case the same component arrives twice
+    /// with identical text; that is a re-merge, not a conflict.
+    /// </summary>
+    public static readonly DiagnosticDescriptor DuplicateIdAcrossAssemblies = new(
+        id: "PAUT008",
+        title: "Two assemblies publish the same authored id",
+        messageFormat: "'{0}' and '{1}' both publish component id {2}; the referenced '{0}' wins and the other is dropped from the merged schema",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "An authored id identifies exactly one component, across every assembly an "
+            + "editor loads together. The referenced declaration wins, matching the first-wins "
+            + "order every host and editor merges with, so a project cannot shadow a component an "
+            + "assembly it references already publishes. Give the newer component a freshly "
+            + "generated GUID rather than reusing one that is already published.");
+
+    /// <summary>
+    /// PAUT009: a referenced document carries a component this build cannot address.
+    ///
+    /// Only reachable from a hand-written <c>AuthoringSchema</c> constant — the generator drops an
+    /// id-less type at PAUT005, long before emission — but a component silently missing from a
+    /// merged schema is the exact failure this feature exists to remove, so it is named.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ReferenceComponentHasNoId = new(
+        id: "PAUT009",
+        title: "Referenced authoring schema has a component with no id",
+        messageFormat: "'{0}' publishes a component ({1}) with no readable id; it is dropped from the merged schema",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Components are merged by id, so one without an id cannot be placed. A "
+            + "document this generator produced never contains one; a hand-written AuthoringSchema "
+            + "constant can. Give the component an id or remove it.");
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var authored = context.SyntaxProvider
@@ -99,9 +167,25 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                 return Sanitize(string.IsNullOrWhiteSpace(root) ? pair.Right.AssemblyName : root);
             });
 
+        // What referenced assemblies already published, when this project asked for an aggregate.
+        // Gated INSIDE the select rather than by not building the provider, because an incremental
+        // generator's pipeline shape is fixed at Initialize: the property is read per compilation
+        // like any other, and a project that never opts in pays one bool comparison.
+        var referenced = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, cancellation) =>
+            {
+                pair.Right.GlobalOptions.TryGetValue(
+                    "build_property.ParadiseAuthoringScanReferences", out var scan);
+                return string.Equals(scan, "true", System.StringComparison.OrdinalIgnoreCase)
+                    ? ReferencedSchemas.Read(pair.Left, cancellation)
+                    : ImmutableArray<ReferencedSchema>.Empty;
+            })
+            .WithComparer(ReferencedSchemaComparer.Instance);
+
         context.RegisterSourceOutput(
-            authored.Combine(namespaceName),
-            static (ctx, pair) => Emit(ctx, pair.Left!, pair.Right));
+            authored.Combine(namespaceName).Combine(referenced),
+            static (ctx, pair) => Emit(ctx, pair.Left.Left!, pair.Left.Right, pair.Right));
     }
 
     /// <summary>An assembly name is not necessarily a legal namespace (it may contain dashes, or
@@ -122,8 +206,17 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         return char.IsDigit(result[0]) ? "_" + result : result;
     }
 
+    /// <summary>The version this generator writes, and therefore the only one it will merge a
+    /// referenced document from. Must track AuthoringSchemaDocument.CurrentVersion — not
+    /// referenced, because this analyzer targets netstandard2.0 and deliberately does not link the
+    /// runtime package it feeds.</summary>
+    private const int SchemaVersion = 3;
+
     private static void Emit(
-        SourceProductionContext context, ImmutableArray<AuthoredType?> types, string namespaceName)
+        SourceProductionContext context,
+        ImmutableArray<AuthoredType?> types,
+        string namespaceName,
+        ImmutableArray<ReferencedSchema> referenced)
     {
         var candidates = types.Where(t => t is not null).Select(t => t!)
             // Ordered so the schema is stable: an unordered generator makes every rebuild a diff.
@@ -163,39 +256,112 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             present.Add(type);
         }
 
-        if (present.Count == 0)
+        // THE MERGE, REFERENCES FIRST. A referenced assembly's declaration wins an id collision
+        // against this project's own, and that order is the whole point rather than an accident of
+        // how the loops were written.
+        //
+        // It is the rule every other merge in the system already applies:
+        // AuthoringSchemaReader.Merge is first-argument-wins, the hosts pass the ENGINE's document
+        // first, and the Blender addon's merge() does the same. The engine is always a reference
+        // here and the game is always local, so seeding from local would resolve the one collision
+        // that matters — a game copying an engine component's id — the opposite way from every
+        // consumer that loads the result. An editor reading this dumped document would then
+        // describe component X by the game's fields while the exporter kept baking the engine's,
+        // which is precisely the drift the dump exists to prevent.
+        //
+        // The cost is that a local declaration can lose to a referenced one, which reads as
+        // surprising until you notice the only way to hit it is to duplicate an id that is already
+        // published — PAUT008, right there in the build log, with both assemblies named.
+        //
+        // Among references the order is by assembly name (ReferencedSchemas.Read sorts), so a
+        // reference-vs-reference collision resolves deterministically rather than by whatever
+        // order the compiler handed them over in.
+        var merged = new List<(string Id, string TypeName, string Element)>();
+        var owners = new Dictionary<string, string>(System.StringComparer.Ordinal);
+        var elements = new Dictionary<string, string>(System.StringComparer.Ordinal);
+
+        foreach (var schema in referenced)
+        {
+            var version = ReferencedSchemas.Version(schema.Json);
+            if (version != SchemaVersion)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    ReferenceVersionUnsupported, Location.None,
+                    schema.Assembly,
+                    version?.ToString(CultureInfo.InvariantCulture) ?? "an unstated version",
+                    SchemaVersion));
+                continue;
+            }
+
+            foreach (var (id, typeName, element) in ReferencedSchemas.Components(schema.Json))
+            {
+                if (id.Length == 0)
+                {
+                    // A component this build cannot address. Only reachable from a hand-written
+                    // constant — the generator excludes an id-less type before emitting — but
+                    // dropping it silently is the failure mode this whole feature exists to
+                    // remove, so it is named rather than skipped.
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        ReferenceComponentHasNoId, Location.None, schema.Assembly, typeName));
+                    continue;
+                }
+                if (owners.TryGetValue(id, out var owner))
+                {
+                    // An id can legitimately arrive twice: a project between this one and the
+                    // declaring assembly may ALSO scan references, so its aggregate and the
+                    // original both carry the component. Identical text is a re-merge, not a
+                    // conflict — reporting it would fire once per shared component and break any
+                    // build with TreatWarningsAsErrors, for a document that is the same either way.
+                    if (!string.Equals(elements[id], element, System.StringComparison.Ordinal))
+                    {
+                        // Location.None: both declarations are in other assemblies, and pointing at
+                        // this project's syntax would blame a file that is not the problem.
+                        context.ReportDiagnostic(Diagnostic.Create(
+                            DuplicateIdAcrossAssemblies, Location.None, owner, schema.Assembly, id));
+                    }
+                    continue;
+                }
+                owners.Add(id, schema.Assembly);
+                elements.Add(id, element);
+                merged.Add((id, typeName, element));
+            }
+        }
+
+        foreach (var type in present)
+        {
+            if (owners.TryGetValue(type.ComponentId, out var owner))
+            {
+                // The local type is the one being dropped, so this diagnostic CAN point at real
+                // syntax — and should: it is the declaration the author can actually change.
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DuplicateIdAcrossAssemblies, type.Declaration,
+                    owner, namespaceName, type.ComponentId));
+                continue;
+            }
+            owners.Add(type.ComponentId, namespaceName);
+            merged.Add((type.ComponentId, type.TypeName, ComponentJson(type)));
+        }
+
+        if (merged.Count == 0)
         {
             return;
         }
 
-        var json = new StringBuilder();
-        // Must track AuthoringSchemaDocument.CurrentVersion. Not referenced: this analyzer targets
-        // netstandard2.0 and deliberately does not link the runtime package it feeds.
-        json.Append("{\"version\":3,\"components\":[");
-        for (var i = 0; i < present.Count; i++)
+        // Ordered by type name — and by id after it, which only a merge can need: two assemblies
+        // CAN publish one type name where one assembly cannot, and an unstable order would make
+        // every rebuild a diff.
+        merged.Sort(static (a, b) =>
         {
-            var type = present[i];
+            var byType = System.StringComparer.Ordinal.Compare(a.TypeName, b.TypeName);
+            return byType != 0 ? byType : System.StringComparer.Ordinal.Compare(a.Id, b.Id);
+        });
+
+        var json = new StringBuilder();
+        json.Append("{\"version\":").Append(SchemaVersion).Append(",\"components\":[");
+        for (var i = 0; i < merged.Count; i++)
+        {
             if (i > 0) json.Append(',');
-            json.Append("{\"id\":").Append(Quote(type.ComponentId));
-            // The fallback key, and the only thing in this document that tells a human which
-            // component the GUID above belongs to.
-            json.Append(",\"type\":").Append(Quote(type.TypeName));
-            json.Append(",\"displayName\":").Append(Quote(type.DisplayName));
-            if (type.AuthoredBy is { } componentSource)
-            {
-                json.Append(",\"authoredBy\":").Append(Quote(componentSource));
-            }
-            if (type.BoxGizmo is { } box)
-            {
-                // How the component LOOKS while you edit it, declared with everything else - so an
-                // editor needs no per-component class to draw it.
-                json.Append(",\"gizmo\":{\"kind\":\"box\",\"halfExtentX\":").Append(Quote(box[0]))
-                    .Append(",\"halfExtentZ\":").Append(Quote(box[1]))
-                    .Append(",\"depth\":").Append(Quote(box[2])).Append('}');
-            }
-            json.Append(",\"fields\":");
-            AppendFields(json, type.Fields);
-            json.Append('}');
+            json.Append(merged[i].Element);
         }
         json.Append("]}");
 
@@ -218,6 +384,39 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         source.AppendLine("}");
 
         context.AddSource("AuthoringSchema.g.cs", source.ToString());
+    }
+
+    /// <summary>One component object, as it appears in the document's <c>components</c> array.
+    ///
+    /// Split out from the emission so a LOCAL component and a component merged in from a
+    /// referenced assembly are the same kind of thing to the code that orders and joins them: a
+    /// piece of text with an id and a type name. It also states, by existing, that a referenced
+    /// component is re-published verbatim rather than reformatted — the two paths meet only as
+    /// strings, so there is no second spelling of this document to keep in step.</summary>
+    private static string ComponentJson(AuthoredType type)
+    {
+        var json = new StringBuilder();
+        json.Append("{\"id\":").Append(Quote(type.ComponentId));
+        // The fallback key, and the only thing in this document that tells a human which
+        // component the GUID above belongs to.
+        json.Append(",\"type\":").Append(Quote(type.TypeName));
+        json.Append(",\"displayName\":").Append(Quote(type.DisplayName));
+        if (type.AuthoredBy is { } componentSource)
+        {
+            json.Append(",\"authoredBy\":").Append(Quote(componentSource));
+        }
+        if (type.BoxGizmo is { } box)
+        {
+            // How the component LOOKS while you edit it, declared with everything else - so an
+            // editor needs no per-component class to draw it.
+            json.Append(",\"gizmo\":{\"kind\":\"box\",\"halfExtentX\":").Append(Quote(box[0]))
+                .Append(",\"halfExtentZ\":").Append(Quote(box[1]))
+                .Append(",\"depth\":").Append(Quote(box[2])).Append('}');
+        }
+        json.Append(",\"fields\":");
+        AppendFields(json, type.Fields);
+        json.Append('}');
+        return json.ToString();
     }
 
     /// <summary>Fields, recursively: a composed field carries its own "fields" array, so an
