@@ -160,6 +160,24 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     }
 
     /// <inheritdoc/>
+    public Entity CreateEntity(in TMask mask)
+    {
+        AssertStructuralChangesAllowed(nameof(CreateEntity));
+
+        // Validate before creating to avoid inconsistent state if limit exceeded
+        ThrowHelper.ThrowIfEntityIdExceedsLimit(_entityManager.PeekNextId(), Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
+
+        var entity = _entityManager.Create();
+        var archetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)mask);
+        // The empty builder writes nothing, which is the whole content of "zero default": chunk
+        // memory is cleared on allocation, so every component in the mask reads as default. It is
+        // the same contract EnsureComponent relies on, reached without a type argument.
+        PlaceEntityWithComponents(entity, archetype, default(EntityBuilder));
+
+        return entity;
+    }
+
+    /// <inheritdoc/>
     public Entity OverwriteEntity<TBuilder>(Entity entity, TBuilder builder)
         where TBuilder : unmanaged, IComponentsBuilder
     {

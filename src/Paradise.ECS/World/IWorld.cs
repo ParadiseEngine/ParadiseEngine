@@ -104,6 +104,26 @@ public interface IWorld<TMask, TConfig>
     Entity CreateEntity<TBuilder>(TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
 
     /// <summary>
+    /// Creates a new entity whose archetype is a mask assembled at RUNTIME, with every component
+    /// at its zero default.
+    ///
+    /// The counterpart to <see cref="CreateEntity{TBuilder}"/> for a caller that cannot name its
+    /// component set at compile time — a scene loader composing an entity out of whatever
+    /// components the authored document happens to carry. <see cref="IComponentsBuilder"/> builds
+    /// its mask by nesting generic structs, so the set has to be a literal chain of type
+    /// arguments; a mask is the same information as a value.
+    ///
+    /// Zero-initialized for the same reason <c>EnsureComponent</c> is: chunk memory is cleared on
+    /// allocation, so an unwritten component reads as <c>default</c> rather than as whatever the
+    /// last occupant of that slot left behind. Seed values afterwards through
+    /// <see cref="GetComponent{T}"/>.
+    /// </summary>
+    /// <param name="mask">The component set the entity is created with. An empty mask places the
+    /// entity in the empty archetype, exactly as <see cref="Spawn"/> does.</param>
+    /// <returns>The created entity handle.</returns>
+    Entity CreateEntity(in TMask mask);
+
+    /// <summary>
     /// Overwrites all components on an existing entity with the builder's components.
     /// Any existing components are discarded. The entity must already exist in this world.
     /// </summary>
