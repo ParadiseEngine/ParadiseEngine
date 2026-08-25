@@ -23,6 +23,27 @@
     in CI the test does.
   -->
 
+  <!--
+    Reference scanning, off by default.
+
+    A project that declares [Authored] types publishes a schema for its OWN. Set this on a project
+    that declares none but references several — a launcher over a game split into Core/Game/Ui —
+    and its schema becomes the union: every referenced assembly's published document merged into
+    one, with the local declarations winning any id collision. That is what lets the schema FILE
+    be dumped from the one assembly that sees the whole game, rather than from whichever library
+    happens to hold the components.
+
+      <ParadiseAuthoringScanReferences>true</ParadiseAuthoringScanReferences>
+
+    The merge takes each reference's already-generated constant verbatim, so a merged component is
+    byte-identical to what that assembly would have dumped alone — including field defaults, which
+    are property initializers and exist only in source. Re-deriving them from metadata would drop
+    every one.
+  -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="ParadiseAuthoringScanReferences" />
+  </ItemGroup>
+
   <PropertyGroup>
     <ParadiseAuthoringSchemaDumpTool Condition="'$(ParadiseAuthoringSchemaDumpTool)' == ''">$(MSBuildThisFileDirectory)../tools/net10.0/Paradise.Authoring.SchemaDump.dll</ParadiseAuthoringSchemaDumpTool>
     <!-- The dotnet muxer BY FULL PATH, never bare "dotnet": builds launched from a GUI process
