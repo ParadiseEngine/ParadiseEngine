@@ -39,6 +39,29 @@ public class SchemaV2Tests
             .IsEquivalentTo(new[] { "Kind", "Size", "LocalCenter", "LocalRotation", "Radius" });
     }
 
+    /// <summary>
+    /// A pose reference: authored by pointing at an object, exported as the numbers baked out of
+    /// where it stands.
+    ///
+    /// The kind is what a host switches on, so it has to survive the round trip intact — and the
+    /// nested fields are the CONTRACT for what gets baked, since an exporter fills them by NAME.
+    /// A record declaring only part of the pose (this one takes position and yaw, not rotation or
+    /// scale) must publish only that part, or a host would look for fields nobody declared.
+    /// </summary>
+    [Test]
+    public async Task a_pose_reference_publishes_its_kind_and_the_fields_baked_from_it()
+    {
+        var destination = Field("Destination");
+        await Assert.That(destination.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(destination.AuthoredBy).IsEqualTo(AuthoredBySources.Transform);
+        await Assert.That(destination.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Position", "Yaw" });
+        await Assert.That(destination.Fields!.Single(f => f.Name == "Position").Type)
+            .IsEqualTo(AuthoredFieldTypes.Vector3);
+        await Assert.That(destination.Fields!.Single(f => f.Name == "Yaw").Unit)
+            .IsEqualTo(AuthoredUnits.Radians);
+    }
+
     /// <summary>Fixed-size aggregates stay LEAVES. Decomposing a Vector3 into three floats would
     /// throw away the dedicated control every editor already has.</summary>
     [Test]

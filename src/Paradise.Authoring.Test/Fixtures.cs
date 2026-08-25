@@ -93,6 +93,16 @@ public sealed record ShapeRefFixture
     public float Radius { get; set; }
 }
 
+/// <summary>A part authored by pointing at an object and reading WHERE IT STANDS. Declares only
+/// two of the four pose fields an exporter knows how to bake, which is the point: a record takes
+/// the part of the pose it means and an exporter fills what it finds.</summary>
+[AuthoredByHost(AuthoredBySources.Transform)]
+public sealed record PlacementRefFixture
+{
+    public Vector3 Position { get; set; }
+    [Radians] public float Yaw { get; set; }
+}
+
 /// <summary>Everything schema v2 added, in one component: a LIST of shape references, the fixed-size
 /// aggregates, an asset reference with its accepted kinds, and two fields guarded by siblings.</summary>
 [Guid(FixtureIds.V2)]
@@ -101,6 +111,9 @@ public sealed record V2Fixture
 {
     /// <summary>An array of host-object references — the shape the engine's collider list has.</summary>
     public List<ShapeRefFixture> Colliders { get; set; } = new();
+
+    /// <summary>A single host-object reference whose value is a POSE, not a shape or an asset.</summary>
+    public PlacementRefFixture Destination { get; set; } = new();
 
     [AuthoredByHost(AuthoredBySources.Mesh)]
     public string MeshNode { get; set; } = "";
