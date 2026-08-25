@@ -72,7 +72,7 @@
           Inputs="$(TargetPath);$(MSBuildAllProjects)"
           Outputs="$(ParadiseAuthoringSchemaPath)">
     <Message Importance="high"
-             Text="Paradise: re-dumping the authoring schema (an [Authored] record changed)." />
+             Text="Paradise: re-dumping the authoring schema (the assembly changed)." />
     <Exec Command="&quot;$(_ParadiseDotNetHost)&quot; exec &quot;$(ParadiseAuthoringSchemaDumpTool)&quot; &quot;$(TargetPath)&quot; &quot;$(ParadiseAuthoringSchemaPath)&quot;" />
   </Target>
 
