@@ -15,7 +15,18 @@
 
     The dump reads the constant out of the built assembly's metadata (tools/ in this package), so
     nothing is loaded or executed and it costs a file copy. Inputs/Outputs keep it to builds where
-    a source actually changed.
+    the assembly actually changed.
+
+    THE INPUT IS $(TargetPath), NOT @(Compile), and the difference is load-bearing once
+    ParadiseAuthoringScanReferences is in play. @(Compile) is the compiling project's OWN sources,
+    which is the whole story only while the project that declares the components is also the one
+    that dumps them. A launcher that dumps the merged schema of everything it references declares
+    none of them: adding a component to a referenced library changed no @(Compile) item, the target
+    was skipped as up to date, and the file silently kept describing yesterday's game — the exact
+    drift the dump exists to prevent, reintroduced by its own incrementality.
+
+    $(TargetPath) is the honest input because it is what the tool READS. MSBuild rebuilds it
+    whenever any reference changes, so it moves exactly when the schema can have moved.
 
     Deliberately skipped under ContinuousIntegrationBuild: a game's drift test asserts the
     committed file matches what the generator emits, and CI regenerating the file first would make
@@ -58,10 +69,10 @@
   <Target Name="ParadiseDumpAuthoringSchema"
           AfterTargets="Build"
           Condition="'$(ParadiseAuthoringSchemaPath)' != '' and '$(ContinuousIntegrationBuild)' != 'true'"
-          Inputs="@(Compile);$(MSBuildAllProjects)"
+          Inputs="$(TargetPath);$(MSBuildAllProjects)"
           Outputs="$(ParadiseAuthoringSchemaPath)">
     <Message Importance="high"
-             Text="Paradise: re-dumping the authoring schema (an [Authored] record changed)." />
+             Text="Paradise: re-dumping the authoring schema (the assembly changed)." />
     <Exec Command="&quot;$(_ParadiseDotNetHost)&quot; exec &quot;$(ParadiseAuthoringSchemaDumpTool)&quot; &quot;$(TargetPath)&quot; &quot;$(ParadiseAuthoringSchemaPath)&quot;" />
   </Target>
 
