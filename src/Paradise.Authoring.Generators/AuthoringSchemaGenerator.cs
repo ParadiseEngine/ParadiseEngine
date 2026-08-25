@@ -95,20 +95,49 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     /// PAUT008: two of the merged assemblies claim one component id.
     ///
     /// The cross-assembly twin of PAUT006, and a warning rather than an error because neither
-    /// assembly is necessarily this project's to fix. Earlier wins, matching
-    /// <c>AuthoringSchemaReader.Merge</c> — so the engine's own components stay authoritative
-    /// when a game copies one of their ids.
+    /// declaration is necessarily this project's to fix.
+    ///
+    /// <b>The REFERENCE wins, including against this project's own declaration.</b> That is the
+    /// rule <c>AuthoringSchemaReader.Merge</c> and the editors already apply — first source wins,
+    /// and every host passes the engine's document first — mapped onto the only ordering a
+    /// compilation has. The engine is always a reference here and the game is always local, so
+    /// resolving it the other way would make this document disagree with every consumer that
+    /// loads it about what component X is.
+    ///
+    /// Reported only when the two declarations actually DIFFER. A project between this one and the
+    /// declaring assembly may also scan references, in which case the same component arrives twice
+    /// with identical text; that is a re-merge, not a conflict.
     /// </summary>
     public static readonly DiagnosticDescriptor DuplicateIdAcrossAssemblies = new(
         id: "PAUT008",
         title: "Two assemblies publish the same authored id",
-        messageFormat: "'{0}' and '{1}' both publish component id {2}; '{0}' wins and the other is dropped from the merged schema",
+        messageFormat: "'{0}' and '{1}' both publish component id {2}; the referenced '{0}' wins and the other is dropped from the merged schema",
         category: "Paradise.Authoring",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "An authored id identifies exactly one component, across every assembly an "
-            + "editor loads together. Give the newer component a freshly generated GUID rather "
-            + "than reusing one that is already published.");
+            + "editor loads together. The referenced declaration wins, matching the first-wins "
+            + "order every host and editor merges with, so a project cannot shadow a component an "
+            + "assembly it references already publishes. Give the newer component a freshly "
+            + "generated GUID rather than reusing one that is already published.");
+
+    /// <summary>
+    /// PAUT009: a referenced document carries a component this build cannot address.
+    ///
+    /// Only reachable from a hand-written <c>AuthoringSchema</c> constant — the generator drops an
+    /// id-less type at PAUT005, long before emission — but a component silently missing from a
+    /// merged schema is the exact failure this feature exists to remove, so it is named.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ReferenceComponentHasNoId = new(
+        id: "PAUT009",
+        title: "Referenced authoring schema has a component with no id",
+        messageFormat: "'{0}' publishes a component ({1}) with no readable id; it is dropped from the merged schema",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Components are merged by id, so one without an id cannot be placed. A "
+            + "document this generator produced never contains one; a hand-written AuthoringSchema "
+            + "constant can. Give the component an id or remove it.");
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -227,21 +256,29 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             present.Add(type);
         }
 
-        // The MERGE. One list of (id, type, text), local components first so that this
-        // assembly's own declaration wins a collision — the same earlier-wins rule
-        // AuthoringSchemaReader.Merge applies at runtime and the editors apply on load, stated
-        // once more here because a merged document is what an editor now receives.
+        // THE MERGE, REFERENCES FIRST. A referenced assembly's declaration wins an id collision
+        // against this project's own, and that order is the whole point rather than an accident of
+        // how the loops were written.
+        //
+        // It is the rule every other merge in the system already applies:
+        // AuthoringSchemaReader.Merge is first-argument-wins, the hosts pass the ENGINE's document
+        // first, and the Blender addon's merge() does the same. The engine is always a reference
+        // here and the game is always local, so seeding from local would resolve the one collision
+        // that matters — a game copying an engine component's id — the opposite way from every
+        // consumer that loads the result. An editor reading this dumped document would then
+        // describe component X by the game's fields while the exporter kept baking the engine's,
+        // which is precisely the drift the dump exists to prevent.
+        //
+        // The cost is that a local declaration can lose to a referenced one, which reads as
+        // surprising until you notice the only way to hit it is to duplicate an id that is already
+        // published — PAUT008, right there in the build log, with both assemblies named.
+        //
+        // Among references the order is by assembly name (ReferencedSchemas.Read sorts), so a
+        // reference-vs-reference collision resolves deterministically rather than by whatever
+        // order the compiler handed them over in.
         var merged = new List<(string Id, string TypeName, string Element)>();
-        foreach (var type in present)
-        {
-            merged.Add((type.ComponentId, type.TypeName, ComponentJson(type)));
-        }
-
         var owners = new Dictionary<string, string>(System.StringComparer.Ordinal);
-        foreach (var type in present)
-        {
-            owners[type.ComponentId] = namespaceName;
-        }
+        var elements = new Dictionary<string, string>(System.StringComparer.Ordinal);
 
         foreach (var schema in referenced)
         {
@@ -260,19 +297,49 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             {
                 if (id.Length == 0)
                 {
+                    // A component this build cannot address. Only reachable from a hand-written
+                    // constant — the generator excludes an id-less type before emitting — but
+                    // dropping it silently is the failure mode this whole feature exists to
+                    // remove, so it is named rather than skipped.
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        ReferenceComponentHasNoId, Location.None, schema.Assembly, typeName));
                     continue;
                 }
                 if (owners.TryGetValue(id, out var owner))
                 {
-                    // Location.None: the declaration is in another assembly, and pointing at this
-                    // project's own syntax would blame a file that is not the problem.
-                    context.ReportDiagnostic(Diagnostic.Create(
-                        DuplicateIdAcrossAssemblies, Location.None, owner, schema.Assembly, id));
+                    // An id can legitimately arrive twice: a project between this one and the
+                    // declaring assembly may ALSO scan references, so its aggregate and the
+                    // original both carry the component. Identical text is a re-merge, not a
+                    // conflict — reporting it would fire once per shared component and break any
+                    // build with TreatWarningsAsErrors, for a document that is the same either way.
+                    if (!string.Equals(elements[id], element, System.StringComparison.Ordinal))
+                    {
+                        // Location.None: both declarations are in other assemblies, and pointing at
+                        // this project's syntax would blame a file that is not the problem.
+                        context.ReportDiagnostic(Diagnostic.Create(
+                            DuplicateIdAcrossAssemblies, Location.None, owner, schema.Assembly, id));
+                    }
                     continue;
                 }
                 owners.Add(id, schema.Assembly);
+                elements.Add(id, element);
                 merged.Add((id, typeName, element));
             }
+        }
+
+        foreach (var type in present)
+        {
+            if (owners.TryGetValue(type.ComponentId, out var owner))
+            {
+                // The local type is the one being dropped, so this diagnostic CAN point at real
+                // syntax — and should: it is the declaration the author can actually change.
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DuplicateIdAcrossAssemblies, type.Declaration,
+                    owner, namespaceName, type.ComponentId));
+                continue;
+            }
+            owners.Add(type.ComponentId, namespaceName);
+            merged.Add((type.ComponentId, type.TypeName, ComponentJson(type)));
         }
 
         if (merged.Count == 0)

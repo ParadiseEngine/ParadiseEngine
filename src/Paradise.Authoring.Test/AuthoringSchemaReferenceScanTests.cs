@@ -77,6 +77,35 @@ public class AuthoringSchemaReferenceScanTests
         return MetadataReference.CreateFromStream(image);
     }
 
+    /// <summary>Like <see cref="Build"/>, but the assembly itself scans ITS references — so its
+    /// published document is an aggregate, which is what a Core/Game/Launcher chain produces.</summary>
+    private static MetadataReference BuildScanning(
+        string name, string source, params MetadataReference[] references)
+    {
+        var compilation = CSharpCompilation.Create(
+            name,
+            [CSharpSyntaxTree.ParseText(source)],
+            BaseReferences().AddRange(references),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: [new AuthoringSchemaGenerator().AsSourceGenerator()],
+            optionsProvider: new ScanOptionsProvider(true));
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
+
+        var image = new MemoryStream();
+        var emitted = updated.Emit(image);
+        if (!emitted.Success)
+        {
+            throw new InvalidOperationException(
+                $"'{name}' did not compile: "
+                + string.Join("; ", emitted.Diagnostics.Where(d =>
+                    d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString())));
+        }
+        image.Position = 0;
+        return MetadataReference.CreateFromStream(image);
+    }
+
     /// <summary>Run the generator over a consumer of <paramref name="references"/>, returning the
     /// document it published (null when it published none) and what it reported.</summary>
     private static (string? Json, ImmutableArray<Diagnostic> Diagnostics) Consume(
@@ -177,11 +206,19 @@ public class AuthoringSchemaReferenceScanTests
             .IsEquivalentTo(new[] { "Consumer.ConsumerComponent", "Library.LibraryComponent" });
     }
 
-    /// <summary>Earlier wins, and the local declaration is earliest — the same rule
-    /// <c>AuthoringSchemaReader.Merge</c> applies at load. Warned rather than errored because
-    /// neither assembly is necessarily this project's to fix.</summary>
+    /// <summary>
+    /// THE REFERENCE WINS, including against the compiling project's own declaration.
+    ///
+    /// This is the merge order every consumer of the result already applies —
+    /// <c>AuthoringSchemaReader.Merge</c> is first-wins and every host passes the ENGINE's document
+    /// first (pinned by <c>AuthoringSchemaMergeTests.the_first_source_of_an_id_wins</c>). The
+    /// engine is always a reference here and the game is always local, so resolving it local-first
+    /// would let a game shadow an engine component in the dumped document while the exporter kept
+    /// baking the engine's — two consumers disagreeing about what one id means, which is the drift
+    /// the dump exists to prevent.
+    /// </summary>
     [Test]
-    public async Task a_local_component_wins_an_id_a_reference_already_claims()
+    public async Task a_reference_wins_an_id_the_local_project_also_claims()
     {
         var (json, diagnostics) = Consume(
             $$"""
@@ -202,8 +239,112 @@ public class AuthoringSchemaReferenceScanTests
 
         var components = AuthoringSchemaReader.Read(json!).Components;
         await Assert.That(components.Count).IsEqualTo(1);
-        await Assert.That(components.Single().Type).IsEqualTo("Consumer.Clashing");
+        await Assert.That(components.Single().Type).IsEqualTo("Library.LibraryComponent");
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PAUT008");
+    }
+
+    /// <summary>The same collision, reported AT the declaration the author can actually change.
+    /// The losing type is the local one, so unlike a reference-vs-reference clash this diagnostic
+    /// has real syntax to point at.</summary>
+    [Test]
+    public async Task the_collision_is_reported_at_the_local_declaration()
+    {
+        var (_, diagnostics) = Consume(
+            $$"""
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Consumer;
+
+            [Guid("{{LibraryId}}")]
+            [Authored]
+            public sealed record Clashing
+            {
+                public int Count { get; set; }
+            }
+            """,
+            scan: true,
+            Build("Library", LibrarySource));
+
+        var reported = diagnostics.Single(d => d.Id == "PAUT008");
+        await Assert.That(reported.Location.SourceTree).IsNotNull();
+    }
+
+    /// <summary>
+    /// The same component arriving twice, identically, is a RE-MERGE and not a conflict.
+    ///
+    /// It happens as soon as a project between this one and the declaring assembly also scans:
+    /// the launcher then sees the intermediate's aggregate AND the original. Warning on it would
+    /// fire once per shared component and break any build with TreatWarningsAsErrors, over a
+    /// document that is identical either way.
+    /// </summary>
+    [Test]
+    public async Task an_identical_component_merged_twice_is_not_reported()
+    {
+        var library = Build("Library", LibrarySource);
+        // An intermediate that scans, so its own published document already contains Library's
+        // component verbatim — exactly what a Core/Game/Launcher chain produces.
+        var middle = BuildScanning("Middle", "namespace Middle; public static class Nothing { }", library);
+
+        var (json, diagnostics) = Consume(DeclaresNothing, scan: true, library, middle);
+
+        var components = AuthoringSchemaReader.Read(json!).Components;
+        await Assert.That(components.Count).IsEqualTo(1);
+        await Assert.That(diagnostics.Select(d => d.Id)).DoesNotContain("PAUT008");
+    }
+
+    /// <summary>A component that cannot be placed is dropped — but said. Silent drops from a
+    /// merged schema are the failure this feature exists to remove.</summary>
+    [Test]
+    public async Task a_referenced_component_with_no_id_is_reported()
+    {
+        var idless = Build("Idless", """
+            namespace Idless;
+
+            public static class AuthoringSchema
+            {
+                public const string Json =
+                    @"{""version"":3,""components"":[{""type"":""Idless.Nameless"",""displayName"":""Nameless"",""fields"":[]}]}";
+            }
+
+            internal static class Anchor
+            {
+                public static readonly System.Type Marker = typeof(Paradise.Authoring.AuthoredAttribute);
+            }
+            """);
+
+        var (json, diagnostics) = Consume(DeclaresNothing, scan: true, idless);
+
+        await Assert.That(json).IsNull();
+        var reported = diagnostics.Single(d => d.Id == "PAUT009");
+        await Assert.That(reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
+            .Contains("Idless.Nameless");
+    }
+
+    /// <summary>A stray brace between elements used to spin the scanner forever — uninterruptibly,
+    /// on the compiler's generator thread. Reachable because the discovery rule matches ANY const
+    /// string named AuthoringSchema.Json, so a hand-written one qualifies.</summary>
+    [Test]
+    public async Task a_malformed_component_array_terminates()
+    {
+        var malformed = Build("Malformed", """
+            namespace Malformed;
+
+            public static class AuthoringSchema
+            {
+                public const string Json = @"{""version"":3,""components"":[}]}";
+            }
+
+            internal static class Anchor
+            {
+                public static readonly System.Type Marker = typeof(Paradise.Authoring.AuthoredAttribute);
+            }
+            """);
+
+        // The assertion is that this call RETURNS. TUnit's per-test timeout is the backstop; before
+        // the guard in Components it hung the whole run.
+        var (json, _) = Consume(DeclaresNothing, scan: true, malformed);
+        await Assert.That(json).IsNull();
     }
 
     /// <summary>A reference built against another engine describes its fields by another set of

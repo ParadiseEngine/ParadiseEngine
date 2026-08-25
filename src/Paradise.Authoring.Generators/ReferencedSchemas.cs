@@ -145,6 +145,18 @@ internal static class ReferencedSchemas
         while (i < end && json[i] != ']')
         {
             var elementEnd = SkipValue(json, i);
+            if (elementEnd <= i)
+            {
+                // SkipValue stands still on ',', '}' and ']'. The first two are handled below and
+                // the third ends the array, so a '}' at an element position is the one input that
+                // would leave the index untouched and spin here forever — uninterruptibly, on the
+                // compiler's generator thread, taking a command-line build or an IDE's IntelliSense
+                // with it. The scanner is written to trust its input (see the note above), but
+                // "correct rather than tolerant" cannot extend to non-termination: the discovery
+                // rule in Read matches ANY const string named AuthoringSchema.Json, so a
+                // hand-written one is reachable.
+                break;
+            }
             var element = json.Substring(i, elementEnd - i);
             TryFindMember(element, 0, "id", out var idStart, out var idEnd);
             TryFindMember(element, 0, "type", out var typeStart, out var typeEnd);
