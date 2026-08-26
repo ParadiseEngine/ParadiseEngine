@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Paradise.Export.Data;
@@ -18,7 +19,7 @@ public sealed record LedgeFixture
 internal sealed partial class LedgeFixtureJsonContext : JsonSerializerContext;
 
 /// <summary>
-/// Game-defined components riding along with an entity in <see cref="LevelEntityData.Components"/>.
+/// Game-defined components riding along with an entity in <see cref="LevelData.Entities"/>.
 ///
 /// The engine never deserializes these into a type — it carries the payload verbatim and the game
 /// reads it back through its own source-generated context. These tests pin both halves of that.
@@ -30,11 +31,7 @@ public class AuthoredComponentContractTests
     private static LevelData LevelWith(params AuthoredComponentData[] custom)
     {
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
-        {
-            Id = "IceLedge",
-            Components = [.. custom],
-        });
+        level.Entities.Add([.. custom]);
         return level;
     }
 
@@ -55,7 +52,7 @@ public class AuthoredComponentContractTests
         var authored = new LedgeFixture { Friction = 0.35f, IsTrigger = true, Label = "north" };
         var json = ExportJsonWriter.SerializeToString(LevelWith(Ledge(authored)));
 
-        var custom = ExportJsonReader.ReadLevel(json).Entities.Single().Components!.Single();
+        var custom = ExportJsonReader.ReadLevel(json).Entities.Single().Single();
         await Assert.That(custom.Id).IsEqualTo(LedgeId);
         await Assert.That(custom.Type).IsEqualTo("Paradise.Export.Tests.LedgeFixture");
 
@@ -81,7 +78,7 @@ public class AuthoredComponentContractTests
         var json = ExportJsonWriter.SerializeToString(
             LevelWith(Ledge(new LedgeFixture { Friction = 0f, IsTrigger = false, Label = "x" })));
 
-        var data = ExportJsonReader.ReadLevel(json).Entities.Single().Components!.Single().Data;
+        var data = ExportJsonReader.ReadLevel(json).Entities.Single().Single().Data;
         await Assert.That(data.GetProperty("IsTrigger").ValueKind).IsEqualTo(JsonValueKind.False);
         await Assert.That(data.GetProperty("Friction").ValueKind).IsEqualTo(JsonValueKind.Number);
         await Assert.That(data.GetProperty("Label").ValueKind).IsEqualTo(JsonValueKind.String);
@@ -95,7 +92,7 @@ public class AuthoredComponentContractTests
             new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
 
         var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities.Single().Components!;
+            .Entities.Single();
         await Assert.That(custom.Select(c => c.Id)).IsEquivalentTo(new[] { LedgeId, OtherId });
     }
 
@@ -108,7 +105,7 @@ public class AuthoredComponentContractTests
             new AuthoredComponentData { Id = OtherId, Data = JsonSerializer.SerializeToElement(7) });
 
         var custom = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities.Single().Components!.Single();
+            .Entities.Single().Single();
         await Assert.That(custom.Id).IsEqualTo(OtherId);
         await Assert.That(custom.Type).IsNull();
     }
@@ -123,15 +120,15 @@ public class AuthoredComponentContractTests
     public async Task a_document_that_authors_nothing_carries_an_empty_list()
     {
         // This used to assert the word "Custom" was absent from the written file — the trick that
-        // kept scenes exported before authored components existed byte-identical. There is no
-        // separate key to be absent any more: an entity that authors nothing has an empty array,
-        // which says the same thing in the one place components are described.
+        // kept scenes exported before authored components existed byte-identical. There is no key
+        // to be absent any more, and since v5 no entity record either: an object that authors
+        // nothing IS an empty array.
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData { Id = "Ground" });
+        level.Entities.Add(new List<AuthoredComponentData>());
 
         string json = ExportJsonWriter.SerializeToString(level);
-        await Assert.That(json).Contains("\"Components\": []");
-        await Assert.That(ExportJsonReader.ReadLevel(json).Entities.Single().Components).IsEmpty();
+        await Assert.That(json).Contains("\"Entities\": [\n    []\n  ]");
+        await Assert.That(ExportJsonReader.ReadLevel(json).Entities.Single()).IsEmpty();
     }
 
     [Test]
@@ -189,9 +186,7 @@ public class AuthoredComponentContractTests
 
         var thrown = Assert.Throws<JsonException>(() => ExportJsonReader.ReadLevel(v3));
         await Assert.That(thrown!.Message).Contains("version 3");
-        // The message must name the way OUT, not just the problem: this break, unlike v2's, has a
-        // one-pass conversion, and a reader who is not told that will re-export by hand instead.
-        await Assert.That(thrown.Message).Contains("migrate_level_v3_to_v4.py");
+        await Assert.That(thrown.Message).Contains("Re-export");
     }
 
     [Test]

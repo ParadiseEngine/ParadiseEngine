@@ -446,6 +446,7 @@ internal static class AuthoredModel
             // object {r,g,b,a}, not a 4-array.
             case "System.Numerics.Vector4": return "vector4color";
             case "System.Numerics.Quaternion": return "quaternion";
+            case "System.Numerics.Matrix4x4": return "matrix4x4";
             case "Paradise.Export.Data.Color32": return "color32";
         }
         return type.SpecialType switch
@@ -487,6 +488,7 @@ internal static class AuthoredModel
             case "System.Numerics.Vector3": return "vector3";
             case "System.Numerics.Vector4": return "color";
             case "System.Numerics.Quaternion": return "quaternion";
+            case "System.Numerics.Matrix4x4": return "matrix4x4";
             case "Paradise.Export.Data.Color32": return "color";
         }
 

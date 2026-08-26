@@ -1,32 +1,20 @@
 {
-  "SchemaVersion": 4,
-  "Camera": {
-    "Position": [
-      0,
-      1,
-      10
-    ],
-    "Rotation": [
-      0,
-      0,
-      0
-    ],
-    "OrthographicSize": 5,
-    "BackgroundColor": {
-      "r": 0.03137255,
-      "g": 0.07450981,
-      "b": 0.19215687,
-      "a": 0
-    }
-  },
-  "Lighting": {
-    "ActiveState": "Default",
-    "ShadowMapSize": null,
-    "ShadowBlur": null,
-    "States": [
+  "SchemaVersion": 5,
+  "Entities": [
+    [
       {
-        "Name": "Default",
-        "Environment": {
+        "Id": "f83f51f4-093a-42c9-aa7a-f50f48c3b5f9",
+        "Type": "Paradise.Export.Data.NameComponentData",
+        "Data": {
+          "Value": "Environment"
+        }
+      },
+      {
+        "Id": "f5f4a867-fe27-426a-82f2-1a2de5aceb2f",
+        "Type": "Paradise.Export.Data.EnvironmentData",
+        "Data": {
+          "ShadowMapSize": null,
+          "ShadowBlur": null,
           "AmbientMode": "Skybox",
           "AmbientColor": {
             "r": 0.03529412,
@@ -105,55 +93,85 @@
           "GlowEnabled": false,
           "GlowIntensity": 0.6,
           "GlowThreshold": 1
-        },
-        "Lights": [
-          {
-            "Id": "Directional Light",
-            "Type": "Directional",
-            "Position": [
-              0,
-              3,
-              0
-            ],
-            "Direction": [
-              0.3213938,
-              0.76604444,
-              0.5566705
-            ],
-            "Color": {
-              "r": 1,
-              "g": 0.78039217,
-              "b": 0.61960787,
-              "a": 1
-            },
-            "Enabled": true,
-            "Intensity": 2,
-            "UseColorTemperature": true,
-            "ColorTemperature": 5000,
-            "Range": 10,
-            "AttenuationExponent": 1,
-            "SpotAngle": 30,
-            "InnerSpotAngle": 21.80208,
-            "AreaSize": [
-              0,
-              0
-            ],
-            "ShadowsEnabled": true,
-            "ShadowType": "Soft",
-            "ShadowStrength": 1,
-            "Specular": 0.5,
-            "Size": 0,
-            "LayerMask": -1,
-            "RenderingLayerMask": 1,
-            "Group": "Default"
-          }
-        ]
+        }
+      }
+    ],
+    [
+      {
+        "Id": "f83f51f4-093a-42c9-aa7a-f50f48c3b5f9",
+        "Type": "Paradise.Export.Data.NameComponentData",
+        "Data": {
+          "Value": "Directional Light"
+        }
+      },
+      {
+        "Id": "5b1a2ea9-a4bb-4ba2-be15-b645ccf50004",
+        "Type": "Paradise.Export.Data.TransformComponentData",
+        "Data": {
+          "World": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            3,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      },
+      {
+        "Id": "fc886b84-c48c-4415-afd9-b03d6faf5ab7",
+        "Type": "Paradise.Export.Data.SceneLightData",
+        "Data": {
+          "Id": "Directional Light",
+          "Type": "Directional",
+          "Position": [
+            0,
+            3,
+            0
+          ],
+          "Direction": [
+            0.3213938,
+            0.76604444,
+            0.5566705
+          ],
+          "Color": {
+            "r": 1,
+            "g": 0.78039217,
+            "b": 0.61960787,
+            "a": 1
+          },
+          "Enabled": true,
+          "Intensity": 2,
+          "UseColorTemperature": true,
+          "ColorTemperature": 5000,
+          "Range": 10,
+          "AttenuationExponent": 1,
+          "SpotAngle": 30,
+          "InnerSpotAngle": 21.80208,
+          "AreaSize": [
+            0,
+            0
+          ],
+          "ShadowsEnabled": true,
+          "ShadowType": "Soft",
+          "ShadowStrength": 1,
+          "Specular": 0.5,
+          "Size": 0,
+          "LayerMask": -1,
+          "RenderingLayerMask": 1,
+          "Group": "Default"
+        }
       }
     ]
-  },
-  "NavMeshAgent": null,
-  "Interactables": [],
-  "Entities": [],
-  "NavMeshFile": null,
-  "Materials": []
+  ]
 }

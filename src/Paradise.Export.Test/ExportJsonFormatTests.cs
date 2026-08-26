@@ -14,9 +14,9 @@ public class ExportJsonFormatTests
     {
         // CreateTranslation puts the translation in M41/M42/M43 (row-vector convention).
         // Column-major flattening => translation lands at flat indices 3, 7, 11.
-        var entity = new LevelEntityData { WorldMatrix = Matrix4x4.CreateTranslation(1f, 2f, 3f) };
-        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(entity))!;
-        JsonArray? m = json["WorldMatrix"] as JsonArray;
+        var transform = new TransformComponentData { World = Matrix4x4.CreateTranslation(1f, 2f, 3f) };
+        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(transform))!;
+        JsonArray? m = json["World"] as JsonArray;
 
         await Assert.That(m).IsNotNull();
         await Assert.That(m!.Count).IsEqualTo(16);
@@ -29,9 +29,9 @@ public class ExportJsonFormatTests
     [Test]
     public async Task color32_is_written_as_rgba_object()
     {
-        var camera = new CameraData { BackgroundColor = Color32.FromRgba(1f, 0f, 0f, 1f) };
-        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(camera))!;
-        JsonObject? c = json["BackgroundColor"] as JsonObject;
+        var light = new SceneLightData { Color = Color32.FromRgba(1f, 0f, 0f, 1f) };
+        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(light))!;
+        JsonObject? c = json["Color"] as JsonObject;
 
         await Assert.That(c).IsNotNull();
         await Assert.That((float)c!["r"]!).IsEqualTo(1f);
@@ -51,8 +51,8 @@ public class ExportJsonFormatTests
     [Test]
     public async Task vector3_is_written_as_array()
     {
-        var camera = new CameraData { Position = new Vector3(1f, 2f, -10f) };
-        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(camera))!;
+        var light = new SceneLightData { Position = new Vector3(1f, 2f, -10f) };
+        JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(light))!;
         JsonArray? p = json["Position"] as JsonArray;
 
         await Assert.That(p).IsNotNull();

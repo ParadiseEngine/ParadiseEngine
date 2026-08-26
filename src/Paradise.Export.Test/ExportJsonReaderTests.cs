@@ -1,87 +1,96 @@
+using System.Collections.Generic;
 using System.Numerics;
 using Paradise.Export.Data;
 using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
-/// <summary>Round-trip guarantee for the new read half: writer output must deserialize back to
-/// equal values through every converter (vectors, quaternions, matrices, Color32, enums).</summary>
+/// <summary>Round-trip guarantee for the read half: writer output must deserialize back to equal
+/// values through every converter (vectors, quaternions, matrices, Color32, enums).</summary>
 public class ExportJsonReaderTests
 {
     [Test]
     public async Task level_document_round_trips_through_write_and_read()
     {
-        var document = new LevelData
+        var document = new LevelData();
+        document.Entities.Add(new List<AuthoredComponentData>
         {
-            Camera = new CameraData
+            AuthoredComponentList.Entry(new NameComponentData { Value = "Ground" }),
+            AuthoredComponentList.Entry(new TransformComponentData { World = Matrix4x4.Identity }),
+            AuthoredComponentList.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static }),
+            AuthoredComponentList.Entry(new ColliderComponentData
             {
-                Position = new Vector3(1.5f, 2.25f, -3.125f),
-                Rotation = new Vector3(10f, 20f, 30f),
-                OrthographicSize = 5.5f,
-            },
-            NavMeshFile = "sample.navmesh.bin",
-        };
-        document.Entities.Add(new LevelEntityData
-        {
-            Id = "Ground",
-            WorldMatrix = Matrix4x4.Identity,
-            Components =
-            {
-                LevelEntityExtensions.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static }),
-                LevelEntityExtensions.Entry(new ColliderComponentData
-                {
-                    Colliders =
-                    [
-                        new ColliderShapeData
-                        {
-                            Id = "Ground",
-                            IsStatic = true,
-                            Layer = 0,
-                            ShapeType = PhysicsShapeType.Box,
-                            LocalCenter = new Vector3(0f, -0.5f, 0f),
-                            LocalRotation = Quaternion.Identity,
-                            Size = new Vector3(20f, 1f, 20f),
-                        },
-                    ],
-                }),
-            },
+                Colliders =
+                [
+                    new ColliderShapeData
+                    {
+                        Id = "Ground",
+                        IsStatic = true,
+                        Layer = 0,
+                        ShapeType = PhysicsShapeType.Box,
+                        LocalCenter = new Vector3(0f, -0.5f, 0f),
+                        LocalRotation = Quaternion.Identity,
+                        Size = new Vector3(20f, 1f, 20f),
+                    },
+                ],
+            }),
         });
-        document.Entities.Add(new LevelEntityData
+        document.Entities.Add(new List<AuthoredComponentData>
         {
-            Id = "Ball1",
-            WorldMatrix = Matrix4x4.CreateTranslation(1f, 0.85f, 2f),
-            Components =
+            AuthoredComponentList.Entry(new NameComponentData { Value = "Ball1" }),
+            AuthoredComponentList.Entry(new TransformComponentData
             {
-                LevelEntityExtensions.Entry(new RenderableComponentData
-                {
-                    Mesh = "meshes/abc.glb",
-                    Materials = ["materials/mat_ball1.json"],
-                }),
-                LevelEntityExtensions.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Dynamic, Mass = 2f }),
-                LevelEntityExtensions.Entry(new ColliderComponentData
-                {
-                    Colliders = [new ColliderShapeData { ShapeType = PhysicsShapeType.Sphere, Radius = 0.35f }],
-                }),
-            },
+                World = Matrix4x4.CreateTranslation(1f, 0.85f, 2f),
+            }),
+            AuthoredComponentList.Entry(new RenderableComponentData
+            {
+                Mesh = "meshes/abc.glb",
+                Materials = ["materials/mat_ball1.json"],
+            }),
+            AuthoredComponentList.Entry(new RigidbodyComponentData
+            {
+                BodyType = PhysicsBodyType.Dynamic,
+                Mass = 2f,
+            }),
+            AuthoredComponentList.Entry(new ColliderComponentData
+            {
+                Colliders = [new ColliderShapeData { ShapeType = PhysicsShapeType.Sphere, Radius = 0.35f }],
+            }),
         });
 
         var parsed = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(parsed.SchemaVersion).IsEqualTo(LevelData.CurrentSchemaVersion);
-        await Assert.That(parsed.Camera!.Position).IsEqualTo(new Vector3(1.5f, 2.25f, -3.125f));
 
         var ground = parsed.Entities[0];
+        await Assert.That(ground.Get<NameComponentData>()!.Value).IsEqualTo("Ground");
         await Assert.That(ground.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Static);
         await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].Size).IsEqualTo(new Vector3(20f, 1f, 20f));
         await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].ShapeType).IsEqualTo(PhysicsShapeType.Box);
 
         var entity = parsed.Entities[1];
-        await Assert.That(entity.WorldMatrix!.Value.Translation).IsEqualTo(new Vector3(1f, 0.85f, 2f));
+        await Assert.That(entity.Get<TransformComponentData>()!.World.Translation)
+            .IsEqualTo(new Vector3(1f, 0.85f, 2f));
         await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("meshes/abc.glb");
         await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
         await Assert.That(entity.Get<ColliderComponentData>()!.Colliders[0].Radius).IsEqualTo(0.35f);
     }
 
-    // The committed_sample_scene_parses cross-check against a real editor export lives in the
-    // editor repo (ParadiseGodotEditor), which owns the committed data/ fixtures.
+    /// <summary>
+    /// A v4 document is REFUSED, and this is the test that earns the version gate.
+    ///
+    /// Without it a v4 document is not an error: its entities are JSON OBJECTS where this build
+    /// expects arrays, so <c>Entities</c> deserializes to nothing and the scene loads as an empty
+    /// world with no diagnostic anywhere.
+    /// </summary>
+    [Test]
+    public async Task a_v4_document_is_refused_by_name()
+    {
+        const string v4 = """
+            {"SchemaVersion":4,"Entities":[{"Id":"Ground","Components":[]}]}
+            """;
+
+        await Assert.That(() => ExportJsonReader.ReadLevel(v4))
+            .Throws<System.Text.Json.JsonException>();
+    }
 }

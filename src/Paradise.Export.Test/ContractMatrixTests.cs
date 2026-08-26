@@ -13,8 +13,8 @@ public class ContractMatrixTests
 {
     private static float[] Serialize(Matrix4x4 m)
     {
-        var entity = new LevelEntityData { WorldMatrix = m };
-        JsonArray arr = (JsonArray)JsonNode.Parse(ExportJsonWriter.SerializeToString(entity))!["WorldMatrix"]!;
+        var transform = new TransformComponentData { World = m };
+        JsonArray arr = (JsonArray)JsonNode.Parse(ExportJsonWriter.SerializeToString(transform))!["World"]!;
         var flat = new float[16];
         for (int i = 0; i < 16; i++)
         {
