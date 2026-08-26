@@ -204,9 +204,15 @@ namespace Paradise.Export.Data
     /// what a renderer's upload table is keyed on; one record holding both would say they were one
     /// thing.
     ///
-    /// SLOT ORDER IS THE CONTRACT: entry <c>n</c> overrides primitive <c>n</c> of the mesh, and a
-    /// null entry means the GLB's own material wins for that primitive. Dropping a null shifts
-    /// every override after it onto the wrong primitive, which renders and is wrong.
+    /// SLOT ORDER IS THE CONTRACT: the GLB's primitive order equals this list's order — every host
+    /// walks the same traversal to produce it. A null entry means the GLB's own embedded material
+    /// is authoritative, which is why the list is of NULLABLE strings and why a shorter list is
+    /// legal: it simply overrides fewer primitives. Dropping a null shifts every override after it
+    /// onto the wrong primitive, which renders, and is wrong.
+    ///
+    /// It carried the same rules on <see cref="RenderableComponentData"/> through v4. There is one
+    /// record for them now rather than two with agreeing prose, because two records asserting one
+    /// wire fact is an ambiguity a future exporter has no way to resolve.
     /// </summary>
     [Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc")]
     [Authored(DisplayName = "Materials")]
@@ -224,7 +230,9 @@ namespace Paradise.Export.Data
     /// PNG/JPEG). <see cref="MeshNode"/> optionally names a single node inside the GLB (reserved;
     /// null = whole default scene).
     ///
-    /// <see cref="Materials"/> joined this record in schema v4. It was a field on the ENTITY, one
+    /// The material slots joined this record in schema v4 and left it again in v5 — see
+    /// <see cref="MaterialsComponentData"/>. The v4 note is kept because the reasoning survives the
+    /// move: they were a field on the ENTITY, one
     /// level up, which made the contract's central rule — slot order equals the GLB's primitive
     /// order — a statement about two fields that nothing held together: an entity could carry
     /// slots with no mesh to index them against, and every reader had to fetch the renderable
@@ -251,20 +259,11 @@ namespace Paradise.Export.Data
         [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
         public string? MeshNode { get; set; }
 
-        /// <summary>
-        /// Per-primitive material overrides, positionally paired with <see cref="Mesh"/>.
-        ///
-        /// <b>Slot order IS the contract:</b> the GLB's primitive order equals this list's order —
-        /// both hosts walk the same MeshInstance3D traversal to produce it. A null slot means the
-        /// GLB's own embedded material is authoritative, which is why the list is of nullable
-        /// strings and why a shorter list is legal: it simply overrides fewer primitives.
-        ///
-        /// DERIVED, not typed. Both editors read it off the object's material slots at export and
-        /// overwrite whatever is here, so an authored edit does not survive a re-export.
-        /// </summary>
-        [AuthoredByHost(AuthoredBySources.Mesh)]
-        [AuthorDoc("Material overrides, one per GLB primitive. Derived from the mesh at export.")]
-        public List<string?> Materials { get; set; } = new();
+        // The material slots are NOT here. They were, from v4, and they moved to
+        // MaterialsComponentData in v5 for the reason the whole schema moved: they are not
+        // geometry. Two objects sharing a GLB and differing only in their slots are two drawable
+        // VARIANTS and one mesh, which is what a renderer's upload table is keyed on — and one
+        // record holding both said they were one thing.
     }
 
     [Guid("e1cd1bc8-86f2-4225-adc9-4a324c70ebf9")]

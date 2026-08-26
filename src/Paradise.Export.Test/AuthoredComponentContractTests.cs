@@ -126,8 +126,16 @@ public class AuthoredComponentContractTests
         var level = new LevelData();
         level.Entities.Add(new List<AuthoredComponentData>());
 
+        // Asserted on the PARSED document rather than on the text. The written form was pinned
+        // here as an exact substring — indentation depth, newline style and all — which made any
+        // future wrapper property fail this with a message about whitespace. What the test means
+        // is that the object is an empty ARRAY, and that survives a reformat.
         string json = ExportJsonWriter.SerializeToString(level);
-        await Assert.That(json).Contains("\"Entities\": [\n    []\n  ]");
+        JsonElement entities = JsonDocument.Parse(json).RootElement.GetProperty("Entities");
+
+        await Assert.That(entities.GetArrayLength()).IsEqualTo(1);
+        await Assert.That(entities[0].ValueKind).IsEqualTo(JsonValueKind.Array);
+        await Assert.That(entities[0].GetArrayLength()).IsEqualTo(0);
         await Assert.That(ExportJsonReader.ReadLevel(json).Entities.Single()).IsEmpty();
     }
 

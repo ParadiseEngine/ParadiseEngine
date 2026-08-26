@@ -45,7 +45,10 @@ public class ExportJsonReaderTests
             AuthoredComponentList.Entry(new RenderableComponentData
             {
                 Mesh = "meshes/abc.glb",
-                Materials = ["materials/mat_ball1.json"],
+            }),
+            AuthoredComponentList.Entry(new MaterialsComponentData
+            {
+                Slots = ["materials/mat_ball1.json"],
             }),
             AuthoredComponentList.Entry(new RigidbodyComponentData
             {
@@ -72,6 +75,8 @@ public class ExportJsonReaderTests
         await Assert.That(entity.Get<TransformComponentData>()!.World.Translation)
             .IsEqualTo(new Vector3(1f, 0.85f, 2f));
         await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("meshes/abc.glb");
+        await Assert.That(entity.Get<MaterialsComponentData>()!.Slots)
+            .IsEquivalentTo(new List<string?> { "materials/mat_ball1.json" });
         await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
         await Assert.That(entity.Get<ColliderComponentData>()!.Colliders[0].Radius).IsEqualTo(0.35f);
     }

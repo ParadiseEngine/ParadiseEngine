@@ -5,7 +5,7 @@ using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
-/// <summary>Schema v4 shape: <see cref="RenderableComponentData"/> carries the mesh GLB
+/// <summary>Schema v5 shape: <see cref="RenderableComponentData"/> carries the mesh GLB
 /// reference AND the material slots that index against its primitives. Pins the serialized keys
 /// and the mesh field path convention.</summary>
 public class RenderableDataShapeTests
@@ -18,9 +18,20 @@ public class RenderableDataShapeTests
 
         await Assert.That(json.Contains("\"Mesh\": \"meshes/abc123.glb\"", StringComparison.Ordinal)).IsTrue();
         await Assert.That(json.Contains("\"MeshNode\": null", StringComparison.Ordinal)).IsTrue();
+        // The slots are NOT a key here any more — they are MaterialsComponentData. Asserted as an
+        // absence because it is the half of the move a reader can get wrong: a host still writing
+        // them here produces a document whose overrides nothing reads.
+        await Assert.That(json.Contains("Materials", StringComparison.Ordinal)).IsFalse();
+    }
+
+    [Test]
+    public async Task material_slots_are_written_empty_rather_than_absent()
+    {
         // Empty, not absent. A reader distinguishes "no overrides" from "key missing" only if the
         // key is always written, and every other list in this contract is written the same way.
-        await Assert.That(json.Contains("\"Materials\": []", StringComparison.Ordinal)).IsTrue();
+        string json = ExportJsonWriter.SerializeToString(new MaterialsComponentData());
+
+        await Assert.That(json.Contains("\"Slots\": []", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]
@@ -36,17 +47,22 @@ public class RenderableDataShapeTests
             AuthoredComponentList.Entry(new RenderableComponentData
             {
                 Mesh = "meshes/abc123.glb",
-                Materials = ["materials/a.json", null, "materials/c.json"],
+            }),
+            // A SEPARATE component since v5. The mesh and the slots that override its primitives
+            // are two things an object says, and the pair is what a drawable variant is keyed on.
+            AuthoredComponentList.Entry(new MaterialsComponentData
+            {
+                Slots = ["materials/a.json", null, "materials/c.json"],
             }),
         });
 
         // Through the whole path — writer, reader, generated registry — because the null is lost
         // in the generated reader, not in the serializer, if it is lost at all.
-        RenderableComponentData round = ExportJsonReader
+        MaterialsComponentData round = ExportJsonReader
             .ReadLevel(ExportJsonWriter.SerializeToString(level))
-            .Entities[0].Get<RenderableComponentData>()!;
+            .Entities[0].Get<MaterialsComponentData>()!;
 
-        await Assert.That(round.Materials).IsEquivalentTo(
+        await Assert.That(round.Slots).IsEquivalentTo(
             new List<string?> { "materials/a.json", null, "materials/c.json" });
     }
 

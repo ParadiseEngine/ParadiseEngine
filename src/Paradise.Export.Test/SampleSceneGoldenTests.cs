@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Paradise.Export.Data;
+using Paradise.Export.Geometry;
 using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
@@ -66,9 +67,19 @@ public class SampleSceneGoldenTests
         document.Entities.Add(new List<AuthoredComponentData>
         {
             AuthoredComponentList.Entry(new NameComponentData { Value = "Directional Light" }),
+            // ContractMatrix.Trs, NOT Matrix4x4.CreateTranslation. The contract's matrices are
+            // column-vector — translation at flat indices 12/13/14 — and CreateTranslation builds
+            // the row-vector form, which serializes the translation to 3/7/11 instead. Both are
+            // matrices and both round-trip, so nothing fails; what breaks is every consumer that
+            // follows the documented rule and transposes, which then reads this light at the
+            // origin while its own SceneLightData.Position says (0, 3, 0).
+            //
+            // This fixture is generated from the writer rather than from an independent baseline,
+            // so it is the reference an exporter author copies the convention from. It has to be
+            // the convention.
             AuthoredComponentList.Entry(new TransformComponentData
             {
-                World = Matrix4x4.CreateTranslation(0f, 3f, 0f),
+                World = ContractMatrix.Trs(new Vector3(0f, 3f, 0f), Quaternion.Identity, Vector3.One),
             }),
             AuthoredComponentList.Entry(new SceneLightData
             {
