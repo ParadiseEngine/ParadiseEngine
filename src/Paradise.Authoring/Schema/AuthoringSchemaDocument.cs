@@ -180,6 +180,19 @@ public static class AuthoredFieldTypes
     public const string Vector3 = "vector3";
     public const string Quaternion = "quaternion";
     public const string Color = "color";
+
+    /// <summary>
+    /// A 4×4 transform, sixteen floats, COLUMN-MAJOR — the contract's own convention, with the
+    /// translation at flat indices 12/13/14.
+    ///
+    /// <b>An editor should not draw sixteen boxes for it.</b> It is here because it is a leaf like
+    /// the vectors above rather than a composed object, but unlike them it is not a value anybody
+    /// types: a placement is something you move with the host's own gizmo. A field of this type is
+    /// almost always DERIVED — an exporter writes it for the object it is exporting — so the
+    /// reasonable editor treatments are to show it read-only or to omit it, and a raw float grid is
+    /// the one treatment that is actively wrong.
+    /// </summary>
+    public const string Matrix4x4 = "matrix4x4";
 }
 
 /// <summary>The closed set of <see cref="AuthoredFieldSchema.Unit"/> values.</summary>
@@ -219,6 +232,26 @@ public static class AuthoredBySources
 
     /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
+
+    /// <summary>
+    /// ANOTHER OBJECT IN THE SCENE: point at it, and the exporter bakes its NAME into this field.
+    ///
+    /// The odd one of the set, because what it bakes is not a value read off the referenced object
+    /// — a pose, a shape, a colour — but the reference itself, reduced to the one thing every
+    /// exported object carries: its <c>NameComponentData</c>. A runtime resolves it against the
+    /// scene once the whole walk is done, since the target may be authored after the thing
+    /// pointing at it.
+    ///
+    /// <b>A name, not an index or an id.</b> An index would break the moment an exporter reordered
+    /// or dropped an object; a minted id would be a second identity that exists only to be
+    /// followed, and would have to survive a re-export unchanged. The name is what an author typed
+    /// and what they see in the outliner, so a broken reference names the thing they need to fix.
+    ///
+    /// The cost, stated so nobody is surprised by it: names are not unique, and nothing here makes
+    /// them so. A scene with two objects called the same thing has an ambiguous reference, and the
+    /// runtime resolving it is the thing that must say so.
+    /// </summary>
+    public const string Entity = "entity";
 
     /// <summary>
     /// An object whose WORLD POSE is the value: point at an empty (or anything else placeable) and

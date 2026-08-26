@@ -400,6 +400,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             case "vector2": helpers.Vector2 = true; return "ReadVector2(" + element + ")";
             case "vector3": helpers.Vector3 = true; return "ReadVector3(" + element + ")";
             case "quaternion": helpers.Quaternion = true; return "ReadQuaternion(" + element + ")";
+            case "matrix4x4": helpers.Matrix4x4 = true; return "ReadMatrix4x4(" + element + ")";
             case "vector4color": helpers.Vector4Color = true; return "ReadColorVector4(" + element + ")";
             case "color32": helpers.Color32 = true; return "ReadColor32(" + element + ")";
             default:
@@ -415,12 +416,13 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
         public bool Vector2;
         public bool Vector3;
         public bool Quaternion;
+        public bool Matrix4x4;
         public bool Vector4Color;
         public bool Color32;
 
         public void Emit(StringBuilder source)
         {
-            if (Vector2 || Vector3 || Quaternion)
+            if (Vector2 || Vector3 || Quaternion || Matrix4x4)
             {
                 source.AppendLine();
                 source.AppendLine("    /// <summary>The addon writes vectors as float arrays.</summary>");
@@ -461,6 +463,26 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
                 source.AppendLine("    {");
                 source.AppendLine("        var v = ReadFloats(json, 4);");
                 source.AppendLine("        return new global::System.Numerics.Quaternion(v[0], v[1], v[2], v[3]);");
+                source.AppendLine("    }");
+            }
+            if (Matrix4x4)
+            {
+                source.AppendLine();
+                source.AppendLine("    /// <summary>An editor writes a matrix as 16 floats, COLUMN-MAJOR — the contract's own");
+                source.AppendLine("    /// convention. This is the EXACT inverse of Matrix4x4Converter.Write, and must stay so:");
+                source.AppendLine("    /// System.Numerics' constructor takes ROWS, so v[4] returns to M12 rather than to M21.");
+                source.AppendLine("    /// Reading the sixteen values straight through instead would produce the transpose —");
+                source.AppendLine("    /// which is a matrix, and looks like one, and differs from what the contract's own");
+                source.AppendLine("    /// reader returns for the same bytes. What arrives is the column-vector layout; a");
+                source.AppendLine("    /// consumer transposes it to get a System.Numerics row-vector model matrix.</summary>");
+                source.AppendLine("    private static global::System.Numerics.Matrix4x4 ReadMatrix4x4(global::System.Text.Json.JsonElement json)");
+                source.AppendLine("    {");
+                source.AppendLine("        var v = ReadFloats(json, 16);");
+                source.AppendLine("        return new global::System.Numerics.Matrix4x4(");
+                source.AppendLine("            v[0], v[4], v[8], v[12],");
+                source.AppendLine("            v[1], v[5], v[9], v[13],");
+                source.AppendLine("            v[2], v[6], v[10], v[14],");
+                source.AppendLine("            v[3], v[7], v[11], v[15]);");
                 source.AppendLine("    }");
             }
             if (Vector4Color || Color32)

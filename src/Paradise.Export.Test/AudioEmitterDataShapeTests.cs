@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Nodes;
 using Paradise.Export.Data;
 using Paradise.Export.Serialization;
@@ -15,24 +16,20 @@ public class AudioEmitterDataShapeTests
     public async Task audio_emitter_serializes_and_round_trips()
     {
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
+        level.Entities.Add(new List<AuthoredComponentData>
         {
-            Id = "ArcadeCabinet",
-            Components =
+            AuthoredComponentList.Entry(new AudioEmitterComponentData
             {
-                LevelEntityExtensions.Entry(new AudioEmitterComponentData
-                {
-                    StartEvent = "Play_Arcade_Bed",
-                    StopEvent = "Stop_Arcade_Bed",
-                    PlayOnStart = true,
-                    Is3D = true,
-                    AttenuationScale = 2.5f,
-                }),
-            },
+                StartEvent = "Play_Arcade_Bed",
+                StopEvent = "Stop_Arcade_Bed",
+                PlayOnStart = true,
+                Is3D = true,
+                AttenuationScale = 2.5f,
+            }),
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
-        JsonNode audio = JsonNode.Parse(json)!["Entities"]![0]!["Components"]![0]!["Data"]!;
+        JsonNode audio = JsonNode.Parse(json)!["Entities"]![0]![0]!["Data"]!;
         await Assert.That((string?)audio["StartEvent"]).IsEqualTo("Play_Arcade_Bed");
         await Assert.That((string?)audio["StopEvent"]).IsEqualTo("Stop_Arcade_Bed");
         await Assert.That((bool)audio["PlayOnStart"]!).IsTrue();
@@ -49,10 +46,10 @@ public class AudioEmitterDataShapeTests
     [Test]
     public async Task audio_emitter_is_absent_from_older_documents()
     {
-        // An entity that authors nothing has an empty list, not a component that reads as null.
+        // An object that authors nothing is an empty list, not a component that reads as null.
         // (This used to prove "absent slot deserializes to null"; the slot is gone, but the
         // property it protected — a scene without audio still reads — is the same one.)
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":4,"Entities":[{"Id":"E"}]}""");
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":5,"Entities":[[]]}""");
         await Assert.That(read.Entities[0].Get<AudioEmitterComponentData>()).IsNull();
     }
 
@@ -61,18 +58,14 @@ public class AudioEmitterDataShapeTests
     {
         // The music case: 2D, no stop event (the runtime stops it by playing id instead).
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
+        level.Entities.Add(new List<AuthoredComponentData>
         {
-            Id = "Music",
-            Components =
+            AuthoredComponentList.Entry(new AudioEmitterComponentData
             {
-                LevelEntityExtensions.Entry(new AudioEmitterComponentData
-                {
-                    StartEvent = "Play_CityPop",
-                    PlayOnStart = false,
-                    Is3D = false,
-                }),
-            },
+                StartEvent = "Play_CityPop",
+                PlayOnStart = false,
+                Is3D = false,
+            }),
         });
 
         AudioEmitterComponentData round = ExportJsonReader

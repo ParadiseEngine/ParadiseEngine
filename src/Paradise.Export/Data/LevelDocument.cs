@@ -40,104 +40,53 @@ namespace Paradise.Export.Data
         /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader
         /// would misparse.
         ///
+        /// v5 reduced the document to its entities, and an entity to its authored components.
+        /// Everything an entity used to carry BESIDE that list — its id and display name, its
+        /// kind and spawn phase, its prefab provenance, its parent link, its local and world
+        /// matrices, its override table — is either gone or has become an ordinary component
+        /// (<see cref="NameComponentData"/>, <see cref="TransformComponentData"/>). So are the
+        /// document's own blocks: the viewport camera, the lighting states, the navmesh agent,
+        /// the interactable table and the material list. A v4 document parses into entities
+        /// carrying their components and SILENTLY loses every one of those fields, which is
+        /// precisely the failure a version gate exists to prevent.
+        ///
         /// v4 moved the entity's <c>Materials</c> slot list onto
-        /// <see cref="RenderableComponentData"/>. A v3 document parses cleanly here and loses the
-        /// slots in silence — every entity keeps its mesh and renders in the GLB's own embedded
-        /// materials — which is exactly the failure a version gate exists to prevent, so v3 is
-        /// refused rather than read.
+        /// <see cref="RenderableComponentData"/>; v3 replaced nine named component slots with one
+        /// list. Both are below the floor now and neither has a shim.
         ///
-        /// v3 replaced the entity's nine named component slots with ONE list of
-        /// <see cref="AuthoredComponentData"/>. Not additive in either direction: a v2 document's
-        /// <c>"Components": {"Rigidbody": {...}}</c> is an object where this build expects an
-        /// array.
-        ///
-        /// Both are REJECTED on read — see
-        /// <see cref="Serialization.ExportJsonReader.ReadLevel"/>.</summary>
-        public const int CurrentSchemaVersion = 4;
+        /// REJECTED on read — see <see cref="Serialization.ExportJsonReader.ReadLevel"/>.</summary>
+        public const int CurrentSchemaVersion = 5;
 
         /// <summary>The oldest document this build still understands. Equal to
         /// <see cref="CurrentSchemaVersion"/>, and that is the point rather than an oversight.
         ///
-        /// v3 COULD have been read with a shim — moving a key is mechanical, unlike v2's named
-        /// slots. It is refused anyway, because a shim is a second reading of the format that
-        /// lives forever: every reader after it has to know both shapes, and the migration nobody
-        /// is forced to do is the one nobody does. <c>tools/migrate_level_v3_to_v4.py</c> converts
-        /// a document in one pass, and re-exporting is better still.</summary>
-        public const int MinimumSupportedVersion = 4;
+        /// A shim is a second reading of the format that lives forever: every reader after it has
+        /// to know both shapes, and the migration nobody is forced to do is the one nobody does.
+        /// Re-export the scene from its editor.</summary>
+        public const int MinimumSupportedVersion = 5;
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
-        public CameraData? Camera { get; set; }
-        public LightingData? Lighting { get; set; }
-        public NavMeshAgentData? NavMeshAgent { get; set; }
-        public List<InteractableData> Interactables { get; set; } = new();
-        public List<LevelEntityData> Entities { get; set; } = new();
-        public string? NavMeshFile { get; set; }
-        public List<LevelMaterialData> Materials { get; set; } = new();
-    }
 
-    public sealed record PrefabTemplateData
-    {
-        public string? DisplayName { get; set; }
-        public string? Prefab { get; set; }
-        public string? PrefabAssetPath { get; set; }
-        public string? PrefabGuid { get; set; }
-        public string? PrefabAssetType { get; set; }
-        public List<string?> Materials { get; set; } = new();
-        public List<LevelEntityData> Entities { get; set; } = new();
-    }
-
-    public sealed record CameraData
-    {
-        public Vector3 Position { get; set; } = Vector3.Zero;
-        public Vector3 Rotation { get; set; } = Vector3.Zero;
-        public float OrthographicSize { get; set; } = 10f;
-        public Color32 BackgroundColor { get; set; } = Color32.FromRgba(0.72f, 0.69f, 0.67f);
-    }
-
-    public sealed record LevelEntityData
-    {
-        public string Id { get; set; } = "";
-        public Guid EntityGuid { get; set; }
-        public string? StableId { get; set; }
-        public string? DisplayName { get; set; }
-        public string? Kind { get; set; }
-        public string? SpawnPhase { get; set; }
-        public bool IsActive { get; set; } = true;
-        public string? Prefab { get; set; }
-        public string? PrefabAssetPath { get; set; }
-        public string? NearestInstanceRoot { get; set; }
-        public string? PrefabGuid { get; set; }
-        public string? PrefabAssetType { get; set; }
-        public string? InitialAnimation { get; set; }
-        public EntityParentData? Parent { get; set; }
-        public Vector3 LocalPosition { get; set; } = Vector3.Zero;
-        public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
-        public Vector3 LocalScale { get; set; } = Vector3.One;
-        public Matrix4x4? LocalMatrix { get; set; }
-        public Matrix4x4? WorldMatrix { get; set; }
-        // Materials used to sit here. It moved onto RenderableComponentData in v4 — see that
-        // record for why. Nothing replaces it at this level: an entity that renders nothing has
-        // no slots to override.
-        public PrefabOverrideData Overrides { get; set; } = new();
-        /// <summary>Every component authored on this entity, engine's and game's alike, each as
-        /// an id + type + opaque payload.
+        /// <summary>
+        /// The scene: one entry per object, and an object IS its authored components.
         ///
-        /// One list rather than the named slots this used to be. A slot could only ever exist for
-        /// a component the CONTRACT knew about, which made the engine's components a privileged
-        /// tier and every game's components a second one — and meant adding an engine component
-        /// changed this record, both editors, and the router in each of them. Now it changes
-        /// nothing: a component is a record with a <c>[Guid]</c>.
+        /// <b>There is no entity record any more.</b> An entity used to be eighteen fields of
+        /// which a runtime read four, and the four it read were a privileged tier no game could
+        /// extend: a name, a matrix, an active flag and a parent link were things the CONTRACT
+        /// knew about, while everything a game had to say went in the list. Every one of those is
+        /// now in the list too — the name and the transform as engine components every exporter
+        /// writes, the active flag as an object the exporter simply does not emit, and the parent
+        /// link as nothing at all, because nothing read it.
         ///
-        /// Read one with <see cref="LevelEntityExtensions.Get{T}"/>, or all of them at once with
-        /// <c>AuthoredComponentRouter.Materialize</c>.</summary>
-        public List<AuthoredComponentData> Components { get; set; } = new();
-    }
-
-    public sealed record EntityParentData
-    {
-        public string Id { get; set; } = "";
-        public string? BonePath { get; set; }
-        public int BoneIndex { get; set; } = -1;
+        /// What that buys is one rule for the whole document: a host writes components, a runtime
+        /// reads components, and adding a fact about an object is adding a record with a
+        /// <c>[Guid]</c> rather than a field here plus a mirror in every editor.
+        ///
+        /// ORDER IS THE DOCUMENT'S and is load-bearing: a runtime that assigns entity handles in
+        /// walk order gets the same handle for the same object in every world it builds only
+        /// because this list is a pure function of the export.
+        /// </summary>
+        public List<List<AuthoredComponentData>> Entities { get; set; } = new();
     }
 
     /// <summary>
@@ -187,6 +136,93 @@ namespace Paradise.Export.Data
     // how a game repo would mint one that collides with the engine. A generated id has no next.
 
     /// <summary>
+    /// What an object is CALLED, as an ordinary component.
+    ///
+    /// <b>It exists for diagnostics, and that is not a small thing.</b> A scene is two hundred
+    /// objects; a refusal that says "authors an interaction trigger with no prompt" and cannot say
+    /// WHICH sends someone counting rows in a JSON file. The name is the string an author greps
+    /// their .blend for, so it travels.
+    ///
+    /// A component rather than a field on the entity, because the entity has no fields — see
+    /// <see cref="LevelData.Entities"/>. That also makes it OPTIONAL by construction: a host with
+    /// nothing meaningful to call an object simply does not write one, and a runtime falls back to
+    /// the object's position in the walk.
+    ///
+    /// Nothing but a message ever reads it. It is not an identity — two objects may share a name,
+    /// and the exporter is not asked to prevent that.
+    /// </summary>
+    [Guid("f83f51f4-093a-42c9-aa7a-f50f48c3b5f9")]
+    [Authored(DisplayName = "Name")]
+    public sealed record NameComponentData
+    {
+        [AuthorDoc("What to call this object in logs and refusals.")]
+        public string Value { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Where an object STANDS: its world placement, as an ordinary component.
+    ///
+    /// <b>Anything that exists is somewhere</b> — so this is the one component an exporter writes
+    /// for every object it emits, and a runtime is entitled to expect it. It used to be
+    /// <c>LevelEntityData.WorldMatrix</c>, a field beside the component list; the difference is
+    /// that a field was a fact only the contract could state, and this is a fact stated the same
+    /// way as every other.
+    ///
+    /// <b>A matrix, not a decomposed pose.</b> The local/position/rotation/scale quartet this
+    /// replaces carried the same placement four times and let them disagree: an exporter wrote all
+    /// four, a reader picked one, and a non-uniformly scaled parent made the decomposed three a
+    /// lossy version of the matrix nobody could tell from the exact one. One value, and the
+    /// consumer decomposes if it wants to.
+    ///
+    /// COLUMN-VECTOR layout, like every other matrix in this contract (column-major float[16] on
+    /// the wire). A consumer operating in System.Numerics' row-vector convention transposes.
+    ///
+    /// <b>The parent link is gone with the local matrix.</b> An object's placement is stated in
+    /// world space and nothing reads a hierarchy at load, so a document that carried both was
+    /// carrying one of them for nobody. A runtime that later wants parenting should author it as
+    /// its own component, where the thing it means can be written down.
+    /// </summary>
+    [Guid("5b1a2ea9-a4bb-4ba2-be15-b645ccf50004")]
+    [Authored(DisplayName = "Transform")]
+    public sealed record TransformComponentData
+    {
+        [AuthorDoc("Where this object stands, world space, column-vector layout.")]
+        public Matrix4x4 World { get; set; } = Matrix4x4.Identity;
+    }
+
+    /// <summary>
+    /// The materials that override a mesh's own, one per GLB primitive.
+    ///
+    /// <b>An engine component, and it has to be.</b> A material assignment is not something an
+    /// author types — it is Blender's material slots, or Godot's surface overrides — so it is
+    /// DERIVED by every exporter from the object it is exporting, exactly as the name and the
+    /// transform are. A game cannot own it for the same reason a game cannot own the transform:
+    /// the host that fills it in cannot be made to know a particular game's type.
+    ///
+    /// Separate from whatever names the MESH, because slots are not geometry. Two objects sharing
+    /// a GLB and differing only in their slots are two drawable VARIANTS and one mesh, which is
+    /// what a renderer's upload table is keyed on; one record holding both would say they were one
+    /// thing.
+    ///
+    /// SLOT ORDER IS THE CONTRACT: the GLB's primitive order equals this list's order — every host
+    /// walks the same traversal to produce it. A null entry means the GLB's own embedded material
+    /// is authoritative, which is why the list is of NULLABLE strings and why a shorter list is
+    /// legal: it simply overrides fewer primitives. Dropping a null shifts every override after it
+    /// onto the wrong primitive, which renders, and is wrong.
+    ///
+    /// It carried the same rules on <see cref="RenderableComponentData"/> through v4. There is one
+    /// record for them now rather than two with agreeing prose, because two records asserting one
+    /// wire fact is an ambiguity a future exporter has no way to resolve.
+    /// </summary>
+    [Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc")]
+    [Authored(DisplayName = "Materials")]
+    public sealed record MaterialsComponentData
+    {
+        [AuthorDoc("Material documents, one per GLB primitive. A null entry keeps the GLB's own.")]
+        public List<string?> Slots { get; set; } = new();
+    }
+
+    /// <summary>
     /// Renderable marker, mesh reference and material slots. <see cref="Mesh"/> is a GLB path
     /// relative to <c>data/</c> (e.g. <c>meshes/&lt;key&gt;.glb</c>) holding the entity's visual
     /// subtree in ENTITY-LOCAL space (the entity's WorldMatrix places it). Textures inside the GLB
@@ -194,7 +230,9 @@ namespace Paradise.Export.Data
     /// PNG/JPEG). <see cref="MeshNode"/> optionally names a single node inside the GLB (reserved;
     /// null = whole default scene).
     ///
-    /// <see cref="Materials"/> joined this record in schema v4. It was a field on the ENTITY, one
+    /// The material slots joined this record in schema v4 and left it again in v5 — see
+    /// <see cref="MaterialsComponentData"/>. The v4 note is kept because the reasoning survives the
+    /// move: they were a field on the ENTITY, one
     /// level up, which made the contract's central rule — slot order equals the GLB's primitive
     /// order — a statement about two fields that nothing held together: an entity could carry
     /// slots with no mesh to index them against, and every reader had to fetch the renderable
@@ -221,20 +259,11 @@ namespace Paradise.Export.Data
         [AuthorDoc("Optional node inside the GLB; empty means its whole default scene.")]
         public string? MeshNode { get; set; }
 
-        /// <summary>
-        /// Per-primitive material overrides, positionally paired with <see cref="Mesh"/>.
-        ///
-        /// <b>Slot order IS the contract:</b> the GLB's primitive order equals this list's order —
-        /// both hosts walk the same MeshInstance3D traversal to produce it. A null slot means the
-        /// GLB's own embedded material is authoritative, which is why the list is of nullable
-        /// strings and why a shorter list is legal: it simply overrides fewer primitives.
-        ///
-        /// DERIVED, not typed. Both editors read it off the object's material slots at export and
-        /// overwrite whatever is here, so an authored edit does not survive a re-export.
-        /// </summary>
-        [AuthoredByHost(AuthoredBySources.Mesh)]
-        [AuthorDoc("Material overrides, one per GLB primitive. Derived from the mesh at export.")]
-        public List<string?> Materials { get; set; } = new();
+        // The material slots are NOT here. They were, from v4, and they moved to
+        // MaterialsComponentData in v5 for the reason the whole schema moved: they are not
+        // geometry. Two objects sharing a GLB and differing only in their slots are two drawable
+        // VARIANTS and one mesh, which is what a renderer's upload table is keyed on — and one
+        // record holding both said they were one thing.
     }
 
     [Guid("e1cd1bc8-86f2-4225-adc9-4a324c70ebf9")]
@@ -556,14 +585,6 @@ namespace Paradise.Export.Data
         public RenderSettingsData Rendering { get; set; } = new();
     }
 
-    public sealed record PrefabOverrideData
-    {
-        public bool Transform { get; set; }
-        public List<int> MaterialSlots { get; set; } = new();
-        public List<string> Colliders { get; set; } = new();
-        public List<string> Metadata { get; set; } = new();
-    }
-
     public sealed record LevelMaterialData
     {
         public string Path { get; set; } = "";
@@ -594,53 +615,40 @@ namespace Paradise.Export.Data
         public Color32 ColorB { get; set; } = Color32.FromRgba(0f, 0f, 0f);
     }
 
-    public sealed record LightingData
-    {
-        public string ActiveState { get; set; } = "Default";
-
-        /// <summary>Per-layer shadow map resolution the scene asks its renderer for, in texels
-        /// (authored in the Blender panel's Lighting section). Null leaves the renderer's own
-        /// default in place. Scene-wide rather than per lighting state: it sizes a GPU resource,
-        /// not a mood.</summary>
-        public int? ShadowMapSize { get; set; }
-
-        /// <summary>Soft-shadow blur: the PCF disk radius in shadow texels — the penumbra width
-        /// of every shadow edge (authored beside <see cref="ShadowMapSize"/>). Null leaves the
-        /// renderer's default.</summary>
-        public float? ShadowBlur { get; set; }
-
-        public List<LightingStateData> States { get; set; } = new();
-
-        public LightingStateData? ResolveActiveState()
-        {
-            if (States.Count == 0)
-            {
-                return null;
-            }
-
-            if (!string.IsNullOrWhiteSpace(ActiveState))
-            {
-                LightingStateData? named = States.FirstOrDefault(state =>
-                    string.Equals(state.Name, ActiveState, StringComparison.OrdinalIgnoreCase));
-                if (named != null)
-                {
-                    return named;
-                }
-            }
-
-            return States[0];
-        }
-    }
-
-    public sealed record LightingStateData
-    {
-        public string Name { get; set; } = "Default";
-        public EnvironmentData Environment { get; set; } = new();
-        public List<SceneLightData> Lights { get; set; } = new();
-    }
-
+    /// <summary>
+    /// How the scene is LIT as a whole: ambient, sky, fog, tone mapping, and the two shadow
+    /// settings that size the renderer's own resources.
+    ///
+    /// <b>A component on an object, like everything else.</b> This used to be a document block
+    /// (<c>Lighting.States[n].Environment</c>) reachable only through a named "active state" — a
+    /// second addressing scheme for a thing exactly one of which is ever used. It is now written
+    /// on an entity of its own, which the exporter emits whether or not any authored object
+    /// corresponds to it: a runtime finds the scene's environment by looking for this component,
+    /// the same way it finds anything else.
+    ///
+    /// <b>The lighting STATES are gone with the block.</b> They existed to let one document carry
+    /// several moods and name one of them active — a feature no host authored and no runtime
+    /// switched at play time. A scene that wants two moods is two environment components and a
+    /// game that chooses between them.
+    ///
+    /// Individual lights are NOT here: each is its own object carrying
+    /// <see cref="SceneLightData"/>. A light is placed, and a thing that is placed is an object.
+    /// </summary>
+    [Guid("f5f4a867-fe27-426a-82f2-1a2de5aceb2f")]
+    [Authored(DisplayName = "Environment")]
     public sealed record EnvironmentData
     {
+        /// <summary>Per-layer shadow map resolution the scene asks its renderer for, in texels.
+        /// Null leaves the renderer's own default in place. It sizes a GPU resource, which is why
+        /// it sits beside the mood rather than inside it.</summary>
+        [AuthorDoc("Shadow map resolution in texels; unset leaves the renderer's default.")]
+        public int? ShadowMapSize { get; set; }
+
+        /// <summary>Soft-shadow blur: the PCF disk radius in shadow texels — the penumbra width of
+        /// every shadow edge. Null leaves the renderer's default.</summary>
+        [AuthorDoc("PCF disk radius in shadow texels; unset leaves the renderer's default.")]
+        public float? ShadowBlur { get; set; }
+
         public string AmbientMode { get; set; } = "Color";
         public Color32 AmbientColor { get; set; } = Color32.FromRgba(0.5f, 0.52f, 0.56f);
         public Color32 AmbientEquatorColor { get; set; } = Color32.FromRgba(0.5f, 0.52f, 0.56f);
@@ -705,13 +713,15 @@ namespace Paradise.Export.Data
     }
 
     /// <summary>
-    /// A light. Reachable two ways, deliberately: as a scene-level entry under
-    /// <see cref="LightingStateData.Lights"/>, and as a component on an entity that AUTHORED one by
-    /// pointing at it.
+    /// A light, as a component on the object that IS it.
     ///
-    /// A light under an entity belongs to that entity and is not also listed at scene level, so a
-    /// light is only ever described once. Aiming is done by ROTATING the referenced object —
-    /// <see cref="Direction"/> is baked from its orientation, not typed.
+    /// One way, now. A light used to be reachable two: as an entry in a scene-level list, and as a
+    /// component on an entity that authored one by pointing at it — with a rule saying a light in
+    /// the second place must not also appear in the first, or the runtime would light it twice.
+    /// Since v5 there is only the component, so the rule has nothing left to be broken by.
+    ///
+    /// Aiming is done by ROTATING the object — <see cref="Direction"/> is baked from its
+    /// orientation, not typed.
     /// </summary>
     [Guid("fc886b84-c48c-4415-afd9-b03d6faf5ab7")]
     [Authored(DisplayName = "Light")]
@@ -749,82 +759,8 @@ namespace Paradise.Export.Data
     }
 
     /// <summary>
-    /// What an entity IS, as an authored component.
-    ///
-    /// Spread onto <see cref="LevelEntityData"/>'s own fields rather than kept in its component
-    /// list — these are not things an entity HAS. It exists as a
-    /// component so identity is declared in the same place as everything else and every editor
-    /// builds its control for it from the same document, rather than each hardcoding a "Kind" box.
-    ///
-    /// The entity's GUID is deliberately absent: minting one and keeping it unique across a scene
-    /// is behaviour, and behaviour is the one thing a schema cannot carry.
-    /// </summary>
-    [Guid("0c068bf4-495f-495b-be8d-9b02042a41c2")]
-    [Authored(DisplayName = "Identity")]
-    public sealed record IdentityComponentData
-    {
-        [AuthorDoc("Free-form label the runtime groups by, e.g. Prop, Character, Door.")]
-        public string Kind { get; set; } = "Prop";
-
-        [AuthorDoc("Spawn this entity when the level loads.")]
-        public bool IsActive { get; set; } = true;
-
-        [AuthorDoc("Animation clip to start on spawn; empty for none.")]
-        public string? InitialAnimation { get; set; }
-
-        /// <summary>
-        /// The source asset this entity was placed from — provenance, not what renders.
-        ///
-        /// It lives on IDENTITY rather than on Renderable for a blunt reason: adding a field to
-        /// Renderable would change the shape of every exported document, and this had to move
-        /// without doing that. Identity never appears under Components (the router spreads it onto
-        /// the entity), so it is the one place a new authored field costs nothing.
-        /// </summary>
-        [AuthorAssetKinds(".glb", ".gltf", ".tscn", ".scn")]
-        [AuthorDoc("Source asset this entity was placed from.")]
-        public string? Prefab { get; set; }
-
-        [AuthorDoc("Name shown in tools; defaults to the node's own name.")]
-        public string? DisplayName { get; set; }
-
-        [AuthorDoc("When in the load sequence this entity appears.")]
-        public string? SpawnPhase { get; set; }
-    }
-
-    public sealed record NavMeshAgentData
-    {
-        public float Speed { get; set; } = 2f;
-        public float AngularSpeed { get; set; } = 720f;
-        public float Acceleration { get; set; } = 40f;
-    }
-
-    public sealed record InteractableData
-    {
-        public string Id { get; set; } = "";
-        public string TargetId { get; set; } = "";
-        public string? DisplayName { get; set; }
-        public string? PersonalityTag { get; set; }
-        public float InteractionRadius { get; set; } = 2f;
-        public List<InteractableColliderData> Colliders { get; set; } = new();
-        public InteractablePresentationData? Presentation { get; set; }
-    }
-
-    public sealed record InteractablePresentationData
-    {
-        public string? AudioEvent { get; set; }
-        public string? ParticleEffectId { get; set; }
-        public string? TimelineId { get; set; }
-        public Vector3 LocalOffset { get; set; } = new(0f, 1f, 0f);
-        public float CooldownSeconds { get; set; } = 0.75f;
-    }
-
-    /// <summary>
     /// One collision shape, AUTHORED by pointing at the host's own shape object and edited with its
     /// native handles — every field below is baked out of that object at export.
-    ///
-    /// Note this is a class with a subclass (<see cref="InteractableColliderData"/>). The authoring
-    /// schema has no notion of inheritance, so it describes the base only; interaction colliders
-    /// carry no extra geometry today, so nothing is lost yet.
     /// </summary>
     [AuthoredByHost(AuthoredBySources.Shape)]
     public class ColliderShapeData
@@ -842,10 +778,6 @@ namespace Paradise.Export.Data
         public float Radius { get; set; }
         public float Height { get; set; }
         public NavObstacleData? NavObstacle { get; set; }
-    }
-
-    public sealed class InteractableColliderData : ColliderShapeData
-    {
     }
 
     public sealed class NavObstacleData

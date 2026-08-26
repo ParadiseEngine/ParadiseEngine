@@ -539,6 +539,22 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Entity CreateEntity(in TMask mask)
+    {
+        // The tag storage is added to the mask exactly as the builder overload wraps its builder in
+        // EnsureComponent<TEntityTags>: a tag can only be applied to an entity whose archetype
+        // already reserves the bits, and a caller assembling a mask at runtime has no more business
+        // remembering that than one spelling a builder does.
+        var entity = _world.CreateEntity(mask.Set(TEntityTags.TypeId));
+        // No builder means no tag can arrive pre-set, so this cannot find anything to cover today.
+        // Kept for the same reason the builder path has it: what may seed a tag is the caller's
+        // business, and a new entity that is already tagged must reach its chunk mask.
+        CoverTags(entity);
+        return entity;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity OverwriteEntity<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder
     {
         var wrappedBuilder = new EnsureComponent<TEntityTags, TBuilder> { InnerBuilder = builder };

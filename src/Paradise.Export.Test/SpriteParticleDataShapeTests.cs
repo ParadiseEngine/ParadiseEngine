@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.Numerics;
 using System.Text.Json.Nodes;
@@ -15,23 +16,19 @@ public class SpriteParticleDataShapeTests
     public async Task sprite_animation_serializes_and_round_trips()
     {
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
+        level.Entities.Add(new List<AuthoredComponentData>
         {
-            Id = "Torch",
-            Components =
+            AuthoredComponentList.Entry(new SpriteAnimationComponentData
             {
-                LevelEntityExtensions.Entry(new SpriteAnimationComponentData
-                {
-                    Sheet = "sprites/torch.ktx2",
-                    Columns = 4,
-                    Rows = 2,
-                    FrameCount = 7,
-                    Fps = 12f,
-                    Loop = true,
-                    QuadSize = new Vector2(0.5f, 1f),
-                    Billboard = true,
-                }),
-            },
+                Sheet = "sprites/torch.ktx2",
+                Columns = 4,
+                Rows = 2,
+                FrameCount = 7,
+                Fps = 12f,
+                Loop = true,
+                QuadSize = new Vector2(0.5f, 1f),
+                Billboard = true,
+            }),
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
@@ -55,27 +52,23 @@ public class SpriteParticleDataShapeTests
     public async Task particle_emitter_serializes_kind_by_name_and_round_trips()
     {
         var level = new LevelData();
-        level.Entities.Add(new LevelEntityData
+        level.Entities.Add(new List<AuthoredComponentData>
         {
-            Id = "Dust",
-            Components =
+            AuthoredComponentList.Entry(new ParticleEmitterComponentData
             {
-                LevelEntityExtensions.Entry(new ParticleEmitterComponentData
-                {
-                    Kind = ParticleRenderKind.Voxel,
-                    MaxParticles = 32,
-                    EmitRate = 20f,
-                    LifetimeSeconds = 0.8f,
-                    InitialSpeed = 3f,
-                    SpreadDegrees = 40f,
-                    Gravity = -4f,
-                    Drag = 0.5f,
-                    StartSize = 0.1f,
-                    EndSize = 0.02f,
-                    Seed = 99,
-                    Color = Color32.FromRgba(1f, 0.5f, 0f),
-                }),
-            },
+                Kind = ParticleRenderKind.Voxel,
+                MaxParticles = 32,
+                EmitRate = 20f,
+                LifetimeSeconds = 0.8f,
+                InitialSpeed = 3f,
+                SpreadDegrees = 40f,
+                Gravity = -4f,
+                Drag = 0.5f,
+                StartSize = 0.1f,
+                EndSize = 0.02f,
+                Seed = 99,
+                Color = Color32.FromRgba(1f, 0.5f, 0f),
+            }),
         });
 
         string json = ExportJsonWriter.SerializeToString(level);
@@ -99,7 +92,7 @@ public class SpriteParticleDataShapeTests
         // An entity that authors nothing has an empty list, and asking it for a component it does
         // not have is null rather than a throw. (This used to say "absent slot reads as null" —
         // same property, one less way to express absence.)
-        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":4,"Entities":[{"Id":"E"}]}""");
+        LevelData read = ExportJsonReader.ReadLevel("""{"SchemaVersion":5,"Entities":[[]]}""");
         await Assert.That(read.Entities[0].Get<SpriteAnimationComponentData>()).IsNull();
         await Assert.That(read.Entities[0].Get<ParticleEmitterComponentData>()).IsNull();
     }
@@ -131,7 +124,7 @@ public class SpriteParticleDataShapeTests
     /// fixed positions, so indexing it would pin the writer's order, not the shape.</summary>
     private static JsonNode Payload(JsonNode entity, Type type)
     {
-        foreach (JsonNode? component in entity["Components"]!.AsArray())
+        foreach (JsonNode? component in entity.AsArray())
         {
             if ((string?)component!["Type"] == type.FullName)
             {

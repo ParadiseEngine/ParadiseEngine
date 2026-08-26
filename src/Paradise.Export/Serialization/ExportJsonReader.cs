@@ -54,20 +54,18 @@ namespace Paradise.Export.Serialization
         /// <summary>
         /// Read a level document, refusing one this build cannot understand.
         ///
-        /// The gate arrived with v3 and earns its keep again at v4, because BOTH breaks fail
-        /// quietly without it — in opposite ways, which is the point:
+        /// The gate earns its keep again at v5, and for the reason it was added: the break is
+        /// SILENT without it. A v4 document deserializes perfectly here — its entities are
+        /// objects, not arrays, so <c>Entities</c> parses as… nothing, and the scene loads as an
+        /// empty world with no error anywhere. Worse, a hand-written v4-shaped entity whose
+        /// components happen to parse would load every component and lose its name, its
+        /// transform and its active flag in silence, because those are not properties of anything
+        /// any more.
         ///
-        /// - a v2 document carries <c>"Components"</c> as an OBJECT of named slots where this
-        ///   build expects an array, so it throws a raw JsonException naming a token position, or
-        ///   parses into entities with no components at all — "the scene authored nothing";
-        /// - a v3 document parses PERFECTLY. Its entity-level <c>"Materials"</c> simply matches no
-        ///   property any more and is dropped by the deserializer, so the scene loads with every
-        ///   mesh in place and every material override gone. Nothing anywhere reports it; the
-        ///   district just renders in the GLBs' own colours.
-        ///
-        /// The second is the more dangerous, and it is why v3 is refused despite BEING
-        /// mechanically convertible: <c>tools/migrate_level_v3_to_v4.py</c> does it in one pass,
-        /// and re-exporting from the editor is better still.
+        /// There is no shim and no migration script. A v4 document does not CONTAIN a v5
+        /// document's information: the name and the world matrix are recoverable, but which
+        /// objects were switched off, and which of the eighteen entity fields a given host meant,
+        /// are not decisions a converter can make. Re-export the scene from its editor.
         /// </summary>
         public static LevelData ReadLevel(string json)
         {
@@ -88,10 +86,9 @@ namespace Paradise.Export.Serialization
                     throw new JsonException(
                         $"Level document is schema version {version}; this build reads "
                         + $"{LevelData.MinimumSupportedVersion}..{LevelData.CurrentSchemaVersion}. "
-                        + "Re-export the scene from its editor. A v3 document can also be "
-                        + "converted in place with tools/migrate_level_v3_to_v4.py, which moves "
-                        + "each entity's Materials onto its Renderable component; v2 and older "
-                        + "have no upgrade path and must be re-exported.");
+                        + "Re-export the scene from its editor: v5 made an object nothing but its "
+                        + "authored components, and no earlier document carries enough to be "
+                        + "converted into one.");
                 }
             }
             return Deserialize<LevelData>(json);

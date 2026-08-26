@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
@@ -26,6 +27,7 @@ public class AuthoredReaderTests
     private const string PositionalId = "d0000000-0000-4000-8000-000000000004";
     private const string FrozenId = "d0000000-0000-4000-8000-000000000005";
     private const string NullyId = "d0000000-0000-4000-8000-000000000006";
+    private const string PlacedId = "d0000000-0000-4000-8000-000000000007";
     private const string HolderId = "d0000000-0000-4000-8000-000000000007";
 
     private static (object? Registry, ImmutableArray<Diagnostic> Diagnostics) Run(string source)
@@ -126,6 +128,54 @@ public class AuthoredReaderTests
             public string Label { get; set; } = "untouched";
         }
         """;
+
+    private const string PlacedSource = $$"""
+        using System.Numerics;
+        using System.Runtime.InteropServices;
+        using Paradise.Authoring;
+
+        [assembly: AuthoredRegistry]
+
+        namespace Game;
+
+        [Guid("{{PlacedId}}")]
+        [Authored]
+        public sealed record Placed
+        {
+            public Matrix4x4 World { get; set; } = Matrix4x4.Identity;
+        }
+        """;
+
+    /// <summary>
+    /// The generated matrix reader agrees with the contract's own, byte for byte.
+    ///
+    /// <b>Written by <c>ExportJsonWriter</c> and read by the GENERATOR's helper.</b> That pairing
+    /// is the whole point: <c>ReadMatrix4x4</c> is a hand-copied index transpose of
+    /// <c>Matrix4x4Converter.Read</c>, living in a second place, and nothing else fails if the two
+    /// drift. A round trip through both is the only thing that notices.
+    ///
+    /// The matrix is deliberately NON-SYMMETRIC and has a translation. A symmetric one round-trips
+    /// through a transposed reader unchanged, which is exactly the bug this is here to catch — and
+    /// the translation is the half that shows up as every object loading at the origin.
+    /// </summary>
+    [Test]
+    public async Task a_matrix_round_trips_through_the_contract_writer_and_the_generated_reader()
+    {
+        var world = Paradise.Export.Geometry.ContractMatrix.Trs(
+            new Vector3(1f, 2f, 3f),
+            Quaternion.CreateFromYawPitchRoll(0.5f, 0.25f, 0.125f),
+            new Vector3(2f, 3f, 4f));
+
+        // Serialized by the contract, so the bytes are exactly what an exporter writes.
+        var payload = Paradise.Export.Serialization.ExportJsonWriter.SerializeToString(
+            new Paradise.Export.Data.TransformComponentData { World = world });
+
+        var (registry, diagnostics) = Run(PlacedSource);
+        await Assert.That(diagnostics).IsEmpty();
+        var placed = ReadComponent(registry!, PlacedId, payload);
+
+        await Assert.That((Matrix4x4)Prop(placed, "World")!).IsEqualTo(world);
+    }
 
     /// <summary>The registration ceremony is gone: [assembly: AuthoredRegistry], no context,
     /// no [JsonSerializable] anywhere, and the payload materializes.</summary>
