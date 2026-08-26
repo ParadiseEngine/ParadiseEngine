@@ -479,6 +479,14 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public ref T GetComponent<T>(Entity entity) where T : unmanaged, IComponent
         => ref _world.GetComponent<T>(entity);
 
+    /// <inheritdoc/>
+    public bool TryGetComponent<T>(Entity entity, out T value) where T : unmanaged, IComponent
+        => _world.TryGetComponent(entity, out value);
+
+    /// <inheritdoc/>
+    public bool TrySetComponent<T>(Entity entity, T value) where T : unmanaged, IComponent
+        => _world.TrySetComponent(entity, value);
+
     /// <summary>
     /// Checks if an entity has a component.
     /// </summary>

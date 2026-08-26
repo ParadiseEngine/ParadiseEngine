@@ -33,6 +33,13 @@ public partial struct SnapExtra
     public int Value;
 }
 
+[Component]
+public partial struct SnapArbitrarySource
+{
+    public Entity Target;
+    public float Observed;
+}
+
 /// <summary>Sole writer of SnapPosition.</summary>
 public ref partial struct SnapWriterSystem : IEntitySystem
 {
@@ -111,6 +118,33 @@ public ref partial struct SnapWorldReaderSystem : IWorldSystem
     }
 }
 
+/// <summary>Snapshot-bound arbitrary-entity read: the target position comes from the read world.</summary>
+public ref partial struct SnapArbitraryReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => Source.Observed = TargetPosition[Source.Target].X;
+}
+
+/// <summary>CurrentTick arbitrary-entity read: the target position comes from the write world.</summary>
+public ref partial struct SnapArbitraryFreshReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    [CurrentTick] public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => Source.Observed = TargetPosition[Source.Target].X;
+}
+
+/// <summary>Arbitrary-entity writer: always binds to the write world.</summary>
+public ref partial struct SnapArbitraryWriterSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public EntityComponentWriter<SnapPosition> TargetPosition;
+
+    public void Execute() => TargetPosition.Set(Source.Target, new SnapPosition { X = 42f });
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -138,6 +172,16 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         return e;
     }
 
+    private (Entity Target, Entity Source) SeedArbitraryPair(float position)
+    {
+        var target = _current.Spawn();
+        _current.AddComponent(target, new SnapPosition { X = position });
+
+        var source = _current.Spawn();
+        _current.AddComponent(source, new SnapArbitrarySource { Target = target });
+        return (target, source);
+    }
+
     [Test]
     public async Task snapshot_run_reads_previous_tick_and_writes_new_tick()
     {
@@ -157,6 +201,51 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         // The current world is never mutated.
         await Assert.That(_current.GetComponent<SnapPosition>(e).X).IsEqualTo(10f);
         await Assert.That(_current.GetComponent<SnapMarker>(e).Observed).IsEqualTo(0f);
+    }
+
+    [Test]
+    public async Task arbitrary_entity_reader_binds_to_snapshot_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task current_tick_arbitrary_entity_reader_binds_to_write_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryFreshReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(11f);
+    }
+
+    [Test]
+    public async Task arbitrary_entity_writer_binds_to_write_world()
+    {
+        var (target, _) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryWriterSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapPosition>(target).X).IsEqualTo(42f);
+        await Assert.That(_current.GetComponent<SnapPosition>(target).X).IsEqualTo(10f);
     }
 
     [Test]

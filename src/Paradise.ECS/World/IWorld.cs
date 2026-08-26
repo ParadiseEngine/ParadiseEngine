@@ -6,7 +6,7 @@ namespace Paradise.ECS;
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
-public interface IWorld<TMask, TConfig>
+public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
@@ -34,23 +34,6 @@ public interface IWorld<TMask, TConfig>
     /// Gets the number of currently alive entities.
     /// </summary>
     int EntityCount { get; }
-
-    /// <summary>
-    /// Gets a reference to a component on an entity.
-    /// </summary>
-    /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity.</param>
-    /// <returns>A reference to the component.</returns>
-    /// <exception cref="InvalidOperationException">Entity doesn't have the component.</exception>
-    ref T GetComponent<T>(Entity entity) where T : unmanaged, IComponent;
-
-    /// <summary>
-    /// Checks if an entity has a specific component.
-    /// </summary>
-    /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity.</param>
-    /// <returns>True if the entity has the component.</returns>
-    bool HasComponent<T>(Entity entity) where T : unmanaged, IComponent;
 
     /// <summary>
     /// Adds a component to an entity. This is a structural change that may move the entity.
@@ -116,7 +99,7 @@ public interface IWorld<TMask, TConfig>
     /// Zero-initialized for the same reason <c>EnsureComponent</c> is: chunk memory is cleared on
     /// allocation, so an unwritten component reads as <c>default</c> rather than as whatever the
     /// last occupant of that slot left behind. Seed values afterwards through
-    /// <see cref="GetComponent{T}"/>.
+    /// <c>GetComponent&lt;T&gt;</c>.
     /// </summary>
     /// <param name="mask">The component set the entity is created with. An empty mask places the
     /// entity in the empty archetype, exactly as <see cref="Spawn"/> does.</param>
