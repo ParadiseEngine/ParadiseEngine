@@ -278,7 +278,8 @@ public class SystemGenerator : IIncrementalGenerator
     /// Resolves Invalid fields that are ref to generated Queryable Data/ChunkData types.
     /// These appear as error types because QueryableGenerator output isn't visible to SystemGenerator.
     /// Matches nested views (<c>PlayerAvatar.Entity</c>, <c>CameraFrame.Singleton</c>) via the
-    /// containing queryable, and the flat aliases (<c>PlayerAvatarEntity</c>) by suffix.
+    /// containing queryable. Suffix names (<c>PlayerAvatarEntity</c>) still resolve if a
+    /// project defines them; the generator no longer emits those aliases.
     /// </summary>
     private static SystemInfo ResolveQueryableFields(
         SystemInfo sys,
@@ -660,8 +661,8 @@ public class SystemGenerator : IIncrementalGenerator
     {
         if (systems.IsEmpty) return;
 
-        // Build queryable lookups: prefix for {Prefix}Entity aliases, FQN for nested
-        // PlayerAvatar.Entity / CameraFrame.Singleton field types.
+        // Build queryable lookups: FQN for nested PlayerAvatar.Entity / CameraFrame.Singleton
+        // field types, prefix for leftover suffix names if a project still defines them.
         var queryableLookup = new Dictionary<string, QueryableLookupInfo>(StringComparer.Ordinal);
         var queryableByFqn = new Dictionary<string, QueryableLookupInfo>(StringComparer.Ordinal);
         foreach (var q in queryableTypes)

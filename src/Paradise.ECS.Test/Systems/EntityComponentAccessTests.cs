@@ -64,7 +64,7 @@ public readonly ref partial struct ArbitraryTargetEntity;
 public ref partial struct ArbitraryQueryableEntityReaderSystem : IEntitySystem
 {
     public ref ArbitraryReaderSource Source;
-    public ArbitraryTargetEntityEntityReader Target;
+    public ArbitraryTargetEntity.EntityReader Target;
 
     public void Execute()
     {
@@ -76,7 +76,7 @@ public ref partial struct ArbitraryQueryableEntityReaderSystem : IEntitySystem
 public ref partial struct ArbitraryQueryableEntityWriterSystem : IEntitySystem
 {
     public ref ArbitraryReaderSource Source;
-    public ArbitraryTargetEntityEntityWriter Target;
+    public ArbitraryTargetEntity.EntityWriter Target;
 
     public void Execute()
     {
@@ -88,7 +88,7 @@ public ref partial struct ArbitraryQueryableEntityWriterSystem : IEntitySystem
 public ref partial struct ArbitraryQueryableEntityReaderGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public ArbitraryTargetEntityEntityReader Target;
+    public ArbitraryTargetEntity.EntityReader Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
@@ -96,7 +96,7 @@ public ref partial struct ArbitraryQueryableEntityReaderGraphSystem : IEntitySys
 public ref partial struct ArbitraryQueryableEntityWriterGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public ArbitraryTargetEntityEntityWriter Target;
+    public ArbitraryTargetEntity.EntityWriter Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }

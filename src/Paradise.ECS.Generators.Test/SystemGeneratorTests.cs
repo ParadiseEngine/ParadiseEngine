@@ -26,7 +26,7 @@ public sealed class SystemGeneratorOptionalComponentTests
 
             public ref partial struct DamageSystem : IEntitySystem
             {
-                public ref DamageableEntity Damageable;
+                public Damageable.Entity Damageable;
                 public void Execute() { }
             }
             """;
@@ -66,7 +66,7 @@ public sealed class SystemGeneratorOptionalComponentTests
 
             public ref partial struct PlayerSystem : IEntitySystem
             {
-                public ref PlayerEntity Player;
+                public Player.Entity Player;
                 public void Execute() { }
             }
             """;
@@ -103,7 +103,7 @@ public sealed class SystemGeneratorOptionalComponentTests
 
             public ref partial struct PlayerPosSystem : IEntitySystem
             {
-                public ref PlayerPosEntity PlayerPos;
+                public PlayerPos.Entity PlayerPos;
                 public void Execute() { }
             }
             """;
@@ -223,8 +223,8 @@ public sealed class SystemGeneratorConstructorTests
 }
 
 /// <summary>
-/// Nested queryable views (<c>Player.Entity</c>, <c>GameState.Singleton</c>) resolve the same
-/// way as the flat aliases (<c>PlayerEntity</c>, <c>GameStateSingleton</c>).
+/// Nested queryable views (<c>Player.Entity</c>, <c>GameState.Singleton</c>) are the system
+/// field types; suffix names are no longer generated as global usings.
 /// </summary>
 public sealed class NestedQueryableSystemFieldTests
 {

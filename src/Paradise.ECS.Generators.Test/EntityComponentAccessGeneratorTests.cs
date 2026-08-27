@@ -78,7 +78,7 @@ public sealed class EntityComponentAccessGeneratorTests
             public ref partial struct ReaderSystem : IEntitySystem
             {
                 public ref Source Source;
-                public TargetEntityReader Target;
+                public Target.EntityReader Target;
 
                 public void Execute() => _ = Target.TryGet(Source.Target, out _);
             }

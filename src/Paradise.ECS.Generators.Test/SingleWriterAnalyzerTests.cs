@@ -451,7 +451,7 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct TargetReaderSystem : Paradise.ECS.IEntitySystem
             {
-                public TargetsEntityReader Target;
+                public Targets.EntityReader Target;
                 public void Execute() { }
             }
             """, DiagnosticId);
@@ -471,13 +471,13 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct FirstTargetWriterSystem : Paradise.ECS.IEntitySystem
             {
-                public TargetsEntityWriter Target;
+                public Targets.EntityWriter Target;
                 public void Execute() { }
             }
 
             public ref partial struct SecondTargetWriterSystem : Paradise.ECS.IEntitySystem
             {
-                public TargetsEntityWriter Target;
+                public Targets.EntityWriter Target;
                 public void Execute() { }
             }
             """, DiagnosticId);
@@ -492,9 +492,8 @@ public class SingleWriterAnalyzerTests
     [Test]
     public async Task singleton_composition_fields_count_writable_with_components_as_writers()
     {
-        // Runs generators first so the {Prefix}Singleton alias resolves to the generated nested
-        // Queryable.Singleton struct — the analyzer must see it through the SAME containing-type
-        // path as existing composition fields.
+        // Runs generators first so Queryable.Singleton is a real nested type the analyzer can
+        // see through the same containing-type path as other composition fields.
         var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
             MarkedComponent + """
 
@@ -504,13 +503,13 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct FirstBonusSystem : Paradise.ECS.IEntitySystem
             {
-                public BoardSingleton Board;
+                public Board.Singleton Board;
                 public void Execute() { }
             }
 
             public ref partial struct SecondBonusSystem : Paradise.ECS.IEntitySystem
             {
-                public BoardSingleton Board;
+                public Board.Singleton Board;
                 public void Execute() { }
             }
             """, DiagnosticId);
@@ -542,7 +541,7 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct FreshReaderSystem : Paradise.ECS.IEntitySystem
             {
-                [Paradise.ECS.CurrentTick] public ObservedSingleton Observed;
+                [Paradise.ECS.CurrentTick] public Observed.Singleton Observed;
                 public void Execute() { }
             }
             """, DiagnosticId);

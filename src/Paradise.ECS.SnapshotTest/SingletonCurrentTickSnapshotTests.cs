@@ -23,7 +23,7 @@ public readonly ref partial struct SnapCtxMutable;
 /// <summary>Read-only singleton, STANDARD snapshot rule: binds to the READ world (stale-by-one).</summary>
 public ref partial struct SnapCtxStaleReaderSystem : IEntitySystem
 {
-    public SnapCtxSingleton Ctx;
+    public SnapCtx.Singleton Ctx;
     public ref SnapMarker Marker;
 
     public void Execute() => Marker.Observed = Ctx.SnapContext.Value;
@@ -32,7 +32,7 @@ public ref partial struct SnapCtxStaleReaderSystem : IEntitySystem
 /// <summary>[CurrentTick] singleton: read-only components bind to the WRITE world (fresh).</summary>
 public ref partial struct SnapCtxFreshReaderSystem : IEntitySystem
 {
-    [CurrentTick] public SnapCtxSingleton Ctx;
+    [CurrentTick] public SnapCtx.Singleton Ctx;
     public ref SnapMarker Marker;
 
     public void Execute() => Marker.Observed = Ctx.SnapContext.Value;
@@ -59,7 +59,7 @@ public ref partial struct SnapFreshInlineReaderSystem : IEntitySystem
 /// <summary>Chunk system reading the singleton (happy path for the chunk dispatch).</summary>
 public ref partial struct SnapCtxChunkReaderSystem : IChunkSystem
 {
-    public SnapCtxSingleton Ctx;
+    public SnapCtx.Singleton Ctx;
     public Span<SnapMarker> Markers;
 
     public void ExecuteChunk()
@@ -72,7 +72,7 @@ public ref partial struct SnapCtxChunkReaderSystem : IChunkSystem
 /// <summary>World system writing through a WRITABLE singleton (binds to the write world).</summary>
 public ref partial struct SnapCtxWorldWriterSystem : IWorldSystem
 {
-    public SnapCtxMutableSingleton Ctx;
+    public SnapCtxMutable.Singleton Ctx;
 
     public void Execute() => Ctx.SnapContext.Value += 1000f;
 }

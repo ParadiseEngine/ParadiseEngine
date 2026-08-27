@@ -82,7 +82,7 @@ public readonly ref partial struct SnapObserved;
 /// also writes — per-component binding, not per-field.</summary>
 public ref partial struct SnapMixedEntityReaderSystem : IEntitySystem
 {
-    public SnapObservedEntity Observed;
+    public SnapObserved.Entity Observed;
 
     public void Execute() => Observed.SnapMarker.Observed = Observed.SnapPosition.X;
 }
@@ -90,7 +90,7 @@ public ref partial struct SnapMixedEntityReaderSystem : IEntitySystem
 /// <summary>Same mixed composition through the chunk-system path.</summary>
 public ref partial struct SnapMixedChunkReaderSystem : IChunkSystem
 {
-    public SnapObservedChunk Observed;
+    public SnapObserved.Chunk Observed;
 
     public void ExecuteChunk()
     {
@@ -107,7 +107,7 @@ public ref partial struct SnapMixedChunkReaderSystem : IChunkSystem
 /// SnapMarker via writable segments — one Execute over every matching entity.</summary>
 public ref partial struct SnapWorldReaderSystem : IWorldSystem
 {
-    public SnapObservedSegments Observed;
+    public SnapObserved.Segments Observed;
 
     public void Execute()
     {
@@ -156,7 +156,7 @@ public readonly ref partial struct SnapWritableTarget;
 public ref partial struct SnapQueryableEntityReaderSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    public SnapTargetEntityReader Target;
+    public SnapTarget.EntityReader Target;
 
     public void Execute()
     {
@@ -168,7 +168,7 @@ public ref partial struct SnapQueryableEntityReaderSystem : IEntitySystem
 public ref partial struct SnapQueryableEntityFreshReaderSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    [CurrentTick] public SnapTargetEntityReader Target;
+    [CurrentTick] public SnapTarget.EntityReader Target;
 
     public void Execute()
     {
@@ -180,7 +180,7 @@ public ref partial struct SnapQueryableEntityFreshReaderSystem : IEntitySystem
 public ref partial struct SnapQueryableEntityWriterSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    public SnapWritableTargetEntityWriter Target;
+    public SnapWritableTarget.EntityWriter Target;
 
     public void Execute()
     {
@@ -216,7 +216,7 @@ public ref partial struct SnapAccessorWriterGraphSystem : IEntitySystem
 public ref partial struct SnapQueryableAccessorReaderGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public SnapTargetEntityReader Target;
+    public SnapTarget.EntityReader Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
@@ -224,7 +224,7 @@ public ref partial struct SnapQueryableAccessorReaderGraphSystem : IEntitySystem
 public ref partial struct SnapQueryableAccessorFreshReaderGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    [CurrentTick] public SnapTargetEntityReader Target;
+    [CurrentTick] public SnapTarget.EntityReader Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
@@ -232,7 +232,7 @@ public ref partial struct SnapQueryableAccessorFreshReaderGraphSystem : IEntityS
 public ref partial struct SnapQueryableAccessorWriterGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public SnapWritableTargetEntityWriter Target;
+    public SnapWritableTarget.EntityWriter Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
