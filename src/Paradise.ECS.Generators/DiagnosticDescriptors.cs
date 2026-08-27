@@ -377,14 +377,14 @@ internal static class DiagnosticDescriptors
     public static readonly DiagnosticDescriptor WorldSystemInvalidField = new(
         id: "PECS3009",
         title: "Invalid world-system field",
-        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments ({{Prefix}}Segments), queryable Singleton ({{Prefix}}Singleton), arbitrary-entity accessors, command/event handles, and Segments fields are only valid on IWorldSystem",
+        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments (TQueryable.Segments), queryable Singleton (TQueryable.Singleton), arbitrary-entity accessors, command/event handles, and Segments fields are only valid on IWorldSystem",
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "World systems access components through whole-query segment views, singletons, or arbitrary-entity accessors; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
 
     /// <summary>
-    /// PECS3010: {Prefix}Singleton field on a queryable not marked Singleton = true.
+    /// PECS3010: TQueryable.Singleton field on a queryable not marked Singleton = true.
     /// </summary>
     public static readonly DiagnosticDescriptor SingletonFieldOnNonSingletonQueryable = new(
         id: "PECS3010",
@@ -393,7 +393,7 @@ internal static class DiagnosticDescriptors
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "A {Prefix}Singleton system field requires the queryable to opt in via [Queryable(Singleton = true)], which generates the Singleton composition type and enforces exactly-one-entity resolution.");
+        description: "A TQueryable.Singleton system field requires the queryable to opt in via [Queryable(Singleton = true)], which generates the Singleton composition type and enforces exactly-one-entity resolution.");
 
     /// <summary>
     /// PECS3011: [CurrentTick] on an unsupported field kind.
@@ -401,11 +401,11 @@ internal static class DiagnosticDescriptors
     public static readonly DiagnosticDescriptor CurrentTickInvalidField = new(
         id: "PECS3011",
         title: "Invalid [CurrentTick] field",
-        messageFormat: "Field '{0}' in system '{1}' has [CurrentTick] but is not an inline 'ref readonly' component field, an arbitrary-entity reader, or a {{Prefix}}Singleton field",
+        messageFormat: "Field '{0}' in system '{1}' has [CurrentTick] but is not an inline 'ref readonly' component field, an arbitrary-entity reader, or a TQueryable.Singleton field",
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "[CurrentTick] marks a read-only field as a fresh (write-world) read under [assembly: SnapshotReadSystems]. It applies only to inline 'ref readonly T' component fields, EntityComponentReader<T> fields, and {Prefix}Singleton composition fields; writable fields already see fresh values and other injection kinds have no fresh-read binding.");
+        description: "[CurrentTick] marks a read-only field as a fresh (write-world) read under [assembly: SnapshotReadSystems]. It applies only to inline 'ref readonly T' component fields, EntityComponentReader<T> fields, and TQueryable.Singleton composition fields; writable fields already see fresh values and other injection kinds have no fresh-read binding.");
 
     /// <summary>
     /// PECS3008: [SingleWriter] component is written by multiple systems.

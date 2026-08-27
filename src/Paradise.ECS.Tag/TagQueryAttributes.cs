@@ -24,7 +24,7 @@ namespace Paradise.ECS;
 /// <b>Where it applies:</b> query iteration (<c>QueryResult</c>), a
 /// <c>[Queryable(Singleton = true)]</c>'s Resolve — whose "exactly one" then means exactly one
 /// TAGGED entity — and ENTITY-mode system claims. It does NOT apply to chunk-mode or world-mode
-/// claims (<c>{Prefix}ChunkData</c>, <c>{Prefix}Segments</c>) or to <c>ChunkQueryResult</c>: those
+/// claims (<c>TQueryable.Chunk</c>, <c>TQueryable.Segments</c>) or to <c>ChunkQueryResult</c>: those
 /// hand out whole chunks and flat spans, where entities carrying the tag and entities not carrying
 /// it sit side by side and the consumer indexes rows positionally. Skipping rows there would break
 /// that indexing rather than filter it, so a batching consumer must test rows itself.

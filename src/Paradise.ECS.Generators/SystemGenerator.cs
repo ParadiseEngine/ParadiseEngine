@@ -694,7 +694,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 if (field.Kind == FieldKind.Invalid)
                 {
-                    // A {Prefix}Singleton field on a queryable that did not opt into
+                    // A TQueryable.Singleton field on a queryable that did not opt into
                     // Singleton = true gets a targeted diagnostic instead of the generic one.
                     if (TryGetNonSingletonQueryable(field, queryableLookup, queryableByFqn, out var nonSingletonFQN))
                         context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SingletonFieldOnNonSingletonQueryable, sys.Location, field.FieldName, sys.FullyQualifiedName, nonSingletonFQN));
@@ -1864,7 +1864,7 @@ public class SystemGenerator : IIncrementalGenerator
         kind is FieldKind.CompositionSegments;
 
     /// <summary>[CurrentTick] is valid on inline `ref readonly T` component fields,
-    /// arbitrary-entity readers, and {Prefix}Singleton composition fields; everything else is
+    /// arbitrary-entity readers, and TQueryable.Singleton composition fields; everything else is
     /// PECS3011.</summary>
     private static bool IsValidCurrentTickField(SystemFieldInfo field) =>
         (field.Kind == FieldKind.InlineComponent && field.IsReadOnly) ||
