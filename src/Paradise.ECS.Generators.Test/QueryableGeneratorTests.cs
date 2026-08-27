@@ -136,7 +136,7 @@ public class QueryableGeneratorStructureTests
     }
 
     [Test]
-    public async Task Queryable_GeneratesNestedEntityReaderAndWriter()
+    public async Task Queryable_GeneratesNestedReadLookupAndWriteLookup()
     {
         const string source = """
             using Paradise.ECS;
@@ -155,10 +155,12 @@ public class QueryableGeneratorStructureTests
             .First(source => source.HintName.Contains("Queryable_TestNamespace_Target", StringComparison.Ordinal))
             .Source;
 
-        await Assert.That(generated).Contains("public readonly ref struct EntityReader<TMask, TConfig>");
-        await Assert.That(generated).Contains("public readonly ref struct EntityWriter<TMask, TConfig>");
+        await Assert.That(generated).Contains("public readonly ref struct ReadLookup<TMask, TConfig>");
+        await Assert.That(generated).Contains("public readonly ref struct WriteLookup<TMask, TConfig>");
         await Assert.That(generated).Contains("public readonly ref struct Entity");
         await Assert.That(generated).DoesNotContain("global using TargetEntity");
+        await Assert.That(generated).DoesNotContain("EntityReader");
+        await Assert.That(generated).DoesNotContain("EntityWriter");
     }
 }
 

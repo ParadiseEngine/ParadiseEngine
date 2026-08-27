@@ -156,7 +156,7 @@ public readonly ref partial struct SnapWritableTarget;
 public ref partial struct SnapQueryableEntityReaderSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    public SnapTarget.EntityReader Target;
+    public SnapTarget.ReadLookup Target;
 
     public void Execute()
     {
@@ -168,7 +168,7 @@ public ref partial struct SnapQueryableEntityReaderSystem : IEntitySystem
 public ref partial struct SnapQueryableEntityFreshReaderSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    [CurrentTick] public SnapTarget.EntityReader Target;
+    [CurrentTick] public SnapTarget.ReadLookup Target;
 
     public void Execute()
     {
@@ -180,7 +180,7 @@ public ref partial struct SnapQueryableEntityFreshReaderSystem : IEntitySystem
 public ref partial struct SnapQueryableEntityWriterSystem : IEntitySystem
 {
     public ref SnapArbitrarySource Source;
-    public SnapWritableTarget.EntityWriter Target;
+    public SnapWritableTarget.WriteLookup Target;
 
     public void Execute()
     {
@@ -216,7 +216,7 @@ public ref partial struct SnapAccessorWriterGraphSystem : IEntitySystem
 public ref partial struct SnapQueryableAccessorReaderGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public SnapTarget.EntityReader Target;
+    public SnapTarget.ReadLookup Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
@@ -224,7 +224,7 @@ public ref partial struct SnapQueryableAccessorReaderGraphSystem : IEntitySystem
 public ref partial struct SnapQueryableAccessorFreshReaderGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    [CurrentTick] public SnapTarget.EntityReader Target;
+    [CurrentTick] public SnapTarget.ReadLookup Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
@@ -232,7 +232,7 @@ public ref partial struct SnapQueryableAccessorFreshReaderGraphSystem : IEntityS
 public ref partial struct SnapQueryableAccessorWriterGraphSystem : IEntitySystem
 {
     public Entity Entity;
-    public SnapWritableTarget.EntityWriter Target;
+    public SnapWritableTarget.WriteLookup Target;
 
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }

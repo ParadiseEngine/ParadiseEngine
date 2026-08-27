@@ -357,8 +357,8 @@ public class SystemGenerator : IIncrementalGenerator
     {
         kind = viewName switch
         {
-            "EntityReader" => FieldKind.CompositionEntityReader,
-            "EntityWriter" => FieldKind.CompositionEntityWriter,
+            "ReadLookup" => FieldKind.CompositionReadLookup,
+            "WriteLookup" => FieldKind.CompositionWriteLookup,
             "Entity" => FieldKind.CompositionData,
             "Chunk" => FieldKind.CompositionChunkData,
             "Segments" => FieldKind.CompositionSegments,
@@ -377,21 +377,21 @@ public class SystemGenerator : IIncrementalGenerator
         matched = default;
         resolvedKind = FieldKind.Invalid;
 
-        if (name.EndsWith("EntityReader", StringComparison.Ordinal) && name.Length > 12)
+        if (name.EndsWith("ReadLookup", StringComparison.Ordinal) && name.Length > 10)
         {
-            var prefix = name.Substring(0, name.Length - 12);
+            var prefix = name.Substring(0, name.Length - 10);
             if (queryableLookup.TryGetValue(prefix, out matched))
             {
-                resolvedKind = FieldKind.CompositionEntityReader;
+                resolvedKind = FieldKind.CompositionReadLookup;
                 return true;
             }
         }
-        else if (name.EndsWith("EntityWriter", StringComparison.Ordinal) && name.Length > 12)
+        else if (name.EndsWith("WriteLookup", StringComparison.Ordinal) && name.Length > 11)
         {
-            var prefix = name.Substring(0, name.Length - 12);
+            var prefix = name.Substring(0, name.Length - 11);
             if (queryableLookup.TryGetValue(prefix, out matched))
             {
-                resolvedKind = FieldKind.CompositionEntityWriter;
+                resolvedKind = FieldKind.CompositionWriteLookup;
                 return true;
             }
         }
@@ -718,7 +718,7 @@ public class SystemGenerator : IIncrementalGenerator
                 // command/event handles, and singletons. Segments are world-system only.
                 // Singleton fields are valid on every system kind.
                 bool worldFieldMismatch =
-                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter or FieldKind.Invalid)) ||
+                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup or FieldKind.Invalid)) ||
                     (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
                 if (worldFieldMismatch)
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
@@ -734,7 +734,7 @@ public class SystemGenerator : IIncrementalGenerator
                 if (f.IsCurrentTick && !IsValidCurrentTickField(f)) return false;
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
-                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)) return false;
+                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)) return false;
                 if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
             }
             return true;
@@ -806,23 +806,23 @@ public class SystemGenerator : IIncrementalGenerator
                 readComponents.Add(field.ComponentFQN);
                 writeComponents.Add(field.ComponentFQN);
             }
-            else if (field.Kind is FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 foreach (var comp in field.QueryableWithComponents)
                 {
                     if (comp.QueryOnly) continue;
                     readComponents.Add(comp.ComponentFQN);
-                    if (field.Kind == FieldKind.CompositionEntityWriter && !comp.IsReadOnly)
+                    if (field.Kind == FieldKind.CompositionWriteLookup && !comp.IsReadOnly)
                         writeComponents.Add(comp.ComponentFQN);
-                    else if (field.Kind == FieldKind.CompositionEntityReader && field.IsCurrentTick)
+                    else if (field.Kind == FieldKind.CompositionReadLookup && field.IsCurrentTick)
                         freshReadComponents.Add(comp.ComponentFQN);
                 }
                 foreach (var comp in field.QueryableOptionalComponents)
                 {
                     readComponents.Add(comp.ComponentFQN);
-                    if (field.Kind == FieldKind.CompositionEntityWriter && !comp.IsReadOnly)
+                    if (field.Kind == FieldKind.CompositionWriteLookup && !comp.IsReadOnly)
                         writeComponents.Add(comp.ComponentFQN);
-                    else if (field.Kind == FieldKind.CompositionEntityReader && field.IsCurrentTick)
+                    else if (field.Kind == FieldKind.CompositionReadLookup && field.IsCurrentTick)
                         freshReadComponents.Add(comp.ComponentFQN);
                 }
             }
@@ -1089,8 +1089,8 @@ public class SystemGenerator : IIncrementalGenerator
                 case FieldKind.EntityComponentWriter:
                     sb.Append($"{GetEntityAccessorFieldType(field)} {ToCamelCase(field.FieldName)}");
                     break;
-                case FieldKind.CompositionEntityReader:
-                case FieldKind.CompositionEntityWriter:
+                case FieldKind.CompositionReadLookup:
+                case FieldKind.CompositionWriteLookup:
                     sb.Append($"{GetQueryableEntityAccessorFieldType(field, maskType, configType)} {ToCamelCase(field.FieldName)}");
                     break;
             }
@@ -1195,7 +1195,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems, maskType, configType));
             }
@@ -1327,7 +1327,7 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append("eventWriter");
             else if (field.Kind == FieldKind.EventReader)
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: false, maskType, configType));
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
@@ -1409,7 +1409,7 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append("eventWriter");
             else if (field.Kind == FieldKind.EventReader)
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: true, maskType, configType));
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
@@ -1498,7 +1498,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: true, maskType, configType));
             }
@@ -1586,7 +1586,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: false, maskType, configType));
             }
@@ -1823,7 +1823,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private static string GetQueryableEntityAccessorFieldType(SystemFieldInfo field, string maskType, string configType)
     {
-        var typeName = field.Kind == FieldKind.CompositionEntityReader ? "EntityReader" : "EntityWriter";
+        var typeName = field.Kind == FieldKind.CompositionReadLookup ? "ReadLookup" : "WriteLookup";
         return $"global::{field.ComponentFQN}.{typeName}<{maskType}, {configType}>";
     }
 
@@ -1833,12 +1833,12 @@ public class SystemGenerator : IIncrementalGenerator
         string maskType,
         string configType)
     {
-        if (field.Kind is FieldKind.CompositionEntityReader or FieldKind.CompositionEntityWriter)
+        if (field.Kind is FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
         {
-            var queryableSource = field.Kind == FieldKind.CompositionEntityReader && snapshotReadSystems && !field.IsCurrentTick
+            var queryableSource = field.Kind == FieldKind.CompositionReadLookup && snapshotReadSystems && !field.IsCurrentTick
                 ? "(readWorld ?? world)"
                 : "world";
-            var accessorName = field.Kind == FieldKind.CompositionEntityReader ? "EntityReader" : "EntityWriter";
+            var accessorName = field.Kind == FieldKind.CompositionReadLookup ? "ReadLookup" : "WriteLookup";
             return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource})";
         }
 
@@ -1852,7 +1852,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk, World }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EventWriter, EventReader, EntityHandle, EntitySpan, EntityComponentReader, EntityComponentWriter, CompositionEntityReader, CompositionEntityWriter, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EventWriter, EventReader, EntityHandle, EntitySpan, EntityComponentReader, EntityComponentWriter, CompositionReadLookup, CompositionWriteLookup, Invalid }
 
     private static bool IsEntityModeField(FieldKind kind) =>
         kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;
@@ -1869,7 +1869,7 @@ public class SystemGenerator : IIncrementalGenerator
     private static bool IsValidCurrentTickField(SystemFieldInfo field) =>
         (field.Kind == FieldKind.InlineComponent && field.IsReadOnly) ||
         field.Kind == FieldKind.EntityComponentReader ||
-        field.Kind == FieldKind.CompositionEntityReader ||
+        field.Kind == FieldKind.CompositionReadLookup ||
         field.Kind == FieldKind.CompositionSingleton;
 
     /// <summary>True when an unresolved field is a Singleton view of a KNOWN

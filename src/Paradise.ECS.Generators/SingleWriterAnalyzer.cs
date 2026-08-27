@@ -167,7 +167,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         if (HasAttribute(fieldType.GetAttributes(), queryableAttribute)) queryable = fieldType;
         else if (fieldType.ContainingType is { } outer && HasAttribute(outer.GetAttributes(), queryableAttribute)) queryable = outer;
         if (queryable is null) yield break;
-        if (fieldType.Name is "EntityReader" or "ReadData") yield break;
+        if (fieldType.Name is "ReadLookup" or "ReadData") yield break;
 
         foreach (AttributeData attribute in queryable.GetAttributes())
         {

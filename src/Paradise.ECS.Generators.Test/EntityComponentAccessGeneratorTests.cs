@@ -78,7 +78,7 @@ public sealed class EntityComponentAccessGeneratorTests
             public ref partial struct ReaderSystem : IEntitySystem
             {
                 public ref Source Source;
-                public Target.EntityReader Target;
+                public Target.ReadLookup Target;
 
                 public void Execute() => _ = Target.TryGet(Source.Target, out _);
             }
@@ -87,7 +87,7 @@ public sealed class EntityComponentAccessGeneratorTests
         var generated = GeneratorTestHelper.GetSystemGeneratedSource(source, "System_TestNamespace_ReaderSystem.g.cs");
 
         await Assert.That(generated).IsNotNull();
-        await Assert.That(generated!).Contains("global::TestNamespace.Target.EntityReader<");
-        await Assert.That(generated).Contains("new global::TestNamespace.Target.EntityReader<");
+        await Assert.That(generated!).Contains("global::TestNamespace.Target.ReadLookup<");
+        await Assert.That(generated).Contains("new global::TestNamespace.Target.ReadLookup<");
     }
 }

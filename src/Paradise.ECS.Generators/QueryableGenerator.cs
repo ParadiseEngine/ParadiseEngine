@@ -523,8 +523,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"{indent}// ===================== Arbitrary Entity Access =====================");
 
-        GenerateNestedEntityAccessor(sb, queryable, indent, "EntityReader", reader: true);
-        GenerateNestedEntityAccessor(sb, queryable, indent, "EntityWriter", reader: false);
+        GenerateNestedEntityAccessor(sb, queryable, indent, "ReadLookup", reader: true);
+        GenerateNestedEntityAccessor(sb, queryable, indent, "WriteLookup", reader: false);
     }
 
     private static void GenerateNestedEntityAccessor(
@@ -535,7 +535,7 @@ public class QueryableGenerator : IIncrementalGenerator
         bool reader)
     {
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>{(reader ? "Reads" : "Provides read/write access to")} the {queryable.TypeName} composition from an arbitrary entity handle.</summary>");
+        sb.AppendLine($"{indent}/// <summary>{(reader ? "Read-only" : "Read/write")} handle lookup into matching {queryable.TypeName} entities.</summary>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
         sb.AppendLine($"{indent}public readonly ref struct {typeName}<TMask, TConfig>");
@@ -1164,7 +1164,7 @@ public class QueryableGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Nested non-generic views with the project's default mask/config baked in:
-    /// <c>Entity</c>, <c>Chunk</c>, <c>Segments</c>, <c>EntityReader</c>, <c>EntityWriter</c>,
+    /// <c>Entity</c>, <c>Chunk</c>, <c>Segments</c>, <c>ReadLookup</c>, <c>WriteLookup</c>,
     /// and <c>Singleton</c> (when opted in). Each wraps the matching generic nested type and
     /// forwards accessors, with an implicit conversion FROM that generic type so system
     /// injection (which still constructs <c>Data&lt;TMask, TConfig&gt;</c> etc.) assigns
@@ -1318,13 +1318,13 @@ public class QueryableGenerator : IIncrementalGenerator
         StringBuilder sb, QueryableInfo queryable, string indent,
         string typeName, string maskType, string configType, bool reader)
     {
-        var viewName = reader ? "EntityReader" : "EntityWriter";
+        var viewName = reader ? "ReadLookup" : "WriteLookup";
         var inner = $"{typeName}.{viewName}<{maskType}, {configType}>";
         var dataType = reader
             ? $"{typeName}.ReadData<{maskType}, {configType}>"
             : $"{typeName}.Data<{maskType}, {configType}>";
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>Default-config {(reader ? "read" : "read/write")} accessor for an arbitrary {queryable.TypeName} entity handle.</summary>");
+        sb.AppendLine($"{indent}/// <summary>Default-config {(reader ? "read" : "read/write")} handle lookup into matching {queryable.TypeName} entities.</summary>");
         sb.AppendLine($"{indent}public readonly ref struct {viewName}");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    private readonly {inner} _inner;");

@@ -451,7 +451,7 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct TargetReaderSystem : Paradise.ECS.IEntitySystem
             {
-                public Targets.EntityReader Target;
+                public Targets.ReadLookup Target;
                 public void Execute() { }
             }
             """, DiagnosticId);
@@ -471,13 +471,13 @@ public class SingleWriterAnalyzerTests
 
             public ref partial struct FirstTargetWriterSystem : Paradise.ECS.IEntitySystem
             {
-                public Targets.EntityWriter Target;
+                public Targets.WriteLookup Target;
                 public void Execute() { }
             }
 
             public ref partial struct SecondTargetWriterSystem : Paradise.ECS.IEntitySystem
             {
-                public Targets.EntityWriter Target;
+                public Targets.WriteLookup Target;
                 public void Execute() { }
             }
             """, DiagnosticId);
