@@ -55,6 +55,52 @@ public ref partial struct ArbitraryEntityWriterGraphSystem : IEntitySystem
     public void Execute() => _ = TargetPosition.TrySet(Entity, default);
 }
 
+[Queryable(Id = 11)]
+[With<TestPosition>]
+[Optional<TestHealth>]
+[Without<TestVelocity>]
+public readonly ref partial struct ArbitraryTargetEntity;
+
+public ref partial struct ArbitraryQueryableEntityReaderSystem : IEntitySystem
+{
+    public ref ArbitraryReaderSource Source;
+    public ArbitraryTargetEntityEntityReader Target;
+
+    public void Execute()
+    {
+        if (Target.TryGet(Source.Target, out var target))
+            Source.Observed = target.TestPosition.X;
+    }
+}
+
+public ref partial struct ArbitraryQueryableEntityWriterSystem : IEntitySystem
+{
+    public ref ArbitraryReaderSource Source;
+    public ArbitraryTargetEntityEntityWriter Target;
+
+    public void Execute()
+    {
+        if (Target.TryGet(Source.Target, out var target))
+            target.TestPosition = new TestPosition { X = 42f, Y = 24f, Z = 0f };
+    }
+}
+
+public ref partial struct ArbitraryQueryableEntityReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public ArbitraryTargetEntityEntityReader Target;
+
+    public void Execute() => _ = Target.TryGet(Entity, out _);
+}
+
+public ref partial struct ArbitraryQueryableEntityWriterGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public ArbitraryTargetEntityEntityWriter Target;
+
+    public void Execute() => _ = Target.TryGet(Entity, out _);
+}
+
 public sealed class EntityComponentAccessTests : IDisposable
 {
     private readonly SharedWorld _sharedWorld;
@@ -101,6 +147,93 @@ public sealed class EntityComponentAccessTests : IDisposable
         schedule.Run(_world);
 
         await Assert.That(_world.GetComponent<ArbitraryReaderSource>(source).Observed).IsEqualTo(-1f);
+    }
+
+    [Test]
+    public async Task queryable_entity_reader_returns_matching_entity_data()
+    {
+        var target = _world.Spawn();
+        _world.AddComponent(target, new TestPosition { X = 9f, Y = 0f, Z = 0f });
+
+        var source = _world.Spawn();
+        _world.AddComponent(source, new ArbitraryReaderSource { Target = target });
+
+        using var schedule = SystemSchedule.Create()
+            .Add<ArbitraryQueryableEntityReaderSystem>()
+            .Build<SequentialWaveScheduler>();
+        schedule.Run(_world);
+
+        await Assert.That(_world.GetComponent<ArbitraryReaderSource>(source).Observed).IsEqualTo(9f);
+    }
+
+    [Test]
+    public async Task queryable_entity_reader_returns_false_for_nonmatching_or_stale_entity()
+    {
+        var nonmatching = _world.Spawn();
+        _world.AddComponent(nonmatching, new TestHealth { Current = 1, Max = 1 });
+
+        var stale = _world.Spawn();
+        _world.AddComponent(stale, new TestPosition { X = 7f, Y = 0f, Z = 0f });
+
+        var source = _world.Spawn();
+        _world.AddComponent(source, new ArbitraryReaderSource { Target = stale, Observed = -1f });
+        _world.Despawn(stale);
+
+        using var schedule = SystemSchedule.Create()
+            .Add<ArbitraryQueryableEntityReaderSystem>()
+            .Build<SequentialWaveScheduler>();
+        schedule.Run(_world);
+
+        await Assert.That(_world.GetComponent<ArbitraryReaderSource>(source).Observed).IsEqualTo(-1f);
+    }
+
+    [Test]
+    public async Task queryable_entity_writer_updates_existing_component()
+    {
+        var target = _world.Spawn();
+        _world.AddComponent(target, new TestPosition { X = 1f, Y = 2f, Z = 3f });
+
+        var source = _world.Spawn();
+        _world.AddComponent(source, new ArbitraryReaderSource { Target = target });
+
+        using var schedule = SystemSchedule.Create()
+            .Add<ArbitraryQueryableEntityWriterSystem>()
+            .Build<SequentialWaveScheduler>();
+        schedule.Run(_world);
+
+        var position = _world.GetComponent<TestPosition>(target);
+        await Assert.That(position.X).IsEqualTo(42f);
+        await Assert.That(position.Y).IsEqualTo(24f);
+    }
+
+    [Test]
+    public async Task queryable_entity_access_masks_do_not_filter_query()
+    {
+        var reader = GetMetadata(typeof(ArbitraryQueryableEntityReaderSystem).FullName!);
+        var writer = GetMetadata(typeof(ArbitraryQueryableEntityWriterSystem).FullName!);
+        int positionId = TestPosition.TypeId.Value;
+
+        await Assert.That(reader.ReadMask.Get(positionId)).IsTrue();
+        await Assert.That(reader.WriteMask.Get(positionId)).IsFalse();
+        await Assert.That(reader.QueryDescription.Value.All.Get(positionId)).IsFalse();
+
+        await Assert.That(writer.ReadMask.Get(positionId)).IsTrue();
+        await Assert.That(writer.WriteMask.Get(positionId)).IsTrue();
+        await Assert.That(writer.QueryDescription.Value.All.Get(positionId)).IsFalse();
+    }
+
+    [Test]
+    public async Task default_dag_separates_queryable_entity_reader_and_writer()
+    {
+        var reader = GetMetadata(typeof(ArbitraryQueryableEntityReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(ArbitraryQueryableEntityWriterGraphSystem).FullName!);
+
+        var waves = new DefaultDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(0);
+        await Assert.That(waves[1]).Contains(1);
     }
 
     [Test]

@@ -56,4 +56,38 @@ public sealed class EntityComponentAccessGeneratorTests
         await Assert.That(generated!).Contains("global::Paradise.ECS.EntityComponentWriter<global::TestNamespace.Position>");
         await Assert.That(generated).Contains("new global::Paradise.ECS.EntityComponentWriter<global::TestNamespace.Position>(world)");
     }
+
+    [Test]
+    public async Task queryable_entity_reader_generates_nested_accessor_binding()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component]
+            public partial struct Position { public float X; }
+
+            [Component]
+            public partial struct Source { public Entity Target; }
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Target;
+
+            public ref partial struct ReaderSystem : IEntitySystem
+            {
+                public ref Source Source;
+                public TargetEntityReader Target;
+
+                public void Execute() => _ = Target.TryGet(Source.Target, out _);
+            }
+            """;
+
+        var generated = GeneratorTestHelper.GetSystemGeneratedSource(source, "System_TestNamespace_ReaderSystem.g.cs");
+
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("global::TestNamespace.Target.EntityReader<");
+        await Assert.That(generated).Contains("new global::TestNamespace.Target.EntityReader<");
+    }
 }

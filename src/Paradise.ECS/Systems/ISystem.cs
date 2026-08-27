@@ -28,6 +28,8 @@ public interface ISystem
 ///     the queryable resolved once per dispatch against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -78,6 +80,8 @@ public interface IEntitySystem : ISystem
 ///     the queryable resolved once per dispatch against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -134,6 +138,8 @@ public interface IChunkSystem : ISystem
 ///     the queryable resolved once per run against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
 ///   <item><c>EntityCommandBuffer</c> - deferred structural changes</item>
 /// </list>
 /// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
