@@ -83,7 +83,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <param name="operation">The name of the attempted structural operation, for the error message.</param>
     [Conditional("DEBUG")]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void AssertStructuralChangesAllowed(string operation)
+    internal void AssertStructuralChangesAllowed(string operation)
     {
         if (Volatile.Read(ref _systemRunInProgress))
             ThrowStructuralChangeDuringRun(operation);

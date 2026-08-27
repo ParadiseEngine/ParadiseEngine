@@ -8,7 +8,9 @@ namespace Paradise.ECS;
 /// <para>
 /// Tags are marker types that indicate entity states or categories without storing data.
 /// Unlike components, tags are stored in a per-entity bitmask within chunks, enabling
-/// O(1) add/remove operations without archetype changes.
+/// O(1) add/remove without an archetype move. The write is still add/remove: during a
+/// schedule run, <see cref="EntityCommandBufferTagExtensions.AddTag{TTag}"/> / <c>RemoveTag</c> are the
+/// system path, the same as adding or removing a marker component.
 /// </para>
 /// <para>
 /// Tags are assigned sequential IDs (0, 1, 2...) based on alphabetical ordering of their

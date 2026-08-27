@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
@@ -78,7 +79,7 @@ public readonly record struct StaleBitStatistics(
 /// Tags are stored in a per-entity bitmask component, enabling O(1) tag operations
 /// without archetype changes.
 /// </remarks>
-public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<TMask, TConfig>
+public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<TMask, TConfig>, ICommandExtensionSink
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
     where TEntityTags : unmanaged, IComponent, IEntityTags<TTagMask>
@@ -316,38 +317,57 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <summary>
     /// Adds a tag to an entity.
     /// </summary>
-    /// <typeparam name="TTag">The tag type to add.</typeparam>
-    /// <param name="entity">The entity to add the tag to.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddTag<TTag>(Entity entity) where TTag : ITag
-    {
-        ref var tags = ref _world.GetComponent<TEntityTags>(entity);
-        // TODO: use mutable tag mask?
-        tags.Mask = tags.Mask.Set(TTag.TagId);
+        => AddTag(entity, TTag.TagId.Value);
 
-        // OR the bit into the chunk's own summary slot.
+    public void AddTag(Entity entity, int tagId)
+    {
+        _world.AssertStructuralChangesAllowed(nameof(AddTag));
+        ref var tags = ref _world.GetComponent<TEntityTags>(entity);
+        tags.Mask = tags.Mask.Set(tagId);
         ref var chunkMask = ref ChunkMaskOf(entity);
-        chunkMask = chunkMask.Or(default(TTagMask).Set(TTag.TagId));
+        chunkMask = chunkMask.Or(default(TTagMask).Set(tagId));
     }
 
-    /// <summary>
-    /// Removes a tag from an entity.
-    /// </summary>
-    /// <typeparam name="TTag">The tag type to remove.</typeparam>
-    /// <param name="entity">The entity to remove the tag from.</param>
-    /// <remarks>
-    /// The chunk tag mask is not recomputed immediately (sticky mask optimization).
-    /// This may result in false positives during tag queries, which is safe but may
-    /// cause queries to check a few extra entities. Call <see cref="RebuildChunkMasks"/>
-    /// to clean up stale bits if needed.
-    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveTag<TTag>(Entity entity) where TTag : ITag
+        => RemoveTag(entity, TTag.TagId.Value);
+
+    public void RemoveTag(Entity entity, int tagId)
     {
+        _world.AssertStructuralChangesAllowed(nameof(RemoveTag));
         ref var tags = ref _world.GetComponent<TEntityTags>(entity);
-        // TODO: use mutable tag mask?
-        tags.Mask = tags.Mask.Clear(TTag.TagId);
+        tags.Mask = tags.Mask.Clear(tagId);
         // Chunk mask not recomputed (sticky mask) - may have stale bits
+    }
+
+    /// <inheritdoc/>
+    public void PlayExtension(Type opType, Entity entity, ReadOnlySpan<byte> data)
+    {
+        if (opType == typeof(AddTagOp))
+        {
+            AddTag(entity, ReadTagId(data));
+            return;
+        }
+
+        if (opType == typeof(RemoveTagOp))
+        {
+            RemoveTag(entity, ReadTagId(data));
+            return;
+        }
+
+        throw new InvalidOperationException($"Unknown command extension '{opType}'.");
+    }
+
+    private static int ReadTagId(ReadOnlySpan<byte> data)
+    {
+        if (data.Length != sizeof(int))
+        {
+            throw new InvalidOperationException("Tag command payload must be a 4-byte tag id.");
+        }
+
+        return MemoryMarshal.Read<int>(data);
     }
 
     /// <summary>
