@@ -6,7 +6,7 @@ namespace Paradise.ECS.Generators.Test;
 public sealed class SingletonQueryableEmissionTests
 {
     [Test]
-    public async Task SingletonQueryable_EmitsSingletonStructAndAlias()
+    public async Task SingletonQueryable_EmitsNestedSingletonView()
     {
         const string source = """
             using Paradise.ECS;
@@ -26,7 +26,9 @@ public sealed class SingletonQueryableEmissionTests
 
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated!).Contains("public readonly ref struct Singleton<TMask, TConfig>");
-        await Assert.That(generated).Contains("global using GameStateSingleton = global::TestNamespace.GameState.Singleton<");
+        await Assert.That(generated).DoesNotContain("global using GameStateSingleton");
+        await Assert.That(generated).Contains("public static implicit operator Singleton(");
+        await Assert.That(generated).Contains("public readonly ref struct Entity");
         // Resolution: query the write world, assert exactly one entity, pair against the read world
         await Assert.That(generated).Contains("public static Singleton<TMask, TConfig> Resolve(");
         await Assert.That(generated).Contains("Singleton queryable 'TestNamespace.GameState' must resolve to exactly one entity");
@@ -84,7 +86,7 @@ public sealed class SingletonQueryableEmissionTests
 }
 
 /// <summary>
-/// Tests for {Prefix}Singleton field recognition and codegen in the SystemGenerator.
+/// Tests for nested Singleton field recognition and codegen in the SystemGenerator.
 /// </summary>
 public sealed class SingletonSystemFieldTests
 {
@@ -112,7 +114,7 @@ public sealed class SingletonSystemFieldTests
             public ref partial struct MoveSystem : IEntitySystem
             {
                 public ref Position Position;
-                public GameStateSingleton State;
+                public GameState.Singleton State;
                 public void Execute() { }
             }
             """, "System_TestNamespace_MoveSystem.g.cs");
@@ -133,7 +135,7 @@ public sealed class SingletonSystemFieldTests
             public ref partial struct BatchSystem : IChunkSystem
             {
                 public System.Span<Position> Positions;
-                public GameStateSingleton State;
+                public GameState.Singleton State;
                 public void ExecuteChunk() { }
             }
             """, "System_TestNamespace_BatchSystem.g.cs");
@@ -153,8 +155,8 @@ public sealed class SingletonSystemFieldTests
 
             public ref partial struct GlobalSystem : IWorldSystem
             {
-                public MoversSegments Movers;
-                public GameStateSingleton State;
+                public Movers.Segments Movers;
+                public GameState.Singleton State;
                 public void Execute() { }
             }
             """);
@@ -174,7 +176,7 @@ public sealed class SingletonSystemFieldTests
             public ref partial struct MoveSystem : IEntitySystem
             {
                 public ref Position Position;
-                public GameStateSingleton State;
+                public GameState.Singleton State;
                 public void Execute() { }
             }
             """);
@@ -208,7 +210,7 @@ public sealed class SingletonSystemFieldTests
 
             public ref partial struct BonusSystem : IEntitySystem
             {
-                public BoardSingleton Board;
+                public Board.Singleton Board;
                 public void Execute() { }
             }
             """);
@@ -239,7 +241,7 @@ public sealed class SingletonSystemFieldTests
 
             public ref partial struct MoveSystem : IEntitySystem
             {
-                public GameStateSingleton State;
+                public GameState.Singleton State;
                 public void Execute() { }
             }
             """);
@@ -274,7 +276,7 @@ public sealed class SingletonSystemFieldTests
             public ref partial struct StaleSystem : IEntitySystem
             {
                 public ref Position Position;
-                public GameStateSingleton State;
+                public GameState.Singleton State;
                 public void Execute() { }
             }
             """, "System_TestNamespace_StaleSystem.g.cs");
@@ -303,7 +305,7 @@ public sealed class SingletonSystemFieldTests
             public ref partial struct FreshSystem : IEntitySystem
             {
                 public ref Position Position;
-                [CurrentTick] public GameStateSingleton State;
+                [CurrentTick] public GameState.Singleton State;
                 public void Execute() { }
             }
             """, "System_TestNamespace_FreshSystem.g.cs");
@@ -366,7 +368,7 @@ public sealed class CurrentTickFieldTests
 
             public ref partial struct FreshReaderSystem : IEntitySystem
             {
-                [CurrentTick] public GameStateSingleton State;
+                [CurrentTick] public GameState.Singleton State;
                 public ref Marker Marker;
                 public void Execute() { }
             }
@@ -466,7 +468,7 @@ public sealed class CurrentTickFieldTests
 
             public ref partial struct BadCompositionSystem : IEntitySystem
             {
-                [CurrentTick] public ReadersEntity Query;
+                [CurrentTick] public Readers.Entity Query;
                 public void Execute() { }
             }
             """);

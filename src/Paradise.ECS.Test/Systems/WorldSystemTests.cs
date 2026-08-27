@@ -13,7 +13,7 @@ public readonly ref partial struct WsMovable;
 /// <summary>Adds velocity.X to position.X for EVERY matching entity in one Execute call.</summary>
 public ref partial struct TestWorldSumSystem : IWorldSystem
 {
-    public WsMovableSegments Movable;
+    public WsMovable.Segments Movable;
 
     public void Execute()
     {
@@ -28,7 +28,7 @@ public ref partial struct TestWorldSumSystem : IWorldSystem
 /// cross-entity dataflow per-entity/per-chunk systems cannot express.</summary>
 public ref partial struct TestWorldMaxBroadcastSystem : IWorldSystem
 {
-    public WsMovableSegments Movable;
+    public WsMovable.Segments Movable;
 
     public void Execute()
     {
@@ -48,7 +48,7 @@ public ref partial struct TestWorldMaxBroadcastSystem : IWorldSystem
 /// <summary>World system recording structural changes through the ECB.</summary>
 public ref partial struct TestWorldSpawnSystem : IWorldSystem
 {
-    public WsMovableSegments Movable;
+    public WsMovable.Segments Movable;
     public EntityCommandBuffer Commands;
 
     public void Execute()

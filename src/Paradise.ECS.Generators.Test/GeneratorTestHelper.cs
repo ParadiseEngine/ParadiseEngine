@@ -276,9 +276,8 @@ public static class GeneratorTestHelper
 
     /// <summary>
     /// Runs the Component/Tag/Queryable generators first, then the analyzer against the UPDATED
-    /// compilation — required when the analyzed source references generated types such as the
-    /// {Prefix}Singleton global-using alias (which resolves to the generated nested
-    /// Queryable.Singleton struct, exactly as in a real build).
+    /// compilation — required when the analyzed source references generated types such as
+    /// <c>Queryable.Singleton</c> (exactly as in a real build).
     /// </summary>
     public static async Task<ImmutableArray<Diagnostic>> GetAnalyzerDiagnosticsWithGeneratorsAsync<TAnalyzer>(string source, string diagnosticId)
         where TAnalyzer : DiagnosticAnalyzer, new()

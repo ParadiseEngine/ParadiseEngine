@@ -23,13 +23,13 @@ public interface ISystem
 /// <list type="bullet">
 ///   <item><c>ref T</c> where T is a [Component] — writable per-entity access</item>
 ///   <item><c>ref readonly T</c> where T is a [Component] — read-only per-entity access</item>
-///   <item><c>{Prefix}Entity</c> where {Prefix} is a [Queryable] — composition access via generated Data type</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
+///   <item><c>TQueryable.Entity</c> where TQueryable is a [Queryable] — composition access via generated Data type</item>
+///   <item><c>TQueryable.Singleton</c> where TQueryable is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per dispatch against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
-///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
-///     [Queryable] - arbitrary-entity composition access</item>
+///   <item><c>TQueryable.ReadLookup</c> / <c>TQueryable.WriteLookup</c> where TQueryable is a
+///     [Queryable] - handle lookup into matching entities</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -46,7 +46,7 @@ public interface ISystem
 ///
 /// public ref partial struct MovementSystem : IEntitySystem
 /// {
-///     public MovableEntity Movable;
+///     public Movable.Entity Movable;
 ///     public void Execute()
 ///     {
 ///         Movable.Position = new(Movable.Position.X + Movable.Velocity.X,
@@ -75,13 +75,13 @@ public interface IEntitySystem : ISystem
 /// <list type="bullet">
 ///   <item><c>Span&lt;T&gt;</c> where T is a [Component] — writable batch access</item>
 ///   <item><c>ReadOnlySpan&lt;T&gt;</c> where T is a [Component] — read-only batch access</item>
-///   <item><c>{Prefix}Chunk</c> where {Prefix} is a [Queryable] — composition access via generated ChunkData type</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
+///   <item><c>TQueryable.Chunk</c> where TQueryable is a [Queryable] — composition access via generated ChunkData type</item>
+///   <item><c>TQueryable.Singleton</c> where TQueryable is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per dispatch against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
-///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
-///     [Queryable] - arbitrary-entity composition access</item>
+///   <item><c>TQueryable.ReadLookup</c> / <c>TQueryable.WriteLookup</c> where TQueryable is a
+///     [Queryable] - handle lookup into matching entities</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -99,7 +99,7 @@ public interface IEntitySystem : ISystem
 ///
 /// public ref partial struct BatchMovementSystem : IChunkSystem
 /// {
-///     public MovableChunk Movable;
+///     public Movable.Chunk Movable;
 ///     public void ExecuteChunk()
 ///     {
 ///         var positions = Movable.PositionSpan;
@@ -131,15 +131,15 @@ public interface IChunkSystem : ISystem
 /// <para>
 /// Fields declare component access:
 /// <list type="bullet">
-///   <item><c>{Prefix}Segments</c> where {Prefix} is a [Queryable] — flat
+///   <item><c>TQueryable.Segments</c> where TQueryable is a [Queryable] — flat
 ///     <see cref="ComponentSegments{T,TMask,TConfig}"/>/<see cref="ReadOnlyComponentSegments{T,TMask,TConfig}"/>
 ///     views per component, index-correlated across the queryable's components</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
+///   <item><c>TQueryable.Singleton</c> where TQueryable is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per run against exactly one entity</item>
 ///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
 ///     arbitrary-entity component access</item>
-///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
-///     [Queryable] - arbitrary-entity composition access</item>
+///   <item><c>TQueryable.ReadLookup</c> / <c>TQueryable.WriteLookup</c> where TQueryable is a
+///     [Queryable] - handle lookup into matching entities</item>
 ///   <item><c>EntityCommandBuffer</c> - deferred structural changes</item>
 /// </list>
 /// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
@@ -182,7 +182,7 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <param name="readWorld">The immutable read world in snapshot mode
     /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c>. Consumed by
     /// snapshot-mode codegen to pair chunks OUTSIDE this system's own query — e.g. resolving the
-    /// read-world copy of a <c>{Prefix}Singleton</c> field's entity.</param>
+    /// read-world copy of a <c>TQueryable.Singleton</c> field's entity.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>

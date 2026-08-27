@@ -53,12 +53,11 @@ public ref partial struct BoundsSystem : IEntitySystem
 
 /// <summary>
 /// Updates movable entity positions using queryable composition.
-/// Demonstrates accessing components through a [Queryable] type's Data struct in an entity system.
-/// The ref field is resolved by the generator to the Movable.Data type alias.
+/// Demonstrates accessing components through a [Queryable] type's Entity view in an entity system.
 /// </summary>
 public ref partial struct QueryableMovementSystem : IEntitySystem
 {
-    public MovableEntity Movable;
+    public Movable.Entity Movable;
 
     public void Execute()
     {
@@ -119,12 +118,11 @@ public ref partial struct HealthClampSystem : IEntitySystem
 
 /// <summary>
 /// Applies gravity in batch using queryable composition.
-/// Demonstrates accessing components through a [Queryable] type's ChunkData struct in a chunk system.
-/// The ref readonly field is resolved by the generator to the Movable.ChunkData type alias.
+/// Demonstrates accessing components through a [Queryable] type's Chunk view in a chunk system.
 /// </summary>
 public ref partial struct QueryableGravityBatchSystem : IChunkSystem
 {
-    public MovableChunk Movable;
+    public Movable.Chunk Movable;
 
     public void ExecuteChunk()
     {
