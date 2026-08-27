@@ -33,6 +33,13 @@ public partial struct SnapExtra
     public int Value;
 }
 
+[Component]
+public partial struct SnapArbitrarySource
+{
+    public Entity Target;
+    public float Observed;
+}
+
 /// <summary>Sole writer of SnapPosition.</summary>
 public ref partial struct SnapWriterSystem : IEntitySystem
 {
@@ -111,6 +118,125 @@ public ref partial struct SnapWorldReaderSystem : IWorldSystem
     }
 }
 
+/// <summary>Snapshot-bound arbitrary-entity read: the target position comes from the read world.</summary>
+public ref partial struct SnapArbitraryReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => Source.Observed = TargetPosition[Source.Target].X;
+}
+
+/// <summary>CurrentTick arbitrary-entity read: the target position comes from the write world.</summary>
+public ref partial struct SnapArbitraryFreshReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    [CurrentTick] public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => Source.Observed = TargetPosition[Source.Target].X;
+}
+
+/// <summary>Arbitrary-entity writer: always binds to the write world.</summary>
+public ref partial struct SnapArbitraryWriterSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public EntityComponentWriter<SnapPosition> TargetPosition;
+
+    public void Execute() => TargetPosition.Set(Source.Target, new SnapPosition { X = 42f });
+}
+
+[Queryable]
+[With<SnapPosition>(IsReadOnly = true)]
+public readonly ref partial struct SnapTarget;
+
+[Queryable]
+[With<SnapPosition>]
+public readonly ref partial struct SnapWritableTarget;
+
+public ref partial struct SnapQueryableEntityReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public SnapTargetEntityReader Target;
+
+    public void Execute()
+    {
+        if (Target.TryGet(Source.Target, out var target))
+            Source.Observed = target.SnapPosition.X;
+    }
+}
+
+public ref partial struct SnapQueryableEntityFreshReaderSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    [CurrentTick] public SnapTargetEntityReader Target;
+
+    public void Execute()
+    {
+        if (Target.TryGet(Source.Target, out var target))
+            Source.Observed = target.SnapPosition.X;
+    }
+}
+
+public ref partial struct SnapQueryableEntityWriterSystem : IEntitySystem
+{
+    public ref SnapArbitrarySource Source;
+    public SnapWritableTargetEntityWriter Target;
+
+    public void Execute()
+    {
+        if (Target.TryGet(Source.Target, out var target))
+            target.SnapPosition = new SnapPosition { X = 42f };
+    }
+}
+
+public ref partial struct SnapAccessorReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapAccessorFreshReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    [CurrentTick] public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapAccessorWriterGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public EntityComponentWriter<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TrySet(Entity, default);
+}
+
+public ref partial struct SnapQueryableAccessorReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public SnapTargetEntityReader Target;
+
+    public void Execute() => _ = Target.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapQueryableAccessorFreshReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    [CurrentTick] public SnapTargetEntityReader Target;
+
+    public void Execute() => _ = Target.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapQueryableAccessorWriterGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public SnapWritableTargetEntityWriter Target;
+
+    public void Execute() => _ = Target.TryGet(Entity, out _);
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -138,6 +264,27 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         return e;
     }
 
+    private (Entity Target, Entity Source) SeedArbitraryPair(float position)
+    {
+        var target = _current.Spawn();
+        _current.AddComponent(target, new SnapPosition { X = position });
+
+        var source = _current.Spawn();
+        _current.AddComponent(source, new SnapArbitrarySource { Target = target });
+        return (target, source);
+    }
+
+    private static SystemMetadata<ComponentMask> GetMetadata(string typeName)
+    {
+        foreach (ref readonly var metadata in SystemRegistry<ComponentMask>.Metadata)
+        {
+            if (metadata.TypeName == typeName)
+                return metadata;
+        }
+
+        throw new InvalidOperationException($"System metadata for {typeName} was not found.");
+    }
+
     [Test]
     public async Task snapshot_run_reads_previous_tick_and_writes_new_tick()
     {
@@ -157,6 +304,177 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         // The current world is never mutated.
         await Assert.That(_current.GetComponent<SnapPosition>(e).X).IsEqualTo(10f);
         await Assert.That(_current.GetComponent<SnapMarker>(e).Observed).IsEqualTo(0f);
+    }
+
+    [Test]
+    public async Task arbitrary_entity_reader_binds_to_snapshot_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task current_tick_arbitrary_entity_reader_binds_to_write_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryFreshReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(11f);
+    }
+
+    [Test]
+    public async Task arbitrary_entity_writer_binds_to_write_world()
+    {
+        var (target, _) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapArbitraryWriterSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapPosition>(target).X).IsEqualTo(42f);
+        await Assert.That(_current.GetComponent<SnapPosition>(target).X).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task queryable_entity_reader_binds_to_snapshot_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapQueryableEntityReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task current_tick_queryable_entity_reader_binds_to_write_world()
+    {
+        var (target, source) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+        _write.GetComponent<SnapPosition>(target).X = 11f;
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapQueryableEntityFreshReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapArbitrarySource>(source).Observed).IsEqualTo(11f);
+    }
+
+    [Test]
+    public async Task queryable_entity_writer_binds_to_write_world()
+    {
+        var (target, _) = SeedArbitraryPair(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapQueryableEntityWriterSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_write, _current);
+
+        await Assert.That(_write.GetComponent<SnapPosition>(target).X).IsEqualTo(42f);
+        await Assert.That(_current.GetComponent<SnapPosition>(target).X).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task snapshot_dag_groups_arbitrary_entity_reader_and_writer()
+    {
+        var reader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(1);
+        await Assert.That(waves[0].Length).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task snapshot_dag_groups_queryable_entity_reader_and_writer()
+    {
+        var reader = GetMetadata(typeof(SnapQueryableAccessorReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapQueryableAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(1);
+        await Assert.That(waves[0].Length).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task snapshot_dag_orders_writer_before_current_tick_queryable_reader()
+    {
+        var reader = GetMetadata(typeof(SnapQueryableAccessorFreshReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapQueryableAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(1);
+        await Assert.That(waves[1]).Contains(0);
+    }
+
+    [Test]
+    public async Task snapshot_dag_orders_writer_before_current_tick_reader()
+    {
+        var reader = GetMetadata(typeof(SnapAccessorFreshReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(1);
+        await Assert.That(waves[1]).Contains(0);
+    }
+
+    [Test]
+    public async Task snapshot_dag_separates_arbitrary_entity_writers()
+    {
+        var firstWriter = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+        var secondWriter = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([firstWriter, secondWriter]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(0);
+        await Assert.That(waves[1]).Contains(1);
+    }
+
+    [Test]
+    public async Task snapshot_dag_groups_arbitrary_entity_readers()
+    {
+        var firstReader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+        var secondReader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([firstReader, secondReader]);
+
+        await Assert.That(waves.Length).IsEqualTo(1);
+        await Assert.That(waves[0].Length).IsEqualTo(2);
     }
 
     [Test]

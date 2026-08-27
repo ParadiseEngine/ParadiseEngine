@@ -134,6 +134,31 @@ public class QueryableGeneratorStructureTests
         await Assert.That(generated).Contains(": global::Paradise.ECS.IQueryData<Data<TMask, TConfig>, TMask, TConfig>");
         await Assert.That(generated).DoesNotContain("Level1Level2DeepQueryData");
     }
+
+    [Test]
+    public async Task Queryable_GeneratesEntityReaderAndWriterAliases()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component("22222222-2222-2222-2222-222222222223")]
+            public partial struct TargetComponent { public int Value; }
+
+            [Queryable]
+            [With<TargetComponent>]
+            public readonly ref partial struct Target;
+            """;
+
+        var generated = GeneratorTestHelper.GetQueryableGeneratedSources(source)
+            .First(source => source.HintName.Contains("Queryable_TestNamespace_Target", StringComparison.Ordinal))
+            .Source;
+
+        await Assert.That(generated).Contains("global using TargetEntityReader =");
+        await Assert.That(generated).Contains("public readonly ref struct EntityReader<TMask, TConfig>");
+        await Assert.That(generated).Contains("public readonly ref struct EntityWriter<TMask, TConfig>");
+    }
 }
 
 /// <summary>

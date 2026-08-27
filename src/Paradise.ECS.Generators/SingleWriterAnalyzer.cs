@@ -14,8 +14,9 @@ namespace Paradise.ECS.Generators;
 /// <c>[assembly: SingleWriter]</c> (which covers every <c>[Component]</c> in that assembly).
 /// Write access = a non-readonly <c>ref T</c> field (IEntitySystem inline mode), a
 /// <c>Span&lt;T&gt;</c> field (IChunkSystem inline mode), or a queryable composition field
-/// (Data/ChunkData/Segments — every non-read-only <c>With&lt;T&gt;</c> of the queryable counts
-/// as a write). Read access (<c>ref readonly T</c>, <c>ReadOnlySpan&lt;T&gt;</c>,
+/// (Data/ChunkData/Segments - every non-read-only <c>With&lt;T&gt;</c> of the queryable counts
+/// as a write), or an <c>EntityComponentWriter&lt;T&gt;</c> field. Read access
+/// (<c>ref readonly T</c>, <c>ReadOnlySpan&lt;T&gt;</c>, <c>EntityComponentReader&lt;T&gt;</c>,
 /// <c>IsReadOnly = true</c>) is unrestricted. Writes from plain managed code are outside the
 /// system-injection model and are not tracked.
 /// </summary>
@@ -29,6 +30,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     private const string WorldSystemFullName = "Paradise.ECS.IWorldSystem";
     private const string QueryableAttributeFullName = "Paradise.ECS.QueryableAttribute";
     private const string SpanMetadataName = "System.Span`1";
+    private const string EntityComponentWriterMetadataName = "Paradise.ECS.EntityComponentWriter`1";
     private const string EcsNamespace = "Paradise.ECS";
     private const string WithAttributeName = "WithAttribute";
     private const string OptionalAttributeName = "OptionalAttribute";
@@ -49,6 +51,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
             INamedTypeSymbol? worldSystem = startContext.Compilation.GetTypeByMetadataName(WorldSystemFullName);
             INamedTypeSymbol? queryableAttribute = startContext.Compilation.GetTypeByMetadataName(QueryableAttributeFullName);
             INamedTypeSymbol? spanType = startContext.Compilation.GetTypeByMetadataName(SpanMetadataName);
+            INamedTypeSymbol? entityComponentWriter = startContext.Compilation.GetTypeByMetadataName(EntityComponentWriterMetadataName);
             if (singleWriterAttribute is null || (entitySystem is null && chunkSystem is null))
             {
                 return; // Paradise.ECS not referenced — nothing to enforce
@@ -73,7 +76,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
                 {
                     if (field.IsStatic || field.IsImplicitlyDeclared) continue;
 
-                    INamedTypeSymbol? component = GetWrittenComponent(field, spanType);
+                    INamedTypeSymbol? component = GetWrittenComponent(field, spanType, entityComponentWriter);
                     if (component is not null)
                     {
                         if (!IsSingleWriterComponent(component, singleWriterAttribute, componentAttribute, assemblyWide)) continue;
@@ -119,7 +122,10 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
 
     /// <summary>The component this field writes, or null when the field is not a write
     /// (read-only access, non-component type, or an unrelated injection kind).</summary>
-    private static INamedTypeSymbol? GetWrittenComponent(IFieldSymbol field, INamedTypeSymbol? spanType)
+    private static INamedTypeSymbol? GetWrittenComponent(
+        IFieldSymbol field,
+        INamedTypeSymbol? spanType,
+        INamedTypeSymbol? entityComponentWriter)
     {
         if (field.RefKind == RefKind.Ref)
         {
@@ -131,7 +137,15 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
             && field.Type is INamedTypeSymbol { IsGenericType: true } named
             && SymbolEqualityComparer.Default.Equals(named.ConstructedFrom, spanType))
         {
-            return named.TypeArguments[0] as INamedTypeSymbol; // `Span<T>` — writable; ReadOnlySpan<T> is a different type
+            return named.TypeArguments[0] as INamedTypeSymbol; // `Span<T>` - writable; ReadOnlySpan<T> is a different type
+        }
+
+        if (field.RefKind == RefKind.None
+            && entityComponentWriter is not null
+            && field.Type is INamedTypeSymbol { IsGenericType: true } writer
+            && SymbolEqualityComparer.Default.Equals(writer.ConstructedFrom, entityComponentWriter))
+        {
+            return writer.TypeArguments[0] as INamedTypeSymbol;
         }
 
         return null;
@@ -141,7 +155,8 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     /// type (or its containing type, for the generated nested Data/ChunkData/Segments structs)
     /// carries [Queryable], every <c>With&lt;T&gt;</c> or <c>Optional&lt;T&gt;</c> that is not
     /// IsReadOnly/QueryOnly is a write (writable optionals surface as <c>ref</c>/<c>Span</c>
-    /// accessors just like With). Empty for non-queryable field types.</summary>
+    /// accessors just like With). Generated arbitrary-entity reader views are not writes.
+    /// Empty for non-queryable field types.</summary>
     private static System.Collections.Generic.IEnumerable<INamedTypeSymbol> GetQueryableWrittenComponents(
         IFieldSymbol field, INamedTypeSymbol? queryableAttribute)
     {
@@ -152,6 +167,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         if (HasAttribute(fieldType.GetAttributes(), queryableAttribute)) queryable = fieldType;
         else if (fieldType.ContainingType is { } outer && HasAttribute(outer.GetAttributes(), queryableAttribute)) queryable = outer;
         if (queryable is null) yield break;
+        if (fieldType.Name is "EntityReader" or "ReadData") yield break;
 
         foreach (AttributeData attribute in queryable.GetAttributes())
         {

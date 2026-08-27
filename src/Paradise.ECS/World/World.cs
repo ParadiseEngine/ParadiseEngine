@@ -336,32 +336,75 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetComponent<T>(Entity entity) where T : unmanaged, IComponent
     {
-        var (handle, offset) = GetComponentLocation<T>(entity);
+        var location = GetValidatedLocation(entity);
+        if (!TryGetComponentLocation<T>(location, out var handle, out var offset))
+            throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
+
         return ref _chunkManager.GetBytes(handle).GetRef<T>(offset);
     }
 
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetComponent<T>(Entity entity, out T value) where T : unmanaged, IComponent
+    {
+        value = default;
+        if (entity.IsPlaceholder || !IsAlive(entity) ||
+            !TryGetComponentLocation<T>(_entityManager.GetLocation(entity.Id), out var handle, out var offset))
+        {
+            return false;
+        }
+
+        value = _chunkManager.GetBytes(handle).GetRef<T>(offset);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TrySetComponent<T>(Entity entity, T value) where T : unmanaged, IComponent
+    {
+        if (entity.IsPlaceholder || !IsAlive(entity) ||
+            !TryGetComponentLocation<T>(_entityManager.GetLocation(entity.Id), out var handle, out var offset))
+        {
+            return false;
+        }
+
+        _chunkManager.GetBytes(handle).GetRef<T>(offset) = value;
+        return true;
+    }
+
     /// <summary>
-    /// Gets the chunk handle and offset for accessing a component on an entity.
+    /// Attempts to resolve an entity location to a component storage location.
     /// </summary>
     /// <typeparam name="T">The component type.</typeparam>
-    /// <param name="entity">The entity.</param>
-    /// <returns>A tuple containing the chunk handle and the byte offset of the component.</returns>
-    /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
+    /// <param name="location">The validated entity location.</param>
+    /// <param name="handle">The chunk handle containing the component.</param>
+    /// <param name="offset">The byte offset of the component.</param>
+    /// <returns>True if the archetype contains the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private (ChunkHandle Handle, int Offset) GetComponentLocation<T>(Entity entity) where T : unmanaged, IComponent
+    private bool TryGetComponentLocation<T>(EntityLocation location, out ChunkHandle handle, out int offset)
+        where T : unmanaged, IComponent
     {
-        var location = GetValidatedLocation(entity);
-        var archetype = _archetypeRegistry.GetById(location.ArchetypeId)
-            ?? throw new InvalidOperationException($"Entity {entity} has no archetype.");
+        var archetype = _archetypeRegistry.GetById(location.ArchetypeId);
+        if (archetype is null)
+        {
+            handle = default;
+            offset = 0;
+            return false;
+        }
 
         var layout = archetype.Layout;
         if (!layout.HasComponent(T.TypeId))
-            throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
+        {
+            handle = default;
+            offset = 0;
+            return false;
+        }
 
         var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(location.GlobalIndex);
         var chunkHandle = archetype.GetChunk(chunkIndex);
-        int offset = layout.GetBaseOffset(T.TypeId) + indexInChunk * T.Size;
-        return (chunkHandle, offset);
+        handle = chunkHandle;
+        offset = layout.GetBaseOffset(T.TypeId) + indexInChunk * T.Size;
+        return true;
     }
 
     /// <summary>

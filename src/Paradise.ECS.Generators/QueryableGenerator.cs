@@ -410,6 +410,8 @@ public class QueryableGenerator : IIncrementalGenerator
             var fqn = "global::" + queryable.FullyQualifiedName.Replace("+", ".");
             var prefix = queryable.HelperStructPrefix;
             sb.AppendLine($"global using {prefix}Entity = {fqn}.Data<{maskTypeFullyQualified}, {configTypeFull}>;");
+            sb.AppendLine($"global using {prefix}EntityReader = {fqn}.EntityReader<{maskTypeFullyQualified}, {configTypeFull}>;");
+            sb.AppendLine($"global using {prefix}EntityWriter = {fqn}.EntityWriter<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine($"global using {prefix}Chunk = {fqn}.ChunkData<{maskTypeFullyQualified}, {configTypeFull}>;");
             sb.AppendLine($"global using {prefix}Segments = {fqn}.Segments<{maskTypeFullyQualified}, {configTypeFull}>;");
             if (queryable.IsSingleton)
@@ -488,6 +490,12 @@ public class QueryableGenerator : IIncrementalGenerator
         // Generate nested Data<TMask, TConfig> struct implementing IQueryData
         GenerateNestedDataStruct(sb, queryable, indent + "    ", rootNamespace);
 
+        // Generate a readonly arbitrary-entity view that never exposes writable refs.
+        GenerateNestedReadDataStruct(sb, queryable, indent + "    ");
+
+        // Generate arbitrary-entity accessors for systems that need a target by handle.
+        GenerateNestedEntityAccessorStructs(sb, queryable, indent + "    ");
+
         // Generate nested ChunkData<TMask, TConfig> struct implementing IQueryChunkData
         GenerateNestedChunkDataStruct(sb, queryable, indent + "    ");
 
@@ -522,6 +530,142 @@ public class QueryableGenerator : IIncrementalGenerator
         // Generate filename
         var filename = "Queryable_" + queryable.FullyQualifiedName.Replace(".", "_").Replace("+", "_") + ".g.cs";
         context.AddSource(filename, sb.ToString());
+    }
+
+    private static void GenerateNestedEntityAccessorStructs(StringBuilder sb, QueryableInfo queryable, string indent)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"{indent}// ===================== Arbitrary Entity Access =====================");
+
+        GenerateNestedEntityAccessor(sb, queryable, indent, "EntityReader", reader: true);
+        GenerateNestedEntityAccessor(sb, queryable, indent, "EntityWriter", reader: false);
+    }
+
+    private static void GenerateNestedEntityAccessor(
+        StringBuilder sb,
+        QueryableInfo queryable,
+        string indent,
+        string typeName,
+        bool reader)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>{(reader ? "Reads" : "Provides read/write access to")} the {queryable.TypeName} composition from an arbitrary entity handle.</summary>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
+        sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
+        sb.AppendLine($"{indent}public readonly ref struct {typeName}<TMask, TConfig>");
+        sb.AppendLine($"{indent}    where TMask : unmanaged, global::Paradise.ECS.IBitSet<TMask>");
+        sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.IWorld<TMask, TConfig> _world;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world) => _world = world;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Returns whether the entity is alive and matches {queryable.TypeName}.</summary>");
+        sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => TryGet(entity, out _);");
+        sb.AppendLine();
+        var dataTypeName = reader
+            ? $"{queryable.TypeName}.ReadData<TMask, TConfig>"
+            : $"{queryable.TypeName}.Data<TMask, TConfig>";
+        sb.AppendLine($"{indent}    /// <summary>Returns a live component view when the entity matches.</summary>");
+        sb.AppendLine($"{indent}    public bool TryGet(global::Paradise.ECS.Entity entity, out {dataTypeName} data)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        data = default;");
+        sb.AppendLine($"{indent}        if (entity.IsPlaceholder || !_world.IsAlive(entity)) return false;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}        var location = _world.EntityManager.GetLocation(entity.Id);");
+        sb.AppendLine($"{indent}        if (!location.MatchesEntity(entity)) return false;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}        var archetype = _world.ArchetypeRegistry.GetById(location.ArchetypeId);");
+        sb.AppendLine($"{indent}        if (archetype is null) return false;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}        var description = global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[QueryableId];");
+        sb.AppendLine($"{indent}        if (!description.Value.Matches(archetype.Layout.ComponentMask)) return false;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}        var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(location.GlobalIndex);");
+        sb.AppendLine($"{indent}        var chunk = archetype.GetChunk(chunkIndex);");
+        sb.AppendLine($"{indent}        if (!global::Paradise.ECS.QueryHelpers.RowMatches<{queryable.TypeName}.Data<TMask, TConfig>, TMask, TConfig>(_world.ChunkManager, archetype.Layout, chunk, indexInChunk)) return false;");
+        sb.AppendLine();
+        if (reader)
+        {
+            sb.AppendLine($"{indent}        data = new {queryable.TypeName}.ReadData<TMask, TConfig>(");
+            sb.AppendLine($"{indent}            _world.ChunkManager, archetype.Layout, chunk, indexInChunk);");
+        }
+        else
+        {
+            sb.AppendLine($"{indent}        data = {queryable.TypeName}.Data<TMask, TConfig>.CreateSnapshot(");
+            sb.AppendLine($"{indent}            _world.ChunkManager, archetype.Layout, chunk,");
+            sb.AppendLine($"{indent}            _world.ChunkManager, chunk, indexInChunk);");
+        }
+        sb.AppendLine($"{indent}        return true;");
+        sb.AppendLine($"{indent}    }}");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateNestedReadDataStruct(StringBuilder sb, QueryableInfo queryable, string indent)
+    {
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Read-only iteration data for arbitrary-entity access.</summary>");
+        sb.AppendLine($"{indent}public readonly ref struct ReadData<TMask, TConfig>");
+        sb.AppendLine($"{indent}    where TMask : unmanaged, global::Paradise.ECS.IBitSet<TMask>");
+        sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
+        sb.AppendLine($"{indent}    private readonly nint _layoutData;");
+        sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _chunk;");
+        sb.AppendLine($"{indent}    private readonly int _indexInChunk;");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    internal ReadData(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig> layout,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkHandle chunk,");
+        sb.AppendLine($"{indent}        int indexInChunk)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        _chunkManager = chunkManager;");
+        sb.AppendLine($"{indent}        _layoutData = layout.DataPointer;");
+        sb.AppendLine($"{indent}        _chunk = chunk;");
+        sb.AppendLine($"{indent}        _indexInChunk = indexInChunk;");
+        sb.AppendLine($"{indent}    }}");
+
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly) continue;
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets a read-only reference to the {comp.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    public ref readonly global::{comp.ComponentFullName} {comp.PropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}        get");
+            sb.AppendLine($"{indent}        {{");
+            sb.AppendLine($"{indent}            int offset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{comp.ComponentFullName}.TypeId) + _indexInChunk * global::{comp.ComponentFullName}.Size;");
+            sb.AppendLine($"{indent}            return ref _chunkManager.GetBytes(_chunk).GetRef<global::{comp.ComponentFullName}>(offset);");
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine($"{indent}    }}");
+        }
+
+        foreach (var opt in queryable.OptionalComponents)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets whether the {opt.ComponentTypeName} component is present.</summary>");
+            sb.AppendLine($"{indent}    public bool Has{opt.PropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}        get => new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).HasComponent(global::{opt.ComponentFullName}.TypeId);");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets a read-only reference to the {opt.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the component is not present. Check Has{opt.PropertyName} first.</exception>");
+            sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
+            sb.AppendLine($"{indent}    public ref readonly global::{opt.ComponentFullName} Get{opt.PropertyName}()");
+            sb.AppendLine($"{indent}    {{");
+            sb.AppendLine($"{indent}        int baseOffset = new global::Paradise.ECS.ImmutableArchetypeLayout<TMask, TConfig>(_layoutData).GetBaseOffset(global::{opt.ComponentFullName}.TypeId);");
+            sb.AppendLine($"{indent}        if (baseOffset < 0)");
+            sb.AppendLine($"{indent}            throw new global::System.InvalidOperationException(\"Optional component {opt.ComponentTypeName} is not present. Check Has{opt.PropertyName} before calling Get{opt.PropertyName}().\");");
+            sb.AppendLine($"{indent}        int offset = baseOffset + _indexInChunk * global::{opt.ComponentFullName}.Size;");
+            sb.AppendLine($"{indent}        return ref _chunkManager.GetBytes(_chunk).GetRef<global::{opt.ComponentFullName}>(offset);");
+            sb.AppendLine($"{indent}    }}");
+        }
+
+        sb.AppendLine($"{indent}}}");
     }
 
     private static void GenerateQueryableExtensionMethods(StringBuilder sb, QueryableInfo queryable)

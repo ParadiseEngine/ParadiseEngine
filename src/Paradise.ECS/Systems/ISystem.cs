@@ -24,8 +24,12 @@ public interface ISystem
 ///   <item><c>ref T</c> where T is a [Component] — writable per-entity access</item>
 ///   <item><c>ref readonly T</c> where T is a [Component] — read-only per-entity access</item>
 ///   <item><c>{Prefix}Entity</c> where {Prefix} is a [Queryable] — composition access via generated Data type</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per dispatch against exactly one entity</item>
+///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
+///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -72,8 +76,12 @@ public interface IEntitySystem : ISystem
 ///   <item><c>Span&lt;T&gt;</c> where T is a [Component] — writable batch access</item>
 ///   <item><c>ReadOnlySpan&lt;T&gt;</c> where T is a [Component] — read-only batch access</item>
 ///   <item><c>{Prefix}Chunk</c> where {Prefix} is a [Queryable] — composition access via generated ChunkData type</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per dispatch against exactly one entity</item>
+///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
+///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -126,9 +134,13 @@ public interface IChunkSystem : ISystem
 ///   <item><c>{Prefix}Segments</c> where {Prefix} is a [Queryable] — flat
 ///     <see cref="ComponentSegments{T,TMask,TConfig}"/>/<see cref="ReadOnlyComponentSegments{T,TMask,TConfig}"/>
 ///     views per component, index-correlated across the queryable's components</item>
-///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] —
+///   <item><c>{Prefix}Singleton</c> where {Prefix} is a [Queryable(Singleton = true)] -
 ///     the queryable resolved once per run against exactly one entity</item>
-///   <item><c>EntityCommandBuffer</c> — deferred structural changes</item>
+///   <item><c>EntityComponentReader&lt;T&gt;</c> / <c>EntityComponentWriter&lt;T&gt;</c> -
+///     arbitrary-entity component access</item>
+///   <item><c>{Prefix}EntityReader</c> / <c>{Prefix}EntityWriter</c> where {Prefix} is a
+///     [Queryable] - arbitrary-entity composition access</item>
+///   <item><c>EntityCommandBuffer</c> - deferred structural changes</item>
 /// </list>
 /// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
 /// Under <c>[assembly: SnapshotReadSystems]</c>, read-only components bind to the READ world

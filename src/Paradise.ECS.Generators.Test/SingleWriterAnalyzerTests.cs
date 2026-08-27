@@ -64,6 +64,67 @@ public class SingleWriterAnalyzerTests
     }
 
     [Test]
+    public async Task a_single_entity_component_writer_is_allowed()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            public ref partial struct MoveTargetSystem : Paradise.ECS.IEntitySystem
+            {
+                public EntityComponentWriter<Position> TargetPosition;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task two_entity_component_writers_are_reported()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            public ref partial struct MoveTargetSystem : Paradise.ECS.IEntitySystem
+            {
+                public EntityComponentWriter<Position> TargetPosition;
+                public void Execute() { }
+            }
+
+            public ref partial struct BounceTargetSystem : Paradise.ECS.IEntitySystem
+            {
+                public EntityComponentWriter<Position> TargetPosition;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'Position'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'BounceTargetSystem'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'MoveTargetSystem'", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
+    public async Task entity_component_reader_does_not_count_as_writer()
+    {
+        var diagnostics = await Analyze(MarkedComponent + """
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct ObserveTargetSystem : Paradise.ECS.IEntitySystem
+            {
+                public EntityComponentReader<Position> TargetPosition;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task ref_readonly_readers_do_not_count_as_writers()
     {
         var diagnostics = await Analyze(MarkedComponent + """
@@ -370,6 +431,62 @@ public class SingleWriterAnalyzerTests
             """);
 
         await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task queryable_entity_reader_fields_do_not_count_as_writers()
+    {
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Targets;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct TargetReaderSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityReader Target;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task queryable_entity_writer_fields_count_as_writers()
+    {
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Targets;
+
+            public ref partial struct FirstTargetWriterSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityWriter Target;
+                public void Execute() { }
+            }
+
+            public ref partial struct SecondTargetWriterSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityWriter Target;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'Position'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'FirstTargetWriterSystem'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'SecondTargetWriterSystem'", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]

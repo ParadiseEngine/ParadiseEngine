@@ -33,7 +33,7 @@ public sealed class QueryableRegistryTests
         // TagQueryTests (TestTaggedPosition, TestActivePlayer, TestPositionOnly,
         // TestTaggedSingleton). This counts the queryables the assembly DECLARES, so it moves
         // whenever a test adds one — the ids themselves are pinned by the tests above.
-        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(8);
+        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(9);
     }
 
     [Test]
