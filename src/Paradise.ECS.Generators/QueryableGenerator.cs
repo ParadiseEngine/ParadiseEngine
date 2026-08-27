@@ -404,19 +404,21 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
 
-        // Emit Entity/Chunk type aliases at top of file (must precede all other elements)
+        // Emit Entity/Chunk type aliases at top of file (must precede all other elements).
+        // These alias the default-config nested views (PlayerAvatar.Entity), not the generic
+        // Data/ChunkData/… types Query<TMask, TConfig> still returns.
         if (!suppressGlobalUsings)
         {
             var fqn = "global::" + queryable.FullyQualifiedName.Replace("+", ".");
             var prefix = queryable.HelperStructPrefix;
-            sb.AppendLine($"global using {prefix}Entity = {fqn}.Data<{maskTypeFullyQualified}, {configTypeFull}>;");
-            sb.AppendLine($"global using {prefix}EntityReader = {fqn}.EntityReader<{maskTypeFullyQualified}, {configTypeFull}>;");
-            sb.AppendLine($"global using {prefix}EntityWriter = {fqn}.EntityWriter<{maskTypeFullyQualified}, {configTypeFull}>;");
-            sb.AppendLine($"global using {prefix}Chunk = {fqn}.ChunkData<{maskTypeFullyQualified}, {configTypeFull}>;");
-            sb.AppendLine($"global using {prefix}Segments = {fqn}.Segments<{maskTypeFullyQualified}, {configTypeFull}>;");
+            sb.AppendLine($"global using {prefix}Entity = {fqn}.Entity;");
+            sb.AppendLine($"global using {prefix}EntityReader = {fqn}.EntityReader;");
+            sb.AppendLine($"global using {prefix}EntityWriter = {fqn}.EntityWriter;");
+            sb.AppendLine($"global using {prefix}Chunk = {fqn}.Chunk;");
+            sb.AppendLine($"global using {prefix}Segments = {fqn}.Segments;");
             if (queryable.IsSingleton)
             {
-                sb.AppendLine($"global using {prefix}Singleton = {fqn}.Singleton<{maskTypeFullyQualified}, {configTypeFull}>;");
+                sb.AppendLine($"global using {prefix}Singleton = {fqn}.Singleton;");
             }
             sb.AppendLine();
         }
@@ -507,6 +509,11 @@ public class QueryableGenerator : IIncrementalGenerator
         {
             GenerateNestedSingletonStruct(sb, queryable, indent + "    ");
         }
+
+        // Default-config views: PlayerAvatar.Entity, CameraFrame.Singleton, … — the types
+        // system fields declare. They wrap the generic nested types with the project's
+        // mask/config baked in, so Execute can write Avatar.WalkIntent without type args.
+        GenerateDefaultConfigViews(sb, queryable, indent + "    ", maskTypeFullyQualified, configTypeFull);
 
         sb.AppendLine($"{indent}}}");
 
@@ -1175,6 +1182,260 @@ public class QueryableGenerator : IIncrementalGenerator
 
         sb.AppendLine($"{indent}}}");
     }
+
+    /// <summary>
+    /// Nested non-generic views with the project's default mask/config baked in:
+    /// <c>Entity</c>, <c>Chunk</c>, <c>Segments</c>, <c>EntityReader</c>, <c>EntityWriter</c>,
+    /// and <c>Singleton</c> (when opted in). Each wraps the matching generic nested type and
+    /// forwards accessors, with an implicit conversion FROM that generic type so system
+    /// injection (which still constructs <c>Data&lt;TMask, TConfig&gt;</c> etc.) assigns
+    /// cleanly onto a <c>PlayerAvatar.Entity</c> field.
+    /// </summary>
+    private static void GenerateDefaultConfigViews(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string maskType, string configType)
+    {
+        var typeName = queryable.TypeName;
+        GenerateDefaultDataView(sb, queryable, indent, maskType, configType);
+        GenerateDefaultChunkView(sb, queryable, indent, maskType, configType);
+        GenerateDefaultSegmentsView(sb, queryable, indent, typeName, maskType, configType);
+        GenerateDefaultAccessorView(sb, queryable, indent, typeName, maskType, configType, reader: true);
+        GenerateDefaultAccessorView(sb, queryable, indent, typeName, maskType, configType, reader: false);
+        if (queryable.IsSingleton)
+            GenerateDefaultSingletonView(sb, queryable, indent, typeName, maskType, configType);
+    }
+
+    private static void GenerateDefaultDataView(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string maskType, string configType)
+    {
+        var inner = $"Data<{maskType}, {configType}>";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Default-config entity view of {queryable.TypeName}. Same accessors as Data.");
+        sb.AppendLine($"{indent}/// Declare as a field on an <c>IEntitySystem</c>: <c>public {queryable.TypeName}.Entity Avatar;</c></summary>");
+        sb.AppendLine($"{indent}public readonly ref struct Entity");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly {inner} _data;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    internal Entity({inner} data) => _data = data;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static implicit operator Entity({inner} data) => new(data);");
+        GenerateDataPropertyForwards(sb, queryable, indent + "    ", "_data");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateDefaultChunkView(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string maskType, string configType)
+    {
+        var inner = $"ChunkData<{maskType}, {configType}>";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Default-config chunk view of {queryable.TypeName}. Same accessors as ChunkData.");
+        sb.AppendLine($"{indent}/// Declare as a field on an <c>IChunkSystem</c>: <c>public {queryable.TypeName}.Chunk Batch;</c></summary>");
+        sb.AppendLine($"{indent}public readonly ref struct Chunk");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly {inner} _data;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    internal Chunk({inner} data) => _data = data;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static implicit operator Chunk({inner} data) => new(data);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Gets the number of entities in this chunk.</summary>");
+        sb.AppendLine($"{indent}    public int EntityCount");
+        sb.AppendLine($"{indent}    {{");
+        AppendAggressiveInlining(sb, indent + "        ");
+        sb.AppendLine($"{indent}        get => _data.EntityCount;");
+        sb.AppendLine($"{indent}    }}");
+
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly) continue;
+            var spanPropertyName = comp.PropertyName + "Span";
+            var spanType = comp.IsReadOnly ? "ReadOnlySpan" : "Span";
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets a {(comp.IsReadOnly ? "read-only " : "")}span over all {comp.ComponentTypeName} components in this chunk.</summary>");
+            sb.AppendLine($"{indent}    public global::System.{spanType}<global::{comp.ComponentFullName}> {spanPropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            AppendAggressiveInlining(sb, indent + "        ");
+            sb.AppendLine($"{indent}        get => _data.{spanPropertyName};");
+            sb.AppendLine($"{indent}    }}");
+        }
+
+        foreach (var opt in queryable.OptionalComponents)
+        {
+            var spanMethodName = "Get" + opt.PropertyName + "Span";
+            var optSpanType = opt.IsReadOnly ? "ReadOnlySpan" : "Span";
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets whether this chunk's archetype has the {opt.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}    public bool Has{opt.PropertyName}");
+            sb.AppendLine($"{indent}    {{");
+            AppendAggressiveInlining(sb, indent + "        ");
+            sb.AppendLine($"{indent}        get => _data.Has{opt.PropertyName};");
+            sb.AppendLine($"{indent}    }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Gets a {(opt.IsReadOnly ? "read-only " : "")}span over all {opt.ComponentTypeName} components in this chunk.</summary>");
+            sb.AppendLine($"{indent}    /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the component is not present. Check Has{opt.PropertyName} first.</exception>");
+            AppendAggressiveInlining(sb, indent + "    ");
+            sb.AppendLine($"{indent}    public global::System.{optSpanType}<global::{opt.ComponentFullName}> {spanMethodName}()");
+            sb.AppendLine($"{indent}        => _data.{spanMethodName}();");
+        }
+
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateDefaultSegmentsView(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string typeName, string maskType, string configType)
+    {
+        var inner = $"{typeName}.Segments<{maskType}, {configType}>";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Default-config whole-query view of {queryable.TypeName}. Same accessors as Segments&lt;TMask, TConfig&gt;.");
+        sb.AppendLine($"{indent}/// Declare as a field on an <c>IWorldSystem</c>: <c>public {queryable.TypeName}.Segments Rows;</c></summary>");
+        sb.AppendLine($"{indent}public readonly ref struct Segments");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly {inner} _inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    internal Segments({inner} inner) => _inner = inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static implicit operator Segments({inner} inner) => new(inner);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Total entity count across all matching chunks.</summary>");
+        sb.AppendLine($"{indent}    public int Length");
+        sb.AppendLine($"{indent}    {{");
+        AppendAggressiveInlining(sb, indent + "        ");
+        sb.AppendLine($"{indent}        get => _inner.Length;");
+        sb.AppendLine($"{indent}    }}");
+
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly) continue;
+            sb.AppendLine();
+            if (comp.IsReadOnly)
+            {
+                sb.AppendLine($"{indent}    /// <summary>Read-only flat view over all {comp.ComponentTypeName} components (READ table).</summary>");
+                sb.AppendLine($"{indent}    public global::Paradise.ECS.ReadOnlyComponentSegments<global::{comp.ComponentFullName}, {maskType}, {configType}> {comp.PropertyName}");
+            }
+            else
+            {
+                sb.AppendLine($"{indent}    /// <summary>Writable flat view over all {comp.ComponentTypeName} components (WRITE table).</summary>");
+                sb.AppendLine($"{indent}    public global::Paradise.ECS.ComponentSegments<global::{comp.ComponentFullName}, {maskType}, {configType}> {comp.PropertyName}");
+            }
+            sb.AppendLine($"{indent}    {{");
+            AppendAggressiveInlining(sb, indent + "        ");
+            sb.AppendLine($"{indent}        get => _inner.{comp.PropertyName};");
+            sb.AppendLine($"{indent}    }}");
+        }
+
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateDefaultAccessorView(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string typeName, string maskType, string configType, bool reader)
+    {
+        var viewName = reader ? "EntityReader" : "EntityWriter";
+        var inner = $"{typeName}.{viewName}<{maskType}, {configType}>";
+        var dataType = reader
+            ? $"{typeName}.ReadData<{maskType}, {configType}>"
+            : $"{typeName}.Data<{maskType}, {configType}>";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Default-config {(reader ? "read" : "read/write")} accessor for an arbitrary {queryable.TypeName} entity handle.</summary>");
+        sb.AppendLine($"{indent}public readonly ref struct {viewName}");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly {inner} _inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world)");
+        sb.AppendLine($"{indent}        => _inner = new {inner}(world);");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    internal {viewName}({inner} inner) => _inner = inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static implicit operator {viewName}({inner} inner) => new(inner);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Returns whether the entity is alive and matches {queryable.TypeName}.</summary>");
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => _inner.Has(entity);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Returns a live component view when the entity matches.</summary>");
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public bool TryGet(global::Paradise.ECS.Entity entity, out {dataType} data)");
+        sb.AppendLine($"{indent}        => _inner.TryGet(entity, out data);");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateDefaultSingletonView(
+        StringBuilder sb, QueryableInfo queryable, string indent,
+        string typeName, string maskType, string configType)
+    {
+        var inner = $"{typeName}.Singleton<{maskType}, {configType}>";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}/// <summary>Default-config singleton view of {queryable.TypeName}. Same accessors as Singleton&lt;TMask, TConfig&gt;.");
+        sb.AppendLine($"{indent}/// Declare as a field on any system: <c>public {queryable.TypeName}.Singleton Frame;</c></summary>");
+        sb.AppendLine($"{indent}public readonly ref struct Singleton");
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{indent}    private readonly {inner} _inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    internal Singleton({inner} inner) => _inner = inner;");
+        sb.AppendLine();
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static implicit operator Singleton({inner} inner) => new(inner);");
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    /// <summary>Resolves the singleton against <paramref name=\"world\"/> by delegating to the generic Singleton type.</summary>");
+        AppendAggressiveInlining(sb, indent + "    ");
+        sb.AppendLine($"{indent}    public static Singleton Resolve(");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld)");
+        sb.AppendLine($"{indent}        => new({inner}.Resolve(world, readWorld));");
+        GenerateDataPropertyForwards(sb, queryable, indent + "    ", "_inner");
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void GenerateDataPropertyForwards(
+        StringBuilder sb, QueryableInfo queryable, string indent, string innerField)
+    {
+        foreach (var comp in queryable.WithComponentsAccess)
+        {
+            if (comp.QueryOnly) continue;
+            var refType = comp.IsReadOnly ? "ref readonly" : "ref";
+            sb.AppendLine();
+            sb.AppendLine($"{indent}/// <summary>Gets a {(comp.IsReadOnly ? "read-only " : "")}reference to the {comp.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}public {refType} global::{comp.ComponentFullName} {comp.PropertyName}");
+            sb.AppendLine($"{indent}{{");
+            AppendAggressiveInlining(sb, indent + "    ");
+            sb.AppendLine($"{indent}    get => ref {innerField}.{comp.PropertyName};");
+            sb.AppendLine($"{indent}}}");
+        }
+
+        foreach (var opt in queryable.OptionalComponents)
+        {
+            var refType = opt.IsReadOnly ? "ref readonly" : "ref";
+            sb.AppendLine();
+            sb.AppendLine($"{indent}/// <summary>Gets whether the {opt.ComponentTypeName} component is present.</summary>");
+            sb.AppendLine($"{indent}public bool Has{opt.PropertyName}");
+            sb.AppendLine($"{indent}{{");
+            AppendAggressiveInlining(sb, indent + "    ");
+            sb.AppendLine($"{indent}    get => {innerField}.Has{opt.PropertyName};");
+            sb.AppendLine($"{indent}}}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}/// <summary>Gets a {(opt.IsReadOnly ? "read-only " : "")}reference to the {opt.ComponentTypeName} component.</summary>");
+            sb.AppendLine($"{indent}/// <exception cref=\"global::System.InvalidOperationException\">Thrown when the component is not present. Check Has{opt.PropertyName} first.</exception>");
+            AppendAggressiveInlining(sb, indent);
+            sb.AppendLine($"{indent}public {refType} global::{opt.ComponentFullName} Get{opt.PropertyName}()");
+            sb.AppendLine($"{indent}    => ref {innerField}.Get{opt.PropertyName}();");
+        }
+    }
+
+    private static void AppendAggressiveInlining(StringBuilder sb, string indent)
+        => sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
 
     private static void GenerateQueryableRegistry(
         SourceProductionContext context,

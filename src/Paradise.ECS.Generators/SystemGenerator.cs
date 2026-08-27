@@ -128,7 +128,13 @@ public class SystemGenerator : IIncrementalGenerator
                 // Store error type info for potential queryable resolution later
                 bool fieldIsRef = field.RefKind != RefKind.None;
                 bool fieldIsRefReadOnly = fieldIsRef && IsRefReadOnlySyntax(field);
-                string? errorTypeName = field.Type is IErrorTypeSymbol ? field.Type.Name : null;
+                string? errorTypeName = null;
+                string? errorContainingTypeFqn = null;
+                if (field.Type is IErrorTypeSymbol errorType)
+                {
+                    errorTypeName = errorType.Name;
+                    errorContainingTypeFqn = TryGetErrorContainingTypeFqn(errorType);
+                }
 
                 hasInvalidFields = true;
                 fields.Add(new SystemFieldInfo(
@@ -137,6 +143,7 @@ public class SystemGenerator : IIncrementalGenerator
                     null, ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
                     isRefField: fieldIsRef, errorTypeName: errorTypeName,
+                    errorContainingTypeFqn: errorContainingTypeFqn,
                     isCurrentTick: HasCurrentTickAttribute(field)));
             }
             else
@@ -270,9 +277,13 @@ public class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// Resolves Invalid fields that are ref to generated Queryable Data/ChunkData types.
     /// These appear as error types because QueryableGenerator output isn't visible to SystemGenerator.
-    /// Matches by naming convention: {QueryablePrefix}Data → CompositionData, {QueryablePrefix}Chunk → CompositionChunkData.
+    /// Matches nested views (<c>PlayerAvatar.Entity</c>, <c>CameraFrame.Singleton</c>) via the
+    /// containing queryable, and the flat aliases (<c>PlayerAvatarEntity</c>) by suffix.
     /// </summary>
-    private static SystemInfo ResolveQueryableFields(SystemInfo sys, Dictionary<string, QueryableLookupInfo> queryableLookup)
+    private static SystemInfo ResolveQueryableFields(
+        SystemInfo sys,
+        Dictionary<string, QueryableLookupInfo> queryableLookup,
+        Dictionary<string, QueryableLookupInfo> queryableByFqn)
     {
         bool anyResolved = false;
         var resolvedFields = new List<SystemFieldInfo>();
@@ -285,80 +296,16 @@ public class SystemGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var name = field.ErrorTypeName;
-            QueryableLookupInfo? matched = null;
-            FieldKind resolvedKind = FieldKind.Invalid;
-
-            // Try {prefix}Entity → CompositionData (entity system)
-            if (name.EndsWith("Entity", StringComparison.Ordinal) && name.Length > 6)
-            {
-                var prefix = name.Substring(0, name.Length - 6);
-                if (queryableLookup.TryGetValue(prefix, out var info))
-                {
-                    matched = info;
-                    resolvedKind = FieldKind.CompositionData;
-                }
-            }
-            else if (name.EndsWith("EntityReader", StringComparison.Ordinal) && name.Length > 12)
-            {
-                var prefix = name.Substring(0, name.Length - 12);
-                if (queryableLookup.TryGetValue(prefix, out var info))
-                {
-                    matched = info;
-                    resolvedKind = FieldKind.CompositionEntityReader;
-                }
-            }
-            else if (name.EndsWith("EntityWriter", StringComparison.Ordinal) && name.Length > 12)
-            {
-                var prefix = name.Substring(0, name.Length - 12);
-                if (queryableLookup.TryGetValue(prefix, out var info))
-                {
-                    matched = info;
-                    resolvedKind = FieldKind.CompositionEntityWriter;
-                }
-            }
-            // Try {prefix}Segments → CompositionSegments (world system)
-            else if (name.EndsWith("Segments", StringComparison.Ordinal) && name.Length > 8)
-            {
-                var prefix = name.Substring(0, name.Length - 8);
-                if (queryableLookup.TryGetValue(prefix, out var segInfo))
-                {
-                    matched = segInfo;
-                    resolvedKind = FieldKind.CompositionSegments;
-                }
-            }
-            // Try {prefix}Singleton → CompositionSingleton (any system kind; queryable must opt
-            // in via [Queryable(Singleton = true)] — otherwise left Invalid for PECS3010).
-            else if (name.EndsWith("Singleton", StringComparison.Ordinal) && name.Length > 9)
-            {
-                var prefix = name.Substring(0, name.Length - 9);
-                if (queryableLookup.TryGetValue(prefix, out var singletonInfo) && singletonInfo.IsSingleton)
-                {
-                    matched = singletonInfo;
-                    resolvedKind = FieldKind.CompositionSingleton;
-                }
-            }
-            // Try {prefix}Chunk → CompositionChunkData (chunk system)
-            else if (name.EndsWith("Chunk", StringComparison.Ordinal) && name.Length > 5)
-            {
-                var prefix = name.Substring(0, name.Length - 5);
-                if (queryableLookup.TryGetValue(prefix, out var info))
-                {
-                    matched = info;
-                    resolvedKind = FieldKind.CompositionChunkData;
-                }
-            }
-
-            if (matched != null)
+            if (TryResolveQueryableField(field, queryableLookup, queryableByFqn, out var matched, out var resolvedKind))
             {
                 anyResolved = true;
                 resolvedFields.Add(new SystemFieldInfo(
                     field.FieldName, resolvedKind, field.IsReadOnly,
-                    field.TypeFQN, matched.Value.FQN,
-                    matched.Value.WithComponents,
-                    matched.Value.WithoutComponents,
-                    matched.Value.WithAnyComponents,
-                    queryableOptionalComponents: matched.Value.OptionalComponents,
+                    field.TypeFQN, matched.FQN,
+                    matched.WithComponents,
+                    matched.WithoutComponents,
+                    matched.WithAnyComponents,
+                    queryableOptionalComponents: matched.OptionalComponents,
                     isRefField: true,
                     isCurrentTick: field.IsCurrentTick));
             }
@@ -379,6 +326,126 @@ public class SystemGenerator : IIncrementalGenerator
             sys.AfterSystems, sys.BeforeSystems,
             sys.WithoutComponents, sys.WithAnyComponents,
             hasInvalidFields);
+    }
+
+    private static bool TryResolveQueryableField(
+        SystemFieldInfo field,
+        Dictionary<string, QueryableLookupInfo> queryableLookup,
+        Dictionary<string, QueryableLookupInfo> queryableByFqn,
+        out QueryableLookupInfo matched,
+        out FieldKind resolvedKind)
+    {
+        matched = default;
+        resolvedKind = FieldKind.Invalid;
+        var name = field.ErrorTypeName;
+        if (name is null) return false;
+
+        // Nested view: PlayerAvatar.Entity, CameraFrame.Singleton, ItemInstance.Segments, …
+        if (field.ErrorContainingTypeFqn is not null
+            && queryableByFqn.TryGetValue(field.ErrorContainingTypeFqn, out var nested)
+            && TryGetNestedViewKind(name, nested.IsSingleton, out resolvedKind))
+        {
+            matched = nested;
+            return true;
+        }
+
+        return TryGetAliasedViewKind(name, queryableLookup, out matched, out resolvedKind);
+    }
+
+    private static bool TryGetNestedViewKind(string viewName, bool isSingletonQueryable, out FieldKind kind)
+    {
+        kind = viewName switch
+        {
+            "EntityReader" => FieldKind.CompositionEntityReader,
+            "EntityWriter" => FieldKind.CompositionEntityWriter,
+            "Entity" => FieldKind.CompositionData,
+            "Chunk" => FieldKind.CompositionChunkData,
+            "Segments" => FieldKind.CompositionSegments,
+            "Singleton" when isSingletonQueryable => FieldKind.CompositionSingleton,
+            _ => FieldKind.Invalid
+        };
+        return kind != FieldKind.Invalid;
+    }
+
+    private static bool TryGetAliasedViewKind(
+        string name,
+        Dictionary<string, QueryableLookupInfo> queryableLookup,
+        out QueryableLookupInfo matched,
+        out FieldKind resolvedKind)
+    {
+        matched = default;
+        resolvedKind = FieldKind.Invalid;
+
+        if (name.EndsWith("EntityReader", StringComparison.Ordinal) && name.Length > 12)
+        {
+            var prefix = name.Substring(0, name.Length - 12);
+            if (queryableLookup.TryGetValue(prefix, out matched))
+            {
+                resolvedKind = FieldKind.CompositionEntityReader;
+                return true;
+            }
+        }
+        else if (name.EndsWith("EntityWriter", StringComparison.Ordinal) && name.Length > 12)
+        {
+            var prefix = name.Substring(0, name.Length - 12);
+            if (queryableLookup.TryGetValue(prefix, out matched))
+            {
+                resolvedKind = FieldKind.CompositionEntityWriter;
+                return true;
+            }
+        }
+        else if (name.EndsWith("Entity", StringComparison.Ordinal) && name.Length > 6)
+        {
+            var prefix = name.Substring(0, name.Length - 6);
+            if (queryableLookup.TryGetValue(prefix, out matched))
+            {
+                resolvedKind = FieldKind.CompositionData;
+                return true;
+            }
+        }
+        else if (name.EndsWith("Segments", StringComparison.Ordinal) && name.Length > 8)
+        {
+            var prefix = name.Substring(0, name.Length - 8);
+            if (queryableLookup.TryGetValue(prefix, out matched))
+            {
+                resolvedKind = FieldKind.CompositionSegments;
+                return true;
+            }
+        }
+        else if (name.EndsWith("Singleton", StringComparison.Ordinal) && name.Length > 9)
+        {
+            var prefix = name.Substring(0, name.Length - 9);
+            if (queryableLookup.TryGetValue(prefix, out var singletonInfo) && singletonInfo.IsSingleton)
+            {
+                matched = singletonInfo;
+                resolvedKind = FieldKind.CompositionSingleton;
+                return true;
+            }
+        }
+        else if (name.EndsWith("Chunk", StringComparison.Ordinal) && name.Length > 5)
+        {
+            var prefix = name.Substring(0, name.Length - 5);
+            if (queryableLookup.TryGetValue(prefix, out matched))
+            {
+                resolvedKind = FieldKind.CompositionChunkData;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? TryGetErrorContainingTypeFqn(IErrorTypeSymbol errorType)
+    {
+        if (errorType.ContainingType is INamedTypeSymbol containing
+            && containing.TypeKind != Microsoft.CodeAnalysis.TypeKind.Error)
+            return GeneratorUtilities.GetFullyQualifiedName(containing);
+
+        var display = errorType.ToDisplayString();
+        if (display.StartsWith("global::", StringComparison.Ordinal))
+            display = display.Substring("global::".Length);
+        var lastDot = display.LastIndexOf('.');
+        return lastDot > 0 ? display.Substring(0, lastDot) : null;
     }
 
     // ===================== Field Analysis =====================
@@ -593,14 +660,19 @@ public class SystemGenerator : IIncrementalGenerator
     {
         if (systems.IsEmpty) return;
 
-        // Build queryable prefix lookup
-        var queryableLookup = new Dictionary<string, QueryableLookupInfo>();
+        // Build queryable lookups: prefix for {Prefix}Entity aliases, FQN for nested
+        // PlayerAvatar.Entity / CameraFrame.Singleton field types.
+        var queryableLookup = new Dictionary<string, QueryableLookupInfo>(StringComparer.Ordinal);
+        var queryableByFqn = new Dictionary<string, QueryableLookupInfo>(StringComparer.Ordinal);
         foreach (var q in queryableTypes)
+        {
             queryableLookup[q.Prefix] = q;
+            queryableByFqn[q.FQN] = q;
+        }
 
         // Resolve error-type fields that match queryable patterns
         var sorted = systems
-            .Select(s => ResolveQueryableFields(s, queryableLookup))
+            .Select(s => ResolveQueryableFields(s, queryableLookup, queryableByFqn))
             .OrderBy(s => s.FullyQualifiedName, StringComparer.Ordinal)
             .ToList();
 
@@ -623,7 +695,7 @@ public class SystemGenerator : IIncrementalGenerator
                 {
                     // A {Prefix}Singleton field on a queryable that did not opt into
                     // Singleton = true gets a targeted diagnostic instead of the generic one.
-                    if (TryGetNonSingletonQueryable(field, queryableLookup, out var nonSingletonFQN))
+                    if (TryGetNonSingletonQueryable(field, queryableLookup, queryableByFqn, out var nonSingletonFQN))
                         context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SingletonFieldOnNonSingletonQueryable, sys.Location, field.FieldName, sys.FullyQualifiedName, nonSingletonFQN));
                     else
                         context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.SystemInvalidFieldType, sys.Location, field.FieldName, sys.FullyQualifiedName, field.TypeFQN));
@@ -1799,16 +1871,28 @@ public class SystemGenerator : IIncrementalGenerator
         field.Kind == FieldKind.CompositionEntityReader ||
         field.Kind == FieldKind.CompositionSingleton;
 
-    /// <summary>True when an unresolved field is a {Prefix}Singleton reference to a KNOWN
+    /// <summary>True when an unresolved field is a Singleton view of a KNOWN
     /// queryable that is not marked [Queryable(Singleton = true)].</summary>
     private static bool TryGetNonSingletonQueryable(
         SystemFieldInfo field,
         Dictionary<string, QueryableLookupInfo> queryableLookup,
+        Dictionary<string, QueryableLookupInfo> queryableByFqn,
         out string queryableFQN)
     {
         queryableFQN = "";
         var name = field.ErrorTypeName;
-        if (name == null || !name.EndsWith("Singleton", StringComparison.Ordinal) || name.Length <= 9)
+        if (name is null) return false;
+
+        if (name == "Singleton"
+            && field.ErrorContainingTypeFqn is not null
+            && queryableByFqn.TryGetValue(field.ErrorContainingTypeFqn, out var nested)
+            && !nested.IsSingleton)
+        {
+            queryableFQN = nested.FQN;
+            return true;
+        }
+
+        if (!name.EndsWith("Singleton", StringComparison.Ordinal) || name.Length <= 9)
             return false;
         var prefix = name.Substring(0, name.Length - 9);
         if (!queryableLookup.TryGetValue(prefix, out var info) || info.IsSingleton)
@@ -1871,6 +1955,7 @@ public class SystemGenerator : IIncrementalGenerator
         public ImmutableArray<QueryableComponentAccess> QueryableOptionalComponents { get; }
         public bool IsRefField { get; }
         public string? ErrorTypeName { get; }
+        public string? ErrorContainingTypeFqn { get; }
         public bool IsCurrentTick { get; }
 
         public SystemFieldInfo(
@@ -1882,6 +1967,7 @@ public class SystemGenerator : IIncrementalGenerator
             ImmutableArray<QueryableComponentAccess> queryableOptionalComponents = default,
             bool isRefField = false,
             string? errorTypeName = null,
+            string? errorContainingTypeFqn = null,
             bool isCurrentTick = false)
         {
             FieldName = fieldName;
@@ -1895,6 +1981,7 @@ public class SystemGenerator : IIncrementalGenerator
             QueryableOptionalComponents = queryableOptionalComponents.IsDefault ? ImmutableArray<QueryableComponentAccess>.Empty : queryableOptionalComponents;
             IsRefField = isRefField;
             ErrorTypeName = errorTypeName;
+            ErrorContainingTypeFqn = errorContainingTypeFqn;
             IsCurrentTick = isCurrentTick;
         }
     }

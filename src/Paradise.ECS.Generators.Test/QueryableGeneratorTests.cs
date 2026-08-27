@@ -158,6 +158,8 @@ public class QueryableGeneratorStructureTests
         await Assert.That(generated).Contains("global using TargetEntityReader =");
         await Assert.That(generated).Contains("public readonly ref struct EntityReader<TMask, TConfig>");
         await Assert.That(generated).Contains("public readonly ref struct EntityWriter<TMask, TConfig>");
+        await Assert.That(generated).Contains("public readonly ref struct Entity");
+        await Assert.That(generated).Contains("global using TargetEntity = global::TestNamespace.Target.Entity;");
     }
 }
 

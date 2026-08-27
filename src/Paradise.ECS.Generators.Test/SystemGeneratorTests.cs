@@ -221,3 +221,117 @@ public sealed class SystemGeneratorConstructorTests
         await Assert.That(generated).DoesNotContain("_velocities");
     }
 }
+
+/// <summary>
+/// Nested queryable views (<c>Player.Entity</c>, <c>GameState.Singleton</c>) resolve the same
+/// way as the flat aliases (<c>PlayerEntity</c>, <c>GameStateSingleton</c>).
+/// </summary>
+public sealed class NestedQueryableSystemFieldTests
+{
+    [Test]
+    public async Task NestedEntityField_IncludedInAccessMasks()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component]
+            public partial struct Health { public float Current; }
+
+            [Component]
+            public partial struct Position { public float X; public float Y; }
+
+            [Queryable]
+            [With<Health>]
+            [With<Position>(IsReadOnly = true)]
+            public readonly ref partial struct Player;
+
+            public ref partial struct PlayerSystem : IEntitySystem
+            {
+                public Player.Entity Avatar;
+                public void Execute() { }
+            }
+            """;
+
+        var result = GeneratorTestHelper.RunSystemGenerator(source);
+        var registrySource = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "SystemRegistry.g.cs").Source;
+
+        await Assert.That(registrySource).IsNotNull();
+        await Assert.That(registrySource!).Contains("readMask0 = TMask.Empty.Set(global::TestNamespace.Health.TypeId).Set(global::TestNamespace.Position.TypeId)");
+        await Assert.That(registrySource).Contains("writeMask0 = TMask.Empty.Set(global::TestNamespace.Health.TypeId)");
+    }
+
+    [Test]
+    public async Task NestedSingletonField_IncludedInAccessMasks()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component]
+            public partial struct SimContext { public float DeltaTime; }
+
+            [Component]
+            public partial struct Position { public float X; }
+
+            [Queryable(Singleton = true)]
+            [With<SimContext>(IsReadOnly = true)]
+            public readonly ref partial struct GameState;
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Mover;
+
+            public ref partial struct MoveSystem : IEntitySystem
+            {
+                public Mover.Entity Body;
+                public GameState.Singleton State;
+                public void Execute() { }
+            }
+            """;
+
+        var result = GeneratorTestHelper.RunSystemGenerator(source);
+        var registrySource = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "SystemRegistry.g.cs").Source;
+
+        await Assert.That(registrySource).IsNotNull();
+        await Assert.That(registrySource!).Contains("SimContext.TypeId");
+        await Assert.That(registrySource).Contains("Position.TypeId");
+    }
+
+    [Test]
+    public async Task NestedSegmentsField_IncludedInAccessMasks()
+    {
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component]
+            public partial struct Position { public float X; }
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Mover;
+
+            public ref partial struct MoveWorldSystem : IWorldSystem
+            {
+                public Mover.Segments Bodies;
+                public void Execute() { }
+            }
+            """;
+
+        var result = GeneratorTestHelper.RunSystemGenerator(source);
+        var registrySource = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "SystemRegistry.g.cs").Source;
+
+        await Assert.That(registrySource).IsNotNull();
+        await Assert.That(registrySource!).Contains("writeMask0 = TMask.Empty.Set(global::TestNamespace.Position.TypeId)");
+    }
+}

@@ -38,10 +38,10 @@ public sealed class QueryableAttribute : Attribute
 
     /// <summary>
     /// Gets or sets whether this queryable is a singleton: resolved once per schedule run against
-    /// EXACTLY one matching entity. When true, the generator additionally emits a
-    /// <c>{Prefix}Singleton</c> composition type that systems of any kind (entity, chunk, world)
-    /// may declare as a field. Resolution runs the queryable's query against the world before
-    /// iteration; matching 0 or more than 1 entity throws
+    /// EXACTLY one matching entity. When true, the generator additionally emits a nested
+    /// <c>Singleton</c> composition type that systems of any kind (entity, chunk, world)
+    /// may declare as a field (<c>public CameraFrame.Singleton Frame;</c>). Resolution runs the
+    /// queryable's query against the world before iteration; matching 0 or more than 1 entity throws
     /// <see cref="InvalidOperationException"/> naming the queryable and the actual count.
     /// Default: false.
     /// </summary>

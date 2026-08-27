@@ -19,7 +19,7 @@ namespace Paradise.ECS;
 /// (same archetype, same chunk index; identical entity slots per World.CopyFrom).</param>
 /// <param name="readWorld">The immutable read world in snapshot mode, or null under classic
 /// <c>Run()</c>. Consumed by snapshot-mode codegen to pair chunks outside the system's own query
-/// (e.g. resolving the read-world copy of a <c>{Prefix}Singleton</c> field's entity).</param>
+/// (e.g. resolving the read-world copy of a <c>TQueryable.Singleton</c> field's entity).</param>
 /// <param name="layout">The archetype layout describing component offsets (layouts live in
 /// shared metadata, so one layout is valid for both worlds' chunks).</param>
 /// <param name="entityCount">The number of entities in the chunk.</param>

@@ -26,7 +26,9 @@ public sealed class SingletonQueryableEmissionTests
 
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated!).Contains("public readonly ref struct Singleton<TMask, TConfig>");
-        await Assert.That(generated).Contains("global using GameStateSingleton = global::TestNamespace.GameState.Singleton<");
+        await Assert.That(generated).Contains("global using GameStateSingleton = global::TestNamespace.GameState.Singleton;");
+        await Assert.That(generated).Contains("public static implicit operator Singleton(");
+        await Assert.That(generated).Contains("public readonly ref struct Entity");
         // Resolution: query the write world, assert exactly one entity, pair against the read world
         await Assert.That(generated).Contains("public static Singleton<TMask, TConfig> Resolve(");
         await Assert.That(generated).Contains("Singleton queryable 'TestNamespace.GameState' must resolve to exactly one entity");
