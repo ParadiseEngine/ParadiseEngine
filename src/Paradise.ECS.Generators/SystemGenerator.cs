@@ -752,8 +752,6 @@ public class SystemGenerator : IIncrementalGenerator
                     else if (field.Kind == FieldKind.CompositionEntityReader && field.IsCurrentTick)
                         freshReadComponents.Add(comp.ComponentFQN);
                 }
-                foreach (var c in field.QueryableWithoutComponents) withoutComponents.Add(c);
-                foreach (var c in field.QueryableWithAnyComponents) withAnyComponents.Add(c);
             }
 
             if (field.Kind is FieldKind.InlineComponent or FieldKind.InlineSpan)

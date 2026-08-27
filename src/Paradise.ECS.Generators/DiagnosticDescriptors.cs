@@ -377,11 +377,11 @@ internal static class DiagnosticDescriptors
     public static readonly DiagnosticDescriptor WorldSystemInvalidField = new(
         id: "PECS3009",
         title: "Invalid world-system field",
-        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments ({{Prefix}}Segments), queryable Singleton ({{Prefix}}Singleton), or EntityCommandBuffer, and Segments fields are only valid on IWorldSystem",
+        messageFormat: "Field '{0}' in system '{1}' is invalid: IWorldSystem fields must be queryable Segments ({{Prefix}}Segments), queryable Singleton ({{Prefix}}Singleton), arbitrary-entity accessors, command/event handles, and Segments fields are only valid on IWorldSystem",
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "World systems access components exclusively through whole-query segment views; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
+        description: "World systems access components through whole-query segment views, singletons, or arbitrary-entity accessors; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
 
     /// <summary>
     /// PECS3010: {Prefix}Singleton field on a queryable not marked Singleton = true.

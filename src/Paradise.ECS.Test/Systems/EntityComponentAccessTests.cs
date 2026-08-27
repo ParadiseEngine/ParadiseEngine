@@ -167,6 +167,24 @@ public sealed class EntityComponentAccessTests : IDisposable
     }
 
     [Test]
+    public async Task queryable_entity_reader_does_not_inherit_target_query_filters()
+    {
+        var target = _world.Spawn();
+        _world.AddComponent(target, new TestPosition { X = 9f, Y = 0f, Z = 0f });
+
+        var source = _world.Spawn();
+        _world.AddComponent(source, new ArbitraryReaderSource { Target = target });
+        _world.AddComponent(source, new TestVelocity { X = 1f, Y = 0f, Z = 0f });
+
+        using var schedule = SystemSchedule.Create()
+            .Add<ArbitraryQueryableEntityReaderSystem>()
+            .Build<SequentialWaveScheduler>();
+        schedule.Run(_world);
+
+        await Assert.That(_world.GetComponent<ArbitraryReaderSource>(source).Observed).IsEqualTo(9f);
+    }
+
+    [Test]
     public async Task queryable_entity_reader_returns_false_for_nonmatching_or_stale_entity()
     {
         var nonmatching = _world.Spawn();
@@ -212,14 +230,17 @@ public sealed class EntityComponentAccessTests : IDisposable
         var reader = GetMetadata(typeof(ArbitraryQueryableEntityReaderSystem).FullName!);
         var writer = GetMetadata(typeof(ArbitraryQueryableEntityWriterSystem).FullName!);
         int positionId = TestPosition.TypeId.Value;
+        int velocityId = TestVelocity.TypeId.Value;
 
         await Assert.That(reader.ReadMask.Get(positionId)).IsTrue();
         await Assert.That(reader.WriteMask.Get(positionId)).IsFalse();
         await Assert.That(reader.QueryDescription.Value.All.Get(positionId)).IsFalse();
+        await Assert.That(reader.QueryDescription.Value.None.Get(velocityId)).IsFalse();
 
         await Assert.That(writer.ReadMask.Get(positionId)).IsTrue();
         await Assert.That(writer.WriteMask.Get(positionId)).IsTrue();
         await Assert.That(writer.QueryDescription.Value.All.Get(positionId)).IsFalse();
+        await Assert.That(writer.QueryDescription.Value.None.Get(velocityId)).IsFalse();
     }
 
     [Test]

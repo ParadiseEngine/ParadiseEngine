@@ -549,7 +549,7 @@ public class QueryableGenerator : IIncrementalGenerator
         bool reader)
     {
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>Reads the {queryable.TypeName} composition from an arbitrary entity handle.</summary>");
+        sb.AppendLine($"{indent}/// <summary>{(reader ? "Reads" : "Provides read/write access to")} the {queryable.TypeName} composition from an arbitrary entity handle.</summary>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
         sb.AppendLine($"{indent}public readonly ref struct {typeName}<TMask, TConfig>");
@@ -563,10 +563,10 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    /// <summary>Returns whether the entity is alive and matches {queryable.TypeName}.</summary>");
         sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => TryGet(entity, out _);");
         sb.AppendLine();
-        sb.AppendLine($"{indent}    /// <summary>Copies a {queryable.TypeName}.Data view when the entity matches.</summary>");
         var dataTypeName = reader
             ? $"{queryable.TypeName}.ReadData<TMask, TConfig>"
             : $"{queryable.TypeName}.Data<TMask, TConfig>";
+        sb.AppendLine($"{indent}    /// <summary>Returns a live component view when the entity matches.</summary>");
         sb.AppendLine($"{indent}    public bool TryGet(global::Paradise.ECS.Entity entity, out {dataTypeName} data)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        data = default;");

@@ -434,6 +434,62 @@ public class SingleWriterAnalyzerTests
     }
 
     [Test]
+    public async Task queryable_entity_reader_fields_do_not_count_as_writers()
+    {
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Targets;
+
+            public ref partial struct MoveSystem : Paradise.ECS.IEntitySystem
+            {
+                public ref Position Position;
+                public void Execute() { }
+            }
+
+            public ref partial struct TargetReaderSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityReader Target;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task queryable_entity_writer_fields_count_as_writers()
+    {
+        var diagnostics = await GeneratorTestHelper.GetAnalyzerDiagnosticsWithGeneratorsAsync<SingleWriterAnalyzer>(
+            MarkedComponent + """
+
+            [Queryable]
+            [With<Position>]
+            public readonly ref partial struct Targets;
+
+            public ref partial struct FirstTargetWriterSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityWriter Target;
+                public void Execute() { }
+            }
+
+            public ref partial struct SecondTargetWriterSystem : Paradise.ECS.IEntitySystem
+            {
+                public TargetsEntityWriter Target;
+                public void Execute() { }
+            }
+            """, DiagnosticId);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(2);
+        string message = diagnostics[0].GetMessage(CultureInfo.InvariantCulture);
+        await Assert.That(message.Contains("'Position'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'FirstTargetWriterSystem'", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(message.Contains("'SecondTargetWriterSystem'", StringComparison.Ordinal)).IsTrue();
+    }
+
+    [Test]
     public async Task singleton_composition_fields_count_writable_with_components_as_writers()
     {
         // Runs generators first so the {Prefix}Singleton alias resolves to the generated nested

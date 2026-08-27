@@ -155,7 +155,8 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     /// type (or its containing type, for the generated nested Data/ChunkData/Segments structs)
     /// carries [Queryable], every <c>With&lt;T&gt;</c> or <c>Optional&lt;T&gt;</c> that is not
     /// IsReadOnly/QueryOnly is a write (writable optionals surface as <c>ref</c>/<c>Span</c>
-    /// accessors just like With). Empty for non-queryable field types.</summary>
+    /// accessors just like With). Generated arbitrary-entity reader views are not writes.
+    /// Empty for non-queryable field types.</summary>
     private static System.Collections.Generic.IEnumerable<INamedTypeSymbol> GetQueryableWrittenComponents(
         IFieldSymbol field, INamedTypeSymbol? queryableAttribute)
     {
@@ -166,6 +167,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         if (HasAttribute(fieldType.GetAttributes(), queryableAttribute)) queryable = fieldType;
         else if (fieldType.ContainingType is { } outer && HasAttribute(outer.GetAttributes(), queryableAttribute)) queryable = outer;
         if (queryable is null) yield break;
+        if (fieldType.Name is "EntityReader" or "ReadData") yield break;
 
         foreach (AttributeData attribute in queryable.GetAttributes())
         {
