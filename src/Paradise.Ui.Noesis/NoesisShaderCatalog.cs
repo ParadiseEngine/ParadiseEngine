@@ -8,7 +8,8 @@ namespace Paradise.Ui.Noesis;
 /// <summary>Static description of Noesis's shader surface plus WGSL generation for every
 /// variant. The tables mirror <c>Noesis.Shader</c>'s own helper methods (asserted equal in
 /// tests) and the WGSL bodies are a faithful port of the reference GLSL templates embedded in
-/// libNoesis 3.2.12 (vertex: row-vector <c>pos * proj</c>, flat color/rect/tile; fragment:
+/// libNoesis 3.2.12 (vertex: row-vector <c>pos * proj</c> plus a 4.0.0 OpenGL-to-WebGPU
+/// clip-Z remap; flat color/rect/tile; fragment:
 /// exact paint/effect formulas including the radial-gradient conic solve and the SDF
 /// constants). Colors and ramp texels arrive PREMULTIPLIED from Noesis — no premultiplication
 /// happens in shaders; SrcOver blending is One / OneMinusSrcAlpha.</summary>
@@ -208,6 +209,9 @@ public static class NoesisShaderCatalog
         sb.AppendLine("@vertex fn vs_main(i: VsIn) -> VsOut {");
         sb.AppendLine("  var o: VsOut;");
         sb.AppendLine("  o.pos = vec4<f32>(i.pos, 0.0, 1.0) * vsU.proj;");
+        // Noesis 4.0.0 emits OpenGL clip Z ([-w, w]) even when Caps.DepthRangeZeroToOne is
+        // true; WebGPU clips z < 0, so the whole UI disappears. Remap to [0, w].
+        sb.AppendLine("  o.pos.z = (o.pos.z + o.pos.w) * 0.5;");
         if (has(Attr.Color)) sb.AppendLine("  o.color = i.color;");
         if (downsample)
         {
