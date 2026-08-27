@@ -1211,7 +1211,8 @@ public class QueryableGenerator : IIncrementalGenerator
     {
         var inner = $"ChunkData<{maskType}, {configType}>";
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>Default-config chunk view of {queryable.TypeName}. Same accessors as ChunkData.");
+        sb.AppendLine($"{indent}/// <summary>Default-config chunk view of {queryable.TypeName}. Same accessors as ChunkData");
+        sb.AppendLine($"{indent}/// (EntityCount and component spans; ChunkData has no per-row entity handle).");
         sb.AppendLine($"{indent}/// Declare as a field on an <c>IChunkSystem</c>: <c>public {queryable.TypeName}.Chunk Batch;</c></summary>");
         sb.AppendLine($"{indent}public readonly ref struct Chunk");
         sb.AppendLine($"{indent}{{");

@@ -436,6 +436,11 @@ public class SystemGenerator : IIncrementalGenerator
         return false;
     }
 
+    /// <summary>
+    /// Containing queryable of a generated nested view (<c>PlayerAvatar.Entity</c>).
+    /// Prefers the semantic containing type so nested classes/namespaces keep a real FQN;
+    /// error types fall back to the display-string prefix.
+    /// </summary>
     private static string? TryGetErrorContainingTypeFqn(IErrorTypeSymbol errorType)
     {
         if (errorType.ContainingType is INamedTypeSymbol containing

@@ -6,7 +6,7 @@ namespace Paradise.ECS.Generators.Test;
 public sealed class SingletonQueryableEmissionTests
 {
     [Test]
-    public async Task SingletonQueryable_EmitsSingletonStructAndAlias()
+    public async Task SingletonQueryable_EmitsNestedSingletonView()
     {
         const string source = """
             using Paradise.ECS;
@@ -26,7 +26,7 @@ public sealed class SingletonQueryableEmissionTests
 
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated!).Contains("public readonly ref struct Singleton<TMask, TConfig>");
-        await Assert.That(generated).DoesNotContain("global using GameState.Singleton");
+        await Assert.That(generated).DoesNotContain("global using GameStateSingleton");
         await Assert.That(generated).Contains("public static implicit operator Singleton(");
         await Assert.That(generated).Contains("public readonly ref struct Entity");
         // Resolution: query the write world, assert exactly one entity, pair against the read world
@@ -58,7 +58,7 @@ public sealed class SingletonQueryableEmissionTests
 
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated!).DoesNotContain("struct Singleton<");
-        await Assert.That(generated).DoesNotContain("global using GameState.Singleton");
+        await Assert.That(generated).DoesNotContain("global using GameStateSingleton");
     }
 
     [Test]
