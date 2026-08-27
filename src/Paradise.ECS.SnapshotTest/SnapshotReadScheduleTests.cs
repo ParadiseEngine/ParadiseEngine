@@ -145,6 +145,30 @@ public ref partial struct SnapArbitraryWriterSystem : IEntitySystem
     public void Execute() => TargetPosition.Set(Source.Target, new SnapPosition { X = 42f });
 }
 
+public ref partial struct SnapAccessorReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapAccessorFreshReaderGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    [CurrentTick] public EntityComponentReader<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TryGet(Entity, out _);
+}
+
+public ref partial struct SnapAccessorWriterGraphSystem : IEntitySystem
+{
+    public Entity Entity;
+    public EntityComponentWriter<SnapPosition> TargetPosition;
+
+    public void Execute() => _ = TargetPosition.TrySet(Entity, default);
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -180,6 +204,17 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         var source = _current.Spawn();
         _current.AddComponent(source, new SnapArbitrarySource { Target = target });
         return (target, source);
+    }
+
+    private static SystemMetadata<ComponentMask> GetMetadata(string typeName)
+    {
+        foreach (ref readonly var metadata in SystemRegistry<ComponentMask>.Metadata)
+        {
+            if (metadata.TypeName == typeName)
+                return metadata;
+        }
+
+        throw new InvalidOperationException($"System metadata for {typeName} was not found.");
     }
 
     [Test]
@@ -246,6 +281,60 @@ public sealed class SnapshotReadScheduleTests : IDisposable
 
         await Assert.That(_write.GetComponent<SnapPosition>(target).X).IsEqualTo(42f);
         await Assert.That(_current.GetComponent<SnapPosition>(target).X).IsEqualTo(10f);
+    }
+
+    [Test]
+    public async Task snapshot_dag_groups_arbitrary_entity_reader_and_writer()
+    {
+        var reader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(1);
+        await Assert.That(waves[0].Length).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task snapshot_dag_orders_writer_before_current_tick_reader()
+    {
+        var reader = GetMetadata(typeof(SnapAccessorFreshReaderGraphSystem).FullName!);
+        var writer = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([reader, writer]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(1);
+        await Assert.That(waves[1]).Contains(0);
+    }
+
+    [Test]
+    public async Task snapshot_dag_separates_arbitrary_entity_writers()
+    {
+        var firstWriter = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+        var secondWriter = GetMetadata(typeof(SnapAccessorWriterGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([firstWriter, secondWriter]);
+
+        await Assert.That(waves.Length).IsEqualTo(2);
+        await Assert.That(waves[0]).Contains(0);
+        await Assert.That(waves[1]).Contains(1);
+    }
+
+    [Test]
+    public async Task snapshot_dag_groups_arbitrary_entity_readers()
+    {
+        var firstReader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+        var secondReader = GetMetadata(typeof(SnapAccessorReaderGraphSystem).FullName!);
+
+        var waves = new SnapshotDagScheduler()
+            .ComputeWaves<ComponentMask>([firstReader, secondReader]);
+
+        await Assert.That(waves.Length).IsEqualTo(1);
+        await Assert.That(waves[0].Length).IsEqualTo(2);
     }
 
     [Test]
