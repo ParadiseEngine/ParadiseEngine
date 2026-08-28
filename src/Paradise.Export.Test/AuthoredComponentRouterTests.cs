@@ -111,6 +111,32 @@ public class AuthoredComponentRouterTests
     }
 
     /// <summary>
+    /// Nullable value-type fields (<c>int?</c>, <c>float?</c>) round-trip through the generated
+    /// reader like any other leaf. Pinned because the generator once had no <c>Nullable&lt;T&gt;</c>
+    /// case and SILENTLY skipped these fields — the scene authored a 4096 shadow map, the record
+    /// materialized null, and the renderer quietly ran at its 1024 default. The absent half
+    /// matters equally: no payload property (or an explicit JSON null) must keep the record's own
+    /// null, which is the contract's "unset leaves the renderer's default".
+    /// </summary>
+    [Test]
+    public async Task nullable_value_fields_materialize_when_present_and_stay_null_when_absent()
+    {
+        var authored = Object(Payload(
+            typeof(EnvironmentData).GUID, """{"ShadowMapSize":4096,"ShadowBlur":2.8}"""));
+        var environment = AuthoredComponentRouter.Materialize(authored)
+            .OfType<EnvironmentData>().Single();
+        await Assert.That(environment.ShadowMapSize).IsEqualTo(4096);
+        await Assert.That(environment.ShadowBlur).IsEqualTo(2.8f);
+
+        var unset = Object(Payload(
+            typeof(EnvironmentData).GUID, """{"ShadowMapSize":null,"AmbientMode":"Color"}"""));
+        var defaults = AuthoredComponentRouter.Materialize(unset)
+            .OfType<EnvironmentData>().Single();
+        await Assert.That(defaults.ShadowMapSize).IsNull();
+        await Assert.That(defaults.ShadowBlur).IsNull();
+    }
+
+    /// <summary>
     /// The repair path, end to end. A payload whose id nothing claims still materializes when it
     /// names its type — the reason a GUID id is survivable rather than a one-way door.
     /// </summary>
