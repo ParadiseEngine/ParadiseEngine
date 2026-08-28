@@ -13,7 +13,7 @@ public sealed class BehaviorTreeTests
     }
 
     [System.Runtime.InteropServices.Guid("F4E3D2C1-B0A9-4867-8765-432109FEDCBA")]
-    private struct ReadBlackboardNode : INodeData
+    internal struct ReadBlackboardNode : INodeData
     {
         public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
@@ -25,7 +25,7 @@ public sealed class BehaviorTreeTests
     }
 
     [System.Runtime.InteropServices.Guid("A1523157-2737-48A0-8F1D-14D07B5F4D77")]
-    private struct CountingNode : INodeData
+    internal struct CountingNode : INodeData
     {
         public int Count;
 
@@ -39,7 +39,7 @@ public sealed class BehaviorTreeTests
     }
 
     [System.Runtime.InteropServices.Guid("324C79B0-5CAB-4953-9A3F-9490C6361AE5")]
-    private struct ResetAwareNode : INodeData
+    internal struct ResetAwareNode : INodeData
     {
         public int Count;
 

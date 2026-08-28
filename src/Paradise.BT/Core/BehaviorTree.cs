@@ -5,9 +5,10 @@ namespace Paradise.BT;
 /// <summary>
 /// Immutable compiled behavior tree.
 /// </summary>
-public sealed class BehaviorTree
+public sealed class BehaviorTree : IDisposable
 {
     private readonly BehaviorTreeNode[] _nodes;
+    private BehaviorTreeLayout? _layout;
 
     internal BehaviorTree(BehaviorTreeNode[] nodes)
     {
@@ -29,6 +30,24 @@ public sealed class BehaviorTree
     public BehaviorTreeInstance<TBlackboard> CreateInstance<TBlackboard>(TBlackboard blackboard)
         where TBlackboard : struct, IBlackboard
         => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
+
+    /// <summary>
+    /// The flattened form every instance ticks against, built on first use and shared by all of
+    /// them — the topology, the node type ids and the authored defaults do not vary per instance.
+    ///
+    /// It owns a native allocation, which is why this type is <see cref="IDisposable"/>. A tree
+    /// that is never instanced never builds one. Every node type must be registered with
+    /// <see cref="NodeTypeRegistry"/> first; the BT generator emits that registration per
+    /// assembly, so in practice this only bites a node type the generator cannot see.
+    /// </summary>
+    internal BehaviorTreeLayout Layout => _layout ??= BehaviorTreeLayout.Build(this);
+
+    public void Dispose()
+    {
+        _layout?.Dispose();
+        _layout = null;
+        GC.SuppressFinalize(this);
+    }
 
     public ManagedBlobAssetReference<BehaviorTreeBlob> Serialize()
         => BehaviorTreeBlobSerializer.Serialize(this);

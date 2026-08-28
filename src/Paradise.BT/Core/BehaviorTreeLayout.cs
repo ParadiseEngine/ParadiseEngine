@@ -8,8 +8,7 @@ namespace Paradise.BT;
 ///
 /// A thousand agents share one layout; each owns only the mutable half (a
 /// <see cref="NodeState"/> per node plus a copy of the data), which is small and blittable enough
-/// for an ECS component. <see cref="NodeBlob"/> makes no such split — it boxes a node per
-/// instance.
+/// for an ECS component.
 ///
 /// Owns a native allocation that every <see cref="UnmanagedNodeBlob"/> points into: dispose it
 /// only once nothing is still ticking against it.
@@ -62,10 +61,12 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             if (!NodeTypeRegistry.TryGetId(factory.NodeGuid, out int id))
             {
                 throw new InvalidOperationException(
-                    $"Node type '{factory.NodeType.FullName}' (GUID '{factory.NodeGuid}') is not "
-                    + $"registered. Call {nameof(NodeTypeRegistry)}.Register<T>() for every node "
-                    + "type in the tree before building a layout; the built-in set is "
-                    + "BuiltInBehaviorNodes.RegisterAll().");
+                    $"Node type '{factory.NodeType.FullName}' (GUID '{factory.NodeGuid}') "
+                    + "is not registered. Node types register themselves through the module "
+                    + "initializer the BT generator emits, so this usually means the declaring "
+                    + "project does not reference Paradise.BT.Generators as an analyzer, or the "
+                    + $"type is not visible to it. Call {nameof(NodeTypeRegistry)}.Register<T>() "
+                    + "explicitly for such a node.");
             }
 
             typeIds[i] = id;

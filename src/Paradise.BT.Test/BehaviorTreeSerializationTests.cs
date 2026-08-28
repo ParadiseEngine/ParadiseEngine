@@ -3,7 +3,7 @@ namespace Paradise.BT.Test;
 public sealed class BehaviorTreeSerializationTests
 {
     [System.Runtime.InteropServices.Guid("8C751F7C-3CAA-4E55-BEBA-96DEB5F8C9A5")]
-    private struct ThresholdNode : INodeData
+    internal struct ThresholdNode : INodeData
     {
         public int RequiredTicks;
         public int Count;

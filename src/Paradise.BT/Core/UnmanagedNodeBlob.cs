@@ -4,20 +4,18 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// An <see cref="INodeBlob"/> with no managed state: a borrowed
-/// <see cref="BehaviorTreeLayoutHandle"/> for what the tree shares, plus two caller-owned spans
-/// for what one instance owns — a <see cref="NodeState"/> per node, and each node's runtime data.
+/// The only <see cref="INodeBlob"/>: a borrowed <see cref="BehaviorTreeLayoutHandle"/> for what
+/// the tree shares, plus two caller-owned spans for what one instance owns — a
+/// <see cref="NodeState"/> per node, and each node's runtime data.
 ///
-/// <see cref="NodeBlob"/> boxes a <c>RuntimeNode&lt;T&gt;</c> per node, which makes an instance an
-/// object graph: it cannot live in an ECS component or be memcpy'd into a snapshot. Two blittable
-/// buffers can.
+/// Storing node data as bytes rather than as an object per node is what lets an instance live in
+/// an ECS component and be memcpy'd into a world snapshot.
 ///
-/// A <c>ref struct</c>, so the compiler checks the spans' lifetime rather than a comment asking
-/// the caller to. Two consequences: it cannot be stored in a field, and cannot cross an
-/// <c>await</c> (CS4007) — build one where it is used.
+/// A <c>ref struct</c>, so the compiler checks the spans' lifetime. Two consequences: it cannot be
+/// stored in a field, and cannot cross an <c>await</c> (CS4007) — build one where it is used.
 ///
-/// <see cref="GetRuntimeDataPtr"/> still hands out an address, so the runtime span must be
-/// non-moveable memory (ECS chunks, <c>NativeMemory</c>; not a <c>byte[]</c>).
+/// Node data is reached by <c>ref byte</c>, so the spans may be ordinary managed arrays as well as
+/// native memory: nothing here takes an address that could outlive a GC move.
 /// </summary>
 public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 {
@@ -51,7 +49,6 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     /// <summary>
     /// Starting state: every node <c>0</c>, every node's data a copy of the authored default.
-    /// The counterpart of <c>NodeBlob.Create</c>.
     /// </summary>
     public static void Initialize(
         BehaviorTreeLayoutHandle layout, Span<NodeState> states, Span<byte> runtime)
@@ -86,26 +83,15 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     public void ResetStates(int index, int count = 1) => _states.Slice(index, count).Clear();
 
-    public IntPtr GetDefaultDataPtr(int nodeIndex) =>
-        (IntPtr)(_layout->DefaultData + _layout->Offsets[nodeIndex]);
+    /// <summary>Into the LAYOUT's block, which every instance shares and none writes.</summary>
+    public ref byte DefaultData(int nodeIndex) =>
+        ref Unsafe.AsRef<byte>(_layout->DefaultData + _layout->Offsets[nodeIndex]);
 
-    /// <summary>The one pointer, taken from the span. Consumed as a <c>ref byte</c> within the
-    /// same tick, so it is never held across a move — but the storage must still be
-    /// non-moveable.</summary>
-    public IntPtr GetRuntimeDataPtr(int nodeIndex) =>
-        (IntPtr)Unsafe.AsPointer(
-            ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _layout->Offsets[nodeIndex]));
+    /// <summary>Into this instance's own span. A ref rather than an address, so the caller may
+    /// back it with a managed array.</summary>
+    public ref byte RuntimeData(int nodeIndex) =>
+        ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _layout->Offsets[nodeIndex]);
 
-    /// <summary>Scope values are not implemented by any blob in this library — the concept came
-    /// across with the EntitiesBT contract and has no consumer here yet.</summary>
-    public IntPtr GetDefaultScopeValuePtr(int offset)
-        => throw new NotSupportedException("Scope values are not implemented by Paradise.BT.");
-
-    /// <inheritdoc cref="GetDefaultScopeValuePtr"/>
-    public IntPtr GetRuntimeScopeValuePtr(int offset)
-        => throw new NotSupportedException("Scope values are not implemented by Paradise.BT.");
-
-    // No dispatch method here on purpose: VirtualMachine ticks through GetTypeId +
-    // GetRuntimeDataPtr, so its unmanaged path works for ANY byte-backed blob. INodeDataAccessor
-    // is not implemented either — reaching an interface member on a ref struct boxes.
+    // No dispatch method here on purpose: VirtualMachine ticks through GetTypeId + RuntimeData,
+    // both INodeBlob members, so it works for any byte-backed blob rather than this type alone.
 }

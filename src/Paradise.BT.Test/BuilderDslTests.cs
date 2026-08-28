@@ -40,7 +40,7 @@ public sealed class BuilderDslTests
     public async Task Sequence_With_Success_Children()
     {
         var tree = new Sequence(new Success(), new Success()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -49,7 +49,7 @@ public sealed class BuilderDslTests
     public async Task Sequence_Fails_On_First_Failure()
     {
         var tree = new Sequence(new Success(), new Failure(), new Success()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
@@ -58,7 +58,7 @@ public sealed class BuilderDslTests
     public async Task Selector_Succeeds_On_First_Success()
     {
         var tree = new Selector(new Failure(), new Success(), new Failure()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -67,7 +67,7 @@ public sealed class BuilderDslTests
     public async Task Inverter_Flips_Success_To_Failure()
     {
         var tree = new Inverter(new Success()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
@@ -76,7 +76,7 @@ public sealed class BuilderDslTests
     public async Task Inverter_Flips_Failure_To_Success()
     {
         var tree = new Inverter(new Failure()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -85,7 +85,7 @@ public sealed class BuilderDslTests
     public async Task Succeeder_Converts_Failure_To_Success()
     {
         var tree = new Succeeder(new Failure()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -93,18 +93,18 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Repeat_Completes_After_Configured_Times()
     {
-        int executions = 0;
+
         var tree = new Repeat(
             3,
-            new LeafNode<CounterNode>(new CounterNode { Callback = () => executions++ })
+            new LeafNode<CounterNode>(new CounterNode())
         ).Build();
 
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
-        await Assert.That(executions).IsEqualTo(3);
+        await Assert.That(instance.ProbeCount()).IsEqualTo(3);
     }
 
     [Test]
@@ -139,7 +139,7 @@ public sealed class BuilderDslTests
     {
         // Build from a non-root node
         var tree = new Inverter(new Running()).Build();
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
     }
@@ -147,30 +147,32 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Parallel_Runs_All_Children()
     {
-        int count = 0;
+
         var tree = new Paradise.BT.Nodes.Builder.Parallel(
-            new LeafNode<CounterNode>(new CounterNode { Callback = () => count++ }),
-            new LeafNode<CounterNode>(new CounterNode { Callback = () => count++ })
+            new LeafNode<CounterNode>(new CounterNode { Slot = 0 }),
+            new LeafNode<CounterNode>(new CounterNode { Slot = 1 })
         ).Build();
 
-        var instance = tree.CreateInstance(new Blackboard());
+        var instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.Tick();
 
-        await Assert.That(count).IsEqualTo(2);
+        await Assert.That(instance.ProbeCount(0)).IsEqualTo(1);
+        await Assert.That(instance.ProbeCount(1)).IsEqualTo(1);
     }
 
-    // Helper node for counting executions
+    // Counts into a blackboard slot. It used to hold an Action and say "not serializable due to
+    // delegate, but fine for tests" — it was the last node in the library whose data was managed,
+    // and so could not live in a blob at all.
     [System.Runtime.InteropServices.Guid("E1234567-ABCD-4321-FEDC-BA9876543210")]
-    private struct CounterNode : INodeData
+    internal struct CounterNode : INodeData
     {
-        // Not serializable due to delegate, but fine for tests
-        public Action? Callback;
+        public int Slot;
 
         public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard
         {
-            Callback?.Invoke();
+            bb.GetDataRef<ProbeData>().Counts[Slot]++;
             return NodeState.Success;
         }
     }

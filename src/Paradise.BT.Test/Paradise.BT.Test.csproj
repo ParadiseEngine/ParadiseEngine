@@ -15,6 +15,10 @@
     <ProjectReference Include="../Paradise.BT/Paradise.BT.csproj" />
     <ProjectReference Include="../Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
     <ProjectReference Include="../Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
+    <!-- The generator, BY NAME. Analyzers do not flow across a ProjectReference, and this project
+         declares node types of its own — without it they get no generated registration and every
+         tree built from one is refused at layout build. -->
+    <ProjectReference Include="../Paradise.BT.Generators/Paradise.BT.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

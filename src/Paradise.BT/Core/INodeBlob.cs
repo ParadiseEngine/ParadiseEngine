@@ -1,9 +1,16 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Paradise.BT;
 
 /// <summary>
-/// Exact node blob contract used by EntitiesBT-style nodes.
+/// Node blob contract, shaped after EntitiesBT: the per-instance state of a running tree — what
+/// each node returned last tick, and each node's live data.
+///
+/// <b>Data is reached by <c>ref byte</c>, not by pointer.</b> It used to be <c>IntPtr</c>, which
+/// forced every implementation onto memory the GC cannot move: a blob over a plain <c>byte[]</c>
+/// could have its buffer relocated mid-tick and the address would dangle. A managed ref survives
+/// compaction, so an instance can now hold ordinary arrays and needs no pinning and no lifetime.
 /// </summary>
 public interface INodeBlob
 {
@@ -15,6 +22,8 @@ public interface INodeBlob
 
     int GetEndIndex(int nodeIndex);
 
+    /// <summary>How many bytes <paramref name="count"/> nodes occupy from
+    /// <paramref name="startNodeIndex"/>, including the padding that keeps each node aligned.</summary>
     int GetNodeDataSize(int startNodeIndex, int count = 1);
 
     NodeState GetState(int nodeIndex);
@@ -23,17 +32,16 @@ public interface INodeBlob
 
     void ResetStates(int index, int count = 1);
 
-    IntPtr GetDefaultDataPtr(int nodeIndex);
+    /// <summary>The authored default for a node — shared, and never written through.</summary>
+    ref byte DefaultData(int nodeIndex);
 
-    IntPtr GetRuntimeDataPtr(int nodeIndex);
-
-    IntPtr GetDefaultScopeValuePtr(int offset);
-
-    IntPtr GetRuntimeScopeValuePtr(int offset);
+    /// <summary>A node's live data. Ticking writes through this, which is what makes a timer
+    /// count down.</summary>
+    ref byte RuntimeData(int nodeIndex);
 }
 
 /// <summary>
-/// EntitiesBT-compatible blob helpers implemented for Paradise.BT's managed runtime blob.
+/// EntitiesBT-compatible blob helpers.
 /// </summary>
 public static class NodeBlobExtensions
 {
@@ -70,39 +78,28 @@ public static class NodeBlobExtensions
         return -1;
     }
 
-    /// <summary>Restore a run of nodes' authored data. The managed blob re-copies each boxed
-    /// node's default; a byte-backed one copies its default region over its runtime one.</summary>
-    public static unsafe void ResetRuntimeData<TNodeBlob>(this ref TNodeBlob blob, int index, int count = 1)
+    /// <summary>Restore a run of nodes' authored data — what restarts a timer on reset. One copy,
+    /// because nodes are laid out contiguously.</summary>
+    public static void ResetRuntimeData<TNodeBlob>(this ref TNodeBlob blob, int index, int count = 1)
         where TNodeBlob : struct, INodeBlob, allows ref struct
     {
-        if (typeof(TNodeBlob) == typeof(NodeBlob))
-        {
-            Unsafe.As<TNodeBlob, NodeBlob>(ref blob).ResetRuntimeData(index, count);
-            return;
-        }
-
         int size = blob.GetNodeDataSize(index, count);
         if (size > 0)
         {
-            new ReadOnlySpan<byte>((void*)blob.GetDefaultDataPtr(index), size)
-                .CopyTo(new Span<byte>((void*)blob.GetRuntimeDataPtr(index), size));
+            MemoryMarshal.CreateReadOnlySpan(ref blob.DefaultData(index), size)
+                .CopyTo(MemoryMarshal.CreateSpan(ref blob.RuntimeData(index), size));
         }
     }
 
-    /// <summary>A node's live data, typed. The managed blob unboxes it; a byte-backed one
-    /// reinterprets its own storage.</summary>
-    public static unsafe ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
+    /// <summary>A node's live data, typed.</summary>
+    public static ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        => ref typeof(TNodeBlob) == typeof(NodeBlob)
-            ? ref Unsafe.As<TNodeBlob, NodeBlob>(ref blob).RuntimeNodeData<T>(index)
-            : ref Unsafe.AsRef<T>((void*)blob.GetRuntimeDataPtr(index));
+        => ref Unsafe.As<byte, T>(ref blob.RuntimeData(index));
 
     /// <inheritdoc cref="GetNodeData{T, TNodeBlob}"/>
-    public static unsafe ref T GetNodeDefaultData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
+    public static ref T GetNodeDefaultData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        => ref typeof(TNodeBlob) == typeof(NodeBlob)
-            ? ref Unsafe.As<TNodeBlob, NodeBlob>(ref blob).DefaultNodeData<T>(index)
-            : ref Unsafe.AsRef<T>((void*)blob.GetDefaultDataPtr(index));
+        => ref Unsafe.As<byte, T>(ref blob.DefaultData(index));
 }
