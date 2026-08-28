@@ -46,13 +46,9 @@ public static class BuiltInBehaviorNodes
     /// registry via <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
     /// </summary>
     /// <summary>
-    /// Register every built-in node type with <see cref="NodeTypeRegistry"/>, which a
-    /// <see cref="BehaviorTreeLayout"/> resolves node GUIDs through.
-    ///
-    /// The same set as <see cref="CreateRegistry"/> and for the same reason: those are exactly the
-    /// nodes whose data is unmanaged, and therefore exactly the nodes that can be stored as bytes.
-    /// Idempotent, so a game may call it at startup and a test may call it per fixture. Register
-    /// custom node types on top with <c>NodeTypeRegistry.Register&lt;T&gt;()</c>.
+    /// Register every built-in node with <see cref="NodeTypeRegistry"/>, which a
+    /// <see cref="BehaviorTreeLayout"/> resolves GUIDs through. Same set as
+    /// <see cref="CreateRegistry"/>: exactly the nodes whose data is unmanaged. Idempotent.
     /// </summary>
     public static void RegisterAll()
     {

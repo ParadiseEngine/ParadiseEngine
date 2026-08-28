@@ -3,33 +3,15 @@ using System.Runtime.CompilerServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// Maps a node type's <c>[Guid]</c> onto a dense id, and that id onto something that can tick a
-/// node of that type given nothing but a <c>ref byte</c> to its data.
+/// Maps a node type's <c>[Guid]</c> to a dense id, and that id to an invoker that ticks the node
+/// from a <c>ref byte</c>. This is what replaces <c>IRuntimeNode</c> for byte-backed blobs, and so
+/// what lets an instance be unmanaged.
 ///
-/// <b>This is what lets a behavior tree instance be UNMANAGED.</b> The managed
-/// <see cref="NodeBlob"/> stores one boxed <c>RuntimeNode&lt;TNodeData&gt;</c> per node and
-/// dispatches through <c>IRuntimeNode</c> — so its per-instance state is an object graph, which
-/// cannot live in an ECS component, be memcpy'd into a snapshot, or be held by a ref struct.
-/// <see cref="UnmanagedNodeBlob"/> stores the same node data as plain bytes and asks this table
-/// which type those bytes are, which moves the only managed thing left — the knowledge of how to
-/// call <c>T.Tick</c> — OUT of the instance and into one process-wide table.
+/// The table is static and managed on purpose: it is a vtable, one entry per node TYPE, so it
+/// never becomes per-instance state. Append-only and idempotent.
 ///
-/// <b>The table being managed and static is not a contradiction.</b> The constraint an ECS
-/// component (or a <c>ref partial struct</c> system) imposes is on its own FIELDS; static managed
-/// data is reachable from both. This is a vtable, in the same sense the CLR's own is: one entry
-/// per node TYPE, never per node instance and never per entity.
-///
-/// <b>Append-only and idempotent.</b> Registering the same type twice returns the same id, so
-/// registration can live wherever it is convenient — a static constructor, a game's startup, a
-/// test — without callers coordinating. Two different types claiming one GUID is a programming
-/// error and throws, exactly as <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>
-/// already does.
-///
-/// Ids are dense and assigned in registration ORDER, which is deliberately NOT a stable identity:
-/// the same tree registered in a different order gets different ids in a different process. The
-/// stable identity is the GUID, and it is what a serialized blob carries — an id is resolved
-/// through <see cref="TryGetId"/> when a <see cref="BehaviorTreeLayout"/> is built, and is
-/// meaningful only for the lifetime of that process. Do not persist one.
+/// Ids are assigned in registration order and are NOT stable across processes — the GUID is the
+/// identity a blob carries. Do not persist an id.
 /// </summary>
 public static class NodeTypeRegistry
 {
@@ -51,13 +33,10 @@ public static class NodeTypeRegistry
     }
 
     /// <summary>
-    /// Register a node type and return its dense id, or return the id it already has.
+    /// Register a node type and return its dense id, or the id it already has.
     ///
-    /// The <c>unmanaged</c> constraint is the whole contract: a node holding a reference cannot
-    /// have its data stored as bytes, and would drag the instance back into the managed world.
-    /// It is the same constraint <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>
-    /// carries, and for the same underlying reason — which is why the delegate-backed helper
-    /// nodes are registrable with neither.
+    /// <c>unmanaged</c> is the contract: a node holding a reference cannot be stored as bytes.
+    /// The delegate-backed nodes therefore cannot be registered here, nor for serialization.
     /// </summary>
     /// <exception cref="InvalidOperationException">Another type already claims this GUID.</exception>
     public static int Register<TNodeData>()
@@ -108,10 +87,8 @@ public static class NodeTypeRegistry
 
     internal static INodeInvoker Invoker(int id)
     {
-        // Read without the lock: the array is append-only and an id in hand was already assigned,
-        // so the slot is populated and never rewritten. The only hazard is reading _invokers
-        // mid-resize, which Volatile.Read of the reference rules out — Array.Resize publishes a
-        // new array, it does not mutate the old one.
+        // No lock: the array is append-only, so a slot for an id in hand is already populated.
+        // Volatile.Read covers a concurrent resize — Array.Resize publishes a new array.
         INodeInvoker[] invokers = Volatile.Read(ref _invokers);
         if ((uint)id >= (uint)invokers.Length || invokers[id] is not { } invoker)
         {
@@ -125,11 +102,8 @@ public static class NodeTypeRegistry
     }
 }
 
-/// <summary>
-/// Ticks one node type given its data as bytes. One implementation per node type, one INSTANCE
-/// per node type for the whole process — see <see cref="NodeTypeRegistry"/> for why a managed
-/// object here does not make the tree instance managed.
-/// </summary>
+/// <summary>Ticks one node type from its data as bytes. One instance per node type, process-wide
+/// — see <see cref="NodeTypeRegistry"/>.</summary>
 internal interface INodeInvoker
 {
     Type NodeType { get; }
@@ -156,25 +130,17 @@ internal sealed class NodeInvoker<TNodeData> : INodeInvoker
 
     public int Size => Unsafe.SizeOf<TNodeData>();
 
-    /// <summary>
-    /// <b>The node is ticked THROUGH the bytes, not on a copy of them.</b>
-    /// <see cref="Unsafe.As{TFrom,TTo}(ref TFrom)"/> reinterprets the blob's storage in place, so
-    /// a node that writes its own fields — <c>DelayTimerNode.TimerSeconds -=</c> is the one every
-    /// timer is built on — writes into the instance's runtime data and the value is there on the
-    /// next tick. Binding it to a local first would compile, run, and silently reset every timer
-    /// in the tree every frame.
-    /// </summary>
+    /// <summary>Ticks THROUGH the bytes: <c>Unsafe.As</c> reinterprets the blob's storage in
+    /// place, so a node writing its own fields (every timer) persists to the next tick. Binding to
+    /// a local first would compile and silently reset every timer each frame.</summary>
     public NodeState Tick<TNodeBlob, TBlackboard>(
         ref byte data, int index, ref TNodeBlob blob, ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard
         => Unsafe.As<byte, TNodeData>(ref data).Tick(index, ref blob, ref bb);
 
-    /// <summary>
-    /// Through the TYPE. <c>Reset</c> is static on <see cref="INodeData"/>, so this needs no
-    /// receiver at all — the <c>ref byte</c> is still in the signature because the interface is
-    /// shared with <see cref="Tick"/>, which very much does need it.
-    /// </summary>
+    /// <summary>Through the TYPE: <c>Reset</c> is static, so no receiver is needed. The
+    /// <c>ref byte</c> stays only because <see cref="Tick"/> shares the signature.</summary>
     public void Reset<TNodeBlob, TBlackboard>(
         ref byte data, int index, ref TNodeBlob blob, ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct

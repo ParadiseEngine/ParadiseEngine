@@ -4,39 +4,20 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// An <see cref="INodeBlob"/> with no managed state whatsoever: a borrowed
-/// <see cref="BehaviorTreeLayoutHandle"/> for everything the tree shares, and two caller-owned
-/// buffers for everything one instance owns — a <see cref="NodeState"/> per node, and the runtime
-/// copy of every node's data.
+/// An <see cref="INodeBlob"/> with no managed state: a borrowed
+/// <see cref="BehaviorTreeLayoutHandle"/> for what the tree shares, plus two caller-owned spans
+/// for what one instance owns — a <see cref="NodeState"/> per node, and each node's runtime data.
 ///
-/// <b>Why this exists.</b> <see cref="NodeBlob"/> keeps one boxed <c>RuntimeNode&lt;T&gt;</c> per
-/// node and dispatches through <c>IRuntimeNode</c>, which makes a tree instance an object graph.
-/// An object graph cannot be a field of a <c>ref struct</c>, cannot live in an ECS component,
-/// and cannot be memcpy'd — so a game whose simulation state is components could hold a behavior
-/// tree only OFF to the side, ticked by managed code around the schedule, with its timers absent
-/// from every snapshot the world takes of itself. Put the same state in two blittable buffers and
-/// all three problems go away at once.
+/// <see cref="NodeBlob"/> boxes a <c>RuntimeNode&lt;T&gt;</c> per node, which makes an instance an
+/// object graph: it cannot live in an ECS component or be memcpy'd into a snapshot. Two blittable
+/// buffers can.
 ///
-/// <b>A <c>ref struct</c> over spans, which is what makes the caller's side safe.</b> It took two
-/// raw pointers and a paragraph asking the caller to guarantee they stayed valid; it takes
-/// <c>Span&lt;&gt;</c> now, so the lifetime is checked by the compiler instead of promised in a
-/// comment. C# 13's `allows ref struct` is what permits it: <see cref="INodeBlob"/>'s consumers —
-/// <see cref="VirtualMachine"/>, <see cref="NodeExtensions"/>, every node's <c>Tick</c> — declare
-/// <c>where TNodeBlob : struct, INodeBlob, allows ref struct</c>, so this type satisfies them
-/// while never being boxed.
+/// A <c>ref struct</c>, so the compiler checks the spans' lifetime rather than a comment asking
+/// the caller to. Two consequences: it cannot be stored in a field, and cannot cross an
+/// <c>await</c> (CS4007) — build one where it is used.
 ///
-/// Two consequences of being a ref struct, both of which a caller meets immediately: it cannot be
-/// stored in a field or an array, and it cannot live across an <c>await</c> or <c>yield</c>
-/// (CS4007). Build one where it is used — that is two span constructions — rather than holding it.
-///
-/// <b>One pointer survives, in <see cref="GetRuntimeDataPtr"/>.</b> <see cref="INodeBlob"/>
-/// mandates that member and the dispatch path turns it straight back into a <c>ref byte</c>, so
-/// the storage behind the runtime span still has to be non-moveable: ECS chunk memory and
-/// <c>NativeMemory</c> qualify, a plain <c>byte[]</c> does not. That is now one documented member
-/// rather than the type's whole contract.
-///
-/// Everything else — the composites, the decorators, <see cref="VirtualMachine"/>,
-/// <see cref="NodeExtensions"/> — is generic over the blob type and works with this unchanged.
+/// <see cref="GetRuntimeDataPtr"/> still hands out an address, so the runtime span must be
+/// non-moveable memory (ECS chunks, <c>NativeMemory</c>; not a <c>byte[]</c>).
 /// </summary>
 public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 {
@@ -46,14 +27,11 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
     private readonly int _runtimeId;
 
     /// <summary>
-    /// Point at an instance's memory. <paramref name="states"/> must have
-    /// <see cref="BehaviorTreeLayoutHandle.NodeCount"/> entries and <paramref name="runtime"/>
-    /// <see cref="BehaviorTreeLayoutHandle.RuntimeDataSize"/> bytes.
-    ///
-    /// This does NOT initialise them — see <see cref="Initialize"/>. Constructing over a buffer
-    /// that was never initialised is legal and meaningful: zeroed memory is exactly "no node has
-    /// run yet", and a node's data would then read as its zero default rather than its AUTHORED
-    /// one, which is why <see cref="Initialize"/> exists and why a world builder must call it.
+    /// Point at an instance's memory: <paramref name="states"/> needs
+    /// <see cref="BehaviorTreeLayoutHandle.NodeCount"/> entries, <paramref name="runtime"/>
+    /// <see cref="BehaviorTreeLayoutHandle.RuntimeDataSize"/> bytes. Does NOT initialise them —
+    /// zeroed data reads as a node's zero default rather than its authored one, so a world
+    /// builder must call <see cref="Initialize"/>.
     /// </summary>
     public UnmanagedNodeBlob(
         BehaviorTreeLayoutHandle layout, Span<NodeState> states, Span<byte> runtime, int runtimeId = 0)
@@ -72,11 +50,8 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
     }
 
     /// <summary>
-    /// Put an instance's buffers into their starting state: every node <c>0</c>, every node's
-    /// runtime data a copy of the layout's authored default.
-    ///
-    /// The counterpart of <c>NodeBlob.Create</c>, which does the same thing by constructing one
-    /// <c>RuntimeNode</c> per node from its factory's default.
+    /// Starting state: every node <c>0</c>, every node's data a copy of the authored default.
+    /// The counterpart of <c>NodeBlob.Create</c>.
     /// </summary>
     public static void Initialize(
         BehaviorTreeLayoutHandle layout, Span<NodeState> states, Span<byte> runtime)
@@ -114,14 +89,9 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
     public IntPtr GetDefaultDataPtr(int nodeIndex) =>
         (IntPtr)(_layout->DefaultData + _layout->Offsets[nodeIndex]);
 
-    /// <summary>
-    /// <b>The one place a pointer is still taken, and it is taken from the SPAN.</b>
-    /// <see cref="INodeBlob"/> mandates this member, and <see cref="VirtualMachine"/>'s dispatch
-    /// turns the result straight back into a <c>ref byte</c> that is used inside the same tick.
-    /// The address is therefore never held across anything that could move the buffer — but it
-    /// is still an address, so the storage behind <c>runtime</c> must not be a moveable managed
-    /// array. Native memory and ECS chunk storage, which is what both callers pass, qualify.
-    /// </summary>
+    /// <summary>The one pointer, taken from the span. Consumed as a <c>ref byte</c> within the
+    /// same tick, so it is never held across a move — but the storage must still be
+    /// non-moveable.</summary>
     public IntPtr GetRuntimeDataPtr(int nodeIndex) =>
         (IntPtr)Unsafe.AsPointer(
             ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _layout->Offsets[nodeIndex]));
@@ -135,11 +105,7 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
     public IntPtr GetRuntimeScopeValuePtr(int offset)
         => throw new NotSupportedException("Scope values are not implemented by Paradise.BT.");
 
-    // NOTE: there is deliberately no dispatch method here. VirtualMachine ticks this blob through
-    // GetTypeId + GetRuntimeDataPtr, which are INodeBlob members — so its unmanaged path is
-    // generic over ANY blob that stores node data as bytes, rather than hard-wired to this type.
-    //
-    // INodeDataAccessor is NOT implemented either, and cannot be: reaching an interface member on
-    // a ref struct means converting it to that interface, which is a box. NodeBlobExtensions'
-    // GetNodeData/GetNodeDefaultData serve this blob through GetRuntimeDataPtr instead.
+    // No dispatch method here on purpose: VirtualMachine ticks through GetTypeId +
+    // GetRuntimeDataPtr, so its unmanaged path works for ANY byte-backed blob. INodeDataAccessor
+    // is not implemented either — reaching an interface member on a ref struct boxes.
 }

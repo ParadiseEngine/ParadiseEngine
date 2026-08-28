@@ -84,13 +84,8 @@ public static class NodeBlobExtensions
         return -1;
     }
 
-    /// <summary>
-    /// Restore a run of nodes' data to what was authored.
-    ///
-    /// Two storages, two ways of saying the same thing: the managed blob re-copies each boxed
-    /// node's default, and a byte-backed blob copies its default region over its runtime one.
-    /// See <see cref="VirtualMachine"/> for why the branch costs nothing.
-    /// </summary>
+    /// <summary>Restore a run of nodes' authored data. The managed blob re-copies each boxed
+    /// node's default; a byte-backed one copies its default region over its runtime one.</summary>
     public static unsafe void ResetRuntimeData<TNodeBlob>(this ref TNodeBlob blob, int index, int count = 1)
         where TNodeBlob : struct, INodeBlob, allows ref struct
     {
@@ -108,14 +103,8 @@ public static class NodeBlobExtensions
         }
     }
 
-    /// <summary>
-    /// A node's live data, typed.
-    ///
-    /// The managed blob keeps it in a boxed node and hands back a ref into that; a byte-backed
-    /// blob reinterprets its own storage. The `blob is INodeDataAccessor` test this used to open
-    /// with cannot survive `allows ref struct` — a ref struct cannot be converted to an interface
-    /// at all — and it boxed the blob on every call besides.
-    /// </summary>
+    /// <summary>A node's live data, typed. The <c>blob is INodeDataAccessor</c> test this used to
+    /// open with cannot survive <c>allows ref struct</c>, and boxed on every call besides.</summary>
     public static unsafe ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct

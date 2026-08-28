@@ -63,11 +63,10 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
     void IRuntimeNodeProvider.ResetRuntimeData(int index, int count)
         => ResetRuntimeData(index, count);
 
-    // The same two operations as direct instance methods, so VirtualMachine can reach them
-    // through a `ref NodeBlob` without converting to IRuntimeNodeProvider. That conversion boxes
-    // — a struct becoming an interface always does — and it used to happen on EVERY node of
-    // EVERY tick. The explicit implementations above stay for outside callers reaching the blob
-    // through the interface.
+    // The same two as direct instance methods, so VirtualMachine reaches them through a
+    // `ref NodeBlob` without converting to IRuntimeNodeProvider — that conversion boxes, and used
+    // to happen on every node of every tick. The explicit implementations stay for outside
+    // callers.
     internal IRuntimeNode GetRuntimeNode(int nodeIndex) => Storage.Nodes[nodeIndex];
 
     internal void ResetRuntimeData(int index, int count)

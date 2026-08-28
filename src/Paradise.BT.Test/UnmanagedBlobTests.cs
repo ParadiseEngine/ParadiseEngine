@@ -3,15 +3,13 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT.Test;
 
 /// <summary>
-/// The unmanaged blob must be a drop-in for the managed one: same trees, same nodes, same states,
-/// tick for tick. These run both side by side rather than asserting expected values, because the
-/// claim being made is EQUIVALENCE — a test that hardcoded the answer would still pass if both
-/// implementations drifted the same way.
+/// The unmanaged blob must be a drop-in for the managed one. These run both side by side rather
+/// than asserting expected values: the claim is EQUIVALENCE, and a hardcoded answer would still
+/// pass if both drifted the same way.
 ///
-/// The three claims beyond parity are the ones the design rests on: node data mutated in place
-/// really does persist (a timer counts down), two instances over one layout do not share state,
-/// and an instance survives being memcpy'd — which is what "a behavior tree can live in an ECS
-/// component and ride a world snapshot" actually means.
+/// Three further claims the design rests on: node data mutated in place persists, two instances
+/// over one layout do not share state, and an instance survives a memcpy — which is what "can ride
+/// a world snapshot" means.
 /// </summary>
 public sealed class UnmanagedBlobTests
 {
@@ -35,23 +33,18 @@ public sealed class UnmanagedBlobTests
             UnmanagedNodeBlob.Initialize(_layout, States, Runtime);
         }
 
-        /// <summary>The buffers as spans. Native memory, so the blob may take an address into
-        /// them — the contract GetRuntimeDataPtr states.</summary>
+        /// <summary>Native memory, so the blob may take an address into it.</summary>
         private Span<NodeState> States => new(_states, _nodeCount);
 
         private Span<byte> Runtime => new(_runtime, _runtimeSize);
 
-        /// <summary>
-        /// The blob is built fresh at each use rather than held in a field: it is a ref struct
-        /// now, so it cannot be stored in a class, and — the thing that actually bites in a test
-        /// suite — it cannot live across an <c>await</c> (CS4007). Building it is two span
-        /// constructions.
-        /// </summary>
+        /// <summary>Built fresh at each use: a ref struct cannot be stored in a class, nor live
+        /// across an <c>await</c> (CS4007).</summary>
         public UnmanagedNodeBlob Blob => new(_layout, States, Runtime);
 
         public NodeState Status => _states[0];
 
-        /// <summary>Topology, copied OUT, so an assertion can await without the blob being live.</summary>
+        /// <summary>Copied OUT, so an assertion can await without the blob being live.</summary>
         public (int Count, int[] EndIndices) Topology()
         {
             UnmanagedNodeBlob blob = Blob;
@@ -63,17 +56,16 @@ public sealed class UnmanagedBlobTests
             return (blob.Count, ends);
         }
 
-        /// <summary>Reset, as a method, for the same reason: it keeps the blob off the caller's
-        /// stack frame and therefore out of its async state machine.</summary>
+        /// <summary>A method for the same reason: keeps the blob out of the caller's async state
+        /// machine.</summary>
         public void Reset(ref Blackboard bb)
         {
             UnmanagedNodeBlob blob = Blob;
             VirtualMachine.Reset(ref blob, ref bb);
         }
 
-        /// <summary>Mirrors <see cref="BehaviorTreeInstance{T}.Tick"/> — including its
-        /// auto-reset-on-completion, so a comparison against the managed instance is comparing
-        /// the same policy and not two different ones.</summary>
+        /// <summary>Mirrors <see cref="BehaviorTreeInstance{T}.Tick"/>, auto-reset included, so the
+        /// comparison is against the same policy.</summary>
         public NodeState Tick(ref Blackboard bb, float deltaTime)
         {
             bb.SetData(new BehaviorTreeTickDeltaTime(deltaTime));
@@ -160,11 +152,8 @@ public sealed class UnmanagedBlobTests
         }
     }
 
-    /// <summary>
-    /// The claim <see cref="NodeInvoker{T}"/>'s doc rests on: a node ticks THROUGH its bytes, so
-    /// <c>TimerSeconds -=</c> lands in the instance and the timer actually counts down. Ticking a
-    /// copy instead would leave the delay permanently Running.
-    /// </summary>
+    /// <summary>A node ticks THROUGH its bytes, so <c>TimerSeconds -=</c> lands in the instance.
+    /// Ticking a copy would leave the delay permanently Running.</summary>
     [Test]
     public async Task Node_Data_Mutated_During_A_Tick_Persists()
     {
@@ -194,11 +183,8 @@ public sealed class UnmanagedBlobTests
         await Assert.That(instance.Tick(ref bb, 0.25f)).IsEqualTo(NodeState.Running);
     }
 
-    /// <summary>
-    /// One layout, many agents. If the shared half leaked any mutable state, ticking one instance
-    /// would advance the other's timer — which is precisely the bug that makes a shared tree
-    /// unusable for a crowd.
-    /// </summary>
+    /// <summary>One layout, many agents. If the shared half leaked mutable state, ticking one
+    /// instance would advance the other's timer.</summary>
     [Test]
     public async Task Two_Instances_Over_One_Layout_Do_Not_Share_State()
     {
@@ -215,11 +201,8 @@ public sealed class UnmanagedBlobTests
         await Assert.That(second.Tick(ref bb, 0.1f)).IsEqualTo(NodeState.Running);
     }
 
-    /// <summary>
-    /// The whole point of the exercise: an instance is BYTES, so copying those bytes copies the
-    /// behavior tree mid-flight. This is what lets one live in an ECS component that a world
-    /// snapshot memcpy's.
-    /// </summary>
+    /// <summary>An instance is BYTES, so copying them copies the tree mid-flight — what lets one
+    /// live in a component a snapshot memcpy's.</summary>
     [Test]
     public async Task An_Instance_Survives_A_Raw_Memory_Copy()
     {
@@ -255,7 +238,7 @@ public sealed class UnmanagedBlobTests
         await Assert.That(second).IsEqualTo(first);
     }
 
-    /// <summary>A node type this test file registers nowhere, so the layout has to refuse it.</summary>
+    /// <summary>Registered nowhere, so the layout must refuse it.</summary>
     [System.Runtime.InteropServices.Guid("6D6F4F4F-2C4F-4E8B-9F1D-5B2A7C3E0A11")]
     private struct UnregisteredNode : INodeData
     {

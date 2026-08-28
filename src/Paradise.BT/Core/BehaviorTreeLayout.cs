@@ -3,30 +3,24 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// The SHARED, IMMUTABLE half of a compiled behavior tree, as plain memory: per node, where its
-/// subtree ends, which type it is, and the bytes its data starts at.
+/// The shared, immutable half of a compiled tree, as plain memory: per node, where its subtree
+/// ends, which type it is, and where its data starts.
 ///
-/// <b>This is the half that does not vary per instance, and separating it is the point.</b> A
-/// thousand agents running one tree share exactly one of these; what each of them owns privately
-/// is only the mutable half — a <see cref="NodeState"/> per node and a copy of the node data —
-/// which is small, blittable, and therefore something an ECS component can hold. The managed
-/// <see cref="NodeBlob"/> makes no such split: it allocates one boxed <c>RuntimeNode</c> per node
-/// PER INSTANCE, so a thousand agents means a thousand object graphs.
+/// A thousand agents share one layout; each owns only the mutable half (a
+/// <see cref="NodeState"/> per node plus a copy of the data), which is small and blittable enough
+/// for an ECS component. <see cref="NodeBlob"/> makes no such split — it boxes a node per
+/// instance.
 ///
-/// <b>Lifetime is the caller's, and it is a real obligation.</b> This owns a native allocation and
-/// every <see cref="UnmanagedNodeBlob"/> built from it holds a raw pointer into it. Dispose it
-/// only once nothing is still ticking against it — the same contract a physics acceleration
-/// structure carries, and for the same reason.
+/// Owns a native allocation that every <see cref="UnmanagedNodeBlob"/> points into: dispose it
+/// only once nothing is still ticking against it.
 ///
-/// <b>Every node type must be registered FIRST.</b> A layout resolves each node's <c>[Guid]</c>
-/// through <see cref="NodeTypeRegistry"/> and refuses, by name, a type nobody registered — rather
-/// than storing an unresolvable id and failing on the first tick, a long way from the cause.
+/// Node types must be registered with <see cref="NodeTypeRegistry"/> first; an unregistered one is
+/// refused by name here rather than faulting on the first tick.
 /// </summary>
 public sealed unsafe class BehaviorTreeLayout : IDisposable
 {
-    /// <summary>Node data is aligned to this, so a node containing a vector type is not read
-    /// across an alignment boundary. 16 rather than 8 because that is what the widest primitive a
-    /// node might reasonably hold wants; the waste is bytes per node, once per tree.</summary>
+    /// <summary>Node data alignment, so a node holding a vector type is not read across a
+    /// boundary. Costs a few bytes per node, once per tree.</summary>
     private const int DataAlignment = 16;
 
     private LayoutData* _data;
@@ -47,11 +41,8 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
     public int RuntimeDataSize => Handle.RuntimeDataSize;
 
     /// <summary>
-    /// Flatten a compiled tree into shared memory.
-    ///
-    /// The default data is copied out of the tree's own factories, so a layout says exactly what
-    /// <see cref="BehaviorTree.CreateInstance{TBlackboard}"/> would have said — one authored tree,
-    /// two runtimes, no second source of defaults.
+    /// Flatten a compiled tree into shared memory. Defaults are copied from the tree's own
+    /// factories, so there is no second source of them.
     /// </summary>
     /// <exception cref="InvalidOperationException">A node's type was never registered with
     /// <see cref="NodeTypeRegistry"/>, or it holds managed references and cannot be stored as
