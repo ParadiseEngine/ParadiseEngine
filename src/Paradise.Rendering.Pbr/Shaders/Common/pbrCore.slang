@@ -165,9 +165,15 @@ static const float ShadowDepthBias = 0.0004;
 // and every texel beyond that widens the contact light-leak strip. The cap bounds the grazing
 // blow-up; past it the surface is nearly edge-on to the light and receives little direct light
 // anyway, so residual acne there stays invisible.
-static const float ShadowNormalBiasTexels = 0.5;
+static const float ShadowNormalBiasTexels = 0.5;      // soft path: plane bias covers the disk
+static const float ShadowNormalBiasTexelsHard = 1.0;  // hard path: no plane bias, hw 2x2 footprint
 static const float ShadowMaxSlopeTexels = 2.0;    // cap on the total lift, in texels
-static const float ShadowPlaneBiasClamp = 0.01;   // NDC cap on the per-tap plane adjustment
+// NDC cap on the per-tap plane adjustment. It bounds SILHOUETTE light-leak: at a shadow edge the
+// receiver plane extends past the caster, and an unbounded gradient there would tilt taps into
+// accepting the caster's own depth. Sized against the camera-fit sun's depth range (~0.5-1.5 m of
+// depth per 0.01 NDC); the legacy whole-scene fit's larger range makes the cap proportionally
+// looser, which errs toward more bias on the path whose texels are also proportionally coarser.
+static const float ShadowPlaneBiasClamp = 0.01;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
 int getPointShadowFace(float3 dir)
@@ -188,7 +194,14 @@ float shadowDiskHash(float2 pos)
     return frac(magic.z * frac(dot(pos, magic.xy)));
 }
 
-float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 N, float3 surfaceToLight, float2 fragCoord)
+// geoN is the GEOMETRIC normal (front-face-corrected interpolated vertex normal), not the
+// normal-mapped shading normal: every quantity here — the lift direction, the slope factor, the
+// receiver-plane basis — describes the real surface the shadow map rasterized. A normal-mapped
+// floor's shading normal tilts the solved plane away from the actual geometry, turning the
+// per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
+// the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
+// out of the shadow lookup entirely.)
+float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
         return 1.0; // no shadow for this light
@@ -200,14 +213,23 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
         return 1.0;
 
     // Normal-offset bias (mechanism 1 above): the centre texel's quantization, more toward
-    // grazing, capped — and no more, or the contact strip beside every caster lightens.
+    // grazing, capped — and no more, or the contact strip beside every caster lightens. The
+    // hard-shadow path carries a larger base: it has no receiver-plane bias (a single tap has no
+    // offsets to adjust), and its hardware 2x2 comparison footprint needs up to ~sqrt(2)·tan
+    // texels of depth coverage that the soft path's per-tap plane adjustment provides instead.
     float texelWorld = light.sizeParams.y;
-    if (light.positionAndType.w > 0.5) // perspective (point/spot): texels grow with distance
+    if (light.positionAndType.w > 0.5)
+    {
+        // Perspective (point/spot): texels grow with distance. RADIAL distance, not axial — an
+        // over-estimate of up to 1/cos(off-axis angle) at a cone's rim, deliberately erring
+        // toward more bias rather than under-covering the texel.
         texelWorld *= length(light.positionAndType.xyz - worldPos);
-    float ndotl = saturate(dot(N, surfaceToLight));
+    }
+    float biasTexels = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
+    float ndotl = saturate(dot(geoN, surfaceToLight));
     float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
-    float liftTexels = min(ShadowNormalBiasTexels * (1.0 + slope), ShadowMaxSlopeTexels);
-    float3 samplePos = worldPos + N * (texelWorld * liftTexels);
+    float liftTexels = min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels);
+    float3 samplePos = worldPos + geoN * (texelWorld * liftTexels);
 
     int matrixIndex = lightIndex * 6 + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
@@ -264,8 +286,8 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
         // tap then compares against the PLANE's depth at its own offset rather than the centre's,
         // which is what lets the normal offset above stay at ~1 texel instead of covering the
         // whole disk. Exact for the ortho sun; first-order (and ample) for spot/point perspective.
-        float3 tan1 = normalize(cross(N, abs(N.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
-        float3 tan2 = cross(N, tan1);
+        float3 tan1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
+        float3 tan2 = cross(geoN, tan1);
         float planeStep = max(texelWorld, 1e-4);
         float4 q1 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan1 * planeStep, 1.0));
         float4 q2 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan2 * planeStep, 1.0));
@@ -305,6 +327,7 @@ float3 evaluateDirectLight(
     int lightIndex,
     float3 worldPos,
     float3 N,
+    float3 geoN,
     float3 V,
     float3 F0,
     float3 baseColor,
@@ -384,7 +407,7 @@ float3 evaluateDirectLight(
     float3 kD = float3(1.0 - metallic, 1.0 - metallic, 1.0 - metallic);
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
-    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, N, L, fragCoord);
+    float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, geoN, L, fragCoord);
     return (diffuse + specular) * radiance * NdotL * shadow;
 }
 
@@ -722,6 +745,9 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
 {
     roughness = applySpecularAntiAliasing(max(roughness, 0.04), N);
     float3 V = normalize(frame.cameraPos.xyz - input.worldPos);
+    // The GEOMETRIC normal, for the shadow-bias geometry only (see sampleSceneLightShadow):
+    // the front-face-corrected vertex normal, independent of whatever normal map shaped N.
+    float3 geoN = normalize(input.isFrontFace ? input.worldNormal : -input.worldNormal);
 
     // Dielectric F0 = 0.04, metallic F0 = albedo
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor.rgb, metallic);
@@ -764,6 +790,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
             i,
             input.worldPos,
             N,
+            geoN,
             V,
             F0,
             baseColor.rgb,

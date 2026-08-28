@@ -16,6 +16,8 @@
   still exists for genuinely unsupported types. Consider it also when adding any new field shape
   to a contract record.
 
+## Paradise.BLOB
+
 - [hits: 1] **`StructBuilder<T>` used to silently DROP plain (non-builder) fields set through
   `builder.Value.X = ...`** — its `BuildImpl` only ran the registered field builders and never
   copied `_value` into the reserved (zero-initialized) data region, unlike `ValueBuilder<T>`
