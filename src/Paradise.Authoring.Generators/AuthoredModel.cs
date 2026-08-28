@@ -229,6 +229,20 @@ internal static class AuthoredModel
             var elementType = ElementTypeOf(member.Type);
             var valueType = elementType ?? member.Type;
 
+            // A nullable VALUE type (int?, float?) authors as its underlying type: the wire
+            // payload is the plain value, the generated assignment converts implicitly, and an
+            // absent (or JSON-null) property keeps the record's own null initializer — which is
+            // exactly what "unset leaves the default" fields mean by null. Without this unwrap
+            // the type matches nothing below and the field is SILENTLY skipped from schema and
+            // reader alike — which is how EnvironmentData.ShadowMapSize authored 4096 and
+            // materialized null. Leaves only, not list elements: a List<int?> would need the
+            // reader's element list to be nullable too, and no contract field wants one.
+            if (elementType is null && valueType is INamedTypeSymbol
+                { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableLeaf)
+            {
+                valueType = nullableLeaf.TypeArguments[0];
+            }
+
             var schemaType = SchemaTypeOf(valueType);
             List<AuthoredField>? nested = null;
             List<string>? enumValues = null;

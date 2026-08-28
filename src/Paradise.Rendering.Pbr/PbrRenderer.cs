@@ -59,9 +59,9 @@ public sealed class PbrRenderer : IDisposable
 
     /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
     /// shadow map covers. The fit used to be the whole scene AABB, which on a large world
-    /// stretches the map until its per-texel depth error exceeds the shadow bias and flat ground
-    /// self-shadows in diagonal bands. A camera-centred fit keeps texel density constant no
-    /// matter how big the scene grows; the box is snapped to whole texels so it does not shimmer
+    /// stretches the map until shadows blur into mush (and, before the bias scaled with texel
+    /// size, flat ground self-shadowed in diagonal bands). A camera-centred fit keeps texel
+    /// density constant no matter how big the scene grows; the box is snapped to whole texels so it does not shimmer
     /// as the camera moves, and the depth range still spans the scene AABB so tall casters
     /// outside the circle keep casting in. When the scene is smaller than the radius (or the
     /// radius is 0) the legacy whole-scene fit applies — small scenes keep their tighter box.</summary>
@@ -198,6 +198,9 @@ public sealed class PbrRenderer : IDisposable
     // assignment (base layer / face count; base layer -1 = not shadowed this frame).
     private readonly List<(int LightIndex, int Face, uint Layer, Matrix4x4 Vp)> _shadowViews = [];
     private readonly int[] _shadowBaseLayer = new int[FrameUniformsGpu.MaxSceneLights];
+    // Shadow texel world size per light (see ComputeLightMatrix), uploaded as sizeParams.y so the
+    // shader's normal-offset bias scales with the map's actual texel density instead of assuming one.
+    private readonly float[] _shadowTexelWorld = new float[FrameUniformsGpu.MaxSceneLights];
     private readonly int[] _shadowFaceCount = new int[FrameUniformsGpu.MaxSceneLights];
     private TextureHandle _depthTexture;
     private uint _width;
@@ -849,7 +852,9 @@ public sealed class PbrRenderer : IDisposable
                 for (var f = 0; f < faceCount; f++)
                 {
                     _shadowViews.Add((i, f, (uint)(shadowLayerCount + f),
-                        ComputeLightMatrix(light, f, center, extent, cameraPosition)));
+                        ComputeLightMatrix(light, f, center, extent, cameraPosition, out var texelWorld)));
+                    // Same for every cube face (the six 90° frusta share one texel density).
+                    _shadowTexelWorld[i] = texelWorld;
                 }
                 shadowLayerCount += faceCount;
             }
@@ -1182,8 +1187,16 @@ public sealed class PbrRenderer : IDisposable
     // Light-space view-projection for one shadow face: directional = ortho fit to a camera-centred
     // circle (falling back to the scene AABB for small scenes); spot = perspective down the cone;
     // point = one of six 90°-FOV cube faces.
+    //
+    // texelWorld is the shadow texel's WORLD size, the quantity the shader scales its normal-offset
+    // bias by (SceneLight.sizeParams.y): a fixed world-space bias is only ever tuned for one texel
+    // size, and any coarser map (smaller texture, larger footprint) outgrows it and self-shadows in
+    // diagonal bands. Ortho (directional) texels have one world size; perspective (spot/point)
+    // texels grow with distance, so those report metres PER METRE of receiver distance and the
+    // shader multiplies by its own distance to the light.
     private Matrix4x4 ComputeLightMatrix(
-        PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition)
+        PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition,
+        out float texelWorld)
     {
         switch (light.Type)
         {
@@ -1194,6 +1207,7 @@ public sealed class PbrRenderer : IDisposable
                 var view = PbrMath.LookAt(light.Position, light.Position + aim, up);
                 var fov = Math.Clamp(light.SpotOuterDegrees * (MathF.PI / 180f) * 1.05f, 0.1f, 3.0f);
                 var proj = PbrMath.Perspective(fov, 1f, 0.05f, MathF.Max(light.Range, 1f));
+                texelWorld = 2f * MathF.Tan(fov * 0.5f) / _shadowMapSize; // per metre of distance
                 return PbrMath.ViewProjection(view, proj);
             }
             case PbrLightType.Point:
@@ -1201,12 +1215,13 @@ public sealed class PbrRenderer : IDisposable
                 var (dir, up) = CubeFace(face);
                 var view = PbrMath.LookAt(light.Position, light.Position + dir, up);
                 var proj = PbrMath.Perspective(MathF.PI / 2f, 1f, 0.05f, MathF.Max(light.Range, 1f));
+                texelWorld = 2f / _shadowMapSize; // tan(90°/2) = 1; per metre of distance
                 return PbrMath.ViewProjection(view, proj);
             }
             default: // Directional
                 return ComputeDirectionalLightMatrix(
                     light.Direction, center, extent, cameraPosition,
-                    DirectionalShadowRadius, _shadowMapSize);
+                    DirectionalShadowRadius, _shadowMapSize, out texelWorld);
         }
     }
 
@@ -1250,7 +1265,8 @@ public sealed class PbrRenderer : IDisposable
     // The XY footprint is a SQUARE of side 2·min(shadowRadius, sceneRadius), centred on the
     // camera (clamped into the scene AABB) — not the scene AABB itself. Fitting the whole scene
     // is what made a growing world quietly destroy its own shadow quality: texel size scales with
-    // the AABB, and past the shader's fixed bias the flat ground self-shadows in diagonal bands.
+    // the AABB, blurring every shadow edge (the acne this once caused is gone — the bias now
+    // scales with texelWorld — but the resolution loss is inherent).
     // A camera-centred fit keeps metres-per-texel constant forever. Two details carry it:
     //
     // * The centre is SNAPPED to whole shadow texels in the light's plane basis, so the box
@@ -1263,7 +1279,7 @@ public sealed class PbrRenderer : IDisposable
     // legacy whole-AABB fit applies — a small scene keeps its tighter, non-square box.
     private static Matrix4x4 ComputeDirectionalLightMatrix(
         Vector3 surfaceToLight, Vector3 center, Vector3 extent, Vector3 cameraPosition,
-        float shadowRadius, uint shadowMapSize)
+        float shadowRadius, uint shadowMapSize, out float texelWorld)
     {
         var lightDir = surfaceToLight.LengthSquared() > 1e-6f ? Vector3.Normalize(surfaceToLight) : Vector3.UnitY;
         const float depthPad = 32f;
@@ -1303,6 +1319,7 @@ public sealed class PbrRenderer : IDisposable
             var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
             var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
             var proj = PbrMath.OrthographicOffCenter(-radius, radius, -radius, radius, nearPlane, farPlane);
+            texelWorld = texel; // the snap grid IS the texel size: 2·radius / mapSize
             return PbrMath.ViewProjection(lightView, proj);
         }
 
@@ -1329,6 +1346,9 @@ public sealed class PbrRenderer : IDisposable
             var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
             var proj = PbrMath.OrthographicOffCenter(
                 minX - xyPad, maxX + xyPad, minY - xyPad, maxY + xyPad, nearPlane, farPlane);
+            // The map is square but the fit is not; the wider axis has the coarser texels, and the
+            // bias must cover the worst case.
+            texelWorld = MathF.Max(maxX - minX + 2f * xyPad, maxY - minY + 2f * xyPad) / shadowMapSize;
             return PbrMath.ViewProjection(lightView, proj);
         }
     }
@@ -1532,9 +1552,10 @@ public sealed class PbrRenderer : IDisposable
             frame.SceneLightShadowMatrices[lightIndex * 6 + face] = vp;
         }
         // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
-        // face count (shadowAtlas.y) and soft-shadow flag (shadowAtlas.w). shadowAtlas.x carries
-        // the distance-attenuation decay and .z the LIGHT_PARAM_SPECULAR amount (both set by
-        // ToGpu) and must be preserved here.
+        // face count (shadowAtlas.y), soft-shadow flag (shadowAtlas.w) and shadow texel world
+        // size (sizeParams.y — the bias scale, see ComputeLightMatrix). shadowAtlas.x carries
+        // the distance-attenuation decay, .z the LIGHT_PARAM_SPECULAR amount and sizeParams.x
+        // the light's angular/world size (all set by ToGpu) and must be preserved here.
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
             if (_shadowBaseLayer[i] < 0) continue;
@@ -1542,6 +1563,7 @@ public sealed class PbrRenderer : IDisposable
             light.SpotAngles.Z = _shadowBaseLayer[i];
             light.SpotAngles.W = Math.Clamp(scene.Lights[i].ShadowStrength, 0f, 1f);
             light.ShadowAtlas = new Vector4(light.ShadowAtlas.X, _shadowFaceCount[i], light.ShadowAtlas.Z, scene.Lights[i].SoftShadows ? 1f : 0f);
+            light.SizeParams.Y = _shadowTexelWorld[i];
             frame.Lights[i] = light;
         }
         _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
@@ -1562,6 +1584,7 @@ public sealed class PbrRenderer : IDisposable
     internal bool CaptureFrameLightsForTest;
     private SceneLightArray _lastFrameLightsForTest;
     internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
+    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].SizeParams;
 
     /// <summary>Register a game-supplied shader program for use by materials. The program is
     /// typically an extension shader that <c>#include</c>s <c>Common/pbrCore.slang</c>, compiled

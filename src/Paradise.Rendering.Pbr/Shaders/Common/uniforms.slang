@@ -14,7 +14,7 @@ struct SceneLight
     float4 colorAndIntensity;     // rgb: color, w: intensity
     float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
     float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
-    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), yzw unused
+    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), y: shadow texel world size (directional: metres; point/spot: metres per metre of receiver distance), zw unused
 };
 
 struct DrawUniforms

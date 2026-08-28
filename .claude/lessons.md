@@ -1,5 +1,21 @@
 # Project Lessons — ParadiseEngine
 
+## Paradise.Authoring
+
+- [hits: 1] **`AuthoredModel.Read` SILENTLY skips any `[Authored]` property whose type it cannot
+  map — no diagnostic, no runtime warning — and the field vanishes from schema AND generated
+  reader alike.** `Nullable<T>` value types (`int?`, `float?`) hit this until 2026-08-28
+  (`SchemaTypeOf` sees `SpecialType.None`): `EnvironmentData.ShadowMapSize` authored 4096,
+  materialized null, and the renderer silently ran its 1024 default — the shadow-acne bands PR
+  #141 had fixed came back with no error anywhere. Fixed by unwrapping `Nullable<T>` leaves to
+  their underlying type (absent/JSON-null keeps the record's null initializer, which is what
+  "unset leaves the default" means); guarded by
+  `nullable_value_fields_materialize_when_present_and_stay_null_when_absent`. **Rule**: when a
+  scene-authored value "doesn't apply" at runtime, diff the regenerated `authoring-schema.json`
+  for the field FIRST — a field missing there was skipped by the generator, and the skip path
+  still exists for genuinely unsupported types. Consider it also when adding any new field shape
+  to a contract record.
+
 ## Paradise.BLOB
 
 - [hits: 1] **`StructBuilder<T>` used to silently DROP plain (non-builder) fields set through

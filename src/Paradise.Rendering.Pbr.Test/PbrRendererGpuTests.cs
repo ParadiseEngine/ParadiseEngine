@@ -285,6 +285,72 @@ public class PbrRendererGpuTests
             pbr.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
             await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+            // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
+            // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
+            // detaching). Point light: perspective texels are metres PER METRE of distance,
+            // 2·tan(45°)/mapSize at the default 1024 map.
+            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The DIRECTIONAL shadow texel size — the value all the actual fit arithmetic feeds, and the
+    /// one whose silent corruption reproduces the original bug class (a wrong bias scale, no test
+    /// failure, acne or detached shadows in-game). Both fits are pinned:
+    ///
+    /// * LEGACY whole-scene fit (scene smaller than DirectionalShadowRadius): a unit cube under a
+    ///   straight-down sun projects to a 1x1 light-space footprint, padded by xyPad = 1 on each
+    ///   side — texel = 3/mapSize. The straight-down direction makes the light basis axis-aligned,
+    ///   so the expected span is exact whatever the LookAt handedness.
+    /// * CAMERA-CENTRED fit (scene larger than the radius): texel = 2·(radius + xyPad)/mapSize,
+    ///   the same value the fit snaps its focus grid to.
+    /// </summary>
+    [Test]
+    public async Task directional_shadow_texel_size_tracks_the_active_fit()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            var (vertices, indices) = Procedural.UnitCube();
+            var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
+            var mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
+            var instance = new PbrInstance { Mesh = mesh };
+
+            var scene = new PbrScene
+            {
+                Camera = new PbrCamera
+                {
+                    View = PbrMath.LookAt(new Vector3(0f, 1.5f, 3f), Vector3.Zero, Vector3.UnitY),
+                    Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                    Position = new Vector3(0f, 1.5f, 3f),
+                },
+            };
+            scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Directional,
+                Direction = Vector3.UnitY, // surface-to-light: straight down, axis-aligned basis
+                Intensity = 1f,
+                CastsShadows = true,
+            });
+            scene.Instances.Add(instance);
+            pbr.CaptureFrameLightsForTest = true;
+
+            // Unit cube → sceneRadius clamps to 4 < DirectionalShadowRadius (50) → legacy fit.
+            pbr.RenderFrame(scene);
+            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+                .IsEqualTo(3f / 1024f).Within(1e-7f);
+
+            // 300 m cube → sceneRadius ≈ 130 > 50 → camera-centred fit at radius + xyPad = 51.
+            instance.Model = Matrix4x4.CreateScale(300f);
+            pbr.RenderFrame(scene);
+            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+                .IsEqualTo(2f * 51f / 1024f).Within(1e-7f);
         }
         finally
         {
