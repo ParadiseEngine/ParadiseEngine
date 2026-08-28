@@ -41,6 +41,29 @@ public sealed class TagFilterGeneratorTests
     }
 
     [Test]
+    public async Task WithoutTag_Singleton_DoesNotCallChunkMatchesOnConcreteData()
+    {
+        const string source = Preamble + """
+
+            [Queryable(Singleton = true)]
+            [WithoutTag<Alive>]
+            [With<Position>(IsReadOnly = true)]
+            public readonly ref partial struct TheOnlyIdle;
+            """;
+
+        var sources = GeneratorTestHelper.GetQueryableGeneratedSources(source);
+        var generated = sources.FirstOrDefault(s =>
+            s.HintName.Contains("TheOnlyIdle", StringComparison.Ordinal)).Source;
+
+        await Assert.That(generated).IsNotNull();
+        // The row test is emitted; the coarse pass is not — a static-virtual default is not
+        // callable on the concrete Data type, which is what Resolve would have to name.
+        await Assert.That(generated!).Contains("Data<TMask, TConfig>.Matches(");
+        await Assert.That(generated).DoesNotContain("Data<TMask, TConfig>.ChunkMatches(");
+        await Assert.That(generated).DoesNotContain("public static bool ChunkMatches(");
+    }
+
+    [Test]
     public async Task WithTagAndWithoutTag_DifferentTags_BothAppearInMatches()
     {
         const string source = Preamble + """

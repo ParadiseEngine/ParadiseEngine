@@ -75,6 +75,13 @@ public sealed class WithTagAttribute<T> : Attribute
 /// queryable are PECS3012 unless that field is marked <see cref="IgnoreTagsAttribute"/>.
 /// </para>
 /// <para>
+/// Like <see cref="WithTagAttribute{T}"/>, this adds <c>EntityTags</c> to the required
+/// COMPONENT mask — the bits live there, so an archetype that cannot carry tags is rejected
+/// before a row is read. An entity with no tag storage therefore matches nothing, including
+/// a without-filter. Every <c>TaggedWorld</c> creation path stamps <c>EntityTags</c>, so that
+/// case does not arise there.
+/// </para>
+/// <para>
 /// <b>Chunk skip cannot help.</b> The per-chunk mask is a sticky union. A clear bit proves
 /// nobody has T (every row matches — the enumerator still walks them). A set bit proves nothing
 /// (a mix, or a leftover after a remove). There is no intersection mask, so

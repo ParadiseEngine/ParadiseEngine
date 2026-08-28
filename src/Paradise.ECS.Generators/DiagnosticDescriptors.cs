@@ -429,7 +429,7 @@ internal static class DiagnosticDescriptors
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "[WithTag]/[WithoutTag] are row filters. They run on query iteration, singleton resolve, entity-mode claims, and lookups unless the field is marked [IgnoreTags]. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them, so a tag-filtered queryable claimed that way is an error unless the field carries [IgnoreTags] — which acknowledges the filter will not run, and that the system must test EntityTags itself.");
+        description: "[WithTag]/[WithoutTag] are row filters. They run on query iteration, singleton resolve, entity-mode claims, and lookups unless the field is marked [IgnoreTags]. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them, so a tag-filtered queryable claimed that way is an error unless the field carries [IgnoreTags] — which acknowledges the filter will not run, and that the system must test EntityTags itself. Only queryables declared in the current compilation are diagnosed; a tag-filtered queryable from a referenced assembly is not.");
 
     /// <summary>
     /// PECS3013: [IgnoreTags] on a field that is not a queryable view.

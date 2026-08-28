@@ -300,6 +300,20 @@ public sealed class TagQueryTests : IDisposable
     }
 
     [Test]
+    public async Task WithoutTag_SingletonResolvesToTheUntaggedEntity()
+    {
+        // The compile pin for WithoutTag-only Resolve: ChunkMatches is not generated, so naming
+        // it on Data<TMask, TConfig> is CS0117. One tagged neighbour so the match is not row 0.
+        var tagged = SpawnPositioned(1);
+        _world.AddTag<TestIsPlayer>(tagged);
+        SpawnPositioned(2);
+
+        var x = TestUntaggedSingleton.Singleton<ComponentMask, DefaultConfig>
+            .Resolve(_world, null).TestPosition.X;
+        await Assert.That(x).IsEqualTo(2f);
+    }
+
+    [Test]
     public async Task IgnoreTags_LookupAcceptsATaggedHandle()
     {
         var tagged = SpawnPositioned(1);
@@ -403,3 +417,10 @@ public readonly ref partial struct TestUntaggedPosition;
 [WithoutTag<TestIsPlayer>]
 [With<TestPosition>]
 public readonly ref partial struct TestActiveNonPlayer;
+
+/// <summary>WithoutTag-only singleton — the combination that must not name
+/// <c>Data.ChunkMatches</c> (the method is omitted; a static-virtual default is CS0117).</summary>
+[Queryable(Id = 26, Singleton = true)]
+[WithoutTag<TestIsPlayer>]
+[With<TestPosition>(IsReadOnly = true)]
+public readonly ref partial struct TestUntaggedSingleton;
