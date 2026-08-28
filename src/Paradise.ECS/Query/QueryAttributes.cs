@@ -7,7 +7,8 @@ namespace Paradise.ECS;
 /// <remarks>
 /// <para>
 /// Use <see cref="WithAttribute{T}"/>, <see cref="WithoutAttribute{T}"/>, and
-/// <see cref="WithAnyAttribute{T}"/> to specify the query constraints.
+/// <see cref="WithAnyAttribute{T}"/> to specify the query constraints. Tag filters
+/// (<c>WithTag</c> / <c>WithoutTag</c>) live in Paradise.ECS.Tag.
 /// </para>
 /// </remarks>
 /// <example>

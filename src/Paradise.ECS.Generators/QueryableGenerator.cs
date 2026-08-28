@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -140,6 +141,7 @@ public class QueryableGenerator : IIncrementalGenerator
         var anyComponents = new List<string>();
         var optionalComponents = new List<ComponentInfo>();
         var withTags = new List<string>();
+        var withoutTags = new List<string>();
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -199,6 +201,11 @@ public class QueryableGenerator : IIncrementalGenerator
                     // it cannot even be written, since the two attributes constrain to different
                     // interfaces.
                     withTags.Add(componentFullName);
+                    attrType = null;
+                }
+                else if (metadataName.StartsWith("Paradise.ECS.WithoutTagAttribute<", StringComparison.Ordinal))
+                {
+                    withoutTags.Add(componentFullName);
                     attrType = null;
                 }
                 else if (metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal))
@@ -271,6 +278,7 @@ public class QueryableGenerator : IIncrementalGenerator
             anyComponents.ToImmutableArray(),
             optionalComponents.ToImmutableArray(),
             withTags.ToImmutableArray(),
+            withoutTags.ToImmutableArray(),
             duplicates);
     }
 
@@ -319,10 +327,20 @@ public class QueryableGenerator : IIncrementalGenerator
                     queryable.FullyQualifiedName,
                     string.Join(", ", attrs)));
             }
+
+            foreach (var tag in queryable.ConflictingTags)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ConflictingTagFilters,
+                    queryable.Location,
+                    queryable.FullyQualifiedName,
+                    tag.Split('.').Last()));
+            }
         }
 
         // Filter to valid queryables (must be ref struct, partial, and no duplicates)
-        var validQueryables = sorted.Where(q => q.IsRefStruct && q.IsPartial && !q.HasDuplicates).ToList();
+        var validQueryables = sorted.Where(q =>
+            q.IsRefStruct && q.IsPartial && !q.HasDuplicates && q.ConflictingTags.IsEmpty).ToList();
         if (validQueryables.Count == 0)
             return;
 
@@ -543,8 +561,13 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.IWorld<TMask, TConfig> _world;");
+        sb.AppendLine($"{indent}    private readonly bool _ignoreTags;");
         sb.AppendLine();
-        sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world) => _world = world;");
+        sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world, bool ignoreTags = false)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        _world = world;");
+        sb.AppendLine($"{indent}        _ignoreTags = ignoreTags;");
+        sb.AppendLine($"{indent}    }}");
         sb.AppendLine();
         sb.AppendLine($"{indent}    /// <summary>Returns whether the entity is alive and matches {queryable.TypeName}.</summary>");
         sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => TryGet(entity, out _);");
@@ -569,7 +592,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"{indent}        var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(location.GlobalIndex);");
         sb.AppendLine($"{indent}        var chunk = archetype.GetChunk(chunkIndex);");
-        sb.AppendLine($"{indent}        if (!global::Paradise.ECS.QueryHelpers.RowMatches<{queryable.TypeName}.Data<TMask, TConfig>, TMask, TConfig>(_world.ChunkManager, archetype.Layout, chunk, indexInChunk)) return false;");
+        sb.AppendLine($"{indent}        if (!_ignoreTags && !global::Paradise.ECS.QueryHelpers.RowMatches<{queryable.TypeName}.Data<TMask, TConfig>, TMask, TConfig>(_world.ChunkManager, archetype.Layout, chunk, indexInChunk)) return false;");
         sb.AppendLine();
         if (reader)
         {
@@ -1060,7 +1083,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    /// matches zero or more than one entity.</exception>");
         sb.AppendLine($"{indent}    public static Singleton<TMask, TConfig> Resolve(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig> world,");
-        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld)");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld,");
+        sb.AppendLine($"{indent}        bool ignoreTags = false)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        var query = world.ArchetypeRegistry.GetOrCreateQuery(global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[{queryableFQN}.QueryableId]);");
         sb.AppendLine($"{indent}        int count = 0;");
@@ -1072,48 +1096,51 @@ public class QueryableGenerator : IIncrementalGenerator
         {
             // Tag-filtered: the match can sit at any row of any chunk, and the chunk's entity
             // count is not the match count. Both facts break the unfiltered form below, which
-            // sums chunk counts and then binds index 0.
+            // sums chunk counts and then binds index 0. ignoreTags: true takes that unfiltered
+            // form — the field opted out of the row test, so cardinality is archetype-level.
             sb.AppendLine($"{indent}        int indexInChunk = 0;");
             sb.AppendLine($"{indent}        int writeEntityCount = 1;");
-            sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
+            sb.AppendLine($"{indent}        if (ignoreTags)");
             sb.AppendLine($"{indent}        {{");
-            // Same coarse pass the enumerator does. It matters most HERE: a singleton resolves once
-            // per step for the lifetime of a run, so skipping chunks that cannot hold the match is
-            // the difference between scanning an archetype every tick and glancing at its chunks.
-            sb.AppendLine($"{indent}            if (!Data<TMask, TConfig>.ChunkMatches(world.ChunkManager, ci.Archetype.Layout, ci.Handle))");
-            sb.AppendLine($"{indent}                continue;");
-            sb.AppendLine($"{indent}            for (int i = 0; i < ci.EntityCount; i++)");
+            EmitUnfilteredSingletonWalk(sb, indent + "    ");
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine($"{indent}        else");
+            sb.AppendLine($"{indent}        {{");
+            sb.AppendLine($"{indent}            foreach (var ci in query.Chunks)");
             sb.AppendLine($"{indent}            {{");
-            sb.AppendLine($"{indent}                if (!Data<TMask, TConfig>.Matches(world.ChunkManager, ci.Archetype.Layout, ci.Handle, i))");
-            sb.AppendLine($"{indent}                    continue;");
-            sb.AppendLine($"{indent}                if (count == 0)");
+            // Same coarse pass the enumerator does — but only when a required tag exists to
+            // test. ChunkMatches is omitted for WithoutTag-only queryables (the sticky union
+            // cannot reject a chunk for an excluded tag), and a static-virtual default is not
+            // reachable through the concrete Data type (CS0117).
+            if (!queryable.WithTags.IsEmpty)
+            {
+                sb.AppendLine($"{indent}                if (!Data<TMask, TConfig>.ChunkMatches(world.ChunkManager, ci.Archetype.Layout, ci.Handle))");
+                sb.AppendLine($"{indent}                    continue;");
+            }
+            sb.AppendLine($"{indent}                for (int i = 0; i < ci.EntityCount; i++)");
             sb.AppendLine($"{indent}                {{");
-            sb.AppendLine($"{indent}                    chunk = ci.Handle;");
-            sb.AppendLine($"{indent}                    layoutData = ci.Archetype.Layout.DataPointer;");
-            sb.AppendLine($"{indent}                    archetypeId = ci.Archetype.Id;");
-            sb.AppendLine($"{indent}                    chunkIndex = ci.ChunkIndex;");
-            sb.AppendLine($"{indent}                    indexInChunk = i;");
-            sb.AppendLine($"{indent}                    writeEntityCount = ci.EntityCount;");
+            sb.AppendLine($"{indent}                    if (!Data<TMask, TConfig>.Matches(world.ChunkManager, ci.Archetype.Layout, ci.Handle, i))");
+            sb.AppendLine($"{indent}                        continue;");
+            sb.AppendLine($"{indent}                    if (count == 0)");
+            sb.AppendLine($"{indent}                    {{");
+            sb.AppendLine($"{indent}                        chunk = ci.Handle;");
+            sb.AppendLine($"{indent}                        layoutData = ci.Archetype.Layout.DataPointer;");
+            sb.AppendLine($"{indent}                        archetypeId = ci.Archetype.Id;");
+            sb.AppendLine($"{indent}                        chunkIndex = ci.ChunkIndex;");
+            sb.AppendLine($"{indent}                        indexInChunk = i;");
+            sb.AppendLine($"{indent}                        writeEntityCount = ci.EntityCount;");
+            sb.AppendLine($"{indent}                    }}");
+            sb.AppendLine($"{indent}                    count++;");
             sb.AppendLine($"{indent}                }}");
-            sb.AppendLine($"{indent}                count++;");
             sb.AppendLine($"{indent}            }}");
             sb.AppendLine($"{indent}        }}");
         }
         else
         {
+            sb.AppendLine($"{indent}        _ = ignoreTags;");
             sb.AppendLine($"{indent}        const int indexInChunk = 0;");
             sb.AppendLine($"{indent}        const int writeEntityCount = 1;");
-            sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
-            sb.AppendLine($"{indent}        {{");
-            sb.AppendLine($"{indent}            if (count == 0 && ci.EntityCount > 0)");
-            sb.AppendLine($"{indent}            {{");
-            sb.AppendLine($"{indent}                chunk = ci.Handle;");
-            sb.AppendLine($"{indent}                layoutData = ci.Archetype.Layout.DataPointer;");
-            sb.AppendLine($"{indent}                archetypeId = ci.Archetype.Id;");
-            sb.AppendLine($"{indent}                chunkIndex = ci.ChunkIndex;");
-            sb.AppendLine($"{indent}            }}");
-            sb.AppendLine($"{indent}            count += ci.EntityCount;");
-            sb.AppendLine($"{indent}        }}");
+            EmitUnfilteredSingletonWalk(sb, indent);
         }
         sb.AppendLine($"{indent}        if (count != 1)");
         sb.AppendLine($"{indent}        {{");
@@ -1160,6 +1187,24 @@ public class QueryableGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine($"{indent}}}");
+    }
+
+    /// <summary>Sums chunk entity counts and binds the first non-empty chunk at index 0.
+    /// Used for unfiltered singletons, and for filtered ones whose claim opted out of the
+    /// row test with <c>ignoreTags: true</c>.</summary>
+    private static void EmitUnfilteredSingletonWalk(StringBuilder sb, string indent)
+    {
+        sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
+        sb.AppendLine($"{indent}        {{");
+        sb.AppendLine($"{indent}            if (count == 0 && ci.EntityCount > 0)");
+        sb.AppendLine($"{indent}            {{");
+        sb.AppendLine($"{indent}                chunk = ci.Handle;");
+        sb.AppendLine($"{indent}                layoutData = ci.Archetype.Layout.DataPointer;");
+        sb.AppendLine($"{indent}                archetypeId = ci.Archetype.Id;");
+        sb.AppendLine($"{indent}                chunkIndex = ci.ChunkIndex;");
+        sb.AppendLine($"{indent}            }}");
+        sb.AppendLine($"{indent}            count += ci.EntityCount;");
+        sb.AppendLine($"{indent}        }}");
     }
 
     /// <summary>
@@ -1331,8 +1376,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    private readonly {inner} _inner;");
         sb.AppendLine();
         AppendAggressiveInlining(sb, indent + "    ");
-        sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world)");
-        sb.AppendLine($"{indent}        => _inner = new {inner}(world);");
+        sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world, bool ignoreTags = false)");
+        sb.AppendLine($"{indent}        => _inner = new {inner}(world, ignoreTags);");
         sb.AppendLine();
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    internal {viewName}({inner} inner) => _inner = inner;");
@@ -1373,8 +1418,9 @@ public class QueryableGenerator : IIncrementalGenerator
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    public static Singleton Resolve(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
-        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld)");
-        sb.AppendLine($"{indent}        => new({inner}.Resolve(world, readWorld));");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
+        sb.AppendLine($"{indent}        bool ignoreTags = false)");
+        sb.AppendLine($"{indent}        => new({inner}.Resolve(world, readWorld, ignoreTags));");
         GenerateDataPropertyForwards(sb, queryable, indent + "    ", "_inner");
         sb.AppendLine($"{indent}}}");
     }
@@ -1544,12 +1590,12 @@ public class QueryableGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Emits <c>IQueryData.IsFiltered</c> and <c>IQueryData.Matches</c> for a queryable declaring
-    /// <c>[WithTag&lt;T&gt;]</c> — and nothing at all for one that does not, which is every
-    /// queryable that existed before tags and the reason this is additive.
+    /// <c>[WithTag&lt;T&gt;]</c> or <c>[WithoutTag&lt;T&gt;]</c> — and nothing at all for one that
+    /// does not, which is every queryable that existed before tags and the reason this is additive.
     ///
     /// The test reads the entity's <c>EntityTags</c> component straight out of the chunk and checks
-    /// one bit per required tag. It reads the WRITE chunk deliberately: which entities a query
-    /// matches is a question about the world being iterated, not about the previous tick's
+    /// one bit per required or excluded tag. It reads the WRITE chunk deliberately: which entities
+    /// a query matches is a question about the world being iterated, not about the previous tick's
     /// snapshot, and the generated singleton counts cardinality there for the same reason.
     /// </summary>
     private static void GenerateRowFilter(
@@ -1558,14 +1604,21 @@ public class QueryableGenerator : IIncrementalGenerator
         if (!queryable.IsFiltered)
             return;
 
-        var tagList = string.Join(", ", queryable.WithTags.Select(static t => t.Split('.').Last()));
+        var required = string.Join(", ", queryable.WithTags.Select(static t => t.Split('.').Last()));
+        var excluded = string.Join(", ", queryable.WithoutTags.Select(static t => t.Split('.').Last()));
+        var tagList = queryable.WithTags.IsEmpty
+            ? $"without {excluded}"
+            : queryable.WithoutTags.IsEmpty
+                ? required
+                : $"{required}; without {excluded}";
 
         sb.AppendLine();
         sb.AppendLine($"{indent}/// <summary>This queryable filters rows by tag ({tagList}), so counting");
         sb.AppendLine($"{indent}/// cannot be answered from archetype bookkeeping alone.</summary>");
         sb.AppendLine($"{indent}public static bool IsFiltered => true;");
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>Whether this row carries every required tag ({tagList}).</summary>");
+        sb.AppendLine($"{indent}/// <summary>Whether this row carries every required tag and none of the");
+        sb.AppendLine($"{indent}/// excluded tags ({tagList}).</summary>");
         sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}public static bool Matches(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager chunkManager,");
@@ -1583,16 +1636,26 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.Append($"__tags.Mask.Get(global::{tag}.TagId)");
             first = false;
         }
+        foreach (var tag in queryable.WithoutTags)
+        {
+            if (!first) sb.Append($"\n{indent}        && ");
+            sb.Append($"!__tags.Mask.Get(global::{tag}.TagId)");
+            first = false;
+        }
         sb.AppendLine(";");
         sb.AppendLine($"{indent}}}");
         sb.AppendLine();
 
-        // The COARSE pass. The chunk carries the union of its entities' tags in a slot the layout
-        // reserved for EntityTags, so a chunk missing any required bit provably holds no match and
-        // is skipped without reading a single row.
-        sb.AppendLine($"{indent}/// <summary>Whether this chunk can hold a row carrying every required tag ({tagList}).");
+        // The COARSE pass. Only required tags can skip a chunk: the per-chunk mask is a sticky
+        // UNION, so a missing bit proves nobody has it. An excluded tag can never prove the
+        // whole chunk is empty of matches — a set bit is "maybe some have it", a clear bit is
+        // "nobody has it", which means every row MATCHES WithoutTag.
+        if (queryable.WithTags.IsEmpty)
+            return;
+
+        sb.AppendLine($"{indent}/// <summary>Whether this chunk can hold a row carrying every required tag ({required}).");
         sb.AppendLine($"{indent}/// Conservative: the chunk mask keeps bits after a tag is removed, so true still has to be");
-        sb.AppendLine($"{indent}/// confirmed row by row; only false is proof.</summary>");
+        sb.AppendLine($"{indent}/// confirmed row by row; only false is proof. Excluded tags cannot reject a chunk.</summary>");
         sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}public static bool ChunkMatches(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager chunkManager,");
@@ -1697,13 +1760,20 @@ public class QueryableGenerator : IIncrementalGenerator
         /// add is the EntityTags requirement and a per-row test.</summary>
         public ImmutableArray<string> WithTags { get; }
 
+        /// <summary>Tag types from <c>[WithoutTag&lt;T&gt;]</c>. Same storage as
+        /// <see cref="WithTags"/>; the generated row test inverts the bit.</summary>
+        public ImmutableArray<string> WithoutTags { get; }
+
         public ImmutableArray<(string Component, List<string> Attributes)> DuplicateComponents { get; }
 
         public bool HasDuplicates => !DuplicateComponents.IsEmpty;
 
+        /// <summary>Tags declared as both required and excluded — PECS017.</summary>
+        public ImmutableArray<string> ConflictingTags { get; }
+
         /// <summary>Whether iteration has to test each row — see
         /// <c>Paradise.ECS.IQueryData.IsFiltered</c>.</summary>
-        public bool IsFiltered => !WithTags.IsEmpty;
+        public bool IsFiltered => !WithTags.IsEmpty || !WithoutTags.IsEmpty;
 
         /// <summary>
         /// Gets the unique helper struct name prefix that includes containing type names.
@@ -1743,6 +1813,7 @@ public class QueryableGenerator : IIncrementalGenerator
             ImmutableArray<string> anyComponents,
             ImmutableArray<ComponentInfo> optionalComponents,
             ImmutableArray<string> withTags,
+            ImmutableArray<string> withoutTags,
             ImmutableArray<(string Component, List<string> Attributes)> duplicateComponents)
         {
             FullyQualifiedName = fullyQualifiedName;
@@ -1760,7 +1831,18 @@ public class QueryableGenerator : IIncrementalGenerator
             AnyComponents = anyComponents;
             OptionalComponents = optionalComponents;
             WithTags = withTags;
+            WithoutTags = withoutTags;
             DuplicateComponents = duplicateComponents;
+
+            if (withTags.IsEmpty || withoutTags.IsEmpty)
+            {
+                ConflictingTags = ImmutableArray<string>.Empty;
+            }
+            else
+            {
+                var required = withTags.ToImmutableHashSet(StringComparer.Ordinal);
+                ConflictingTags = [.. withoutTags.Where(required.Contains)];
+            }
         }
     }
 

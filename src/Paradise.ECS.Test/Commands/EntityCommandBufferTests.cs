@@ -650,4 +650,16 @@ public sealed class EntityCommandBufferTests : IDisposable
 
         await Assert.That(() => ecb2.Resolve(foreign)).ThrowsExactly<InvalidOperationException>();
     }
+
+    [Test]
+    public async Task Extension_Playback_WithoutSink_Throws()
+    {
+        var entity = _world.Spawn();
+        using var ecb = new EntityCommandBuffer();
+        ecb.RecordExtension<UntaggedWorldExtensionOp>(entity);
+
+        await Assert.That(() => ecb.Playback(_world)).ThrowsExactly<InvalidOperationException>();
+    }
 }
+
+file struct UntaggedWorldExtensionOp : ICommandExtension;

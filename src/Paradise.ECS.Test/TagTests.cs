@@ -888,4 +888,76 @@ public sealed class TaggedWorldTests : IDisposable
         await Assert.That(stats.TotalActualBits).IsEqualTo(1);
         await Assert.That(stats.SuggestsRebuild).IsTrue();
     }
+
+    [Test]
+    public async Task AddTag_WhileScheduleFlagIsSet_Throws()
+    {
+        var entity = _world.Spawn();
+        _world.SetSystemRunInProgress(true);
+        try
+        {
+            await Assert.That(() => _world.AddTag<TestIsActive>(entity))
+                .Throws<InvalidOperationException>();
+            await Assert.That(() => _world.RemoveTag<TestIsActive>(entity))
+                .Throws<InvalidOperationException>();
+        }
+        finally
+        {
+            _world.SetSystemRunInProgress(false);
+        }
+        _world.AddTag<TestIsActive>(entity);
+        await Assert.That(_world.HasTag<TestIsActive>(entity)).IsTrue();
+    }
+
+    [Test]
+    public async Task CommandBuffer_AddTag_Playback_SetsTheBit()
+    {
+        var entity = _world.Spawn();
+        using var ecb = new EntityCommandBuffer();
+        ecb.AddTag<TestIsActive>(entity);
+        ecb.Playback(_world);
+        await Assert.That(_world.HasTag<TestIsActive>(entity)).IsTrue();
+    }
+
+    [Test]
+    public async Task CommandBuffer_RemoveTag_Playback_ClearsTheBit()
+    {
+        var entity = _world.Spawn();
+        _world.AddTag<TestIsActive>(entity);
+        using var ecb = new EntityCommandBuffer();
+        ecb.RemoveTag<TestIsActive>(entity);
+        ecb.Playback(_world);
+        await Assert.That(_world.HasTag<TestIsActive>(entity)).IsFalse();
+    }
+
+    [Test]
+    public async Task CommandBuffer_AddTag_OnDeferredEntity_Playback_SetsTheBit()
+    {
+        using var ecb = new EntityCommandBuffer();
+        var deferred = ecb.Spawn();
+        ecb.AddTag<TestIsActive>(deferred);
+        ecb.Playback(_world);
+
+        var real = ecb.Resolve(deferred);
+        await Assert.That(_world.HasTag<TestIsActive>(real)).IsTrue();
+    }
+
+    [Test]
+    public async Task CommandBuffer_UnknownExtension_Playback_Throws()
+    {
+        var entity = _world.Spawn();
+        using var ecb = new EntityCommandBuffer();
+        ecb.RecordExtension<UnknownExtensionOp>(entity);
+
+        await Assert.That(() => ecb.Playback(_world)).ThrowsExactly<InvalidOperationException>();
+    }
+
+    [Test]
+    public async Task CommandExtensionIds_AddAndRemove_AreDistinct()
+    {
+        await Assert.That(CommandExtensionId<AddTagOp>.Value)
+            .IsNotEqualTo(CommandExtensionId<RemoveTagOp>.Value);
+    }
 }
+
+file struct UnknownExtensionOp : ICommandExtension;

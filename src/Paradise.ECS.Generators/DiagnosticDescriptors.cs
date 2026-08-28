@@ -199,6 +199,18 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Empty components (zero size) should typically be tags. Use [Tag] for marker types that don't store data.");
 
+    /// <summary>
+    /// PECS017: [WithTag&lt;T&gt;] and [WithoutTag&lt;T&gt;] on the same queryable for the same T.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ConflictingTagFilters = new(
+        id: "PECS017",
+        title: "Conflicting tag filters",
+        messageFormat: "Queryable '{0}' declares both [WithTag<{1}>] and [WithoutTag<{1}>] — that matches nothing",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A tag cannot be both required and excluded on the same queryable. Drop one of the attributes.");
+
     // ===== Tag-related diagnostics =====
 
     /// <summary>
@@ -406,6 +418,30 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "[CurrentTick] marks a read-only field as a fresh (write-world) read under [assembly: SnapshotReadSystems]. It applies only to inline 'ref readonly T' component fields, EntityComponentReader<T> fields, and TQueryable.Singleton composition fields; writable fields already see fresh values and other injection kinds have no fresh-read binding.");
+
+    /// <summary>
+    /// PECS3012: Chunk or Segments claim of a tag-filtered queryable, without [IgnoreTags].
+    /// </summary>
+    public static readonly DiagnosticDescriptor TagFilterOnBatchClaim = new(
+        id: "PECS3012",
+        title: "Tag filter does not apply to Chunk or Segments",
+        messageFormat: "Field '{0}' in system '{1}' claims queryable '{2}' as {3}, but that queryable filters by tag and {3} cannot skip rows — mark the field with [IgnoreTags]",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[WithTag]/[WithoutTag] are row filters. They run on query iteration, singleton resolve, entity-mode claims, and lookups unless the field is marked [IgnoreTags]. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them, so a tag-filtered queryable claimed that way is an error unless the field carries [IgnoreTags] — which acknowledges the filter will not run, and that the system must test EntityTags itself. Only queryables declared in the current compilation are diagnosed; a tag-filtered queryable from a referenced assembly is not.");
+
+    /// <summary>
+    /// PECS3013: [IgnoreTags] on a field that is not a queryable view.
+    /// </summary>
+    public static readonly DiagnosticDescriptor IgnoreTagsInvalidField = new(
+        id: "PECS3013",
+        title: "Invalid [IgnoreTags] field",
+        messageFormat: "Field '{0}' in system '{1}' has [IgnoreTags] but is not a TQueryable.Chunk, TQueryable.Segments, TQueryable.Entity, TQueryable.Singleton, TQueryable.ReadLookup or TQueryable.WriteLookup field",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "[IgnoreTags] skips the queryable's [WithTag]/[WithoutTag] filter on that field. On Chunk and Segments it also silences PECS3012, because those views cannot apply a row filter. On Entity, Singleton, ReadLookup and WriteLookup the filter otherwise runs. Other injection kinds have no tag filter to skip.");
 
     /// <summary>
     /// PECS3008: [SingleWriter] component is written by multiple systems.

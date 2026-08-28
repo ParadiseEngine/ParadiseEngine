@@ -178,6 +178,11 @@ Paradise.ECS is a high-performance Entity Component System library for .NET 10, 
 
 ### In Progress
 
+- [~] **Tag query filters: WithoutTag, IgnoreTags, PECS3012** (feat/tag-query-filters)
+  - `[WithoutTag<T>]` inverts `[WithTag<T>]` on query iteration, singletons, entity-mode claims, and lookups
+  - Chunk/Segments of a tag-filtered queryable is PECS3012; `[IgnoreTags]` on that field opts out
+  - `[IgnoreTags]` is also valid on Entity, Singleton, ReadLookup and WriteLookup, where it skips the row filter (PECS3013 otherwise)
+  - PECS017 refuses `[WithTag<T>]` and `[WithoutTag<T>]` for the same T
 
 ### Planned
 
