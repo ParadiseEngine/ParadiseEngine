@@ -5,7 +5,7 @@ namespace Paradise.BT.Nodes;
 public struct SequenceNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
+        where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard
         => index.TickChildrenReturnLastOrDefault(ref blob, ref bb, static state => state.IsRunningOrFailure());
 }

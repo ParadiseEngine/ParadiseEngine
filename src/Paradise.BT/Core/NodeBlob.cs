@@ -58,9 +58,19 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
         return new NodeBlob(new NodeBlobStorage(runtimeId, nodes, endIndices, states));
     }
 
-    IRuntimeNode IRuntimeNodeProvider.GetRuntimeNode(int nodeIndex) => Storage.Nodes[nodeIndex];
+    IRuntimeNode IRuntimeNodeProvider.GetRuntimeNode(int nodeIndex) => GetRuntimeNode(nodeIndex);
 
     void IRuntimeNodeProvider.ResetRuntimeData(int index, int count)
+        => ResetRuntimeData(index, count);
+
+    // The same two operations as direct instance methods, so VirtualMachine can reach them
+    // through a `ref NodeBlob` without converting to IRuntimeNodeProvider. That conversion boxes
+    // — a struct becoming an interface always does — and it used to happen on EVERY node of
+    // EVERY tick. The explicit implementations above stay for outside callers reaching the blob
+    // through the interface.
+    internal IRuntimeNode GetRuntimeNode(int nodeIndex) => Storage.Nodes[nodeIndex];
+
+    internal void ResetRuntimeData(int index, int count)
     {
         for (int i = index; i < index + count; i++)
         {
@@ -68,7 +78,15 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
         }
     }
 
-    ref T INodeDataAccessor.GetRuntimeNodeData<T>(int index)
+    ref T INodeDataAccessor.GetRuntimeNodeData<T>(int index) => ref RuntimeNodeData<T>(index);
+
+    ref T INodeDataAccessor.GetDefaultNodeData<T>(int index) => ref DefaultNodeData<T>(index);
+
+    // Both again as direct instance methods, for the same reason GetRuntimeNode is: reaching them
+    // through INodeDataAccessor requires converting this struct to an interface, which boxes. It
+    // also cannot be done at all from a generic whose blob type `allows ref struct`, and
+    // NodeBlobExtensions is now such a generic.
+    internal ref T RuntimeNodeData<T>(int index) where T : struct
     {
         if (Storage.Nodes[index] is IRuntimeNodeDataAccess accessor)
         {
@@ -78,7 +96,7 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
         throw new InvalidOperationException($"Node at index {index} is not of type '{typeof(T).FullName}'.");
     }
 
-    ref T INodeDataAccessor.GetDefaultNodeData<T>(int index)
+    internal ref T DefaultNodeData<T>(int index) where T : struct
     {
         if (Storage.Nodes[index] is IRuntimeNodeDataAccess accessor)
         {

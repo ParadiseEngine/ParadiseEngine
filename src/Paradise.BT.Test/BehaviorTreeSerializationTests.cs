@@ -9,7 +9,7 @@ public sealed class BehaviorTreeSerializationTests
         public int Count;
 
         public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-            where TNodeBlob : struct, INodeBlob
+            where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard
         {
             Count++;

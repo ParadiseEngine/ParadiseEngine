@@ -25,9 +25,25 @@ internal interface IRuntimeNodeFactory
 
     Guid NodeGuid { get; }
 
+    /// <summary>How many bytes this node's data occupies — what an unmanaged instance reserves
+    /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
+    int DataSize { get; }
+
     IRuntimeNode CreateRuntimeNode();
 
     IBuilder CreateSerializedDefaultDataBuilder();
+
+    /// <summary>
+    /// Copy this node's authored default data into <paramref name="destination"/>, which is
+    /// exactly <see cref="DataSize"/> bytes.
+    ///
+    /// The same bytes <see cref="CreateSerializedDefaultDataBuilder"/> would serialize, and
+    /// refused on the same grounds — a node holding a managed reference has no byte
+    /// representation — but written straight into a caller's buffer rather than through a blob
+    /// builder, because a layout is assembling one contiguous block and has nowhere to put an
+    /// <c>IBuilder</c>.
+    /// </summary>
+    void WriteDefaultData(Span<byte> destination);
 }
 
 internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
@@ -48,7 +64,23 @@ internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
 
     public Guid NodeGuid => _metadata.Guid;
 
+    public int DataSize => Unsafe.SizeOf<TNodeData>();
+
     public IRuntimeNode CreateRuntimeNode() => new RuntimeNode<TNodeData>(_nodeData, _metadata.Id);
+
+    public void WriteDefaultData(Span<byte> destination)
+    {
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<TNodeData>())
+        {
+            throw new NotSupportedException(
+                $"Node '{typeof(TNodeData).FullName}' cannot back an unmanaged behavior tree "
+                + "instance because it contains managed references.");
+        }
+
+        TNodeData nodeData = _nodeData;
+        MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref nodeData, 1))
+            .CopyTo(destination);
+    }
 
     public IBuilder CreateSerializedDefaultDataBuilder()
     {

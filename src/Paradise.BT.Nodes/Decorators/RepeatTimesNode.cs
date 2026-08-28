@@ -8,7 +8,7 @@ public struct RepeatTimesNode : INodeData
     public NodeState BreakStates;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
+        where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard
     {
         NodeState childState = index.TickChild(ref blob, ref bb);

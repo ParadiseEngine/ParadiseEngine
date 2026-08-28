@@ -45,6 +45,30 @@ public static class BuiltInBehaviorNodes
     /// are not serializable and therefore not registered. Register additional custom types on the returned
     /// registry via <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
     /// </summary>
+    /// <summary>
+    /// Register every built-in node type with <see cref="NodeTypeRegistry"/>, which a
+    /// <see cref="BehaviorTreeLayout"/> resolves node GUIDs through.
+    ///
+    /// The same set as <see cref="CreateRegistry"/> and for the same reason: those are exactly the
+    /// nodes whose data is unmanaged, and therefore exactly the nodes that can be stored as bytes.
+    /// Idempotent, so a game may call it at startup and a test may call it per fixture. Register
+    /// custom node types on top with <c>NodeTypeRegistry.Register&lt;T&gt;()</c>.
+    /// </summary>
+    public static void RegisterAll()
+    {
+        NodeTypeRegistry.Register<SequenceNode>();
+        NodeTypeRegistry.Register<SelectorNode>();
+        NodeTypeRegistry.Register<ParallelNode>();
+        NodeTypeRegistry.Register<InverterNode>();
+        NodeTypeRegistry.Register<SucceederNode>();
+        NodeTypeRegistry.Register<RepeatTimesNode>();
+        NodeTypeRegistry.Register<RepeatForeverNode>();
+        NodeTypeRegistry.Register<SuccessNode>();
+        NodeTypeRegistry.Register<FailedNode>();
+        NodeTypeRegistry.Register<RunningNode>();
+        NodeTypeRegistry.Register<DelayTimerNode>();
+    }
+
     public static BehaviorTreeSerializationRegistry CreateRegistry()
         => new BehaviorTreeSerializationRegistry()
             .Register<SequenceNode>()

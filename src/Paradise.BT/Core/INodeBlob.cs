@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Paradise.BT;
 
 /// <summary>
@@ -50,7 +52,7 @@ internal interface INodeDataAccessor
 public static class NodeBlobExtensions
 {
     public static int FirstOrDefaultChildIndex<TNodeBlob>(this ref TNodeBlob blob, int parentIndex, Predicate<NodeState> predicate)
-        where TNodeBlob : struct, INodeBlob
+        where TNodeBlob : struct, INodeBlob, allows ref struct
     {
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
@@ -68,7 +70,7 @@ public static class NodeBlobExtensions
     }
 
     public static int ParentIndex<TNodeBlob>(this ref TNodeBlob blob, int childIndex)
-        where TNodeBlob : struct, INodeBlob
+        where TNodeBlob : struct, INodeBlob, allows ref struct
     {
         int endIndex = blob.GetEndIndex(childIndex);
         for (int i = childIndex - 1; i >= 0; i--)
@@ -82,39 +84,50 @@ public static class NodeBlobExtensions
         return -1;
     }
 
-    public static void ResetRuntimeData<TNodeBlob>(this ref TNodeBlob blob, int index, int count = 1)
-        where TNodeBlob : struct, INodeBlob
+    /// <summary>
+    /// Restore a run of nodes' data to what was authored.
+    ///
+    /// Two storages, two ways of saying the same thing: the managed blob re-copies each boxed
+    /// node's default, and a byte-backed blob copies its default region over its runtime one.
+    /// See <see cref="VirtualMachine"/> for why the branch costs nothing.
+    /// </summary>
+    public static unsafe void ResetRuntimeData<TNodeBlob>(this ref TNodeBlob blob, int index, int count = 1)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
     {
-        if (blob is IRuntimeNodeProvider provider)
+        if (typeof(TNodeBlob) == typeof(NodeBlob))
         {
-            provider.ResetRuntimeData(index, count);
+            Unsafe.As<TNodeBlob, NodeBlob>(ref blob).ResetRuntimeData(index, count);
             return;
         }
 
-        throw new NotSupportedException("Runtime node data reset is only supported by Paradise.BT NodeBlob instances.");
-    }
-
-    public static ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
-        where T : struct
-        where TNodeBlob : struct, INodeBlob
-    {
-        if (blob is INodeDataAccessor accessor)
+        int size = blob.GetNodeDataSize(index, count);
+        if (size > 0)
         {
-            return ref accessor.GetRuntimeNodeData<T>(index);
+            new ReadOnlySpan<byte>((void*)blob.GetDefaultDataPtr(index), size)
+                .CopyTo(new Span<byte>((void*)blob.GetRuntimeDataPtr(index), size));
         }
-
-        throw new NotSupportedException("Runtime node data access is only supported by Paradise.BT NodeBlob instances.");
     }
 
-    public static ref T GetNodeDefaultData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
+    /// <summary>
+    /// A node's live data, typed.
+    ///
+    /// The managed blob keeps it in a boxed node and hands back a ref into that; a byte-backed
+    /// blob reinterprets its own storage. The `blob is INodeDataAccessor` test this used to open
+    /// with cannot survive `allows ref struct` — a ref struct cannot be converted to an interface
+    /// at all — and it boxed the blob on every call besides.
+    /// </summary>
+    public static unsafe ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
         where T : struct
-        where TNodeBlob : struct, INodeBlob
-    {
-        if (blob is INodeDataAccessor accessor)
-        {
-            return ref accessor.GetDefaultNodeData<T>(index);
-        }
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        => ref typeof(TNodeBlob) == typeof(NodeBlob)
+            ? ref Unsafe.As<TNodeBlob, NodeBlob>(ref blob).RuntimeNodeData<T>(index)
+            : ref Unsafe.AsRef<T>((void*)blob.GetRuntimeDataPtr(index));
 
-        throw new NotSupportedException("Default node data access is only supported by Paradise.BT NodeBlob instances.");
-    }
+    /// <inheritdoc cref="GetNodeData{T, TNodeBlob}"/>
+    public static unsafe ref T GetNodeDefaultData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
+        where T : struct
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        => ref typeof(TNodeBlob) == typeof(NodeBlob)
+            ? ref Unsafe.As<TNodeBlob, NodeBlob>(ref blob).DefaultNodeData<T>(index)
+            : ref Unsafe.AsRef<T>((void*)blob.GetDefaultDataPtr(index));
 }
