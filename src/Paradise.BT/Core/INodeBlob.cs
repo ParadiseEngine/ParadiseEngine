@@ -32,20 +32,6 @@ public interface INodeBlob
     IntPtr GetRuntimeScopeValuePtr(int offset);
 }
 
-internal interface IRuntimeNodeProvider
-{
-    IRuntimeNode GetRuntimeNode(int nodeIndex);
-
-    void ResetRuntimeData(int index, int count = 1);
-}
-
-internal interface INodeDataAccessor
-{
-    ref T GetRuntimeNodeData<T>(int index) where T : struct;
-
-    ref T GetDefaultNodeData<T>(int index) where T : struct;
-}
-
 /// <summary>
 /// EntitiesBT-compatible blob helpers implemented for Paradise.BT's managed runtime blob.
 /// </summary>
@@ -103,8 +89,8 @@ public static class NodeBlobExtensions
         }
     }
 
-    /// <summary>A node's live data, typed. The <c>blob is INodeDataAccessor</c> test this used to
-    /// open with cannot survive <c>allows ref struct</c>, and boxed on every call besides.</summary>
+    /// <summary>A node's live data, typed. The managed blob unboxes it; a byte-backed one
+    /// reinterprets its own storage.</summary>
     public static unsafe ref T GetNodeData<T, TNodeBlob>(this ref TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct

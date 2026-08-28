@@ -3,7 +3,7 @@ namespace Paradise.BT;
 /// <summary>
 /// Managed runtime blob implementing the exact EntitiesBT <see cref="INodeBlob"/> contract.
 /// </summary>
-public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
+public struct NodeBlob : INodeBlob
 {
     private readonly NodeBlobStorage? _storage;
 
@@ -14,9 +14,9 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
 
     public int RuntimeId => Storage.RuntimeId;
 
-    public int Count => Storage.Nodes.Length;
+    public int Count => Storage.Data.Length;
 
-    public int GetTypeId(int nodeIndex) => Storage.Nodes[nodeIndex].TypeId;
+    public int GetTypeId(int nodeIndex) => Storage.Factories[nodeIndex].TypeId;
 
     public int GetEndIndex(int nodeIndex) => Storage.EndIndices[nodeIndex];
 
@@ -44,82 +44,75 @@ public struct NodeBlob : INodeBlob, IRuntimeNodeProvider, INodeDataAccessor
     internal static NodeBlob Create(BehaviorTree tree)
     {
         int runtimeId = Environment.TickCount ^ tree.GetHashCode();
-        var nodes = new IRuntimeNode[tree.Count];
+        var factories = new IRuntimeNodeFactory[tree.Count];
+        var data = new object[tree.Count];
         var endIndices = new int[tree.Count];
         var states = new NodeState[tree.Count];
 
         for (int i = 0; i < tree.Count; i++)
         {
             BehaviorTreeNode compiledNode = tree.GetCompiledNode(i);
-            nodes[i] = compiledNode.Factory.CreateRuntimeNode();
+            factories[i] = compiledNode.Factory;
+            data[i] = compiledNode.Factory.CreateBoxedData();
             endIndices[i] = compiledNode.EndIndex;
         }
 
-        return new NodeBlob(new NodeBlobStorage(runtimeId, nodes, endIndices, states));
+        return new NodeBlob(new NodeBlobStorage(runtimeId, factories, data, endIndices, states));
     }
 
-    IRuntimeNode IRuntimeNodeProvider.GetRuntimeNode(int nodeIndex) => GetRuntimeNode(nodeIndex);
+    // Direct instance methods rather than interface implementations: VirtualMachine reaches them
+    // through a `ref NodeBlob`, and converting a struct to an interface boxes — which used to
+    // happen on every node of every tick. It also cannot be done at all from a generic whose blob
+    // type `allows ref struct`, and every caller here is now such a generic.
+    internal NodeState Tick<TNodeBlob, TBlackboard>(
+        int index, ref TNodeBlob blob, ref TBlackboard bb)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBlackboard : struct, IBlackboard
+        => Storage.Factories[index].Tick(Storage.Data[index], index, ref blob, ref bb);
 
-    void IRuntimeNodeProvider.ResetRuntimeData(int index, int count)
-        => ResetRuntimeData(index, count);
-
-    // The same two as direct instance methods, so VirtualMachine reaches them through a
-    // `ref NodeBlob` without converting to IRuntimeNodeProvider — that conversion boxes, and used
-    // to happen on every node of every tick. The explicit implementations stay for outside
-    // callers.
-    internal IRuntimeNode GetRuntimeNode(int nodeIndex) => Storage.Nodes[nodeIndex];
+    internal void Reset<TNodeBlob, TBlackboard>(
+        int index, ref TNodeBlob blob, ref TBlackboard bb)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBlackboard : struct, IBlackboard
+        => Storage.Factories[index].Reset(index, ref blob, ref bb);
 
     internal void ResetRuntimeData(int index, int count)
     {
         for (int i = index; i < index + count; i++)
         {
-            Storage.Nodes[i].CopyDefaultToRuntime();
+            Storage.Factories[i].RestoreDefault(Storage.Data[i]);
         }
     }
 
-    ref T INodeDataAccessor.GetRuntimeNodeData<T>(int index) => ref RuntimeNodeData<T>(index);
-
-    ref T INodeDataAccessor.GetDefaultNodeData<T>(int index) => ref DefaultNodeData<T>(index);
-
-    // Both again as direct instance methods, for the same reason GetRuntimeNode is: reaching them
-    // through INodeDataAccessor requires converting this struct to an interface, which boxes. It
-    // also cannot be done at all from a generic whose blob type `allows ref struct`, and
-    // NodeBlobExtensions is now such a generic.
     internal ref T RuntimeNodeData<T>(int index) where T : struct
-    {
-        if (Storage.Nodes[index] is IRuntimeNodeDataAccess accessor)
-        {
-            return ref accessor.GetRuntimeData<T>();
-        }
-
-        throw new InvalidOperationException($"Node at index {index} is not of type '{typeof(T).FullName}'.");
-    }
+        => ref Storage.Factories[index].DataRef<T>(Storage.Data[index]);
 
     internal ref T DefaultNodeData<T>(int index) where T : struct
-    {
-        if (Storage.Nodes[index] is IRuntimeNodeDataAccess accessor)
-        {
-            return ref accessor.GetDefaultData<T>();
-        }
-
-        throw new InvalidOperationException($"Node at index {index} is not of type '{typeof(T).FullName}'.");
-    }
+        => ref Storage.Factories[index].DefaultRef<T>();
 
     private NodeBlobStorage Storage => _storage ?? throw new InvalidOperationException("NodeBlob is not initialized.");
 
     private sealed class NodeBlobStorage
     {
-        public NodeBlobStorage(int runtimeId, IRuntimeNode[] nodes, int[] endIndices, NodeState[] states)
+        public NodeBlobStorage(
+            int runtimeId, IRuntimeNodeFactory[] factories, object[] data, int[] endIndices,
+            NodeState[] states)
         {
             RuntimeId = runtimeId;
-            Nodes = nodes;
+            Factories = factories;
+            Data = data;
             EndIndices = endIndices;
             States = states;
         }
 
         public int RuntimeId { get; }
 
-        public IRuntimeNode[] Nodes { get; }
+        /// <summary>One per node, shared with the tree — the dispatch half, which does not vary
+        /// per instance.</summary>
+        public IRuntimeNodeFactory[] Factories { get; }
+
+        /// <summary>The boxed node data, one per node. The only genuinely per-instance state.</summary>
+        public object[] Data { get; }
 
         public int[] EndIndices { get; }
 

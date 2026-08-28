@@ -25,7 +25,7 @@ public static class VirtualMachine
         where TBlackboard : struct, IBlackboard
     {
         NodeState state = typeof(TNodeBlob) == typeof(NodeBlob)
-            ? Managed(ref blob).GetRuntimeNode(index).Tick(index, ref blob, ref bb)
+            ? Managed(ref blob).Tick(index, ref blob, ref bb)
             : TickByTypeId(index, ref blob, ref bb);
         blob.SetState(index, state);
         return state;
@@ -42,7 +42,7 @@ public static class VirtualMachine
             Managed(ref blob).ResetRuntimeData(fromIndex, count);
             for (int i = fromIndex; i < fromIndex + count; i++)
             {
-                Managed(ref blob).GetRuntimeNode(i).Reset(i, ref blob, ref bb);
+                Managed(ref blob).Reset(i, ref blob, ref bb);
             }
 
             return;
