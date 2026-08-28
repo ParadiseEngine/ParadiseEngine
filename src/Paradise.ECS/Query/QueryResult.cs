@@ -180,7 +180,8 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
 ///
 /// <para><b>Row filters do not apply here.</b> This yields CHUNKS, and a chunk-level filter is a
 /// different question from a row-level one — a chunk holds matching and non-matching entities
-/// alike. A queryable declaring <c>[WithTag&lt;T&gt;]</c> therefore still hands out whole chunks
+/// alike. A queryable declaring <c>[WithTag&lt;T&gt;]</c> or <c>[WithoutTag&lt;T&gt;]</c> therefore
+/// still hands out whole chunks
 /// through this path, and a caller batching over the spans must test the rows itself. See
 /// ParadiseEngine#166.</para>
 /// </summary>

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -140,6 +141,7 @@ public class QueryableGenerator : IIncrementalGenerator
         var anyComponents = new List<string>();
         var optionalComponents = new List<ComponentInfo>();
         var withTags = new List<string>();
+        var withoutTags = new List<string>();
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -199,6 +201,11 @@ public class QueryableGenerator : IIncrementalGenerator
                     // it cannot even be written, since the two attributes constrain to different
                     // interfaces.
                     withTags.Add(componentFullName);
+                    attrType = null;
+                }
+                else if (metadataName.StartsWith("Paradise.ECS.WithoutTagAttribute<", StringComparison.Ordinal))
+                {
+                    withoutTags.Add(componentFullName);
                     attrType = null;
                 }
                 else if (metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal))
@@ -271,6 +278,7 @@ public class QueryableGenerator : IIncrementalGenerator
             anyComponents.ToImmutableArray(),
             optionalComponents.ToImmutableArray(),
             withTags.ToImmutableArray(),
+            withoutTags.ToImmutableArray(),
             duplicates);
     }
 
@@ -319,10 +327,20 @@ public class QueryableGenerator : IIncrementalGenerator
                     queryable.FullyQualifiedName,
                     string.Join(", ", attrs)));
             }
+
+            foreach (var tag in queryable.ConflictingTags)
+            {
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ConflictingTagFilters,
+                    queryable.Location,
+                    queryable.FullyQualifiedName,
+                    tag.Split('.').Last()));
+            }
         }
 
         // Filter to valid queryables (must be ref struct, partial, and no duplicates)
-        var validQueryables = sorted.Where(q => q.IsRefStruct && q.IsPartial && !q.HasDuplicates).ToList();
+        var validQueryables = sorted.Where(q =>
+            q.IsRefStruct && q.IsPartial && !q.HasDuplicates && q.ConflictingTags.IsEmpty).ToList();
         if (validQueryables.Count == 0)
             return;
 
@@ -1544,12 +1562,12 @@ public class QueryableGenerator : IIncrementalGenerator
 
     /// <summary>
     /// Emits <c>IQueryData.IsFiltered</c> and <c>IQueryData.Matches</c> for a queryable declaring
-    /// <c>[WithTag&lt;T&gt;]</c> — and nothing at all for one that does not, which is every
-    /// queryable that existed before tags and the reason this is additive.
+    /// <c>[WithTag&lt;T&gt;]</c> or <c>[WithoutTag&lt;T&gt;]</c> — and nothing at all for one that
+    /// does not, which is every queryable that existed before tags and the reason this is additive.
     ///
     /// The test reads the entity's <c>EntityTags</c> component straight out of the chunk and checks
-    /// one bit per required tag. It reads the WRITE chunk deliberately: which entities a query
-    /// matches is a question about the world being iterated, not about the previous tick's
+    /// one bit per required or excluded tag. It reads the WRITE chunk deliberately: which entities
+    /// a query matches is a question about the world being iterated, not about the previous tick's
     /// snapshot, and the generated singleton counts cardinality there for the same reason.
     /// </summary>
     private static void GenerateRowFilter(
@@ -1558,14 +1576,21 @@ public class QueryableGenerator : IIncrementalGenerator
         if (!queryable.IsFiltered)
             return;
 
-        var tagList = string.Join(", ", queryable.WithTags.Select(static t => t.Split('.').Last()));
+        var required = string.Join(", ", queryable.WithTags.Select(static t => t.Split('.').Last()));
+        var excluded = string.Join(", ", queryable.WithoutTags.Select(static t => t.Split('.').Last()));
+        var tagList = queryable.WithTags.IsEmpty
+            ? $"without {excluded}"
+            : queryable.WithoutTags.IsEmpty
+                ? required
+                : $"{required}; without {excluded}";
 
         sb.AppendLine();
         sb.AppendLine($"{indent}/// <summary>This queryable filters rows by tag ({tagList}), so counting");
         sb.AppendLine($"{indent}/// cannot be answered from archetype bookkeeping alone.</summary>");
         sb.AppendLine($"{indent}public static bool IsFiltered => true;");
         sb.AppendLine();
-        sb.AppendLine($"{indent}/// <summary>Whether this row carries every required tag ({tagList}).</summary>");
+        sb.AppendLine($"{indent}/// <summary>Whether this row carries every required tag and none of the");
+        sb.AppendLine($"{indent}/// excluded tags ({tagList}).</summary>");
         sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}public static bool Matches(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager chunkManager,");
@@ -1583,16 +1608,26 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.Append($"__tags.Mask.Get(global::{tag}.TagId)");
             first = false;
         }
+        foreach (var tag in queryable.WithoutTags)
+        {
+            if (!first) sb.Append($"\n{indent}        && ");
+            sb.Append($"!__tags.Mask.Get(global::{tag}.TagId)");
+            first = false;
+        }
         sb.AppendLine(";");
         sb.AppendLine($"{indent}}}");
         sb.AppendLine();
 
-        // The COARSE pass. The chunk carries the union of its entities' tags in a slot the layout
-        // reserved for EntityTags, so a chunk missing any required bit provably holds no match and
-        // is skipped without reading a single row.
-        sb.AppendLine($"{indent}/// <summary>Whether this chunk can hold a row carrying every required tag ({tagList}).");
+        // The COARSE pass. Only required tags can skip a chunk: the per-chunk mask is a sticky
+        // UNION, so a missing bit proves nobody has it. An excluded tag can never prove the
+        // whole chunk is empty of matches — a set bit is "maybe some have it", a clear bit is
+        // "nobody has it", which means every row MATCHES WithoutTag.
+        if (queryable.WithTags.IsEmpty)
+            return;
+
+        sb.AppendLine($"{indent}/// <summary>Whether this chunk can hold a row carrying every required tag ({required}).");
         sb.AppendLine($"{indent}/// Conservative: the chunk mask keeps bits after a tag is removed, so true still has to be");
-        sb.AppendLine($"{indent}/// confirmed row by row; only false is proof.</summary>");
+        sb.AppendLine($"{indent}/// confirmed row by row; only false is proof. Excluded tags cannot reject a chunk.</summary>");
         sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}public static bool ChunkMatches(");
         sb.AppendLine($"{indent}    global::Paradise.ECS.ChunkManager chunkManager,");
@@ -1697,13 +1732,20 @@ public class QueryableGenerator : IIncrementalGenerator
         /// add is the EntityTags requirement and a per-row test.</summary>
         public ImmutableArray<string> WithTags { get; }
 
+        /// <summary>Tag types from <c>[WithoutTag&lt;T&gt;]</c>. Same storage as
+        /// <see cref="WithTags"/>; the generated row test inverts the bit.</summary>
+        public ImmutableArray<string> WithoutTags { get; }
+
         public ImmutableArray<(string Component, List<string> Attributes)> DuplicateComponents { get; }
 
         public bool HasDuplicates => !DuplicateComponents.IsEmpty;
 
+        /// <summary>Tags declared as both required and excluded — PECS017.</summary>
+        public ImmutableArray<string> ConflictingTags { get; }
+
         /// <summary>Whether iteration has to test each row — see
         /// <c>Paradise.ECS.IQueryData.IsFiltered</c>.</summary>
-        public bool IsFiltered => !WithTags.IsEmpty;
+        public bool IsFiltered => !WithTags.IsEmpty || !WithoutTags.IsEmpty;
 
         /// <summary>
         /// Gets the unique helper struct name prefix that includes containing type names.
@@ -1743,6 +1785,7 @@ public class QueryableGenerator : IIncrementalGenerator
             ImmutableArray<string> anyComponents,
             ImmutableArray<ComponentInfo> optionalComponents,
             ImmutableArray<string> withTags,
+            ImmutableArray<string> withoutTags,
             ImmutableArray<(string Component, List<string> Attributes)> duplicateComponents)
         {
             FullyQualifiedName = fullyQualifiedName;
@@ -1760,7 +1803,18 @@ public class QueryableGenerator : IIncrementalGenerator
             AnyComponents = anyComponents;
             OptionalComponents = optionalComponents;
             WithTags = withTags;
+            WithoutTags = withoutTags;
             DuplicateComponents = duplicateComponents;
+
+            if (withTags.IsEmpty || withoutTags.IsEmpty)
+            {
+                ConflictingTags = ImmutableArray<string>.Empty;
+            }
+            else
+            {
+                var required = withTags.ToImmutableHashSet(StringComparer.Ordinal);
+                ConflictingTags = [.. withoutTags.Where(required.Contains)];
+            }
         }
     }
 

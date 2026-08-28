@@ -1,7 +1,8 @@
 namespace Paradise.ECS.Test;
 
 /// <summary>
-/// Queryables that filter by TAG rather than by archetype — <c>[WithTag&lt;T&gt;]</c>.
+/// Queryables that filter by TAG rather than by archetype — <c>[WithTag&lt;T&gt;]</c> and
+/// <c>[WithoutTag&lt;T&gt;]</c>.
 ///
 /// The thing under test is a seam that archetype matching cannot reach: a tag is a bit in the
 /// EntityTags component, deliberately not part of the archetype mask, so entities that do and do
@@ -259,6 +260,64 @@ public sealed class TagQueryTests : IDisposable
 
         await Assert.That(ResolveSingleton().TestPosition.X).IsEqualTo(2f);
     }
+
+    // ---------------------------------------------------------------------------------------
+    // [WithoutTag] — the invert: the row is kept when the bit is clear.
+    // ---------------------------------------------------------------------------------------
+
+    private int CountUntagged()
+    {
+        var count = 0;
+        foreach (var _ in TestUntaggedPosition.Query<World, ComponentMask, DefaultConfig>(_world))
+            count++;
+        return count;
+    }
+
+    [Test]
+    public async Task WithoutTag_SkipsTheTaggedEntity()
+    {
+        var tagged = SpawnPositioned(1);
+        SpawnPositioned(2);
+        _world.AddTag<TestIsPlayer>(tagged);
+
+        // Same archetype as TestTaggedPosition; the invert yields the untagged neighbour.
+        await Assert.That(CountUntagged()).IsEqualTo(1);
+        await Assert.That(Count(TaggedQuery())).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task WithoutTag_LookupRejectsATaggedHandle()
+    {
+        var tagged = SpawnPositioned(1);
+        var plain = SpawnPositioned(2);
+        _world.AddTag<TestIsPlayer>(tagged);
+
+        var lookup = new TestUntaggedPosition.ReadLookup(_world);
+        var plainMatches = lookup.Has(plain);
+        var taggedMatches = lookup.Has(tagged);
+        await Assert.That(plainMatches).IsTrue();
+        await Assert.That(taggedMatches).IsFalse();
+    }
+
+    [Test]
+    public async Task WithTagAndWithoutTag_AreAnIntersection()
+    {
+        var player = SpawnPositioned(1);
+        var active = SpawnPositioned(2);
+        var both = SpawnPositioned(3);
+        SpawnPositioned(4);
+        _world.AddTag<TestIsPlayer>(player);
+        _world.AddTag<TestIsActive>(active);
+        _world.AddTag<TestIsPlayer>(both);
+        _world.AddTag<TestIsActive>(both);
+
+        var seen = new List<float>();
+        foreach (var row in TestActiveNonPlayer.Query<World, ComponentMask, DefaultConfig>(_world))
+            seen.Add(row.TestPosition.X);
+
+        // Active and not player: only 2. Untagged 4 is out; player-only 1 is out; both 3 is out.
+        await Assert.That(seen).IsEquivalentTo(new List<float> { 2f });
+    }
 }
 
 // ===== Queryables under test =====
@@ -292,3 +351,16 @@ public readonly ref partial struct TestPositionOnly;
 [WithTag<TestIsPlayer>]
 [With<TestPosition>(IsReadOnly = true)]
 public readonly ref partial struct TestTaggedSingleton;
+
+/// <summary>The invert of <see cref="TestTaggedPosition"/>: same components, player tag excluded.</summary>
+[Queryable(Id = 24)]
+[WithoutTag<TestIsPlayer>]
+[With<TestPosition>]
+public readonly ref partial struct TestUntaggedPosition;
+
+/// <summary>Active, and not a player — both polarities on one queryable.</summary>
+[Queryable(Id = 25)]
+[WithTag<TestIsActive>]
+[WithoutTag<TestIsPlayer>]
+[With<TestPosition>]
+public readonly ref partial struct TestActiveNonPlayer;

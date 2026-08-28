@@ -29,11 +29,12 @@ public sealed class QueryableRegistryTests
     [Test]
     public async Task QueryableRegistry_Count_ReturnsCorrectCount()
     {
-        // TestMovableEntity, TestProjectile, TestHealthEntity, WsMovable, plus the four in
+        // TestMovableEntity, TestProjectile, TestHealthEntity, WsMovable, plus the six in
         // TagQueryTests (TestTaggedPosition, TestActivePlayer, TestPositionOnly,
-        // TestTaggedSingleton). This counts the queryables the assembly DECLARES, so it moves
-        // whenever a test adds one — the ids themselves are pinned by the tests above.
-        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(9);
+        // TestTaggedSingleton, TestUntaggedPosition, TestActiveNonPlayer). This counts the
+        // queryables the assembly DECLARES, so it moves whenever a test adds one — the ids
+        // themselves are pinned by the tests above.
+        await Assert.That(QueryableRegistry<SmallBitSet<ulong>>.Count).IsEqualTo(11);
     }
 
     [Test]
@@ -42,9 +43,9 @@ public sealed class QueryableRegistryTests
         var descriptions = QueryableRegistry<SmallBitSet<ulong>>.Descriptions;
 
         await Assert.That(descriptions.IsDefault).IsFalse();
-        // Indexed BY queryable id, so the array is sized to the highest one — TestTaggedSingleton's
-        // explicit 23 — plus one. Sparse by construction: the gaps are ids nothing claimed.
-        await Assert.That(descriptions.Length).IsEqualTo(24);
+        // Indexed BY queryable id, so the array is sized to the highest one — TestActiveNonPlayer's
+        // explicit 25 — plus one. Sparse by construction: the gaps are ids nothing claimed.
+        await Assert.That(descriptions.Length).IsEqualTo(26);
     }
 
     [Test]
