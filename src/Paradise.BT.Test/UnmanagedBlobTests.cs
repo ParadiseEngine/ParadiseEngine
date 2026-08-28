@@ -112,11 +112,10 @@ public sealed class UnmanagedBlobTests
                 BuiltInBehaviorNodes.Success()),
             BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Failure()));
 
-    private static BehaviorTreeLayout LayoutOf(BehaviorNodeDefinition definition)
-    {
-        BuiltInBehaviorNodes.RegisterAll();
-        return BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(definition));
-    }
+    /// <summary>No registration call: the built-in node types register themselves through a
+    /// generated module initializer.</summary>
+    private static BehaviorTreeLayout LayoutOf(BehaviorNodeDefinition definition) =>
+        BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(definition));
 
     [Test]
     public async Task Unmanaged_Ticks_Identically_To_Managed()

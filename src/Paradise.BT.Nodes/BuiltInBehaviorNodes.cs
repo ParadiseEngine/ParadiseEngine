@@ -45,25 +45,10 @@ public static class BuiltInBehaviorNodes
     /// are not serializable and therefore not registered. Register additional custom types on the returned
     /// registry via <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
     /// </summary>
-    /// <summary>
-    /// Register every built-in node with <see cref="NodeTypeRegistry"/>, which a
-    /// <see cref="BehaviorTreeLayout"/> resolves GUIDs through. Same set as
-    /// <see cref="CreateRegistry"/>: exactly the nodes whose data is unmanaged. Idempotent.
-    /// </summary>
-    public static void RegisterAll()
-    {
-        NodeTypeRegistry.Register<SequenceNode>();
-        NodeTypeRegistry.Register<SelectorNode>();
-        NodeTypeRegistry.Register<ParallelNode>();
-        NodeTypeRegistry.Register<InverterNode>();
-        NodeTypeRegistry.Register<SucceederNode>();
-        NodeTypeRegistry.Register<RepeatTimesNode>();
-        NodeTypeRegistry.Register<RepeatForeverNode>();
-        NodeTypeRegistry.Register<SuccessNode>();
-        NodeTypeRegistry.Register<FailedNode>();
-        NodeTypeRegistry.Register<RunningNode>();
-        NodeTypeRegistry.Register<DelayTimerNode>();
-    }
+    // There is deliberately no RegisterAll() here. Every node type in this assembly registers
+    // itself with NodeTypeRegistry through a generated module initializer (Paradise.BT.Generators),
+    // so a node added here needs no second edit and cannot be forgotten. CreateRegistry below is a
+    // different thing and stays: DESERIALIZATION takes a registry instance the caller passes.
 
     public static BehaviorTreeSerializationRegistry CreateRegistry()
         => new BehaviorTreeSerializationRegistry()
