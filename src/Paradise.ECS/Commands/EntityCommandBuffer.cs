@@ -23,7 +23,13 @@ public enum CommandType
     RemoveComponent = 3,
 
     /// <summary>Set a component value on an entity (non-structural).</summary>
-    SetComponent = 4
+    SetComponent = 4,
+
+    /// <summary>
+    /// Package-defined command. Compact op id in <c>ComponentId</c> maps to an
+    /// <see cref="ICommandExtension"/> type; payload follows the header.
+    /// </summary>
+    Extension = 5
 }
 
 /// <summary>
@@ -40,7 +46,8 @@ internal struct CommandHeader
     public byte Reserved;
 
     /// <summary>
-    /// The component type ID. -1 for Spawn/Despawn commands.
+    /// The component type ID for Add/Remove/Set. -1 for Spawn/Despawn.
+    /// For <see cref="CommandType.Extension"/>, the process-local op id.
     /// </summary>
     public short ComponentId;
 
@@ -54,8 +61,8 @@ internal struct CommandHeader
     public uint EntityVersion;
 
     /// <summary>
-    /// The size of component data following this header.
-    /// 0 for Spawn/Despawn/RemoveComponent and tag components.
+    /// The size of payload following this header.
+    /// 0 for Spawn/Despawn/RemoveComponent.
     /// </summary>
     public int DataSize;
 }
@@ -125,7 +132,8 @@ public sealed class EntityCommandBuffer : IDisposable
     /// <remarks>
     /// RESTRICTION: the returned placeholder is valid ONLY as an argument to commands recorded
     /// on THIS buffer afterwards (<see cref="Despawn"/>, <see cref="AddComponent{T}"/>,
-    /// <see cref="RemoveComponent{T}"/>, <see cref="SetComponent{T}"/>). It must NOT be stored
+    /// <see cref="RemoveComponent{T}"/>, <see cref="SetComponent{T}"/>,
+    /// <see cref="RecordExtension{TOp}"/>). It must NOT be stored
     /// into component data, passed to another buffer's commands, or passed to World methods —
     /// DEBUG builds throw when a foreign placeholder is detected. Use <see cref="Resolve"/>
     /// after playback to obtain the real entity.
@@ -196,6 +204,20 @@ public sealed class EntityCommandBuffer : IDisposable
     }
 
     /// <summary>
+    /// Records a package-defined command keyed by <typeparamref name="TOp"/>. Playback requires
+    /// an <see cref="ICommandExtensionSink"/> that understands that type.
+    /// </summary>
+    /// <typeparam name="TOp">The extension type. Identity is the CLR type, not a shared opcode.</typeparam>
+    /// <param name="entity">The target entity. Can be a real entity or a placeholder from this buffer.</param>
+    /// <param name="data">Opaque payload delivered to <see cref="ICommandExtensionSink.PlayExtension"/>; empty if omitted.</param>
+    public void RecordExtension<TOp>(Entity entity, ReadOnlySpan<byte> data = default) where TOp : ICommandExtension
+    {
+        ThrowIfDisposed();
+        AssertPlaceholderBelongsToThisBuffer(entity);
+        WriteCommand(CommandType.Extension, entity.Id, entity.Version, CommandExtensionId<TOp>.Value, data);
+    }
+
+    /// <summary>
     /// Replays all recorded commands against the specified world in order.
     /// Spawn commands allocate real entity IDs here (in command order); placeholder arguments
     /// in subsequent commands are remapped to the real entities.
@@ -258,10 +280,27 @@ public sealed class EntityCommandBuffer : IDisposable
                 case CommandType.SetComponent:
                     world.SetComponentRaw(entity, new ComponentId(header.ComponentId), data);
                     break;
+                case CommandType.Extension:
+                    PlayExtension(world, header.ComponentId, entity, data);
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown command type: {header.Type}");
             }
         }
+    }
+
+    private static void PlayExtension<TMask, TConfig>(
+        IWorld<TMask, TConfig> world, short opId, Entity entity, ReadOnlySpan<byte> data)
+        where TMask : unmanaged, IBitSet<TMask>
+        where TConfig : IConfig, new()
+    {
+        if (world is not ICommandExtensionSink sink)
+        {
+            throw new InvalidOperationException(
+                "Extension commands require a world that implements ICommandExtensionSink.");
+        }
+
+        sink.PlayExtension(CommandExtensionRegistry.TypeOf(opId), entity, data);
     }
 
     /// <summary>
