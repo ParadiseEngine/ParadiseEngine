@@ -285,6 +285,11 @@ public class PbrRendererGpuTests
             pbr.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
             await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+            // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
+            // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
+            // detaching). Point light: perspective texels are metres PER METRE of distance,
+            // 2·tan(45°)/mapSize at the default 1024 map.
+            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
         }
         finally
         {
