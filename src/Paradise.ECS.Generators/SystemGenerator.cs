@@ -144,7 +144,8 @@ public class SystemGenerator : IIncrementalGenerator
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
                     isRefField: fieldIsRef, errorTypeName: errorTypeName,
                     errorContainingTypeFqn: errorContainingTypeFqn,
-                    isCurrentTick: HasCurrentTickAttribute(field)));
+                    isCurrentTick: HasCurrentTickAttribute(field),
+                    isIgnoreTags: HasIgnoreTagsAttribute(field)));
             }
             else
             {
@@ -216,11 +217,13 @@ public class SystemGenerator : IIncrementalGenerator
             }
         }
 
-        // Collect With/Without/WithAny/Optional component info
+        // Collect With/Without/WithAny/Optional component info, and whether the queryable
+        // filters rows by tag ([WithTag]/[WithoutTag]).
         var withComponents = new List<QueryableComponentAccess>();
         var withoutComponents = new List<string>();
         var withAnyComponents = new List<string>();
         var optionalComponents = new List<QueryableComponentAccess>();
+        var isFiltered = false;
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -264,6 +267,10 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 withAnyComponents.Add(compFQN);
             }
+            else if (origName is "WithTagAttribute" or "WithoutTagAttribute")
+            {
+                isFiltered = true;
+            }
         }
 
         return new QueryableLookupInfo(
@@ -271,7 +278,8 @@ public class SystemGenerator : IIncrementalGenerator
             withComponents.ToImmutableArray(),
             withoutComponents.ToImmutableArray(),
             withAnyComponents.ToImmutableArray(),
-            optionalComponents.ToImmutableArray());
+            optionalComponents.ToImmutableArray(),
+            isFiltered);
     }
 
     /// <summary>
@@ -308,7 +316,8 @@ public class SystemGenerator : IIncrementalGenerator
                     matched.WithAnyComponents,
                     queryableOptionalComponents: matched.OptionalComponents,
                     isRefField: true,
-                    isCurrentTick: field.IsCurrentTick));
+                    isCurrentTick: field.IsCurrentTick,
+                    isIgnoreTags: field.IsIgnoreTags));
             }
             else
             {
@@ -462,6 +471,7 @@ public class SystemGenerator : IIncrementalGenerator
         bool isRef = field.RefKind != RefKind.None;
         bool isRefReadOnly = isRef && IsRefReadOnlySyntax(field);
         bool isCurrentTick = HasCurrentTickAttribute(field);
+        bool isIgnoreTags = HasIgnoreTagsAttribute(field);
 
         // ref T or ref readonly T where T has [Component] or [Tag] attribute → InlineComponent
         if (isRef && fieldType is INamedTypeSymbol refNamedType)
@@ -474,7 +484,7 @@ public class SystemGenerator : IIncrementalGenerator
                     GeneratorUtilities.GetFullyQualifiedName(refNamedType),
                     ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isCurrentTick: isCurrentTick);
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
             }
         }
 
@@ -487,7 +497,7 @@ public class SystemGenerator : IIncrementalGenerator
                 "global::Paradise.ECS.EntityCommandBuffer",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
                 ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                isCurrentTick: isCurrentTick);
+                isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
         }
 
         // SystemEventWriter field → EventWriter (deferred event emission; off-entity, no masks)
@@ -499,7 +509,7 @@ public class SystemGenerator : IIncrementalGenerator
                 "global::Paradise.ECS.SystemEventWriter",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
                 ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                isCurrentTick: isCurrentTick);
+                isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
         }
 
         // SystemEventReader field → EventReader (reads last frame's events; off-entity, no masks)
@@ -511,7 +521,7 @@ public class SystemGenerator : IIncrementalGenerator
                 "global::Paradise.ECS.SystemEventReader",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
                 ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                isCurrentTick: isCurrentTick);
+                isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
         }
 
         // Entity field → EntityHandle (for entity systems)
@@ -523,7 +533,7 @@ public class SystemGenerator : IIncrementalGenerator
                 "global::Paradise.ECS.Entity",
                 null, ImmutableArray<QueryableComponentAccess>.Empty,
                 ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                isCurrentTick: isCurrentTick);
+                isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
         }
 
         // EntityComponentReader<T> / EntityComponentWriter<T> where T has [Component]:
@@ -550,7 +560,7 @@ public class SystemGenerator : IIncrementalGenerator
                     GeneratorUtilities.GetFullyQualifiedName(componentType),
                     ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isCurrentTick: isCurrentTick);
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
             }
         }
 
@@ -568,7 +578,7 @@ public class SystemGenerator : IIncrementalGenerator
                     "global::System.ReadOnlySpan<global::Paradise.ECS.Entity>",
                     null, ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isCurrentTick: isCurrentTick);
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
             }
 
             if (origDef.Name == "Span" &&
@@ -582,7 +592,7 @@ public class SystemGenerator : IIncrementalGenerator
                     GeneratorUtilities.GetFullyQualifiedName(spanArg),
                     ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isCurrentTick: isCurrentTick);
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
             }
 
             if (origDef.Name == "ReadOnlySpan" &&
@@ -596,18 +606,24 @@ public class SystemGenerator : IIncrementalGenerator
                     GeneratorUtilities.GetFullyQualifiedName(rosArg),
                     ImmutableArray<QueryableComponentAccess>.Empty,
                     ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
-                    isCurrentTick: isCurrentTick);
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
             }
         }
 
         return null;
     }
 
-    private static bool HasCurrentTickAttribute(IFieldSymbol field)
+    private static bool HasCurrentTickAttribute(IFieldSymbol field) =>
+        HasAttribute(field, "Paradise.ECS.CurrentTickAttribute");
+
+    private static bool HasIgnoreTagsAttribute(IFieldSymbol field) =>
+        HasAttribute(field, "Paradise.ECS.IgnoreTagsAttribute");
+
+    private static bool HasAttribute(IFieldSymbol field, string fullName)
     {
         foreach (var attr in field.GetAttributes())
         {
-            if (attr.AttributeClass?.ToDisplayString() == "Paradise.ECS.CurrentTickAttribute")
+            if (attr.AttributeClass?.ToDisplayString() == fullName)
                 return true;
         }
         return false;
@@ -711,6 +727,9 @@ public class SystemGenerator : IIncrementalGenerator
                 if (field.IsCurrentTick && field.Kind != FieldKind.Invalid && !IsValidCurrentTickField(field))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.CurrentTickInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
 
+                if (field.IsIgnoreTags && field.Kind != FieldKind.Invalid && !IsValidIgnoreTagsField(field))
+                    context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.IgnoreTagsInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
+
                 // IChunkSystem with entity-mode fields
                 if (sys.Kind == SystemKind.Chunk && IsEntityModeField(field.Kind))
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.ChunkSystemHasEntityFields, sys.Location, field.FieldName, sys.FullyQualifiedName));
@@ -727,6 +746,15 @@ public class SystemGenerator : IIncrementalGenerator
                     (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
                 if (worldFieldMismatch)
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
+
+                if (IsDisallowedTagBatchClaim(field, queryableByFqn))
+                {
+                    var view = field.Kind == FieldKind.CompositionChunkData ? "Chunk" : "Segments";
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.TagFilterOnBatchClaim,
+                        sys.Location, field.FieldName, sys.FullyQualifiedName,
+                        field.ComponentFQN ?? field.TypeFQN, view));
+                }
             }
         }
 
@@ -737,10 +765,12 @@ public class SystemGenerator : IIncrementalGenerator
             foreach (var f in s.Fields)
             {
                 if (f.IsCurrentTick && !IsValidCurrentTickField(f)) return false;
+                if (f.IsIgnoreTags && !IsValidIgnoreTagsField(f)) return false;
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)) return false;
                 if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
+                if (IsDisallowedTagBatchClaim(f, queryableByFqn)) return false;
             }
             return true;
         }).ToList();
@@ -1259,7 +1289,8 @@ public class SystemGenerator : IIncrementalGenerator
             var varName = ToCamelCase(field.FieldName) + "Singleton";
             var singletonType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Singleton<{maskType}, {configType}>";
             var readArg = snapshotRead && !field.IsCurrentTick ? "readWorld" : "null";
-            sb.AppendLine($"{indent}var {varName} = {singletonType}.Resolve(world, {readArg});");
+            var ignoreArg = field.IsIgnoreTags ? ", ignoreTags: true" : "";
+            sb.AppendLine($"{indent}var {varName} = {singletonType}.Resolve(world, {readArg}{ignoreArg});");
         }
     }
 
@@ -1292,6 +1323,7 @@ public class SystemGenerator : IIncrementalGenerator
         // that declare no filter.
         foreach (var field in compositionFields)
         {
+            if (field.IsIgnoreTags) continue;
             var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
             sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
         }
@@ -1375,6 +1407,7 @@ public class SystemGenerator : IIncrementalGenerator
         // Same row filter as the classic path above — see the note there.
         foreach (var field in compositionFields)
         {
+            if (field.IsIgnoreTags) continue;
             var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
             sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
         }
@@ -1844,7 +1877,8 @@ public class SystemGenerator : IIncrementalGenerator
                 ? "(readWorld ?? world)"
                 : "world";
             var accessorName = field.Kind == FieldKind.CompositionReadLookup ? "ReadLookup" : "WriteLookup";
-            return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource})";
+            var ignoreArg = field.IsIgnoreTags ? ", ignoreTags: true" : "";
+            return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource}{ignoreArg})";
         }
 
         var source = field.Kind == FieldKind.EntityComponentReader && snapshotReadSystems && !field.IsCurrentTick
@@ -1867,6 +1901,33 @@ public class SystemGenerator : IIncrementalGenerator
 
     private static bool IsWorldModeField(FieldKind kind) =>
         kind is FieldKind.CompositionSegments;
+
+    /// <summary>Chunk/Segments of a [WithTag]/[WithoutTag] queryable, with no [IgnoreTags]
+    /// on the field — PECS3012. Lookups, entity-mode claims and singletons honor the filter
+    /// and are not this case.</summary>
+    private static bool IsDisallowedTagBatchClaim(
+        SystemFieldInfo field,
+        Dictionary<string, QueryableLookupInfo> queryableByFqn)
+    {
+        if (field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionChunkData))
+            return false;
+        if (field.IsIgnoreTags)
+            return false;
+        if (field.ComponentFQN is null || !queryableByFqn.TryGetValue(field.ComponentFQN, out var queryable))
+            return false;
+        return queryable.IsFiltered;
+    }
+
+    /// <summary>[IgnoreTags] is valid on every queryable view a system can claim: Chunk,
+    /// Segments (where it also silences PECS3012), Entity, Singleton, ReadLookup and
+    /// WriteLookup. Everything else is PECS3013.</summary>
+    private static bool IsValidIgnoreTagsField(SystemFieldInfo field) =>
+        field.Kind is FieldKind.CompositionChunkData
+            or FieldKind.CompositionSegments
+            or FieldKind.CompositionData
+            or FieldKind.CompositionSingleton
+            or FieldKind.CompositionReadLookup
+            or FieldKind.CompositionWriteLookup;
 
     /// <summary>[CurrentTick] is valid on inline `ref readonly T` component fields,
     /// arbitrary-entity readers, and TQueryable.Singleton composition fields; everything else is
@@ -1930,13 +1991,15 @@ public class SystemGenerator : IIncrementalGenerator
         public ImmutableArray<string> WithoutComponents { get; }
         public ImmutableArray<string> WithAnyComponents { get; }
         public ImmutableArray<QueryableComponentAccess> OptionalComponents { get; }
+        public bool IsFiltered { get; }
 
         public QueryableLookupInfo(
             string prefix, string fqn, bool isSingleton,
             ImmutableArray<QueryableComponentAccess> withComponents,
             ImmutableArray<string> withoutComponents,
             ImmutableArray<string> withAnyComponents,
-            ImmutableArray<QueryableComponentAccess> optionalComponents)
+            ImmutableArray<QueryableComponentAccess> optionalComponents,
+            bool isFiltered = false)
         {
             Prefix = prefix;
             FQN = fqn;
@@ -1945,6 +2008,7 @@ public class SystemGenerator : IIncrementalGenerator
             WithoutComponents = withoutComponents;
             WithAnyComponents = withAnyComponents;
             OptionalComponents = optionalComponents;
+            IsFiltered = isFiltered;
         }
     }
 
@@ -1963,6 +2027,7 @@ public class SystemGenerator : IIncrementalGenerator
         public string? ErrorTypeName { get; }
         public string? ErrorContainingTypeFqn { get; }
         public bool IsCurrentTick { get; }
+        public bool IsIgnoreTags { get; }
 
         public SystemFieldInfo(
             string fieldName, FieldKind kind, bool isReadOnly, string typeFQN,
@@ -1974,7 +2039,8 @@ public class SystemGenerator : IIncrementalGenerator
             bool isRefField = false,
             string? errorTypeName = null,
             string? errorContainingTypeFqn = null,
-            bool isCurrentTick = false)
+            bool isCurrentTick = false,
+            bool isIgnoreTags = false)
         {
             FieldName = fieldName;
             Kind = kind;
@@ -1989,6 +2055,7 @@ public class SystemGenerator : IIncrementalGenerator
             ErrorTypeName = errorTypeName;
             ErrorContainingTypeFqn = errorContainingTypeFqn;
             IsCurrentTick = isCurrentTick;
+            IsIgnoreTags = isIgnoreTags;
         }
     }
 
