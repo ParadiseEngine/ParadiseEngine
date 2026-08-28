@@ -11,6 +11,11 @@
     <ProjectReference Include="../Paradise.BT/Paradise.BT.csproj" />
     <ProjectReference Include="../Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
     <ProjectReference Include="../Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
+    <!-- The generator, BY NAME. Analyzers do not flow across a ProjectReference, so a project
+         declaring its own nodes has to ask for it: without this the sample's [Builder] structs get
+         no builder classes, and — since registration is generated too — no NodeTypeRegistry
+         entries either. Paradise.Export hit the same wall and says so in its own csproj. -->
+    <ProjectReference Include="../Paradise.BT.Generators/Paradise.BT.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

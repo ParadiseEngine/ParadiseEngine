@@ -49,31 +49,6 @@ public sealed class BehaviorTreeSerializationTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
-    [Test]
-    public async Task Delegate_Backed_Nodes_Are_Rejected_By_Blob_Serialization()
-    {
-        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Action(_ => NodeState.Success));
-
-        Exception? exception = null;
-        IDisposable? serializedTree = null;
-
-        try
-        {
-            serializedTree = tree.Serialize();
-        }
-        catch (Exception ex)
-        {
-            exception = ex;
-        }
-        finally
-        {
-            serializedTree?.Dispose();
-        }
-
-        await Assert.That(exception is NotSupportedException).IsTrue();
-        await Assert.That(exception?.Message.Contains(nameof(DelegateActionNode), StringComparison.Ordinal) ?? false).IsTrue();
-    }
-
     // ============================
     // Byte array serialization
     // ============================
@@ -135,34 +110,6 @@ public sealed class BehaviorTreeSerializationTests
         await Assert.That(tree.Count).IsEqualTo(2);
     }
 
-    // ============================
-    // DelegateConditionNode serialization rejection
-    // ============================
-
-    [Test]
-    public async Task Delegate_Condition_Nodes_Are_Rejected_By_Blob_Serialization()
-    {
-        var tree = BehaviorTreeBuilder.Build(TestBehaviorNodes.Condition(_ => true));
-
-        Exception? exception = null;
-        IDisposable? serializedTree = null;
-
-        try
-        {
-            serializedTree = tree.Serialize();
-        }
-        catch (Exception ex)
-        {
-            exception = ex;
-        }
-        finally
-        {
-            serializedTree?.Dispose();
-        }
-
-        await Assert.That(exception is NotSupportedException).IsTrue();
-        await Assert.That(exception?.Message.Contains(nameof(DelegateConditionNode), StringComparison.Ordinal) ?? false).IsTrue();
-    }
 
     // ============================
     // Registry

@@ -40,10 +40,9 @@ public static class BuiltInBehaviorNodes
         => BehaviorNodes.Node(new DelayTimerNode { TimerSeconds = seconds });
 
     /// <summary>
-    /// Creates a <see cref="BehaviorTreeSerializationRegistry"/> pre-populated with every unmanaged node
-    /// type shipped in Paradise.BT.Nodes. Delegate-backed helpers (DelegateActionNode, DelegateConditionNode)
-    /// are not serializable and therefore not registered. Register additional custom types on the returned
-    /// registry via <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
+    /// Creates a <see cref="BehaviorTreeSerializationRegistry"/> pre-populated with every node type
+    /// shipped in Paradise.BT.Nodes. Register additional custom types on the returned registry via
+    /// <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
     /// </summary>
     // There is deliberately no RegisterAll() here. Every node type in this assembly registers
     // itself with NodeTypeRegistry through a generated module initializer (Paradise.BT.Generators),
