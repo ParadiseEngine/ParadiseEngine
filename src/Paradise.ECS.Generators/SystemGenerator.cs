@@ -1289,7 +1289,8 @@ public class SystemGenerator : IIncrementalGenerator
             var varName = ToCamelCase(field.FieldName) + "Singleton";
             var singletonType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Singleton<{maskType}, {configType}>";
             var readArg = snapshotRead && !field.IsCurrentTick ? "readWorld" : "null";
-            sb.AppendLine($"{indent}var {varName} = {singletonType}.Resolve(world, {readArg});");
+            var ignoreArg = field.IsIgnoreTags ? ", ignoreTags: true" : "";
+            sb.AppendLine($"{indent}var {varName} = {singletonType}.Resolve(world, {readArg}{ignoreArg});");
         }
     }
 
@@ -1322,6 +1323,7 @@ public class SystemGenerator : IIncrementalGenerator
         // that declare no filter.
         foreach (var field in compositionFields)
         {
+            if (field.IsIgnoreTags) continue;
             var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
             sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
         }
@@ -1405,6 +1407,7 @@ public class SystemGenerator : IIncrementalGenerator
         // Same row filter as the classic path above — see the note there.
         foreach (var field in compositionFields)
         {
+            if (field.IsIgnoreTags) continue;
             var filterType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
             sb.AppendLine($"{indent}    if (!global::Paradise.ECS.QueryHelpers.RowMatches<{filterType}, {maskType}, {configType}>(world.ChunkManager, layout, chunk, __i)) continue;");
         }
@@ -1874,7 +1877,8 @@ public class SystemGenerator : IIncrementalGenerator
                 ? "(readWorld ?? world)"
                 : "world";
             var accessorName = field.Kind == FieldKind.CompositionReadLookup ? "ReadLookup" : "WriteLookup";
-            return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource})";
+            var ignoreArg = field.IsIgnoreTags ? ", ignoreTags: true" : "";
+            return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource}{ignoreArg})";
         }
 
         var source = field.Kind == FieldKind.EntityComponentReader && snapshotReadSystems && !field.IsCurrentTick
@@ -1914,10 +1918,16 @@ public class SystemGenerator : IIncrementalGenerator
         return queryable.IsFiltered;
     }
 
-    /// <summary>[IgnoreTags] is valid only on TQueryable.Chunk and TQueryable.Segments;
-    /// everything else is PECS3013.</summary>
+    /// <summary>[IgnoreTags] is valid on every queryable view a system can claim: Chunk,
+    /// Segments (where it also silences PECS3012), Entity, Singleton, ReadLookup and
+    /// WriteLookup. Everything else is PECS3013.</summary>
     private static bool IsValidIgnoreTagsField(SystemFieldInfo field) =>
-        field.Kind is FieldKind.CompositionChunkData or FieldKind.CompositionSegments;
+        field.Kind is FieldKind.CompositionChunkData
+            or FieldKind.CompositionSegments
+            or FieldKind.CompositionData
+            or FieldKind.CompositionSingleton
+            or FieldKind.CompositionReadLookup
+            or FieldKind.CompositionWriteLookup;
 
     /// <summary>[CurrentTick] is valid on inline `ref readonly T` component fields,
     /// arbitrary-entity readers, and TQueryable.Singleton composition fields; everything else is

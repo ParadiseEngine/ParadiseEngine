@@ -300,6 +300,45 @@ public sealed class TagQueryTests : IDisposable
     }
 
     [Test]
+    public async Task IgnoreTags_LookupAcceptsATaggedHandle()
+    {
+        var tagged = SpawnPositioned(1);
+        var plain = SpawnPositioned(2);
+        _world.AddTag<TestIsPlayer>(tagged);
+
+        var lookup = new TestUntaggedPosition.ReadLookup(_world, ignoreTags: true);
+        var plainMatches = lookup.Has(plain);
+        var taggedMatches = lookup.Has(tagged);
+        await Assert.That(plainMatches).IsTrue();
+        await Assert.That(taggedMatches).IsTrue();
+    }
+
+    [Test]
+    public async Task IgnoreTags_SingletonCountsUntagged()
+    {
+        // One untagged entity: the filter would refuse (zero tagged), ignoreTags binds it.
+        SpawnPositioned(1);
+
+        var x = TestTaggedSingleton.Singleton<ComponentMask, DefaultConfig>
+            .Resolve(_world, null, ignoreTags: true).TestPosition.X;
+        await Assert.That(x).IsEqualTo(1f);
+    }
+
+    [Test]
+    public async Task IgnoreTags_SingletonRefusesTwoUntagged()
+    {
+        // Two untagged: ignoreTags counts at archetype level, so this is two, not zero.
+        SpawnPositioned(1);
+        SpawnPositioned(2);
+
+        await Assert.That(() =>
+        {
+            _ = TestTaggedSingleton.Singleton<ComponentMask, DefaultConfig>
+                .Resolve(_world, null, ignoreTags: true);
+        }).Throws<InvalidOperationException>();
+    }
+
+    [Test]
     public async Task WithTagAndWithoutTag_AreAnIntersection()
     {
         var player = SpawnPositioned(1);

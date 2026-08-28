@@ -425,23 +425,23 @@ internal static class DiagnosticDescriptors
     public static readonly DiagnosticDescriptor TagFilterOnBatchClaim = new(
         id: "PECS3012",
         title: "Tag filter does not apply to Chunk or Segments",
-        messageFormat: "Field '{0}' in system '{1}' claims queryable '{2}' as {3}, but that queryable filters by tag and batch views cannot skip rows — test EntityTags yourself or mark the field with [IgnoreTags]",
+        messageFormat: "Field '{0}' in system '{1}' claims queryable '{2}' as {3}, but that queryable filters by tag and {3} cannot skip rows — mark the field with [IgnoreTags]",
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "[WithTag]/[WithoutTag] run on query iteration, singleton resolve, entity-mode claims, and lookups. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them. [IgnoreTags] on that field acknowledges the filter will not run on this view.");
+        description: "[WithTag]/[WithoutTag] are row filters. They run on query iteration, singleton resolve, entity-mode claims, and lookups unless the field is marked [IgnoreTags]. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them, so a tag-filtered queryable claimed that way is an error unless the field carries [IgnoreTags] — which acknowledges the filter will not run, and that the system must test EntityTags itself.");
 
     /// <summary>
-    /// PECS3013: [IgnoreTags] on a field that is not Chunk or Segments.
+    /// PECS3013: [IgnoreTags] on a field that is not a queryable view.
     /// </summary>
     public static readonly DiagnosticDescriptor IgnoreTagsInvalidField = new(
         id: "PECS3013",
         title: "Invalid [IgnoreTags] field",
-        messageFormat: "Field '{0}' in system '{1}' has [IgnoreTags] but is not a TQueryable.Chunk or TQueryable.Segments field",
+        messageFormat: "Field '{0}' in system '{1}' has [IgnoreTags] but is not a TQueryable.Chunk, TQueryable.Segments, TQueryable.Entity, TQueryable.Singleton, TQueryable.ReadLookup or TQueryable.WriteLookup field",
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "[IgnoreTags] is the opt-out for PECS3012: it is only meaningful on batch views that cannot apply a row filter. Lookups, entity-mode claims and singletons honor [WithTag]/[WithoutTag] and must not carry it.");
+        description: "[IgnoreTags] skips the queryable's [WithTag]/[WithoutTag] filter on that field. On Chunk and Segments it also silences PECS3012, because those views cannot apply a row filter. On Entity, Singleton, ReadLookup and WriteLookup the filter otherwise runs. Other injection kinds have no tag filter to skip.");
 
     /// <summary>
     /// PECS3008: [SingleWriter] component is written by multiple systems.

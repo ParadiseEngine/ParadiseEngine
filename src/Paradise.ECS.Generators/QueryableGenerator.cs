@@ -561,8 +561,13 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.IWorld<TMask, TConfig> _world;");
+        sb.AppendLine($"{indent}    private readonly bool _ignoreTags;");
         sb.AppendLine();
-        sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world) => _world = world;");
+        sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world, bool ignoreTags = false)");
+        sb.AppendLine($"{indent}    {{");
+        sb.AppendLine($"{indent}        _world = world;");
+        sb.AppendLine($"{indent}        _ignoreTags = ignoreTags;");
+        sb.AppendLine($"{indent}    }}");
         sb.AppendLine();
         sb.AppendLine($"{indent}    /// <summary>Returns whether the entity is alive and matches {queryable.TypeName}.</summary>");
         sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => TryGet(entity, out _);");
@@ -587,7 +592,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"{indent}        var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(location.GlobalIndex);");
         sb.AppendLine($"{indent}        var chunk = archetype.GetChunk(chunkIndex);");
-        sb.AppendLine($"{indent}        if (!global::Paradise.ECS.QueryHelpers.RowMatches<{queryable.TypeName}.Data<TMask, TConfig>, TMask, TConfig>(_world.ChunkManager, archetype.Layout, chunk, indexInChunk)) return false;");
+        sb.AppendLine($"{indent}        if (!_ignoreTags && !global::Paradise.ECS.QueryHelpers.RowMatches<{queryable.TypeName}.Data<TMask, TConfig>, TMask, TConfig>(_world.ChunkManager, archetype.Layout, chunk, indexInChunk)) return false;");
         sb.AppendLine();
         if (reader)
         {
@@ -1078,7 +1083,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    /// matches zero or more than one entity.</exception>");
         sb.AppendLine($"{indent}    public static Singleton<TMask, TConfig> Resolve(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig> world,");
-        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld)");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld,");
+        sb.AppendLine($"{indent}        bool ignoreTags = false)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        var query = world.ArchetypeRegistry.GetOrCreateQuery(global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[{queryableFQN}.QueryableId]);");
         sb.AppendLine($"{indent}        int count = 0;");
@@ -1090,48 +1096,47 @@ public class QueryableGenerator : IIncrementalGenerator
         {
             // Tag-filtered: the match can sit at any row of any chunk, and the chunk's entity
             // count is not the match count. Both facts break the unfiltered form below, which
-            // sums chunk counts and then binds index 0.
+            // sums chunk counts and then binds index 0. ignoreTags: true takes that unfiltered
+            // form — the field opted out of the row test, so cardinality is archetype-level.
             sb.AppendLine($"{indent}        int indexInChunk = 0;");
             sb.AppendLine($"{indent}        int writeEntityCount = 1;");
-            sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
+            sb.AppendLine($"{indent}        if (ignoreTags)");
             sb.AppendLine($"{indent}        {{");
+            EmitUnfilteredSingletonWalk(sb, indent + "    ");
+            sb.AppendLine($"{indent}        }}");
+            sb.AppendLine($"{indent}        else");
+            sb.AppendLine($"{indent}        {{");
+            sb.AppendLine($"{indent}            foreach (var ci in query.Chunks)");
+            sb.AppendLine($"{indent}            {{");
             // Same coarse pass the enumerator does. It matters most HERE: a singleton resolves once
             // per step for the lifetime of a run, so skipping chunks that cannot hold the match is
             // the difference between scanning an archetype every tick and glancing at its chunks.
-            sb.AppendLine($"{indent}            if (!Data<TMask, TConfig>.ChunkMatches(world.ChunkManager, ci.Archetype.Layout, ci.Handle))");
-            sb.AppendLine($"{indent}                continue;");
-            sb.AppendLine($"{indent}            for (int i = 0; i < ci.EntityCount; i++)");
-            sb.AppendLine($"{indent}            {{");
-            sb.AppendLine($"{indent}                if (!Data<TMask, TConfig>.Matches(world.ChunkManager, ci.Archetype.Layout, ci.Handle, i))");
+            sb.AppendLine($"{indent}                if (!Data<TMask, TConfig>.ChunkMatches(world.ChunkManager, ci.Archetype.Layout, ci.Handle))");
             sb.AppendLine($"{indent}                    continue;");
-            sb.AppendLine($"{indent}                if (count == 0)");
+            sb.AppendLine($"{indent}                for (int i = 0; i < ci.EntityCount; i++)");
             sb.AppendLine($"{indent}                {{");
-            sb.AppendLine($"{indent}                    chunk = ci.Handle;");
-            sb.AppendLine($"{indent}                    layoutData = ci.Archetype.Layout.DataPointer;");
-            sb.AppendLine($"{indent}                    archetypeId = ci.Archetype.Id;");
-            sb.AppendLine($"{indent}                    chunkIndex = ci.ChunkIndex;");
-            sb.AppendLine($"{indent}                    indexInChunk = i;");
-            sb.AppendLine($"{indent}                    writeEntityCount = ci.EntityCount;");
+            sb.AppendLine($"{indent}                    if (!Data<TMask, TConfig>.Matches(world.ChunkManager, ci.Archetype.Layout, ci.Handle, i))");
+            sb.AppendLine($"{indent}                        continue;");
+            sb.AppendLine($"{indent}                    if (count == 0)");
+            sb.AppendLine($"{indent}                    {{");
+            sb.AppendLine($"{indent}                        chunk = ci.Handle;");
+            sb.AppendLine($"{indent}                        layoutData = ci.Archetype.Layout.DataPointer;");
+            sb.AppendLine($"{indent}                        archetypeId = ci.Archetype.Id;");
+            sb.AppendLine($"{indent}                        chunkIndex = ci.ChunkIndex;");
+            sb.AppendLine($"{indent}                        indexInChunk = i;");
+            sb.AppendLine($"{indent}                        writeEntityCount = ci.EntityCount;");
+            sb.AppendLine($"{indent}                    }}");
+            sb.AppendLine($"{indent}                    count++;");
             sb.AppendLine($"{indent}                }}");
-            sb.AppendLine($"{indent}                count++;");
             sb.AppendLine($"{indent}            }}");
             sb.AppendLine($"{indent}        }}");
         }
         else
         {
+            sb.AppendLine($"{indent}        _ = ignoreTags;");
             sb.AppendLine($"{indent}        const int indexInChunk = 0;");
             sb.AppendLine($"{indent}        const int writeEntityCount = 1;");
-            sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
-            sb.AppendLine($"{indent}        {{");
-            sb.AppendLine($"{indent}            if (count == 0 && ci.EntityCount > 0)");
-            sb.AppendLine($"{indent}            {{");
-            sb.AppendLine($"{indent}                chunk = ci.Handle;");
-            sb.AppendLine($"{indent}                layoutData = ci.Archetype.Layout.DataPointer;");
-            sb.AppendLine($"{indent}                archetypeId = ci.Archetype.Id;");
-            sb.AppendLine($"{indent}                chunkIndex = ci.ChunkIndex;");
-            sb.AppendLine($"{indent}            }}");
-            sb.AppendLine($"{indent}            count += ci.EntityCount;");
-            sb.AppendLine($"{indent}        }}");
+            EmitUnfilteredSingletonWalk(sb, indent);
         }
         sb.AppendLine($"{indent}        if (count != 1)");
         sb.AppendLine($"{indent}        {{");
@@ -1178,6 +1183,24 @@ public class QueryableGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine($"{indent}}}");
+    }
+
+    /// <summary>Sums chunk entity counts and binds the first non-empty chunk at index 0.
+    /// Used for unfiltered singletons, and for filtered ones whose claim opted out of the
+    /// row test with <c>ignoreTags: true</c>.</summary>
+    private static void EmitUnfilteredSingletonWalk(StringBuilder sb, string indent)
+    {
+        sb.AppendLine($"{indent}        foreach (var ci in query.Chunks)");
+        sb.AppendLine($"{indent}        {{");
+        sb.AppendLine($"{indent}            if (count == 0 && ci.EntityCount > 0)");
+        sb.AppendLine($"{indent}            {{");
+        sb.AppendLine($"{indent}                chunk = ci.Handle;");
+        sb.AppendLine($"{indent}                layoutData = ci.Archetype.Layout.DataPointer;");
+        sb.AppendLine($"{indent}                archetypeId = ci.Archetype.Id;");
+        sb.AppendLine($"{indent}                chunkIndex = ci.ChunkIndex;");
+        sb.AppendLine($"{indent}            }}");
+        sb.AppendLine($"{indent}            count += ci.EntityCount;");
+        sb.AppendLine($"{indent}        }}");
     }
 
     /// <summary>
@@ -1349,8 +1372,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    private readonly {inner} _inner;");
         sb.AppendLine();
         AppendAggressiveInlining(sb, indent + "    ");
-        sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world)");
-        sb.AppendLine($"{indent}        => _inner = new {inner}(world);");
+        sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world, bool ignoreTags = false)");
+        sb.AppendLine($"{indent}        => _inner = new {inner}(world, ignoreTags);");
         sb.AppendLine();
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    internal {viewName}({inner} inner) => _inner = inner;");
@@ -1391,8 +1414,9 @@ public class QueryableGenerator : IIncrementalGenerator
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    public static Singleton Resolve(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}> world,");
-        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld)");
-        sb.AppendLine($"{indent}        => new({inner}.Resolve(world, readWorld));");
+        sb.AppendLine($"{indent}        global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld,");
+        sb.AppendLine($"{indent}        bool ignoreTags = false)");
+        sb.AppendLine($"{indent}        => new({inner}.Resolve(world, readWorld, ignoreTags));");
         GenerateDataPropertyForwards(sb, queryable, indent + "    ", "_inner");
         sb.AppendLine($"{indent}}}");
     }

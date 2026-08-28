@@ -24,13 +24,15 @@ namespace Paradise.ECS;
 /// <b>Where it applies:</b> query iteration (<c>QueryResult</c>), a
 /// <c>[Queryable(Singleton = true)]</c>'s Resolve — whose "exactly one" then means exactly one
 /// TAGGED entity — ENTITY-mode system claims, and lookups (<c>TQueryable.ReadLookup</c> /
-/// <c>WriteLookup</c>). It does NOT apply to chunk-mode or world-mode claims
-/// (<c>TQueryable.Chunk</c>, <c>TQueryable.Segments</c>) or to <c>ChunkQueryResult</c>: those
-/// hand out whole chunks and flat spans, where entities carrying the tag and entities not carrying
-/// it sit side by side and the consumer indexes rows positionally. Skipping rows there would break
-/// that indexing rather than filter it. A system that claims a tag-filtered queryable as
-/// <c>Chunk</c> or <c>Segments</c> is therefore a compile error (PECS3012), unless that field
-/// is marked <see cref="IgnoreTagsAttribute"/>.
+/// <c>WriteLookup</c>). A system field of any of those kinds can opt out with
+/// <see cref="IgnoreTagsAttribute"/>, in which case that claim matches on archetype alone.
+/// It does NOT apply to chunk-mode or world-mode claims (<c>TQueryable.Chunk</c>,
+/// <c>TQueryable.Segments</c>) or to <c>ChunkQueryResult</c>: those hand out whole chunks and
+/// flat spans, where entities carrying the tag and entities not carrying it sit side by side
+/// and the consumer indexes rows positionally. Skipping rows there would break that indexing
+/// rather than filter it. A system that claims a tag-filtered queryable as <c>Chunk</c> or
+/// <c>Segments</c> is therefore a compile error (PECS3012), unless that field is marked
+/// <see cref="IgnoreTagsAttribute"/> — which there acknowledges the filter cannot run.
 /// </para>
 /// <para>
 /// <b>Cost:</b> the row test is the only filter — matching archetypes are scanned in full, and a
@@ -68,9 +70,9 @@ public sealed class WithTagAttribute<T> : Attribute
 /// </para>
 /// <para>
 /// <b>Where it applies</b> is identical to <see cref="WithTagAttribute{T}"/>: query iteration,
-/// singleton resolve, entity-mode claims, and lookups. Chunk and Segments claims of a
-/// tag-filtered queryable are PECS3012 unless that field is marked
-/// <see cref="IgnoreTagsAttribute"/>.
+/// singleton resolve, entity-mode claims, and lookups — each of which a system field can opt
+/// out of with <see cref="IgnoreTagsAttribute"/>. Chunk and Segments claims of a tag-filtered
+/// queryable are PECS3012 unless that field is marked <see cref="IgnoreTagsAttribute"/>.
 /// </para>
 /// <para>
 /// <b>Chunk skip cannot help.</b> The per-chunk mask is a sticky union. A clear bit proves
@@ -94,20 +96,21 @@ public sealed class WithoutTagAttribute<T> : Attribute
 }
 
 /// <summary>
-/// Allows a <c>Chunk</c> or <c>Segments</c> system field of a tag-filtered queryable,
-/// acknowledging that the tag filter will not run on that view.
+/// Skips the queryable's <see cref="WithTagAttribute{T}"/> / <see cref="WithoutTagAttribute{T}"/>
+/// filter on this system field.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="WithTagAttribute{T}"/> and <see cref="WithoutTagAttribute{T}"/> are row filters.
-/// Batch views cannot skip rows without misaligning spans, so a system field of kind
-/// <c>TQueryable.Chunk</c> or <c>TQueryable.Segments</c> on a filtered queryable is PECS3012 —
-/// unless this attribute is present on that field. The claim then sees every row of the matching
-/// archetypes; test the bits yourself (claim <c>EntityTags</c>, or read them off the span).
+/// Those attributes are row filters. On a lookup, entity, or singleton claim they run by
+/// default; this attribute turns them off for that field, so the claim matches on archetype
+/// alone. On <c>Chunk</c> and <c>Segments</c> they cannot run without misaligning spans, so a
+/// filtered queryable claimed that way is PECS3012 unless this attribute is present — which
+/// there acknowledges the filter will not run. Test the bits yourself (claim
+/// <c>EntityTags</c>, or read them off the span).
 /// </para>
 /// <para>
-/// Valid only on <c>Chunk</c> and <c>Segments</c> fields (PECS3013 otherwise). It does not
-/// change iteration, singleton, entity-mode, or lookup filters.
+/// Valid on <c>Chunk</c>, <c>Segments</c>, <c>Entity</c>, <c>Singleton</c>,
+/// <c>ReadLookup</c>, and <c>WriteLookup</c> fields (PECS3013 otherwise).
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = false)]

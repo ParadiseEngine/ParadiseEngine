@@ -2,7 +2,7 @@ namespace Paradise.ECS.Generators.Test;
 
 /// <summary>
 /// [WithTag]/[WithoutTag] row filters, PECS017 (same tag required and excluded), and PECS3012
-/// (Chunk/Segments of a tag-filtered queryable) plus [IgnoreTags] as the opt-out.
+/// (Chunk/Segments of a tag-filtered queryable) plus [IgnoreTags] as the field-level opt-out.
 /// </summary>
 public sealed class TagFilterGeneratorTests
 {
@@ -153,7 +153,7 @@ public sealed class TagFilterGeneratorTests
     }
 
     [Test]
-    public async Task IgnoreTagsOnLookup_IsPecs3013()
+    public async Task IgnoreTagsOnLookup_IsAllowed()
     {
         var result = GeneratorTestHelper.RunSystemGenerator(Preamble + """
 
@@ -166,6 +166,80 @@ public sealed class TagFilterGeneratorTests
             {
                 [IgnoreTags]
                 public Living.ReadLookup Bodies;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(result.Diagnostics.Any(d => d.Id == "PECS3013")).IsFalse();
+        await Assert.That(result.Diagnostics.Any(d => d.Id == "PECS3012")).IsFalse();
+        var generated = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "System_TestNamespace_Tick.g.cs").Source;
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("ignoreTags: true");
+    }
+
+    [Test]
+    public async Task IgnoreTagsOnEntity_OmitsRowMatches()
+    {
+        var result = GeneratorTestHelper.RunSystemGenerator(Preamble + """
+
+            [Queryable]
+            [WithTag<Alive>]
+            [With<Position>]
+            public readonly ref partial struct Living;
+
+            public ref partial struct Tick : IEntitySystem
+            {
+                [IgnoreTags]
+                public Living.Entity Row;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(result.Diagnostics.Any(d => d.Id == "PECS3013")).IsFalse();
+        var generated = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "System_TestNamespace_Tick.g.cs").Source;
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).DoesNotContain("RowMatches");
+    }
+
+    [Test]
+    public async Task IgnoreTagsOnSingleton_PassesTrueToResolve()
+    {
+        var result = GeneratorTestHelper.RunSystemGenerator(Preamble + """
+
+            [Queryable(Singleton = true)]
+            [WithTag<Alive>]
+            [With<Position>]
+            public readonly ref partial struct TheOne;
+
+            public ref partial struct Tick : IWorldSystem
+            {
+                [IgnoreTags]
+                public TheOne.Singleton Body;
+                public void Execute() { }
+            }
+            """);
+
+        await Assert.That(result.Diagnostics.Any(d => d.Id == "PECS3013")).IsFalse();
+        var generated = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "System_TestNamespace_Tick.g.cs").Source;
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("ignoreTags: true");
+    }
+
+    [Test]
+    public async Task IgnoreTagsOnCommandBuffer_IsPecs3013()
+    {
+        var result = GeneratorTestHelper.RunSystemGenerator(Preamble + """
+
+            public ref partial struct Tick : IWorldSystem
+            {
+                [IgnoreTags]
+                public EntityCommandBuffer Commands;
                 public void Execute() { }
             }
             """);
@@ -234,5 +308,10 @@ public sealed class TagFilterGeneratorTests
             """);
 
         await Assert.That(result.Diagnostics.Any(d => d.Id == "PECS3012")).IsFalse();
+        var generated = result.GeneratedTrees
+            .Select(t => (HintName: System.IO.Path.GetFileName(t.FilePath), Source: t.GetText().ToString()))
+            .FirstOrDefault(s => s.HintName == "System_TestNamespace_Tick.g.cs").Source;
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated!).Contains("RowMatches");
     }
 }
