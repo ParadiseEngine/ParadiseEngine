@@ -2,10 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>Deferred tag add. Payload is the tag id as a little-endian <see cref="int"/>.</summary>
+/// <summary>Deferred tag add. Payload is the tag id as a host-endian <see cref="int"/>.</summary>
 public readonly struct AddTagOp : ICommandExtension;
 
-/// <summary>Deferred tag remove. Payload is the tag id as a little-endian <see cref="int"/>.</summary>
+/// <summary>Deferred tag remove. Payload is the tag id as a host-endian <see cref="int"/>.</summary>
 public readonly struct RemoveTagOp : ICommandExtension;
 
 /// <summary>

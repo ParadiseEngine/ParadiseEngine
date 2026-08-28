@@ -317,11 +317,13 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <summary>
     /// Adds a tag to an entity.
     /// </summary>
+    /// <typeparam name="TTag">The tag type to add.</typeparam>
+    /// <param name="entity">The entity to add the tag to.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddTag<TTag>(Entity entity) where TTag : ITag
         => AddTag(entity, TTag.TagId.Value);
 
-    public void AddTag(Entity entity, int tagId)
+    private void AddTag(Entity entity, int tagId)
     {
         _world.AssertStructuralChangesAllowed(nameof(AddTag));
         ref var tags = ref _world.GetComponent<TEntityTags>(entity);
@@ -330,11 +332,22 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         chunkMask = chunkMask.Or(default(TTagMask).Set(tagId));
     }
 
+    /// <summary>
+    /// Removes a tag from an entity.
+    /// </summary>
+    /// <typeparam name="TTag">The tag type to remove.</typeparam>
+    /// <param name="entity">The entity to remove the tag from.</param>
+    /// <remarks>
+    /// The chunk tag mask is not recomputed immediately (sticky mask optimization).
+    /// This may result in false positives during tag queries, which is safe but may
+    /// cause queries to check a few extra entities. Call <see cref="RebuildChunkMasks"/>
+    /// to clean up stale bits if needed.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveTag<TTag>(Entity entity) where TTag : ITag
         => RemoveTag(entity, TTag.TagId.Value);
 
-    public void RemoveTag(Entity entity, int tagId)
+    private void RemoveTag(Entity entity, int tagId)
     {
         _world.AssertStructuralChangesAllowed(nameof(RemoveTag));
         ref var tags = ref _world.GetComponent<TEntityTags>(entity);
