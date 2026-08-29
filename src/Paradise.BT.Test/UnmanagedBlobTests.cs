@@ -257,12 +257,13 @@ public sealed class UnmanagedBlobTests
     }
 
     [Test]
-    public async Task Registering_The_Same_Type_Twice_Returns_One_Id()
+    public async Task Registering_The_Same_Type_Twice_Is_A_NoOp()
     {
-        int first = NodeTypeRegistry.Register<SequenceNode>();
-        int second = NodeTypeRegistry.Register<SequenceNode>();
+        NodeTypeRegistry.Register<SequenceNode>();
+        int count = NodeTypeRegistry.Count;
+        NodeTypeRegistry.Register<SequenceNode>();
 
-        await Assert.That(second).IsEqualTo(first);
+        await Assert.That(NodeTypeRegistry.Count).IsEqualTo(count);
     }
 
     /// <summary>Registered nowhere, so the layout must refuse it.</summary>

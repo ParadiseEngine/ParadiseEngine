@@ -26,8 +26,7 @@ public struct NodeBlob
     /// <summary>Bumped when the layout of this struct changes.
     /// v2: added <see cref="Guids"/>. v3: Guids deduplicated per type. v4: <see cref="Types"/>
     /// holds table indices, and the blob carries NOTHING process-local — a node's type is a GUID,
-    /// full stop. Registry resolution lives beside the blob, in
-    /// <see cref="BehaviorTreeLayoutHandle"/>.</summary>
+    /// full stop, and <see cref="NodeTypeRegistry"/> dispatches by it directly.</summary>
     public const int CurrentFormatVersion = 4;
 
     public int FormatVersion;
@@ -35,8 +34,8 @@ public struct NodeBlob
     /// <summary>Where each node's subtree ends, exclusive — the tree's topology, flattened.</summary>
     public BlobArray<int> EndIndices;
 
-    /// <summary>Each node's index into <see cref="Guids"/> — ONE meaning, at rest and in memory.
-    /// Never a registry id: those are process-local and never enter the blob.</summary>
+    /// <summary>Each node's index into <see cref="Guids"/> — ONE meaning, at rest and in
+    /// memory.</summary>
     public BlobArray<int> Types;
 
     /// <summary>Each distinct node TYPE's <c>[Guid]</c>, ordered by first appearance — the

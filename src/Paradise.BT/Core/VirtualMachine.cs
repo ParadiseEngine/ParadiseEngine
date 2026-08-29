@@ -21,7 +21,7 @@ public static class VirtualMachine
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState state = NodeTypeRegistry.Invoker(blob.GetTypeId(index))
+        NodeState state = NodeTypeRegistry.Invoker(blob.GetTypeGuid(index))
             .Tick(ref blob.RuntimeData(index), index, blob, bb);
         blob.SetState(index, state);
         return state;
@@ -36,7 +36,7 @@ public static class VirtualMachine
 
         for (int i = fromIndex; i < fromIndex + count; i++)
         {
-            NodeTypeRegistry.Invoker(blob.GetTypeId(i)).Reset(
+            NodeTypeRegistry.Invoker(blob.GetTypeGuid(i)).Reset(
                 ref blob.RuntimeData(i), i, blob, bb);
         }
     }

@@ -18,7 +18,9 @@ public interface INodeBlob
 
     int Count { get; }
 
-    int GetTypeId(int nodeIndex);
+    /// <summary>The node's durable type identity — what <see cref="VirtualMachine"/> hands to
+    /// <see cref="NodeTypeRegistry"/> for dispatch.</summary>
+    Guid GetTypeGuid(int nodeIndex);
 
     int GetEndIndex(int nodeIndex);
 

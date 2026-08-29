@@ -73,16 +73,18 @@ BTreeNode graph   ──────▶    BehaviorTree     ──────�
                                   ▼                               ▼
                              BehaviorTreeLayout ◀────── UnmanagedNodeBlob (ref struct view)
                              one shared native blob:              │
-                             topology · type ids · GUID           ▼
-                             table · offsets · defaults    VirtualMachine.Tick
+                             topology · GUID table +           ▼
+                             indices · offsets · defaults   VirtualMachine.Tick
 ```
 
 The layout is the tree's shared, immutable half: end indices (node *i*'s subtree is the
-contiguous range `[i, End[i])`, so its first child is `i+1` and a sibling is one jump), a dense
-type id per node, a GUID table for durable identity, per-node data offsets packed at each type's
-natural alignment, and the authored defaults. A thousand agents share one layout; each owns only
-the two buffers. Dispatch goes through a process-wide registry of static-generic invokers — no
-reflection, no boxing, no dictionary on the hot path.
+contiguous range `[i, End[i])`, so its first child is `i+1` and a sibling is one jump), a GUID
+table with one entry per distinct node type plus each node's index into it — a node's type is its
+GUID, the same identity at rest, in memory, and at dispatch — per-node data offsets packed at
+each type's natural alignment, and the authored defaults. A thousand agents share one layout;
+each owns only the two buffers. Dispatch goes through a process-wide registry of static-generic
+invokers keyed by that GUID — no reflection, no boxing, no lock on the hot path (registration
+copies the map and publishes it, so readers never synchronize).
 
 **Ownership:** whoever compiles a layout owns it (`IDisposable`, native memory) and must keep it
 alive while instances tick against it.
@@ -242,8 +244,8 @@ byte[] bytes = layout.SerializeToBytes();              // or tree.SerializeLayou
 using BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(bytes);
 ```
 
-- Node identity crosses as a **GUID table**, one entry per distinct type; process-local ids are
-  re-resolved against the registry on load.
+- Node identity crosses as a **GUID table**, one entry per distinct type — the same identity
+  dispatch resolves by, so nothing needs re-mapping on load.
 - Loading **validates before anything ticks**: format version, array bounds, topology sanity,
   and that every GUID is registered with a compatible size.
 - Nothing process-local reaches the bytes, so the same tree serializes **identically in every
@@ -274,7 +276,7 @@ All enforced at compile time by `Paradise.BT.Generators`:
 - Instances are unmanaged so trees can live *inside* a simulation — in components, in snapshots
   — rather than beside it in a managed side table where timers escape every snapshot and
   decisions arrive a frame late.
-- The tick path allocates nothing: dispatch is a dense-id lookup into static-generic invokers,
+- The tick path allocates nothing: dispatch is a lock-free GUID lookup into static-generic invokers,
   and the generated blackboard's `GetData<T>`/`SetData<T>` fold to direct field access at JIT
   time.
 - Determinism is a design goal throughout: no clocks, no reflection at tick time, and

@@ -22,7 +22,6 @@ namespace Paradise.BT;
 public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 {
     private readonly NodeBlob* _blob;
-    private readonly int* _registryIds;
     private readonly Span<NodeState> _states;
     private readonly Span<byte> _runtime;
     private readonly int _runtimeId;
@@ -62,7 +61,6 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
         }
 
         _blob = layout.Blob;
-        _registryIds = layout.RegistryIds;
         _states = states;
         _runtime = runtime;
         _runtimeId = runtimeId;
@@ -88,9 +86,9 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     public int Count => _blob->Count;
 
-    /// <summary>The registry id dispatch needs: the node's GUID-table index, resolved through the
-    /// process-local table the handle carries — the blob itself knows only GUIDs.</summary>
-    public int GetTypeId(int nodeIndex) => _registryIds[_blob->Types[nodeIndex]];
+    /// <summary>Straight from the blob's GUID table — the same identity at rest, in memory, and
+    /// at dispatch.</summary>
+    public Guid GetTypeGuid(int nodeIndex) => _blob->TypeGuid(nodeIndex);
 
     public int GetEndIndex(int nodeIndex) => _blob->EndIndices[nodeIndex];
 
@@ -114,6 +112,6 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
     public ref byte RuntimeData(int nodeIndex) =>
         ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _blob->Offsets[nodeIndex]);
 
-    // No dispatch method here on purpose: VirtualMachine ticks through GetTypeId + RuntimeData,
+    // No dispatch method here on purpose: VirtualMachine ticks through GetTypeGuid + RuntimeData,
     // both INodeBlob members, so it works for any byte-backed blob rather than this type alone.
 }

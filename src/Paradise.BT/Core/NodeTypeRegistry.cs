@@ -3,84 +3,66 @@ using System.Runtime.CompilerServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// Maps a node type's <c>[Guid]</c> to a dense id, and that id to an invoker that ticks the node
-/// from a <c>ref byte</c>. This is what replaces <c>IRuntimeNode</c> for byte-backed blobs, and so
-/// what lets an instance be unmanaged.
+/// Maps a node type's <c>[Guid]</c> to an invoker that ticks the node from a <c>ref byte</c>. This
+/// is what replaces <c>IRuntimeNode</c> for byte-backed blobs, and so what lets an instance be
+/// unmanaged.
 ///
 /// The table is static and managed on purpose: it is a vtable, one entry per node TYPE, so it
 /// never becomes per-instance state. Append-only and idempotent.
 ///
-/// Ids are assigned in registration order and are NOT stable across processes — the GUID is the
-/// identity a blob carries. Do not persist an id.
+/// The GUID is the whole identity — the same one a blob carries — so dispatch resolves a node
+/// straight from its serialized form, with no process-local id in between. Readers never lock:
+/// registration copies the map and publishes the new one, so a map a reader holds is immutable.
 /// </summary>
 public static class NodeTypeRegistry
 {
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<Guid, int> Ids = new();
-    private static INodeInvoker[] _invokers = [];
-    private static int _count;
+    private static Dictionary<Guid, INodeInvoker> _invokers = new();
 
     /// <summary>How many node types have been registered so far.</summary>
-    public static int Count
-    {
-        get
-        {
-            lock (Gate)
-            {
-                return _count;
-            }
-        }
-    }
+    public static int Count => Volatile.Read(ref _invokers).Count;
 
     /// <summary>
-    /// Register a node type and return its dense id, or the id it already has.
+    /// Register a node type. Idempotent — registering the same type again is a no-op.
     ///
     /// <c>unmanaged</c> is the contract: a node holding a reference cannot be stored as bytes.
     /// The delegate-backed nodes therefore cannot be registered here, nor for serialization.
     /// </summary>
     /// <exception cref="InvalidOperationException">Another type already claims this GUID.</exception>
-    public static int Register<TNodeData>()
+    public static void Register<TNodeData>()
         where TNodeData : unmanaged, INodeData
     {
         Guid guid = typeof(TNodeData).GetNodeGuid();
         lock (Gate)
         {
-            if (Ids.TryGetValue(guid, out int existing))
+            if (_invokers.TryGetValue(guid, out INodeInvoker? existing))
             {
-                if (_invokers[existing].NodeType != typeof(TNodeData))
+                if (existing.NodeType != typeof(TNodeData))
                 {
                     throw new InvalidOperationException(
                         $"Node GUID '{guid}' is already registered for "
-                        + $"'{_invokers[existing].NodeType.FullName}' and cannot also name "
+                        + $"'{existing.NodeType.FullName}' and cannot also name "
                         + $"'{typeof(TNodeData).FullName}'.");
                 }
 
-                return existing;
+                return;
             }
 
-            if (_count == _invokers.Length)
+            // Copy-on-write: readers dispatch against whatever map they loaded, which is never
+            // mutated after publish — the lock covers writers only.
+            var next = new Dictionary<Guid, INodeInvoker>(_invokers)
             {
-                Array.Resize(ref _invokers, _count == 0 ? 8 : _count * 2);
-            }
-
-            int id = _count++;
-            _invokers[id] = NodeInvoker<TNodeData>.Instance;
-            Ids[guid] = id;
-            return id;
+                [guid] = NodeInvoker<TNodeData>.Instance,
+            };
+            Volatile.Write(ref _invokers, next);
         }
     }
 
-    /// <summary>The id a GUID was registered under, or false if nobody registered it.</summary>
-    public static bool TryGetId(Guid guid, out int id)
-    {
-        lock (Gate)
-        {
-            return Ids.TryGetValue(guid, out id);
-        }
-    }
+    /// <summary>Whether anybody registered this GUID.</summary>
+    public static bool IsRegistered(Guid guid) => Volatile.Read(ref _invokers).ContainsKey(guid);
 
     /// <summary>How many bytes one node of this type occupies in a blob's runtime data.</summary>
-    public static int SizeOf(int id) => Invoker(id).Size;
+    public static int SizeOf(Guid guid) => Invoker(guid).Size;
 
     /// <summary>
     /// A managed factory over a serialized node's default data — what
@@ -90,7 +72,7 @@ public static class NodeTypeRegistry
     /// <exception cref="InvalidOperationException">Nobody registered this GUID.</exception>
     internal static IRuntimeNodeFactory CreateFactory(Guid guid, ref BehaviorTreeBlobNode node)
     {
-        if (!TryGetId(guid, out int id))
+        if (!Volatile.Read(ref _invokers).TryGetValue(guid, out INodeInvoker? invoker))
         {
             throw new InvalidOperationException(
                 $"Node GUID '{guid}' is not registered for behavior tree deserialization. Node "
@@ -99,23 +81,20 @@ public static class NodeTypeRegistry
                 + "for a node type the generator cannot see.");
         }
 
-        return Invoker(id).CreateFactory(ref node);
+        return invoker.CreateFactory(ref node);
     }
 
-    /// <summary>The CLR type behind an id — for diagnostics, never for dispatch.</summary>
-    public static Type TypeOf(int id) => Invoker(id).NodeType;
+    /// <summary>The CLR type behind a GUID — for diagnostics, never for dispatch.</summary>
+    public static Type TypeOf(Guid guid) => Invoker(guid).NodeType;
 
-    internal static INodeInvoker Invoker(int id)
+    internal static INodeInvoker Invoker(Guid guid)
     {
-        // No lock: the array is append-only, so a slot for an id in hand is already populated.
-        // Volatile.Read covers a concurrent resize — Array.Resize publishes a new array.
-        INodeInvoker[] invokers = Volatile.Read(ref _invokers);
-        if ((uint)id >= (uint)invokers.Length || invokers[id] is not { } invoker)
+        if (!Volatile.Read(ref _invokers).TryGetValue(guid, out INodeInvoker? invoker))
         {
             throw new InvalidOperationException(
-                $"Node type id {id} is not registered. Every node type in a tree must be passed "
+                $"Node GUID '{guid}' is not registered. Every node type in a tree must be passed "
                 + $"to {nameof(NodeTypeRegistry)}.{nameof(Register)}<T>() before a "
-                + $"{nameof(BehaviorTreeLayout)} is built from it.");
+                + $"{nameof(BehaviorTreeLayout)} is built or loaded from it.");
         }
 
         return invoker;
