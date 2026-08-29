@@ -36,7 +36,7 @@ public sealed class NodeBlobTests
         for (int i = 0; i < count; i++)
         {
             ends[i] = blob->EndIndices[i];
-            types[i] = NodeTypeRegistry.TypeOf(blob->Types[i]);
+            types[i] = NodeTypeRegistry.TypeOf(blob->RegistryTypeId(i));
             offsets[i] = blob->Offsets[i];
         }
 

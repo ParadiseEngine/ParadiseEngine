@@ -86,7 +86,7 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     public int Count => _blob->Count;
 
-    public int GetTypeId(int nodeIndex) => _blob->Types[nodeIndex];
+    public int GetTypeId(int nodeIndex) => _blob->RegistryTypeId(nodeIndex);
 
     public int GetEndIndex(int nodeIndex) => _blob->EndIndices[nodeIndex];
 

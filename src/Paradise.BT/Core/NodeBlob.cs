@@ -24,24 +24,33 @@ namespace Paradise.BT;
 public struct NodeBlob
 {
     /// <summary>Bumped when the layout of this struct changes.
-    /// v2: added <see cref="Guids"/>. v3: Guids deduplicated per type; Types at rest are table
-    /// indices.</summary>
-    public const int CurrentFormatVersion = 3;
+    /// v2: added <see cref="Guids"/>. v3: Guids deduplicated per type. v4: <see cref="Types"/>
+    /// holds table indices everywhere; the process-local resolution moved to
+    /// <see cref="RuntimeTypeIds"/>, zeroed at rest.</summary>
+    public const int CurrentFormatVersion = 4;
 
     public int FormatVersion;
 
     /// <summary>Where each node's subtree ends, exclusive — the tree's topology, flattened.</summary>
     public BlobArray<int> EndIndices;
 
-    /// <summary>One entry per node, with two meanings. IN MEMORY: <see cref="NodeTypeRegistry"/>
-    /// ids, valid only for this process. AT REST: indices into <see cref="Guids"/> —
-    /// <see cref="BehaviorTreeLayout"/> rewrites them both ways, so never read a loaded blob's
-    /// ids before <see cref="BehaviorTreeLayout.Deserialize"/> resolves them.</summary>
+    /// <summary>Each node's index into <see cref="Guids"/> — ONE meaning, at rest and in memory.
+    /// Never a registry id: the process-local half lives in <see cref="RuntimeTypeIds"/>.</summary>
     public BlobArray<int> Types;
 
     /// <summary>Each distinct node TYPE's <c>[Guid]</c>, ordered by first appearance — the
-    /// identity that survives a process, where <see cref="Types"/> does not.</summary>
+    /// identity that survives a process.</summary>
     public BlobArray<Guid> Guids;
+
+    /// <summary>Per <see cref="Guids"/> slot: the <see cref="NodeTypeRegistry"/> id this process
+    /// resolved it to — filled at build and at load, ZEROED in serialized bytes, since a registry
+    /// id means nothing to another process and would break byte determinism. Nothing may read a
+    /// loaded blob's ids before <see cref="BehaviorTreeLayout.Deserialize"/> fills them.</summary>
+    public BlobArray<int> RuntimeTypeIds;
+
+    /// <summary>The registry id dispatch needs for a node: its table index, resolved through this
+    /// process's <see cref="RuntimeTypeIds"/>.</summary>
+    public int RegistryTypeId(int nodeIndex) => RuntimeTypeIds[Types[nodeIndex]];
 
     /// <summary>Where each node's data starts, with <c>Count + 1</c> entries so node <c>i</c>'s
     /// reserved size is <c>Offsets[i + 1] - Offsets[i]</c> without a second array.</summary>
