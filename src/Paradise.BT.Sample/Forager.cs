@@ -83,9 +83,9 @@ public struct Decisions
 /// <summary>Reads two things at once, which is the case a single-access node never covers.</summary>
 [Guid("A0000000-0000-4000-8000-000000000001")]
 [Builder]
-public struct ThreatNearNode : INodeData
+public struct ThreatNearNode(float panicStamina) : INodeData
 {
-    public float PanicStamina;
+    public float PanicStamina = panicStamina;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
         int index, TNodeBlob blob, TBlackboard bb)
@@ -110,9 +110,9 @@ public struct FoodVisibleNode : INodeData
 /// <summary>The second reader of <see cref="Stamina"/>: a pure condition, writing nothing.</summary>
 [Guid("A0000000-0000-4000-8000-000000000003")]
 [Builder]
-public struct ExhaustedNode : INodeData
+public struct ExhaustedNode(float restBelow) : INodeData
 {
-    public float RestBelow;
+    public float RestBelow = restBelow;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
         int index, TNodeBlob blob, TBlackboard bb)
@@ -130,17 +130,17 @@ public struct ExhaustedNode : INodeData
 /// </summary>
 [Guid("A0000000-0000-4000-8000-00000000000A")]
 [Builder]
-public struct ForageWorthItNode : INodeData
+public struct ForageWorthItNode(float minStamina, float maxDistance, bool requireVisible) : INodeData
 {
     /// <summary>Below this there is no point setting out.</summary>
-    public float MinStamina;
+    public float MinStamina = minStamina;
 
     /// <summary>Further than this and the walk costs more than the meal.</summary>
-    public float MaxDistance;
+    public float MaxDistance = maxDistance;
 
     /// <summary>Whether food it cannot currently see counts. False lets it head for a remembered
     /// spot.</summary>
-    public bool RequireVisible;
+    public bool RequireVisible = requireVisible;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
         int index, TNodeBlob blob, TBlackboard bb)
@@ -177,9 +177,9 @@ public struct AlreadyDecidedNode : INodeData
 /// <summary>Runs away: reads the pose it is fleeing FROM and writes where to go.</summary>
 [Guid("A0000000-0000-4000-8000-000000000005")]
 [Builder]
-public struct FleeNode : INodeData
+public struct FleeNode(float distance) : INodeData
 {
-    public float Distance;
+    public float Distance = distance;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
         int index, TNodeBlob blob, TBlackboard bb)
@@ -203,9 +203,9 @@ public struct FleeNode : INodeData
 /// <summary>The second reader of <see cref="Position"/> and the second writer of both extras.</summary>
 [Guid("A0000000-0000-4000-8000-000000000006")]
 [Builder]
-public struct SeekFoodNode : INodeData
+public struct SeekFoodNode(float arriveWithin) : INodeData
 {
-    public float ArriveWithin;
+    public float ArriveWithin = arriveWithin;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
         int index, TNodeBlob blob, TBlackboard bb)
