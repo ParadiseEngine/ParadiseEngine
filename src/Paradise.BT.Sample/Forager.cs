@@ -131,6 +131,44 @@ public struct ExhaustedNode : INodeData
         => (bb.GetData<Stamina>().Value < RestBelow).ToNodeState();
 }
 
+/// <summary>
+/// Is the trip worth making? The only node here with more than one authored number, so it is what
+/// exercises a builder constructor carrying several: <c>ForageWorthIt(0.3f, 6f, true)</c>.
+///
+/// The three would otherwise be three separate conditions sequenced together, which reads worse
+/// and costs a node apiece in a component sized at compile time.
+/// </summary>
+[Guid("A0000000-0000-4000-8000-00000000000A")]
+[Builder]
+public struct ForageWorthItNode : INodeData
+{
+    /// <summary>Below this there is no point setting out.</summary>
+    public float MinStamina;
+
+    /// <summary>Further than this and the walk costs more than the meal.</summary>
+    public float MaxDistance;
+
+    /// <summary>Whether food it cannot currently see counts. False lets it head for a remembered
+    /// spot.</summary>
+    public bool RequireVisible;
+
+    public NodeState Tick<TNodeBlob, TBlackboard>(
+        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
+    {
+        Senses senses = bb.GetData<Senses>();
+        if (RequireVisible && !senses.FoodVisible)
+        {
+            return NodeState.Failure;
+        }
+
+        return (bb.GetData<Stamina>().Value >= MinStamina
+            && MathF.Abs(senses.FoodX - bb.GetData<Position>().X) <= MaxDistance)
+            .ToNodeState();
+    }
+}
+
 /// <summary>Reads what an earlier branch concluded: an extra that is READ as well as written, so
 /// the generator's merge has to keep it a write rather than demote it.</summary>
 [Guid("A0000000-0000-4000-8000-000000000004")]

@@ -13,7 +13,7 @@ namespace Paradise.BT.Sample;
 /// <see cref="ForagerRow"/>'s claims, and emits <c>ForagerTreeBlackboard</c> and
 /// <c>ForagerTreeExtras</c>.
 ///
-/// Twenty nodes — nine node types of its own plus four built-ins — and the resulting blackboard
+/// Twenty-one nodes — ten node types of its own plus four built-ins — and the resulting blackboard
 /// carries SIX entries: three components each read by more than one node, plus Intent, Decisions,
 /// and the delta time the timer needs. That gap between node count and field count is the whole
 /// point — the blackboard is sized by what the tree TOUCHES, not by how big the tree is.
@@ -29,7 +29,7 @@ public static class ForagerTree
     /// <code>
     /// Selector
     /// ├─ Sequence  FLEE      ThreatNear(panic) → Flee → Delay(0.2) → Tally
-    /// ├─ Sequence  FORAGE    FoodVisible → Inverter(Exhausted) → SeekFood → Tally
+    /// ├─ Sequence  FORAGE    FoodVisible → Inverter(Exhausted) → ForageWorthIt → SeekFood → Tally
     /// ├─ Sequence  SETTLE    Exhausted → Rest → Noop
     /// ├─ Sequence  CONFIRM   AlreadyDecided → Tally
     /// └─ Rest                always succeeds, so the Selector always concludes
@@ -46,6 +46,7 @@ public static class ForagerTree
                 FoodVisible(),
                 Inverter(
                     Exhausted(0.25f)),
+                ForageWorthIt(0.3f, 6f, requireVisible: true),
                 SeekFood(0.5f),
                 Tally()),
             Sequence(
