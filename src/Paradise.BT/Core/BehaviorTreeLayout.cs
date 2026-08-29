@@ -18,10 +18,9 @@ namespace Paradise.BT;
 /// </summary>
 public sealed unsafe class BehaviorTreeLayout : IDisposable
 {
-    /// <summary>Alignment of the blob and of each array within it. Individual nodes are packed at
-    /// their own natural alignment (see <see cref="IRuntimeNodeFactory.DataAlignment"/>), which is
-    /// capped by this: aligning every node to 16 cost a full stride per empty marker node, per
-    /// instance, and no node type needs more than its own alignment.</summary>
+    /// <summary>Alignment of the blob and of each array within it. Individual nodes pack at
+    /// their own natural alignment (see <see cref="IRuntimeNodeFactory.DataAlignment"/>), capped
+    /// by this.</summary>
     private const int DataAlignment = 16;
 
     private NativeBlobAssetReference<NodeBlob>? _blob;
@@ -41,8 +40,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
     /// <summary>How many bytes an instance's runtime node data needs.</summary>
     public int RuntimeDataSize => Handle.RuntimeDataSize;
 
-    /// <summary>A new instance over this layout, which must outlive it. The path from a
-    /// deserialized layout to a ticking agent, with no managed tree in between.</summary>
+    /// <summary>A new instance over this layout, which must outlive it.</summary>
     public BehaviorTreeInstance CreateInstance() => new(Handle);
 
     /// <summary>
@@ -61,8 +59,8 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         var endIndices = new int[count];
         var offsets = new int[count + 1];
 
-        // One GUID per distinct TYPE, ordered by first appearance — deterministic, so the same
-        // tree serializes to the same bytes anywhere.
+        // One GUID per distinct type, ordered by first appearance, so serialization is
+        // deterministic.
         var guidTable = new List<Guid>();
         var seenIds = new HashSet<int>();
 
@@ -124,17 +122,11 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         (value + (alignment - 1)) & ~(alignment - 1);
 
     /// <summary>
-    /// The blob as bytes — a raw copy, possible because every offset in a <see cref="NodeBlob"/>
-    /// is self-relative. This is the shippable form of a compiled tree: unlike
-    /// <see cref="BehaviorTree.Serialize"/> it round-trips through no managed tree and allocates
-    /// no factory per node on load — <see cref="Deserialize"/> maps it straight back.
-    ///
-    /// One rewrite on the way out: in-memory <see cref="NodeBlob.Types"/> holds process-local
-    /// registry ids, so the copy's entries are replaced by indices into the
-    /// <see cref="NodeBlob.Guids"/> table. Nothing process-local reaches the bytes, which makes
-    /// the serialized form deterministic — the same tree yields the same bytes in every process,
-    /// so a layout can be content-hashed. (EntitiesBT instead truncates its runtime arrays off
-    /// the tail, which works only while its builder happens to allocate them last.)
+    /// The blob as bytes — a raw copy, valid because every offset in a <see cref="NodeBlob"/> is
+    /// self-relative. The copy's <see cref="NodeBlob.Types"/> are rewritten from process-local
+    /// registry ids to <see cref="NodeBlob.Guids"/> table indices, so nothing process-local
+    /// reaches the bytes: the same tree serializes identically everywhere and a layout can be
+    /// content-hashed.
     /// </summary>
     public byte[] SerializeToBytes()
     {
@@ -145,7 +137,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 
         NodeBlob* blob = reference.UnsafePtr;
 
-        // Registry id -> table index, sized by the table (distinct types), not the tree.
+        // Registry id -> table index.
         var tableIndexById = new Dictionary<int, int>(blob->Guids.Length);
         for (int t = 0; t < blob->Guids.Length; t++)
         {
@@ -172,9 +164,9 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 
     /// <summary>
     /// Load a layout serialized by <see cref="SerializeToBytes"/>: copy into aligned native
-    /// memory, validate the topology, and resolve each node's GUID to this process's
-    /// <see cref="NodeTypeRegistry"/> id. The caller owns the result and disposes it once nothing
-    /// ticks against it.
+    /// memory, validate, and resolve each type's GUID to this process's
+    /// <see cref="NodeTypeRegistry"/> id. The caller owns the result and disposes it once
+    /// nothing ticks against it.
     /// </summary>
     /// <exception cref="InvalidOperationException">The bytes are not a current-format layout blob,
     /// the topology is corrupt, or a node type is not registered in this process.</exception>
@@ -201,11 +193,9 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         return new BehaviorTreeLayout(reference);
     }
 
-    /// <summary>
-    /// Refuse a corrupt blob here, where the file name is still on the stack, rather than fault on
-    /// the first tick; then rewrite <see cref="NodeBlob.Types"/> — the only mutation a loaded blob
-    /// ever sees — from the durable GUIDs.
-    /// </summary>
+    /// <summary>Refuse a corrupt blob at load rather than fault on the first tick, then rewrite
+    /// <see cref="NodeBlob.Types"/> from table indices to this process's registry ids — the only
+    /// mutation a loaded blob ever sees.</summary>
     private static void ValidateAndResolve(NodeBlob* blob, int blobLength)
     {
         if (blob->FormatVersion != NodeBlob.CurrentFormatVersion)
@@ -259,8 +249,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             }
         }
 
-        // Resolve the GUID table once — T lookups for N nodes — then rewrite each node's
-        // at-rest table index into this process's registry id.
+        // Resolve the table once, then rewrite each node's index to a registry id.
         var tableIds = new int[typeCount];
         var seenGuids = new HashSet<Guid>();
         for (int t = 0; t < typeCount; t++)
@@ -306,8 +295,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         }
     }
 
-    /// <summary>An array whose self-relative offset or length escapes the loaded bytes would be
-    /// read (or, for <see cref="NodeBlob.Types"/>, written) out of bounds — refuse it first.</summary>
+    /// <summary>Refuse an array whose self-relative offset or length escapes the loaded bytes.</summary>
     private static void ValidateArrayBounds<T>(
         NodeBlob* blob, int blobLength, ref BlobArray<T> array, string name)
         where T : unmanaged

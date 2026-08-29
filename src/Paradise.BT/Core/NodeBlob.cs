@@ -24,10 +24,8 @@ namespace Paradise.BT;
 public struct NodeBlob
 {
     /// <summary>Bumped when the layout of this struct changes.
-    /// Version 2: added <see cref="Guids"/>, which is what made the blob itself loadable.
-    /// Version 3: <see cref="Guids"/> deduplicated to one entry per distinct TYPE, and
-    /// <see cref="Types"/> serialized as indices into it — so nothing process-local is in the
-    /// bytes, and the same tree serializes identically in every process.</summary>
+    /// v2: added <see cref="Guids"/>. v3: Guids deduplicated per type; Types at rest are table
+    /// indices.</summary>
     public const int CurrentFormatVersion = 3;
 
     public int FormatVersion;
@@ -36,17 +34,13 @@ public struct NodeBlob
     public BlobArray<int> EndIndices;
 
     /// <summary>One entry per node, with two meanings. IN MEMORY: <see cref="NodeTypeRegistry"/>
-    /// ids, assigned in registration order and valid only for this process. AT REST: indices into
-    /// <see cref="Guids"/> — <see cref="BehaviorTreeLayout.SerializeToBytes"/> rewrites them on
-    /// the way out and <see cref="BehaviorTreeLayout.Deserialize"/> back on the way in, which is
-    /// why nothing may read a loaded blob's ids before it does.</summary>
+    /// ids, valid only for this process. AT REST: indices into <see cref="Guids"/> —
+    /// <see cref="BehaviorTreeLayout"/> rewrites them both ways, so never read a loaded blob's
+    /// ids before <see cref="BehaviorTreeLayout.Deserialize"/> resolves them.</summary>
     public BlobArray<int> Types;
 
     /// <summary>Each distinct node TYPE's <c>[Guid]</c>, ordered by first appearance — the
-    /// identity that survives a process, where <see cref="Types"/> does not. Per type rather than
-    /// per node: a tree repeats few types many times, and 16 bytes per node was mostly the same
-    /// GUID over and over. (EntitiesBT keys its blob on a 32-bit hash of the GUID instead —
-    /// smaller still, but collidable.)</summary>
+    /// identity that survives a process, where <see cref="Types"/> does not.</summary>
     public BlobArray<Guid> Guids;
 
     /// <summary>Where each node's data starts, with <c>Count + 1</c> entries so node <c>i</c>'s

@@ -146,9 +146,9 @@ for (int step = 1; step <= 5; step++)
 }
 
 // ---------------------------------------------------------------------------------------------
-// 4. The layout IS the asset: a raw byte copy of the compiled blob, loaded back with no managed
-//    tree in between. Node identity crosses the boundary as GUIDs; the process-local type ids
-//    are re-resolved on load. Under PublishAot this is the whole ship-and-load path.
+// 4. The layout IS the asset: a byte copy of the compiled blob, loaded back with no managed tree
+//    in between. Node identity crosses the boundary as a GUID table; type ids are re-resolved on
+//    load.
 // ---------------------------------------------------------------------------------------------
 
 Console.WriteLine();

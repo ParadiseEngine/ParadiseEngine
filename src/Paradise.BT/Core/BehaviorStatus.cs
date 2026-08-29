@@ -6,8 +6,8 @@ namespace Paradise.BT;
 [Flags]
 public enum NodeState
 {
-    /// <summary>Never ticked, or reset since. A real state, not an error: composites return it
-    /// when no child was ticked, and decorators branch on it to detect an exhausted child.</summary>
+    /// <summary>Never ticked, or reset since — a real state: decorators branch on it to detect
+    /// an exhausted child.</summary>
     None = 0,
     Success = 1 << 0,
     Failure = 1 << 1,

@@ -3,15 +3,9 @@ namespace Paradise.BT;
 /// <summary>
 /// One agent's mutable half of a compiled tree — a <see cref="NodeState"/> per node and each
 /// node's live data as bytes, laid out by the shared <see cref="BehaviorTreeLayout"/> — with the
-/// blackboard passed per call rather than stored.
-///
-/// Passing it per call is what admits a <c>ref struct</c> blackboard, which the generated
-/// (blackboard-per-tree) bindings are and which no field can hold. Before this type existed,
-/// every caller of such a blackboard hand-rolled the same buffers-plus-tick loop; the sample and
-/// the tests each had their own copy.
-///
-/// The buffers are ordinary managed arrays and need no pinning: <see cref="INodeBlob"/> reaches
-/// node data by <c>ref</c>, not by address.
+/// blackboard passed per call rather than stored, which is what admits a <c>ref struct</c>
+/// (generated) blackboard. The buffers are ordinary managed arrays and need no pinning:
+/// <see cref="INodeBlob"/> reaches node data by <c>ref</c>, not by address.
 /// </summary>
 /// <remarks>
 /// Construction copies each node's authored defaults but does not run custom
@@ -69,9 +63,9 @@ public class BehaviorTreeInstance
 }
 
 /// <summary>
-/// <see cref="BehaviorTreeInstance"/> plus an owned blackboard, for the common case where the
-/// blackboard is an ordinary struct that can live in a field. A generated (ref struct) blackboard
-/// cannot — bind one per tick and use the base class directly.
+/// <see cref="BehaviorTreeInstance"/> plus an owned blackboard, for an ordinary struct blackboard
+/// that can live in a field. A generated (ref struct) blackboard cannot — bind one per tick and
+/// use the base class directly.
 /// </summary>
 /// <remarks>
 /// <see cref="Tick"/> performs no blackboard writes of its own. Per-tick inputs (e.g.

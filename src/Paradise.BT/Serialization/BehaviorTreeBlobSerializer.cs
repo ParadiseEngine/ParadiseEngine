@@ -21,8 +21,7 @@ public static class BehaviorTreeBlobSerializer
 
     /// <summary>
     /// Deserializes a behavior tree from a raw Paradise.BLOB byte array. Node types resolve
-    /// through <see cref="NodeTypeRegistry"/> — the same table the generated module initializers
-    /// populate — so there is no registry to pass and no list to keep in sync.
+    /// through <see cref="NodeTypeRegistry"/>, so there is no registry to pass.
     /// </summary>
     /// <param name="blob">The serialized behavior-tree blob.</param>
     public static BehaviorTree Deserialize(byte[] blob)

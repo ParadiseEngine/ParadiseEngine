@@ -23,17 +23,16 @@ internal interface IRuntimeNodeFactory
 
     Guid NodeGuid { get; }
 
-    /// <summary>What the node's <c>[Builder]</c> attribute declares about child count, or null for
-    /// a node that carries none — validation then has nothing to check against and skips it.</summary>
+    /// <summary>Child-count claim from the node's <c>[Builder]</c> attribute; null (no
+    /// attribute) skips validation.</summary>
     NodeCardinality? Cardinality { get; }
 
     /// <summary>How many bytes this node's data occupies — what an unmanaged instance reserves
     /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
     int DataSize { get; }
 
-    /// <summary>The node struct's natural alignment, so a layout places its data on a boundary
-    /// the type can be read at — and no wider: an empty marker node packs to a byte instead of
-    /// burning a 16-byte stride per node per instance.</summary>
+    /// <summary>The node struct's natural alignment — a layout packs each node's data to this,
+    /// and no wider.</summary>
     int DataAlignment { get; }
 
     IBuilder CreateSerializedDefaultDataBuilder();

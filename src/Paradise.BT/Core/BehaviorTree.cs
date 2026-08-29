@@ -31,11 +31,9 @@ public sealed class BehaviorTree : IDisposable
         where TBlackboard : struct, IBlackboard
         => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
 
-    /// <summary>
-    /// An instance without an owned blackboard — the blackboard is passed to each
-    /// <see cref="BehaviorTreeInstance.Tick{TBlackboard}"/> call instead, which is the only shape
-    /// a <c>ref struct</c> (generated) blackboard fits.
-    /// </summary>
+    /// <summary>An instance without an owned blackboard — pass one to each
+    /// <see cref="BehaviorTreeInstance.Tick{TBlackboard}"/> call instead, the only shape a
+    /// <c>ref struct</c> (generated) blackboard fits.</summary>
     public BehaviorTreeInstance CreateInstance() => new(Layout.Handle);
 
     /// <summary>
@@ -63,10 +61,9 @@ public sealed class BehaviorTree : IDisposable
         => BehaviorTreeBlobSerializer.SerializeToBytes(this);
 
     /// <summary>
-    /// The compiled layout as bytes — the runtime form itself, which
+    /// The compiled layout as bytes — the shippable form, which
     /// <see cref="BehaviorTreeLayout.Deserialize"/> loads without rebuilding a managed tree.
-    /// Prefer this for shipping; <see cref="Serialize"/> remains the interchange form a managed
-    /// <see cref="BehaviorTree"/> can be reconstructed from.
+    /// <see cref="Serialize"/> remains the managed interchange form.
     /// </summary>
     public byte[] SerializeLayoutToBytes() => Layout.SerializeToBytes();
 

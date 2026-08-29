@@ -84,10 +84,8 @@ public static class NodeTypeRegistry
 
     /// <summary>
     /// A managed factory over a serialized node's default data — what
-    /// <see cref="BehaviorTreeBlobSerializer"/> rebuilds a <see cref="BehaviorTree"/> from. Here
-    /// rather than in a separate serialization registry: this table already knows every node type
-    /// by GUID, through the generated module initializers, so a second hand-maintained list of the
-    /// same types was only a way to forget one.
+    /// <see cref="BehaviorTreeBlobSerializer"/> rebuilds a <see cref="BehaviorTree"/> from. Lives
+    /// here because this table already knows every node type by GUID.
     /// </summary>
     /// <exception cref="InvalidOperationException">Nobody registered this GUID.</exception>
     internal static IRuntimeNodeFactory CreateFactory(Guid guid, ref BehaviorTreeBlobNode node)

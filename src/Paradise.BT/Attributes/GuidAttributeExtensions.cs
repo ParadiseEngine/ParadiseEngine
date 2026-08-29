@@ -13,8 +13,7 @@ internal readonly struct BehaviorNodeMetadata
 
     public Guid Guid { get; }
 
-    /// <summary>From the node's <c>[Builder]</c> attribute; null when it carries none, which is
-    /// what exempts a node from child-count validation rather than mis-assuming Leaf.</summary>
+    /// <summary>From the node's <c>[Builder]</c> attribute; null when it carries none.</summary>
     public NodeCardinality? Cardinality { get; }
 }
 

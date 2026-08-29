@@ -185,11 +185,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             ? null
             : structSymbol.ContainingNamespace?.ToDisplayString();
 
-        // The exposed surface. A node that declares a constructor names it there: each parameter
-        // is an exposed, initialized value (keeping its declared default), and everything else —
-        // a private accumulator, a public field left out of the constructor — is runtime state
-        // the builder never shows. Without a constructor, every public value field is exposed,
-        // as before.
+        // The exposed surface: the declared constructor's parameters when there is one
+        // (everything else is runtime state the builder never shows), otherwise every public
+        // value field.
         var publicCtors = ImmutableArray.CreateBuilder<IMethodSymbol>();
         foreach (var ctorSymbol in structSymbol.InstanceConstructors)
         {
@@ -285,9 +283,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// A constructor parameter's default, re-rendered as source that resolves anywhere — the
-    /// constant VALUE rather than the original expression text, because `NodeState.Running` in
-    /// the node's file may not be in scope in the generated one. Null means required.
+    /// A parameter's default re-rendered from its constant VALUE, not its expression text —
+    /// `NodeState.Running` in the node's file may not resolve in the generated one. Null means
+    /// required.
     /// </summary>
     private static string? RenderDefault(IParameterSymbol parameter)
     {
@@ -556,9 +554,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}, children) {{ }}");
     }
 
-    /// <summary>How the node value is built: through its own constructor when it declares one —
-    /// the constructor IS the exposed surface, and it may initialize non-exposed state — or by
-    /// object initializer over public fields when it does not.</summary>
+    /// <summary>Through the node's own constructor when it declares one (it may initialize
+    /// non-exposed state), otherwise by object initializer over public fields.</summary>
     private static string Construction(NodeInfo info)
     {
         if (info.UseConstructor)
@@ -582,8 +579,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         return $"new {info.FullyQualifiedStructName} {{ {string.Join(", ", assignments)} }}";
     }
 
-    // An optional parameter may precede `params children` (callers then name it or supply it
-    // positionally), so declared defaults survive on composites too.
+    // An optional parameter may precede `params children`, so declared defaults survive on
+    // composites too.
     private static string BuildCompositeParamList(ImmutableArray<FieldInfo> fields)
     {
         var parts = new System.Collections.Generic.List<string>();

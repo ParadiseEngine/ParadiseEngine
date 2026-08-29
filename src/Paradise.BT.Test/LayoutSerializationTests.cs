@@ -4,12 +4,9 @@ using Paradise.BT.Nodes.Builder;
 namespace Paradise.BT.Test;
 
 /// <summary>
-/// The layout blob is the shippable artifact: <see cref="BehaviorTreeLayout.SerializeToBytes"/> is
-/// a raw copy of the position-independent blob, and <see cref="BehaviorTreeLayout.Deserialize"/>
-/// maps it back with no managed tree in between. What needs guarding is the load seam — that a
-/// loaded layout ticks exactly like the one it was copied from (the dense type ids it carries are
-/// meaningless here and must be re-resolved from GUIDs), and that corrupt bytes are refused at
-/// load rather than faulting on the first tick.
+/// The layout blob is the shippable artifact. What needs guarding is the load seam: a loaded
+/// layout ticks exactly like the one it was copied from (type ids re-resolved from the GUID
+/// table), and corrupt bytes are refused at load rather than faulting on the first tick.
 /// </summary>
 public sealed class LayoutSerializationTests
 {

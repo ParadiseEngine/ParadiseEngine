@@ -36,14 +36,10 @@ public sealed class BehaviorTreeBuilder
     }
 
     /// <summary>
-    /// A leaf with a child or a decorator without exactly one is a wiring mistake that otherwise
-    /// SILENTLY misbehaves — traversal is index math, so an inverter's second child is simply
-    /// never ticked. The generated builders make such trees hard to write; this catches the trees
-    /// assembled from raw definitions, where nothing else would.
-    ///
-    /// The claim checked is the node's own <c>[Builder]</c> cardinality; a node without the
-    /// attribute claims nothing and is not checked. Composites accept any count, as EntitiesBT's
-    /// do.
+    /// A leaf with a child or a decorator without exactly one otherwise misbehaves SILENTLY —
+    /// traversal is index math that never visits the impossible child. Checked against the node's
+    /// own <c>[Builder]</c> cardinality; a node without the attribute claims nothing, and
+    /// composites accept any count.
     /// </summary>
     private static void ValidateChildCount(BehaviorNodeDefinition definition)
     {

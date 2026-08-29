@@ -79,9 +79,7 @@ public sealed class NodeBlobTests
             int size = blob.Offsets[i + 1] - blob.Offsets[i];
             await Assert.That(size).IsGreaterThan(0);
 
-            // Every node starts on a boundary its own type can be read at — and no wider: nodes
-            // pack at their natural alignment, so a 1-byte marker node no longer costs a 16-byte
-            // stride per instance.
+            // Every node starts on a boundary its own type can be read at — and no wider.
             await Assert.That(blob.Offsets[i] % AlignmentOf(blob.Types[i])).IsEqualTo(0);
         }
 

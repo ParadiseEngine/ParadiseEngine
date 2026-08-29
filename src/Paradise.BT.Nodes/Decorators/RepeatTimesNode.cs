@@ -1,7 +1,7 @@
 namespace Paradise.BT.Nodes;
 
-/// <summary>The primary constructor is the exposed surface: the generated builder mirrors its
-/// parameters, defaults included, rather than guessing from field order.</summary>
+/// <summary>The primary constructor is the exposed surface the generated builder mirrors,
+/// defaults included.</summary>
 [System.Runtime.InteropServices.Guid("76E27039-91C1-4DEF-AFEF-1EDDBAAE8CCE")]
 [Builder("Repeat", NodeCardinality.Decorator)]
 public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None) : INodeData
