@@ -24,24 +24,29 @@ namespace Paradise.BT;
 public struct NodeBlob
 {
     /// <summary>Bumped when the layout of this struct changes.
-    /// Version 2: added <see cref="Guids"/>, which is what made the blob itself loadable.</summary>
-    public const int CurrentFormatVersion = 2;
+    /// Version 2: added <see cref="Guids"/>, which is what made the blob itself loadable.
+    /// Version 3: <see cref="Guids"/> deduplicated to one entry per distinct TYPE, and
+    /// <see cref="Types"/> serialized as indices into it — so nothing process-local is in the
+    /// bytes, and the same tree serializes identically in every process.</summary>
+    public const int CurrentFormatVersion = 3;
 
     public int FormatVersion;
 
     /// <summary>Where each node's subtree ends, exclusive — the tree's topology, flattened.</summary>
     public BlobArray<int> EndIndices;
 
-    /// <summary><see cref="NodeTypeRegistry"/> ids, which are assigned in registration order and
-    /// so are valid only for the process that built this blob. A blob loaded from bytes carries a
-    /// dead process's ids here until <see cref="BehaviorTreeLayout.Deserialize"/> rewrites them
-    /// from <see cref="Guids"/> — which is why nothing may read them before it does.</summary>
+    /// <summary>One entry per node, with two meanings. IN MEMORY: <see cref="NodeTypeRegistry"/>
+    /// ids, assigned in registration order and valid only for this process. AT REST: indices into
+    /// <see cref="Guids"/> — <see cref="BehaviorTreeLayout.SerializeToBytes"/> rewrites them on
+    /// the way out and <see cref="BehaviorTreeLayout.Deserialize"/> back on the way in, which is
+    /// why nothing may read a loaded blob's ids before it does.</summary>
     public BlobArray<int> Types;
 
-    /// <summary>Each node type's <c>[Guid]</c> — the identity that survives a process, where
-    /// <see cref="Types"/> does not. This array is what lets the layout blob be saved and loaded
-    /// directly (EntitiesBT ships its blob as the asset too, but keys it on a 32-bit hash of the
-    /// GUID; the full GUID costs 12 more bytes per node and cannot collide).</summary>
+    /// <summary>Each distinct node TYPE's <c>[Guid]</c>, ordered by first appearance — the
+    /// identity that survives a process, where <see cref="Types"/> does not. Per type rather than
+    /// per node: a tree repeats few types many times, and 16 bytes per node was mostly the same
+    /// GUID over and over. (EntitiesBT keys its blob on a 32-bit hash of the GUID instead —
+    /// smaller still, but collidable.)</summary>
     public BlobArray<Guid> Guids;
 
     /// <summary>Where each node's data starts, with <c>Count + 1</c> entries so node <c>i</c>'s

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Paradise.BLOB;
 
 namespace Paradise.BT;
@@ -57,9 +58,13 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 
         int count = tree.Count;
         var typeIds = new int[count];
-        var guids = new Guid[count];
         var endIndices = new int[count];
         var offsets = new int[count + 1];
+
+        // One GUID per distinct TYPE, ordered by first appearance — deterministic, so the same
+        // tree serializes to the same bytes anywhere.
+        var guidTable = new List<Guid>();
+        var seenIds = new HashSet<int>();
 
         int size = 0;
         for (int i = 0; i < count; i++)
@@ -77,7 +82,11 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             }
 
             typeIds[i] = id;
-            guids[i] = factory.NodeGuid;
+            if (seenIds.Add(id))
+            {
+                guidTable.Add(factory.NodeGuid);
+            }
+
             size = Align(size, Math.Min(factory.DataAlignment, DataAlignment));
             offsets[i] = size;
             size += factory.DataSize;
@@ -103,7 +112,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         builder.SetValue(ref builder.Value.FormatVersion, NodeBlob.CurrentFormatVersion);
         builder.SetArray(ref builder.Value.EndIndices, endIndices, DataAlignment);
         builder.SetArray(ref builder.Value.Types, typeIds, DataAlignment);
-        builder.SetArray(ref builder.Value.Guids, guids, DataAlignment);
+        builder.SetArray(ref builder.Value.Guids, guidTable, DataAlignment);
         builder.SetArray(ref builder.Value.Offsets, offsets, DataAlignment);
         builder.SetArray(ref builder.Value.DefaultData, defaultData, DataAlignment);
 
@@ -120,17 +129,44 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
     /// <see cref="BehaviorTree.Serialize"/> it round-trips through no managed tree and allocates
     /// no factory per node on load — <see cref="Deserialize"/> maps it straight back.
     ///
-    /// The copy includes <see cref="NodeBlob.Types"/>, whose ids mean nothing to another process;
-    /// <see cref="Deserialize"/> rewrites them from <see cref="NodeBlob.Guids"/>. (EntitiesBT
-    /// instead truncates its runtime arrays off the tail, which works only while its builder
-    /// happens to allocate them last.)
+    /// One rewrite on the way out: in-memory <see cref="NodeBlob.Types"/> holds process-local
+    /// registry ids, so the copy's entries are replaced by indices into the
+    /// <see cref="NodeBlob.Guids"/> table. Nothing process-local reaches the bytes, which makes
+    /// the serialized form deterministic — the same tree yields the same bytes in every process,
+    /// so a layout can be content-hashed. (EntitiesBT instead truncates its runtime arrays off
+    /// the tail, which works only while its builder happens to allocate them last.)
     /// </summary>
     public byte[] SerializeToBytes()
     {
-        NativeBlobAssetReference<NodeBlob> blob =
+        NativeBlobAssetReference<NodeBlob> reference =
             _blob ?? throw new ObjectDisposedException(nameof(BehaviorTreeLayout));
-        var bytes = new byte[blob.Length];
-        new ReadOnlySpan<byte>(blob.UnsafePtr, blob.Length).CopyTo(bytes);
+        var bytes = new byte[reference.Length];
+        new ReadOnlySpan<byte>(reference.UnsafePtr, reference.Length).CopyTo(bytes);
+
+        NodeBlob* blob = reference.UnsafePtr;
+
+        // Registry id -> table index, sized by the table (distinct types), not the tree.
+        var tableIndexById = new Dictionary<int, int>(blob->Guids.Length);
+        for (int t = 0; t < blob->Guids.Length; t++)
+        {
+            if (!NodeTypeRegistry.TryGetId(blob->Guids[t], out int id))
+            {
+                throw new InvalidOperationException(
+                    $"Node GUID '{blob->Guids[t]}' is not registered, so this layout cannot "
+                    + "have been built or loaded in this process — it is corrupt.");
+            }
+
+            tableIndexById[id] = t;
+        }
+
+        long typesOffset = (byte*)blob->Types.UnsafePtr - (byte*)blob;
+        Span<int> serializedTypes = MemoryMarshal.Cast<byte, int>(
+            bytes.AsSpan((int)typesOffset, blob->Count * sizeof(int)));
+        for (int i = 0; i < blob->Count; i++)
+        {
+            serializedTypes[i] = tableIndexById[blob->Types[i]];
+        }
+
         return bytes;
     }
 
@@ -186,14 +222,16 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         ValidateArrayBounds(blob, blobLength, ref blob->DefaultData, nameof(NodeBlob.DefaultData));
 
         int count = blob->Types.Length;
+        int typeCount = blob->Guids.Length;
         if (count == 0
             || blob->EndIndices.Length != count
-            || blob->Guids.Length != count
+            || typeCount == 0
+            || typeCount > count
             || blob->Offsets.Length != count + 1)
         {
             throw new InvalidOperationException(
                 "Serialized behavior tree layout is corrupt: its arrays disagree on the node "
-                + $"count ({count} types, {blob->Guids.Length} GUIDs, "
+                + $"count ({count} types, {typeCount} GUID table entries, "
                 + $"{blob->EndIndices.Length} end indices, {blob->Offsets.Length} offsets).");
         }
 
@@ -221,17 +259,40 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             }
         }
 
-        for (int i = 0; i < count; i++)
+        // Resolve the GUID table once — T lookups for N nodes — then rewrite each node's
+        // at-rest table index into this process's registry id.
+        var tableIds = new int[typeCount];
+        var seenGuids = new HashSet<Guid>();
+        for (int t = 0; t < typeCount; t++)
         {
-            Guid guid = blob->Guids[i];
-            if (!NodeTypeRegistry.TryGetId(guid, out int id))
+            Guid guid = blob->Guids[t];
+            if (!seenGuids.Add(guid))
             {
                 throw new InvalidOperationException(
-                    $"Node GUID '{guid}' (node {i}) is not registered in this process. Every node "
-                    + "type in a serialized layout must be registered with "
-                    + $"{nameof(NodeTypeRegistry)} before the layout is loaded.");
+                    $"Serialized behavior tree layout is corrupt: GUID '{guid}' appears twice in "
+                    + "the type table, which a built layout never produces.");
             }
 
+            if (!NodeTypeRegistry.TryGetId(guid, out tableIds[t]))
+            {
+                throw new InvalidOperationException(
+                    $"Node GUID '{guid}' is not registered in this process. Every node type in a "
+                    + $"serialized layout must be registered with {nameof(NodeTypeRegistry)} "
+                    + "before the layout is loaded.");
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            int tableIndex = blob->Types[i];
+            if ((uint)tableIndex >= (uint)typeCount)
+            {
+                throw new InvalidOperationException(
+                    $"Serialized behavior tree layout is corrupt: node {i} names type table "
+                    + $"entry {tableIndex}, and the table has {typeCount}.");
+            }
+
+            int id = tableIds[tableIndex];
             if (NodeTypeRegistry.SizeOf(id) > blob->GetNodeDataSize(i))
             {
                 throw new InvalidOperationException(

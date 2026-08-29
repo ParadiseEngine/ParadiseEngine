@@ -117,6 +117,53 @@ public sealed class LayoutSerializationTests
             .WithMessageContaining(unknown.ToString());
     }
 
+    /// <summary>The GUID table holds one entry per distinct TYPE, not per node — a tree that
+    /// repeats a type must serialize its GUID exactly once.</summary>
+    [Test]
+    public async Task Serialized_Bytes_Carry_Each_Type_Guid_Once()
+    {
+        // SuccessNode appears four times, SequenceNode twice.
+        using BehaviorTreeLayout layout = LayoutOf(
+            new Sequence(
+                new Success(),
+                new Success(),
+                new Sequence(new Success(), new Success())));
+        byte[] bytes = layout.SerializeToBytes();
+
+        await Assert.That(CountOccurrences(bytes, typeof(Paradise.BT.Nodes.SuccessNode).GUID)).IsEqualTo(1);
+        await Assert.That(CountOccurrences(bytes, typeof(Paradise.BT.Nodes.SequenceNode).GUID)).IsEqualTo(1);
+    }
+
+    /// <summary>Nothing process-local reaches the bytes — at rest, node types are indices into
+    /// the GUID table — so serializing, loading, and serializing again must reproduce the exact
+    /// bytes. This is what makes a layout content-hashable.</summary>
+    [Test]
+    public async Task Serialization_Is_Deterministic_Across_A_Load()
+    {
+        using BehaviorTreeLayout original = LayoutOf(SampleTree());
+        byte[] first = original.SerializeToBytes();
+
+        using BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(first);
+        byte[] second = loaded.SerializeToBytes();
+
+        await Assert.That(second.AsSpan().SequenceEqual(first)).IsTrue();
+    }
+
+    private static int CountOccurrences(byte[] haystack, Guid guid)
+    {
+        ReadOnlySpan<byte> needle = guid.ToByteArray();
+        ReadOnlySpan<byte> span = haystack;
+        int count = 0;
+        int at;
+        while ((at = span.IndexOf(needle)) >= 0)
+        {
+            count++;
+            span = span[(at + needle.Length)..];
+        }
+
+        return count;
+    }
+
     /// <summary>A ref struct blackboard cannot live in a field, so it goes through
     /// <see cref="BehaviorTreeInstance.Tick{TBlackboard}"/> per call — the same shape the
     /// generated bindings need.</summary>
