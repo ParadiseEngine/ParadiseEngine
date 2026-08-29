@@ -41,7 +41,7 @@ public static class NodeExtensions
     {
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
-        return childIndex < endIndex ? VirtualMachine.Tick(childIndex, blob, bb) : 0;
+        return childIndex < endIndex ? VirtualMachine.Tick(childIndex, blob, bb) : NodeState.None;
     }
 
     private static NodeState TickChildrenReturnBreakOrDefault<TNodeBlob, TBlackboard>(
@@ -53,14 +53,16 @@ public static class NodeExtensions
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState lastState = 0;
+        NodeState lastState = NodeState.None;
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            NodeState currentState = tickCheck(previousState) ? VirtualMachine.Tick(childIndex, blob, bb) : 0;
-            lastState = currentState == 0 ? previousState : currentState;
+            NodeState currentState = tickCheck(previousState)
+                ? VirtualMachine.Tick(childIndex, blob, bb)
+                : NodeState.None;
+            lastState = currentState == NodeState.None ? previousState : currentState;
             if (breakCheck(lastState))
             {
                 break;

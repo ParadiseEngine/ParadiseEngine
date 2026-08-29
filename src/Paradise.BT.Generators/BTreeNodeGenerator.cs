@@ -144,27 +144,25 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             ? null
             : structSymbol.ContainingNamespace?.ToDisplayString();
 
-        // Get public fields for constructor parameters
-        var fields = ImmutableArray<FieldInfo>.Empty;
-        if (cardinality != 2) // Not composite — composites have no struct fields in constructor
+        // Get public fields for constructor parameters — composites included: a weighted selector
+        // or a parallel policy is data on a composite, and dropping it made such nodes
+        // unconfigurable through their builders with no diagnostic saying so.
+        var fieldsBuilder = ImmutableArray.CreateBuilder<FieldInfo>();
+        foreach (var member in structSymbol.GetMembers())
         {
-            var builder = ImmutableArray.CreateBuilder<FieldInfo>();
-            foreach (var member in structSymbol.GetMembers())
+            if (member is IFieldSymbol field
+                && field.DeclaredAccessibility == Accessibility.Public
+                && !field.IsStatic
+                && !field.IsConst
+                && field.Type.IsValueType)
             {
-                if (member is IFieldSymbol field
-                    && field.DeclaredAccessibility == Accessibility.Public
-                    && !field.IsStatic
-                    && !field.IsConst
-                    && field.Type.IsValueType)
-                {
-                    builder.Add(new FieldInfo(
-                        field.Name,
-                        field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-                    ));
-                }
+                fieldsBuilder.Add(new FieldInfo(
+                    field.Name,
+                    field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                ));
             }
-            fields = builder.ToImmutable();
         }
+        var fields = fieldsBuilder.ToImmutable();
 
         string fullyQualifiedName = structSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
@@ -362,7 +360,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         {
             0 => BuildParamList(info.Fields, includeChild: false),
             1 => BuildParamList(info.Fields, includeChild: true),
-            _ => "params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children",
+            _ => BuildCompositeParamList(info.Fields),
         });
 
         sb.Append(") => new(");
@@ -374,7 +372,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
                 info.Fields.Take(1).Select(f => ToCamelCase(f.Name))
                     .Concat(["child"])
                     .Concat(info.Fields.Skip(1).Select(f => ToCamelCase(f.Name)))),
-            _ => "children",
+            _ => string.Join(
+                ", ",
+                info.Fields.Select(f => ToCamelCase(f.Name)).Concat(["children"])),
         });
 
         sb.AppendLine(");");
@@ -403,9 +403,25 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({initializer}, child) {{ }}");
     }
 
+    // Composite fields are all required: `params children` must come last, and a parameter with a
+    // default cannot precede it.
     private static void GenerateCompositeConstructor(StringBuilder sb, NodeInfo info)
     {
-        sb.AppendLine($"    public {info.GeneratedClassName}(params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children) : base(new {info.FullyQualifiedStructName}(), children) {{ }}");
+        var paramList = BuildCompositeParamList(info.Fields);
+        var initializer = BuildStructInitializer(info.FullyQualifiedStructName, info.Fields);
+        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({initializer}, children) {{ }}");
+    }
+
+    private static string BuildCompositeParamList(ImmutableArray<FieldInfo> fields)
+    {
+        var parts = new System.Collections.Generic.List<string>();
+        foreach (var field in fields)
+        {
+            parts.Add($"{field.TypeName} {ToCamelCase(field.Name)}");
+        }
+
+        parts.Add("params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children");
+        return string.Join(", ", parts);
     }
 
     private static string BuildParamList(ImmutableArray<FieldInfo> fields, bool includeChild)

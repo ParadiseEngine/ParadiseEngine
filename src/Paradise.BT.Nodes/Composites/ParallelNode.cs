@@ -8,7 +8,7 @@ public struct ParallelNode : INodeData
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState flags = 0;
+        NodeState flags = NodeState.None;
         int endIndex = blob.GetEndIndex(index);
         int childIndex = index + 1;
         while (childIndex < endIndex)

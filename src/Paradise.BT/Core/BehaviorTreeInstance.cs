@@ -1,47 +1,50 @@
 namespace Paradise.BT;
 
 /// <summary>
-/// Mutable runtime state for a compiled <see cref="BehaviorTree"/>.
-/// Parameterised over <typeparamref name="TBlackboard"/> so the tick pipeline stays allocation-free — the
-/// <c>struct</c> + <see cref="IBlackboard"/> constraint matches <see cref="VirtualMachine"/>'s generic
-/// signatures and lets the JIT specialise per concrete blackboard type.
+/// One agent's mutable half of a compiled tree — a <see cref="NodeState"/> per node and each
+/// node's live data as bytes, laid out by the shared <see cref="BehaviorTreeLayout"/> — with the
+/// blackboard passed per call rather than stored.
 ///
-/// <b>The state is two plain arrays.</b> What each node returned last tick, and each node's live
-/// data as bytes, laid out by the tree's shared <see cref="BehaviorTreeLayout"/>. They are ordinary
-/// managed arrays and need no pinning: <see cref="INodeBlob"/> reaches node data by <c>ref</c>, not
-/// by address. The blob itself is a ref struct, so it is built per call rather than held.
+/// Passing it per call is what admits a <c>ref struct</c> blackboard, which the generated
+/// (blackboard-per-tree) bindings are and which no field can hold. Before this type existed,
+/// every caller of such a blackboard hand-rolled the same buffers-plus-tick loop; the sample and
+/// the tests each had their own copy.
+///
+/// The buffers are ordinary managed arrays and need no pinning: <see cref="INodeBlob"/> reaches
+/// node data by <c>ref</c>, not by address.
 /// </summary>
 /// <remarks>
-/// <see cref="Tick"/> performs no blackboard writes of its own. Per-tick inputs (e.g.
-/// <see cref="BehaviorTreeTickDeltaTime"/> for time-based nodes) are the caller's responsibility: write them
-/// via <see cref="Blackboard"/> before calling <see cref="Tick"/>.
+/// Construction copies each node's authored defaults but does not run custom
+/// <see cref="INodeData.Reset"/> hooks — those need a blackboard. Call <see cref="Reset"/> first
+/// if any node type has one.
 /// </remarks>
-public class BehaviorTreeInstance<TBlackboard>
-    where TBlackboard : struct, IBlackboard
+public class BehaviorTreeInstance
 {
     private readonly BehaviorTreeLayoutHandle _layout;
     private readonly NodeState[] _states;
     private readonly byte[] _data;
-    private TBlackboard _blackboard;
 
-    internal BehaviorTreeInstance(BehaviorTree tree, TBlackboard blackboard)
+    /// <summary>Borrows <paramref name="layout"/>: whoever built the layout must keep it alive
+    /// for as long as this instance ticks.</summary>
+    public BehaviorTreeInstance(BehaviorTreeLayoutHandle layout)
     {
-        ArgumentNullException.ThrowIfNull(tree);
+        if (!layout.IsValid)
+        {
+            throw new ArgumentException(
+                "Behavior tree layout handle is not valid. Build or deserialize a "
+                + $"{nameof(BehaviorTreeLayout)} and pass its handle.", nameof(layout));
+        }
 
-        BehaviorTreeLayout layout = tree.Layout;
-        _layout = layout.Handle;
+        _layout = layout;
         _states = new NodeState[layout.NodeCount];
         _data = new byte[Math.Max(1, layout.RuntimeDataSize)];
-        _blackboard = blackboard;
         AutoResetOnCompletion = true;
 
         UnmanagedNodeBlob.Initialize(_layout, _states, _data);
-        Reset();
     }
 
+    /// <summary>Restart a finished tree on its next tick, so an instance loops by default.</summary>
     public bool AutoResetOnCompletion { get; set; }
-
-    public ref TBlackboard Blackboard => ref _blackboard;
 
     public NodeState Status => _states[0];
 
@@ -49,20 +52,53 @@ public class BehaviorTreeInstance<TBlackboard>
     /// field.</summary>
     private UnmanagedNodeBlob Blob => new(_layout, _states, _data);
 
-    public NodeState Tick()
+    public NodeState Tick<TBlackboard>(TBlackboard blackboard)
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         if (AutoResetOnCompletion && Status.IsCompleted())
         {
-            Reset();
+            Reset(blackboard);
         }
 
-        UnmanagedNodeBlob blob = Blob;
-        return VirtualMachine.Tick(blob, _blackboard);
+        return VirtualMachine.Tick(Blob, blackboard);
     }
 
-    public void Reset()
+    public void Reset<TBlackboard>(TBlackboard blackboard)
+        where TBlackboard : struct, IBlackboard, allows ref struct
+        => VirtualMachine.Reset(Blob, blackboard);
+}
+
+/// <summary>
+/// <see cref="BehaviorTreeInstance"/> plus an owned blackboard, for the common case where the
+/// blackboard is an ordinary struct that can live in a field. A generated (ref struct) blackboard
+/// cannot — bind one per tick and use the base class directly.
+/// </summary>
+/// <remarks>
+/// <see cref="Tick"/> performs no blackboard writes of its own. Per-tick inputs (e.g.
+/// <see cref="BehaviorTreeTickDeltaTime"/> for time-based nodes) are the caller's responsibility:
+/// write them via <see cref="Blackboard"/> before calling <see cref="Tick"/>.
+/// </remarks>
+public class BehaviorTreeInstance<TBlackboard> : BehaviorTreeInstance
+    where TBlackboard : struct, IBlackboard
+{
+    private TBlackboard _blackboard;
+
+    internal BehaviorTreeInstance(BehaviorTree tree, TBlackboard blackboard)
+        : base(GetLayoutHandle(tree))
     {
-        UnmanagedNodeBlob blob = Blob;
-        VirtualMachine.Reset(blob, _blackboard);
+        _blackboard = blackboard;
+        Reset();
+    }
+
+    public ref TBlackboard Blackboard => ref _blackboard;
+
+    public NodeState Tick() => Tick(_blackboard);
+
+    public void Reset() => Reset(_blackboard);
+
+    private static BehaviorTreeLayoutHandle GetLayoutHandle(BehaviorTree tree)
+    {
+        ArgumentNullException.ThrowIfNull(tree);
+        return tree.Layout.Handle;
     }
 }

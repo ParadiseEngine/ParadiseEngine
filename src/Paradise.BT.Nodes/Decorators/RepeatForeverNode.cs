@@ -11,7 +11,7 @@ public struct RepeatForeverNode : INodeData
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         NodeState childState = index.TickChild(blob, bb);
-        if (childState == 0)
+        if (childState == NodeState.None)
         {
             index.ResetChildren(blob, bb);
             childState = index.TickChild(blob, bb);

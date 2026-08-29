@@ -17,8 +17,10 @@ namespace Paradise.BT;
 /// </summary>
 public sealed unsafe class BehaviorTreeLayout : IDisposable
 {
-    /// <summary>Node data alignment, so a node holding a vector type is not read across a
-    /// boundary. Costs a few bytes per node, once per tree.</summary>
+    /// <summary>Alignment of the blob and of each array within it. Individual nodes are packed at
+    /// their own natural alignment (see <see cref="IRuntimeNodeFactory.DataAlignment"/>), which is
+    /// capped by this: aligning every node to 16 cost a full stride per empty marker node, per
+    /// instance, and no node type needs more than its own alignment.</summary>
     private const int DataAlignment = 16;
 
     private NativeBlobAssetReference<NodeBlob>? _blob;
@@ -38,6 +40,10 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
     /// <summary>How many bytes an instance's runtime node data needs.</summary>
     public int RuntimeDataSize => Handle.RuntimeDataSize;
 
+    /// <summary>A new instance over this layout, which must outlive it. The path from a
+    /// deserialized layout to a ticking agent, with no managed tree in between.</summary>
+    public BehaviorTreeInstance CreateInstance() => new(Handle);
+
     /// <summary>
     /// Flatten a compiled tree into a <see cref="NodeBlob"/>. Defaults are copied from the tree's
     /// own factories, so there is no second source of them.
@@ -51,6 +57,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 
         int count = tree.Count;
         var typeIds = new int[count];
+        var guids = new Guid[count];
         var endIndices = new int[count];
         var offsets = new int[count + 1];
 
@@ -70,8 +77,10 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             }
 
             typeIds[i] = id;
+            guids[i] = factory.NodeGuid;
+            size = Align(size, Math.Min(factory.DataAlignment, DataAlignment));
             offsets[i] = size;
-            size = Align(size + factory.DataSize);
+            size += factory.DataSize;
         }
 
         offsets[count] = size;
@@ -87,13 +96,14 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         }
 
         // Aligning every array to DataAlignment aligns the START of the one that follows it, which
-        // is how DefaultData ends up on a 16-byte boundary within the blob. Its per-node offsets
-        // are already 16-strided, so a node's data is aligned in the shared block and identically
-        // placed in whatever buffer an instance copies it into.
+        // is how DefaultData ends up on a 16-byte boundary within the blob. Per-node offsets then
+        // respect each node's own alignment relative to that start, so a node's data is aligned in
+        // the shared block and identically placed in whatever buffer an instance copies it into.
         var builder = new StructBuilder<NodeBlob>();
         builder.SetValue(ref builder.Value.FormatVersion, NodeBlob.CurrentFormatVersion);
         builder.SetArray(ref builder.Value.EndIndices, endIndices, DataAlignment);
         builder.SetArray(ref builder.Value.Types, typeIds, DataAlignment);
+        builder.SetArray(ref builder.Value.Guids, guids, DataAlignment);
         builder.SetArray(ref builder.Value.Offsets, offsets, DataAlignment);
         builder.SetArray(ref builder.Value.DefaultData, defaultData, DataAlignment);
 
@@ -101,8 +111,165 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             builder.CreateNativeBlobAssetReference<NodeBlob>(DataAlignment));
     }
 
-    private static int Align(int value) =>
-        (value + (DataAlignment - 1)) & ~(DataAlignment - 1);
+    private static int Align(int value, int alignment) =>
+        (value + (alignment - 1)) & ~(alignment - 1);
+
+    /// <summary>
+    /// The blob as bytes — a raw copy, possible because every offset in a <see cref="NodeBlob"/>
+    /// is self-relative. This is the shippable form of a compiled tree: unlike
+    /// <see cref="BehaviorTree.Serialize"/> it round-trips through no managed tree and allocates
+    /// no factory per node on load — <see cref="Deserialize"/> maps it straight back.
+    ///
+    /// The copy includes <see cref="NodeBlob.Types"/>, whose ids mean nothing to another process;
+    /// <see cref="Deserialize"/> rewrites them from <see cref="NodeBlob.Guids"/>. (EntitiesBT
+    /// instead truncates its runtime arrays off the tail, which works only while its builder
+    /// happens to allocate them last.)
+    /// </summary>
+    public byte[] SerializeToBytes()
+    {
+        NativeBlobAssetReference<NodeBlob> blob =
+            _blob ?? throw new ObjectDisposedException(nameof(BehaviorTreeLayout));
+        var bytes = new byte[blob.Length];
+        new ReadOnlySpan<byte>(blob.UnsafePtr, blob.Length).CopyTo(bytes);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Load a layout serialized by <see cref="SerializeToBytes"/>: copy into aligned native
+    /// memory, validate the topology, and resolve each node's GUID to this process's
+    /// <see cref="NodeTypeRegistry"/> id. The caller owns the result and disposes it once nothing
+    /// ticks against it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The bytes are not a current-format layout blob,
+    /// the topology is corrupt, or a node type is not registered in this process.</exception>
+    public static BehaviorTreeLayout Deserialize(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < sizeof(NodeBlob))
+        {
+            throw new InvalidOperationException(
+                $"Serialized behavior tree layout is too small ({data.Length} bytes) to hold a "
+                + $"{nameof(NodeBlob)} header.");
+        }
+
+        var reference = new NativeBlobAssetReference<NodeBlob>(data, DataAlignment);
+        try
+        {
+            ValidateAndResolve(reference.UnsafePtr, reference.Length);
+        }
+        catch
+        {
+            reference.Dispose();
+            throw;
+        }
+
+        return new BehaviorTreeLayout(reference);
+    }
+
+    /// <summary>
+    /// Refuse a corrupt blob here, where the file name is still on the stack, rather than fault on
+    /// the first tick; then rewrite <see cref="NodeBlob.Types"/> — the only mutation a loaded blob
+    /// ever sees — from the durable GUIDs.
+    /// </summary>
+    private static void ValidateAndResolve(NodeBlob* blob, int blobLength)
+    {
+        if (blob->FormatVersion != NodeBlob.CurrentFormatVersion)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported behavior tree layout format version {blob->FormatVersion}. "
+                + $"Expected {NodeBlob.CurrentFormatVersion}.");
+        }
+
+        ValidateArrayBounds(blob, blobLength, ref blob->EndIndices, nameof(NodeBlob.EndIndices));
+        ValidateArrayBounds(blob, blobLength, ref blob->Types, nameof(NodeBlob.Types));
+        ValidateArrayBounds(blob, blobLength, ref blob->Guids, nameof(NodeBlob.Guids));
+        ValidateArrayBounds(blob, blobLength, ref blob->Offsets, nameof(NodeBlob.Offsets));
+        ValidateArrayBounds(blob, blobLength, ref blob->DefaultData, nameof(NodeBlob.DefaultData));
+
+        int count = blob->Types.Length;
+        if (count == 0
+            || blob->EndIndices.Length != count
+            || blob->Guids.Length != count
+            || blob->Offsets.Length != count + 1)
+        {
+            throw new InvalidOperationException(
+                "Serialized behavior tree layout is corrupt: its arrays disagree on the node "
+                + $"count ({count} types, {blob->Guids.Length} GUIDs, "
+                + $"{blob->EndIndices.Length} end indices, {blob->Offsets.Length} offsets).");
+        }
+
+        if (blob->Offsets[0] != 0 || blob->Offsets[count] != blob->DefaultData.Length)
+        {
+            throw new InvalidOperationException(
+                "Serialized behavior tree layout is corrupt: node data offsets do not span the "
+                + "default data block.");
+        }
+
+        if (blob->EndIndices[0] != count)
+        {
+            throw new InvalidOperationException(
+                "Serialized behavior tree layout is corrupt: the root's subtree does not span "
+                + "the whole tree.");
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (blob->Offsets[i + 1] < blob->Offsets[i] || blob->EndIndices[i] <= i || blob->EndIndices[i] > count)
+            {
+                throw new InvalidOperationException(
+                    $"Serialized behavior tree layout is corrupt at node {i}: offsets must be "
+                    + "non-decreasing and every subtree must end after its node, within the tree.");
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            Guid guid = blob->Guids[i];
+            if (!NodeTypeRegistry.TryGetId(guid, out int id))
+            {
+                throw new InvalidOperationException(
+                    $"Node GUID '{guid}' (node {i}) is not registered in this process. Every node "
+                    + "type in a serialized layout must be registered with "
+                    + $"{nameof(NodeTypeRegistry)} before the layout is loaded.");
+            }
+
+            if (NodeTypeRegistry.SizeOf(id) > blob->GetNodeDataSize(i))
+            {
+                throw new InvalidOperationException(
+                    $"Node {i} ('{NodeTypeRegistry.TypeOf(id).FullName}') needs "
+                    + $"{NodeTypeRegistry.SizeOf(id)} bytes but the serialized layout reserves "
+                    + $"{blob->GetNodeDataSize(i)} — the layout was built against a different "
+                    + "version of the node type.");
+            }
+
+            blob->Types[i] = id;
+        }
+    }
+
+    /// <summary>An array whose self-relative offset or length escapes the loaded bytes would be
+    /// read (or, for <see cref="NodeBlob.Types"/>, written) out of bounds — refuse it first.</summary>
+    private static void ValidateArrayBounds<T>(
+        NodeBlob* blob, int blobLength, ref BlobArray<T> array, string name)
+        where T : unmanaged
+    {
+        if (array.Length < 0)
+        {
+            throw new InvalidOperationException(
+                $"Serialized behavior tree layout is corrupt: array '{name}' has negative length.");
+        }
+
+        if (array.Length == 0)
+        {
+            return;
+        }
+
+        long start = (byte*)array.UnsafePtr - (byte*)blob;
+        long byteLength = (long)array.Length * sizeof(T);
+        if (start < sizeof(NodeBlob) || start + byteLength > blobLength)
+        {
+            throw new InvalidOperationException(
+                $"Serialized behavior tree layout is corrupt: array '{name}' escapes the blob.");
+        }
+    }
 
     /// <summary>Frees the blob. No finalizer here: <see cref="NativeBlobAssetReference{T}"/> has
     /// its own, so a layout nobody disposes still gives its memory back.</summary>

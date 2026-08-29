@@ -12,6 +12,6 @@ public static class BehaviorNodes
     private static class BehaviorNodeMetadata<TNodeData>
         where TNodeData : struct, INodeData
     {
-        public static readonly BehaviorNodeMetadata Metadata = new(typeof(TNodeData).GetNodeGuid());
+        public static readonly BehaviorNodeMetadata Metadata = new(typeof(TNodeData));
     }
 }

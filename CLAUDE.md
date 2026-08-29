@@ -82,20 +82,20 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 
 ### Behavior Tree Pipeline
 
-1. **Authoring** — `BehaviorNodeDefinition` is the mutable tree representation. Use `BehaviorNodes` static factory methods (`Sequence`, `Selector`, `Delay`, `Action`, etc.) to compose trees declaratively.
-2. **Compilation** — `BehaviorTreeBuilder.Build(definition)` validates the tree (child count per node type) and produces an immutable `BehaviorTree` with a flat node array + end indices.
-3. **Instantiation** — `tree.CreateInstance()` returns a `BehaviorTreeInstance` with its own `NodeBlob` (runtime state) and `Blackboard`.
-4. **Execution** — `instance.Tick(deltaTime)` drives one frame via `VirtualMachine.Tick()`, which dispatches to each node's `IRuntimeNode` implementation.
-5. **Serialization** (optional) — `tree.Serialize()` compiles to Paradise.BLOB binary format. `BehaviorTreeBlobSerializer.Deserialize(blob, registry)` round-trips. Delegate-backed nodes cannot be serialized (managed references).
+1. **Authoring** — generated builder classes (from `[Builder]` via `BTreeNodeGenerator`) or raw `BehaviorNodes.Node(...)` compose a mutable `BehaviorNodeDefinition` tree.
+2. **Compilation** — `BehaviorTreeBuilder.Build(definition)` validates child counts against each node's `[Builder]` cardinality (Leaf = 0, Decorator = 1; nodes without the attribute are not checked) and produces an immutable `BehaviorTree` (flat pre-order array + end indices).
+3. **Layout** — `BehaviorTreeLayout.Build(tree)` flattens into a shared, immutable `NodeBlob` in native memory: end indices, node type ids, GUIDs, per-node data offsets (packed at each node's natural alignment), and authored defaults. A thousand agents share one layout.
+4. **Instantiation** — `BehaviorTreeInstance` owns the per-agent state (a `NodeState[]` and a `byte[]` of node data) and takes the blackboard per `Tick(bb)` call, so `ref struct` (generated) blackboards work. `BehaviorTreeInstance<TBlackboard>` adds an owned blackboard for plain-struct blackboards; `tree.CreateInstance(...)` / `layout.CreateInstance()` construct them.
+5. **Execution** — `VirtualMachine.Tick()` looks each node up in `NodeTypeRegistry` by dense id and ticks it through its bytes. Registration is emitted per assembly by the generator as a module initializer.
+6. **Serialization** — two forms. **Layout bytes** (preferred for shipping): `layout.SerializeToBytes()` / `tree.SerializeLayoutToBytes()` is a raw copy of the position-independent blob; `BehaviorTreeLayout.Deserialize(bytes)` validates it and re-resolves GUIDs to this process's type ids — no managed tree, no registry argument. **Interchange**: `tree.Serialize()` via `BehaviorTreeBlobSerializer` round-trips a managed `BehaviorTree` through a `BehaviorTreeSerializationRegistry`.
 
 ### Key Abstractions
 
-- **`INodeData`** — The core node contract. All custom nodes must be `struct` types implementing this. Generic `Tick<TNodeBlob, TBlackboard>` method receives index, blob, and blackboard by ref.
-- **`ICustomResetAction`** — Optional interface for nodes with stateful reset behavior.
-- **`INodeBlob` / `NodeBlob`** — Stores per-instance runtime state: `IRuntimeNode[]`, end indices, and `NodeState[]` per node.
-- **`IBlackboard` / `Blackboard`** — Mutable data store for shared state. Supports typed struct/object storage and named key-value pairs.
-- **`BehaviorNodeType`** — Enum (`Action`, `Decorate`, `Composite`) that governs child-count validation.
-- **`NodeState`** — Flags enum (`Success`, `Failure`, `Running`).
+- **`INodeData`** — The core node contract: unmanaged struct with generic `Tick<TNodeBlob, TBlackboard>(int index, blob, bb)`; optional `static virtual Reset`. Identity is `[Guid]`.
+- **`INodeBlob` / `UnmanagedNodeBlob`** — Blob contract over a shared `NodeBlob*` plus caller-owned spans (states + runtime data). Data is reached by `ref byte`, so buffers may be managed arrays or native/chunk memory.
+- **`NodeTypeRegistry`** — Process-wide GUID → dense id → invoker table; ids are process-local, GUIDs are the durable identity.
+- **`IBlackboard`** — Three members (`HasData`/`GetData`/`SetData`), no ref returns, which is what makes read/write intent statically checkable by the generators.
+- **`NodeState`** — Flags enum (`None`, `Success`, `Failure`, `Running`); `None` means "never ticked / reset".
 
 ### Custom Node Pattern
 
@@ -105,9 +105,9 @@ Implement `INodeData` on an unmanaged struct, tag with `[Guid("...")]` for seria
 [Guid("...")]
 public struct MyNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         // access runtime/default data via blob.GetNodeData<MyNode>(index)
         // access shared state via bb.GetData<T>()

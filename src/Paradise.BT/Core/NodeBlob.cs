@@ -23,8 +23,9 @@ namespace Paradise.BT;
 /// </summary>
 public struct NodeBlob
 {
-    /// <summary>Bumped when the layout of this struct changes.</summary>
-    public const int CurrentFormatVersion = 1;
+    /// <summary>Bumped when the layout of this struct changes.
+    /// Version 2: added <see cref="Guids"/>, which is what made the blob itself loadable.</summary>
+    public const int CurrentFormatVersion = 2;
 
     public int FormatVersion;
 
@@ -32,9 +33,16 @@ public struct NodeBlob
     public BlobArray<int> EndIndices;
 
     /// <summary><see cref="NodeTypeRegistry"/> ids, which are assigned in registration order and
-    /// so are valid only for the process that built this blob. The durable identity of a node type
-    /// is its GUID, which <see cref="BehaviorTreeBlob"/> carries.</summary>
+    /// so are valid only for the process that built this blob. A blob loaded from bytes carries a
+    /// dead process's ids here until <see cref="BehaviorTreeLayout.Deserialize"/> rewrites them
+    /// from <see cref="Guids"/> — which is why nothing may read them before it does.</summary>
     public BlobArray<int> Types;
+
+    /// <summary>Each node type's <c>[Guid]</c> — the identity that survives a process, where
+    /// <see cref="Types"/> does not. This array is what lets the layout blob be saved and loaded
+    /// directly (EntitiesBT ships its blob as the asset too, but keys it on a 32-bit hash of the
+    /// GUID; the full GUID costs 12 more bytes per node and cannot collide).</summary>
+    public BlobArray<Guid> Guids;
 
     /// <summary>Where each node's data starts, with <c>Count + 1</c> entries so node <c>i</c>'s
     /// reserved size is <c>Offsets[i + 1] - Offsets[i]</c> without a second array.</summary>

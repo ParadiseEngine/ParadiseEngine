@@ -32,6 +32,13 @@ public sealed class BehaviorTree : IDisposable
         => new BehaviorTreeInstance<TBlackboard>(this, blackboard);
 
     /// <summary>
+    /// An instance without an owned blackboard — the blackboard is passed to each
+    /// <see cref="BehaviorTreeInstance.Tick{TBlackboard}"/> call instead, which is the only shape
+    /// a <c>ref struct</c> (generated) blackboard fits.
+    /// </summary>
+    public BehaviorTreeInstance CreateInstance() => new(Layout.Handle);
+
+    /// <summary>
     /// The flattened form every instance ticks against, built on first use and shared by all of
     /// them — the topology, the node type ids and the authored defaults do not vary per instance.
     ///
@@ -54,6 +61,14 @@ public sealed class BehaviorTree : IDisposable
 
     public byte[] SerializeToBytes()
         => BehaviorTreeBlobSerializer.SerializeToBytes(this);
+
+    /// <summary>
+    /// The compiled layout as bytes — the runtime form itself, which
+    /// <see cref="BehaviorTreeLayout.Deserialize"/> loads without rebuilding a managed tree.
+    /// Prefer this for shipping; <see cref="Serialize"/> remains the interchange form a managed
+    /// <see cref="BehaviorTree"/> can be reconstructed from.
+    /// </summary>
+    public byte[] SerializeLayoutToBytes() => Layout.SerializeToBytes();
 
     public Type GetNodeType(int nodeIndex)
     {

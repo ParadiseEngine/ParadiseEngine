@@ -68,7 +68,7 @@ public sealed class BehaviorTreeSerializationRegistry
         {
             ref BlobPtrAny defaultDataPtr = ref node.DefaultData;
             TNodeData defaultData = defaultDataPtr.GetValue<TNodeData>();
-            return new RuntimeNodeFactory<TNodeData>(defaultData, new BehaviorNodeMetadata(NodeGuid));
+            return new RuntimeNodeFactory<TNodeData>(defaultData, new BehaviorNodeMetadata(typeof(TNodeData)));
         }
     }
 }

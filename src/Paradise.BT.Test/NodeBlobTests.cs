@@ -79,9 +79,10 @@ public sealed class NodeBlobTests
             int size = blob.Offsets[i + 1] - blob.Offsets[i];
             await Assert.That(size).IsGreaterThan(0);
 
-            // Every node starts on a 16-byte boundary, which is what lets a node hold a vector
-            // type without being read across one.
-            await Assert.That(blob.Offsets[i] % 16).IsEqualTo(0);
+            // Every node starts on a boundary its own type can be read at — and no wider: nodes
+            // pack at their natural alignment, so a 1-byte marker node no longer costs a 16-byte
+            // stride per instance.
+            await Assert.That(blob.Offsets[i] % AlignmentOf(blob.Types[i])).IsEqualTo(0);
         }
 
         await Assert.That(blob.Offsets[blob.Count]).IsEqualTo(blob.DefaultLength);
@@ -98,6 +99,30 @@ public sealed class NodeBlobTests
         var blob = Read(layout);
 
         await Assert.That(blob.DefaultAddress % 16).IsEqualTo((nint)0);
+    }
+
+    /// <summary>The alignment the layout is expected to give a node: its natural one. Reflection
+    /// is fine here — the test project is not AOT.</summary>
+    private static int AlignmentOf(Type nodeType) =>
+        (int)typeof(NodeBlobTests)
+            .GetMethod(nameof(AlignmentOfGeneric))!
+            .MakeGenericMethod(nodeType)
+            .Invoke(null, null)!;
+
+    public static int AlignmentOfGeneric<T>() where T : unmanaged =>
+        System.Runtime.CompilerServices.Unsafe.SizeOf<AlignmentProbe<T>>()
+        - System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+
+    private struct AlignmentProbe<T> where T : unmanaged
+    {
+        public byte Padding;
+        public T Value;
+
+        public AlignmentProbe(byte padding, T value)
+        {
+            Padding = padding;
+            Value = value;
+        }
     }
 
     [Test]

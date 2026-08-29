@@ -50,9 +50,10 @@ Console.WriteLine("Forager — the generated blackboard, over a row:");
 
 BehaviorTree forager = ForagerTree.Build();
 BehaviorTreeLayout layout = BehaviorTreeLayout.Build(forager);
-var states = new NodeState[layout.NodeCount];
-var data = new byte[layout.RuntimeDataSize];
-UnmanagedNodeBlob.Initialize(layout.Handle, states, data);
+
+// The instance owns the two per-agent buffers; the blackboard is bound per tick, because a
+// generated blackboard is a ref struct no field can hold.
+BehaviorTreeInstance foragerInstance = layout.CreateInstance();
 
 Console.WriteLine($"  {layout.NodeCount} nodes, {layout.RuntimeDataSize} bytes of node data.");
 
@@ -86,14 +87,8 @@ foreach ((string label, Senses senses, float energy) in situations)
         position: in position,
         senses: in senses,
         stamina: in stamina);
-    var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
 
-    if (blob.GetState(0).IsCompleted())
-    {
-        VirtualMachine.Reset(blob, bb);
-    }
-
-    NodeState state = VirtualMachine.Tick(blob, bb);
+    NodeState state = foragerInstance.Tick(bb);
 
     Console.WriteLine(
         $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
@@ -131,14 +126,8 @@ for (int step = 1; step <= 5; step++)
         position: in position,
         senses: in world,
         stamina: in stamina);
-    var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
 
-    if (blob.GetState(0).IsCompleted())
-    {
-        VirtualMachine.Reset(blob, bb);
-    }
-
-    VirtualMachine.Tick(blob, bb);
+    foragerInstance.Tick(bb);
 
     // The caller owns the component, so the caller applies the decision.
     float before = position.X;
@@ -154,6 +143,35 @@ for (int step = 1; step <= 5; step++)
     Console.WriteLine(
         $"  step {step}: {intent.Kind,-6} goal x={intent.GoalX:0.0}"
         + $" -> moved {before:0.0} to {position.X:0.0}, stamina now {stamina.Value:0.0}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// 4. The layout IS the asset: a raw byte copy of the compiled blob, loaded back with no managed
+//    tree in between. Node identity crosses the boundary as GUIDs; the process-local type ids
+//    are re-resolved on load. Under PublishAot this is the whole ship-and-load path.
+// ---------------------------------------------------------------------------------------------
+
+Console.WriteLine();
+Console.WriteLine("Round-tripping the compiled layout through bytes:");
+
+byte[] shipped = layout.SerializeToBytes();
+using (BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(shipped))
+{
+    BehaviorTreeInstance loadedInstance = loaded.CreateInstance();
+
+    var intent = default(Intent);
+    var decisions = default(Decisions);
+    var senses = new Senses { FoodVisible = true, FoodX = 4f };
+    NodeState state = loadedInstance.Tick(ForagerTreeBlackboard.Bind(
+        behaviorTreeTickDeltaTime: in deltaTime,
+        decisions: ref decisions,
+        intent: ref intent,
+        position: in position,
+        senses: in senses,
+        stamina: in stamina));
+
+    Console.WriteLine(
+        $"  {shipped.Length} bytes -> {loaded.NodeCount} nodes -> {state}, intent {intent.Kind}");
 }
 
 layout.Dispose();

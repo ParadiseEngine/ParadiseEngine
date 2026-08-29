@@ -5,15 +5,17 @@ namespace Paradise.BT;
 
 internal readonly struct BehaviorNodeMetadata
 {
-    public BehaviorNodeMetadata(Guid guid)
+    public BehaviorNodeMetadata(Type nodeType)
     {
-        Guid = guid;
-        Id = guid.GetHashCode();
+        Guid = nodeType.GetNodeGuid();
+        Cardinality = nodeType.GetCustomAttribute<BuilderAttribute>()?.Cardinality;
     }
 
     public Guid Guid { get; }
 
-    public int Id { get; }
+    /// <summary>From the node's <c>[Builder]</c> attribute; null when it carries none, which is
+    /// what exempts a node from child-count validation rather than mis-assuming Leaf.</summary>
+    public NodeCardinality? Cardinality { get; }
 }
 
 internal static class GuidAttributeExtensions

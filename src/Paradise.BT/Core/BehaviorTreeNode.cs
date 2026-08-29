@@ -19,15 +19,22 @@ internal readonly struct BehaviorTreeNode
 
 internal interface IRuntimeNodeFactory
 {
-    int TypeId { get; }
-
     Type NodeType { get; }
 
     Guid NodeGuid { get; }
 
+    /// <summary>What the node's <c>[Builder]</c> attribute declares about child count, or null for
+    /// a node that carries none — validation then has nothing to check against and skips it.</summary>
+    NodeCardinality? Cardinality { get; }
+
     /// <summary>How many bytes this node's data occupies — what an unmanaged instance reserves
     /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
     int DataSize { get; }
+
+    /// <summary>The node struct's natural alignment, so a layout places its data on a boundary
+    /// the type can be read at — and no wider: an empty marker node packs to a byte instead of
+    /// burning a 16-byte stride per node per instance.</summary>
+    int DataAlignment { get; }
 
     IBuilder CreateSerializedDefaultDataBuilder();
 
@@ -56,13 +63,15 @@ internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
         _metadata = metadata;
     }
 
-    public int TypeId => _metadata.Id;
-
     public Type NodeType => typeof(TNodeData);
 
     public Guid NodeGuid => _metadata.Guid;
 
+    public NodeCardinality? Cardinality => _metadata.Cardinality;
+
     public int DataSize => Unsafe.SizeOf<TNodeData>();
+
+    public int DataAlignment => GetAlignment<TNodeData>();
 
     public void WriteDefaultData(Span<byte> destination)
     {
