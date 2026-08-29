@@ -3,15 +3,15 @@ using Paradise.BT.Nodes;
 namespace Paradise.BT.Sample;
 
 /// <summary>
-/// The forager's tree, and the thing being demonstrated: nothing here says what the blackboard
-/// holds. The generator reads the node types this class names, unions the access they declare,
-/// checks it against <see cref="ForagerRow"/>'s claims, and emits <c>ForagerTreeBlackboard</c> and
+/// The forager's tree, and the thing being demonstrated: nothing here — and nothing in
+/// Forager.cs — says what the blackboard holds. The generator takes the node types this class
+/// names, reads each one's access out of its own Tick body, checks the result against
+/// <see cref="ForagerRow"/>'s claims, and emits <c>ForagerTreeBlackboard</c> and
 /// <c>ForagerTreeExtras</c>.
 ///
 /// Twenty nodes — nine node types of its own plus four built-ins — and the resulting blackboard
-/// carries SIX entries: three
-/// components each read by more than one node, plus Intent, Decisions, and the delta time the
-/// Also-listed timer needs. That gap between node count and field count is the whole point — the
+/// carries SIX entries: three components each read by more than one node, plus Intent, Decisions,
+/// and the delta time the Also-listed timer needs. That gap between node count and field count is the whole point — the
 /// blackboard is sized by what the tree TOUCHES, not by how big the tree is.
 ///
 /// <c>DelayTimerNode</c> is listed in <c>Also</c> because <c>BuiltInBehaviorNodes.Delay</c> builds

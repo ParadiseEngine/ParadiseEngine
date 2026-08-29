@@ -102,6 +102,15 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
             return;
         }
 
+        // A node that declares NOTHING is read from its body by the generator, so there is nothing
+        // for it to disagree with and nothing to report. Declaring even one access opts into the
+        // stricter reading: if you write the contract down, it has to be complete, because that is
+        // the only version a consumer in another assembly can see.
+        if (!DeclaresAnyAccess(node))
+        {
+            return;
+        }
+
         ITypeSymbol accessed = target.TypeArguments[0];
 
         // `GetData<T>()` where T is the node's own type parameter cannot be resolved to a
@@ -157,6 +166,25 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
                 return;
             }
         }
+    }
+
+    /// <summary>Whether this node states its access at all, as opposed to leaving it to be read
+    /// off the body.</summary>
+    private static bool DeclaresAnyAccess(INamedTypeSymbol node)
+    {
+        foreach (AttributeData attr in node.GetAttributes())
+        {
+            INamedTypeSymbol? ac = attr.AttributeClass;
+            if (ac is not null
+                && ac.IsGenericType
+                && ac.ContainingNamespace?.ToDisplayString() == "Paradise.BT"
+                && ac.Name is "ReadsAttribute" or "WritesAttribute" or "OptionalReadsAttribute")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool Declares(INamedTypeSymbol node, ITypeSymbol accessed, string attribute)

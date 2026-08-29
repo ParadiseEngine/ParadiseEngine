@@ -62,6 +62,9 @@ public class BlackboardAccessAnalyzerTests
         var test = Test("""
             namespace Game
             {
+                // Declares SOMETHING, which is what opts a node into the strict reading. A node
+                // declaring nothing at all is read off its body by the generator instead.
+                [Paradise.BT.Reads<Decision>]
                 public struct PeekNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
@@ -69,6 +72,7 @@ public class BlackboardAccessAnalyzerTests
                         where TNodeBlob : struct, Paradise.BT.INodeBlob
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
+                        _ = bb.GetData<Decision>().Strike;
                         _ = bb.GetData<Pose>().X;
                         return Paradise.BT.NodeState.Success;
                     }
@@ -80,7 +84,7 @@ public class BlackboardAccessAnalyzerTests
             CSharpAnalyzerVerifier<BlackboardAccessAnalyzer, DefaultVerifier>
                 .Diagnostic(BlackboardAccessAnalyzer.s_undeclaredAccess)
                 .WithArguments("PeekNode", "GetData", "Pose", "Reads")
-                .WithSpan(43, 17, 43, 35));
+                .WithSpan(47, 17, 47, 35));
 
         await test.RunAsync().ConfigureAwait(false);
     }
@@ -168,11 +172,9 @@ public class BlackboardAccessAnalyzerTests
             }
             """);
 
-        test.ExpectedDiagnostics.Add(
-            CSharpAnalyzerVerifier<BlackboardAccessAnalyzer, DefaultVerifier>
-                .Diagnostic(BlackboardAccessAnalyzer.s_undeclaredAccess)
-                .WithArguments("DelegatingNode", "SetData", "Decision", "Writes")
-                .WithSpan(40, 16, 40, 45));
+        // Only PBT0010. DelegatingNode declares nothing, so its own body is the generator's
+        // source of truth and there is no declaration to contradict -- but the helper it calls is
+        // still out of view, which is the whole point of the warning.
         test.ExpectedDiagnostics.Add(
             CSharpAnalyzerVerifier<BlackboardAccessAnalyzer, DefaultVerifier>
                 .Diagnostic(BlackboardAccessAnalyzer.s_blackboardEscapes)

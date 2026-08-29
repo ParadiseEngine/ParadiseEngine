@@ -9,11 +9,19 @@ namespace Paradise.BT.Sample;
 // produce: a component three separate nodes read, an extra four separate nodes write, a type both
 // read and written, a node that touches nothing at all, and a node no line of this file names.
 //
-// The point of running it is that everything below is checked twice over. PBT0005 refuses a
-// component ForagerRow does not claim; PBT0008 refuses a node trying to write one; PBT0009 refuses
-// a node whose body reaches for something it did not declare. And because the sample publishes
-// AOT, the emitted blackboard is proven to survive trimming and native compilation — which is
-// where generated code usually breaks first.
+// NOT ONE NODE BELOW DECLARES ITS ACCESS. There is no [Reads<T>] or [Writes<T>] in this file:
+// the generator reads each Tick body, taking every GetData<T>() as a read and every SetData<T>()
+// as a write. That is only decidable because those two replaced a ref-returning accessor, under
+// which taking a ref to avoid a copy and taking one to mutate were the same call.
+//
+// The attributes still exist and still matter — they are how a node in a REFERENCED assembly says
+// what it touches, since a body only exists where it is declared. DelayTimerNode ships in
+// Paradise.BT.Nodes and carries them for exactly that reason. Source is scanned, metadata is read,
+// and the two are unioned.
+//
+// Deriving it does not weaken the refusals: PBT0008 still refuses a component write whether it was
+// declared or merely performed. And because the sample publishes AOT, the emitted blackboard is
+// proven to survive trimming and native compilation — where generated code usually breaks first.
 
 // ===================== the world's vocabulary =====================
 
@@ -85,8 +93,6 @@ public struct Decisions
 /// <summary>Reads two things at once, which is the case a single-access node never covers.</summary>
 [Guid("A0000000-0000-4000-8000-000000000001")]
 [Builder]
-[Reads<Senses>]
-[Reads<Stamina>]
 public struct ThreatNearNode : INodeData
 {
     public float PanicStamina;
@@ -102,7 +108,6 @@ public struct ThreatNearNode : INodeData
 /// <summary>The second reader of <see cref="Senses"/>: one field in the blackboard, two nodes.</summary>
 [Guid("A0000000-0000-4000-8000-000000000002")]
 [Builder]
-[Reads<Senses>]
 public struct FoodVisibleNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
@@ -112,11 +117,9 @@ public struct FoodVisibleNode : INodeData
         => bb.GetData<Senses>().FoodVisible.ToNodeState();
 }
 
-/// <summary>The second reader of <see cref="Stamina"/>, and a node that reads a component while
-/// writing an extra — the mixed case.</summary>
+/// <summary>The second reader of <see cref="Stamina"/>: a pure condition, writing nothing.</summary>
 [Guid("A0000000-0000-4000-8000-000000000003")]
 [Builder]
-[Reads<Stamina>]
 public struct ExhaustedNode : INodeData
 {
     public float RestBelow;
@@ -132,7 +135,6 @@ public struct ExhaustedNode : INodeData
 /// the generator's merge has to keep it a write rather than demote it.</summary>
 [Guid("A0000000-0000-4000-8000-000000000004")]
 [Builder]
-[Reads<Intent>]
 public struct AlreadyDecidedNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
@@ -147,10 +149,6 @@ public struct AlreadyDecidedNode : INodeData
 /// <summary>Runs away: reads the pose it is fleeing FROM and writes where to go.</summary>
 [Guid("A0000000-0000-4000-8000-000000000005")]
 [Builder]
-[Reads<Position>]
-[Reads<Senses>]
-[Writes<Intent>]
-[Writes<Decisions>]
 public struct FleeNode : INodeData
 {
     public float Distance;
@@ -177,10 +175,6 @@ public struct FleeNode : INodeData
 /// <summary>The second reader of <see cref="Position"/> and the second writer of both extras.</summary>
 [Guid("A0000000-0000-4000-8000-000000000006")]
 [Builder]
-[Reads<Position>]
-[Reads<Senses>]
-[Writes<Intent>]
-[Writes<Decisions>]
 public struct SeekFoodNode : INodeData
 {
     public float ArriveWithin;
@@ -207,9 +201,6 @@ public struct SeekFoodNode : INodeData
 /// Selector always concludes something.</summary>
 [Guid("A0000000-0000-4000-8000-000000000007")]
 [Builder]
-[Reads<Position>]
-[Writes<Intent>]
-[Writes<Decisions>]
 public struct RestNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
@@ -232,7 +223,6 @@ public struct RestNode : INodeData
 /// one thing.</summary>
 [Guid("A0000000-0000-4000-8000-000000000008")]
 [Builder]
-[Writes<Decisions>]
 public struct TallyNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(

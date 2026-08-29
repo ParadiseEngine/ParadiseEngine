@@ -356,6 +356,84 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
     }
 
+    /// <summary>
+    /// A node that declares NOTHING still contributes, because its body is read directly. This is
+    /// only decidable since GetData/SetData replaced the ref-returning accessor: taking a ref to
+    /// avoid a copy and taking one to mutate were the same call.
+    ///
+    /// The declarations remain the cross-assembly contract — a node from a referenced assembly has
+    /// no body to read — so the two are unioned rather than one replacing the other.
+    /// </summary>
+    [Test]
+    public async Task A_Node_That_Declares_Nothing_Is_Read_From_Its_Body()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace Game
+            {
+                public struct SilentNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        // Never declared, only performed.
+                        _ = bb.GetData<WorldTransform>().X;
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    public static object Build() => new SilentNode();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+
+        string generated = string.Join("\n", sources);
+        await Assert.That(generated).Contains("private readonly global::Game.WorldTransform _worldTransform;");
+        await Assert.That(generated).Contains("public global::Game.Decision Decision;");
+    }
+
+    /// <summary>
+    /// The read/write split survives the scan: SetData on a COMPONENT is refused exactly as a
+    /// declared [Writes&lt;T&gt;] would be, so the body cannot smuggle past what the attribute
+    /// cannot say.
+    /// </summary>
+    [Test]
+    public async Task A_Component_Write_Is_Refused_Even_When_Only_The_Body_Says_So()
+    {
+        var (diagnostics, _, _) = Run(Prelude + World + """
+            namespace Game
+            {
+                public struct ShoveNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<ChaseIntent>() with { X = 1f });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    public static object Build() => new ShoveNode();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0008");
+    }
+
     // ===================== harness =====================
 
     private static (ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<string> Sources,

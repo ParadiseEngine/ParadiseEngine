@@ -31,6 +31,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
     private const string QueryableAttributeFullName = "Paradise.ECS.QueryableAttribute";
     private const string NodeDataInterface = "Paradise.BT.INodeData";
     private const string ComponentInterface = "Paradise.ECS.IComponent";
+    private const string BlackboardInterface = "Paradise.BT.IBlackboard";
 
     private static readonly DiagnosticDescriptor s_readsUnclaimed = new(
         id: "PBT0005",
@@ -144,9 +145,11 @@ public sealed class BindingGenerator : IIncrementalGenerator
     /// Paradise.BT.Nodes and has no declaration syntax here at all, so a source-only pass would
     /// silently give it no access and leave its delta time out of the blackboard.
     /// </summary>
-    private static ImmutableArray<Access> CollectAccess(INamedTypeSymbol symbol)
+    private static ImmutableArray<Access> CollectAccess(
+        INamedTypeSymbol symbol, Compilation compilation, System.Threading.CancellationToken ct)
     {
         var access = ImmutableArray.CreateBuilder<Access>();
+        ScanBody(symbol, compilation, access, ct);
         foreach (var attr in symbol.GetAttributes())
         {
             INamedTypeSymbol? ac = attr.AttributeClass;
@@ -179,6 +182,74 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         return access.ToImmutable();
+    }
+
+    /// <summary>
+    /// Read a node's access out of its BODY: every <c>bb.GetData&lt;T&gt;()</c> is a read, every
+    /// <c>bb.SetData&lt;T&gt;()</c> a write. Only possible since those two replaced the
+    /// ref-returning accessor — taking a ref to avoid a copy and taking one to mutate looked
+    /// identical, so no scan could tell them apart.
+    ///
+    /// This runs only where the body EXISTS, which is the whole rule: a node declared in this
+    /// compilation is scanned and needs no attributes, while a node arriving from a referenced
+    /// assembly has no syntax at all and is read from its attributes, which is why those remain
+    /// the cross-assembly contract. <c>DeclaringSyntaxReferences</c> is exactly that test.
+    ///
+    /// Unioned with whatever the node declares rather than replacing it, so a node reaching the
+    /// blackboard somewhere this cannot follow — through a helper, see PBT0010 — can still say so
+    /// by hand.
+    /// </summary>
+    private static void ScanBody(
+        INamedTypeSymbol symbol,
+        Compilation compilation,
+        ImmutableArray<Access>.Builder access,
+        System.Threading.CancellationToken ct)
+    {
+        foreach (SyntaxReference reference in symbol.DeclaringSyntaxReferences)
+        {
+            ct.ThrowIfCancellationRequested();
+            SyntaxNode declaration = reference.GetSyntax(ct);
+            SemanticModel model = compilation.GetSemanticModel(declaration.SyntaxTree);
+
+            foreach (InvocationExpressionSyntax invocation in
+                declaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                ct.ThrowIfCancellationRequested();
+                if (model.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol target
+                    || target.ContainingType?.ToDisplayString() != BlackboardInterface
+                    || target.TypeArguments.Length != 1)
+                {
+                    continue;
+                }
+
+                AccessKind kind;
+                switch (target.Name)
+                {
+                    case "GetData":
+                        kind = AccessKind.Read;
+                        break;
+                    case "SetData":
+                        kind = AccessKind.Write;
+                        break;
+                    default:
+                        // HasData asks whether something is there and is answerable for any T,
+                        // so it is not a claim on anything.
+                        continue;
+                }
+
+                ITypeSymbol t = target.TypeArguments[0];
+
+                // `GetData<T>()` where T is the node's own type parameter names no component and
+                // cannot be resolved to a field.
+                if (t is ITypeParameterSymbol || t.TypeKind == TypeKind.Error)
+                {
+                    continue;
+                }
+
+                access.Add(new Access(
+                    symbol.Name, t.ToDisplayString(), t.Name, kind, IsComponent(t)));
+            }
+        }
     }
 
     private static BindingModel? GetBinding(
@@ -218,7 +289,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 && Implements(t, NodeDataInterface)
                 && seen.Add(t.ToDisplayString()))
             {
-                access.AddRange(CollectAccess(t));
+                access.AddRange(CollectAccess(t, ctx.SemanticModel.Compilation, ct));
             }
         }
 
@@ -236,7 +307,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
                     && Implements(also, NodeDataInterface)
                     && seen.Add(also.ToDisplayString()))
                 {
-                    access.AddRange(CollectAccess(also));
+                    access.AddRange(CollectAccess(also, ctx.SemanticModel.Compilation, ct));
                 }
             }
         }
