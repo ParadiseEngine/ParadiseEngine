@@ -2,13 +2,18 @@ using Paradise.BT;
 using Paradise.BT.Nodes;
 using Paradise.BT.Builder;
 using Paradise.BT.Nodes.Builder;
+using Paradise.BT.Sample;
+
+// ---------------------------------------------------------------------------------------------
+// 1. The builder DSL, over a hand-written blackboard.
+// ---------------------------------------------------------------------------------------------
 
 var blackboard = new Blackboard();
 blackboard.SetData(new HasTargetData { Value = true });
 blackboard.SetData(new ShotsFiredData());
 
-// Builder DSL syntax. Every leaf is an unmanaged struct declared in SampleNodes.cs; the builder
-// classes around them are generated from [Builder].
+// Every leaf is an unmanaged struct declared in SampleNodes.cs; the builder classes around them
+// are generated from [Builder].
 var tree = new Selector(
     new Sequence(
         new HasTarget(),
@@ -28,3 +33,67 @@ for (int i = 0; i < 10; i++)
     NodeState status = instance.Tick();
     Console.WriteLine($"Tick {i + 1}: {status}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// 2. The GENERATED blackboard, over an ECS row.
+//
+// Nothing below names a blackboard type that anyone wrote. ForagerTreeBlackboard and
+// ForagerTreeExtras were emitted from what the tree's eleven node types declare with
+// [Reads<T>] / [Writes<T>], checked against ForagerRow's claims.
+//
+// Running it under PublishAot is the part worth having: generated code plus trimming plus native
+// compilation is where this would break first if it were going to.
+// ---------------------------------------------------------------------------------------------
+
+Console.WriteLine();
+Console.WriteLine("Forager — the generated blackboard, over a row:");
+
+BehaviorTree forager = ForagerTree.Build();
+BehaviorTreeLayout layout = BehaviorTreeLayout.Build(forager);
+var states = new NodeState[layout.NodeCount];
+var data = new byte[layout.RuntimeDataSize];
+UnmanagedNodeBlob.Initialize(layout.Handle, states, data);
+
+Console.WriteLine($"  {layout.NodeCount} nodes, {layout.RuntimeDataSize} bytes of node data.");
+
+// One forager, walking a line. In a game these three come off a chunk; here they are locals,
+// because the generated Bind takes components rather than a query.
+var position = new Position { X = 0f };
+var stamina = new Stamina { Value = 1f };
+
+// Four situations, so every branch of the Selector is taken at least once.
+(string Label, Senses Senses, float Stamina)[] situations =
+[
+    ("threatened", new Senses { ThreatNear = true, FoodX = 2f, FoodVisible = true }, 0.9f),
+    ("food ahead", new Senses { FoodVisible = true, FoodX = 4f }, 0.8f),
+    ("worn out", new Senses { FoodVisible = true, FoodX = 4f }, 0.1f),
+    ("nothing doing", new Senses(), 0.5f),
+];
+
+foreach ((string label, Senses senses, float energy) in situations)
+{
+    stamina = stamina with { Value = energy };
+
+    var extras = new ForagerTreeExtras
+    {
+        BehaviorTreeTickDeltaTime = new BehaviorTreeTickDeltaTime(0.5f),
+    };
+
+    var bb = ForagerTreeBlackboard.Bind(in position, in senses, in stamina, in extras);
+    var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
+
+    if (blob.GetState(0).IsCompleted())
+    {
+        VirtualMachine.Reset(ref blob, ref bb);
+    }
+
+    NodeState state = VirtualMachine.Tick(ref blob, ref bb);
+    Intent intent = bb.Extras.Intent;
+
+    Console.WriteLine(
+        $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
+        + (intent.HasGoal ? $"goal x={intent.GoalX:0.0}" : "no goal")
+        + $"  (decisions so far: {bb.Extras.Decisions.Count})");
+}
+
+layout.Dispose();

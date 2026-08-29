@@ -11,6 +11,12 @@
     <ProjectReference Include="../Paradise.BT/Paradise.BT.csproj" />
     <ProjectReference Include="../Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
     <ProjectReference Include="../Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
+
+    <!-- The generated blackboard is bound against an ECS queryable's claims, so the sample needs
+         the component and query vocabulary. Both generators run here: the ECS one so [Component]
+         and [Queryable] are real rather than decorative, the BT one so the binding is emitted. -->
+    <ProjectReference Include="../Paradise.ECS/Paradise.ECS.csproj" />
+    <ProjectReference Include="../Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <!-- The generator, BY NAME. Analyzers do not flow across a ProjectReference, so a project
          declaring its own nodes has to ask for it: without this the sample's [Builder] structs get
          no builder classes, and — since registration is generated too — no NodeTypeRegistry
