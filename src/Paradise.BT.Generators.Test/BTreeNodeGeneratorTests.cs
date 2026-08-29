@@ -206,6 +206,67 @@ public sealed class BTreeNodeGeneratorTests
             + ": base(new global::Game.RetryNode(times, pass), child) { }");
     }
 
+    /// <summary>The short form: a primary constructor is the exposed surface too, whether its
+    /// parameters initialize named fields or are captured directly.</summary>
+    [Test]
+    public async Task A_Primary_Constructor_Defines_The_Exposed_Surface()
+    {
+        var (sources, compileErrors, diagnostics) = Run(
+            """
+            namespace Game;
+
+            [System.Runtime.InteropServices.Guid("9D4E5F60-7182-4394-A5B6-C7D8E9F0A1B2")]
+            [Paradise.BT.Builder]
+            public struct DashNode(float speed, int charges = 2) : Paradise.BT.INodeData
+            {
+                public float Speed = speed;
+                public int Charges = charges;
+                private float _cooldown = 0f;
+
+                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                    int index, TNodeBlob blob, TBlackboard bb)
+                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    => Paradise.BT.NodeState.Success;
+            }
+            """);
+
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(diagnostics.Where(d => d.Id.StartsWith("PBT", StringComparison.Ordinal))).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains(
+            "public Dash(float speed, int charges = 2) : base(new global::Game.DashNode(speed, charges)) { }");
+    }
+
+    /// <summary>Captured-parameter style: no named fields at all — the parameters ARE the state,
+    /// stored in compiler-synthesized capture fields.</summary>
+    [Test]
+    public async Task A_Primary_Constructor_With_Captured_Parameters_Works()
+    {
+        var (sources, compileErrors, _) = Run(
+            """
+            namespace Game;
+
+            [System.Runtime.InteropServices.Guid("AE5F6071-8293-44A5-B6C7-D8E9F0A1B2C3")]
+            [Paradise.BT.Builder(Paradise.BT.NodeCardinality.Decorator)]
+            public struct CooldownNode(float seconds) : Paradise.BT.INodeData
+            {
+                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                    int index, TNodeBlob blob, TBlackboard bb)
+                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                {
+                    seconds -= 0.1f; // captured parameter is mutable node state
+                    return seconds > 0f ? Paradise.BT.NodeState.Running : Paradise.BT.NodeState.Success;
+                }
+            }
+            """);
+
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains(
+            "public Cooldown(float seconds, global::Paradise.BT.Builder.BTreeNode child) "
+            + ": base(new global::Game.CooldownNode(seconds), child) { }");
+    }
+
     [Test]
     public async Task Two_Public_Constructors_Are_Refused()
     {
