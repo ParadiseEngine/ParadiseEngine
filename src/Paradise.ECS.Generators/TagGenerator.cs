@@ -77,7 +77,6 @@ public class TagGenerator : IIncrementalGenerator
         var (validTags, tagMaskType) = GeneratorUtilities.ProcessTypes(
             context, tags, DefaultMaxTagId,
             DiagnosticDescriptors.TagNotUnmanaged,
-            DiagnosticDescriptors.InvalidTagGuidFormat,
             DiagnosticDescriptors.UnsupportedTagContainingType,
             DiagnosticDescriptors.TagIdExceedsLimit,
             DiagnosticDescriptors.DuplicateTagId,

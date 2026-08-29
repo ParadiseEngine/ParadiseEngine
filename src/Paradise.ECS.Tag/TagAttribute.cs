@@ -24,8 +24,8 @@ namespace Paradise.ECS;
 /// [Tag]
 /// public partial struct IsPlayer;
 ///
+/// [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
 /// [Tag]
-/// [Guid("12345678-1234-1234-1234-123456789012")]
 /// public partial struct IsEnemy;
 ///
 /// [Tag(Id = 100)]

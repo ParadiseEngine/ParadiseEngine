@@ -32,8 +32,9 @@ namespace Paradise.ECS;
 ///     public int Value;
 /// }
 ///
+/// // Stable cross-compilation identity
+/// [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
 /// [Component]
-/// [Guid("12345678-1234-1234-1234-123456789012")]  // Stable cross-compilation identity
 /// public partial struct StableComponent
 /// {
 ///     public int Value;

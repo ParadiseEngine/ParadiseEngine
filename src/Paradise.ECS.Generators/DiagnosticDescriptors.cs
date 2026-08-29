@@ -43,17 +43,8 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Component types must be value types (structs) for efficient storage.");
 
-    /// <summary>
-    /// PECS004: Invalid GUID format.
-    /// </summary>
-    public static readonly DiagnosticDescriptor InvalidGuidFormat = new(
-        id: "PECS004",
-        title: "Invalid GUID format",
-        messageFormat: "Component '{0}' has invalid GUID format '{1}'",
-        category: "Paradise.ECS",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "The GUID provided to the [System.Runtime.InteropServices.Guid] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
+    // PECS004 (invalid component GUID format) was retired: identity now comes from
+    // [System.Runtime.InteropServices.Guid], whose argument the compiler already validates with CS0591.
 
     /// <summary>
     /// PECS005: Component nested in generic type.
@@ -237,17 +228,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Tag types must be empty marker structs with no instance fields. Use [Component] for data-carrying types.");
 
-    /// <summary>
-    /// PECS022: Invalid tag GUID format.
-    /// </summary>
-    public static readonly DiagnosticDescriptor InvalidTagGuidFormat = new(
-        id: "PECS022",
-        title: "Invalid tag GUID format",
-        messageFormat: "Tag '{0}' has invalid GUID format '{1}'",
-        category: "Paradise.ECS",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "The GUID provided to the [System.Runtime.InteropServices.Guid] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
+    // PECS022 (invalid tag GUID format) was retired alongside PECS004, for the same reason.
 
     /// <summary>
     /// PECS023: Tag nested in generic type.
