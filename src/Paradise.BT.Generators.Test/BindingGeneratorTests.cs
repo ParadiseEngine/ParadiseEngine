@@ -54,6 +54,9 @@ public sealed class BindingGeneratorTests
             [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
             public sealed class OptionalReadsAttribute<T> : Attribute where T : struct { }
 
+            [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+            public sealed class BuildsAttribute<T> : Attribute where T : struct { }
+
             [AttributeUsage(AttributeTargets.Class)]
             public sealed class BehaviorTreeBindingAttribute : Attribute
             {
@@ -432,6 +435,98 @@ public sealed class BindingGeneratorTests
             """);
 
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0008");
+    }
+
+    /// <summary>
+    /// A factory hides the node type from the tree that uses it — <c>BuiltInBehaviorNodes.Delay</c>
+    /// returns a definition, so <c>DelayTimerNode</c> appears nowhere in the tree's source. The
+    /// factory declares what it builds, and the scan follows it there, so no tree has to know
+    /// which built-ins conceal a node.
+    /// </summary>
+    [Test]
+    public async Task A_Factory_Declares_What_It_Builds_So_The_Tree_Need_Not()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace Game
+            {
+                public struct HiddenNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                public static class Factory
+                {
+                    [Paradise.BT.Builds<HiddenNode>]
+                    public static object Hidden() => new HiddenNode();
+                }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    // Never names HiddenNode. Only the factory does.
+                    public static object Build() => Factory.Hidden();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+    }
+
+    /// <summary>
+    /// A tree written with the builder DSL binds too. A builder derives from
+    /// <c>CompositeNode&lt;T&gt;</c> and friends, so the node type survives as a generic argument
+    /// on the base — the tree's source never says <c>HiddenNode</c>, and the scan finds it anyway.
+    ///
+    /// This is what separates the DSL from a factory method: a method returning
+    /// <c>BehaviorNodeDefinition</c> discards the type and has to be told.
+    /// </summary>
+    [Test]
+    public async Task A_Tree_Built_With_The_Builder_Dsl_Binds()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace Paradise.BT.Builder
+            {
+                public abstract class BTreeNode { }
+                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData { }
+            }
+
+            namespace Game
+            {
+                public struct HiddenNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                /// The generated builder shape: the node is a type argument on the base.
+                public sealed class Hidden : Paradise.BT.Builder.LeafNode<HiddenNode> { }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    public static object Build() => new Hidden();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
     }
 
     // ===================== harness =====================

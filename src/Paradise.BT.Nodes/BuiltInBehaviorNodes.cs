@@ -6,36 +6,47 @@ namespace Paradise.BT.Nodes;
 /// </summary>
 public static class BuiltInBehaviorNodes
 {
+    [Builds<SuccessNode>]
     public static BehaviorNodeDefinition Success()
         => BehaviorNodes.Node(new SuccessNode());
 
+    [Builds<FailedNode>]
     public static BehaviorNodeDefinition Failure()
         => BehaviorNodes.Node(new FailedNode());
 
+    [Builds<RunningNode>]
     public static BehaviorNodeDefinition Running()
         => BehaviorNodes.Node(new RunningNode());
 
+    [Builds<SequenceNode>]
     public static BehaviorNodeDefinition Sequence(params BehaviorNodeDefinition[] children)
         => BehaviorNodes.Node(new SequenceNode(), children);
 
+    [Builds<SelectorNode>]
     public static BehaviorNodeDefinition Selector(params BehaviorNodeDefinition[] children)
         => BehaviorNodes.Node(new SelectorNode(), children);
 
+    [Builds<ParallelNode>]
     public static BehaviorNodeDefinition Parallel(params BehaviorNodeDefinition[] children)
         => BehaviorNodes.Node(new ParallelNode(), children);
 
+    [Builds<InverterNode>]
     public static BehaviorNodeDefinition Inverter(BehaviorNodeDefinition child)
         => BehaviorNodes.Node(new InverterNode(), child);
 
+    [Builds<SucceederNode>]
     public static BehaviorNodeDefinition Succeeder(BehaviorNodeDefinition child)
         => BehaviorNodes.Node(new SucceederNode(), child);
 
+    [Builds<RepeatTimesNode>]
     public static BehaviorNodeDefinition Repeat(int count, BehaviorNodeDefinition child, NodeState breakStates = 0)
         => BehaviorNodes.Node(new RepeatTimesNode { TickTimes = count, BreakStates = breakStates }, child);
 
+    [Builds<RepeatForeverNode>]
     public static BehaviorNodeDefinition RepeatForever(BehaviorNodeDefinition child, NodeState breakStates = 0)
         => BehaviorNodes.Node(new RepeatForeverNode { BreakStates = breakStates }, child);
 
+    [Builds<DelayTimerNode>]
     public static BehaviorNodeDefinition Delay(float seconds)
         => BehaviorNodes.Node(new DelayTimerNode { TimerSeconds = seconds });
 

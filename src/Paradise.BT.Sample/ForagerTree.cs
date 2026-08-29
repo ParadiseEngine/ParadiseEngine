@@ -11,14 +11,14 @@ namespace Paradise.BT.Sample;
 ///
 /// Twenty nodes — nine node types of its own plus four built-ins — and the resulting blackboard
 /// carries SIX entries: three components each read by more than one node, plus Intent, Decisions,
-/// and the delta time the Also-listed timer needs. That gap between node count and field count is the whole point — the
-/// blackboard is sized by what the tree TOUCHES, not by how big the tree is.
+/// and the delta time the timer needs. That gap between node count and field count is the whole
+/// point — the blackboard is sized by what the tree TOUCHES, not by how big the tree is.
 ///
-/// <c>DelayTimerNode</c> is listed in <c>Also</c> because <c>BuiltInBehaviorNodes.Delay</c> builds
-/// it without naming it, so no scan of this file could find it — and it is the one built-in that
-/// reads a blackboard.
+/// Nothing is listed by hand, not even the timer. <c>BuiltInBehaviorNodes.Delay</c> builds a
+/// <c>DelayTimerNode</c> without naming it — and it is the one built-in that reads a blackboard —
+/// but the factory says what it builds with <c>[Builds&lt;T&gt;]</c>, so the scan follows it there.
 /// </summary>
-[BehaviorTreeBinding(typeof(ForagerRow), Also = new[] { typeof(DelayTimerNode) })]
+[BehaviorTreeBinding(typeof(ForagerRow))]
 public static class ForagerTree
 {
     /// <summary>

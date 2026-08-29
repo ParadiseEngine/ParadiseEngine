@@ -285,15 +285,54 @@ public sealed class BindingGenerator : IIncrementalGenerator
             ITypeSymbol? resolved = ctx.SemanticModel.GetSymbolInfo(ts, ct).Symbol as ITypeSymbol
                 ?? ctx.SemanticModel.GetTypeInfo(ts, ct).Type;
 
-            if (resolved is INamedTypeSymbol t
-                && Implements(t, NodeDataInterface)
-                && seen.Add(t.ToDisplayString()))
+            if (resolved is not INamedTypeSymbol t)
             {
-                access.AddRange(CollectAccess(t, ctx.SemanticModel.Compilation, ct));
+                continue;
+            }
+
+            // A builder wraps its node as a generic argument — `Sequence : CompositeNode<SequenceNode>`
+            // — so the DSL names the node type after all, in metadata rather than in the tree's
+            // source. Following it is what lets a tree written with the builder DSL be bound.
+            INamedTypeSymbol? node = Implements(t, NodeDataInterface) ? t : BuiltNodeOf(t);
+
+            if (node is not null && seen.Add(node.ToDisplayString()))
+            {
+                access.AddRange(CollectAccess(node, ctx.SemanticModel.Compilation, ct));
             }
         }
 
-        // Nodes the tree uses but never names, because a factory builds them.
+        // Nodes a FACTORY builds, which the sweep above cannot see: `BuiltInBehaviorNodes.Delay`
+        // returns a definition, so the word DelayTimerNode is nowhere in the tree that uses it.
+        // The factory knows, and says so with [Builds<T>] — read here off the resolved method, so
+        // it works for a factory in a referenced assembly exactly as for one in source.
+        foreach (InvocationExpressionSyntax invocation in
+            decl.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (ctx.SemanticModel.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol factory)
+            {
+                continue;
+            }
+
+            foreach (AttributeData built in factory.GetAttributes())
+            {
+                INamedTypeSymbol? ac = built.AttributeClass;
+                if (ac is null
+                    || !ac.IsGenericType
+                    || ac.Name != "BuildsAttribute"
+                    || ac.ContainingNamespace?.ToDisplayString() != "Paradise.BT"
+                    || ac.TypeArguments[0] is not INamedTypeSymbol builds
+                    || !Implements(builds, NodeDataInterface)
+                    || !seen.Add(builds.ToDisplayString()))
+                {
+                    continue;
+                }
+
+                access.AddRange(CollectAccess(builds, ctx.SemanticModel.Compilation, ct));
+            }
+        }
+
+        // The escape hatch: a factory nobody has annotated.
         foreach (var named in attr.NamedArguments)
         {
             if (named.Key != "Also" || named.Value.Kind != TypedConstantKind.Array)
@@ -348,6 +387,32 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         return Implements(type, ComponentInterface);
+    }
+
+    /// <summary>
+    /// The node a builder class wraps, or null if this is not one.
+    ///
+    /// The generated builders derive from <c>LeafNode&lt;T&gt;</c> / <c>DecoratorNode&lt;T&gt;</c> /
+    /// <c>CompositeNode&lt;T&gt;</c>, so the node type survives as a generic argument on the base.
+    /// That is the difference between the DSL and a factory method: a method returning
+    /// <c>BehaviorNodeDefinition</c> throws the type away and has to be told with
+    /// <c>[Builds&lt;T&gt;]</c>; a builder still carries it.
+    /// </summary>
+    private static INamedTypeSymbol? BuiltNodeOf(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+        {
+            if (current.IsGenericType
+                && current.TypeArguments.Length == 1
+                && current.ContainingNamespace?.ToDisplayString() == "Paradise.BT.Builder"
+                && current.TypeArguments[0] is INamedTypeSymbol node
+                && Implements(node, NodeDataInterface))
+            {
+                return node;
+            }
+        }
+
+        return null;
     }
 
     private static bool Implements(ITypeSymbol type, string interfaceFullName)

@@ -34,3 +34,21 @@ public sealed class BehaviorTreeBindingAttribute : Attribute
     /// </summary>
     public Type[]? Also { get; set; }
 }
+
+/// <summary>
+/// Declares which <see cref="INodeData"/> a factory method constructs.
+///
+/// A tree names its nodes by constructing them, which is how the binding scan finds them. A
+/// FACTORY breaks that: <c>BuiltInBehaviorNodes.Delay(seconds)</c> returns a
+/// <c>BehaviorNodeDefinition</c>, so the word <c>DelayTimerNode</c> appears nowhere in the tree
+/// that uses it — and it is the one built-in that reads a blackboard, so missing it means the
+/// timer has no delta time and throws on its first tick.
+///
+/// The factory is the thing that knows, so this is where it is written down. It survives into
+/// metadata, so a tree in another assembly gets the answer without seeing the body.
+///
+/// <see cref="BehaviorTreeBindingAttribute.Also"/> remains the escape hatch for a factory nobody
+/// has annotated.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
+public sealed class BuildsAttribute<T> : Attribute where T : struct;
