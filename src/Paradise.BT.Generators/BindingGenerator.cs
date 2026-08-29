@@ -81,9 +81,19 @@ public sealed class BindingGenerator : IIncrementalGenerator
             .Where(static b => b.HasValue)
             .Select(static (b, _) => b!.Value);
 
+        // The builders BTreeNodeGenerator will emit for nodes declared here. Derived from the same
+        // [Builder] declarations it reads, because its output is not visible to this generator —
+        // so a tree saying `new ThreatNear(0.1f)` is recovered by name against this table.
+        var builders = context.SyntaxProvider.CreateSyntaxProvider(
+                predicate: static (node, _) =>
+                    node is StructDeclarationSyntax { AttributeLists.Count: > 0, BaseList.Types.Count: > 0 },
+                transform: static (ctx, ct) => GetBuilder(ctx, ct))
+            .Where(static b => b.HasValue)
+            .Select(static (b, _) => b!.Value);
+
         context.RegisterSourceOutput(
-            bindings.Collect().Combine(queryables.Collect()),
-            static (spc, data) => Emit(spc, data.Left, data.Right));
+            bindings.Collect().Combine(queryables.Collect()).Combine(builders.Collect()),
+            static (spc, data) => Emit(spc, data.Left.Left, data.Left.Right, data.Right));
     }
 
     // ===================== collection =====================
@@ -185,6 +195,57 @@ public sealed class BindingGenerator : IIncrementalGenerator
     }
 
     /// <summary>
+    /// The builder BTreeNodeGenerator will emit for a <c>[Builder]</c> node, as (name, access).
+    ///
+    /// The naming rule is duplicated from that generator — an optional name argument, else the
+    /// type name with a trailing "Node" removed — because the two cannot share a computed value
+    /// across the generator boundary. If that rule changes there, it changes here.
+    /// </summary>
+    private static BuilderModel? GetBuilder(
+        GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (ctx.SemanticModel.GetDeclaredSymbol((StructDeclarationSyntax)ctx.Node, ct)
+                is not INamedTypeSymbol symbol
+            || !Implements(symbol, NodeDataInterface))
+        {
+            return null;
+        }
+
+        string? name = null;
+        bool isBuilder = false;
+        foreach (AttributeData attr in symbol.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() != "Paradise.BT.BuilderAttribute")
+            {
+                continue;
+            }
+
+            isBuilder = true;
+            foreach (TypedConstant argument in attr.ConstructorArguments)
+            {
+                if (argument.Type?.SpecialType == SpecialType.System_String
+                    && argument.Value is string given)
+                {
+                    name = given;
+                }
+            }
+        }
+
+        if (!isBuilder)
+        {
+            return null;
+        }
+
+        name ??= symbol.Name.EndsWith("Node", System.StringComparison.Ordinal)
+            ? symbol.Name.Substring(0, symbol.Name.Length - 4)
+            : symbol.Name;
+
+        return new BuilderModel(
+            name, CollectAccess(symbol, ctx.SemanticModel.Compilation, ct));
+    }
+
+    /// <summary>
     /// Read a node's access out of its BODY: every <c>bb.GetData&lt;T&gt;()</c> is a read, every
     /// <c>bb.SetData&lt;T&gt;()</c> a write. Only possible since those two replaced the
     /// ref-returning accessor — taking a ref to avoid a copy and taking one to mutate looked
@@ -273,6 +334,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // a `typeof`. All of them surface as a TypeSyntax, so one sweep catches each. Deliberately
         // an over-approximation: a stray mention costs a loud PBT0004/5, never a silent miss.
         var access = ImmutableArray.CreateBuilder<Access>();
+        var unresolved = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(System.StringComparer.Ordinal);
         foreach (TypeSyntax ts in decl.DescendantNodes().OfType<TypeSyntax>())
         {
@@ -285,8 +347,21 @@ public sealed class BindingGenerator : IIncrementalGenerator
             ITypeSymbol? resolved = ctx.SemanticModel.GetSymbolInfo(ts, ct).Symbol as ITypeSymbol
                 ?? ctx.SemanticModel.GetTypeInfo(ts, ct).Type;
 
-            if (resolved is not INamedTypeSymbol t)
+            if (resolved is not INamedTypeSymbol t || t.TypeKind == TypeKind.Error)
             {
+                // An unresolvable name in a tree is very often a builder GENERATED for a node in
+                // this same compilation — `new ThreatNear(0.1f)`. BTreeNodeGenerator emits it,
+                // this generator cannot see it, and the reference is an error type here even
+                // though the finished compilation is fine.
+                //
+                // Recovered by NAME against the builder table below, which is derived from the
+                // same [Builder] declarations BTreeNodeGenerator reads. Paradise.ECS does exactly
+                // this where SystemGenerator meets QueryableGenerator's output.
+                if (ts is IdentifierNameSyntax or GenericNameSyntax)
+                {
+                    unresolved.Add(((SimpleNameSyntax)ts).Identifier.ValueText);
+                }
+
                 continue;
             }
 
@@ -312,6 +387,16 @@ public sealed class BindingGenerator : IIncrementalGenerator
             if (ctx.SemanticModel.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol factory)
             {
                 continue;
+            }
+
+            // A factory RETURNING a builder keeps the node type: `Seq(…)` is typed Sequence, which
+            // is CompositeNode<SequenceNode>. That is the difference between this and the factories
+            // that were deleted, which returned a bare definition and told you nothing.
+            if (factory.ReturnType is INamedTypeSymbol returned
+                && BuiltNodeOf(returned) is INamedTypeSymbol returnedNode
+                && seen.Add(returnedNode.ToDisplayString()))
+            {
+                access.AddRange(CollectAccess(returnedNode, ctx.SemanticModel.Compilation, ct));
             }
 
             foreach (AttributeData built in factory.GetAttributes())
@@ -360,6 +445,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             symbol.Name,
             queryable.ToDisplayString(),
             access.ToImmutable(),
+            unresolved.ToImmutable(),
             decl.Identifier.GetLocation());
     }
 
@@ -433,7 +519,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
     private static void Emit(
         SourceProductionContext spc,
         ImmutableArray<BindingModel> bindings,
-        ImmutableArray<QueryableModel> queryables)
+        ImmutableArray<QueryableModel> queryables,
+        ImmutableArray<BuilderModel> builders)
     {
         foreach (BindingModel binding in bindings)
         {
@@ -461,7 +548,22 @@ public sealed class BindingGenerator : IIncrementalGenerator
             var merged = new Dictionary<string, Access>(System.StringComparer.Ordinal);
             bool refused = false;
 
-            foreach (Access a in binding.Access)
+            // A name the tree used that resolved to nothing is very likely a builder generated
+            // for a node declared here; recover its access from the table.
+            var resolvedAccess = binding.Access.ToBuilder();
+            foreach (string name in binding.Unresolved)
+            {
+                foreach (BuilderModel builder in builders)
+                {
+                    if (builder.Name == name)
+                    {
+                        resolvedAccess.AddRange(builder.Access);
+                        break;
+                    }
+                }
+            }
+
+            foreach (Access a in resolvedAccess)
             {
                 if (a.Kind == AccessKind.OptionalRead)
                 {
@@ -867,6 +969,25 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public override int GetHashCode() => Fqn.GetHashCode();
     }
 
+    private readonly struct BuilderModel : System.IEquatable<BuilderModel>
+    {
+        public readonly string Name;
+        public readonly ImmutableArray<Access> Access;
+
+        public BuilderModel(string name, ImmutableArray<Access> access)
+        {
+            Name = name;
+            Access = access;
+        }
+
+        public bool Equals(BuilderModel other) =>
+            Name == other.Name && Access.SequenceEqual(other.Access);
+
+        public override bool Equals(object? obj) => obj is BuilderModel other && Equals(other);
+
+        public override int GetHashCode() => Name.GetHashCode();
+    }
+
     private readonly struct BindingModel : System.IEquatable<BindingModel>
     {
         public readonly string Namespace;
@@ -877,6 +998,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
         /// rather than grouped per node: nothing downstream needs the grouping, and each entry
         /// remembers its own <see cref="Access.DeclaringNode"/>.</summary>
         public readonly ImmutableArray<Access> Access;
+
+        /// <summary>Names the tree used that resolved to nothing — most often a builder generated
+        /// for a node declared here, which this generator cannot see.</summary>
+        public readonly ImmutableArray<string> Unresolved;
         public readonly Location Location;
 
         public BindingModel(
@@ -884,12 +1009,14 @@ public sealed class BindingGenerator : IIncrementalGenerator
             string className,
             string queryableFqn,
             ImmutableArray<Access> access,
+            ImmutableArray<string> unresolved,
             Location location)
         {
             Namespace = ns;
             ClassName = className;
             QueryableFqn = queryableFqn;
             Access = access;
+            Unresolved = unresolved;
             Location = location;
         }
 
@@ -897,7 +1024,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
             Namespace == other.Namespace
             && ClassName == other.ClassName
             && QueryableFqn == other.QueryableFqn
-            && Access.SequenceEqual(other.Access);
+            && Access.SequenceEqual(other.Access)
+            && Unresolved.SequenceEqual(other.Unresolved);
 
         public override bool Equals(object? obj) => obj is BindingModel other && Equals(other);
 

@@ -344,6 +344,41 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         }
 
         sb.AppendLine("}");
+
+        // A static entry point beside the class, so a tree reads Seq(Delay(0.5f)) rather than
+        // new Sequence(new Delay(0.5f)). Contributed to one partial class per assembly, which a
+        // tree brings into scope with `using static`.
+        //
+        // This is a factory method, which is the shape that was just deleted from this library —
+        // and the difference is the RETURN TYPE. BuiltInBehaviorNodes.Sequence returned a
+        // BehaviorNodeDefinition, discarding every trace of what it built, so a binding could not
+        // see through it. This returns the BUILDER, which carries its node as a generic argument
+        // on its base, so the node type survives the call.
+        sb.AppendLine();
+        sb.AppendLine("public static partial class Nodes");
+        sb.AppendLine("{");
+        sb.Append($"    public static {info.GeneratedClassName} {info.GeneratedClassName}(");
+        sb.Append(info.Cardinality switch
+        {
+            0 => BuildParamList(info.Fields, includeChild: false),
+            1 => BuildParamList(info.Fields, includeChild: true),
+            _ => "params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children",
+        });
+
+        sb.Append(") => new(");
+        sb.Append(info.Cardinality switch
+        {
+            0 => string.Join(", ", info.Fields.Select(f => ToCamelCase(f.Name))),
+            1 => string.Join(
+                ", ",
+                info.Fields.Take(1).Select(f => ToCamelCase(f.Name))
+                    .Concat(["child"])
+                    .Concat(info.Fields.Skip(1).Select(f => ToCamelCase(f.Name)))),
+            _ => "children",
+        });
+
+        sb.AppendLine(");");
+        sb.AppendLine("}");
         return sb.ToString();
     }
 
@@ -370,7 +405,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
     private static void GenerateCompositeConstructor(StringBuilder sb, NodeInfo info)
     {
-        sb.AppendLine($"    public {info.GeneratedClassName}(params global::Paradise.BT.Builder.BTreeNode[] children) : base(new {info.FullyQualifiedStructName}(), children) {{ }}");
+        sb.AppendLine($"    public {info.GeneratedClassName}(params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children) : base(new {info.FullyQualifiedStructName}(), children) {{ }}");
     }
 
     private static string BuildParamList(ImmutableArray<FieldInfo> fields, bool includeChild)

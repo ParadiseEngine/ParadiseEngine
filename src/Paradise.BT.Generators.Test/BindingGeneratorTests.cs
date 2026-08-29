@@ -57,6 +57,12 @@ public sealed class BindingGeneratorTests
             [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
             public sealed class BuildsAttribute<T> : Attribute where T : struct { }
 
+            [AttributeUsage(AttributeTargets.Struct)]
+            public sealed class BuilderAttribute : Attribute
+            {
+                public BuilderAttribute(string? name = null) { }
+            }
+
             [AttributeUsage(AttributeTargets.Class)]
             public sealed class BehaviorTreeBindingAttribute : Attribute
             {
@@ -527,10 +533,104 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
     }
 
+    /// <summary>
+    /// A builder generated BESIDE the tree, in the same compilation. BTreeNodeGenerator would emit
+    /// <c>Hidden</c> for <c>HiddenNode</c>, but this generator cannot see another generator's
+    /// output, so the reference is an error type at the moment the scan runs.
+    ///
+    /// Recovered by NAME against a table of the builders that will be emitted, derived from the
+    /// same <c>[Builder]</c> declarations. Without it, a tree composed of its own assembly's
+    /// builders binds an empty blackboard — compiling cleanly and failing on the first tick.
+    /// </summary>
+    [Test]
+    public async Task A_Builder_Generated_Beside_The_Tree_Is_Recovered_By_Name()
+    {
+        var (diagnostics, sources, _) = Run(expectUnresolvedNames: true, source: Prelude + World + """
+            namespace Game
+            {
+                [Paradise.BT.Builder]
+                public struct HiddenNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    // `Hidden` does not exist yet — the other generator emits it.
+                    public static object Build() => new Hidden();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+    }
+
+    /// <summary>
+    /// A factory RETURNING a builder is transparent, which is what lets the DSL drop <c>new</c>.
+    ///
+    /// The distinction is the return type and nothing else. The factories deleted from this library
+    /// returned a bare <c>BehaviorNodeDefinition</c> and discarded every trace of what they built;
+    /// a method typed <c>Hidden</c> still carries <c>HiddenNode</c> on that type's base, so the
+    /// scan follows it with no annotation at all.
+    /// </summary>
+    [Test]
+    public async Task A_Factory_Returning_A_Builder_Needs_No_Annotation()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace Paradise.BT.Builder
+            {
+                public abstract class BTreeNode { }
+                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData { }
+            }
+
+            namespace Game
+            {
+                public struct HiddenNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                public sealed class Hidden : Paradise.BT.Builder.LeafNode<HiddenNode> { }
+
+                public static class Nodes
+                {
+                    // No [Builds<T>]: the return type already says it.
+                    public static Hidden Hidden() => new();
+                }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class EnemyTree
+                {
+                    public static object Build() => Nodes.Hidden();
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+    }
+
     // ===================== harness =====================
 
     private static (ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<string> Sources,
-        ImmutableArray<Diagnostic> CompileErrors) Run(string source)
+        ImmutableArray<Diagnostic> CompileErrors) Run(string source, bool expectUnresolvedNames = false)
     {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create(
@@ -543,8 +643,11 @@ public sealed class BindingGeneratorTests
 
         // A stub that does not compile would make the generator find nothing and every assertion
         // fail for the wrong reason, so refuse it here with the compiler's own message.
+        // CS0246 is EXPECTED where a test composes a tree from builders another generator would
+        // emit: they do not exist at this point, which is exactly the case being exercised.
         var inputErrors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Where(d => d.Severity == DiagnosticSeverity.Error
+                && !(expectUnresolvedNames && d.Id == "CS0246"))
             .ToImmutableArray();
         if (inputErrors.Length > 0)
         {

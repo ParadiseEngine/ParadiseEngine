@@ -17,10 +17,11 @@ namespace Paradise.BT;
 /// returns a definition and says nothing, so it must be annotated with
 /// <see cref="BuildsAttribute{T}"/> or its node listed in <see cref="Also"/>.
 ///
-/// One case cannot be seen at all: a builder GENERATED beside this tree, in the same assembly. A
-/// generator cannot read another generator's output, so <c>new Flee(5f)</c> resolves to nothing
-/// here even though it compiles. Use <c>LeafNode&lt;FleeNode&gt;</c> for a node declared alongside
-/// its tree; builders from a referenced assembly are fine.
+/// A builder GENERATED beside this tree is the awkward case, and is handled rather than refused.
+/// A generator cannot read another generator's output, so <c>new Flee(5f)</c> is an error type
+/// here even though the finished compilation is fine. Such a name is recovered against a table of
+/// the builders that WILL be emitted, derived from the same <c>[Builder]</c> declarations — the
+/// trick Paradise.ECS uses where SystemGenerator meets QueryableGenerator's output.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class BehaviorTreeBindingAttribute : Attribute

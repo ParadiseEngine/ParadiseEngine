@@ -1,3 +1,5 @@
+using static Paradise.BT.Sample.Builder.Nodes;
+using static Paradise.BT.Nodes.Builder.Nodes;
 using Paradise.BT.Builder;
 using Paradise.BT.Nodes.Builder;
 using Paradise.BT.Nodes;
@@ -16,10 +18,9 @@ namespace Paradise.BT.Sample;
 /// and the delta time the timer needs. That gap between node count and field count is the whole
 /// point — the blackboard is sized by what the tree TOUCHES, not by how big the tree is.
 ///
-/// Nothing is listed by hand, not even the timer. <c>new Delay(0.2f)</c> is a generated builder
-/// deriving from <c>DecoratorNode&lt;DelayTimerNode&gt;</c>, so the node type is on its base and the
-/// scan follows it — which is why the built-ins compose with <c>new</c> while this assembly's own
-/// leaves use <c>LeafNode&lt;T&gt;</c>: a builder generated BESIDE the tree is invisible to it.
+/// Nothing is listed by hand, and every node is composed through its generated builder — the
+/// built-ins from a referenced assembly, this assembly's own leaves recovered by name, since a
+/// generator cannot see another generator's output.
 /// </summary>
 [BehaviorTreeBinding(typeof(ForagerRow))]
 public static class ForagerTree
@@ -35,24 +36,24 @@ public static class ForagerTree
     /// </code>
     /// </summary>
     public static BehaviorTree Build() => BehaviorTreeBuilder.Build(
-        new Selector(
-            new Sequence(
-                new LeafNode<ThreatNearNode>(new ThreatNearNode { PanicStamina = 0.1f }),
-                new LeafNode<FleeNode>(new FleeNode { Distance = 5f }),
-                new Delay(0.2f),
-                new LeafNode<TallyNode>(new TallyNode())),
-            new Sequence(
-                new LeafNode<FoodVisibleNode>(new FoodVisibleNode()),
-                new Inverter(
-                    new LeafNode<ExhaustedNode>(new ExhaustedNode { RestBelow = 0.25f })),
-                new LeafNode<SeekFoodNode>(new SeekFoodNode { ArriveWithin = 0.5f }),
-                new LeafNode<TallyNode>(new TallyNode())),
-            new Sequence(
-                new LeafNode<ExhaustedNode>(new ExhaustedNode { RestBelow = 0.25f }),
-                new LeafNode<RestNode>(new RestNode()),
-                new LeafNode<NoopNode>(new NoopNode())),
-            new Sequence(
-                new LeafNode<AlreadyDecidedNode>(new AlreadyDecidedNode()),
-                new LeafNode<TallyNode>(new TallyNode())),
-            new LeafNode<RestNode>(new RestNode())));
+        Selector(
+            Sequence(
+                ThreatNear(0.1f),
+                Flee(5f),
+                Delay(0.2f),
+                Tally()),
+            Sequence(
+                FoodVisible(),
+                Inverter(
+                    Exhausted(0.25f)),
+                SeekFood(0.5f),
+                Tally()),
+            Sequence(
+                Exhausted(0.25f),
+                Rest(),
+                Noop()),
+            Sequence(
+                AlreadyDecided(),
+                Tally()),
+            Rest()));
 }
