@@ -8,21 +8,17 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Paradise.BT.Generators;
 
 /// <summary>
-/// Binds a behavior tree to the ECS rows that feed it.
+/// Binds a behavior tree to the ECS rows that feed it: collects the node types a
+/// <c>[BehaviorTreeBinding]</c> class names, unions their access, checks it against the
+/// queryable's claims, and emits a blackboard plus a <c>Bind</c>.
 ///
-/// Scans each <c>[BehaviorTreeBinding(typeof(TQueryable))]</c> class for the node types it
-/// mentions, unions their declared access, checks it against the queryable's claims, and emits a
-/// blackboard over those components plus a <c>Bind</c> that wires one row into it.
+/// It VERIFIES a queryable and never authors one, because a generator cannot see another
+/// generator's output — Paradise.ECS says the same in its own SystemGenerator. Both read the
+/// hand-written attributes instead.
 ///
-/// It VERIFIES a queryable; it never authors one. That is forced, not chosen: a generator cannot
-/// see another generator's output in the same compilation — Paradise.ECS says so in its own
-/// SystemGenerator ("QueryableGenerator output isn't visible to SystemGenerator") — so an emitted
-/// <c>[Queryable]</c> would be invisible to the generator that has to expand it. Both generators
-/// therefore read the same hand-written attributes.
-///
-/// No reference to Paradise.ECS is taken, and none is possible: Paradise.BT does not depend on it.
-/// A type counts as a component when it implements an interface NAMED Paradise.ECS.IComponent,
-/// tested symbolically. Everything else is a caller-supplied extra.
+/// Takes no reference on Paradise.ECS and could not: a type is a component when it carries
+/// [Component] or implements an interface NAMED Paradise.ECS.IComponent. Everything else is a
+/// caller-supplied extra.
 /// </summary>
 [Generator]
 public sealed class BindingGenerator : IIncrementalGenerator
@@ -246,19 +242,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Read a node's access out of its BODY: every <c>bb.GetData&lt;T&gt;()</c> is a read, every
-    /// <c>bb.SetData&lt;T&gt;()</c> a write. Only possible since those two replaced the
-    /// ref-returning accessor — taking a ref to avoid a copy and taking one to mutate looked
-    /// identical, so no scan could tell them apart.
+    /// Read a node's access out of its BODY: <c>GetData</c> is a read, <c>SetData</c> a write.
     ///
-    /// This runs only where the body EXISTS, which is the whole rule: a node declared in this
-    /// compilation is scanned and needs no attributes, while a node arriving from a referenced
-    /// assembly has no syntax at all and is read from its attributes, which is why those remain
-    /// the cross-assembly contract. <c>DeclaringSyntaxReferences</c> is exactly that test.
-    ///
-    /// Unioned with whatever the node declares rather than replacing it, so a node reaching the
-    /// blackboard somewhere this cannot follow — through a helper, see PBT0010 — can still say so
-    /// by hand.
+    /// Only where the body EXISTS, which is the rule: a node declared here is scanned and needs no
+    /// attributes; one from a referenced assembly has no syntax and is read from its attributes.
+    /// <c>DeclaringSyntaxReferences</c> is that test. The two are unioned, so a node reaching the
+    /// blackboard somewhere this cannot follow (PBT0010) can still say so by hand.
     /// </summary>
     private static void ScanBody(
         INamedTypeSymbol symbol,
@@ -450,15 +439,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Is this type an ECS component?
-    ///
-    /// Two tests, because neither alone is enough. A component declared in THIS compilation gets
-    /// its <c>: IComponent</c> from Paradise.ECS's own ComponentGenerator — generator output,
-    /// which this generator cannot see, exactly as SystemGenerator cannot see QueryableGenerator's.
-    /// So source-declared components are recognised by the <c>[Component]</c> ATTRIBUTE on the
-    /// original declaration, the one thing both generators can read. A component arriving from a
-    /// REFERENCED assembly is already compiled, so there the interface is real metadata and the
-    /// attribute may have been on a partial this compilation never sees.
+    /// Is this type an ECS component? Two tests, because neither alone is enough: one declared
+    /// HERE gets its <c>: IComponent</c> from the ECS generator, which this generator cannot see,
+    /// so it is recognised by the [Component] attribute; one from a REFERENCED assembly is already
+    /// compiled, so there the interface is real metadata.
     /// </summary>
     private static bool IsComponent(ITypeSymbol type)
     {
@@ -476,13 +460,9 @@ public sealed class BindingGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The node a builder class wraps, or null if this is not one.
-    ///
-    /// The generated builders derive from <c>LeafNode&lt;T&gt;</c> / <c>DecoratorNode&lt;T&gt;</c> /
-    /// <c>CompositeNode&lt;T&gt;</c>, so the node type survives as a generic argument on the base.
-    /// That is the difference between the DSL and a factory method: a method returning
-    /// <c>BehaviorNodeDefinition</c> throws the type away and has to be told with
-    /// <c>[Builds&lt;T&gt;]</c>; a builder still carries it.
+    /// The node a builder class wraps, or null if this is not one. Builders derive from
+    /// <c>LeafNode&lt;T&gt;</c> and friends, so the node survives as a generic argument on the base
+    /// — which a factory returning a bare definition does not.
     /// </summary>
     private static INamedTypeSymbol? BuiltNodeOf(INamedTypeSymbol type)
     {
@@ -650,8 +630,16 @@ public sealed class BindingGenerator : IIncrementalGenerator
     {
         string bb = binding.ClassName + "Blackboard";
         string extras = binding.ClassName + "Extras";
-        ImmutableArray<Access> components = access.Where(a => a.IsComponent).ToImmutableArray();
-        ImmutableArray<Access> plain = access.Where(a => !a.IsComponent).ToImmutableArray();
+        // What flows IN is a parameter; what comes BACK is Extras. A component is always an input,
+        // and so is a non-component the tree only reads — delta time, a sensed value the caller
+        // computed. Only what a node WRITES needs somewhere the caller can read it from, which is
+        // the one thing a by-value parameter cannot be.
+        ImmutableArray<Access> inputs = access
+            .Where(a => a.IsComponent || a.Kind != AccessKind.Write)
+            .ToImmutableArray();
+        ImmutableArray<Access> outputs = access
+            .Where(a => !a.IsComponent && a.Kind == AccessKind.Write)
+            .ToImmutableArray();
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -665,18 +653,18 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         // ----- extras -----
-        sb.AppendLine("/// <summary>What " + binding.ClassName + "'s tree reads that is NOT a component:");
-        sb.AppendLine("/// derived values, and the tree's own conclusions. The caller fills it.</summary>");
+        sb.AppendLine("/// <summary>What " + binding.ClassName + "'s tree WRITES, for the caller to");
+        sb.AppendLine("/// read back. Everything the tree only reads is a Bind parameter instead.</summary>");
         sb.AppendLine("public struct " + extras);
         sb.AppendLine("{");
-        foreach (Access a in plain)
+        foreach (Access a in outputs)
         {
             sb.AppendLine("    public global::" + a.TypeFqn + " " + a.TypeName + ";");
         }
 
-        if (plain.Length == 0)
+        if (outputs.Length == 0)
         {
-            sb.AppendLine("    // This tree reads only components.");
+            sb.AppendLine("    // This tree concludes nothing: every node only reads.");
         }
 
         sb.AppendLine("}");
@@ -699,7 +687,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // assume the worst about an unsubstituted type parameter. A copy has no scope to reason
         // about. The cost is a memcpy per component per tick; the limit is that a node cannot
         // WRITE a component (PBT0008) until that is solved.
-        foreach (Access a in components)
+        foreach (Access a in inputs)
         {
             sb.AppendLine("    private readonly global::" + a.TypeFqn + " " + Field(a) + ";");
         }
@@ -711,12 +699,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
         // One ref per component, taken from the segment indexer — the same shape
         // BehaviorTreeState.BlobOf uses to hand a chunk ref to UnmanagedNodeBlob.
-        var ctorParams = components
+        var ctorParams = inputs
             .Select(a => "in global::" + a.TypeFqn + " " + Param(a))
             .Concat(new[] { "in " + extras + " extras" });
         sb.AppendLine("    public " + bb + "(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("    {");
-        foreach (Access a in components)
+        foreach (Access a in inputs)
         {
             sb.AppendLine("        " + Field(a) + " = " + Param(a) + ";");
         }
@@ -725,33 +713,22 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Bind takes the component REFS, resolved by the caller off the segment indexer — it does
-        // NOT take the Segments and index them here. That is load-bearing, not a style choice.
-        // ComponentSegments' indexer returns a ref reached through its ChunkManager, which is a
-        // CLASS, so `rows.X[i]` at the call site is a ref of unrestricted scope. Resolving it
-        // inside this method instead ties it to the `rows` parameter — a by-value ref struct,
-        // whose scope is the calling method — and the blackboard built from it is then too narrow
-        // to pass as `ref` to VirtualMachine.Tick (CS8350/CS8352).
-        //
-        // BehaviorTreeState.BlobOf is the same shape and the reason it was always fine:
-        // `BlobOf(ref Pack.BehaviorTreeState[i], layout)`.
+        // Every input by value; only what the tree writes comes back, through Extras.
         sb.AppendLine("    /// <summary>");
-        sb.AppendLine("    /// Wire one row's components in. Resolve them at the CALL SITE:");
+        sb.AppendLine("    /// Wire one row in:");
         sb.AppendLine("    /// <code>");
         sb.Append("    /// var bb = " + bb + ".Bind(");
         sb.AppendLine(string.Join(
             ", ",
-            components.Select(a =>
+            inputs.Select(a =>
                 "in rows." + PropertyOf(queryable, a) + "[i]")
                 .Concat(new[] { "in extras" })));
         sb.AppendLine("    /// </code>");
-        sb.AppendLine("    /// Passing the segments and indexing them in here instead would narrow every ref to");
-        sb.AppendLine("    /// this method and make the result unpassable to the VM.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine("    public static " + bb + " Bind(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("        => new(" + string.Join(
             ", ",
-            components.Select(a => "in " + Param(a))
+            inputs.Select(a => "in " + Param(a))
                 .Concat(new[] { "in extras" })) + ");");
         sb.AppendLine();
 
@@ -773,7 +750,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // GetData
         sb.AppendLine("    public T GetData<T>() where T : struct");
         sb.AppendLine("    {");
-        foreach (Access a in components)
+        foreach (Access a in inputs)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
@@ -784,7 +761,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        foreach (Access a in plain)
+        foreach (Access a in outputs)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
@@ -801,7 +778,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // SetData
         sb.AppendLine("    public void SetData<T>(T value) where T : struct");
         sb.AppendLine("    {");
-        foreach (Access a in plain)
+        foreach (Access a in outputs)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
@@ -817,7 +794,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // node that DECLARES the write and PBT0009 one that merely performs it, so this is only
         // reachable through a hand-written blackboard or reflection — but silence here would be a
         // write that vanishes.
-        foreach (Access a in components)
+        foreach (Access a in inputs)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");

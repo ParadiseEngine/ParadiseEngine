@@ -70,16 +70,20 @@ var stamina = new Stamina { Value = 1f };
     ("nothing doing", new Senses(), 0.5f),
 ];
 
+var deltaTime = new BehaviorTreeTickDeltaTime(0.5f);
+
 foreach ((string label, Senses senses, float energy) in situations)
 {
     stamina = stamina with { Value = energy };
 
-    var extras = new ForagerTreeExtras
-    {
-        BehaviorTreeTickDeltaTime = new BehaviorTreeTickDeltaTime(0.5f),
-    };
-
-    var bb = ForagerTreeBlackboard.Bind(in position, in senses, in stamina, in extras);
+    // Extras carry what the tree WRITES; everything it reads is a parameter, delta time included.
+    var extras = default(ForagerTreeExtras);
+    var bb = ForagerTreeBlackboard.Bind(
+        behaviorTreeTickDeltaTime: deltaTime,
+        position: position,
+        senses: senses,
+        stamina: stamina,
+        extras: extras);
     var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
 
     if (blob.GetState(0).IsCompleted())
@@ -94,6 +98,60 @@ foreach ((string label, Senses senses, float energy) in situations)
         $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
         + (intent.HasGoal ? $"goal x={intent.GoalX:0.0}" : "no goal")
         + $"  (decisions so far: {bb.Extras.Decisions.Count})");
+}
+
+// ---------------------------------------------------------------------------------------------
+// 3. How a tree CHANGES anything, given that components are read-only to it.
+//
+// A node cannot write Position: components bind by value, so the write would not reach the chunk,
+// and PBT0008 refuses a node that tries. What a node writes is a CONCLUSION — here Intent — which
+// the caller applies. In the game that caller is EnemySystem, turning the goal into a steering
+// intent; here it is this loop, walking the forager toward whatever the tree decided.
+//
+// That round trip is the point: read components, write extras, apply, read again. It is also why
+// the same tree can drive a body steered any way you like.
+// ---------------------------------------------------------------------------------------------
+
+Console.WriteLine();
+Console.WriteLine("Walking toward what the tree decides:");
+
+position = new Position { X = 0f };
+stamina = new Stamina { Value = 0.9f };
+var world = new Senses { FoodVisible = true, FoodX = 4f };
+
+for (int step = 1; step <= 5; step++)
+{
+    var extras = default(ForagerTreeExtras);
+    var bb = ForagerTreeBlackboard.Bind(
+        behaviorTreeTickDeltaTime: deltaTime,
+        position: position,
+        senses: world,
+        stamina: stamina,
+        extras: extras);
+    var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
+
+    if (blob.GetState(0).IsCompleted())
+    {
+        VirtualMachine.Reset(ref blob, ref bb);
+    }
+
+    VirtualMachine.Tick(ref blob, ref bb);
+    Intent intent = bb.Extras.Intent;
+
+    // The caller owns the component, so the caller applies the decision.
+    float before = position.X;
+    if (intent.HasGoal)
+    {
+        float step01 = MathF.Sign(intent.GoalX - position.X);
+        position = position with { X = position.X + step01 };
+    }
+
+    // Walking costs something, which eventually changes which branch the tree takes.
+    stamina = stamina with { Value = MathF.Max(0f, stamina.Value - 0.2f) };
+
+    Console.WriteLine(
+        $"  step {step}: {intent.Kind,-6} goal x={intent.GoalX:0.0}"
+        + $" -> moved {before:0.0} to {position.X:0.0}, stamina now {stamina.Value:0.0}");
 }
 
 layout.Dispose();

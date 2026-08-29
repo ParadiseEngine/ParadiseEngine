@@ -327,7 +327,7 @@ public sealed class BindingGeneratorTests
         // Structure-only nodes are the normal case and are not an error.
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("This tree reads only components.");
+        await Assert.That(string.Join("\n", sources)).Contains("This tree concludes nothing");
     }
 
     /// <summary>
@@ -361,7 +361,9 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+
+        // TimerNode only READS Decision, so it arrives as a Bind parameter rather than an extra.
+        await Assert.That(string.Join("\n", sources)).Contains("in global::Game.Decision decision");
     }
 
     /// <summary>
