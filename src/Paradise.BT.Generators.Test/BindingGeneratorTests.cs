@@ -608,6 +608,77 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
+    /// <summary>Two same-named data types both survive the FQN-keyed merge, so their generated
+    /// identifiers must be disambiguated — two `_target` fields would be CS0102 in a file the
+    /// user cannot edit. A type named after a keyword must be escaped for the same reason.</summary>
+    [Test]
+    public async Task Colliding_And_Keyword_Type_Names_Still_Compile()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace North { public struct Target { public float X; } }
+            namespace South { public struct Target { public float X; } }
+            namespace Game
+            {
+                public struct Event { public int Id; }
+
+                public struct BusyNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, TNodeBlob blob, TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    {
+                        bb.SetData(bb.GetData<North.Target>());
+                        bb.SetData(bb.GetData<South.Target>());
+                        bb.SetData(bb.GetData<Event>());
+                        return Paradise.BT.NodeState.Success;
+                    }
+                }
+
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
+                {
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new BusyNode(); return null!; }
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+
+        string generated = string.Join("\n", sources);
+        await Assert.That(generated).Contains("_target_North");
+        await Assert.That(generated).Contains("_target_South");
+        await Assert.That(generated).Contains("@event");
+    }
+
+    /// <summary>Binding hint names are namespace-qualified too: two same-named tree types in
+    /// different namespaces must both emit rather than killing the generator.</summary>
+    [Test]
+    public async Task Same_Named_Trees_In_Two_Namespaces_Both_Emit()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace North
+            {
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
+                {
+                    public static Paradise.BT.Builder.BTreeNode Build() => null!;
+                }
+            }
+
+            namespace South
+            {
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
+                {
+                    public static Paradise.BT.Builder.BTreeNode Build() => null!;
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(sources.Length).IsEqualTo(2);
+    }
+
     /// <summary>
     /// The cross-assembly path with NO hand-written declarations: the node's declaring assembly is
     /// compiled separately (its BODY does not survive into metadata), BTreeNodeGenerator publishes

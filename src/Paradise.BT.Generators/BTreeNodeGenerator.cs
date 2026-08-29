@@ -117,7 +117,14 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             }
 
             var source = GenerateWrapper(info);
-            spc.AddSource($"{info.GeneratedClassName}.g.cs", source);
+
+            // Namespace-qualified: hint names must be unique per generator, and a duplicate
+            // (two same-named builders in different namespaces) throws inside Roslyn and drops
+            // EVERY file this generator would emit — registration included.
+            string hint = info.Namespace is null
+                ? $"{info.GeneratedClassName}.g.cs"
+                : $"{info.Namespace.Replace('.', '_')}_{info.GeneratedClassName}.g.cs";
+            spc.AddSource(hint, source);
         });
     }
 

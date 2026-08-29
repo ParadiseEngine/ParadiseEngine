@@ -306,6 +306,39 @@ public sealed class BTreeNodeGeneratorTests
             "public Patrol(float radius, int waypoints = 4) : base(new global::Game.PatrolNode(radius, waypoints)) { }");
     }
 
+    /// <summary>Hint names must be unique per generator — with simple-name hints, two same-named
+    /// builders in different namespaces threw inside Roslyn and dropped EVERY emitted file,
+    /// registration included.</summary>
+    [Test]
+    public async Task Same_Named_Builders_In_Two_Namespaces_Both_Emit()
+    {
+        const string node = """
+            [System.Runtime.InteropServices.Guid("{0}")]
+            [Paradise.BT.Builder]
+            public struct DashNode : Paradise.BT.INodeData
+            {{
+                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                    int index, TNodeBlob blob, TBlackboard bb)
+                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    => Paradise.BT.NodeState.Success;
+            }}
+            """;
+
+        var (sources, compileErrors, _) = Run(
+            "namespace Game.North {\n"
+            + string.Format(System.Globalization.CultureInfo.InvariantCulture, node, "D1000000-0000-4000-8000-000000000001")
+            + "\n}\nnamespace Game.South {\n"
+            + string.Format(System.Globalization.CultureInfo.InvariantCulture, node, "D1000000-0000-4000-8000-000000000002")
+            + "\n}");
+
+        await Assert.That(compileErrors).IsEmpty();
+
+        string generated = string.Join("\n", sources);
+        await Assert.That(generated).Contains("namespace Game.North.Builder;");
+        await Assert.That(generated).Contains("namespace Game.South.Builder;");
+    }
+
     [Test]
     public async Task Two_Public_Constructors_Are_Refused()
     {

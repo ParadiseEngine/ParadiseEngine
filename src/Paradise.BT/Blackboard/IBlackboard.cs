@@ -6,6 +6,12 @@ namespace Paradise.BT;
 /// No member returns a <c>ref</c>, which is what makes a caller's INTENT legible — taking a ref to
 /// avoid a copy and taking one to mutate looked identical, so nothing could tell a read from a
 /// write. That split is what the access declarations and PBT0009 rest on.
+///
+/// <b>An implementation must be handle-shaped.</b> Blackboards travel BY VALUE through the VM
+/// (the ref-safety rules force it — see <see cref="VirtualMachine"/>), so a copy must write to
+/// the same storage: hold a class reference, refs, or a pointer — never the data itself. A struct
+/// storing its data inline loses every <see cref="SetData{T}"/> silently. The same rule
+/// <see cref="INodeBlob"/> documents for blobs.
 /// </summary>
 public interface IBlackboard
 {

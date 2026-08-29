@@ -40,8 +40,10 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
     /// <summary>How many bytes an instance's runtime node data needs.</summary>
     public int RuntimeDataSize => Handle.RuntimeDataSize;
 
-    /// <summary>A new instance over this layout, which must outlive it.</summary>
-    public BehaviorTreeInstance CreateInstance() => new(Handle);
+    /// <summary>A new instance over this layout. The instance roots this layout, so the native
+    /// memory outlives every instance created this way; dispose still rests with whoever built
+    /// the layout.</summary>
+    public BehaviorTreeInstance CreateInstance() => new(Handle, owner: this);
 
     /// <summary>
     /// Flatten a compiled tree into a <see cref="NodeBlob"/>. Defaults are copied from the tree's

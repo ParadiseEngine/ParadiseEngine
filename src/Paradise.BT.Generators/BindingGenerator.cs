@@ -555,14 +555,33 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
             ImmutableArray<Access> access = merged.Values
                 .OrderBy(a => a.TypeName, System.StringComparer.Ordinal)
+                .ThenBy(a => a.TypeFqn, System.StringComparer.Ordinal)
                 .ToImmutableArray();
 
-            spc.AddSource($"{binding.ClassName}.Binding.g.cs", Render(binding, access));
+            // Namespace-qualified for the same reason as BTreeNodeGenerator's hints: a duplicate
+            // hint name throws inside Roslyn and drops every binding in the compilation.
+            string hint = binding.Namespace.Length == 0
+                ? $"{binding.ClassName}.Binding.g.cs"
+                : $"{binding.Namespace.Replace('.', '_')}_{binding.ClassName}.Binding.g.cs";
+            spc.AddSource(hint, Render(binding, access));
         }
     }
 
     private static string Render(BindingModel binding, ImmutableArray<Access> access)
     {
+        Dictionary<string, string> identifiers = NameIdentifiers(access);
+        string FieldOf(Access a) => "_" + identifiers[a.TypeFqn];
+        string ParamOf(Access a)
+        {
+            string name = identifiers[a.TypeFqn];
+
+            // A data type named `Event` yields the parameter `event` — escape any keyword.
+            return Microsoft.CodeAnalysis.CSharp.SyntaxFacts.GetKeywordKind(name)
+                != Microsoft.CodeAnalysis.CSharp.SyntaxKind.None
+                ? "@" + name
+                : name;
+        }
+
         string bb = binding.ClassName + "Blackboard";
         string extras = binding.ClassName + "Extras";
         // What flows IN is a parameter; what comes BACK is Extras. A component is always an input,
@@ -604,7 +623,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         foreach (Access a in access)
         {
             string modifier = a.Kind == AccessKind.Write ? "ref" : "ref readonly";
-            sb.AppendLine("    private readonly " + modifier + " global::" + a.TypeFqn + " " + Field(a) + ";");
+            sb.AppendLine("    private readonly " + modifier + " global::" + a.TypeFqn + " " + FieldOf(a) + ";");
         }
 
         if (access.Length == 0)
@@ -615,12 +634,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         var ctorParams = access.Select(a =>
-            (a.Kind == AccessKind.Write ? "ref global::" : "in global::") + a.TypeFqn + " " + Param(a));
+            (a.Kind == AccessKind.Write ? "ref global::" : "in global::") + a.TypeFqn + " " + ParamOf(a));
         sb.AppendLine("    public " + bb + "(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("    {");
         foreach (Access a in access)
         {
-            sb.AppendLine("        " + Field(a) + " = ref " + Param(a) + ";");
+            sb.AppendLine("        " + FieldOf(a) + " = ref " + ParamOf(a) + ";");
         }
 
         sb.AppendLine("    }");
@@ -633,7 +652,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("    public static " + bb + " Bind(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("        => new(" + string.Join(
             ", ",
-            access.Select(a => (a.Kind == AccessKind.Write ? "ref " : "in ") + Param(a))) + ");");
+            access.Select(a => (a.Kind == AccessKind.Write ? "ref " : "in ") + ParamOf(a))) + ");");
         sb.AppendLine();
 
         // HasData
@@ -658,7 +677,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
-            sb.AppendLine("            global::" + a.TypeFqn + " value = " + Field(a) + ";");
+            sb.AppendLine("            global::" + a.TypeFqn + " value = " + FieldOf(a) + ";");
             sb.AppendLine("            return global::System.Runtime.CompilerServices.Unsafe"
                 + ".As<global::" + a.TypeFqn + ", T>(ref value);");
             sb.AppendLine("        }");
@@ -676,7 +695,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
-            sb.AppendLine("            " + Field(a)
+            sb.AppendLine("            " + FieldOf(a)
                 + " = global::System.Runtime.CompilerServices.Unsafe"
                 + ".As<T, global::" + a.TypeFqn + ">(ref value);");
             sb.AppendLine("            return;");
@@ -712,11 +731,37 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    private static string Field(Access a) =>
-        "_" + char.ToLowerInvariant(a.TypeName[0]) + a.TypeName.Substring(1);
+    /// <summary>
+    /// One identifier per access entry, keyed by FQN. Simple names are the readable default;
+    /// two same-named types from different namespaces both survive the FQN-keyed merge, so a
+    /// colliding GROUP is suffixed with each member's namespace — emitting two `_target` fields
+    /// would be CS0102 in a file the user cannot edit.
+    /// </summary>
+    private static Dictionary<string, string> NameIdentifiers(ImmutableArray<Access> access)
+    {
+        var map = new Dictionary<string, string>(System.StringComparer.Ordinal);
+        foreach (var group in access.GroupBy(
+            a => char.ToLowerInvariant(a.TypeName[0]) + a.TypeName.Substring(1),
+            System.StringComparer.Ordinal))
+        {
+            var members = group.ToList();
+            if (members.Count == 1)
+            {
+                map[members[0].TypeFqn] = group.Key;
+                continue;
+            }
 
-    private static string Param(Access a) =>
-        char.ToLowerInvariant(a.TypeName[0]) + a.TypeName.Substring(1);
+            foreach (Access a in members)
+            {
+                string ns = a.TypeFqn.Length > a.TypeName.Length + 1
+                    ? a.TypeFqn.Substring(0, a.TypeFqn.Length - a.TypeName.Length - 1).Replace('.', '_')
+                    : "global";
+                map[a.TypeFqn] = group.Key + "_" + ns;
+            }
+        }
+
+        return map;
+    }
 
     // ===================== models =====================
 

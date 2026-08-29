@@ -43,6 +43,23 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
                 + "its Handle before constructing an instance over it.", nameof(layout));
         }
 
+        // The one unguarded entry: RuntimeData reaches past span bounds checks on purpose
+        // (Unsafe.Add over an offset), so an undersized buffer here is a SILENT write into
+        // whatever sits next to it — for chunk memory, another entity's components.
+        if (states.Length < layout.NodeCount)
+        {
+            throw new ArgumentException(
+                $"The states span holds {states.Length} entries but the layout has "
+                + $"{layout.NodeCount} nodes.", nameof(states));
+        }
+
+        if (runtime.Length < layout.RuntimeDataSize)
+        {
+            throw new ArgumentException(
+                $"The runtime span holds {runtime.Length} bytes but the layout's node data "
+                + $"needs {layout.RuntimeDataSize}.", nameof(runtime));
+        }
+
         _blob = layout.Blob;
         _states = states;
         _runtime = runtime;

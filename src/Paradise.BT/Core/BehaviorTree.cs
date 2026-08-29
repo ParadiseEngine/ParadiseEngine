@@ -8,6 +8,7 @@ namespace Paradise.BT;
 public sealed class BehaviorTree : IDisposable
 {
     private readonly BehaviorTreeNode[] _nodes;
+    private readonly Lock _layoutGate = new();
     private BehaviorTreeLayout? _layout;
 
     internal BehaviorTree(BehaviorTreeNode[] nodes)
@@ -33,8 +34,9 @@ public sealed class BehaviorTree : IDisposable
 
     /// <summary>An instance without an owned blackboard — pass one to each
     /// <see cref="BehaviorTreeInstance.Tick{TBlackboard}"/> call instead, the only shape a
-    /// <c>ref struct</c> (generated) blackboard fits.</summary>
-    public BehaviorTreeInstance CreateInstance() => new(Layout.Handle);
+    /// <c>ref struct</c> (generated) blackboard fits. The instance roots this tree, so the
+    /// layout's native memory cannot be finalizer-freed under a live instance.</summary>
+    public BehaviorTreeInstance CreateInstance() => new(Layout.Handle, owner: this);
 
     /// <summary>
     /// The flattened form every instance ticks against, built on first use and shared by all of
@@ -44,13 +46,30 @@ public sealed class BehaviorTree : IDisposable
     /// that is never instanced never builds one. Every node type must be registered with
     /// <see cref="NodeTypeRegistry"/> first; the BT generator emits that registration per
     /// assembly, so in practice this only bites a node type the generator cannot see.
+    ///
+    /// Locked, not <c>??=</c>: a lost race would build two layouts and finalizer-free the loser
+    /// while an instance may already hold its raw handle — the dangling-pointer failure, reached
+    /// concurrently.
     /// </summary>
-    internal BehaviorTreeLayout Layout => _layout ??= BehaviorTreeLayout.Build(this);
+    internal BehaviorTreeLayout Layout
+    {
+        get
+        {
+            lock (_layoutGate)
+            {
+                return _layout ??= BehaviorTreeLayout.Build(this);
+            }
+        }
+    }
 
     public void Dispose()
     {
-        _layout?.Dispose();
-        _layout = null;
+        lock (_layoutGate)
+        {
+            _layout?.Dispose();
+            _layout = null;
+        }
+
         GC.SuppressFinalize(this);
     }
 

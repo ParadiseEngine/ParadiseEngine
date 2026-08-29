@@ -131,6 +131,19 @@ public sealed class LayoutSerializationTests
         await Assert.That(CountOccurrences(bytes, typeof(Paradise.BT.Nodes.SequenceNode).GUID)).IsEqualTo(1);
     }
 
+    /// <summary>The stronger determinism claim: two FRESH builds of the same tree — not a
+    /// round-trip, whose rewrites are exact inverses — must produce identical bytes. This is
+    /// what makes a layout content-hashable across machines and build orders.</summary>
+    [Test]
+    public async Task Two_Builds_Of_The_Same_Tree_Serialize_Identically()
+    {
+        using BehaviorTreeLayout first = LayoutOf(SampleTree());
+        using BehaviorTreeLayout second = LayoutOf(SampleTree());
+
+        await Assert.That(second.SerializeToBytes().AsSpan().SequenceEqual(first.SerializeToBytes()))
+            .IsTrue();
+    }
+
     /// <summary>Nothing process-local reaches the bytes — at rest, node types are indices into
     /// the GUID table — so serializing, loading, and serializing again must reproduce the exact
     /// bytes. This is what makes a layout content-hashable.</summary>

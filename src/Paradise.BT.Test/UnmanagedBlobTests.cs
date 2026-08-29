@@ -219,6 +219,32 @@ public sealed class UnmanagedBlobTests
         await Assert.That(copy.Tick(ref bb, 0.1f)).IsEqualTo(NodeState.Success);
     }
 
+    /// <summary>RuntimeData reaches past span bounds checks on purpose, so an undersized buffer
+    /// would be a SILENT write into neighbouring memory — the constructor is the one place to
+    /// refuse it.</summary>
+    [Test]
+    public async Task Blob_Refuses_Undersized_Buffers()
+    {
+        using BehaviorTreeLayout layout = LayoutOf(SampleTree());
+        BehaviorTreeLayoutHandle handle = layout.Handle;
+        int nodeCount = layout.NodeCount;
+        int dataSize = layout.RuntimeDataSize;
+
+        await Assert.That(() =>
+        {
+            Span<NodeState> shortStates = stackalloc NodeState[nodeCount - 1];
+            Span<byte> runtime = stackalloc byte[dataSize];
+            _ = new UnmanagedNodeBlob(handle, shortStates, runtime);
+        }).Throws<ArgumentException>().WithMessageContaining("states");
+
+        await Assert.That(() =>
+        {
+            Span<NodeState> states = stackalloc NodeState[nodeCount];
+            Span<byte> shortRuntime = stackalloc byte[dataSize - 1];
+            _ = new UnmanagedNodeBlob(handle, states, shortRuntime);
+        }).Throws<ArgumentException>().WithMessageContaining("runtime");
+    }
+
     [Test]
     public async Task Layout_Refuses_A_Node_Type_Nobody_Registered()
     {
