@@ -511,6 +511,11 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine("public static partial class Nodes");
         sb.AppendLine("{");
+        if (!info.Fields.IsEmpty)
+        {
+            sb.AppendLine(RequireNamedArguments);
+        }
+
         sb.Append($"    public static {info.GeneratedClassName} {info.GeneratedClassName}(");
         sb.Append(info.Cardinality switch
         {
@@ -519,24 +524,28 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             _ => BuildCompositeParamList(info.Fields),
         });
 
+        // Value arguments are forwarded by name — the constructor is [RequireNamedArguments],
+        // and this forwarder is its first caller.
         sb.Append(") => new(");
         sb.Append(info.Cardinality switch
         {
-            0 => string.Join(", ", info.Fields.Select(f => ToCamelCase(f.Name))),
+            0 => string.Join(", ", info.Fields.Select(f => NamedArgument(f.Name))),
             1 => string.Join(
                 ", ",
-                info.Fields.Where(f => f.DefaultLiteral is null).Select(f => ToCamelCase(f.Name))
+                info.Fields.Where(f => f.DefaultLiteral is null).Select(f => NamedArgument(f.Name))
                     .Concat(["child"])
-                    .Concat(info.Fields.Where(f => f.DefaultLiteral is not null).Select(f => ToCamelCase(f.Name)))),
+                    .Concat(info.Fields.Where(f => f.DefaultLiteral is not null).Select(f => NamedArgument(f.Name)))),
             _ => string.Join(
                 ", ",
-                info.Fields.Select(f => ToCamelCase(f.Name)).Concat(["children"])),
+                info.Fields.Select(f => NamedArgument(f.Name)).Concat(["children"])),
         });
 
         sb.AppendLine(");");
         sb.AppendLine("}");
         return sb.ToString();
     }
+
+    private const string RequireNamedArguments = "    [global::Paradise.BT.RequireNamedArguments]";
 
     private static void GenerateLeafConstructor(StringBuilder sb, NodeInfo info)
     {
@@ -547,6 +556,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         else
         {
             var paramList = BuildParamList(info.Fields, includeChild: false);
+            sb.AppendLine(RequireNamedArguments);
             sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}) {{ }}");
         }
     }
@@ -554,12 +564,18 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     private static void GenerateDecoratorConstructor(StringBuilder sb, NodeInfo info)
     {
         var paramList = BuildParamList(info.Fields, includeChild: true);
+        sb.AppendLine(RequireNamedArguments);
         sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}, child) {{ }}");
     }
 
     private static void GenerateCompositeConstructor(StringBuilder sb, NodeInfo info)
     {
         var paramList = BuildCompositeParamList(info.Fields);
+        if (!info.Fields.IsEmpty)
+        {
+            sb.AppendLine(RequireNamedArguments);
+        }
+
         sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}, children) {{ }}");
     }
 
@@ -631,6 +647,12 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         }
 
         return string.Join(", ", parts);
+    }
+
+    private static string NamedArgument(string fieldName)
+    {
+        string name = ToCamelCase(fieldName);
+        return $"{name}: {name}";
     }
 
     private static string Parameter(FieldInfo field) =>

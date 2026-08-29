@@ -13,3 +13,4 @@ PBT0009 | Paradise.BT.Design | Error | Node uses blackboard data it does not dec
 PBT0010 | Paradise.BT.Design | Warning | Blackboard passed to a method whose access cannot be checked
 PBT0011 | Paradise.BT.Generators | Error | Node with [Builder] declares more than one public constructor
 PBT0012 | Paradise.BT.Generators | Warning | Public field is not part of the node's constructor surface
+PBT0013 | Paradise.BT.Design | Error | Builder call passes multiple value arguments positionally

@@ -37,7 +37,7 @@ public static class ForagerTree
                 FoodVisible(),
                 Inverter(
                     Exhausted(0.25f)),
-                ForageWorthIt(0.3f, 6f, requireVisible: true),
+                ForageWorthIt(minStamina: 0.3f, maxDistance: 6f, requireVisible: true),
                 SeekFood(0.5f),
                 Tally()),
             Sequence(

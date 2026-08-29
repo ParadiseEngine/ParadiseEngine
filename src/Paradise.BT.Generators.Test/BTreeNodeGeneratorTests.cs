@@ -46,6 +46,9 @@ public sealed class BTreeNodeGeneratorTests
             {
                 public static int Register<T>() where T : unmanaged, INodeData => 0;
             }
+
+            [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method)]
+            public sealed class RequireNamedArgumentsAttribute : Attribute { }
         }
 
         namespace Paradise.BT.Builder

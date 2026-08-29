@@ -199,7 +199,7 @@ public sealed class NodeTests
     {
         var tree = BehaviorTreeBuilder.Build(
             new Repeat(
-                5,
+                tickTimes: 5,
                 TestBehaviorNodes.ProbeUntil(2, NodeState.Success, NodeState.Failure),
                 breakStates: NodeState.Failure));
 
