@@ -10,6 +10,8 @@ if (args.Length == 0) return Usage();
 
 var verb = args[0];
 string? projectDirectory = null;
+var profile = "dev";
+var play = false;
 var fix = false;
 var keepEditor = false;
 for (var i = 1; i < args.Length; i++)
@@ -18,6 +20,14 @@ for (var i = 1; i < args.Length; i++)
     {
         case "--project" when i + 1 < args.Length:
             projectDirectory = args[++i];
+            break;
+
+        case "--profile" when i + 1 < args.Length:
+            profile = args[++i];
+            break;
+
+        case "--play":
+            play = true;
             break;
 
         case "--fix":
@@ -59,6 +69,8 @@ switch (verb)
         return Verbs.Clean(physical, layout, keepEditor);
 
     case "build":
+        return Verbs.Build(physical, layout, profile, play);
+
     case "watch":
     case "mv":
     case "pack":
@@ -79,10 +91,12 @@ static int Usage()
         verbs:
           verify                 check the assets/ tree: sidecars, identities, document validity
           scene-check [--fix]    police (or restore) canonical form of *.scene.toml documents
+          build [--profile p]    compile assets/ into build/ (or .editor/play with --play)
           clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
 
         options:
           --project <dir>        the project root (default: found from the working directory)
+          --profile <name>       the build profile (default: dev)
         """);
     return 2;
 }

@@ -1,0 +1,8 @@
+{
+  "$comment": "Pinned KTX-Software toolchain (the `ktx create` CLI the texture step shells out to). RID keys match .NET RuntimeIdentifier values; URLs are the GitHub release assets, SHA256 digests computed from downloads whose SHA1 was cross-checked against the published .sha1 sidecars where Khronos ships one (the Linux tarballs; the Windows .exe installers have none). Khronos ships NO extractable archive for Windows (NSIS .exe installer; modern 7-Zip cannot unpack NSIS payloads) or macOS (.pkg), so those RIDs are deliberately absent: on them the bootstrap fails with guidance to install KTX-Software and set PARADISE_KTX_PATH. For the record, the v4.4.2 installer digests are sha256 1f323b0fec19794f5e6c0425a61d4b1da396872a10be862d105f4f4b2d2957fe (Windows-x64.exe) and 86d6edba47f3df597f3b9bceda6e4da8b4205b43c8386519e1c0d2ce804c4284 (Windows-arm64.exe). To bump: download each archive, recompute SHA256, update version + entries.",
+  "version": "4.4.2",
+  "rids": {
+    "linux-x64":   { "url": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2", "sha256": "a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245", "format": "tar.bz2" },
+    "linux-arm64": { "url": "https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-arm64.tar.bz2",  "sha256": "60382e7b842177b8048bd58ccdc770383f8ef65b94452a25d3afdb55f2405c5a", "format": "tar.bz2" }
+  }
+}

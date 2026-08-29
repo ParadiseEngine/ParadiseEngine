@@ -50,6 +50,29 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
+    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool play)
+    {
+        // A vendored third_party/tools/KTX-Software under the project root wins; PATH and
+        // PARADISE_KTX_PATH are the fallbacks — the same probe order as KtxCreate itself.
+        KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
+
+        var runner = new BuildRunner(
+            fileSystem, layout, encoder,
+            log: Console.WriteLine,
+            warn: message => Console.Error.WriteLine($"warning: {message}"));
+        var result = runner.Run(profile, play ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
+
+        foreach (var error in result.Errors)
+        {
+            Console.Error.WriteLine($"error: {error}");
+        }
+
+        Console.WriteLine(result.Succeeded
+            ? $"build: {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
+            : $"build: FAILED with {result.Errors.Count} error(s)");
+        return result.Succeeded ? 0 : 1;
+    }
+
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)
     {
         foreach (var removed in ProjectCleaner.Clean(fileSystem, layout, keepEditor))

@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json.Nodes;
 
+using Paradise.Assets.Pipeline;
+
 namespace Paradise.Export.Pipeline
 {
     /// <summary>

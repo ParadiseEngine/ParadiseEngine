@@ -23,6 +23,9 @@
   <ItemGroup>
     <!-- The [Authored] vocabulary and its schema emitter. A leaf with no dependencies of its own,
          so referencing it here costs the export core nothing. -->
+    <!-- The GLB container and tool-execution plumbing (and KtxCreate itself) moved to the
+         asset pipeline; this export package keeps only what is export-specific. -->
+    <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
     <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
     <!-- Also as an ANALYZER. Consumers of the published package get the schema emitter through
          Paradise.Authoring's analyzers/dotnet/cs folder, but analyzers do not flow across a

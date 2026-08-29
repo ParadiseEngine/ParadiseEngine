@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json.Nodes;
 
-namespace Paradise.Export.Pipeline
+namespace Paradise.Assets.Pipeline
 {
     /// <summary>
     /// Converts the PNG/JPEG textures embedded in a GLB to KTX2 (Basis Universal) via the Khronos
@@ -48,7 +48,7 @@ namespace Paradise.Export.Pipeline
         /// Encode a STANDALONE source image (PNG/JPEG — a spritesheet) to a KTX2 sidecar next to
         /// it, for the .NET runtime; the Godot editor keeps rendering the source image. Same
         /// colour preset as GLB base-colour textures (UASTC, linear-tagged container — see
-        /// <see cref="BuildCreateArguments"/>). Idempotent by timestamp: an output at least as
+        /// <see cref="BuildCreateArguments(TextureEncodingPreset, string, string, bool)"/>). Idempotent by timestamp: an output at least as
         /// new as its source returns <see cref="ConversionResult.NoConvertibleTextures"/>.
         /// </summary>
         public static ConversionResult ConvertImageFile(
@@ -446,6 +446,14 @@ namespace Paradise.Export.Pipeline
         // `basis-lz`, Zstandard is --zstd, and the positional order is INPUT then OUTPUT.
 
         public static string BuildCreateArguments(TextureEncodingPreset preset, string outputPath, string sourcePath)
+            => BuildCreateArguments(preset, outputPath, sourcePath, fastEncode: false);
+
+        /// <summary>
+        /// <see cref="BuildCreateArguments(TextureEncodingPreset, string, string)"/> with the
+        /// build-profile speed knob: <paramref name="fastEncode"/> drops UASTC quality to 0 —
+        /// the iteration setting behind <c>texture_quality = "fast"</c>, never for shipping.
+        /// </summary>
+        public static string BuildCreateArguments(TextureEncodingPreset preset, string outputPath, string sourcePath, bool fastEncode)
         {
             var arguments = new List<string> { "create", "--generate-mipmap" };
 
@@ -468,6 +476,12 @@ namespace Paradise.Export.Pipeline
                     // both hosts show the authored colours. Revisit if Godot fixes the double decode.
                     arguments.AddRange(new[] { "--format", "R8G8B8A8_UNORM", "--assign-tf", "linear", "--encode", "uastc", "--uastc-quality", "2", "--zstd", "10" });
                     break;
+            }
+
+            if (fastEncode)
+            {
+                var quality = arguments.IndexOf("--uastc-quality");
+                if (quality >= 0 && quality + 1 < arguments.Count) arguments[quality + 1] = "0";
             }
 
             arguments.Add(ProcessTools.QuoteArgument(sourcePath));
@@ -512,11 +526,26 @@ namespace Paradise.Export.Pipeline
             return true;
         }
 
-        private static bool TryConvertImageBytes(
+        public static bool TryConvertImageBytes(
             string ktxPath,
             byte[] sourceBytes,
             string sourceExtension,
             TextureEncodingPreset preset,
+            out byte[] ktx2Bytes,
+            Action<string>? error)
+            => TryConvertImageBytes(ktxPath, sourceBytes, sourceExtension, preset, fastEncode: false, out ktx2Bytes, error);
+
+        /// <summary>
+        /// The bytes-in/bytes-out heart of every conversion above, public because the asset
+        /// pipeline's texture step is exactly this shape: bytes from a mount, KTX2 bytes back,
+        /// caching and placement the caller's business.
+        /// </summary>
+        public static bool TryConvertImageBytes(
+            string ktxPath,
+            byte[] sourceBytes,
+            string sourceExtension,
+            TextureEncodingPreset preset,
+            bool fastEncode,
             out byte[] ktx2Bytes,
             Action<string>? error)
         {
@@ -532,7 +561,7 @@ namespace Paradise.Export.Pipeline
 
                 ProcessTools.ProcessResult run = ProcessTools.Run(
                     ktxPath,
-                    BuildCreateArguments(preset, outputPath, sourcePath),
+                    BuildCreateArguments(preset, outputPath, sourcePath, fastEncode),
                     KtxTimeoutMilliseconds,
                     KtxEnvironment(ktxPath));
 

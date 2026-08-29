@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Process = System.Diagnostics.Process;
 using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 
-namespace Paradise.Export.Pipeline
+namespace Paradise.Assets.Pipeline
 {
     /// <summary>
     /// Engine-neutral subprocess + executable-resolution helpers shared by the Blender and toktx

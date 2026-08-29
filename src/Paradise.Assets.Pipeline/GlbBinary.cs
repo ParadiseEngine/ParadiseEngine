@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace Paradise.Export.Pipeline
+namespace Paradise.Assets.Pipeline
 {
     /// <summary>
     /// Minimal binary glTF (GLB) container read/write — the JSON chunk plus an optional BIN chunk.

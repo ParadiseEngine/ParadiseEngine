@@ -2,13 +2,13 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.Json.Nodes;
-using Paradise.Export.Pipeline;
+using Paradise.Assets.Pipeline;
 
-namespace Paradise.Export.Tests;
+namespace Paradise.Assets.Pipeline.Test;
 
 // Engine-neutral coverage of the asset-pipeline logic: GLB container round-trip, `ktx create`
 // argument building + preset selection, KTX2 validation, and executable resolution.
-public class PipelineTests
+public class KtxCreateTests
 {
     [Test]
     public async Task glb_round_trips_json_and_bin()
