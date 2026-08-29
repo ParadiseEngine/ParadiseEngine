@@ -135,8 +135,6 @@ public static class TestBehaviorNodes
         return blackboard;
     }
 
-    public static BehaviorTreeSerializationRegistry BuiltInRegistry()
-        => BuiltInNodeRegistry.Create();
 }
 
 internal static class TestTickExtensions

@@ -82,6 +82,28 @@ public static class NodeTypeRegistry
     /// <summary>How many bytes one node of this type occupies in a blob's runtime data.</summary>
     public static int SizeOf(int id) => Invoker(id).Size;
 
+    /// <summary>
+    /// A managed factory over a serialized node's default data — what
+    /// <see cref="BehaviorTreeBlobSerializer"/> rebuilds a <see cref="BehaviorTree"/> from. Here
+    /// rather than in a separate serialization registry: this table already knows every node type
+    /// by GUID, through the generated module initializers, so a second hand-maintained list of the
+    /// same types was only a way to forget one.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Nobody registered this GUID.</exception>
+    internal static IRuntimeNodeFactory CreateFactory(Guid guid, ref BehaviorTreeBlobNode node)
+    {
+        if (!TryGetId(guid, out int id))
+        {
+            throw new InvalidOperationException(
+                $"Node GUID '{guid}' is not registered for behavior tree deserialization. Node "
+                + "types register themselves through the module initializer the BT generator "
+                + $"emits; call {nameof(NodeTypeRegistry)}.{nameof(Register)}<T>() explicitly "
+                + "for a node type the generator cannot see.");
+        }
+
+        return Invoker(id).CreateFactory(ref node);
+    }
+
     /// <summary>The CLR type behind an id — for diagnostics, never for dispatch.</summary>
     public static Type TypeOf(int id) => Invoker(id).NodeType;
 
@@ -119,6 +141,9 @@ internal interface INodeInvoker
         scoped ref byte data, int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct;
+
+    /// <summary>See <see cref="NodeTypeRegistry.CreateFactory"/>.</summary>
+    IRuntimeNodeFactory CreateFactory(ref BehaviorTreeBlobNode node);
 }
 
 internal sealed class NodeInvoker<TNodeData> : INodeInvoker
@@ -146,4 +171,11 @@ internal sealed class NodeInvoker<TNodeData> : INodeInvoker
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => TNodeData.Reset(index, blob, bb);
+
+    public IRuntimeNodeFactory CreateFactory(ref BehaviorTreeBlobNode node)
+    {
+        TNodeData defaultData = node.DefaultData.GetValue<TNodeData>();
+        return new RuntimeNodeFactory<TNodeData>(
+            defaultData, new BehaviorNodeMetadata(typeof(TNodeData)));
+    }
 }

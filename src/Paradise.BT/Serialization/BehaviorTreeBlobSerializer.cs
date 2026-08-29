@@ -20,40 +20,28 @@ public static class BehaviorTreeBlobSerializer
         => CreateBlob(tree);
 
     /// <summary>
-    /// Deserializes a behavior tree from a raw Paradise.BLOB byte array.
+    /// Deserializes a behavior tree from a raw Paradise.BLOB byte array. Node types resolve
+    /// through <see cref="NodeTypeRegistry"/> — the same table the generated module initializers
+    /// populate — so there is no registry to pass and no list to keep in sync.
     /// </summary>
     /// <param name="blob">The serialized behavior-tree blob.</param>
-    /// <param name="registry">
-    /// A <see cref="BehaviorTreeSerializationRegistry"/> populated with every node type used in <paramref name="blob"/>.
-    /// The registry is no longer auto-populated: callers needing the built-in node set shipped in the
-    /// <c>Paradise.BT.Nodes</c> package should call <c>BuiltInNodeRegistry.Create()</c> and register any
-    /// additional custom types on top.
-    /// </param>
-    public static BehaviorTree Deserialize(byte[] blob, BehaviorTreeSerializationRegistry registry)
+    public static BehaviorTree Deserialize(byte[] blob)
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
-        ThrowHelper.ThrowIfNull(registry, nameof(registry));
 
         using var serializedTree = new ManagedBlobAssetReference<BehaviorTreeBlob>(blob);
-        return Deserialize(serializedTree, registry);
+        return Deserialize(serializedTree);
     }
 
     /// <summary>
     /// Deserializes a behavior tree from a pinned Paradise.BLOB asset reference.
     /// </summary>
     /// <param name="blob">The pinned blob asset reference.</param>
-    /// <param name="registry">
-    /// A <see cref="BehaviorTreeSerializationRegistry"/> populated with every node type used in <paramref name="blob"/>.
-    /// The registry is no longer auto-populated: callers needing the built-in node set shipped in the
-    /// <c>Paradise.BT.Nodes</c> package should call <c>BuiltInNodeRegistry.Create()</c> and register any
-    /// additional custom types on top.
-    /// </param>
-    public static BehaviorTree Deserialize(
-        ManagedBlobAssetReference<BehaviorTreeBlob> blob,
-        BehaviorTreeSerializationRegistry registry)
+    /// <exception cref="InvalidOperationException">A node type in the blob is not registered with
+    /// <see cref="NodeTypeRegistry"/> in this process.</exception>
+    public static BehaviorTree Deserialize(ManagedBlobAssetReference<BehaviorTreeBlob> blob)
     {
         ThrowHelper.ThrowIfNull(blob, nameof(blob));
-        ThrowHelper.ThrowIfNull(registry, nameof(registry));
 
         ref BehaviorTreeBlob serializedTree = ref blob.Value;
 
@@ -73,7 +61,9 @@ public static class BehaviorTreeBlobSerializer
         for (int i = 0; i < count; i++)
         {
             ref BehaviorTreeBlobNode serializedNode = ref serializedTree.Nodes.GetValue(i);
-            nodes[i] = new BehaviorTreeNode(registry.CreateFactory(ref serializedNode), serializedTree.Nodes.GetEndIndex(i));
+            nodes[i] = new BehaviorTreeNode(
+                NodeTypeRegistry.CreateFactory(serializedNode.NodeGuid, ref serializedNode),
+                serializedTree.Nodes.GetEndIndex(i));
         }
 
         return new BehaviorTree(nodes);

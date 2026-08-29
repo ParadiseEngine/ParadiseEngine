@@ -28,7 +28,7 @@ public sealed class BehaviorTreeSerializationTests
                 new Repeat(2, new Success())));
 
         using var serializedTree = tree.Serialize();
-        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree);
         BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick(0.25f)).IsEqualTo(NodeState.Running);
@@ -36,14 +36,16 @@ public sealed class BehaviorTreeSerializationTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
+    /// <summary>No registry to populate: <see cref="ThresholdNode"/> is internal, so the
+    /// generated module initializer registered it, and deserialization resolves through the same
+    /// <see cref="NodeTypeRegistry"/> everything else does.</summary>
     [Test]
-    public async Task Custom_Unmanaged_Nodes_Can_Be_Deserialized_With_A_Registry()
+    public async Task Custom_Unmanaged_Nodes_Deserialize_Through_The_Type_Registry()
     {
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ThresholdNode { RequiredTicks = 3 }));
 
         using var serializedTree = tree.Serialize();
-        var registry = new BehaviorTreeSerializationRegistry().Register<ThresholdNode>();
-        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, registry);
+        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree);
         BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -64,7 +66,7 @@ public sealed class BehaviorTreeSerializationTests
                 new Success()));
 
         byte[] bytes = tree.SerializeToBytes();
-        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes);
         BehaviorTreeInstance<Blackboard> instance = roundTrippedTree.CreateInstance(new Blackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
@@ -79,7 +81,7 @@ public sealed class BehaviorTreeSerializationTests
                 new Failure()));
 
         byte[] bytes = tree.SerializeToBytes();
-        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes);
 
         await Assert.That(roundTrippedTree.Count).IsEqualTo(3);
     }
@@ -92,11 +94,11 @@ public sealed class BehaviorTreeSerializationTests
             new Success());
 
         using var fromDefinition = BehaviorTreeBlobSerializer.Serialize(definition);
-        BehaviorTree tree1 = BehaviorTreeBlobSerializer.Deserialize(fromDefinition, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree tree1 = BehaviorTreeBlobSerializer.Deserialize(fromDefinition);
 
         BehaviorTree compiled = BehaviorTreeBuilder.Build(definition);
         using var fromTree = BehaviorTreeBlobSerializer.Serialize(compiled);
-        BehaviorTree tree2 = BehaviorTreeBlobSerializer.Deserialize(fromTree, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree tree2 = BehaviorTreeBlobSerializer.Deserialize(fromTree);
 
         await Assert.That(tree1.Count).IsEqualTo(tree2.Count);
     }
@@ -107,7 +109,7 @@ public sealed class BehaviorTreeSerializationTests
         var definition = new Sequence(new Success());
 
         byte[] bytes = BehaviorTreeBlobSerializer.SerializeToBytes(definition);
-        BehaviorTree tree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree tree = BehaviorTreeBlobSerializer.Deserialize(bytes);
 
         await Assert.That(tree.Count).IsEqualTo(2);
     }
@@ -117,19 +119,19 @@ public sealed class BehaviorTreeSerializationTests
     // Registry
     // ============================
 
+    /// <summary>Serializing needs no registration — the factories come from the definitions — so
+    /// a PRIVATE node (which the generator will not register) makes a blob whose GUID nobody in
+    /// this process answers to.</summary>
     [Test]
-    public async Task Registry_Missing_Guid_Throws_On_Deserialize()
+    public async Task Deserialize_Refuses_A_Node_Guid_Nobody_Registered()
     {
-        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ThresholdNode { RequiredTicks = 1 }));
+        var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new HermitNode()));
         using var serializedTree = tree.Serialize();
-
-        // Default registry is empty — no built-in nodes are auto-registered.
-        var emptyRegistry = new BehaviorTreeSerializationRegistry();
 
         InvalidOperationException? ex = null;
         try
         {
-            BehaviorTreeBlobSerializer.Deserialize(serializedTree, emptyRegistry);
+            BehaviorTreeBlobSerializer.Deserialize(serializedTree);
         }
         catch (InvalidOperationException e)
         {
@@ -138,6 +140,16 @@ public sealed class BehaviorTreeSerializationTests
 
         await Assert.That(ex).IsNotNull();
         await Assert.That(ex!.Message.Contains("not registered", StringComparison.Ordinal)).IsTrue();
+    }
+
+    /// <summary>Private on purpose, so the generated module initializer cannot name it.</summary>
+    [System.Runtime.InteropServices.Guid("2E7D9A3B-5C1F-4E82-9B60-D4A7F1C8E052")]
+    private struct HermitNode : INodeData
+    {
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
+            where TNodeBlob : struct, INodeBlob, allows ref struct
+            where TBlackboard : struct, IBlackboard, allows ref struct
+            => NodeState.Success;
     }
 
     [Test]
@@ -154,25 +166,24 @@ public sealed class BehaviorTreeSerializationTests
                 new Succeeder(new Failure()),
                 new Delay(0.1f)));
 
-        // Should not throw - all node types are registered via the full built-in registry
+        // Should not throw — every built-in node type is registered by its generated initializer
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
 
         await Assert.That(roundTripped.Count).IsEqualTo(tree.Count);
     }
 
+    /// <summary>Explicit registration on top of the generated one must be harmless — a node the
+    /// generator cannot see is registered by hand, and hands may be redundant.</summary>
     [Test]
-    public async Task Registry_Re_Register_Same_Type_Is_Idempotent()
+    public async Task Explicit_Registration_On_Top_Of_The_Generated_One_Is_Idempotent()
     {
-        var registry = new BehaviorTreeSerializationRegistry();
-        // Registering the same type again should not throw
-        registry.Register<ThresholdNode>();
-        registry.Register<ThresholdNode>();
+        NodeTypeRegistry.Register<ThresholdNode>();
+        NodeTypeRegistry.Register<ThresholdNode>();
 
-        // Verify it works
         var tree = BehaviorTreeBuilder.Build(BehaviorNodes.Node(new ThresholdNode { RequiredTicks = 1 }));
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, registry);
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
 
         await Assert.That(roundTripped.Count).IsEqualTo(1);
     }
@@ -190,7 +201,7 @@ public sealed class BehaviorTreeSerializationTests
                 new Repeat(2, new Delay(0.1f))));
 
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
         BehaviorTreeInstance<Blackboard> instance = roundTripped.CreateInstance(new Blackboard());
 
         // Inverter(Failure) -> Success
@@ -211,7 +222,7 @@ public sealed class BehaviorTreeSerializationTests
                 new Inverter(new Success())));
 
         using var serialized = tree.Serialize();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
 
         await Assert.That(roundTripped.GetNodeType(0)).IsEqualTo(typeof(SequenceNode));
         await Assert.That(roundTripped.GetNodeType(1)).IsEqualTo(typeof(InverterNode));
@@ -231,7 +242,7 @@ public sealed class BehaviorTreeSerializationTests
         InvalidOperationException? ex = null;
         try
         {
-            BehaviorTreeBlobSerializer.Deserialize(blob, TestBehaviorNodes.BuiltInRegistry());
+            BehaviorTreeBlobSerializer.Deserialize(blob);
         }
         catch (InvalidOperationException e)
         {
@@ -249,8 +260,7 @@ public sealed class BehaviorTreeSerializationTests
             BehaviorNodes.Node(new ThresholdNode { RequiredTicks = 5 }));
 
         using var serialized = tree.Serialize();
-        var registry = new BehaviorTreeSerializationRegistry().Register<ThresholdNode>();
-        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, registry);
+        BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized);
         BehaviorTreeInstance<Blackboard> instance = roundTripped.CreateInstance(new Blackboard());
 
         // Needs 5 ticks to complete

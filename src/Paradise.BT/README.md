@@ -98,14 +98,10 @@ using var blob = tree.Serialize();
 BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(blob);
 ```
 
-Custom unmanaged nodes must be registered before deserialization.
-
-```csharp
-var registry = new BehaviorTreeSerializationRegistry()
-    .Register<CounterNode>();
-
-BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(blob, registry);
-```
+Node types resolve through `NodeTypeRegistry`, which the BT generator populates per assembly via
+a module initializer — there is no serialization registry to maintain. Only a node type the
+generator cannot see (private, or in a project without the analyzer reference) needs an explicit
+`NodeTypeRegistry.Register<CounterNode>()` before deserialization.
 
 ## Notes
 
