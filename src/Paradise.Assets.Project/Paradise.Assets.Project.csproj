@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The asset project foundation: where a project's files live, what its manifest says, and the
+    artifact cache both this engine and the Blender addon read.
+
+    Deliberately thin. It knows nothing about textures, meshes or scene documents — those belong
+    to the pipeline that will sit on top of it. Keeping the model here means a host that only
+    wants to MOUNT a built tree does not drag in the tooling that produced it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Assets.Project</AssemblyName>
+    <RootNamespace>Paradise.Assets.Project</RootNamespace>
+    <PackageId>Paradise.Assets.Project</PackageId>
+    <Title>Paradise.Assets.Project</Title>
+    <Description>The Paradise asset project model: assets/ layout, the project.toml manifest, the content-addressed artifact cache shared with the Blender addon, and Zio mount construction. No pipeline, no asset decoding.</Description>
+    <PackageTags>assets;pipeline;toml;filesystem;zio;nativeaot;game-dev</PackageTags>
+    <!-- AOT-clean: Tomlyn is used exclusively through its source-generated serializer context
+         (see ProjectManifestSerializerContext), never through the reflection overloads. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Zio" />
+    <PackageReference Include="Tomlyn" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Assets.Project.Test" />
+  </ItemGroup>
+
+</Project>

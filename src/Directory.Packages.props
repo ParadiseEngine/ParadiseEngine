@@ -14,6 +14,11 @@
     <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
+    <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem
+         abstraction every asset path goes through (MemoryFileSystem in tests); Tomlyn is the
+         TOML reader, used only through its in-package source generator so the AOT story holds. -->
+    <PackageVersion Include="Zio" Version="0.22.2" />
+    <PackageVersion Include="Tomlyn" Version="2.3.2" />
     <!-- Export pipeline (match the DotRecast version ParadiseUnityEditor vendored — navmesh
          binary format must stay identical to what the runtime expects) -->
     <PackageVersion Include="DotRecast.Core" Version="2026.1.3" />

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Assets.Project.Test</AssemblyName>
+    <RootNamespace>Paradise.Assets.Project.Test</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <!-- Tomlyn only turns its reflection fallback off automatically under PublishAot, which the
+         test projects deliberately do not use. Turning it off here anyway is what makes these
+         tests a real AOT guard: a model that lost its [TomlSerializable] registration would
+         otherwise keep passing on reflection and only break at publish time. -->
+    <TomlynIsReflectionEnabledByDefault>false</TomlynIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
+  </ItemGroup>
+</Project>
