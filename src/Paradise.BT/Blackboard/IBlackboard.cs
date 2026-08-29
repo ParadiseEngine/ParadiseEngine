@@ -1,14 +1,19 @@
-using System.Diagnostics.CodeAnalysis;
-
 namespace Paradise.BT;
 
 /// <summary>
-/// What a node may ask of the world: typed struct data, by value or by reference.
+/// What a node may ask of the world: typed struct data, read by value and written back whole.
 ///
-/// Deliberately three members. The EntitiesBT original also carried <c>HasData(Type)</c>,
-/// <c>GetDataPtrRO/RW(Type)</c> and <c>GetObject&lt;T&gt;</c> — reflection- and pointer-shaped
-/// members that no node ever called, and that an implementation storing its data as ref fields
-/// cannot honour. <c>Paradise.BT.Nodes.Blackboard</c> still offers them as its own methods.
+/// Three members, and none of them returns a <c>ref</c>. That is deliberate on both counts. The
+/// EntitiesBT original also carried <c>HasData(Type)</c>, <c>GetDataPtrRO/RW(Type)</c> and
+/// <c>GetObject&lt;T&gt;</c> — reflection- and pointer-shaped members no node ever called;
+/// <c>Paradise.BT.Nodes.Blackboard</c> still offers them as its own methods.
+///
+/// The ref-returning <c>GetDataRef&lt;T&gt;</c> is gone too, and it took two problems with it.
+/// It needed <c>[UnscopedRef]</c> so an implementation storing its data in its own fields could
+/// return a ref to itself (CS8170/CS9102); nothing here returns a ref now, so that is moot. And it
+/// could not say whether a caller meant to READ or to WRITE — taking a ref to avoid a copy looks
+/// exactly like taking one to mutate. <see cref="GetData{T}"/> reads and <see cref="SetData{T}"/>
+/// writes, which is what lets a node's declared access be checked against what it actually does.
 /// </summary>
 public interface IBlackboard
 {
@@ -19,13 +24,13 @@ public interface IBlackboard
     T GetData<T>() where T : struct;
 
     /// <summary>
-    /// A reference to the stored value, so a node can write through it.
+    /// Store <typeparamref name="T"/> back.
     ///
-    /// <c>[UnscopedRef]</c> is what allows an INLINE implementation. One storing its data as its
-    /// own fields returns a ref to itself, which a struct member may not do by default (CS8170)
-    /// and cannot opt into unless the interface has (CS9102). The reference implementation keeps
-    /// its data behind a class and is unaffected.
+    /// Read-modify-write rather than mutation in place. For a struct of settable members a
+    /// <c>with</c> expression says it in one line:
+    /// <code>
+    /// bb.SetData(bb.GetData&lt;Decision&gt;() with { Strike = true });
+    /// </code>
     /// </summary>
-    [UnscopedRef]
-    ref T GetDataRef<T>() where T : struct;
+    void SetData<T>(T value) where T : struct;
 }

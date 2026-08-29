@@ -560,32 +560,33 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // GetDataRef
-        sb.AppendLine("    [global::System.Diagnostics.CodeAnalysis.UnscopedRef]");
-        sb.AppendLine("    public ref T GetDataRef<T>() where T : struct");
+        // SetData
+        sb.AppendLine("    public void SetData<T>(T value) where T : struct");
         sb.AppendLine("    {");
         foreach (Access a in plain)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
-            sb.AppendLine("            return ref global::System.Runtime.CompilerServices.Unsafe"
-                + ".As<global::" + a.TypeFqn + ", T>(ref Extras." + a.TypeName + ");");
+            sb.AppendLine("            Extras." + a.TypeName
+                + " = global::System.Runtime.CompilerServices.Unsafe"
+                + ".As<T, global::" + a.TypeFqn + ">(ref value);");
+            sb.AppendLine("            return;");
             sb.AppendLine("        }");
             sb.AppendLine();
         }
 
-        // A read-only claim must not hand out a writable ref: that is the hole
-        // [assembly: SingleWriter] exists to close. PBT0004 catches the declared case at build
-        // time; this is the backstop for a node whose attributes and body disagree.
+        // Components are bound by value, so a write could not reach the chunk. PBT0008 refuses a
+        // node that DECLARES the write and PBT0009 one that merely performs it, so this is only
+        // reachable through a hand-written blackboard or reflection — but silence here would be a
+        // write that vanishes.
         foreach (Access a in components)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
             sb.AppendLine("            throw new global::System.InvalidOperationException(");
-            sb.AppendLine("                \"'" + a.TypeName + "' is a component, bound BY VALUE, so it cannot be \"");
-            sb.AppendLine("                + \"written through — a writable reference into chunk memory cannot reach a \"");
-            sb.AppendLine("                + \"node. Read it with GetData<" + a.TypeName + ">(), and write a conclusion \"");
-            sb.AppendLine("                + \"the system applies.\");");
+            sb.AppendLine("                \"'" + a.TypeName + "' is a component, bound BY VALUE, so writing it here \"");
+            sb.AppendLine("                + \"would not reach the chunk. Read it with GetData<" + a.TypeName + ">(), \"");
+            sb.AppendLine("                + \"and write a conclusion the system applies.\");");
             sb.AppendLine("        }");
             sb.AppendLine();
         }

@@ -43,6 +43,7 @@ public enum ProbeRule : byte
 /// is unmanaged now, so a node's data can live in a blob as bytes.
 /// </summary>
 [Guid("7C1B4E22-9A3D-4F51-8E60-1B2C3D4E5F60")]
+[Writes<ProbeData>]
 public struct ProbeNode : INodeData
 {
     public int Slot;
@@ -55,8 +56,11 @@ public struct ProbeNode : INodeData
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        ref ProbeData probe = ref bb.GetDataRef<ProbeData>();
+        // Read-modify-write rather than `with`: the mutation is into an inline array, which a
+        // `with` expression cannot address.
+        var probe = bb.GetData<ProbeData>();
         int runs = ++probe.Counts[Slot];
+        bb.SetData(probe);
 
         return Rule switch
         {
@@ -70,14 +74,18 @@ public struct ProbeNode : INodeData
 /// <summary>Records the delta time the blackboard carried this tick, for the one test that is
 /// about delta-time propagation.</summary>
 [Guid("7C1B4E22-9A3D-4F51-8E60-1B2C3D4E5F61")]
+[Writes<ProbeData>]
+[Reads<BehaviorTreeTickDeltaTime>]
 public struct RecordDeltaTimeNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        bb.GetDataRef<ProbeData>().LastDeltaTime =
-            bb.GetData<BehaviorTreeTickDeltaTime>().Value;
+        bb.SetData(bb.GetData<ProbeData>() with
+        {
+            LastDeltaTime = bb.GetData<BehaviorTreeTickDeltaTime>().Value,
+        });
         return NodeState.Success;
     }
 }

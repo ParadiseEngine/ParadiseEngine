@@ -16,7 +16,7 @@ namespace Paradise.BT;
 public sealed class ReadsAttribute<T> : Attribute where T : struct;
 
 /// <summary>
-/// This node writes <typeparamref name="T"/> through <see cref="IBlackboard.GetDataRef{T}"/>.
+/// This node writes <typeparamref name="T"/> through <see cref="IBlackboard.SetData{T}"/>.
 ///
 /// Stricter than <see cref="ReadsAttribute{T}"/>: a component claimed read-only by the queryable
 /// is refused, because writing through a read-only claim is what

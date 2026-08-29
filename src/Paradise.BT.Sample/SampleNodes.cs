@@ -10,6 +10,7 @@ using Paradise.BT;
 
 /// <summary>Succeeds while the blackboard says there is a target.</summary>
 [Guid("3F5A1C08-2B44-4E9A-9D71-6C0E8A2B4D10")]
+[Reads<HasTargetData>]
 [Builder]
 public struct HasTargetNode : INodeData
 {
@@ -21,6 +22,7 @@ public struct HasTargetNode : INodeData
 
 /// <summary>Counts a shot onto the blackboard and says so.</summary>
 [Guid("3F5A1C08-2B44-4E9A-9D71-6C0E8A2B4D11")]
+[Writes<ShotsFiredData>]
 [Builder]
 public struct FireShotNode : INodeData
 {
@@ -28,8 +30,9 @@ public struct FireShotNode : INodeData
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        ref ShotsFiredData shots = ref bb.GetDataRef<ShotsFiredData>();
-        shots.Value++;
+        var shots = bb.GetData<ShotsFiredData>();
+        shots = shots with { Value = shots.Value + 1 };
+        bb.SetData(shots);
         Console.WriteLine($"Fired shot #{shots.Value}");
         return NodeState.Success;
     }

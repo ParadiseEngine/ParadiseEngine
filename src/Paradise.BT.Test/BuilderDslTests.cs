@@ -164,6 +164,7 @@ public sealed class BuilderDslTests
     // delegate, but fine for tests" — it was the last node in the library whose data was managed,
     // and so could not live in a blob at all.
     [System.Runtime.InteropServices.Guid("E1234567-ABCD-4321-FEDC-BA9876543210")]
+    [Writes<ProbeData>]
     internal struct CounterNode : INodeData
     {
         public int Slot;
@@ -172,7 +173,9 @@ public sealed class BuilderDslTests
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {
-            bb.GetDataRef<ProbeData>().Counts[Slot]++;
+            var probe = bb.GetData<ProbeData>();
+            probe.Counts[Slot]++;
+            bb.SetData(probe);
             return NodeState.Success;
         }
     }

@@ -35,8 +35,7 @@ public sealed class BindingGeneratorTests
             {
                 bool HasData<T>() where T : struct;
                 T GetData<T>() where T : struct;
-                [System.Diagnostics.CodeAnalysis.UnscopedRef]
-                ref T GetDataRef<T>() where T : struct;
+                void SetData<T>(T value) where T : struct;
             }
 
             public interface INodeData
@@ -149,7 +148,7 @@ public sealed class BindingGeneratorTests
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
-                        bb.GetDataRef<Decision>().Strike = true;
+                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
                         _ = bb.GetData<ChaseIntent>().X + bb.GetData<WorldTransform>().X;
                         return Paradise.BT.NodeState.Success;
                     }

@@ -9,8 +9,6 @@ public sealed class GenericBlackboardTests
 
         public bool HasData<T>() where T : struct => _inner.HasData<T>();
         public T GetData<T>() where T : struct => _inner.GetData<T>();
-        public ref T GetDataRef<T>() where T : struct => ref _inner.GetDataRef<T>();
-
         public void SetData<T>(T value) where T : struct
         {
             SetDataCount++;
