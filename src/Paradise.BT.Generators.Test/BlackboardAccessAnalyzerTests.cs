@@ -34,7 +34,7 @@ public class BlackboardAccessAnalyzerTests
 
             public interface INodeData
             {
-                NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+                NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                     where TNodeBlob : struct, INodeBlob
                     where TBlackboard : struct, IBlackboard;
             }
@@ -68,7 +68,7 @@ public class BlackboardAccessAnalyzerTests
                 public struct PeekNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, ref TNodeBlob blob, ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
@@ -100,7 +100,7 @@ public class BlackboardAccessAnalyzerTests
                 public struct StrikeNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, ref TNodeBlob blob, ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
@@ -131,7 +131,7 @@ public class BlackboardAccessAnalyzerTests
                 public struct SeekNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, ref TNodeBlob blob, ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
@@ -156,16 +156,16 @@ public class BlackboardAccessAnalyzerTests
             {
                 public struct DelegatingNode : Paradise.BT.INodeData
                 {
-                    private static void Helper<TBlackboard>(ref TBlackboard bb)
+                    private static void Helper<TBlackboard>(TBlackboard bb)
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                         => bb.SetData(default(Decision));
 
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, ref TNodeBlob blob, ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
-                        Helper(ref bb);
+                        Helper(bb);
                         return Paradise.BT.NodeState.Success;
                     }
                 }
@@ -179,7 +179,7 @@ public class BlackboardAccessAnalyzerTests
             CSharpAnalyzerVerifier<BlackboardAccessAnalyzer, DefaultVerifier>
                 .Diagnostic(BlackboardAccessAnalyzer.s_blackboardEscapes)
                 .WithArguments("DelegatingNode", "Helper")
-                .WithSpan(47, 13, 47, 27));
+                .WithSpan(47, 13, 47, 23));
 
         await test.RunAsync().ConfigureAwait(false);
     }
@@ -193,7 +193,7 @@ public class BlackboardAccessAnalyzerTests
             {
                 public static class Host
                 {
-                    public static void Drive<TBlackboard>(ref TBlackboard bb)
+                    public static void Drive<TBlackboard>(TBlackboard bb)
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
                         _ = bb.GetData<Pose>();

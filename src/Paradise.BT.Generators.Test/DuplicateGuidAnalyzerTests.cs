@@ -26,7 +26,7 @@ public class DuplicateGuidAnalyzerTests
                 public interface IBlackboard { }
                 public interface INodeData
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard;
                 }
@@ -34,7 +34,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("11111111-1111-1111-1111-111111111111")]
                 public struct NodeA : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {
@@ -45,7 +45,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("11111111-1111-1111-1111-111111111111")]
                 public struct NodeB : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {
@@ -83,7 +83,7 @@ public class DuplicateGuidAnalyzerTests
                 public interface IBlackboard { }
                 public interface INodeData
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard;
                 }
@@ -91,7 +91,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("11111111-1111-1111-1111-111111111111")]
                 public struct NodeA : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {
@@ -102,7 +102,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("22222222-2222-2222-2222-222222222222")]
                 public struct NodeB : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {
@@ -133,7 +133,7 @@ public class DuplicateGuidAnalyzerTests
                 public interface IBlackboard { }
                 public interface INodeData
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard;
                 }
@@ -176,7 +176,7 @@ public class DuplicateGuidAnalyzerTests
                 public interface IBlackboard { }
                 public interface INodeData
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard;
                 }
@@ -184,7 +184,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")]
                 public struct NodeA : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {
@@ -195,7 +195,7 @@ public class DuplicateGuidAnalyzerTests
                 [Guid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")]
                 public struct NodeB : INodeData
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, INodeBlob
                         where TBlackboard : struct, IBlackboard
                     {

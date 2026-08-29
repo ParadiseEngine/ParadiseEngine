@@ -5,7 +5,7 @@ namespace Paradise.BT;
 /// </summary>
 public interface INodeData
 {
-    NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct;
 
@@ -18,7 +18,7 @@ public interface INodeData
     /// 237,552 B before, 0 after. The cost is that Reset cannot read the node's own fields —
     /// nothing wanted to.
     /// </summary>
-    static virtual void Reset<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    static virtual void Reset<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {

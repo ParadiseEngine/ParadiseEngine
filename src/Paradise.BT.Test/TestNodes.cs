@@ -53,7 +53,7 @@ public struct ProbeNode : INodeData
     public ProbeRule Rule;
     public int Threshold;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -79,7 +79,7 @@ public struct ProbeNode : INodeData
 [Reads<BehaviorTreeTickDeltaTime>]
 public struct RecordDeltaTimeNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {

@@ -47,8 +47,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
     private static readonly DiagnosticDescriptor s_componentWriteUnsupported = new(
         id: "PBT0008",
-        title: "Writing a component from a node is not supported",
-        messageFormat: "Node '{0}' declares [Writes<{1}>], and {1} is an ECS component. A blackboard holding a writable reference into chunk memory cannot be passed to the virtual machine under the current ref-safety rules, so components are bound by value and are read-only. Have the node write a non-component conclusion the system applies instead.",
+        title: "Node writes a component the queryable does not grant",
+        messageFormat: "Node '{0}' declares [Writes<{1}>], but queryable '{2}' {3}. A tree cannot write through a claim it does not hold.",
         category: "Paradise.BT.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -553,14 +553,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                if (a.IsComponent && a.Kind == AccessKind.Write)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        s_componentWriteUnsupported, binding.Location, a.DeclaringNode, a.TypeName));
-                    refused = true;
-                    continue;
-                }
-
                 if (a.IsComponent && !Verify(spc, binding, queryable, a))
                 {
                     refused = true;
@@ -605,9 +597,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
             }
         }
 
+        bool write = access.Kind == AccessKind.Write;
+
         string? problem =
             !claimed ? "does not claim it"
             : claim.QueryOnly ? "claims it QueryOnly, which generates no accessor"
+            : write && claim.IsReadOnly ? "claims it IsReadOnly = true"
             : null;
 
         if (problem is null)
@@ -616,7 +611,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         spc.ReportDiagnostic(Diagnostic.Create(
-            s_readsUnclaimed,
+            write ? s_componentWriteUnsupported : s_readsUnclaimed,
             binding.Location,
             access.DeclaringNode,
             access.TypeName,
@@ -652,84 +647,53 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        // ----- extras -----
-        sb.AppendLine("/// <summary>What " + binding.ClassName + "'s tree WRITES, for the caller to");
-        sb.AppendLine("/// read back. Everything the tree only reads is a Bind parameter instead.</summary>");
-        sb.AppendLine("public struct " + extras);
-        sb.AppendLine("{");
-        foreach (Access a in outputs)
-        {
-            sb.AppendLine("    public global::" + a.TypeFqn + " " + a.TypeName + ";");
-        }
-
-        if (outputs.Length == 0)
-        {
-            sb.AppendLine("    // This tree concludes nothing: every node only reads.");
-        }
-
-        sb.AppendLine("}");
-        sb.AppendLine();
-
         // ----- blackboard -----
         sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard, over one " + queryable.Fqn + " row.");
         sb.AppendLine("///");
-        sb.AppendLine("/// Components are copied in BY VALUE and are read-only; what the tree concludes goes");
-        sb.AppendLine("/// into Extras, which the caller reads back. An ordinary struct, not a ref struct:");
-        sb.AppendLine("/// holding refs or spans into chunk memory makes it unpassable to VirtualMachine.Tick");
-        sb.AppendLine("/// (CS8350/CS8352), and with only value fields there is nothing a ref struct would buy.");
+        sb.AppendLine("/// Holds a REFERENCE to everything it touches: what the tree reads by");
+        sb.AppendLine("/// <c>ref readonly</c>, what it writes by <c>ref</c>, so a write lands in the caller's own");
+        sb.AppendLine("/// storage — a component in chunk memory, a conclusion in a local. Nothing is copied and");
+        sb.AppendLine("/// there is nothing to read back out of.");
+        sb.AppendLine("///");
+        sb.AppendLine("/// A ref struct, therefore, which is why the virtual machine takes a blackboard BY VALUE.");
+        sb.AppendLine("/// Passed by <c>ref</c> instead, this would be unusable: CS8350/CS8352 reject the");
+        sb.AppendLine("/// combination of two by-ref arguments whose contents could capture each other.");
         sb.AppendLine("/// </summary>");
-        sb.AppendLine("public struct " + bb + " : global::Paradise.BT.IBlackboard");
+        sb.AppendLine("public readonly ref struct " + bb + " : global::Paradise.BT.IBlackboard");
         sb.AppendLine("{");
-        // Components are copied in BY VALUE. A blackboard holding refs or spans into chunk
-        // memory cannot be passed as `ref` to VirtualMachine.Tick (CS8350/CS8352) — ref fields,
-        // one-element spans, call-site resolution, and `scoped` on both parameters and the local
-        // were all tried and none help, because `TBlackboard allows ref struct` makes the compiler
-        // assume the worst about an unsubstituted type parameter. A copy has no scope to reason
-        // about. The cost is a memcpy per component per tick; the limit is that a node cannot
-        // WRITE a component (PBT0008) until that is solved.
-        foreach (Access a in inputs)
+        foreach (Access a in access)
         {
-            sb.AppendLine("    private readonly global::" + a.TypeFqn + " " + Field(a) + ";");
+            string modifier = a.Kind == AccessKind.Write ? "ref" : "ref readonly";
+            sb.AppendLine("    private readonly " + modifier + " global::" + a.TypeFqn + " " + Field(a) + ";");
         }
 
-        sb.AppendLine("    /// <summary>The non-component data, held BY VALUE. The caller reads back what the");
-        sb.AppendLine("    /// tree wrote from here.</summary>");
-        sb.AppendLine("    public " + extras + " Extras;");
+        if (access.Length == 0)
+        {
+            sb.AppendLine("    // This tree touches nothing.");
+        }
+
         sb.AppendLine();
 
-        // One ref per component, taken from the segment indexer — the same shape
-        // BehaviorTreeState.BlobOf uses to hand a chunk ref to UnmanagedNodeBlob.
-        var ctorParams = inputs
-            .Select(a => "in global::" + a.TypeFqn + " " + Param(a))
-            .Concat(new[] { "in " + extras + " extras" });
+        var ctorParams = access.Select(a =>
+            (a.Kind == AccessKind.Write ? "ref global::" : "in global::") + a.TypeFqn + " " + Param(a));
         sb.AppendLine("    public " + bb + "(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("    {");
-        foreach (Access a in inputs)
+        foreach (Access a in access)
         {
-            sb.AppendLine("        " + Field(a) + " = " + Param(a) + ";");
+            sb.AppendLine("        " + Field(a) + " = ref " + Param(a) + ";");
         }
 
-        sb.AppendLine("        Extras = extras;");
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // Every input by value; only what the tree writes comes back, through Extras.
         sb.AppendLine("    /// <summary>");
-        sb.AppendLine("    /// Wire one row in:");
-        sb.AppendLine("    /// <code>");
-        sb.Append("    /// var bb = " + bb + ".Bind(");
-        sb.AppendLine(string.Join(
-            ", ",
-            inputs.Select(a =>
-                "in rows." + PropertyOf(queryable, a) + "[i]")
-                .Concat(new[] { "in extras" })));
-        sb.AppendLine("    /// </code>");
+        sb.AppendLine("    /// Wire one row in. Pass arguments BY NAME: they are ordered by type name, so adding");
+        sb.AppendLine("    /// a node can reorder them, and two of the same type would transpose in silence.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine("    public static " + bb + " Bind(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("        => new(" + string.Join(
             ", ",
-            inputs.Select(a => "in " + Param(a))
-                .Concat(new[] { "in extras" })) + ");");
+            access.Select(a => (a.Kind == AccessKind.Write ? "ref " : "in ") + Param(a))) + ");");
         sb.AppendLine();
 
         // HasData
@@ -750,23 +714,13 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // GetData
         sb.AppendLine("    public T GetData<T>() where T : struct");
         sb.AppendLine("    {");
-        foreach (Access a in inputs)
+        foreach (Access a in access)
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
             sb.AppendLine("            global::" + a.TypeFqn + " value = " + Field(a) + ";");
             sb.AppendLine("            return global::System.Runtime.CompilerServices.Unsafe"
                 + ".As<global::" + a.TypeFqn + ", T>(ref value);");
-            sb.AppendLine("        }");
-            sb.AppendLine();
-        }
-
-        foreach (Access a in outputs)
-        {
-            sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
-            sb.AppendLine("        {");
-            sb.AppendLine("            return global::System.Runtime.CompilerServices.Unsafe"
-                + ".As<global::" + a.TypeFqn + ", T>(ref Extras." + a.TypeName + ");");
             sb.AppendLine("        }");
             sb.AppendLine();
         }
@@ -778,11 +732,11 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // SetData
         sb.AppendLine("    public void SetData<T>(T value) where T : struct");
         sb.AppendLine("    {");
-        foreach (Access a in outputs)
+        foreach (Access a in access.Where(a => a.Kind == AccessKind.Write))
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
-            sb.AppendLine("            Extras." + a.TypeName
+            sb.AppendLine("            " + Field(a)
                 + " = global::System.Runtime.CompilerServices.Unsafe"
                 + ".As<T, global::" + a.TypeFqn + ">(ref value);");
             sb.AppendLine("            return;");
@@ -790,18 +744,16 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        // Components are bound by value, so a write could not reach the chunk. PBT0008 refuses a
-        // node that DECLARES the write and PBT0009 one that merely performs it, so this is only
-        // reachable through a hand-written blackboard or reflection — but silence here would be a
-        // write that vanishes.
-        foreach (Access a in inputs)
+        // Held by `ref readonly`, so there is nowhere for a write to go. PBT0009 refuses a node
+        // that performs one and PBT0008 one that declares it, leaving this reachable only through
+        // a hand-written blackboard — where silence would be a write that vanishes.
+        foreach (Access a in access.Where(a => a.Kind != AccessKind.Write))
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
             sb.AppendLine("        {");
             sb.AppendLine("            throw new global::System.InvalidOperationException(");
-            sb.AppendLine("                \"'" + a.TypeName + "' is a component, bound BY VALUE, so writing it here \"");
-            sb.AppendLine("                + \"would not reach the chunk. Read it with GetData<" + a.TypeName + ">(), \"");
-            sb.AppendLine("                + \"and write a conclusion the system applies.\");");
+            sb.AppendLine("                \"'" + a.TypeName + "' is bound read-only: no node declares [Writes<\"");
+            sb.AppendLine("                + \"" + a.TypeName + ">], so the caller passed it by `in`.\");");
             sb.AppendLine("        }");
             sb.AppendLine();
         }

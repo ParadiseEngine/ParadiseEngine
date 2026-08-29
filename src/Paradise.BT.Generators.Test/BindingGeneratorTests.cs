@@ -40,7 +40,7 @@ public sealed class BindingGeneratorTests
 
             public interface INodeData
             {
-                NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
                     where TNodeBlob : struct, INodeBlob, allows ref struct
                     where TBlackboard : struct, IBlackboard, allows ref struct;
             }
@@ -153,7 +153,7 @@ public sealed class BindingGeneratorTests
                 public struct SeekNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -178,36 +178,35 @@ public sealed class BindingGeneratorTests
         // The component split. Components resolve off the row on demand — segments plus an index,
         // never a ref field, because a ref struct holding ref fields cannot be passed as `ref` to
         // the VM. The non-component lands in the extras struct rather than being sought on the row.
-        await Assert.That(generated).Contains("private readonly global::Game.WorldTransform _worldTransform;");
-        await Assert.That(generated).Contains("public global::Game.Decision Decision;");
+        await Assert.That(generated).Contains("ref readonly global::Game.WorldTransform _worldTransform;");
+        await Assert.That(generated).Contains("ref global::Game.Decision decision");
 
         // Read-only reads the row by value; writable hands out a ref straight into the chunk.
-        // A plain struct, NOT a ref struct. Load-bearing: a ref-struct blackboard cannot be passed
-        // as `ref` to VirtualMachine.Tick, and with only value fields it buys nothing anyway.
-        await Assert.That(generated).Contains("public struct EnemyTreeBlackboard");
-        await Assert.That(generated).DoesNotContain("public ref struct EnemyTreeBlackboard");
+        // A ref struct, holding a reference to everything it touches. Passable because the VM
+        // takes a blackboard BY VALUE; by `ref` this shape is rejected outright.
+        await Assert.That(generated).Contains("public readonly ref struct EnemyTreeBlackboard");
 
-        // A read-only claim must never yield a writable ref — that is the SingleWriter hole.
-        await Assert.That(generated).Contains("is a component, bound BY VALUE");
+        // Read-only access is held by `ref readonly`, so SetData on it has nowhere to go.
+        await Assert.That(generated).Contains("is bound read-only");
 
         // The one that matters: what was emitted is legal C#, ref-safety included.
         await Assert.That(compileErrors).IsEmpty();
     }
 
-    /// <summary>Component writes are refused wholesale while the blackboard binds by value —
-    /// including ChaseIntent, which the queryable DOES grant writable. The claim is not the
-    /// obstacle; getting a writable chunk reference into a node is.</summary>
+    /// <summary>A component write is allowed, but only through a claim that grants it. The
+    /// blackboard holds a ref, so the write reaches the chunk — which is exactly why the claim has
+    /// to be checked.</summary>
     [Test]
-    public async Task Writing_A_Component_Is_Refused_Even_When_The_Claim_Allows_It()
+    public async Task Writing_A_Component_The_Claim_Makes_ReadOnly_Is_Refused()
     {
         var (diagnostics, _, _) = Run(Prelude + World + """
             namespace Game
             {
-                [Paradise.BT.Writes<ChaseIntent>]
+                [Paradise.BT.Writes<WorldTransform>]
                 public struct ShoveNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
@@ -223,7 +222,7 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0008");
         await Assert.That(diagnostics[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture))
-            .Contains("bound by value");
+            .Contains("claims it IsReadOnly = true");
     }
 
     [Test]
@@ -236,7 +235,7 @@ public sealed class BindingGeneratorTests
                 public struct CheckNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
@@ -264,7 +263,7 @@ public sealed class BindingGeneratorTests
                 public struct MaybeNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
@@ -310,7 +309,7 @@ public sealed class BindingGeneratorTests
                 public struct PlainNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
@@ -327,7 +326,7 @@ public sealed class BindingGeneratorTests
         // Structure-only nodes are the normal case and are not an error.
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("This tree concludes nothing");
+        await Assert.That(string.Join("\n", sources)).Contains("This tree touches nothing");
     }
 
     /// <summary>
@@ -344,7 +343,7 @@ public sealed class BindingGeneratorTests
                 public struct TimerNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
@@ -383,7 +382,7 @@ public sealed class BindingGeneratorTests
                 public struct SilentNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -406,17 +405,16 @@ public sealed class BindingGeneratorTests
         await Assert.That(compileErrors).IsEmpty();
 
         string generated = string.Join("\n", sources);
-        await Assert.That(generated).Contains("private readonly global::Game.WorldTransform _worldTransform;");
-        await Assert.That(generated).Contains("public global::Game.Decision Decision;");
+        await Assert.That(generated).Contains("ref readonly global::Game.WorldTransform _worldTransform;");
+        await Assert.That(generated).Contains("ref global::Game.Decision decision");
     }
 
     /// <summary>
-    /// The read/write split survives the scan: SetData on a COMPONENT is refused exactly as a
-    /// declared [Writes&lt;T&gt;] would be, so the body cannot smuggle past what the attribute
-    /// cannot say.
+    /// The scan carries the same weight as a declaration: a component write performed only in the
+    /// BODY is checked against the claim exactly as a declared one is.
     /// </summary>
     [Test]
-    public async Task A_Component_Write_Is_Refused_Even_When_Only_The_Body_Says_So()
+    public async Task A_Component_Write_Is_Checked_Even_When_Only_The_Body_Says_So()
     {
         var (diagnostics, _, _) = Run(Prelude + World + """
             namespace Game
@@ -424,11 +422,11 @@ public sealed class BindingGeneratorTests
                 public struct ShoveNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
-                        bb.SetData(bb.GetData<ChaseIntent>() with { X = 1f });
+                        bb.SetData(bb.GetData<WorldTransform>() with { X = 1f });
                         return Paradise.BT.NodeState.Success;
                     }
                 }
@@ -458,7 +456,7 @@ public sealed class BindingGeneratorTests
                 public struct HiddenNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -484,7 +482,7 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+        await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
     /// <summary>
@@ -510,7 +508,7 @@ public sealed class BindingGeneratorTests
                 public struct HiddenNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -532,7 +530,7 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+        await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
     /// <summary>
@@ -554,7 +552,7 @@ public sealed class BindingGeneratorTests
                 public struct HiddenNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -573,7 +571,7 @@ public sealed class BindingGeneratorTests
             """);
 
         await Assert.That(diagnostics).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+        await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
     /// <summary>
@@ -599,7 +597,7 @@ public sealed class BindingGeneratorTests
                 public struct HiddenNode : Paradise.BT.INodeData
                 {
                     public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+                        int index, TNodeBlob blob, TBlackboard bb)
                         where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
@@ -626,7 +624,7 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics).IsEmpty();
         await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("public global::Game.Decision Decision;");
+        await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
     // ===================== harness =====================

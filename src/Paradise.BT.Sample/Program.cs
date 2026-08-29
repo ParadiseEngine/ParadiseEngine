@@ -37,9 +37,9 @@ for (int i = 0; i < 10; i++)
 // ---------------------------------------------------------------------------------------------
 // 2. The GENERATED blackboard, over an ECS row.
 //
-// Nothing below names a blackboard type that anyone wrote. ForagerTreeBlackboard and
-// ForagerTreeExtras were emitted from what the tree's eleven node types declare with
-// [Reads<T>] / [Writes<T>], checked against ForagerRow's claims.
+// Nothing below names a blackboard type that anyone wrote. ForagerTreeBlackboard was emitted from
+// what the tree's node types declare with [Reads<T>] / [Writes<T>], checked against ForagerRow's
+// claims. It holds a ref to each value, so a write lands in the local passed to Bind.
 //
 // Running it under PublishAot is the part worth having: generated code plus trimming plus native
 // compilation is where this would break first if it were going to.
@@ -76,40 +76,41 @@ foreach ((string label, Senses senses, float energy) in situations)
 {
     stamina = stamina with { Value = energy };
 
-    // Extras carry what the tree WRITES; everything it reads is a parameter, delta time included.
-    var extras = default(ForagerTreeExtras);
+    // The tree writes straight into these: the blackboard holds a ref to each.
+    var intent = default(Intent);
+    var decisions = default(Decisions);
     var bb = ForagerTreeBlackboard.Bind(
-        behaviorTreeTickDeltaTime: deltaTime,
-        position: position,
-        senses: senses,
-        stamina: stamina,
-        extras: extras);
+        behaviorTreeTickDeltaTime: in deltaTime,
+        decisions: ref decisions,
+        intent: ref intent,
+        position: in position,
+        senses: in senses,
+        stamina: in stamina);
     var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
 
     if (blob.GetState(0).IsCompleted())
     {
-        VirtualMachine.Reset(ref blob, ref bb);
+        VirtualMachine.Reset(blob, bb);
     }
 
-    NodeState state = VirtualMachine.Tick(ref blob, ref bb);
-    Intent intent = bb.Extras.Intent;
+    NodeState state = VirtualMachine.Tick(blob, bb);
 
     Console.WriteLine(
         $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
         + (intent.HasGoal ? $"goal x={intent.GoalX:0.0}" : "no goal")
-        + $"  (decisions so far: {bb.Extras.Decisions.Count})");
+        + $"  (decisions so far: {decisions.Count})");
 }
 
 // ---------------------------------------------------------------------------------------------
 // 3. How a tree CHANGES anything, given that components are read-only to it.
 //
-// A node cannot write Position: components bind by value, so the write would not reach the chunk,
-// and PBT0008 refuses a node that tries. What a node writes is a CONCLUSION — here Intent — which
+// A node COULD write Position now — the blackboard holds a ref to it — but only if ForagerRow
+// claimed it writable, which it does not. What these nodes write is a CONCLUSION, Intent, which
 // the caller applies. In the game that caller is EnemySystem, turning the goal into a steering
 // intent; here it is this loop, walking the forager toward whatever the tree decided.
 //
-// That round trip is the point: read components, write extras, apply, read again. It is also why
-// the same tree can drive a body steered any way you like.
+// That round trip is the point: read, conclude, apply, read again — and it is why the same tree
+// can drive a body steered any way you like.
 // ---------------------------------------------------------------------------------------------
 
 Console.WriteLine();
@@ -121,22 +122,23 @@ var world = new Senses { FoodVisible = true, FoodX = 4f };
 
 for (int step = 1; step <= 5; step++)
 {
-    var extras = default(ForagerTreeExtras);
+    var intent = default(Intent);
+    var decisions = default(Decisions);
     var bb = ForagerTreeBlackboard.Bind(
-        behaviorTreeTickDeltaTime: deltaTime,
-        position: position,
-        senses: world,
-        stamina: stamina,
-        extras: extras);
+        behaviorTreeTickDeltaTime: in deltaTime,
+        decisions: ref decisions,
+        intent: ref intent,
+        position: in position,
+        senses: in world,
+        stamina: in stamina);
     var blob = new UnmanagedNodeBlob(layout.Handle, states, data);
 
     if (blob.GetState(0).IsCompleted())
     {
-        VirtualMachine.Reset(ref blob, ref bb);
+        VirtualMachine.Reset(blob, bb);
     }
 
-    VirtualMachine.Tick(ref blob, ref bb);
-    Intent intent = bb.Extras.Intent;
+    VirtualMachine.Tick(blob, bb);
 
     // The caller owns the component, so the caller applies the decision.
     float before = position.X;

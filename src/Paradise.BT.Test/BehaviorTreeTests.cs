@@ -18,7 +18,7 @@ public sealed class BehaviorTreeTests
     [Reads<PreTickData>]
     internal struct ReadBlackboardNode : INodeData
     {
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {
@@ -32,7 +32,7 @@ public sealed class BehaviorTreeTests
     {
         public int Count;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {
@@ -47,7 +47,7 @@ public sealed class BehaviorTreeTests
     {
         public int Count;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {
@@ -55,7 +55,7 @@ public sealed class BehaviorTreeTests
             return Count >= 2 ? NodeState.Success : NodeState.Running;
         }
 
-        public static void Reset<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        public static void Reset<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {

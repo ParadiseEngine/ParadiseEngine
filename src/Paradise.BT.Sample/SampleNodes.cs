@@ -14,7 +14,7 @@ using Paradise.BT;
 [Builder]
 public struct HasTargetNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<HasTargetData>().Value.ToNodeState();
@@ -26,7 +26,7 @@ public struct HasTargetNode : INodeData
 [Builder]
 public struct FireShotNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -43,7 +43,7 @@ public struct FireShotNode : INodeData
 [Builder]
 public struct IdleNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {

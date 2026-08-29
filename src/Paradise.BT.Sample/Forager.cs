@@ -88,7 +88,7 @@ public struct ThreatNearNode : INodeData
     public float PanicStamina;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => (bb.GetData<Senses>().ThreatNear && bb.GetData<Stamina>().Value > PanicStamina)
@@ -101,7 +101,7 @@ public struct ThreatNearNode : INodeData
 public struct FoodVisibleNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<Senses>().FoodVisible.ToNodeState();
@@ -115,7 +115,7 @@ public struct ExhaustedNode : INodeData
     public float RestBelow;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => (bb.GetData<Stamina>().Value < RestBelow).ToNodeState();
@@ -143,7 +143,7 @@ public struct ForageWorthItNode : INodeData
     public bool RequireVisible;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -166,7 +166,7 @@ public struct ForageWorthItNode : INodeData
 public struct AlreadyDecidedNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<Intent>().HasGoal.ToNodeState();
@@ -182,7 +182,7 @@ public struct FleeNode : INodeData
     public float Distance;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -208,7 +208,7 @@ public struct SeekFoodNode : INodeData
     public float ArriveWithin;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -232,7 +232,7 @@ public struct SeekFoodNode : INodeData
 public struct RestNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -254,7 +254,7 @@ public struct RestNode : INodeData
 public struct TallyNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -270,7 +270,7 @@ public struct TallyNode : INodeData
 public struct NoopNode : INodeData
 {
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => NodeState.Success;

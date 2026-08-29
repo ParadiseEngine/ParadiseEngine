@@ -63,7 +63,7 @@ public sealed class UnmanagedBlobTests
         public void Reset(ref Blackboard bb)
         {
             UnmanagedNodeBlob blob = Blob;
-            VirtualMachine.Reset(ref blob, ref bb);
+            VirtualMachine.Reset(blob, bb);
         }
 
         /// <summary>Mirrors <see cref="BehaviorTreeInstance{T}.Tick"/>, auto-reset included, so the
@@ -74,10 +74,10 @@ public sealed class UnmanagedBlobTests
             UnmanagedNodeBlob blob = Blob;
             if (Status.IsCompleted())
             {
-                VirtualMachine.Reset(ref blob, ref bb);
+                VirtualMachine.Reset(blob, bb);
             }
 
-            return VirtualMachine.Tick(ref blob, ref bb);
+            return VirtualMachine.Tick(blob, bb);
         }
 
         /// <summary>Copy this instance's whole state over another's — a world snapshot, in
@@ -243,7 +243,7 @@ public sealed class UnmanagedBlobTests
     [System.Runtime.InteropServices.Guid("6D6F4F4F-2C4F-4E8B-9F1D-5B2A7C3E0A11")]
     private struct UnregisteredNode : INodeData
     {
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
             => NodeState.Success;

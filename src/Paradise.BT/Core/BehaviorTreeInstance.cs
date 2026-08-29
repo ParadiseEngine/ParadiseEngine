@@ -57,12 +57,12 @@ public class BehaviorTreeInstance<TBlackboard>
         }
 
         UnmanagedNodeBlob blob = Blob;
-        return VirtualMachine.Tick(ref blob, ref _blackboard);
+        return VirtualMachine.Tick(blob, _blackboard);
     }
 
     public void Reset()
     {
         UnmanagedNodeBlob blob = Blob;
-        VirtualMachine.Reset(ref blob, ref _blackboard);
+        VirtualMachine.Reset(blob, _blackboard);
     }
 }

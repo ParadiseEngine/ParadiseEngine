@@ -4,7 +4,7 @@ namespace Paradise.BT.Nodes;
 [Builder(NodeCardinality.Composite)]
 public struct ParallelNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -14,7 +14,7 @@ public struct ParallelNode : INodeData
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            flags |= previousState.IsCompleted() ? previousState : VirtualMachine.Tick(childIndex, ref blob, ref bb);
+            flags |= previousState.IsCompleted() ? previousState : VirtualMachine.Tick(childIndex, blob, bb);
             childIndex = blob.GetEndIndex(childIndex);
         }
 

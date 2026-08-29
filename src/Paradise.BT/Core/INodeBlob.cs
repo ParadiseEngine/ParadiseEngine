@@ -45,7 +45,7 @@ public interface INodeBlob
 /// </summary>
 public static class NodeBlobExtensions
 {
-    public static int FirstOrDefaultChildIndex<TNodeBlob>(this scoped ref TNodeBlob blob, int parentIndex, Predicate<NodeState> predicate)
+    public static int FirstOrDefaultChildIndex<TNodeBlob>(this TNodeBlob blob, int parentIndex, Predicate<NodeState> predicate)
         where TNodeBlob : struct, INodeBlob, allows ref struct
     {
         int endIndex = blob.GetEndIndex(parentIndex);
@@ -63,7 +63,7 @@ public static class NodeBlobExtensions
         return default;
     }
 
-    public static int ParentIndex<TNodeBlob>(this scoped ref TNodeBlob blob, int childIndex)
+    public static int ParentIndex<TNodeBlob>(this TNodeBlob blob, int childIndex)
         where TNodeBlob : struct, INodeBlob, allows ref struct
     {
         int endIndex = blob.GetEndIndex(childIndex);
@@ -80,7 +80,7 @@ public static class NodeBlobExtensions
 
     /// <summary>Restore a run of nodes' authored data — what restarts a timer on reset. One copy,
     /// because nodes are laid out contiguously.</summary>
-    public static void ResetRuntimeData<TNodeBlob>(this scoped ref TNodeBlob blob, int index, int count = 1)
+    public static void ResetRuntimeData<TNodeBlob>(this TNodeBlob blob, int index, int count = 1)
         where TNodeBlob : struct, INodeBlob, allows ref struct
     {
         int size = blob.GetNodeDataSize(index, count);
@@ -92,13 +92,13 @@ public static class NodeBlobExtensions
     }
 
     /// <summary>A node's live data, typed.</summary>
-    public static ref T GetNodeData<T, TNodeBlob>(this scoped ref TNodeBlob blob, int index)
+    public static ref T GetNodeData<T, TNodeBlob>(this TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct
         => ref Unsafe.As<byte, T>(ref blob.RuntimeData(index));
 
     /// <inheritdoc cref="GetNodeData{T, TNodeBlob}"/>
-    public static ref T GetNodeDefaultData<T, TNodeBlob>(this scoped ref TNodeBlob blob, int index)
+    public static ref T GetNodeDefaultData<T, TNodeBlob>(this TNodeBlob blob, int index)
         where T : struct
         where TNodeBlob : struct, INodeBlob, allows ref struct
         => ref Unsafe.As<byte, T>(ref blob.DefaultData(index));

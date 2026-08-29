@@ -7,15 +7,15 @@ public struct RepeatTimesNode : INodeData
     public int TickTimes;
     public NodeState BreakStates;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState childState = index.TickChild(ref blob, ref bb);
+        NodeState childState = index.TickChild(blob, bb);
         if (childState == 0)
         {
-            index.ResetChildren(ref blob, ref bb);
-            childState = index.TickChild(ref blob, ref bb);
+            index.ResetChildren(blob, bb);
+            childState = index.TickChild(blob, bb);
         }
 
         if (BreakStates.HasFlagFast(childState))

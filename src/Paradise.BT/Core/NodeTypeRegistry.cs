@@ -111,12 +111,12 @@ internal interface INodeInvoker
     int Size { get; }
 
     NodeState Tick<TNodeBlob, TBlackboard>(
-        scoped ref byte data, int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        scoped ref byte data, int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct;
 
     void Reset<TNodeBlob, TBlackboard>(
-        scoped ref byte data, int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        scoped ref byte data, int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct;
 }
@@ -134,16 +134,16 @@ internal sealed class NodeInvoker<TNodeData> : INodeInvoker
     /// place, so a node writing its own fields (every timer) persists to the next tick. Binding to
     /// a local first would compile and silently reset every timer each frame.</summary>
     public NodeState Tick<TNodeBlob, TBlackboard>(
-        scoped ref byte data, int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        scoped ref byte data, int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => Unsafe.As<byte, TNodeData>(ref data).Tick(index, ref blob, ref bb);
+        => Unsafe.As<byte, TNodeData>(ref data).Tick(index, blob, bb);
 
     /// <summary>Through the TYPE: <c>Reset</c> is static, so no receiver is needed. The
     /// <c>ref byte</c> stays only because <see cref="Tick"/> shares the signature.</summary>
     public void Reset<TNodeBlob, TBlackboard>(
-        scoped ref byte data, int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+        scoped ref byte data, int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => TNodeData.Reset(index, ref blob, ref bb);
+        => TNodeData.Reset(index, blob, bb);
 }

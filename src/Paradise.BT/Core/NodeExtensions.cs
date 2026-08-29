@@ -5,49 +5,49 @@ namespace Paradise.BT;
 /// </summary>
 public static class NodeExtensions
 {
-    public static void ResetChildren<TNodeBlob, TBlackboard>(this int parentIndex, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
+    public static void ResetChildren<TNodeBlob, TBlackboard>(this int parentIndex, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int firstChildIndex = parentIndex + 1;
         int lastChildIndex = blob.GetEndIndex(parentIndex);
         int childCount = lastChildIndex - firstChildIndex;
-        VirtualMachine.Reset(firstChildIndex, ref blob, ref bb, childCount);
+        VirtualMachine.Reset(firstChildIndex, blob, bb, childCount);
     }
 
     public static NodeState TickChildrenReturnLastOrDefault<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        scoped ref TNodeBlob blob,
-        scoped ref TBlackboard bb,
+        TNodeBlob blob,
+        TBlackboard bb,
         Predicate<NodeState> breakCheck)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => TickChildrenReturnBreakOrDefault(parentIndex, ref blob, ref bb, breakCheck, static state => !state.IsCompleted());
+        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, breakCheck, static state => !state.IsCompleted());
 
     public static NodeState TickChildrenReturnFirstOrDefault<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        scoped ref TNodeBlob blob,
-        scoped ref TBlackboard bb)
+        TNodeBlob blob,
+        TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => TickChildrenReturnBreakOrDefault(parentIndex, ref blob, ref bb, static _ => true, static state => !state.IsCompleted());
+        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, static _ => true, static state => !state.IsCompleted());
 
     public static NodeState TickChild<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        scoped ref TNodeBlob blob,
-        scoped ref TBlackboard bb)
+        TNodeBlob blob,
+        TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
-        return childIndex < endIndex ? VirtualMachine.Tick(childIndex, ref blob, ref bb) : 0;
+        return childIndex < endIndex ? VirtualMachine.Tick(childIndex, blob, bb) : 0;
     }
 
     private static NodeState TickChildrenReturnBreakOrDefault<TNodeBlob, TBlackboard>(
         int parentIndex,
-        scoped ref TNodeBlob blob,
-        scoped ref TBlackboard bb,
+        TNodeBlob blob,
+        TBlackboard bb,
         Predicate<NodeState> breakCheck,
         Predicate<NodeState> tickCheck)
         where TNodeBlob : struct, INodeBlob, allows ref struct
@@ -59,7 +59,7 @@ public static class NodeExtensions
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            NodeState currentState = tickCheck(previousState) ? VirtualMachine.Tick(childIndex, ref blob, ref bb) : 0;
+            NodeState currentState = tickCheck(previousState) ? VirtualMachine.Tick(childIndex, blob, bb) : 0;
             lastState = currentState == 0 ? previousState : currentState;
             if (breakCheck(lastState))
             {
