@@ -4,12 +4,14 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// The only <see cref="INodeBlob"/>: a borrowed <see cref="BehaviorTreeLayoutHandle"/> for what
-/// the tree shares, plus two caller-owned spans for what one instance owns — a
+/// The only <see cref="INodeBlob"/>: a borrowed <see cref="BehaviorTreeLayoutHandle"/> for the
+/// shared <see cref="NodeBlob"/>, plus two caller-owned spans for what one instance owns — a
 /// <see cref="NodeState"/> per node, and each node's runtime data.
 ///
-/// Storing node data as bytes rather than as an object per node is what lets an instance live in
-/// an ECS component and be memcpy'd into a world snapshot.
+/// This is EntitiesBT's <c>NodeBlobRef</c> with the instance state pulled out of the blob: storing
+/// node data as bytes rather than as an object per node is what lets an instance live in an ECS
+/// component and be memcpy'd into a world snapshot, and keeping it OUT of the blob is what lets a
+/// thousand agents share one.
 ///
 /// A <c>ref struct</c>, so the compiler checks the spans' lifetime. Two consequences: it cannot be
 /// stored in a field, and cannot cross an <c>await</c> (CS4007) — build one where it is used.
@@ -19,7 +21,7 @@ namespace Paradise.BT;
 /// </summary>
 public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 {
-    private readonly LayoutData* _layout;
+    private readonly NodeBlob* _blob;
     private readonly Span<NodeState> _states;
     private readonly Span<byte> _runtime;
     private readonly int _runtimeId;
@@ -41,7 +43,7 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
                 + "its Handle before constructing an instance over it.", nameof(layout));
         }
 
-        _layout = layout.Data;
+        _blob = layout.Blob;
         _states = states;
         _runtime = runtime;
         _runtimeId = runtimeId;
@@ -58,24 +60,22 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
             throw new ArgumentException("Behavior tree layout handle is not valid.", nameof(layout));
         }
 
-        LayoutData* data = layout.Data;
-        states[..data->NodeCount].Clear();
-        new ReadOnlySpan<byte>(data->DefaultData, data->RuntimeDataSize).CopyTo(runtime);
+        NodeBlob* blob = layout.Blob;
+        states[..blob->Count].Clear();
+        blob->DefaultData.ToSpan().CopyTo(runtime);
     }
 
     public int RuntimeId => _runtimeId;
 
-    public int Count => _layout->NodeCount;
+    public int Count => _blob->Count;
 
-    public int GetTypeId(int nodeIndex) => _layout->TypeIds[nodeIndex];
+    public int GetTypeId(int nodeIndex) => _blob->Types[nodeIndex];
 
-    public int GetEndIndex(int nodeIndex) => _layout->EndIndices[nodeIndex];
+    public int GetEndIndex(int nodeIndex) => _blob->EndIndices[nodeIndex];
 
-    /// <summary>How many bytes <paramref name="count"/> nodes occupy from
-    /// <paramref name="startNodeIndex"/> — the RESERVED span, so it includes the padding that
-    /// keeps each node's data aligned.</summary>
+    /// <inheritdoc cref="NodeBlob.GetNodeDataSize"/>
     public int GetNodeDataSize(int startNodeIndex, int count = 1) =>
-        _layout->Offsets[startNodeIndex + count] - _layout->Offsets[startNodeIndex];
+        _blob->GetNodeDataSize(startNodeIndex, count);
 
     public NodeState GetState(int nodeIndex) => _states[nodeIndex];
 
@@ -83,14 +83,15 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     public void ResetStates(int index, int count = 1) => _states.Slice(index, count).Clear();
 
-    /// <summary>Into the LAYOUT's block, which every instance shares and none writes.</summary>
+    /// <summary>Into the BLOB's defaults, which every instance shares and none writes. Reached
+    /// through the pointer, never through a copy of the blob — see <see cref="NodeBlob"/>.</summary>
     public ref byte DefaultData(int nodeIndex) =>
-        ref Unsafe.AsRef<byte>(_layout->DefaultData + _layout->Offsets[nodeIndex]);
+        ref _blob->DefaultData[_blob->Offsets[nodeIndex]];
 
     /// <summary>Into this instance's own span. A ref rather than an address, so the caller may
     /// back it with a managed array.</summary>
     public ref byte RuntimeData(int nodeIndex) =>
-        ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _layout->Offsets[nodeIndex]);
+        ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _blob->Offsets[nodeIndex]);
 
     // No dispatch method here on purpose: VirtualMachine ticks through GetTypeId + RuntimeData,
     // both INodeBlob members, so it works for any byte-backed blob rather than this type alone.

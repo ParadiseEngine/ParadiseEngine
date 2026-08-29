@@ -1,6 +1,6 @@
 # Paradise.BT
 
-`Paradise.BT` is a pure .NET behavior tree runtime with struct-based nodes, an `EntitiesBT`-style blackboard API, and optional binary serialization through `Paradise.BLOB`.
+`Paradise.BT` is a pure .NET behavior tree runtime with struct-based nodes and an `EntitiesBT`-style blackboard API. A compiled tree is flattened into a `Paradise.BLOB` asset — a `NodeBlob` — that every instance of that tree shares.
 
 ## Install
 
@@ -14,6 +14,7 @@ dotnet add package Paradise.BT
 - Targets `netstandard2.1` and `net10.0`.
 - Built-in sequence, selector, parallel, repeat, repeat-forever, inverter, succeeder, delay, success, failure, running, delegate action, and delegate condition nodes.
 - Immutable compiled trees plus reusable `BehaviorTreeInstance` runtime state.
+- The shared half of a tree — topology, node types, authored defaults — is a `NodeBlob` built with `Paradise.BLOB`; an instance owns only a `NodeState` per node and a copy of the node data, so it fits in an ECS component.
 - Custom node authoring via unmanaged `struct` types that implement `INodeData`.
 - Serialization and deserialization support through `Paradise.BLOB`.
 
