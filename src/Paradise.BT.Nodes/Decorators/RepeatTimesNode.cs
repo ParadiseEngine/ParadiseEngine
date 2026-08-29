@@ -7,6 +7,14 @@ public struct RepeatTimesNode : INodeData
     public int TickTimes;
     public NodeState BreakStates;
 
+    /// <summary>The constructor is the exposed surface: the generated builder mirrors these
+    /// parameters, defaults included, rather than guessing from field order.</summary>
+    public RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None)
+    {
+        TickTimes = tickTimes;
+        BreakStates = breakStates;
+    }
+
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct

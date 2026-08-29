@@ -29,6 +29,27 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         isEnabledByDefault: true
     );
 
+    private static readonly DiagnosticDescriptor s_multipleConstructorsDiagnostic = new(
+        id: "PBT0011",
+        title: "Ambiguous node constructor",
+        messageFormat: "Struct '{0}' has [Builder] and declares more than one public constructor, "
+            + "so the generator cannot tell which one is the exposed surface — keep exactly one",
+        category: "Paradise.BT.Generators",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true
+    );
+
+    private static readonly DiagnosticDescriptor s_unexposedPublicFieldDiagnostic = new(
+        id: "PBT0012",
+        title: "Public field is not exposed by the constructor",
+        messageFormat: "Struct '{0}' declares a constructor, which makes the constructor the "
+            + "exposed surface — public field '{1}' is not one of its parameters, so the builder "
+            + "will not expose it; add it to the constructor or make it private runtime state",
+        category: "Paradise.BT.Generators",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true
+    );
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var provider = context.SyntaxProvider.CreateSyntaxProvider(
@@ -70,6 +91,26 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
                     info.StructName
                 ));
                 return;
+            }
+
+            if (info.HasMultipleConstructors)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    s_multipleConstructorsDiagnostic,
+                    info.Location,
+                    info.StructName
+                ));
+                return;
+            }
+
+            foreach (var fieldName in info.UnexposedPublicFields)
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(
+                    s_unexposedPublicFieldDiagnostic,
+                    info.Location,
+                    info.StructName,
+                    fieldName
+                ));
             }
 
             var source = GenerateWrapper(info);
@@ -144,10 +185,22 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             ? null
             : structSymbol.ContainingNamespace?.ToDisplayString();
 
-        // Get public fields for constructor parameters — composites included: a weighted selector
-        // or a parallel policy is data on a composite, and dropping it made such nodes
-        // unconfigurable through their builders with no diagnostic saying so.
-        var fieldsBuilder = ImmutableArray.CreateBuilder<FieldInfo>();
+        // The exposed surface. A node that declares a constructor names it there: each parameter
+        // is an exposed, initialized value (keeping its declared default), and everything else —
+        // a private accumulator, a public field left out of the constructor — is runtime state
+        // the builder never shows. Without a constructor, every public value field is exposed,
+        // as before.
+        var publicCtors = ImmutableArray.CreateBuilder<IMethodSymbol>();
+        foreach (var ctorSymbol in structSymbol.InstanceConstructors)
+        {
+            if (!ctorSymbol.IsImplicitlyDeclared
+                && ctorSymbol.DeclaredAccessibility == Accessibility.Public)
+            {
+                publicCtors.Add(ctorSymbol);
+            }
+        }
+
+        var publicFields = ImmutableArray.CreateBuilder<IFieldSymbol>();
         foreach (var member in structSymbol.GetMembers())
         {
             if (member is IFieldSymbol field
@@ -156,12 +209,61 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
                 && !field.IsConst
                 && field.Type.IsValueType)
             {
+                publicFields.Add(field);
+            }
+        }
+
+        var fieldsBuilder = ImmutableArray.CreateBuilder<FieldInfo>();
+        var unexposed = ImmutableArray<string>.Empty;
+        bool useConstructor = publicCtors.Count == 1;
+        if (useConstructor)
+        {
+            foreach (var parameter in publicCtors[0].Parameters)
+            {
+                fieldsBuilder.Add(new FieldInfo(
+                    parameter.Name,
+                    parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    RenderDefault(parameter)
+                ));
+            }
+
+            var unexposedBuilder = ImmutableArray.CreateBuilder<string>();
+            foreach (var field in publicFields)
+            {
+                bool matchesParameter = false;
+                foreach (var parameter in publicCtors[0].Parameters)
+                {
+                    if (string.Equals(field.Name, parameter.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchesParameter = true;
+                        break;
+                    }
+                }
+
+                if (!matchesParameter)
+                {
+                    unexposedBuilder.Add(field.Name);
+                }
+            }
+
+            unexposed = unexposedBuilder.ToImmutable();
+        }
+        else
+        {
+            // No constructor: exposed = every public value field. First required, rest optional
+            // for leaves and decorators; all required for composites, whose `params children`
+            // must come last.
+            for (int i = 0; i < publicFields.Count; i++)
+            {
+                IFieldSymbol field = publicFields[i];
                 fieldsBuilder.Add(new FieldInfo(
                     field.Name,
-                    field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    i == 0 || cardinality == 2 ? null : "default"
                 ));
             }
         }
+
         var fields = fieldsBuilder.ToImmutable();
 
         string fullyQualifiedName = structSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
@@ -174,9 +276,56 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             cardinality,
             hasGuid,
             isUnmanaged,
+            useConstructor,
+            publicCtors.Count > 1,
+            unexposed,
             fields,
             structDecl.GetLocation()
         );
+    }
+
+    /// <summary>
+    /// A constructor parameter's default, re-rendered as source that resolves anywhere — the
+    /// constant VALUE rather than the original expression text, because `NodeState.Running` in
+    /// the node's file may not be in scope in the generated one. Null means required.
+    /// </summary>
+    private static string? RenderDefault(IParameterSymbol parameter)
+    {
+        if (!parameter.HasExplicitDefaultValue)
+        {
+            return null;
+        }
+
+        object? value = parameter.ExplicitDefaultValue;
+        if (value is null)
+        {
+            return "default";
+        }
+
+        if (parameter.Type.TypeKind == TypeKind.Enum)
+        {
+            string enumType = parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            return $"({enumType})({System.Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture)})";
+        }
+
+        return value switch
+        {
+            bool b => b ? "true" : "false",
+            float f when !float.IsNaN(f) && !float.IsInfinity(f) =>
+                f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
+            double d when !double.IsNaN(d) && !double.IsInfinity(d) =>
+                d.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "d",
+            decimal m => m.ToString(System.Globalization.CultureInfo.InvariantCulture) + "m",
+            string s => Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(s, quote: true),
+            char c => Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(c, quote: true),
+            byte or sbyte or short or ushort or int =>
+                System.Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture),
+            uint u => u.ToString(System.Globalization.CultureInfo.InvariantCulture) + "u",
+            long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture) + "L",
+            ulong ul => ul.ToString(System.Globalization.CultureInfo.InvariantCulture) + "UL",
+            _ => "default",
+        };
     }
 
     private const string NodeDataFullName = "Paradise.BT.INodeData";
@@ -369,9 +518,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             0 => string.Join(", ", info.Fields.Select(f => ToCamelCase(f.Name))),
             1 => string.Join(
                 ", ",
-                info.Fields.Take(1).Select(f => ToCamelCase(f.Name))
+                info.Fields.Where(f => f.DefaultLiteral is null).Select(f => ToCamelCase(f.Name))
                     .Concat(["child"])
-                    .Concat(info.Fields.Skip(1).Select(f => ToCamelCase(f.Name)))),
+                    .Concat(info.Fields.Where(f => f.DefaultLiteral is not null).Select(f => ToCamelCase(f.Name)))),
             _ => string.Join(
                 ", ",
                 info.Fields.Select(f => ToCamelCase(f.Name)).Concat(["children"])),
@@ -386,64 +535,80 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     {
         if (info.Fields.IsEmpty)
         {
-            sb.AppendLine($"    public {info.GeneratedClassName}() : base(new {info.FullyQualifiedStructName}()) {{ }}");
+            sb.AppendLine($"    public {info.GeneratedClassName}() : base({Construction(info)}) {{ }}");
         }
         else
         {
             var paramList = BuildParamList(info.Fields, includeChild: false);
-            var initializer = BuildStructInitializer(info.FullyQualifiedStructName, info.Fields);
-            sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({initializer}) {{ }}");
+            sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}) {{ }}");
         }
     }
 
     private static void GenerateDecoratorConstructor(StringBuilder sb, NodeInfo info)
     {
         var paramList = BuildParamList(info.Fields, includeChild: true);
-        var initializer = BuildStructInitializer(info.FullyQualifiedStructName, info.Fields);
-        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({initializer}, child) {{ }}");
+        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}, child) {{ }}");
     }
 
-    // Composite fields are all required: `params children` must come last, and a parameter with a
-    // default cannot precede it.
     private static void GenerateCompositeConstructor(StringBuilder sb, NodeInfo info)
     {
         var paramList = BuildCompositeParamList(info.Fields);
-        var initializer = BuildStructInitializer(info.FullyQualifiedStructName, info.Fields);
-        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({initializer}, children) {{ }}");
+        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}, children) {{ }}");
     }
 
+    /// <summary>How the node value is built: through its own constructor when it declares one —
+    /// the constructor IS the exposed surface, and it may initialize non-exposed state — or by
+    /// object initializer over public fields when it does not.</summary>
+    private static string Construction(NodeInfo info)
+    {
+        if (info.UseConstructor)
+        {
+            return $"new {info.FullyQualifiedStructName}("
+                + string.Join(", ", info.Fields.Select(f => ToCamelCase(f.Name)))
+                + ")";
+        }
+
+        if (info.Fields.IsEmpty)
+        {
+            return $"new {info.FullyQualifiedStructName}()";
+        }
+
+        var assignments = new System.Collections.Generic.List<string>();
+        foreach (var field in info.Fields)
+        {
+            assignments.Add($"{field.Name} = {ToCamelCase(field.Name)}");
+        }
+
+        return $"new {info.FullyQualifiedStructName} {{ {string.Join(", ", assignments)} }}";
+    }
+
+    // An optional parameter may precede `params children` (callers then name it or supply it
+    // positionally), so declared defaults survive on composites too.
     private static string BuildCompositeParamList(ImmutableArray<FieldInfo> fields)
     {
         var parts = new System.Collections.Generic.List<string>();
         foreach (var field in fields)
         {
-            parts.Add($"{field.TypeName} {ToCamelCase(field.Name)}");
+            parts.Add(Parameter(field));
         }
 
         parts.Add("params global::System.ReadOnlySpan<global::Paradise.BT.Builder.BTreeNode> children");
         return string.Join(", ", parts);
     }
 
+    /// <summary>Required parameters, then the decorator's child, then optional ones. Constructor
+    /// parameters are already required-then-optional (C# insists), so their declared order is
+    /// preserved.</summary>
     private static string BuildParamList(ImmutableArray<FieldInfo> fields, bool includeChild)
     {
         var parts = new System.Collections.Generic.List<string>();
 
-        // Required fields first (no default), then child for decorators, then optional fields
-        var requiredFields = new System.Collections.Generic.List<FieldInfo>();
-        var optionalFields = new System.Collections.Generic.List<FieldInfo>();
-
         foreach (var field in fields)
         {
-            // First field is always required, rest get defaults
-            if (requiredFields.Count == 0)
-                requiredFields.Add(field);
-            else
-                optionalFields.Add(field);
-        }
-
-        foreach (var field in requiredFields)
-        {
-            parts.Add($"{field.TypeName} {ToCamelCase(field.Name)}");
+            if (field.DefaultLiteral is null)
+            {
+                parts.Add(Parameter(field));
+            }
         }
 
         if (includeChild)
@@ -451,27 +616,21 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             parts.Add("global::Paradise.BT.Builder.BTreeNode child");
         }
 
-        foreach (var field in optionalFields)
+        foreach (var field in fields)
         {
-            parts.Add($"{field.TypeName} {ToCamelCase(field.Name)} = default");
+            if (field.DefaultLiteral is not null)
+            {
+                parts.Add(Parameter(field));
+            }
         }
 
         return string.Join(", ", parts);
     }
 
-    private static string BuildStructInitializer(string structName, ImmutableArray<FieldInfo> fields)
-    {
-        if (fields.IsEmpty)
-            return $"new {structName}()";
-
-        var assignments = new System.Collections.Generic.List<string>();
-        foreach (var field in fields)
-        {
-            assignments.Add($"{field.Name} = {ToCamelCase(field.Name)}");
-        }
-
-        return $"new {structName} {{ {string.Join(", ", assignments)} }}";
-    }
+    private static string Parameter(FieldInfo field) =>
+        field.DefaultLiteral is null
+            ? $"{field.TypeName} {ToCamelCase(field.Name)}"
+            : $"{field.TypeName} {ToCamelCase(field.Name)} = {field.DefaultLiteral}";
 
     private static string ToCamelCase(string name)
     {
@@ -489,6 +648,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         public readonly int Cardinality;
         public readonly bool HasGuid;
         public readonly bool IsUnmanaged;
+        public readonly bool UseConstructor;
+        public readonly bool HasMultipleConstructors;
+        public readonly ImmutableArray<string> UnexposedPublicFields;
         public readonly ImmutableArray<FieldInfo> Fields;
         public readonly Location? Location;
 
@@ -500,6 +662,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             int cardinality,
             bool hasGuid,
             bool isUnmanaged,
+            bool useConstructor,
+            bool hasMultipleConstructors,
+            ImmutableArray<string> unexposedPublicFields,
             ImmutableArray<FieldInfo> fields,
             Location? location)
         {
@@ -510,6 +675,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             Cardinality = cardinality;
             HasGuid = hasGuid;
             IsUnmanaged = isUnmanaged;
+            UseConstructor = useConstructor;
+            HasMultipleConstructors = hasMultipleConstructors;
+            UnexposedPublicFields = unexposedPublicFields;
             Fields = fields;
             Location = location;
         }
@@ -522,6 +690,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             && Cardinality == other.Cardinality
             && HasGuid == other.HasGuid
             && IsUnmanaged == other.IsUnmanaged
+            && UseConstructor == other.UseConstructor
+            && HasMultipleConstructors == other.HasMultipleConstructors
+            && UnexposedPublicFields.SequenceEqual(other.UnexposedPublicFields)
             && Fields.SequenceEqual(other.Fields);
 
         public override bool Equals(object? obj) => obj is NodeInfo other && Equals(other);
@@ -534,6 +705,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
                 hash = hash * 31 + Cardinality;
                 hash = hash * 31 + (HasGuid ? 1 : 0);
                 hash = hash * 31 + (IsUnmanaged ? 1 : 0);
+                hash = hash * 31 + (UseConstructor ? 1 : 0);
                 return hash;
             }
         }
@@ -544,13 +716,20 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         public readonly string Name;
         public readonly string TypeName;
 
-        public FieldInfo(string name, string typeName)
+        /// <summary>Rendered default value for an optional parameter, or null for a required
+        /// one. Constructor parameters keep their declared default; the fallback field surface
+        /// marks the first field required and the rest <c>default</c>.</summary>
+        public readonly string? DefaultLiteral;
+
+        public FieldInfo(string name, string typeName, string? defaultLiteral)
         {
             Name = name;
             TypeName = typeName;
+            DefaultLiteral = defaultLiteral;
         }
 
-        public bool Equals(FieldInfo other) => Name == other.Name && TypeName == other.TypeName;
+        public bool Equals(FieldInfo other) =>
+            Name == other.Name && TypeName == other.TypeName && DefaultLiteral == other.DefaultLiteral;
 
         public override bool Equals(object? obj) => obj is FieldInfo other && Equals(other);
 
