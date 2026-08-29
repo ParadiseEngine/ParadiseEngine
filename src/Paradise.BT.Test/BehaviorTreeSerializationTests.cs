@@ -8,9 +8,9 @@ public sealed class BehaviorTreeSerializationTests
         public int RequiredTicks;
         public int Count;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
-            where TBlackboard : struct, IBlackboard
+            where TBlackboard : struct, IBlackboard, allows ref struct
         {
             Count++;
             return Count >= RequiredTicks ? NodeState.Success : NodeState.Running;

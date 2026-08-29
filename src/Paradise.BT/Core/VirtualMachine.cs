@@ -12,14 +12,14 @@ namespace Paradise.BT;
 /// </summary>
 public static class VirtualMachine
 {
-    public static NodeState Tick<TNodeBlob, TBlackboard>(ref TNodeBlob blob, ref TBlackboard bb)
+    public static NodeState Tick<TNodeBlob, TBlackboard>(scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
         => Tick(0, ref blob, ref bb);
 
-    public static NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public static NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         NodeState state = NodeTypeRegistry.Invoker(blob.GetTypeId(index))
             .Tick(ref blob.RuntimeData(index), index, ref blob, ref bb);
@@ -27,9 +27,9 @@ public static class VirtualMachine
         return state;
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(int fromIndex, ref TNodeBlob blob, ref TBlackboard bb, int count = 1)
+    public static void Reset<TNodeBlob, TBlackboard>(int fromIndex, scoped ref TNodeBlob blob, scoped ref TBlackboard bb, int count = 1)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         blob.ResetStates(fromIndex, count);
         blob.ResetRuntimeData(fromIndex, count);
@@ -41,9 +41,9 @@ public static class VirtualMachine
         }
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(ref TNodeBlob blob, ref TBlackboard bb)
+    public static void Reset<TNodeBlob, TBlackboard>(scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int count = blob.GetEndIndex(0);
         Reset(0, ref blob, ref bb, count);

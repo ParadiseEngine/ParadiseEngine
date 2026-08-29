@@ -13,9 +13,9 @@ using Paradise.BT;
 [Builder]
 public struct HasTargetNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<HasTargetData>().Value.ToNodeState();
 }
 
@@ -24,9 +24,9 @@ public struct HasTargetNode : INodeData
 [Builder]
 public struct FireShotNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         ref ShotsFiredData shots = ref bb.GetDataRef<ShotsFiredData>();
         shots.Value++;
@@ -40,9 +40,9 @@ public struct FireShotNode : INodeData
 [Builder]
 public struct IdleNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         Console.WriteLine("Idling...");
         return NodeState.Success;

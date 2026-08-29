@@ -10,10 +10,6 @@ public sealed class GenericBlackboardTests
         public bool HasData<T>() where T : struct => _inner.HasData<T>();
         public T GetData<T>() where T : struct => _inner.GetData<T>();
         public ref T GetDataRef<T>() where T : struct => ref _inner.GetDataRef<T>();
-        public bool HasData(Type type) => _inner.HasData(type);
-        public IntPtr GetDataPtrRO(Type type) => _inner.GetDataPtrRO(type);
-        public IntPtr GetDataPtrRW(Type type) => _inner.GetDataPtrRW(type);
-        public T GetObject<T>() where T : class => _inner.GetObject<T>();
 
         public void SetData<T>(T value) where T : struct
         {

@@ -15,9 +15,9 @@ public sealed class BehaviorTreeTests
     [System.Runtime.InteropServices.Guid("F4E3D2C1-B0A9-4867-8765-432109FEDCBA")]
     internal struct ReadBlackboardNode : INodeData
     {
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
-            where TBlackboard : struct, IBlackboard
+            where TBlackboard : struct, IBlackboard, allows ref struct
         {
             var data = bb.GetData<PreTickData>();
             return data.Value == 42 ? NodeState.Success : NodeState.Failure;
@@ -29,9 +29,9 @@ public sealed class BehaviorTreeTests
     {
         public int Count;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
-            where TBlackboard : struct, IBlackboard
+            where TBlackboard : struct, IBlackboard, allows ref struct
         {
             Count++;
             return Count >= 2 ? NodeState.Success : NodeState.Running;
@@ -43,17 +43,17 @@ public sealed class BehaviorTreeTests
     {
         public int Count;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+        public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
-            where TBlackboard : struct, IBlackboard
+            where TBlackboard : struct, IBlackboard, allows ref struct
         {
             Count++;
             return Count >= 2 ? NodeState.Success : NodeState.Running;
         }
 
-        public static void Reset<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+        public static void Reset<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
             where TNodeBlob : struct, INodeBlob, allows ref struct
-            where TBlackboard : struct, IBlackboard
+            where TBlackboard : struct, IBlackboard, allows ref struct
         {
             ref ResetCallData resetCall = ref bb.GetDataRef<ResetCallData>();
             resetCall.Value++;

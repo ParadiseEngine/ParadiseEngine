@@ -51,9 +51,9 @@ public struct ProbeNode : INodeData
     public ProbeRule Rule;
     public int Threshold;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         ref ProbeData probe = ref bb.GetDataRef<ProbeData>();
         int runs = ++probe.Counts[Slot];
@@ -72,9 +72,9 @@ public struct ProbeNode : INodeData
 [Guid("7C1B4E22-9A3D-4F51-8E60-1B2C3D4E5F61")]
 public struct RecordDeltaTimeNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         bb.GetDataRef<ProbeData>().LastDeltaTime =
             bb.GetData<BehaviorTreeTickDeltaTime>().Value;

@@ -4,8 +4,8 @@ namespace Paradise.BT.Nodes;
 [Builder(NodeCardinality.Composite)]
 public struct SelectorNode : INodeData
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
         => index.TickChildrenReturnLastOrDefault(ref blob, ref bb, static state => state.IsRunningOrSuccess());
 }

@@ -6,19 +6,25 @@ namespace Paradise.BT.Nodes;
 /// A single-shot timer that returns <see cref="NodeState.Running"/> until <see cref="TimerSeconds"/> counts down to zero.
 /// </summary>
 /// <remarks>
-/// Field mutations on <see cref="TimerSeconds"/> across ticks are persistent because Paradise.BT stores each runtime
-/// node as a boxed <c>RuntimeNode&lt;TNodeData&gt;</c> inside the blob. <c>Tick</c> receives a <c>ref</c> to the
-/// boxed struct field, so <c>TimerSeconds -=</c> writes back into the live instance. On reset the VM repopulates
-/// the runtime data from the default data via <c>CopyDefaultToRuntime()</c>, restarting the timer.
+/// Writes to <see cref="TimerSeconds"/> persist across ticks because <c>Tick</c> receives a
+/// <c>ref</c> to the node's own bytes in the blob, so <c>TimerSeconds -=</c> lands in the live
+/// instance. On reset the VM restores the runtime data from the authored default, restarting the
+/// timer.
+///
+/// The only built-in that reads a blackboard, which is why it is the only one declaring access.
+/// It is also built by a factory (<c>BuiltInBehaviorNodes.Delay</c>) rather than named, so a tree
+/// using it has to list it in <c>[BehaviorTreeBinding(..., Also = [typeof(DelayTimerNode)])]</c>
+/// for its delta time to be bound.
 /// </remarks>
 [Guid("2F6009D3-1314-42E6-8E52-4AEB7CDDB4CD")]
+[Reads<BehaviorTreeTickDeltaTime>]
 public struct DelayTimerNode : INodeData
 {
     public float TimerSeconds;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         TimerSeconds -= bb.GetData<BehaviorTreeTickDeltaTime>().Value;
         return TimerSeconds <= 0f ? NodeState.Success : NodeState.Running;

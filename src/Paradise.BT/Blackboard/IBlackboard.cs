@@ -3,10 +3,17 @@ using System.Diagnostics.CodeAnalysis;
 namespace Paradise.BT;
 
 /// <summary>
-/// Exact blackboard contract used by EntitiesBT-style nodes.
+/// What a node may ask of the world: typed struct data, by value or by reference.
+///
+/// Deliberately three members. The EntitiesBT original also carried <c>HasData(Type)</c>,
+/// <c>GetDataPtrRO/RW(Type)</c> and <c>GetObject&lt;T&gt;</c> — reflection- and pointer-shaped
+/// members that no node ever called, and that an implementation storing its data as ref fields
+/// cannot honour. <c>Paradise.BT.Nodes.Blackboard</c> still offers them as its own methods.
 /// </summary>
 public interface IBlackboard
 {
+    /// <summary>Whether <typeparamref name="T"/> is reachable — false for an optional component
+    /// this entity lacks.</summary>
     bool HasData<T>() where T : struct;
 
     T GetData<T>() where T : struct;
@@ -21,12 +28,4 @@ public interface IBlackboard
     /// </summary>
     [UnscopedRef]
     ref T GetDataRef<T>() where T : struct;
-
-    bool HasData(Type type);
-
-    IntPtr GetDataPtrRO(Type type);
-
-    IntPtr GetDataPtrRW(Type type);
-
-    T GetObject<T>() where T : class;
 }

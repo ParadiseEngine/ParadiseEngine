@@ -5,9 +5,9 @@ namespace Paradise.BT;
 /// </summary>
 public static class NodeExtensions
 {
-    public static void ResetChildren<TNodeBlob, TBlackboard>(this int parentIndex, ref TNodeBlob blob, ref TBlackboard bb)
+    public static void ResetChildren<TNodeBlob, TBlackboard>(this int parentIndex, scoped ref TNodeBlob blob, scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int firstChildIndex = parentIndex + 1;
         int lastChildIndex = blob.GetEndIndex(parentIndex);
@@ -17,27 +17,27 @@ public static class NodeExtensions
 
     public static NodeState TickChildrenReturnLastOrDefault<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        ref TNodeBlob blob,
-        ref TBlackboard bb,
+        scoped ref TNodeBlob blob,
+        scoped ref TBlackboard bb,
         Predicate<NodeState> breakCheck)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
         => TickChildrenReturnBreakOrDefault(parentIndex, ref blob, ref bb, breakCheck, static state => !state.IsCompleted());
 
     public static NodeState TickChildrenReturnFirstOrDefault<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        ref TNodeBlob blob,
-        ref TBlackboard bb)
+        scoped ref TNodeBlob blob,
+        scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
         => TickChildrenReturnBreakOrDefault(parentIndex, ref blob, ref bb, static _ => true, static state => !state.IsCompleted());
 
     public static NodeState TickChild<TNodeBlob, TBlackboard>(
         this int parentIndex,
-        ref TNodeBlob blob,
-        ref TBlackboard bb)
+        scoped ref TNodeBlob blob,
+        scoped ref TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
@@ -46,12 +46,12 @@ public static class NodeExtensions
 
     private static NodeState TickChildrenReturnBreakOrDefault<TNodeBlob, TBlackboard>(
         int parentIndex,
-        ref TNodeBlob blob,
-        ref TBlackboard bb,
+        scoped ref TNodeBlob blob,
+        scoped ref TBlackboard bb,
         Predicate<NodeState> breakCheck,
         Predicate<NodeState> tickCheck)
         where TNodeBlob : struct, INodeBlob, allows ref struct
-        where TBlackboard : struct, IBlackboard
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         NodeState lastState = 0;
         int endIndex = blob.GetEndIndex(parentIndex);
