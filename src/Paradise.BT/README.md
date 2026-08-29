@@ -1,110 +1,146 @@
 # Paradise.BT
 
-`Paradise.BT` is a pure .NET behavior tree runtime with struct-based nodes and an `EntitiesBT`-style blackboard API. A compiled tree is flattened into a `Paradise.BLOB` asset — a `NodeBlob` — that every instance of that tree shares.
+`Paradise.BT` is a pure .NET behavior tree runtime with unmanaged struct nodes, inspired by
+`EntitiesBT`. A compiled tree is flattened into one shared `Paradise.BLOB` asset — the layout —
+and an instance owns only a `NodeState` per node plus its node data as bytes, so a thousand
+agents share one layout and an instance fits in an ECS component and survives a memcpy.
 
 ## Install
 
 ```bash
 dotnet add package Paradise.BT
+dotnet add package Paradise.BT.Builder   # authoring: BTreeNode, IBehaviorTreeBuilder, BehaviorTrees
+dotnet add package Paradise.BT.Nodes     # built-ins + the reference Blackboard
 ```
+
+Projects that **declare node types or trees** must also reference `Paradise.BT.Generators` as an
+analyzer: it registers every node type via a module initializer, emits the builder classes, the
+per-tree blackboards, and the access metadata, and enforces the PBT diagnostics.
 
 ## Features
 
-- Pure .NET runtime with no Unity or ECS dependency.
-- Targets `netstandard2.1` and `net10.0`.
-- Built-in sequence, selector, parallel, repeat, repeat-forever, inverter, succeeder, delay, success, failure, running, delegate action, and delegate condition nodes.
-- Immutable compiled trees plus reusable `BehaviorTreeInstance` runtime state.
-- The shared half of a tree — topology, node types, authored defaults — is a `NodeBlob` built with `Paradise.BLOB`; an instance owns only a `NodeState` per node and a copy of the node data, so it fits in an ECS component.
-- Custom node authoring via unmanaged `struct` types that implement `INodeData`.
-- Serialization and deserialization support through `Paradise.BLOB`.
+- Pure .NET (`net10.0`), NativeAOT/trimming compatible, zero allocation on the tick path.
+- Built-ins: sequence, selector, parallel, repeat, repeat-forever, inverter, succeeder, delay,
+  success, failure, running.
+- Nodes are unmanaged structs; a node's **primary constructor is its exposed surface**, mirrored
+  into a generated builder (`record struct` works too).
+- A **generated, per-tree blackboard**: the union of what the tree's nodes actually touch, read
+  from their `Tick` bodies — nothing declared, nothing to drift stale.
+- The layout blob is **directly serializable and deterministic**: the same tree produces the same
+  bytes in every process, so assets are content-hashable.
 
 ## Quick start
 
 ```csharp
 using Paradise.BT;
+using Paradise.BT.Nodes;
+using Paradise.BT.Nodes.Builder;
 
-public struct HasTargetData
-{
-    public bool Value;
-}
+BehaviorTree tree = new Selector(
+    new Sequence(
+        new Delay(0.5f),
+        new Success()),
+    new Failure()
+).Build();
 
-public struct ShotsFiredData
-{
-    public int Value;
-}
+var bb = new Blackboard();
+BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(bb);
 
-var blackboard = new Blackboard();
-blackboard.SetData(new HasTargetData { Value = true });
-blackboard.SetData(new ShotsFiredData());
-
-var tree = BehaviorTreeBuilder.Build(
-    BehaviorNodes.Selector(
-        BehaviorNodes.Sequence(
-            BehaviorNodes.Condition(static bb => bb.GetData<HasTargetData>().Value),
-            BehaviorNodes.Repeat(
-                3,
-                BehaviorNodes.Sequence(
-                    BehaviorNodes.Delay(0.5f),
-                    BehaviorNodes.Action(static bb =>
-                    {
-                        ref ShotsFiredData shots = ref bb.GetDataRef<ShotsFiredData>();
-                        shots.Value++;
-                        return NodeState.Success;
-                    })))),
-        BehaviorNodes.Action(static _ => NodeState.Success)));
-
-BehaviorTreeInstance instance = tree.CreateInstance(blackboard);
-
-NodeState firstTick = instance.Tick(0.25f);
-NodeState secondTick = instance.Tick(0.25f);
+instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.25f));
+NodeState first = instance.Tick();    // Running: the delay has 0.25s left
+instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.25f));
+NodeState second = instance.Tick();   // Success
 ```
+
+Delta time is the caller's to supply — the runtime never reads a clock.
 
 ## Custom nodes
 
-Implement `INodeData` on a `struct` and decorate it with `GuidAttribute` so it can participate in serialization.
+An unmanaged struct implementing `INodeData`, identified by `[Guid]`. `[Builder]` makes the
+generator emit a builder class whose constructor mirrors the node's primary constructor —
+parameters, order, and declared defaults. Anything not in the constructor (a private field, a
+captured parameter) is runtime state the builder never shows.
 
 ```csharp
 using Paradise.BT;
 using System.Runtime.InteropServices;
 
 [Guid("7D4E31B3-0D57-4211-9C1F-91EAB87734E5")]
-public struct CounterNode : INodeData
+[Builder]
+public struct CounterNode(int threshold) : INodeData
 {
-    public int Count;
+    public int Threshold = threshold;
+    private int _count;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
+    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
+        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        Count++;
-        return Count >= 3 ? NodeState.Success : NodeState.Running;
+        _count++;
+        return _count >= Threshold ? NodeState.Success : NodeState.Running;
     }
 }
 
-var tree = BehaviorTreeBuilder.Build(
-    BehaviorNodes.Node(new CounterNode()));
+// Composes as: new Counter(3)
 ```
 
-If a node needs reset side effects in addition to restoring its default struct data, also implement `ICustomResetAction`.
+A node writing its own fields persists them — it ticks through its bytes in the instance, and a
+reset restores the authored defaults. A builder call passing **two or more** values must name
+them (`PBT0013`); one value stays positional.
+
+## Trees, and the generated blackboard
+
+A tree is a type implementing `IBehaviorTreeBuilder` (or `IBehaviorTreeBuilder<TArgs>` when it is
+built from a config). That is the whole marker: the generator sweeps the type for the nodes it
+composes, unions their access, and emits `{Tree}Blackboard` with a `Bind` — the union IS the
+tree's contract.
+
+```csharp
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
+
+public readonly struct PatrolTree : IBehaviorTreeBuilder
+{
+    public static BTreeNode Build() =>
+        new Sequence(
+            new Counter(3),
+            new Delay(0.5f));
+}
+
+using BehaviorTreeLayout layout = BehaviorTrees.CompileLayout<PatrolTree>();
+BehaviorTreeInstance agent = layout.CreateInstance();
+
+var dt = new BehaviorTreeTickDeltaTime(0.25f);
+NodeState state = agent.Tick(PatrolTreeBlackboard.Bind(behaviorTreeTickDeltaTime: in dt));
+```
+
+`PatrolTreeBlackboard` here has exactly one entry — the delay's delta time — because that is all
+this tree touches, and nobody declared it anywhere: the generator read `DelayTimerNode`'s body in
+its own assembly and published the access as metadata. The generated blackboard is a `ref struct`
+of refs into the caller's storage (ECS chunk memory, locals), so pass it per `Tick` call; ECS
+components bind read-only, and a node that tries to write one is refused at compile time
+(`PBT0008`) — a tree writes conclusions the caller applies.
 
 ## Serialization
 
-Compiled trees can be turned into binary blobs and loaded back later.
+The layout blob is the shippable asset — a raw, position-independent byte block:
 
 ```csharp
-using Paradise.BT;
-
-using var blob = tree.Serialize();
-BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(blob);
+byte[] bytes = layout.SerializeToBytes();              // or tree.SerializeLayoutToBytes()
+using BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(bytes);
 ```
 
-Node types resolve through `NodeTypeRegistry`, which the BT generator populates per assembly via
-a module initializer — there is no serialization registry to maintain. Only a node type the
-generator cannot see (private, or in a project without the analyzer reference) needs an explicit
-`NodeTypeRegistry.Register<CounterNode>()` before deserialization.
+Node identity crosses as a GUID table (one entry per distinct type); process-local ids are
+re-resolved on load, corrupt bytes are refused at load, and serialization is deterministic. The
+`BehaviorTreeBlob` form (`tree.Serialize()` / `BehaviorTreeBlobSerializer.Deserialize`) remains
+as managed interchange. Node types resolve through `NodeTypeRegistry`, populated by the
+generator's module initializers — only a node the generator cannot see (private, or no analyzer
+reference) needs an explicit `NodeTypeRegistry.Register<T>()`.
 
 ## Notes
 
-- `BehaviorTreeInstance.Tick(deltaTime)` stores the supplied delta time in the blackboard, which is how nodes such as `BehaviorNodes.Delay(...)` advance.
-- Delegate-backed nodes are runtime-only and cannot be serialized because they capture managed references.
-- The `Blackboard` type also supports object and keyed-value storage helpers for app-level data setup.
+- `BehaviorTreeInstance` is two plain buffers over a borrowed layout; the layout must outlive its
+  instances, and whoever compiles it disposes it.
+- `NodeState.None` (0) means "never ticked / reset since" — a real state decorators branch on.
+- The reference `Blackboard` in `Paradise.BT.Nodes` is a managed dictionary — right for setup and
+  tests; the generated per-tree blackboard is the zero-allocation path.
