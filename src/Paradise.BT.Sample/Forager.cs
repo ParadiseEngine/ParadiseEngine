@@ -40,16 +40,6 @@ public partial struct Senses
     public bool FoodVisible;
 }
 
-/// <summary>
-/// The row the tree runs over. The claims here are the contract the whole tree is checked
-/// against: a node reaching for anything not listed stops the build.
-/// </summary>
-[Queryable]
-[With<Position>(IsReadOnly = true)]
-[With<Stamina>(IsReadOnly = true)]
-[With<Senses>(IsReadOnly = true)]
-public readonly ref partial struct ForagerRow;
-
 // ===================== what is not a component =====================
 
 /// <summary>

@@ -12,9 +12,9 @@ namespace Paradise.BT.Generators;
 /// <c>[BehaviorTreeBinding]</c> class names, unions their access, checks it against the
 /// queryable's claims, and emits a blackboard plus a <c>Bind</c>.
 ///
-/// It VERIFIES a queryable and never authors one, because a generator cannot see another
-/// generator's output — Paradise.ECS says the same in its own SystemGenerator. Both read the
-/// hand-written attributes instead.
+/// The union of the nodes' access IS the tree's contract — there is no hand-maintained row to
+/// check against, so nothing can drift stale when a node is added or removed. The one rule left
+/// is that a component may not be written (PBT0008): components bind read-only by value.
 ///
 /// Takes no reference on Paradise.ECS and could not: a type is a component when it carries
 /// [Component] or implements an interface NAMED Paradise.ECS.IComponent. Everything else is a
@@ -24,18 +24,9 @@ namespace Paradise.BT.Generators;
 public sealed class BindingGenerator : IIncrementalGenerator
 {
     private const string BindingAttributeFullName = "Paradise.BT.BehaviorTreeBindingAttribute";
-    private const string QueryableAttributeFullName = "Paradise.ECS.QueryableAttribute";
     private const string NodeDataInterface = "Paradise.BT.INodeData";
     private const string ComponentInterface = "Paradise.ECS.IComponent";
     private const string BlackboardInterface = "Paradise.BT.IBlackboard";
-
-    private static readonly DiagnosticDescriptor s_readsUnclaimed = new(
-        id: "PBT0005",
-        title: "Node reads a component the queryable does not claim",
-        messageFormat: "Node '{0}' declares [Reads<{1}>], but queryable '{2}' {3}. Add [With<{1}>(IsReadOnly = true)] to it.",
-        category: "Paradise.BT.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor s_optionalUnsupported = new(
         id: "PBT0006",
@@ -47,29 +38,15 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
     private static readonly DiagnosticDescriptor s_componentWriteUnsupported = new(
         id: "PBT0008",
-        title: "Node writes a component the queryable does not grant",
-        messageFormat: "Node '{0}' declares [Writes<{1}>], but queryable '{2}' {3}. A tree cannot write through a claim it does not hold.",
-        category: "Paradise.BT.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
-
-    private static readonly DiagnosticDescriptor s_notQueryable = new(
-        id: "PBT0007",
-        title: "Binding target is not a queryable",
-        messageFormat: "'{0}' names '{1}', which carries no [Queryable] attribute. Its claims cannot be checked, so no binding was emitted.",
+        title: "Node writes a component",
+        messageFormat: "Node '{0}' writes component '{1}'. Components bind read-only by value, so "
+            + "the write could not reach the chunk — write a conclusion the caller applies instead.",
         category: "Paradise.BT.Generators",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var queryables = context.SyntaxProvider.ForAttributeWithMetadataName(
-                QueryableAttributeFullName,
-                predicate: static (node, _) => node is StructDeclarationSyntax,
-                transform: static (ctx, _) => GetQueryable(ctx))
-            .Where(static q => q.HasValue)
-            .Select(static (q, _) => q!.Value);
-
         var bindings = context.SyntaxProvider.ForAttributeWithMetadataName(
                 BindingAttributeFullName,
                 predicate: static (node, _) => node is ClassDeclarationSyntax,
@@ -89,60 +66,11 @@ public sealed class BindingGenerator : IIncrementalGenerator
             .Select(static (b, _) => b!.Value);
 
         context.RegisterSourceOutput(
-            bindings.Collect().Combine(queryables.Collect()).Combine(builders.Collect()),
-            static (spc, data) => Emit(spc, data.Left.Left, data.Left.Right, data.Right));
+            bindings.Collect().Combine(builders.Collect()),
+            static (spc, data) => Emit(spc, data.Left, data.Right));
     }
 
     // ===================== collection =====================
-
-    private static QueryableModel? GetQueryable(GeneratorAttributeSyntaxContext ctx)
-    {
-        if (ctx.TargetSymbol is not INamedTypeSymbol symbol)
-        {
-            return null;
-        }
-
-        var claims = ImmutableArray.CreateBuilder<Claim>();
-        foreach (var attr in symbol.GetAttributes())
-        {
-            INamedTypeSymbol? ac = attr.AttributeClass;
-            if (ac is null
-                || !ac.IsGenericType
-                || ac.Name != "WithAttribute"
-                || ac.ContainingNamespace?.ToDisplayString() != "Paradise.ECS")
-            {
-                continue;
-            }
-
-            bool isReadOnly = false;
-            bool queryOnly = false;
-            string? nameOverride = null;
-            foreach (var named in attr.NamedArguments)
-            {
-                switch (named.Key)
-                {
-                    case "IsReadOnly":
-                        isReadOnly = named.Value.Value is true;
-                        break;
-                    case "QueryOnly":
-                        queryOnly = named.Value.Value is true;
-                        break;
-                    case "Name":
-                        nameOverride = named.Value.Value as string;
-                        break;
-                }
-            }
-
-            ITypeSymbol component = ac.TypeArguments[0];
-            claims.Add(new Claim(
-                component.ToDisplayString(),
-                nameOverride ?? component.Name,
-                isReadOnly,
-                queryOnly));
-        }
-
-        return new QueryableModel(symbol.ToDisplayString(), claims.ToImmutable());
-    }
 
     /// <summary>
     /// What one node type declares it touches, read straight off the SYMBOL.
@@ -361,15 +289,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         AttributeData attr = ctx.Attributes[0];
-        if (attr.ConstructorArguments.Length != 1
-            || attr.ConstructorArguments[0].Value is not INamedTypeSymbol queryable)
-        {
-            return null;
-        }
 
         // Every node type the class MENTIONS, in any spelling: `new StrikeNode()`, `Node<T>(...)`,
         // a `typeof`. All of them surface as a TypeSyntax, so one sweep catches each. Deliberately
-        // an over-approximation: a stray mention costs a loud PBT0004/5, never a silent miss.
+        // an over-approximation: a stray mention widens the blackboard, never silently misses.
         var access = ImmutableArray.CreateBuilder<Access>();
         var unresolved = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(System.StringComparer.Ordinal);
@@ -480,7 +403,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return new BindingModel(
             ns,
             symbol.Name,
-            queryable.ToDisplayString(),
             access.ToImmutable(),
             unresolved.ToImmutable(),
             decl.Identifier.GetLocation());
@@ -547,30 +469,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
     private static void Emit(
         SourceProductionContext spc,
         ImmutableArray<BindingModel> bindings,
-        ImmutableArray<QueryableModel> queryables,
         ImmutableArray<BuilderModel> builders)
     {
         foreach (BindingModel binding in bindings)
         {
-            QueryableModel queryable = default;
-            bool found = false;
-            foreach (QueryableModel q in queryables)
-            {
-                if (q.Fqn == binding.QueryableFqn)
-                {
-                    queryable = q;
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found)
-            {
-                spc.ReportDiagnostic(Diagnostic.Create(
-                    s_notQueryable, binding.Location, binding.ClassName, binding.QueryableFqn));
-                continue;
-            }
-
             // Union the access of every node in the tree. A type both read and written is a write:
             // the stricter claim is the one that has to hold.
             var merged = new Dictionary<string, Access>(System.StringComparer.Ordinal);
@@ -601,8 +503,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                if (a.IsComponent && !Verify(spc, binding, queryable, a))
+                // A component binds read-only by value — there is no claim to write through, and
+                // the union IS the contract, so the one rule left is that a write cannot land.
+                if (a.IsComponent && a.Kind == AccessKind.Write)
                 {
+                    spc.ReportDiagnostic(Diagnostic.Create(
+                        s_componentWriteUnsupported, binding.Location, a.DeclaringNode, a.TypeName));
                     refused = true;
                     continue;
                 }
@@ -623,53 +529,11 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 .OrderBy(a => a.TypeName, System.StringComparer.Ordinal)
                 .ToImmutableArray();
 
-            spc.AddSource($"{binding.ClassName}.Binding.g.cs", Render(binding, queryable, access));
+            spc.AddSource($"{binding.ClassName}.Binding.g.cs", Render(binding, access));
         }
     }
 
-    private static bool Verify(
-        SourceProductionContext spc,
-        BindingModel binding,
-        QueryableModel queryable,
-        Access access)
-    {
-        Claim claim = default;
-        bool claimed = false;
-        foreach (Claim c in queryable.Claims)
-        {
-            if (c.ComponentFqn == access.TypeFqn)
-            {
-                claim = c;
-                claimed = true;
-                break;
-            }
-        }
-
-        bool write = access.Kind == AccessKind.Write;
-
-        string? problem =
-            !claimed ? "does not claim it"
-            : claim.QueryOnly ? "claims it QueryOnly, which generates no accessor"
-            : write && claim.IsReadOnly ? "claims it IsReadOnly = true"
-            : null;
-
-        if (problem is null)
-        {
-            return true;
-        }
-
-        spc.ReportDiagnostic(Diagnostic.Create(
-            write ? s_componentWriteUnsupported : s_readsUnclaimed,
-            binding.Location,
-            access.DeclaringNode,
-            access.TypeName,
-            queryable.Fqn,
-            problem));
-        return false;
-    }
-
-    private static string Render(
-        BindingModel binding, QueryableModel queryable, ImmutableArray<Access> access)
+    private static string Render(BindingModel binding, ImmutableArray<Access> access)
     {
         string bb = binding.ClassName + "Blackboard";
         string extras = binding.ClassName + "Extras";
@@ -696,7 +560,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         // ----- blackboard -----
-        sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard, over one " + queryable.Fqn + " row.");
+        sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard — the union of its nodes' access.");
         sb.AppendLine("///");
         sb.AppendLine("/// Holds a REFERENCE to everything it touches: what the tree reads by");
         sb.AppendLine("/// <c>ref readonly</c>, what it writes by <c>ref</c>, so a write lands in the caller's own");
@@ -826,19 +690,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
     private static string Param(Access a) =>
         char.ToLowerInvariant(a.TypeName[0]) + a.TypeName.Substring(1);
 
-    private static string PropertyOf(QueryableModel queryable, Access a)
-    {
-        foreach (Claim c in queryable.Claims)
-        {
-            if (c.ComponentFqn == a.TypeFqn)
-            {
-                return c.PropertyName;
-            }
-        }
-
-        return a.TypeName;
-    }
-
     // ===================== models =====================
 
     private enum AccessKind
@@ -892,60 +743,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
     }
 
-    private readonly struct Claim : System.IEquatable<Claim>
-    {
-        public readonly string ComponentFqn;
-        public readonly string PropertyName;
-        public readonly bool IsReadOnly;
-        public readonly bool QueryOnly;
-
-        public Claim(string componentFqn, string propertyName, bool isReadOnly, bool queryOnly)
-        {
-            ComponentFqn = componentFqn;
-            PropertyName = propertyName;
-            IsReadOnly = isReadOnly;
-            QueryOnly = queryOnly;
-        }
-
-        public bool Equals(Claim other) =>
-            ComponentFqn == other.ComponentFqn
-            && PropertyName == other.PropertyName
-            && IsReadOnly == other.IsReadOnly
-            && QueryOnly == other.QueryOnly;
-
-        public override bool Equals(object? obj) => obj is Claim other && Equals(other);
-
-        public override int GetHashCode()
-        {
-            unchecked
-            {
-                int hash = ComponentFqn.GetHashCode();
-                hash = (hash * 31) + (IsReadOnly ? 1 : 0);
-                hash = (hash * 31) + (QueryOnly ? 1 : 0);
-                return hash;
-            }
-        }
-    }
-
-    private readonly struct QueryableModel : System.IEquatable<QueryableModel>
-    {
-        public readonly string Fqn;
-        public readonly ImmutableArray<Claim> Claims;
-
-        public QueryableModel(string fqn, ImmutableArray<Claim> claims)
-        {
-            Fqn = fqn;
-            Claims = claims;
-        }
-
-        public bool Equals(QueryableModel other) =>
-            Fqn == other.Fqn && Claims.SequenceEqual(other.Claims);
-
-        public override bool Equals(object? obj) => obj is QueryableModel other && Equals(other);
-
-        public override int GetHashCode() => Fqn.GetHashCode();
-    }
-
     private readonly struct BuilderModel : System.IEquatable<BuilderModel>
     {
         public readonly string Name;
@@ -969,7 +766,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
     {
         public readonly string Namespace;
         public readonly string ClassName;
-        public readonly string QueryableFqn;
 
         /// <summary>Every access every node in this tree declares, already resolved. Flattened
         /// rather than grouped per node: nothing downstream needs the grouping, and each entry
@@ -984,14 +780,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public BindingModel(
             string ns,
             string className,
-            string queryableFqn,
             ImmutableArray<Access> access,
             ImmutableArray<string> unresolved,
             Location location)
         {
             Namespace = ns;
             ClassName = className;
-            QueryableFqn = queryableFqn;
             Access = access;
             Unresolved = unresolved;
             Location = location;
@@ -1000,18 +794,11 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public bool Equals(BindingModel other) =>
             Namespace == other.Namespace
             && ClassName == other.ClassName
-            && QueryableFqn == other.QueryableFqn
             && Access.SequenceEqual(other.Access)
             && Unresolved.SequenceEqual(other.Unresolved);
 
         public override bool Equals(object? obj) => obj is BindingModel other && Equals(other);
 
-        public override int GetHashCode()
-        {
-            unchecked
-            {
-                return (ClassName.GetHashCode() * 31) + QueryableFqn.GetHashCode();
-            }
-        }
+        public override int GetHashCode() => ClassName.GetHashCode();
     }
 }

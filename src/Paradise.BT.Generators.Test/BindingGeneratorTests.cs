@@ -66,8 +66,6 @@ public sealed class BindingGeneratorTests
             [AttributeUsage(AttributeTargets.Class)]
             public sealed class BehaviorTreeBindingAttribute : Attribute
             {
-                public BehaviorTreeBindingAttribute(Type queryable) => Queryable = queryable;
-                public Type Queryable { get; }
                 public Type[]? Also { get; set; }
             }
         }
@@ -163,7 +161,7 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new SeekNode();
@@ -193,11 +191,10 @@ public sealed class BindingGeneratorTests
         await Assert.That(compileErrors).IsEmpty();
     }
 
-    /// <summary>A component write is allowed, but only through a claim that grants it. The
-    /// blackboard holds a ref, so the write reaches the chunk — which is exactly why the claim has
-    /// to be checked.</summary>
+    /// <summary>Components bind read-only by value — there is no claim to write through, so a
+    /// component write is refused outright. The tree writes conclusions the caller applies.</summary>
     [Test]
-    public async Task Writing_A_Component_The_Claim_Makes_ReadOnly_Is_Refused()
+    public async Task Writing_A_Component_Is_Refused()
     {
         var (diagnostics, _, _) = Run(Prelude + World + """
             namespace Game
@@ -212,7 +209,7 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new ShoveNode();
@@ -222,13 +219,15 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0008");
         await Assert.That(diagnostics[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture))
-            .Contains("claims it IsReadOnly = true");
+            .Contains("read-only by value");
     }
 
+    /// <summary>There is no claims list to be absent from: any component a node reads simply
+    /// binds read-only. The union of the nodes' access IS the contract.</summary>
     [Test]
-    public async Task Reading_An_Unclaimed_Component_Is_Refused()
+    public async Task Reading_Any_Component_Binds_It_Read_Only()
     {
-        var (diagnostics, _, _) = Run(Prelude + World + """
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
             namespace Game
             {
                 [Paradise.BT.Reads<Stunned>]
@@ -241,7 +240,7 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new CheckNode();
@@ -249,8 +248,10 @@ public sealed class BindingGeneratorTests
             }
             """);
 
-        await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0005");
-        await Assert.That(diagnostics[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("does not claim it");
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources))
+            .Contains("ref readonly global::Game.Stunned");
     }
 
     [Test]
@@ -269,7 +270,7 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new MaybeNode();
@@ -279,25 +280,6 @@ public sealed class BindingGeneratorTests
 
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0006");
         await Assert.That(diagnostics[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("Segments view");
-    }
-
-    [Test]
-    public async Task Binding_A_Non_Queryable_Is_Refused()
-    {
-        var (diagnostics, _, _) = Run(Prelude + World + """
-            namespace Game
-            {
-                public readonly ref struct NotAQueryable { }
-
-                [Paradise.BT.BehaviorTreeBinding(typeof(NotAQueryable))]
-                public static class EnemyTree
-                {
-                    public static object Build() => null!;
-                }
-            }
-            """);
-
-        await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0007");
     }
 
     [Test]
@@ -315,7 +297,7 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new PlainNode();
@@ -349,7 +331,7 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack), Also = new[] { typeof(TimerNode) })]
+                [Paradise.BT.BehaviorTreeBinding(Also = new[] { typeof(TimerNode) })]
                 public static class EnemyTree
                 {
                     // Deliberately never mentions TimerNode: a factory would have built it.
@@ -393,7 +375,7 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new SilentNode();
@@ -431,7 +413,7 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new ShoveNode();
@@ -471,7 +453,7 @@ public sealed class BindingGeneratorTests
                     public static object Hidden() => new HiddenNode();
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     // Never names HiddenNode. Only the factory does.
@@ -520,7 +502,7 @@ public sealed class BindingGeneratorTests
                 /// The generated builder shape: the node is a type argument on the base.
                 public sealed class Hidden : Paradise.BT.Builder.LeafNode<HiddenNode> { }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => new Hidden();
@@ -561,7 +543,7 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     // `Hidden` does not exist yet — the other generator emits it.
@@ -614,7 +596,7 @@ public sealed class BindingGeneratorTests
                     public static Hidden Hidden() => new();
                 }
 
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class EnemyTree
                 {
                     public static object Build() => Nodes.Hidden();
@@ -712,10 +694,7 @@ public sealed class BindingGeneratorTests
         const string treeSource = """
             namespace Game
             {
-                [Paradise.ECS.Queryable]
-                public readonly ref struct Pack { }
-
-                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                [Paradise.BT.BehaviorTreeBinding]
                 public static class ClockTree
                 {
                     public static object Build() => new Game.Builder.Clock();

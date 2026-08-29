@@ -1,9 +1,11 @@
 namespace Paradise.BT;
 
 /// <summary>
-/// Marks the class that builds one tree, naming the queryable whose rows feed it. The generator
-/// takes the node types the class names, unions their access, checks it against the queryable's
-/// claims, and emits a blackboard plus a <c>Bind</c>.
+/// Marks the class that builds one tree. The generator takes the node types the class names,
+/// unions their access, and emits a blackboard plus a <c>Bind</c> — the union IS the tree's
+/// contract, so nothing hand-maintained can drift stale when a node is added or removed.
+/// Components (by <c>[Component]</c> or <c>Paradise.ECS.IComponent</c>) bind read-only and may
+/// not be written (PBT0008); everything else is a caller-supplied value.
 ///
 /// Nodes are found by NAME, so how a tree composes them decides whether they are visible:
 /// <list type="bullet">
@@ -16,17 +18,11 @@ namespace Paradise.BT;
 /// emitted.</item>
 /// </list>
 ///
-/// Named <c>BehaviorTreeBinding</c> because <c>BehaviorTree</c> is already a type. Takes a
-/// <c>Type</c> rather than a generic parameter because a queryable is a <c>ref struct</c>.
+/// Named <c>BehaviorTreeBinding</c> because <c>BehaviorTree</c> is already a type.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class BehaviorTreeBindingAttribute : Attribute
 {
-    public BehaviorTreeBindingAttribute(Type queryable) => Queryable = queryable;
-
-    /// <summary>The <c>[Queryable]</c> ref struct whose rows this tree ticks over.</summary>
-    public Type Queryable { get; }
-
     /// <summary>
     /// Nodes the tree uses but never names. The escape hatch of last resort, for somebody else's
     /// factory carrying no <see cref="BuildsAttribute{T}"/>; prefer annotating the factory, so the

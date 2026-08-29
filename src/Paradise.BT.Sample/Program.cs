@@ -38,8 +38,8 @@ for (int i = 0; i < 10; i++)
 // 2. The GENERATED blackboard, over an ECS row.
 //
 // Nothing below names a blackboard type that anyone wrote. ForagerTreeBlackboard was emitted from
-// what the tree's node types declare with [Reads<T>] / [Writes<T>], checked against ForagerRow's
-// claims. It holds a ref to each value, so a write lands in the local passed to Bind.
+// what the tree's node types touch — the union of their access is the whole contract. It holds a
+// ref to each value, so a write lands in the local passed to Bind.
 //
 // Running it under PublishAot is the part worth having: generated code plus trimming plus native
 // compilation is where this would break first if it were going to.
@@ -99,10 +99,10 @@ foreach ((string label, Senses senses, float energy) in situations)
 // ---------------------------------------------------------------------------------------------
 // 3. How a tree CHANGES anything, given that components are read-only to it.
 //
-// A node COULD write Position now — the blackboard holds a ref to it — but only if ForagerRow
-// claimed it writable, which it does not. What these nodes write is a CONCLUSION, Intent, which
-// the caller applies. In the game that caller is EnemySystem, turning the goal into a steering
-// intent; here it is this loop, walking the forager toward whatever the tree decided.
+// A node cannot write Position: it is a component, and components bind read-only by value
+// (PBT0008). What these nodes write is a CONCLUSION, Intent, which the caller applies. In the
+// game that caller is EnemySystem, turning the goal into a steering intent; here it is this
+// loop, walking the forager toward whatever the tree decided.
 //
 // That round trip is the point: read, conclude, apply, read again — and it is why the same tree
 // can drive a body steered any way you like.
