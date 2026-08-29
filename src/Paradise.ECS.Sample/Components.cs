@@ -7,7 +7,8 @@ namespace Paradise.ECS.Sample;
 /// <summary>
 /// Position component for 2D game entities.
 /// </summary>
-[Component("A1B2C3D4-E5F6-7890-ABCD-EF1234567890")]
+[System.Runtime.InteropServices.Guid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890")]
+[Component]
 public partial struct Position
 {
     public float X;
@@ -25,7 +26,8 @@ public partial struct Position
 /// <summary>
 /// Velocity component for moving entities.
 /// </summary>
-[Component("B2C3D4E5-F678-90AB-CDEF-123456789012")]
+[System.Runtime.InteropServices.Guid("B2C3D4E5-F678-90AB-CDEF-123456789012")]
+[Component]
 public partial struct Velocity
 {
     public float X;
@@ -43,7 +45,8 @@ public partial struct Velocity
 /// <summary>
 /// Health component for damageable entities.
 /// </summary>
-[Component("C3D4E5F6-7890-ABCD-EF12-345678901234")]
+[System.Runtime.InteropServices.Guid("C3D4E5F6-7890-ABCD-EF12-345678901234")]
+[Component]
 public partial struct Health
 {
     public int Current;
@@ -59,16 +62,19 @@ public partial struct Health
 }
 
 // Tags used as entity markers
-[Tag("D4E5F678-90AB-CDEF-1234-567890123456")]
+[System.Runtime.InteropServices.Guid("D4E5F678-90AB-CDEF-1234-567890123456")]
+[Tag]
 public partial struct PlayerTag;
 
-[Tag("E5F67890-ABCD-EF12-3456-789012345678")]
+[System.Runtime.InteropServices.Guid("E5F67890-ABCD-EF12-3456-789012345678")]
+[Tag]
 public partial struct EnemyTag;
 
 /// <summary>
 /// Name component for named entities.
 /// </summary>
-[Component("F6789012-CDEF-1234-5678-901234567890")]
+[System.Runtime.InteropServices.Guid("F6789012-CDEF-1234-5678-901234567890")]
+[Component]
 public partial struct Name
 {
     // Fixed-size name buffer for AOT compatibility (no managed strings)

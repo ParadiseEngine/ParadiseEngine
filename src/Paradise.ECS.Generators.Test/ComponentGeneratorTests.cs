@@ -214,7 +214,8 @@ public class ComponentGeneratorGuidTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -228,14 +229,15 @@ public class ComponentGeneratorGuidTests
     }
 
     [Test]
-    public async Task ComponentWithGuid_AddsGuidAttribute()
+    public async Task ComponentWithGuid_DoesNotReemitGuidAttribute()
     {
         const string source = """
             using Paradise.ECS;
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -244,8 +246,35 @@ public class ComponentGeneratorGuidTests
 
         var generated = GeneratorTestHelper.GetGeneratedSource(source, "TestNamespace_Position.g.cs");
 
+        // The user declares [Guid] on the partial themselves; re-emitting it would be a duplicate attribute.
         await Assert.That(generated).IsNotNull();
-        await Assert.That(generated).Contains("[global::System.Runtime.InteropServices.Guid(\"12345678-1234-1234-1234-123456789012\")]");
+        await Assert.That(generated).DoesNotContain("InteropServices.Guid(");
+    }
+
+    [Test]
+    public async Task GuidOnSeparatePartialDeclaration_IsStillPickedUp()
+    {
+        // [Guid] need not sit on the same partial declaration as [Component]: the GUID is read from
+        // the merged type symbol, which aggregates attributes across every declaration.
+        const string source = """
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [Component]
+            public partial struct SplitPosition
+            {
+                public float X;
+            }
+
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            public partial struct SplitPosition;
+            """;
+
+        var generated = GeneratorTestHelper.GetGeneratedSource(source, "TestNamespace_SplitPosition.g.cs");
+
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated).Contains("public static global::System.Guid Guid { get; } = new global::System.Guid(\"12345678-1234-1234-1234-123456789012\")");
     }
 
     [Test]
@@ -256,7 +285,8 @@ public class ComponentGeneratorGuidTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -465,39 +495,20 @@ public class ComponentGeneratorDiagnosticTests
         await Assert.That(pecs001).IsNotNull();
     }
 
+    // Malformed [Guid] values are the compiler's job, not ours: it rejects anything but the exact
+    // "D" format with CS0591, so the generator carries no diagnostic of its own for them. These
+    // tests pin the fallback behaviour on source that the compiler would already be failing.
+
     [Test]
-    public async Task InvalidGuidFormat_ReportsPECS004()
+    public async Task MalformedGuid_GeneratesComponentWithEmptyGuid()
     {
         const string source = """
             using Paradise.ECS;
 
             namespace TestNamespace;
 
-            [Component("not-a-valid-guid")]
-            public partial struct BadGuidComponent
-            {
-                public int Value;
-            }
-            """;
-
-        var diagnostics = GeneratorTestHelper.GetDiagnostics(source);
-
-        var pecs004 = diagnostics.FirstOrDefault(d => d.Id == "PECS004");
-        await Assert.That(pecs004).IsNotNull();
-        await Assert.That(pecs004!.Severity).IsEqualTo(DiagnosticSeverity.Error);
-        await Assert.That(pecs004.GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("TestNamespace.BadGuidComponent");
-        await Assert.That(pecs004.GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("not-a-valid-guid");
-    }
-
-    [Test]
-    public async Task InvalidGuidFormat_StillGeneratesComponentWithoutGuid()
-    {
-        const string source = """
-            using Paradise.ECS;
-
-            namespace TestNamespace;
-
-            [Component("invalid")]
+            [System.Runtime.InteropServices.Guid("not-a-valid-guid")]
+            [Component]
             public partial struct ComponentWithBadGuid
             {
                 public int Value;
@@ -506,23 +517,50 @@ public class ComponentGeneratorDiagnosticTests
 
         var sources = GeneratorTestHelper.GetGeneratedSources(source);
 
-        // Component should still be generated (just without the GUID)
+        // Component is still generated, just without a stable identity
         var generated = sources.FirstOrDefault(s => s.HintName == "TestNamespace_ComponentWithBadGuid.g.cs").Source;
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated).Contains("partial struct ComponentWithBadGuid : global::Paradise.ECS.IComponent");
-        // Should use Guid.Empty since the provided GUID was invalid
         await Assert.That(generated).Contains("public static global::System.Guid Guid => global::System.Guid.Empty;");
     }
 
     [Test]
-    public async Task ValidGuidFormat_NoErrorReported()
+    [Arguments("{12345678-1234-1234-1234-123456789012}")] // B format
+    [Arguments("(12345678-1234-1234-1234-123456789012)")] // P format
+    [Arguments("12345678123412341234123456789012")]       // N format
+    public async Task NonDFormatGuid_IsIgnored(string guid)
+    {
+        // Guid.TryParse accepts these, but the compiler does not (CS0591), so neither do we —
+        // otherwise the generator would claim an identity for source that cannot build.
+        var source = $$"""
+            using Paradise.ECS;
+
+            namespace TestNamespace;
+
+            [System.Runtime.InteropServices.Guid("{{guid}}")]
+            [Component]
+            public partial struct OddFormatComponent
+            {
+                public int Value;
+            }
+            """;
+
+        var generated = GeneratorTestHelper.GetGeneratedSource(source, "TestNamespace_OddFormatComponent.g.cs");
+
+        await Assert.That(generated).IsNotNull();
+        await Assert.That(generated).Contains("public static global::System.Guid Guid => global::System.Guid.Empty;");
+    }
+
+    [Test]
+    public async Task ValidGuidFormat_NoGeneratorErrorReported()
     {
         const string source = """
             using Paradise.ECS;
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct ValidGuidComponent
             {
                 public int Value;
@@ -531,8 +569,7 @@ public class ComponentGeneratorDiagnosticTests
 
         var diagnostics = GeneratorTestHelper.GetDiagnostics(source);
 
-        var pecs004 = diagnostics.FirstOrDefault(d => d.Id == "PECS004");
-        await Assert.That(pecs004).IsNull();
+        await Assert.That(diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)).IsFalse();
     }
 
     [Test]
@@ -740,7 +777,8 @@ public class ComponentGeneratorRegistryTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position { public float X; }
             """;
 
