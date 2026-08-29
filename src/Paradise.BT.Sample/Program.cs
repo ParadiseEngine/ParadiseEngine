@@ -48,8 +48,7 @@ for (int i = 0; i < 10; i++)
 Console.WriteLine();
 Console.WriteLine("Forager — the generated blackboard, over a row:");
 
-BehaviorTree forager = ForagerTree.Build();
-BehaviorTreeLayout layout = BehaviorTreeLayout.Build(forager);
+BehaviorTreeLayout layout = BehaviorTrees.CompileLayout<ForagerTree>();
 
 // The instance owns the two per-agent buffers; the blackboard is bound per tick, because a
 // generated blackboard is a ref struct no field can hold.

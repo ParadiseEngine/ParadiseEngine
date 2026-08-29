@@ -8,9 +8,10 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Paradise.BT.Generators;
 
 /// <summary>
-/// Binds a behavior tree to the ECS rows that feed it: collects the node types a
-/// <c>[BehaviorTreeBinding]</c> class names, unions their access, checks it against the
-/// queryable's claims, and emits a blackboard plus a <c>Bind</c>.
+/// Emits each tree's blackboard: collects the node types an <c>IBehaviorTreeBuilder</c>
+/// implementation names, unions their access, and emits a <c>{Type}Blackboard</c> plus its
+/// <c>Bind</c>. The interface rather than an attribute, so the shape is compile-checked — a tree
+/// type must have a <c>Build</c> — and a tree can be a type parameter.
 ///
 /// The union of the nodes' access IS the tree's contract — there is no hand-maintained row to
 /// check against, so nothing can drift stale when a node is added or removed. The one rule left
@@ -23,6 +24,8 @@ namespace Paradise.BT.Generators;
 [Generator]
 public sealed class BindingGenerator : IIncrementalGenerator
 {
+    private const string TreeBuilderInterfaceName = "IBehaviorTreeBuilder";
+    private const string TreeBuilderInterfaceNamespace = "Paradise.BT.Builder";
     private const string BindingAttributeFullName = "Paradise.BT.BehaviorTreeBindingAttribute";
     private const string NodeDataInterface = "Paradise.BT.INodeData";
     private const string ComponentInterface = "Paradise.ECS.IComponent";
@@ -47,9 +50,9 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var bindings = context.SyntaxProvider.ForAttributeWithMetadataName(
-                BindingAttributeFullName,
-                predicate: static (node, _) => node is ClassDeclarationSyntax,
+        var bindings = context.SyntaxProvider.CreateSyntaxProvider(
+                predicate: static (node, _) =>
+                    node is TypeDeclarationSyntax { BaseList.Types.Count: > 0 },
                 transform: static (ctx, ct) => GetBinding(ctx, ct))
             .Where(static b => b.HasValue)
             .Select(static (b, _) => b!.Value);
@@ -279,18 +282,17 @@ public sealed class BindingGenerator : IIncrementalGenerator
     }
 
     private static BindingModel? GetBinding(
-        GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
+        GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (ctx.TargetSymbol is not INamedTypeSymbol symbol
-            || ctx.TargetNode is not ClassDeclarationSyntax decl)
+        var decl = (TypeDeclarationSyntax)ctx.Node;
+        if (ctx.SemanticModel.GetDeclaredSymbol(decl, ct) is not INamedTypeSymbol symbol
+            || !BuildsATree(symbol))
         {
             return null;
         }
 
-        AttributeData attr = ctx.Attributes[0];
-
-        // Every node type the class MENTIONS, in any spelling: `new StrikeNode()`, `Node<T>(...)`,
+        // Every node type the type MENTIONS, in any spelling: `new StrikeNode()`, `Node<T>(...)`,
         // a `typeof`. All of them surface as a TypeSyntax, so one sweep catches each. Deliberately
         // an over-approximation: a stray mention widens the blackboard, never silently misses.
         var access = ImmutableArray.CreateBuilder<Access>();
@@ -377,21 +379,30 @@ public sealed class BindingGenerator : IIncrementalGenerator
             }
         }
 
-        // The escape hatch: a factory nobody has annotated.
-        foreach (var named in attr.NamedArguments)
+        // The escape hatch: [BehaviorTreeBinding(Also = ...)] names nodes the tree composes only
+        // through a factory nobody annotated — the one form the sweep cannot see.
+        foreach (AttributeData bindingAttr in symbol.GetAttributes())
         {
-            if (named.Key != "Also" || named.Value.Kind != TypedConstantKind.Array)
+            if (bindingAttr.AttributeClass?.ToDisplayString() != BindingAttributeFullName)
             {
                 continue;
             }
 
-            foreach (TypedConstant entry in named.Value.Values)
+            foreach (var named in bindingAttr.NamedArguments)
             {
-                if (entry.Value is INamedTypeSymbol also
-                    && Implements(also, NodeDataInterface)
-                    && seen.Add(also.ToDisplayString()))
+                if (named.Key != "Also" || named.Value.Kind != TypedConstantKind.Array)
                 {
-                    access.AddRange(CollectAccess(also, ctx.SemanticModel.Compilation, ct));
+                    continue;
+                }
+
+                foreach (TypedConstant entry in named.Value.Values)
+                {
+                    if (entry.Value is INamedTypeSymbol also
+                        && Implements(also, NodeDataInterface)
+                        && seen.Add(also.ToDisplayString()))
+                    {
+                        access.AddRange(CollectAccess(also, ctx.SemanticModel.Compilation, ct));
+                    }
                 }
             }
         }
@@ -406,6 +417,23 @@ public sealed class BindingGenerator : IIncrementalGenerator
             access.ToImmutable(),
             unresolved.ToImmutable(),
             decl.Identifier.GetLocation());
+    }
+
+    /// <summary>A tree type is one implementing <c>IBehaviorTreeBuilder</c> (either arity), by
+    /// name — the interface lives in Paradise.BT.Builder, which this generator does not
+    /// reference.</summary>
+    private static bool BuildsATree(INamedTypeSymbol symbol)
+    {
+        foreach (INamedTypeSymbol i in symbol.AllInterfaces)
+        {
+            if (i.Name == TreeBuilderInterfaceName
+                && i.ContainingNamespace?.ToDisplayString() == TreeBuilderInterfaceNamespace)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

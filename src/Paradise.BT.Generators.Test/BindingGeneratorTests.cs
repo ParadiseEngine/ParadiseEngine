@@ -63,10 +63,31 @@ public sealed class BindingGeneratorTests
                 public BuilderAttribute(string? name = null) { }
             }
 
-            [AttributeUsage(AttributeTargets.Class)]
+            [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
             public sealed class BehaviorTreeBindingAttribute : Attribute
             {
                 public Type[]? Also { get; set; }
+            }
+        }
+
+        namespace Paradise.BT.Builder
+        {
+            public abstract class BTreeNode { }
+
+            public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+            {
+                public LeafNode() { }
+                public LeafNode(T data) { }
+            }
+
+            public interface IBehaviorTreeBuilder
+            {
+                static abstract BTreeNode Build();
+            }
+
+            public interface IBehaviorTreeBuilder<TArgs>
+            {
+                static abstract BTreeNode Build(TArgs args);
             }
         }
 
@@ -161,10 +182,9 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new SeekNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new SeekNode(); return null!; }
                 }
             }
             """);
@@ -209,10 +229,9 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new ShoveNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new ShoveNode(); return null!; }
                 }
             }
             """);
@@ -240,10 +259,9 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new CheckNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new CheckNode(); return null!; }
                 }
             }
             """);
@@ -270,10 +288,9 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new MaybeNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new MaybeNode(); return null!; }
                 }
             }
             """);
@@ -297,10 +314,9 @@ public sealed class BindingGeneratorTests
                         => Paradise.BT.NodeState.Success;
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new PlainNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new PlainNode(); return null!; }
                 }
             }
             """);
@@ -313,7 +329,8 @@ public sealed class BindingGeneratorTests
 
     /// <summary>
     /// A node a factory builds, so the tree never names it. The escape hatch of last resort, for a
-    /// factory carrying no [Builds&lt;T&gt;]; prefer annotating the factory.
+    /// factory carrying no [Builds&lt;T&gt;]; prefer annotating the factory. The attribute is now
+    /// ONLY this: the interface marks the tree, [BehaviorTreeBinding] just carries Also.
     /// </summary>
     [Test]
     public async Task Also_Binds_A_Node_The_Tree_Never_Names()
@@ -332,10 +349,10 @@ public sealed class BindingGeneratorTests
                 }
 
                 [Paradise.BT.BehaviorTreeBinding(Also = new[] { typeof(TimerNode) })]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
                     // Deliberately never mentions TimerNode: a factory would have built it.
-                    public static object Build() => null!;
+                    public static Paradise.BT.Builder.BTreeNode Build() => null!;
                 }
             }
             """);
@@ -375,10 +392,9 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new SilentNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new SilentNode(); return null!; }
                 }
             }
             """);
@@ -413,10 +429,9 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new ShoveNode();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new ShoveNode(); return null!; }
                 }
             }
             """);
@@ -453,11 +468,10 @@ public sealed class BindingGeneratorTests
                     public static object Hidden() => new HiddenNode();
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
                     // Never names HiddenNode. Only the factory does.
-                    public static object Build() => Factory.Hidden();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = Factory.Hidden(); return null!; }
                 }
             }
             """);
@@ -479,12 +493,6 @@ public sealed class BindingGeneratorTests
     public async Task A_Tree_Built_With_The_Builder_Dsl_Binds()
     {
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
-            namespace Paradise.BT.Builder
-            {
-                public abstract class BTreeNode { }
-                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData { }
-            }
-
             namespace Game
             {
                 public struct HiddenNode : Paradise.BT.INodeData
@@ -502,10 +510,9 @@ public sealed class BindingGeneratorTests
                 /// The generated builder shape: the node is a type argument on the base.
                 public sealed class Hidden : Paradise.BT.Builder.LeafNode<HiddenNode> { }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new Hidden();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new Hidden(); return null!; }
                 }
             }
             """);
@@ -543,11 +550,10 @@ public sealed class BindingGeneratorTests
                     }
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
                     // `Hidden` does not exist yet — the other generator emits it.
-                    public static object Build() => new Hidden();
+                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new Hidden(); return null!; }
                 }
             }
             """);
@@ -568,12 +574,6 @@ public sealed class BindingGeneratorTests
     public async Task A_Factory_Returning_A_Builder_Needs_No_Annotation()
     {
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
-            namespace Paradise.BT.Builder
-            {
-                public abstract class BTreeNode { }
-                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData { }
-            }
-
             namespace Game
             {
                 public struct HiddenNode : Paradise.BT.INodeData
@@ -596,10 +596,9 @@ public sealed class BindingGeneratorTests
                     public static Hidden Hidden() => new();
                 }
 
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class EnemyTree
+                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => Nodes.Hidden();
+                    public static Paradise.BT.Builder.BTreeNode Build() => Nodes.Hidden();
                 }
             }
             """);
@@ -636,16 +635,6 @@ public sealed class BindingGeneratorTests
                 public static class NodeTypeRegistry
                 {
                     public static int Register<T>() where T : unmanaged, INodeData => 0;
-                }
-            }
-
-            namespace Paradise.BT.Builder
-            {
-                public abstract class BTreeNode { }
-
-                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
-                {
-                    public LeafNode(T data) { }
                 }
             }
 
@@ -694,10 +683,9 @@ public sealed class BindingGeneratorTests
         const string treeSource = """
             namespace Game
             {
-                [Paradise.BT.BehaviorTreeBinding]
-                public static class ClockTree
+                public struct ClockTree : Paradise.BT.Builder.IBehaviorTreeBuilder
                 {
-                    public static object Build() => new Game.Builder.Clock();
+                    public static Paradise.BT.Builder.BTreeNode Build() => new Game.Builder.Clock();
                 }
             }
             """;

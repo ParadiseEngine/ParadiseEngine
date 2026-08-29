@@ -14,8 +14,7 @@ namespace Paradise.BT.Sample;
 /// Twenty-one nodes produce SIX blackboard entries. That gap is the point — the blackboard is
 /// sized by what the tree TOUCHES, not by how big it is.
 /// </summary>
-[BehaviorTreeBinding]
-public static class ForagerTree
+public readonly struct ForagerTree : IBehaviorTreeBuilder
 {
     /// <summary>
     /// <code>
@@ -27,7 +26,7 @@ public static class ForagerTree
     /// └─ Rest                always succeeds, so the Selector always concludes
     /// </code>
     /// </summary>
-    public static BehaviorTree Build() => BehaviorTreeBuilder.Build(
+    public static BTreeNode Build() =>
         Selector(
             Sequence(
                 ThreatNear(0.1f),
@@ -48,5 +47,5 @@ public static class ForagerTree
             Sequence(
                 AlreadyDecided(),
                 Tally()),
-            Rest()));
+            Rest());
 }
