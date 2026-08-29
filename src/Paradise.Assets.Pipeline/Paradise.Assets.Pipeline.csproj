@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The build pipeline of an asset project: the verbs' logic, filesystem-only and fully
+    testable in memory. The CLI (Paradise.Assets.Cli) is a thin argument parser over this.
+
+    Owns policy the model packages deliberately do not: which extensions are foreign assets,
+    what `verify` refuses, what `clean` deletes.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Assets.Pipeline</AssemblyName>
+    <RootNamespace>Paradise.Assets.Pipeline</RootNamespace>
+    <PackageId>Paradise.Assets.Pipeline</PackageId>
+    <Title>Paradise.Assets.Pipeline</Title>
+    <Description>The Paradise asset build pipeline: source-tree verification, canonical-form checks, and the build verbs' logic, on Zio. The paradise-assets CLI is a thin shell over this library.</Description>
+    <PackageTags>assets;pipeline;build;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Documents\Paradise.Assets.Documents.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Assets.Pipeline.Test" />
+  </ItemGroup>
+
+</Project>
