@@ -19,9 +19,9 @@ namespace Paradise.BT.Nodes;
 [Guid("2F6009D3-1314-42E6-8E52-4AEB7CDDB4CD")]
 [Reads<BehaviorTreeTickDeltaTime>]
 [Builder("Delay")]
-public struct DelayTimerNode : INodeData
+public struct DelayTimerNode(float timerSeconds) : INodeData
 {
-    public float TimerSeconds;
+    public float TimerSeconds = timerSeconds;
 
     public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
         where TNodeBlob : struct, INodeBlob, allows ref struct
