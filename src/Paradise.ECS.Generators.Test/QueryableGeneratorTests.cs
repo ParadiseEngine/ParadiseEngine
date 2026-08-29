@@ -18,7 +18,8 @@ public class QueryableGeneratorStructureTests
 
             namespace TestNamespace;
 
-            [Component("11111111-1111-1111-1111-111111111111")]
+            [System.Runtime.InteropServices.Guid("11111111-1111-1111-1111-111111111111")]
+            [Component]
             public partial struct TestComp { public int Value; }
 
             public partial class ContainerA
@@ -76,7 +77,8 @@ public class QueryableGeneratorStructureTests
 
             namespace TestNamespace;
 
-            [Component("22222222-2222-2222-2222-222222222222")]
+            [System.Runtime.InteropServices.Guid("22222222-2222-2222-2222-222222222222")]
+            [Component]
             public partial struct SimpleComp { public int Value; }
 
             [Queryable]
@@ -109,7 +111,8 @@ public class QueryableGeneratorStructureTests
 
             namespace TestNamespace;
 
-            [Component("33333333-3333-3333-3333-333333333333")]
+            [System.Runtime.InteropServices.Guid("33333333-3333-3333-3333-333333333333")]
+            [Component]
             public partial struct DeepComp { public int Value; }
 
             public partial class Level1
@@ -143,7 +146,8 @@ public class QueryableGeneratorStructureTests
 
             namespace TestNamespace;
 
-            [Component("22222222-2222-2222-2222-222222222223")]
+            [System.Runtime.InteropServices.Guid("22222222-2222-2222-2222-222222222223")]
+            [Component]
             public partial struct TargetComponent { public int Value; }
 
             [Queryable]
@@ -218,7 +222,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("44444444-4444-4444-4444-444444444444")]
+            [System.Runtime.InteropServices.Guid("44444444-4444-4444-4444-444444444444")]
+            [Component]
             public partial struct SuppressTestComp { public int Value; }
 
             [Queryable]
@@ -243,7 +248,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("55555555-5555-5555-5555-555555555555")]
+            [System.Runtime.InteropServices.Guid("55555555-5555-5555-5555-555555555555")]
+            [Component]
             public partial struct SuppressCommentComp { public int Value; }
 
             [Queryable]
@@ -266,7 +272,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("66666666-6666-6666-6666-666666666666")]
+            [System.Runtime.InteropServices.Guid("66666666-6666-6666-6666-666666666666")]
+            [Component]
             public partial struct NoSuppressComp { public int Value; }
 
             [Queryable]
@@ -292,7 +299,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("77777777-7777-7777-7777-777777777777")]
+            [System.Runtime.InteropServices.Guid("77777777-7777-7777-7777-777777777777")]
+            [Component]
             public partial struct SuppressRegistryComp { public int Value; }
 
             [Queryable]
@@ -324,7 +332,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("88888888-8888-8888-8888-888888888888")]
+            [System.Runtime.InteropServices.Guid("88888888-8888-8888-8888-888888888888")]
+            [Component]
             public partial struct SuppressRefComp { public int Value; }
 
             [Queryable]
@@ -353,13 +362,16 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("11111111-1111-1111-1111-111111111111")]
+            [System.Runtime.InteropServices.Guid("11111111-1111-1111-1111-111111111111")]
+            [Component]
             public partial struct Required { public int Value; }
 
-            [Component("22222222-2222-2222-2222-222222222222")]
+            [System.Runtime.InteropServices.Guid("22222222-2222-2222-2222-222222222222")]
+            [Component]
             public partial struct Excluded { public int Value; }
 
-            [Component("33333333-3333-3333-3333-333333333333")]
+            [System.Runtime.InteropServices.Guid("33333333-3333-3333-3333-333333333333")]
+            [Component]
             public partial struct Maybe { public int Value; }
 
             [Queryable]
@@ -392,7 +404,8 @@ public class QueryableGeneratorSuppressGlobalUsingsTests
 
             namespace TestNamespace;
 
-            [Component("11111111-1111-1111-1111-111111111111")]
+            [System.Runtime.InteropServices.Guid("11111111-1111-1111-1111-111111111111")]
+            [Component]
             public partial struct Excluded { public int Value; }
 
             [Queryable]

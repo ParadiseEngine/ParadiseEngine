@@ -53,7 +53,7 @@ internal static class DiagnosticDescriptors
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The GUID provided to [Component] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
+        description: "The GUID provided to the [System.Runtime.InteropServices.Guid] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
 
     /// <summary>
     /// PECS005: Component nested in generic type.
@@ -247,7 +247,7 @@ internal static class DiagnosticDescriptors
         category: "Paradise.ECS",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "The GUID provided to [Tag] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
+        description: "The GUID provided to the [System.Runtime.InteropServices.Guid] attribute must be a valid GUID format (e.g., '12345678-1234-1234-1234-123456789012').");
 
     /// <summary>
     /// PECS023: Tag nested in generic type.

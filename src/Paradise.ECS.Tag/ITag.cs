@@ -22,7 +22,8 @@ namespace Paradise.ECS;
 /// [Tag]
 /// public partial struct IsPlayer;
 ///
-/// [Tag("12345678-1234-1234-1234-123456789012")]
+/// [Tag]
+/// [Guid("12345678-1234-1234-1234-123456789012")]
 /// public partial struct IsEnemy;
 /// </code>
 /// </example>
@@ -39,7 +40,7 @@ public interface ITag
     /// <remarks>
     /// Unlike <see cref="TagId"/> which changes based on alphabetical ordering,
     /// this GUID provides stable identification across compilations when specified
-    /// via <see cref="TagAttribute"/>.
+    /// via <see cref="System.Runtime.InteropServices.GuidAttribute"/>.
     /// </remarks>
     static abstract Guid Guid { get; }
 }

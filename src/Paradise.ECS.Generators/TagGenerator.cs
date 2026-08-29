@@ -129,9 +129,6 @@ public class TagGenerator : IIncrementalGenerator
             indent += "    ";
         }
 
-        if (info.Guid != null)
-            sb.AppendLine($"{indent}[global::System.Runtime.InteropServices.Guid(\"{info.Guid}\")]");
-
         sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.ITag");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    /// <summary>The unique tag type ID assigned at module initialization.</summary>");

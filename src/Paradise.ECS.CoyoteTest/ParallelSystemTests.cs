@@ -8,19 +8,22 @@ namespace Paradise.ECS.Concurrent.ConcurrentTest;
 // Test Components
 // ============================================================================
 
-[Component("2E9B1C4B-F50F-4D76-A16F-478E3098F4AA", Id = 0)]
+[System.Runtime.InteropServices.Guid("2E9B1C4B-F50F-4D76-A16F-478E3098F4AA")]
+[Component(Id = 0)]
 public partial struct CoyotePosition
 {
     public float X, Y, Z;
 }
 
-[Component("EF293D66-2FE4-4078-9523-9798121EC2CE", Id = 1)]
+[System.Runtime.InteropServices.Guid("EF293D66-2FE4-4078-9523-9798121EC2CE")]
+[Component(Id = 1)]
 public partial struct CoyoteVelocity
 {
     public float X, Y, Z;
 }
 
-[Component("2056C049-F782-4369-B172-669BB00513B8", Id = 2)]
+[System.Runtime.InteropServices.Guid("2056C049-F782-4369-B172-669BB00513B8")]
+[Component(Id = 2)]
 public partial struct CoyoteHealth
 {
     public int Current;

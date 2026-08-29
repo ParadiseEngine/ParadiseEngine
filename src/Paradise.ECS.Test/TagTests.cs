@@ -90,7 +90,8 @@ public partial struct TestManualIdTag;
 
 // EntityTags needs [Component] attribute for ComponentGenerator to register it.
 // The TagGenerator generates the IEntityTags implementation as a partial struct.
-[Component("D1E2F3A4-B5C6-4D7E-8F9A-0B1C2D3E4F5A")]
+[System.Runtime.InteropServices.Guid("D1E2F3A4-B5C6-4D7E-8F9A-0B1C2D3E4F5A")]
+[Component]
 public partial struct EntityTags;
 
 /// <summary>

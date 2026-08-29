@@ -214,7 +214,8 @@ public class ComponentGeneratorGuidTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -228,14 +229,15 @@ public class ComponentGeneratorGuidTests
     }
 
     [Test]
-    public async Task ComponentWithGuid_AddsGuidAttribute()
+    public async Task ComponentWithGuid_DoesNotReemitGuidAttribute()
     {
         const string source = """
             using Paradise.ECS;
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -244,8 +246,9 @@ public class ComponentGeneratorGuidTests
 
         var generated = GeneratorTestHelper.GetGeneratedSource(source, "TestNamespace_Position.g.cs");
 
+        // The user declares [Guid] on the partial themselves; re-emitting it would be a duplicate attribute.
         await Assert.That(generated).IsNotNull();
-        await Assert.That(generated).Contains("[global::System.Runtime.InteropServices.Guid(\"12345678-1234-1234-1234-123456789012\")]");
+        await Assert.That(generated).DoesNotContain("InteropServices.Guid(");
     }
 
     [Test]
@@ -256,7 +259,8 @@ public class ComponentGeneratorGuidTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position
             {
                 public float X;
@@ -473,7 +477,8 @@ public class ComponentGeneratorDiagnosticTests
 
             namespace TestNamespace;
 
-            [Component("not-a-valid-guid")]
+            [System.Runtime.InteropServices.Guid("not-a-valid-guid")]
+            [Component]
             public partial struct BadGuidComponent
             {
                 public int Value;
@@ -497,7 +502,8 @@ public class ComponentGeneratorDiagnosticTests
 
             namespace TestNamespace;
 
-            [Component("invalid")]
+            [System.Runtime.InteropServices.Guid("invalid")]
+            [Component]
             public partial struct ComponentWithBadGuid
             {
                 public int Value;
@@ -522,7 +528,8 @@ public class ComponentGeneratorDiagnosticTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct ValidGuidComponent
             {
                 public int Value;
@@ -740,7 +747,8 @@ public class ComponentGeneratorRegistryTests
 
             namespace TestNamespace;
 
-            [Component("12345678-1234-1234-1234-123456789012")]
+            [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+            [Component]
             public partial struct Position { public float X; }
             """;
 

@@ -8,6 +8,8 @@ namespace Paradise.ECS.Generators;
 /// </summary>
 internal static class GeneratorUtilities
 {
+    private const string GuidAttributeFullName = "System.Runtime.InteropServices.GuidAttribute";
+
     /// <summary>
     /// Gets the optimal mask type string based on the number of bits required.
     /// </summary>
@@ -87,38 +89,19 @@ internal static class GeneratorUtilities
             }
         }
 
-        // Extract GUID and manual ID from attributes
-        string? validGuid = null, invalidGuid = null;
+        // Extract the manual ID from the [Component]/[Tag] attribute
         int? manualId = null;
         foreach (var attr in context.Attributes)
         {
-            if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string ctorGuid)
-            {
-                if (Guid.TryParse(ctorGuid, out _))
-                    validGuid = ctorGuid;
-                else
-                    invalidGuid = ctorGuid;
-            }
-
             foreach (var arg in attr.NamedArguments)
             {
-                if (arg.Key == "Guid" && arg.Value.Value is string g)
-                {
-                    if (Guid.TryParse(g, out _))
-                    {
-                        validGuid = g;
-                        invalidGuid = null;
-                    }
-                    else
-                    {
-                        validGuid = null;
-                        invalidGuid = g;
-                    }
-                }
-                else if (arg.Key == "Id" && arg.Value.Value is int id && id >= 0)
+                if (arg.Key == "Id" && arg.Value.Value is int id && id >= 0)
                     manualId = id;
             }
         }
+
+        // Stable identity comes from the standard [System.Runtime.InteropServices.Guid] attribute
+        var (validGuid, invalidGuid) = ExtractGuid(typeSymbol);
 
         var hasInstanceFields = typeSymbol.GetMembers().OfType<IFieldSymbol>().Any(f => !f.IsStatic);
 
@@ -135,6 +118,27 @@ internal static class GeneratorUtilities
             invalidContainingType,
             hasInstanceFields,
             manualId);
+    }
+
+    /// <summary>
+    /// Reads the stable GUID declared by <c>[System.Runtime.InteropServices.Guid]</c> on a type.
+    /// </summary>
+    /// <returns>
+    /// The GUID string when well-formed, otherwise the raw value so the caller can report a diagnostic.
+    /// </returns>
+    private static (string? Valid, string? Invalid) ExtractGuid(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var attr in typeSymbol.GetAttributes())
+        {
+            if (attr.AttributeClass?.ToDisplayString() != GuidAttributeFullName)
+                continue;
+            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Value is not string value)
+                continue;
+
+            return Guid.TryParse(value, out _) ? (value, null) : (null, value);
+        }
+
+        return (null, null);
     }
 
     /// <summary>
