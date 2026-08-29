@@ -1,3 +1,5 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 namespace Paradise.BT.Test;
 
 public sealed class GenericBlackboardTests
@@ -19,7 +21,7 @@ public sealed class GenericBlackboardTests
     [Test]
     public async Task Generic_CreateInstance_Exposes_Custom_Blackboard_By_Ref()
     {
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
+        var tree = BehaviorTreeBuilder.Build(new Success());
         var instance = tree.CreateInstance(new CountingBlackboard());
 
         // Caller writes persist through the ref exposed by the instance.
@@ -37,9 +39,9 @@ public sealed class GenericBlackboardTests
     public async Task Generic_CreateInstance_Runs_Tree_To_Completion_With_Custom_Blackboard()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Delay(0.5f),
-                BuiltInBehaviorNodes.Success()));
+            new Sequence(
+                new Delay(0.5f),
+                new Success()));
 
         var instance = tree.CreateInstance(new CountingBlackboard());
 

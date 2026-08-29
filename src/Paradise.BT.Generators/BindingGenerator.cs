@@ -301,8 +301,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
             }
         }
 
-        // Nodes a FACTORY builds, which the sweep above cannot see: `BuiltInBehaviorNodes.Delay`
-        // returns a definition, so the word DelayTimerNode is nowhere in the tree that uses it.
+        // Nodes a FACTORY builds, which the sweep above cannot see: a method returning a definition
+        // discards what it built, so the tree calling it names no node.
         // The factory knows, and says so with [Builds<T>] — read here off the resolved method, so
         // it works for a factory in a referenced assembly exactly as for one in source.
         foreach (InvocationExpressionSyntax invocation in

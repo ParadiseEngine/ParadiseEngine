@@ -12,12 +12,13 @@ namespace Paradise.BT.Nodes;
 /// timer.
 ///
 /// The only built-in that reads a blackboard, which is why it is the only one declaring access.
-/// It is also built by a factory (<c>BuiltInBehaviorNodes.Delay</c>) rather than named, so a tree
-/// using it has to list it in <c>[BehaviorTreeBinding(..., Also = [typeof(DelayTimerNode)])]</c>
-/// for its delta time to be bound.
+/// Its generated builder (<c>Delay</c>) carries this type on its base, so a tree using it binds
+/// the delta time without being told — provided the builder comes from a referenced assembly, as
+/// it does here.
 /// </remarks>
 [Guid("2F6009D3-1314-42E6-8E52-4AEB7CDDB4CD")]
 [Reads<BehaviorTreeTickDeltaTime>]
+[Builder("Delay")]
 public struct DelayTimerNode : INodeData
 {
     public float TimerSeconds;

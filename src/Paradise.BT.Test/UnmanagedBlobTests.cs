@@ -1,3 +1,5 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 using System.Runtime.InteropServices;
 
 namespace Paradise.BT.Test;
@@ -105,12 +107,12 @@ public sealed class UnmanagedBlobTests
     }
 
     private static BehaviorNodeDefinition SampleTree() =>
-        BuiltInBehaviorNodes.Selector(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Success(),
-                BuiltInBehaviorNodes.Delay(0.5f),
-                BuiltInBehaviorNodes.Success()),
-            BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Failure()));
+        new Selector(
+            new Sequence(
+                new Success(),
+                new Delay(0.5f),
+                new Success()),
+            new Inverter(new Failure()));
 
     /// <summary>No registration call: the built-in node types register themselves through a
     /// generated module initializer.</summary>
@@ -159,7 +161,7 @@ public sealed class UnmanagedBlobTests
         // 0.25 rather than 0.30 so the third step lands clearly PAST zero. Three 0.1f steps out of
         // 0.3f leave about 1e-8 behind rather than nothing, which would make this test a check on
         // float residue instead of on whether the subtraction was written back at all.
-        using BehaviorTreeLayout layout = LayoutOf(BuiltInBehaviorNodes.Delay(0.25f));
+        using BehaviorTreeLayout layout = LayoutOf(new Delay(0.25f));
         using var instance = new Instance(layout);
         var bb = new Blackboard();
 
@@ -171,7 +173,7 @@ public sealed class UnmanagedBlobTests
     [Test]
     public async Task Reset_Restores_The_Authored_Default()
     {
-        using BehaviorTreeLayout layout = LayoutOf(BuiltInBehaviorNodes.Delay(0.3f));
+        using BehaviorTreeLayout layout = LayoutOf(new Delay(0.3f));
         using var instance = new Instance(layout);
         var bb = new Blackboard();
 
@@ -187,7 +189,7 @@ public sealed class UnmanagedBlobTests
     [Test]
     public async Task Two_Instances_Over_One_Layout_Do_Not_Share_State()
     {
-        using BehaviorTreeLayout layout = LayoutOf(BuiltInBehaviorNodes.Delay(0.3f));
+        using BehaviorTreeLayout layout = LayoutOf(new Delay(0.3f));
         using var first = new Instance(layout);
         using var second = new Instance(layout);
         var bb = new Blackboard();
@@ -205,7 +207,7 @@ public sealed class UnmanagedBlobTests
     [Test]
     public async Task An_Instance_Survives_A_Raw_Memory_Copy()
     {
-        using BehaviorTreeLayout layout = LayoutOf(BuiltInBehaviorNodes.Delay(0.3f));
+        using BehaviorTreeLayout layout = LayoutOf(new Delay(0.3f));
         using var original = new Instance(layout);
         using var copy = new Instance(layout);
         var bb = new Blackboard();

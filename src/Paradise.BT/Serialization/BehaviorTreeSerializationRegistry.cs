@@ -13,7 +13,7 @@ public sealed class BehaviorTreeSerializationRegistry
     /// Creates an empty registry. Register every node type used in your tree via <see cref="Register{TNodeData}"/>
     /// before passing the registry to <see cref="BehaviorTreeBlobSerializer.Deserialize(byte[], BehaviorTreeSerializationRegistry)"/>.
     /// Consumers of the <c>Paradise.BT.Nodes</c> package can seed this with the built-in node set via
-    /// <c>BuiltInBehaviorNodes.CreateRegistry()</c>.
+    /// <c>BuiltInNodeRegistry.Create()</c>.
     /// </summary>
     public BehaviorTreeSerializationRegistry()
     {

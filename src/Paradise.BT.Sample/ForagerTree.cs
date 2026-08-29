@@ -1,3 +1,5 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 using Paradise.BT.Nodes;
 
 namespace Paradise.BT.Sample;
@@ -14,9 +16,10 @@ namespace Paradise.BT.Sample;
 /// and the delta time the timer needs. That gap between node count and field count is the whole
 /// point — the blackboard is sized by what the tree TOUCHES, not by how big the tree is.
 ///
-/// Nothing is listed by hand, not even the timer. <c>BuiltInBehaviorNodes.Delay</c> builds a
-/// <c>DelayTimerNode</c> without naming it — and it is the one built-in that reads a blackboard —
-/// but the factory says what it builds with <c>[Builds&lt;T&gt;]</c>, so the scan follows it there.
+/// Nothing is listed by hand, not even the timer. <c>new Delay(0.2f)</c> is a generated builder
+/// deriving from <c>DecoratorNode&lt;DelayTimerNode&gt;</c>, so the node type is on its base and the
+/// scan follows it — which is why the built-ins compose with <c>new</c> while this assembly's own
+/// leaves use <c>LeafNode&lt;T&gt;</c>: a builder generated BESIDE the tree is invisible to it.
 /// </summary>
 [BehaviorTreeBinding(typeof(ForagerRow))]
 public static class ForagerTree
@@ -32,24 +35,24 @@ public static class ForagerTree
     /// </code>
     /// </summary>
     public static BehaviorTree Build() => BehaviorTreeBuilder.Build(
-        BuiltInBehaviorNodes.Selector(
-            BuiltInBehaviorNodes.Sequence(
-                BehaviorNodes.Node(new ThreatNearNode { PanicStamina = 0.1f }),
-                BehaviorNodes.Node(new FleeNode { Distance = 5f }),
-                BuiltInBehaviorNodes.Delay(0.2f),
-                BehaviorNodes.Node(new TallyNode())),
-            BuiltInBehaviorNodes.Sequence(
-                BehaviorNodes.Node(new FoodVisibleNode()),
-                BuiltInBehaviorNodes.Inverter(
-                    BehaviorNodes.Node(new ExhaustedNode { RestBelow = 0.25f })),
-                BehaviorNodes.Node(new SeekFoodNode { ArriveWithin = 0.5f }),
-                BehaviorNodes.Node(new TallyNode())),
-            BuiltInBehaviorNodes.Sequence(
-                BehaviorNodes.Node(new ExhaustedNode { RestBelow = 0.25f }),
-                BehaviorNodes.Node(new RestNode()),
-                BehaviorNodes.Node(new NoopNode())),
-            BuiltInBehaviorNodes.Sequence(
-                BehaviorNodes.Node(new AlreadyDecidedNode()),
-                BehaviorNodes.Node(new TallyNode())),
-            BehaviorNodes.Node(new RestNode())));
+        new Selector(
+            new Sequence(
+                new LeafNode<ThreatNearNode>(new ThreatNearNode { PanicStamina = 0.1f }),
+                new LeafNode<FleeNode>(new FleeNode { Distance = 5f }),
+                new Delay(0.2f),
+                new LeafNode<TallyNode>(new TallyNode())),
+            new Sequence(
+                new LeafNode<FoodVisibleNode>(new FoodVisibleNode()),
+                new Inverter(
+                    new LeafNode<ExhaustedNode>(new ExhaustedNode { RestBelow = 0.25f })),
+                new LeafNode<SeekFoodNode>(new SeekFoodNode { ArriveWithin = 0.5f }),
+                new LeafNode<TallyNode>(new TallyNode())),
+            new Sequence(
+                new LeafNode<ExhaustedNode>(new ExhaustedNode { RestBelow = 0.25f }),
+                new LeafNode<RestNode>(new RestNode()),
+                new LeafNode<NoopNode>(new NoopNode())),
+            new Sequence(
+                new LeafNode<AlreadyDecidedNode>(new AlreadyDecidedNode()),
+                new LeafNode<TallyNode>(new TallyNode())),
+            new LeafNode<RestNode>(new RestNode())));
 }

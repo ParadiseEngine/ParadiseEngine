@@ -1,3 +1,5 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 namespace Paradise.BT.Test;
 
 public sealed class BehaviorTreeSerializationTests
@@ -21,9 +23,9 @@ public sealed class BehaviorTreeSerializationTests
     public async Task Built_In_Trees_Can_Roundtrip_Through_Blob_Serialization()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Delay(0.5f),
-                BuiltInBehaviorNodes.Repeat(2, BuiltInBehaviorNodes.Success())));
+            new Sequence(
+                new Delay(0.5f),
+                new Repeat(2, new Success())));
 
         using var serializedTree = tree.Serialize();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(serializedTree, TestBehaviorNodes.BuiltInRegistry());
@@ -57,9 +59,9 @@ public sealed class BehaviorTreeSerializationTests
     public async Task SerializeToBytes_And_Deserialize_From_Bytes_Round_Trips()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Selector(
-                BuiltInBehaviorNodes.Failure(),
-                BuiltInBehaviorNodes.Success()));
+            new Selector(
+                new Failure(),
+                new Success()));
 
         byte[] bytes = tree.SerializeToBytes();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
@@ -72,9 +74,9 @@ public sealed class BehaviorTreeSerializationTests
     public async Task SerializeToBytes_Preserves_Node_Count()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Success(),
-                BuiltInBehaviorNodes.Failure()));
+            new Sequence(
+                new Success(),
+                new Failure()));
 
         byte[] bytes = tree.SerializeToBytes();
         BehaviorTree roundTrippedTree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
@@ -85,9 +87,9 @@ public sealed class BehaviorTreeSerializationTests
     [Test]
     public async Task Serialize_From_Definition_Matches_Serialize_From_Tree()
     {
-        var definition = BuiltInBehaviorNodes.Sequence(
-            BuiltInBehaviorNodes.Success(),
-            BuiltInBehaviorNodes.Success());
+        var definition = new Sequence(
+            new Success(),
+            new Success());
 
         using var fromDefinition = BehaviorTreeBlobSerializer.Serialize(definition);
         BehaviorTree tree1 = BehaviorTreeBlobSerializer.Deserialize(fromDefinition, TestBehaviorNodes.BuiltInRegistry());
@@ -102,7 +104,7 @@ public sealed class BehaviorTreeSerializationTests
     [Test]
     public async Task SerializeToBytes_From_Definition_Works()
     {
-        var definition = BuiltInBehaviorNodes.Sequence(BuiltInBehaviorNodes.Success());
+        var definition = new Sequence(new Success());
 
         byte[] bytes = BehaviorTreeBlobSerializer.SerializeToBytes(definition);
         BehaviorTree tree = BehaviorTreeBlobSerializer.Deserialize(bytes, TestBehaviorNodes.BuiltInRegistry());
@@ -143,14 +145,14 @@ public sealed class BehaviorTreeSerializationTests
     {
         // Build a tree using every built-in node type
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Selector(BuiltInBehaviorNodes.Failure(), BuiltInBehaviorNodes.Success()),
-                BuiltInBehaviorNodes.Parallel(BuiltInBehaviorNodes.Success(), BuiltInBehaviorNodes.Running()),
-                BuiltInBehaviorNodes.Repeat(1, BuiltInBehaviorNodes.Success()),
-                BuiltInBehaviorNodes.RepeatForever(BuiltInBehaviorNodes.Failure(), breakStates: NodeState.Failure),
-                BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Success()),
-                BuiltInBehaviorNodes.Succeeder(BuiltInBehaviorNodes.Failure()),
-                BuiltInBehaviorNodes.Delay(0.1f)));
+            new Sequence(
+                new Selector(new Failure(), new Success()),
+                new global::Paradise.BT.Nodes.Builder.Parallel(new Success(), new Running()),
+                new Repeat(1, new Success()),
+                new RepeatForever(NodeState.Failure, new Failure()),
+                new Inverter(new Success()),
+                new Succeeder(new Failure()),
+                new Delay(0.1f)));
 
         // Should not throw - all node types are registered via the full built-in registry
         using var serialized = tree.Serialize();
@@ -183,9 +185,9 @@ public sealed class BehaviorTreeSerializationTests
     public async Task Complex_Tree_Round_Trip_Preserves_Behavior()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Failure()),
-                BuiltInBehaviorNodes.Repeat(2, BuiltInBehaviorNodes.Delay(0.1f))));
+            new Sequence(
+                new Inverter(new Failure()),
+                new Repeat(2, new Delay(0.1f))));
 
         using var serialized = tree.Serialize();
         BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
@@ -205,8 +207,8 @@ public sealed class BehaviorTreeSerializationTests
     public async Task Round_Trip_Preserves_Node_Types()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Success())));
+            new Sequence(
+                new Inverter(new Success())));
 
         using var serialized = tree.Serialize();
         BehaviorTree roundTripped = BehaviorTreeBlobSerializer.Deserialize(serialized, TestBehaviorNodes.BuiltInRegistry());
@@ -220,7 +222,7 @@ public sealed class BehaviorTreeSerializationTests
     public async Task Deserialize_Rejects_Wrong_Format_Version()
     {
         var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(BuiltInBehaviorNodes.Success()));
+            new Sequence(new Success()));
 
         byte[] blob = tree.SerializeToBytes();
         // Corrupt the format version (first 4 bytes of the blob struct)

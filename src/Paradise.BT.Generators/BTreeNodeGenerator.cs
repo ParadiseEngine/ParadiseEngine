@@ -39,7 +39,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
         // Registration is emitted from a SEPARATE pass over every INodeData struct, not from the
         // [Builder] pass above. The two sets are not the same: DelayTimerNode is registerable and
-        // has no [Builder], because BuiltInBehaviorNodes.Delay is its factory. Keying registration
+        // used to have no [Builder] at all, back when a factory built it. Keying registration
         // on [Builder] would silently drop it, and with it every timer node in every tree.
         var registrable = context.SyntaxProvider.CreateSyntaxProvider(
             predicate: static (node, _) => node is StructDeclarationSyntax { BaseList.Types.Count: > 0 },

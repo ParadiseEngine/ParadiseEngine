@@ -12,8 +12,15 @@ namespace Paradise.BT;
 /// type here. Takes a <c>Type</c> rather than a generic parameter because a queryable is a
 /// <c>ref struct</c>, which cannot be a generic argument to an attribute.
 ///
-/// A node reached only through an untyped factory — <c>BuiltInBehaviorNodes.Delay(…)</c> names no
-/// node type — cannot be discovered by name. List those in <see cref="Also"/>.
+/// Nodes are found by NAME, so how a tree composes them decides whether they are visible. A
+/// builder carries its node as a generic argument on its base and is followed; a factory method
+/// returns a definition and says nothing, so it must be annotated with
+/// <see cref="BuildsAttribute{T}"/> or its node listed in <see cref="Also"/>.
+///
+/// One case cannot be seen at all: a builder GENERATED beside this tree, in the same assembly. A
+/// generator cannot read another generator's output, so <c>new Flee(5f)</c> resolves to nothing
+/// here even though it compiles. Use <c>LeafNode&lt;FleeNode&gt;</c> for a node declared alongside
+/// its tree; builders from a referenced assembly are fine.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class BehaviorTreeBindingAttribute : Attribute
@@ -26,11 +33,9 @@ public sealed class BehaviorTreeBindingAttribute : Attribute
     /// <summary>
     /// Node types the tree uses but never names, because a factory builds them.
     ///
-    /// <c>BuiltInBehaviorNodes.Delay(seconds)</c> is the case that forces this to exist: it
-    /// returns a definition, so <c>DelayTimerNode</c> — the one built-in that reads a blackboard —
-    /// appears nowhere in the tree's source. Without listing it, its
-    /// <c>BehaviorTreeTickDeltaTime</c> would be missing from the blackboard and the timer would
-    /// throw on its first tick.
+    /// The escape hatch of last resort, for somebody else's factory that carries no
+    /// <see cref="BuildsAttribute{T}"/>. Prefer annotating the factory: it knows what it builds,
+    /// and the answer then travels with it to every tree rather than being restated at each one.
     /// </summary>
     public Type[]? Also { get; set; }
 }
@@ -39,10 +44,13 @@ public sealed class BehaviorTreeBindingAttribute : Attribute
 /// Declares which <see cref="INodeData"/> a factory method constructs.
 ///
 /// A tree names its nodes by constructing them, which is how the binding scan finds them. A
-/// FACTORY breaks that: <c>BuiltInBehaviorNodes.Delay(seconds)</c> returns a
-/// <c>BehaviorNodeDefinition</c>, so the word <c>DelayTimerNode</c> appears nowhere in the tree
-/// that uses it — and it is the one built-in that reads a blackboard, so missing it means the
-/// timer has no delta time and throws on its first tick.
+/// FACTORY breaks that: a method returning a <c>BehaviorNodeDefinition</c> discards every trace of
+/// what it built, so a tree calling it names no node at all — and if that node reads the
+/// blackboard, its data is silently missing and it throws on the first tick.
+///
+/// The built-in factories this existed for are gone: each built-in node has a generated builder,
+/// which carries its node type on its base and needs no annotation. This remains for a factory
+/// somebody writes.
 ///
 /// The factory is the thing that knows, so this is where it is written down. It survives into
 /// metadata, so a tree in another assembly gets the answer without seeing the body.

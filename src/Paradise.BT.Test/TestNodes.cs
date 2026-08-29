@@ -1,3 +1,4 @@
+using Paradise.BT.Builder;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -94,14 +95,14 @@ public static class TestBehaviorNodes
 {
     /// <summary>A probe that counts into <paramref name="slot"/> and always returns
     /// <paramref name="result"/>.</summary>
-    public static BehaviorNodeDefinition Probe(int slot = 0, NodeState result = NodeState.Success)
-        => BehaviorNodes.Node(new ProbeNode { Slot = slot, Result = result });
+    public static BTreeNode Probe(int slot = 0, NodeState result = NodeState.Success)
+        => new LeafNode<ProbeNode>(new ProbeNode { Slot = slot, Result = result });
 
     /// <summary>A probe that returns <paramref name="before"/> until it has run
     /// <paramref name="threshold"/> times, then <paramref name="after"/>.</summary>
-    public static BehaviorNodeDefinition ProbeUntil(
+    public static BTreeNode ProbeUntil(
         int threshold, NodeState before, NodeState after, int slot = 0)
-        => BehaviorNodes.Node(new ProbeNode
+        => new LeafNode<ProbeNode>(new ProbeNode
         {
             Slot = slot,
             Rule = ProbeRule.CountAtLeast,
@@ -112,9 +113,9 @@ public static class TestBehaviorNodes
 
     /// <summary>A probe that returns <paramref name="odd"/> on odd runs and
     /// <paramref name="even"/> on even ones.</summary>
-    public static BehaviorNodeDefinition ProbeAlternating(
+    public static BTreeNode ProbeAlternating(
         NodeState odd, NodeState even, int slot = 0)
-        => BehaviorNodes.Node(new ProbeNode
+        => new LeafNode<ProbeNode>(new ProbeNode
         {
             Slot = slot,
             Rule = ProbeRule.CountEven,
@@ -122,8 +123,8 @@ public static class TestBehaviorNodes
             After = even,
         });
 
-    public static BehaviorNodeDefinition RecordDeltaTime()
-        => BehaviorNodes.Node(new RecordDeltaTimeNode());
+    public static BTreeNode RecordDeltaTime()
+        => new LeafNode<RecordDeltaTimeNode>(new RecordDeltaTimeNode());
 
     /// <summary>A blackboard already carrying <see cref="ProbeData"/>, which every probe writes
     /// through.</summary>
@@ -135,7 +136,7 @@ public static class TestBehaviorNodes
     }
 
     public static BehaviorTreeSerializationRegistry BuiltInRegistry()
-        => BuiltInBehaviorNodes.CreateRegistry();
+        => BuiltInNodeRegistry.Create();
 }
 
 internal static class TestTickExtensions

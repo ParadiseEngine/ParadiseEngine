@@ -325,9 +325,8 @@ public sealed class BindingGeneratorTests
     }
 
     /// <summary>
-    /// A node a factory builds, so the tree never names it. <c>BuiltInBehaviorNodes.Delay</c> is
-    /// the real case — <c>DelayTimerNode</c> is the one built-in that reads a blackboard, and
-    /// missing it means the cooldown has no delta time and throws on its first tick.
+    /// A node a factory builds, so the tree never names it. The escape hatch of last resort, for a
+    /// factory carrying no [Builds&lt;T&gt;]; prefer annotating the factory.
     /// </summary>
     [Test]
     public async Task Also_Binds_A_Node_The_Tree_Never_Names()
@@ -438,10 +437,9 @@ public sealed class BindingGeneratorTests
     }
 
     /// <summary>
-    /// A factory hides the node type from the tree that uses it — <c>BuiltInBehaviorNodes.Delay</c>
-    /// returns a definition, so <c>DelayTimerNode</c> appears nowhere in the tree's source. The
-    /// factory declares what it builds, and the scan follows it there, so no tree has to know
-    /// which built-ins conceal a node.
+    /// A factory hides the node type from the tree that uses it: a method returning a definition
+    /// says nothing about what it built. The factory declares it instead, and the scan follows it
+    /// there, so no tree has to know which calls conceal a node.
     /// </summary>
     [Test]
     public async Task A_Factory_Declares_What_It_Builds_So_The_Tree_Need_Not()
