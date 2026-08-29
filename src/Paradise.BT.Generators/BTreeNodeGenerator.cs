@@ -68,8 +68,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             predicate: static (node, _) =>
                 IsStructDeclaration(node) && ((TypeDeclarationSyntax)node).BaseList?.Types.Count > 0,
             transform: static (ctx, ct) => GetRegistrableNode(ctx, ct)
-        ).Where(static name => name is not null)
-         .Select(static (name, _) => name!);
+        ).Where(static node => node.HasValue)
+         .Select(static (node, _) => node!.Value);
 
         context.RegisterSourceOutput(
             registrable.Collect(), static (spc, names) => EmitRegistration(spc, names));
@@ -347,7 +347,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     /// what an internal class can name. That last rule is what keeps a private test node, declared
     /// to prove a layout REFUSES unregistered types, from being registered behind its own back.
     /// </summary>
-    private static string? GetRegistrableNode(
+    private static RegistrableNode? GetRegistrableNode(
         GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -377,7 +377,93 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             return null;
         }
 
-        return symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        CollectNodeAccess(
+            symbol, ctx.SemanticModel.Compilation,
+            out ImmutableArray<string> reads, out ImmutableArray<string> writes, ct);
+        return new RegistrableNode(
+            symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), reads, writes);
+    }
+
+    /// <summary>
+    /// What this node touches, for the assembly-level metadata: its <c>Tick</c> body's
+    /// <c>GetData</c>/<c>SetData</c> calls unioned with any hand-written access attributes. This
+    /// is what a CONSUMING assembly's binding reads, since bodies do not survive into metadata.
+    /// </summary>
+    private static void CollectNodeAccess(
+        INamedTypeSymbol symbol,
+        Compilation compilation,
+        out ImmutableArray<string> reads,
+        out ImmutableArray<string> writes,
+        System.Threading.CancellationToken ct)
+    {
+        var readSet = new System.Collections.Generic.SortedSet<string>(StringComparer.Ordinal);
+        var writeSet = new System.Collections.Generic.SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            ct.ThrowIfCancellationRequested();
+            var declaration = reference.GetSyntax(ct);
+            var model = compilation.GetSemanticModel(declaration.SyntaxTree);
+
+            foreach (var invocation in declaration.DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (model.GetSymbolInfo(invocation, ct).Symbol is not IMethodSymbol target
+                    || target.ContainingType?.ToDisplayString() != "Paradise.BT.IBlackboard"
+                    || target.TypeArguments.Length != 1)
+                {
+                    continue;
+                }
+
+                ITypeSymbol t = target.TypeArguments[0];
+                if (t is ITypeParameterSymbol || t.TypeKind == TypeKind.Error || !IsReachableType(t))
+                {
+                    // A private data type cannot be written into a typeof() here — and could not
+                    // be consumed from another assembly either, so nothing is lost by omitting it.
+                    continue;
+                }
+
+                switch (target.Name)
+                {
+                    case "GetData":
+                        readSet.Add(t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                        break;
+                    case "SetData":
+                        writeSet.Add(t.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                        break;
+                }
+            }
+        }
+
+        foreach (var attr in symbol.GetAttributes())
+        {
+            INamedTypeSymbol? ac = attr.AttributeClass;
+            if (ac is null
+                || !ac.IsGenericType
+                || ac.ContainingNamespace?.ToDisplayString() != "Paradise.BT")
+            {
+                continue;
+            }
+
+            ITypeSymbol declared = ac.TypeArguments[0];
+            if (!IsReachableType(declared))
+            {
+                continue;
+            }
+
+            string t = declared.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            switch (ac.Name)
+            {
+                case "ReadsAttribute":
+                    readSet.Add(t);
+                    break;
+                case "WritesAttribute":
+                    writeSet.Add(t);
+                    break;
+            }
+        }
+
+        reads = [.. readSet];
+        writes = [.. writeSet];
     }
 
     private static bool HasGuidAttribute(INamedTypeSymbol symbol)
@@ -391,6 +477,21 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         }
 
         return false;
+    }
+
+    /// <summary>Reachability for an accessed DATA type — same rule as <see cref="IsReachable"/>,
+    /// over any type symbol.</summary>
+    private static bool IsReachableType(ITypeSymbol symbol)
+    {
+        for (ITypeSymbol? current = symbol; current is not null; current = current.ContainingType)
+        {
+            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Can an internal class in the same assembly name this type? Private and protected
@@ -416,36 +517,88 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     /// somebody added. A module initializer runs before any of the assembly's types are used, so
     /// the table is populated by the time anything can ask.
     /// </summary>
-    private static void EmitRegistration(SourceProductionContext spc, ImmutableArray<string> names)
+    private static void EmitRegistration(SourceProductionContext spc, ImmutableArray<RegistrableNode> nodes)
     {
-        if (names.IsDefaultOrEmpty)
+        if (nodes.IsDefaultOrEmpty)
         {
             return;
         }
+
+        // A partial struct is seen once per declaration; the access union is symbol-based and so
+        // identical on each, and one row per node is what the metadata reader expects.
+        var distinct = nodes
+            .GroupBy(static n => n.Name, StringComparer.Ordinal)
+            .Select(static g => g.First())
+            .OrderBy(static n => n.Name, StringComparer.Ordinal)
+            .ToImmutableArray();
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
-        sb.AppendLine("namespace Paradise.BT.Generated;");
-        sb.AppendLine();
-        sb.AppendLine("/// <summary>Registers this assembly's node types with NodeTypeRegistry.</summary>");
-        sb.AppendLine("internal static class NodeTypeRegistration");
-        sb.AppendLine("{");
-        sb.AppendLine("    [global::System.Runtime.CompilerServices.ModuleInitializer]");
-        sb.AppendLine("    internal static void Register()");
-        sb.AppendLine("    {");
 
-        foreach (var name in names.Distinct().OrderBy(static n => n, StringComparer.Ordinal))
+        // Each node's access, published as metadata so a CONSUMING assembly's binding can read it
+        // where no body exists — the generated counterpart of hand-written [Reads<T>]/[Writes<T>].
+        foreach (var node in distinct)
         {
-            sb.AppendLine(
-                $"        global::Paradise.BT.NodeTypeRegistry.Register<{name}>();");
+            sb.Append($"[assembly: global::Paradise.BT.NodeAccess(typeof({node.Name})");
+            if (!node.Reads.IsEmpty)
+            {
+                sb.Append($", Reads = new[] {{ {string.Join(", ", node.Reads.Select(static t => $"typeof({t})"))} }}");
+            }
+
+            if (!node.Writes.IsEmpty)
+            {
+                sb.Append($", Writes = new[] {{ {string.Join(", ", node.Writes.Select(static t => $"typeof({t})"))} }}");
+            }
+
+            sb.AppendLine(")]");
         }
 
+        sb.AppendLine();
+        sb.AppendLine("namespace Paradise.BT.Generated");
+        sb.AppendLine("{");
+        sb.AppendLine("    /// <summary>Registers this assembly's node types with NodeTypeRegistry.</summary>");
+        sb.AppendLine("    internal static class NodeTypeRegistration");
+        sb.AppendLine("    {");
+        sb.AppendLine("        [global::System.Runtime.CompilerServices.ModuleInitializer]");
+        sb.AppendLine("        internal static void Register()");
+        sb.AppendLine("        {");
+
+        foreach (var node in distinct)
+        {
+            sb.AppendLine(
+                $"            global::Paradise.BT.NodeTypeRegistry.Register<{node.Name}>();");
+        }
+
+        sb.AppendLine("        }");
         sb.AppendLine("    }");
         sb.AppendLine("}");
 
         spc.AddSource("NodeTypeRegistration.g.cs", sb.ToString());
+    }
+
+    private readonly struct RegistrableNode : System.IEquatable<RegistrableNode>
+    {
+        public readonly string Name;
+        public readonly ImmutableArray<string> Reads;
+        public readonly ImmutableArray<string> Writes;
+
+        public RegistrableNode(string name, ImmutableArray<string> reads, ImmutableArray<string> writes)
+        {
+            Name = name;
+            Reads = reads;
+            Writes = writes;
+        }
+
+        public bool Equals(RegistrableNode other) =>
+            Name == other.Name
+            && Reads.SequenceEqual(other.Reads)
+            && Writes.SequenceEqual(other.Writes);
+
+        public override bool Equals(object? obj) => obj is RegistrableNode other && Equals(other);
+
+        public override int GetHashCode() => Name.GetHashCode();
     }
 
     private static string StripNodeSuffix(string name)

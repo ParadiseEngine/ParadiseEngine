@@ -627,6 +627,137 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
+    /// <summary>
+    /// The cross-assembly path with NO hand-written declarations: the node's declaring assembly is
+    /// compiled separately (its BODY does not survive into metadata), BTreeNodeGenerator publishes
+    /// the body-scanned access as <c>[assembly: NodeAccess]</c>, and this binding reads it off the
+    /// metadata reference — which is what made attributes like DelayTimerNode's optional.
+    /// </summary>
+    [Test]
+    public async Task A_Referenced_Nodes_Access_Arrives_Through_Generated_Metadata()
+    {
+        const string nodesSource = """
+
+            namespace Paradise.BT
+            {
+                [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+                public sealed class NodeAccessAttribute : Attribute
+                {
+                    public NodeAccessAttribute(Type node) { }
+                    public Type[]? Reads { get; set; }
+                    public Type[]? Writes { get; set; }
+                }
+
+                [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method)]
+                public sealed class RequireNamedArgumentsAttribute : Attribute { }
+
+                public static class NodeTypeRegistry
+                {
+                    public static int Register<T>() where T : unmanaged, INodeData => 0;
+                }
+            }
+
+            namespace Paradise.BT.Builder
+            {
+                public abstract class BTreeNode { }
+
+                public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+                {
+                    public LeafNode(T data) { }
+                }
+            }
+
+            namespace Game
+            {
+                /// An extra, not a component — read only by ClockNode's BODY, in this assembly.
+                public struct Pulse { public int Ticks; }
+
+                [System.Runtime.InteropServices.Guid("C0FFEE00-1234-4ABC-8DEF-000000000001")]
+                [Paradise.BT.Builder]
+                public struct ClockNode : Paradise.BT.INodeData
+                {
+                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                        int index, TNodeBlob blob, TBlackboard bb)
+                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                        => bb.GetData<Pulse>().Ticks > 0
+                            ? Paradise.BT.NodeState.Success
+                            : Paradise.BT.NodeState.Failure;
+                }
+            }
+            """;
+
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        var runtimeReferences = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
+            .Select(a => (MetadataReference)MetadataReference.CreateFromFile(a.Location))
+            .ToImmutableArray();
+        var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true);
+
+        var nodesCompilation = CSharpCompilation.Create(
+            "ExternalNodesAssembly",
+            [CSharpSyntaxTree.ParseText(Prelude + nodesSource, parseOptions)],
+            runtimeReferences,
+            options);
+
+        CSharpGeneratorDriver.Create(new BTreeNodeGenerator())
+            .WithUpdatedParseOptions(parseOptions)
+            .RunGeneratorsAndUpdateCompilation(nodesCompilation, out Compilation nodesOutput, out _);
+
+        using var image = new System.IO.MemoryStream();
+        Microsoft.CodeAnalysis.Emit.EmitResult emitted = nodesOutput.Emit(image);
+        await Assert.That(emitted.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)).IsEmpty();
+        await Assert.That(emitted.Success).IsTrue();
+
+        const string treeSource = """
+            namespace Game
+            {
+                [Paradise.ECS.Queryable]
+                public readonly ref struct Pack { }
+
+                [Paradise.BT.BehaviorTreeBinding(typeof(Pack))]
+                public static class ClockTree
+                {
+                    public static object Build() => new Game.Builder.Clock();
+                }
+            }
+            """;
+
+        var treeCompilation = CSharpCompilation.Create(
+            "TreeAssembly",
+            [CSharpSyntaxTree.ParseText(treeSource, parseOptions)],
+            runtimeReferences.Add(MetadataReference.CreateFromImage(image.ToArray())),
+            options);
+
+        var inputErrors = treeCompilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToImmutableArray();
+        await Assert.That(inputErrors).IsEmpty();
+
+        GeneratorDriver driver = CSharpGeneratorDriver
+            .Create(new BindingGenerator())
+            .WithUpdatedParseOptions(parseOptions);
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            treeCompilation, out Compilation treeOutput, out _);
+        GeneratorDriverRunResult result = driver.GetRunResult();
+
+        await Assert.That(result.Diagnostics).IsEmpty();
+
+        var generatedTrees = treeOutput.SyntaxTrees.Except(treeCompilation.SyntaxTrees).ToImmutableArray();
+        var compileErrors = treeOutput.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error
+                && d.Location.SourceTree is not null
+                && generatedTrees.Contains(d.Location.SourceTree))
+            .ToImmutableArray();
+        await Assert.That(compileErrors).IsEmpty();
+
+        // Pulse reached the blackboard although no declaration for it exists anywhere in source.
+        await Assert.That(string.Join("\n", result.Results
+                .SelectMany(r => r.GeneratedSources)
+                .Select(s => s.SourceText.ToString())))
+            .Contains("global::Game.Pulse");
+    }
+
     // ===================== harness =====================
 
     private static (ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<string> Sources,

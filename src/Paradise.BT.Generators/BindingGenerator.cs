@@ -188,6 +188,53 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 symbol.Name, t.ToDisplayString(), t.Name, kind, IsComponent(t)));
         }
 
+        // The generated counterpart of those attributes: the node's DECLARING assembly publishes
+        // its body-scanned access as [assembly: NodeAccess(...)], so a cross-assembly node needs
+        // no hand-written declarations at all. Duplicates with the sources above are harmless —
+        // the blackboard merges per type.
+        foreach (AttributeData attr in symbol.ContainingAssembly.GetAttributes())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (attr.AttributeClass?.ToDisplayString() != "Paradise.BT.NodeAccessAttribute"
+                || attr.ConstructorArguments.Length != 1
+                || attr.ConstructorArguments[0].Value is not INamedTypeSymbol node
+                || !SymbolEqualityComparer.Default.Equals(node, symbol))
+            {
+                continue;
+            }
+
+            foreach (System.Collections.Generic.KeyValuePair<string, TypedConstant> named
+                in attr.NamedArguments)
+            {
+                AccessKind kind;
+                switch (named.Key)
+                {
+                    case "Reads":
+                        kind = AccessKind.Read;
+                        break;
+                    case "Writes":
+                        kind = AccessKind.Write;
+                        break;
+                    default:
+                        continue;
+                }
+
+                if (named.Value.Values.IsDefault)
+                {
+                    continue;
+                }
+
+                foreach (TypedConstant value in named.Value.Values)
+                {
+                    if (value.Value is ITypeSymbol t)
+                    {
+                        access.Add(new Access(
+                            symbol.Name, t.ToDisplayString(), t.Name, kind, IsComponent(t)));
+                    }
+                }
+            }
+        }
+
         return access.ToImmutable();
     }
 

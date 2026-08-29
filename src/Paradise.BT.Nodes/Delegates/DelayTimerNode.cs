@@ -11,13 +11,11 @@ namespace Paradise.BT.Nodes;
 /// instance. On reset the VM restores the runtime data from the authored default, restarting the
 /// timer.
 ///
-/// The only built-in that reads a blackboard, which is why it is the only one declaring access.
-/// Its generated builder (<c>Delay</c>) carries this type on its base, so a tree using it binds
-/// the delta time without being told — provided the builder comes from a referenced assembly, as
-/// it does here.
+/// The only built-in that reads a blackboard. It declares nothing: the generator scans this body
+/// and publishes the access as assembly metadata (<c>[assembly: NodeAccess]</c>), which is how a
+/// consuming assembly's binding learns about the delta time with no hand-written declaration.
 /// </remarks>
 [Guid("2F6009D3-1314-42E6-8E52-4AEB7CDDB4CD")]
-[Reads<BehaviorTreeTickDeltaTime>]
 [Builder("Delay")]
 public struct DelayTimerNode(float timerSeconds) : INodeData
 {

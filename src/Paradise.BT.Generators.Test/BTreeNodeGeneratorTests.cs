@@ -49,6 +49,14 @@ public sealed class BTreeNodeGeneratorTests
 
             [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method)]
             public sealed class RequireNamedArgumentsAttribute : Attribute { }
+
+            [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+            public sealed class NodeAccessAttribute : Attribute
+            {
+                public NodeAccessAttribute(Type node) { }
+                public Type[]? Reads { get; set; }
+                public Type[]? Writes { get; set; }
+            }
         }
 
         namespace Paradise.BT.Builder
