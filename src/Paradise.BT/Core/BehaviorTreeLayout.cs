@@ -25,14 +25,24 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 
     private NativeBlobAssetReference<NodeBlob>? _blob;
 
-    private BehaviorTreeLayout(NativeBlobAssetReference<NodeBlob> blob) => _blob = blob;
+    /// <summary>The process-local half, deliberately OUTSIDE the blob: one
+    /// <see cref="NodeTypeRegistry"/> id per <see cref="NodeBlob.Guids"/> slot, resolved at build
+    /// or load. The blob itself carries nothing process-local, which is what makes serialization
+    /// a pure copy and a loaded blob read-only.</summary>
+    private NativeBlobAssetReference? _registryIds;
+
+    private BehaviorTreeLayout(NativeBlobAssetReference<NodeBlob> blob, NativeBlobAssetReference registryIds)
+    {
+        _blob = blob;
+        _registryIds = registryIds;
+    }
 
     /// <summary>What an instance points at. Copyable, unmanaged, and valid only while this object
     /// is alive and undisposed.</summary>
     public BehaviorTreeLayoutHandle Handle =>
-        new(_blob is null
+        _blob is null || _registryIds is null
             ? throw new ObjectDisposedException(nameof(BehaviorTreeLayout))
-            : _blob.UnsafePtr);
+            : new(_blob.UnsafePtr, _registryIds.GetUnsafePtr<int>());
 
     /// <summary>How many nodes the tree has — the length of an instance's state buffer.</summary>
     public int NodeCount => Handle.NodeCount;
@@ -117,22 +127,27 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         builder.SetArray(ref builder.Value.EndIndices, endIndices, DataAlignment);
         builder.SetArray(ref builder.Value.Types, typeIds, DataAlignment);
         builder.SetArray(ref builder.Value.Guids, guidTable, DataAlignment);
-        builder.SetArray(ref builder.Value.RuntimeTypeIds, registryIds, DataAlignment);
         builder.SetArray(ref builder.Value.Offsets, offsets, DataAlignment);
         builder.SetArray(ref builder.Value.DefaultData, defaultData, DataAlignment);
 
         return new BehaviorTreeLayout(
-            builder.CreateNativeBlobAssetReference<NodeBlob>(DataAlignment));
+            builder.CreateNativeBlobAssetReference<NodeBlob>(DataAlignment),
+            RegistryIdBlock(registryIds.ToArray()));
     }
+
+    /// <summary>The side allocation the handle points at — its own finalizer-backed block, so an
+    /// undisposed layout leaks neither half.</summary>
+    private static NativeBlobAssetReference RegistryIdBlock(int[] ids) =>
+        new(MemoryMarshal.AsBytes(ids.AsSpan()), DataAlignment);
 
     private static int Align(int value, int alignment) =>
         (value + (alignment - 1)) & ~(alignment - 1);
 
     /// <summary>
-    /// The blob as bytes — a raw copy, valid because every offset in a <see cref="NodeBlob"/> is
-    /// self-relative. The copy's <see cref="NodeBlob.RuntimeTypeIds"/> are zeroed — a registry id
-    /// means nothing to another process — so nothing process-local reaches the bytes: the same
-    /// tree serializes identically everywhere and a layout can be content-hashed.
+    /// The blob as bytes — a PURE raw copy, valid because every offset in a <see cref="NodeBlob"/>
+    /// is self-relative and the blob carries nothing process-local: the registry resolution lives
+    /// beside it, in the layout. The same tree serializes identically everywhere and a layout can
+    /// be content-hashed.
     /// </summary>
     public byte[] SerializeToBytes()
     {
@@ -140,14 +155,6 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             _blob ?? throw new ObjectDisposedException(nameof(BehaviorTreeLayout));
         var bytes = new byte[reference.Length];
         new ReadOnlySpan<byte>(reference.UnsafePtr, reference.Length).CopyTo(bytes);
-
-        NodeBlob* blob = reference.UnsafePtr;
-        if (blob->RuntimeTypeIds.Length > 0)
-        {
-            long offset = (byte*)blob->RuntimeTypeIds.UnsafePtr - (byte*)blob;
-            bytes.AsSpan((int)offset, blob->RuntimeTypeIds.Length * sizeof(int)).Clear();
-        }
-
         return bytes;
     }
 
@@ -169,9 +176,10 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         }
 
         var reference = new NativeBlobAssetReference<NodeBlob>(data, DataAlignment);
+        int[] registryIds;
         try
         {
-            ValidateAndResolve(reference.UnsafePtr, reference.Length);
+            registryIds = ValidateAndResolve(reference.UnsafePtr, reference.Length);
         }
         catch
         {
@@ -179,14 +187,13 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             throw;
         }
 
-        return new BehaviorTreeLayout(reference);
+        return new BehaviorTreeLayout(reference, RegistryIdBlock(registryIds));
     }
 
-    /// <summary>Refuse a corrupt blob at load rather than fault on the first tick, then fill
-    /// <see cref="NodeBlob.RuntimeTypeIds"/> with this process's registry ids — the only mutation
-    /// a loaded blob ever sees. <see cref="NodeBlob.Types"/> is untouched: it holds table indices
-    /// in memory exactly as at rest.</summary>
-    private static void ValidateAndResolve(NodeBlob* blob, int blobLength)
+    /// <summary>Refuse a corrupt blob at load rather than fault on the first tick, and resolve
+    /// the GUID table to this process's registry ids. The blob itself is never written — a loaded
+    /// blob stays byte-identical to the file.</summary>
+    private static int[] ValidateAndResolve(NodeBlob* blob, int blobLength)
     {
         if (blob->FormatVersion != NodeBlob.CurrentFormatVersion)
         {
@@ -198,7 +205,6 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         ValidateArrayBounds(blob, blobLength, ref blob->EndIndices, nameof(NodeBlob.EndIndices));
         ValidateArrayBounds(blob, blobLength, ref blob->Types, nameof(NodeBlob.Types));
         ValidateArrayBounds(blob, blobLength, ref blob->Guids, nameof(NodeBlob.Guids));
-        ValidateArrayBounds(blob, blobLength, ref blob->RuntimeTypeIds, nameof(NodeBlob.RuntimeTypeIds));
         ValidateArrayBounds(blob, blobLength, ref blob->Offsets, nameof(NodeBlob.Offsets));
         ValidateArrayBounds(blob, blobLength, ref blob->DefaultData, nameof(NodeBlob.DefaultData));
 
@@ -208,13 +214,11 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             || blob->EndIndices.Length != count
             || typeCount == 0
             || typeCount > count
-            || blob->RuntimeTypeIds.Length != typeCount
             || blob->Offsets.Length != count + 1)
         {
             throw new InvalidOperationException(
                 "Serialized behavior tree layout is corrupt: its arrays disagree on the node "
                 + $"count ({count} types, {typeCount} GUID table entries, "
-                + $"{blob->RuntimeTypeIds.Length} runtime ids, "
                 + $"{blob->EndIndices.Length} end indices, {blob->Offsets.Length} offsets).");
         }
 
@@ -242,7 +246,8 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
             }
         }
 
-        // Resolve the table once — T lookups for N nodes — into RuntimeTypeIds.
+        // Resolve the table once — T lookups for N nodes — into the layout's OWN block.
+        var registryIds = new int[typeCount];
         var seenGuids = new HashSet<Guid>();
         for (int t = 0; t < typeCount; t++)
         {
@@ -254,15 +259,13 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
                     + "the type table, which a built layout never produces.");
             }
 
-            if (!NodeTypeRegistry.TryGetId(guid, out int id))
+            if (!NodeTypeRegistry.TryGetId(guid, out registryIds[t]))
             {
                 throw new InvalidOperationException(
                     $"Node GUID '{guid}' is not registered in this process. Every node type in a "
                     + $"serialized layout must be registered with {nameof(NodeTypeRegistry)} "
                     + "before the layout is loaded.");
             }
-
-            blob->RuntimeTypeIds[t] = id;
         }
 
         for (int i = 0; i < count; i++)
@@ -275,7 +278,7 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
                     + $"entry {tableIndex}, and the table has {typeCount}.");
             }
 
-            int id = blob->RuntimeTypeIds[tableIndex];
+            int id = registryIds[tableIndex];
             if (NodeTypeRegistry.SizeOf(id) > blob->GetNodeDataSize(i))
             {
                 throw new InvalidOperationException(
@@ -285,6 +288,8 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
                     + "version of the node type.");
             }
         }
+
+        return registryIds;
     }
 
     /// <summary>Refuse an array whose self-relative offset or length escapes the loaded bytes.</summary>
@@ -312,18 +317,23 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
         }
     }
 
-    /// <summary>Frees the blob. No finalizer here: <see cref="NativeBlobAssetReference{T}"/> has
-    /// its own, so a layout nobody disposes still gives its memory back.</summary>
+    /// <summary>Frees both halves. No finalizer here: each
+    /// <see cref="NativeBlobAssetReference"/> has its own, so a layout nobody disposes still
+    /// gives its memory back.</summary>
     public void Dispose()
     {
         _blob?.Dispose();
         _blob = null;
+        _registryIds?.Dispose();
+        _registryIds = null;
     }
 }
 
 /// <summary>
-/// A borrowed pointer to a <see cref="BehaviorTreeLayout"/>'s <see cref="NodeBlob"/> — unmanaged,
-/// so it can be stored in an ECS component beside the instance state that points at it.
+/// A borrowed view of a <see cref="BehaviorTreeLayout"/> — unmanaged, so it can be stored in an
+/// ECS component beside the instance state that points at it. Two pointers: the
+/// process-independent blob, and this process's registry id per GUID-table slot, which is what
+/// dispatch resolves through.
 ///
 /// It does NOT keep the layout alive. Whoever built the layout owns it; a handle outliving its
 /// owner is a dangling pointer, exactly as a physics world handle is.
@@ -331,12 +341,17 @@ public sealed unsafe class BehaviorTreeLayout : IDisposable
 public readonly unsafe struct BehaviorTreeLayoutHandle
 {
     internal readonly NodeBlob* Blob;
+    internal readonly int* RegistryIds;
 
-    internal BehaviorTreeLayoutHandle(NodeBlob* blob) => Blob = blob;
+    internal BehaviorTreeLayoutHandle(NodeBlob* blob, int* registryIds)
+    {
+        Blob = blob;
+        RegistryIds = registryIds;
+    }
 
     /// <summary>False for a <c>default</c> handle — which is what an entity reads before anything
     /// published one, since chunk memory is zeroed.</summary>
-    public bool IsValid => Blob is not null;
+    public bool IsValid => Blob is not null && RegistryIds is not null;
 
     public int NodeCount => Blob is null ? 0 : Blob->Count;
 

@@ -22,6 +22,7 @@ namespace Paradise.BT;
 public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 {
     private readonly NodeBlob* _blob;
+    private readonly int* _registryIds;
     private readonly Span<NodeState> _states;
     private readonly Span<byte> _runtime;
     private readonly int _runtimeId;
@@ -61,6 +62,7 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
         }
 
         _blob = layout.Blob;
+        _registryIds = layout.RegistryIds;
         _states = states;
         _runtime = runtime;
         _runtimeId = runtimeId;
@@ -86,7 +88,9 @@ public readonly unsafe ref struct UnmanagedNodeBlob : INodeBlob
 
     public int Count => _blob->Count;
 
-    public int GetTypeId(int nodeIndex) => _blob->RegistryTypeId(nodeIndex);
+    /// <summary>The registry id dispatch needs: the node's GUID-table index, resolved through the
+    /// process-local table the handle carries — the blob itself knows only GUIDs.</summary>
+    public int GetTypeId(int nodeIndex) => _registryIds[_blob->Types[nodeIndex]];
 
     public int GetEndIndex(int nodeIndex) => _blob->EndIndices[nodeIndex];
 
