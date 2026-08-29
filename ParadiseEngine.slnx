@@ -21,6 +21,7 @@
     <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
     <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
     <Project Path="src/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
+    <Project Path="src/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
     <Project Path="src/Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
     <Project Path="src/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
     <Project Path="src/Paradise.Audio.Wwise/Paradise.Audio.Wwise.csproj" />
@@ -42,6 +43,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/Paradise.Assets.Gltf.Test/Paradise.Assets.Gltf.Test.csproj" />
+    <Project Path="src/Paradise.Assets.Documents.Test/Paradise.Assets.Documents.Test.csproj" />
     <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
     <Project Path="src/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
