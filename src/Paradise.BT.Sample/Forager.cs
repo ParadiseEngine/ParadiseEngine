@@ -4,24 +4,14 @@ using Paradise.ECS;
 
 namespace Paradise.BT.Sample;
 
-// A deliberately busy tree, here to exercise the GENERATED blackboard rather than to be a tidy
-// example. Nine node types over five data types, with the overlaps a one-node tree cannot
-// produce: a component three separate nodes read, an extra four separate nodes write, a type both
-// read and written, a node that touches nothing at all, and a node no line of this file names.
+// A deliberately busy tree, to exercise the GENERATED blackboard rather than to be a tidy example:
+// ten node types over five data types, with the overlaps a small tree cannot produce — a component
+// three nodes read, an extra four nodes write, a type both read and written, and a node touching
+// nothing at all.
 //
-// NOT ONE NODE BELOW DECLARES ITS ACCESS. There is no [Reads<T>] or [Writes<T>] in this file:
-// the generator reads each Tick body, taking every GetData<T>() as a read and every SetData<T>()
-// as a write. That is only decidable because those two replaced a ref-returning accessor, under
-// which taking a ref to avoid a copy and taking one to mutate were the same call.
-//
-// The attributes still exist and still matter — they are how a node in a REFERENCED assembly says
-// what it touches, since a body only exists where it is declared. DelayTimerNode ships in
-// Paradise.BT.Nodes and carries them for exactly that reason. Source is scanned, metadata is read,
-// and the two are unioned.
-//
-// Deriving it does not weaken the refusals: PBT0008 still refuses a component write whether it was
-// declared or merely performed. And because the sample publishes AOT, the emitted blackboard is
-// proven to survive trimming and native compilation — where generated code usually breaks first.
+// NOT ONE NODE BELOW DECLARES ITS ACCESS. The generator reads each Tick body instead. The
+// attributes still matter for a node in a REFERENCED assembly, where no body exists; the two are
+// unioned.
 
 // ===================== the world's vocabulary =====================
 

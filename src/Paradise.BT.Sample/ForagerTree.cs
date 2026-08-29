@@ -7,20 +7,11 @@ using Paradise.BT.Nodes;
 namespace Paradise.BT.Sample;
 
 /// <summary>
-/// The forager's tree, and the thing being demonstrated: nothing here — and nothing in
-/// Forager.cs — says what the blackboard holds. The generator takes the node types this class
-/// names, reads each one's access out of its own Tick body, checks the result against
-/// <see cref="ForagerRow"/>'s claims, and emits <c>ForagerTreeBlackboard</c> and
-/// <c>ForagerTreeExtras</c>.
+/// Nothing here, and nothing in Forager.cs, says what the blackboard holds: the generator reads it
+/// off the nodes this class names and checks it against <see cref="ForagerRow"/>.
 ///
-/// Twenty-one nodes — ten node types of its own plus four built-ins — and the resulting blackboard
-/// carries SIX entries: three components each read by more than one node, plus Intent, Decisions,
-/// and the delta time the timer needs. That gap between node count and field count is the whole
-/// point — the blackboard is sized by what the tree TOUCHES, not by how big the tree is.
-///
-/// Nothing is listed by hand, and every node is composed through its generated builder — the
-/// built-ins from a referenced assembly, this assembly's own leaves recovered by name, since a
-/// generator cannot see another generator's output.
+/// Twenty-one nodes produce SIX blackboard entries. That gap is the point — the blackboard is
+/// sized by what the tree TOUCHES, not by how big it is.
 /// </summary>
 [BehaviorTreeBinding(typeof(ForagerRow))]
 public static class ForagerTree

@@ -1,20 +1,11 @@
 namespace Paradise.BT.Nodes;
 
 /// <summary>
-/// A <see cref="BehaviorTreeSerializationRegistry"/> preloaded with every node type shipped in
-/// Paradise.BT.Nodes. Register custom types on the returned registry with
-/// <see cref="BehaviorTreeSerializationRegistry.Register{T}"/>.
+/// A <see cref="BehaviorTreeSerializationRegistry"/> preloaded with every node type shipped here.
+/// Register custom types on the result.
 ///
-/// This is all that survives of the old <c>BuiltInBehaviorNodes</c>. Its factory methods are gone:
-/// each built-in node has a generated builder, so <c>new Sequence(a, b)</c> replaced
-/// <c>BuiltInBehaviorNodes.Sequence(a, b)</c>. A factory method was the one way of composing a tree
-/// that DISCARDED the node type — its return type is a definition, which says nothing about what
-/// built it — so a binding could not see through it without being told.
-///
-/// There is deliberately no RegisterAll() here either. Every node type in this assembly registers
-/// itself with NodeTypeRegistry through a generated module initializer, so a node added here needs
-/// no second edit and cannot be forgotten. Deserialization is the different case that stays: it
-/// takes a registry instance the caller passes.
+/// Deserialization is the one case that needs a list: node REGISTRATION is generated, so a node
+/// added here needs no second edit.
 /// </summary>
 public static class BuiltInNodeRegistry
 {

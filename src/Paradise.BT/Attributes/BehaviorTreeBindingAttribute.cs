@@ -1,27 +1,23 @@
 namespace Paradise.BT;
 
 /// <summary>
-/// Marks the partial class that builds one tree, naming the queryable whose rows feed it.
+/// Marks the class that builds one tree, naming the queryable whose rows feed it. The generator
+/// takes the node types the class names, unions their access, checks it against the queryable's
+/// claims, and emits a blackboard plus a <c>Bind</c>.
 ///
-/// The generator scans this class for every <see cref="INodeData"/> type it mentions, unions their
-/// <see cref="ReadsAttribute{T}"/> / <see cref="WritesAttribute{T}"/>, checks the union against the
-/// queryable's claims, and emits a blackboard plus a <c>Bind</c> that wires a
-/// row into it.
+/// Nodes are found by NAME, so how a tree composes them decides whether they are visible:
+/// <list type="bullet">
+/// <item>a builder carries its node as a generic argument on its base, and is followed;</item>
+/// <item>a factory RETURNING a builder keeps it in the return type, and is followed;</item>
+/// <item>a factory returning a bare definition keeps nothing, and needs
+/// <see cref="BuildsAttribute{T}"/> or <see cref="Also"/>;</item>
+/// <item>a builder generated in THIS assembly is an error type here — a generator cannot read
+/// another generator's output — and is recovered by name against the builders that will be
+/// emitted.</item>
+/// </list>
 ///
-/// Named <c>BehaviorTreeBinding</c> rather than <c>BehaviorTree</c> because that name is already a
-/// type here. Takes a <c>Type</c> rather than a generic parameter because a queryable is a
-/// <c>ref struct</c>, which cannot be a generic argument to an attribute.
-///
-/// Nodes are found by NAME, so how a tree composes them decides whether they are visible. A
-/// builder carries its node as a generic argument on its base and is followed; a factory method
-/// returns a definition and says nothing, so it must be annotated with
-/// <see cref="BuildsAttribute{T}"/> or its node listed in <see cref="Also"/>.
-///
-/// A builder GENERATED beside this tree is the awkward case, and is handled rather than refused.
-/// A generator cannot read another generator's output, so <c>new Flee(5f)</c> is an error type
-/// here even though the finished compilation is fine. Such a name is recovered against a table of
-/// the builders that WILL be emitted, derived from the same <c>[Builder]</c> declarations — the
-/// trick Paradise.ECS uses where SystemGenerator meets QueryableGenerator's output.
+/// Named <c>BehaviorTreeBinding</c> because <c>BehaviorTree</c> is already a type. Takes a
+/// <c>Type</c> rather than a generic parameter because a queryable is a <c>ref struct</c>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class BehaviorTreeBindingAttribute : Attribute
@@ -32,32 +28,17 @@ public sealed class BehaviorTreeBindingAttribute : Attribute
     public Type Queryable { get; }
 
     /// <summary>
-    /// Node types the tree uses but never names, because a factory builds them.
-    ///
-    /// The escape hatch of last resort, for somebody else's factory that carries no
-    /// <see cref="BuildsAttribute{T}"/>. Prefer annotating the factory: it knows what it builds,
-    /// and the answer then travels with it to every tree rather than being restated at each one.
+    /// Nodes the tree uses but never names. The escape hatch of last resort, for somebody else's
+    /// factory carrying no <see cref="BuildsAttribute{T}"/>; prefer annotating the factory, so the
+    /// answer travels with it to every tree.
     /// </summary>
     public Type[]? Also { get; set; }
 }
 
 /// <summary>
-/// Declares which <see cref="INodeData"/> a factory method constructs.
-///
-/// A tree names its nodes by constructing them, which is how the binding scan finds them. A
-/// FACTORY breaks that: a method returning a <c>BehaviorNodeDefinition</c> discards every trace of
-/// what it built, so a tree calling it names no node at all — and if that node reads the
-/// blackboard, its data is silently missing and it throws on the first tick.
-///
-/// The built-in factories this existed for are gone: each built-in node has a generated builder,
-/// which carries its node type on its base and needs no annotation. This remains for a factory
-/// somebody writes.
-///
-/// The factory is the thing that knows, so this is where it is written down. It survives into
-/// metadata, so a tree in another assembly gets the answer without seeing the body.
-///
-/// <see cref="BehaviorTreeBindingAttribute.Also"/> remains the escape hatch for a factory nobody
-/// has annotated.
+/// Declares which <see cref="INodeData"/> a factory method constructs, for one that returns a bare
+/// <c>BehaviorNodeDefinition</c> and so discards every trace of what it built. A factory returning
+/// a builder needs no annotation.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = false)]
 public sealed class BuildsAttribute<T> : Attribute where T : struct;

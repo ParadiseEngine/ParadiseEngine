@@ -6,25 +6,15 @@ using Microsoft.CodeAnalysis.Operations;
 namespace Paradise.BT.Generators;
 
 /// <summary>
-/// Checks that a node's DECLARED blackboard access matches what its body actually does.
+/// Checks a node's DECLARED access against what its body does, closing the one gap in making the
+/// attributes the contract: they can disagree with the code beside them, and only a
+/// <c>KeyNotFoundException</c> on the first tick would say so.
 ///
-/// <see cref="BindingGenerator"/> builds a tree's blackboard from <c>[Reads&lt;T&gt;]</c> /
-/// <c>[Writes&lt;T&gt;]</c>. Those attributes have to be the contract rather than the body, because
-/// a node can arrive from a referenced assembly where no body exists — attributes survive into
-/// metadata and method bodies do not. The cost of that choice is that an attribute can disagree
-/// with the code beside it, and the only thing catching it today is a <c>KeyNotFoundException</c>
-/// on the first tick. This closes that gap without giving up the contract.
+/// Runs in whichever assembly DECLARES the node, so each body is checked once, where it exists.
 ///
-/// It runs in whichever assembly DECLARES the node, so every node's body is checked exactly once,
-/// where it exists. A consumer in another assembly then relies on the attribute, which by then has
-/// been verified.
-///
-/// Deliberately one-directional: it reports access the body performs and the node does not declare,
-/// never a declaration the body does not use. A node may legitimately declare access it only reaches
-/// down one branch, and over-declaring is refused by PBT0005/PBT0008 anyway.
-///
-/// It can only see calls it can resolve. A node that reaches the blackboard through a helper method
-/// is not followed — see PBT0010, which refuses to guess.
+/// One-directional: it reports access performed but not declared, never a declaration the body
+/// does not use — a node may reach something down one branch only. A node that reaches the
+/// blackboard through a helper is not followed; PBT0010 says so rather than guessing.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
