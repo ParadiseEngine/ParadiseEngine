@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Paradise.BT.Generators;
@@ -53,7 +54,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var provider = context.SyntaxProvider.CreateSyntaxProvider(
-            predicate: static (node, _) => node is StructDeclarationSyntax s && s.AttributeLists.Count > 0,
+            predicate: static (node, _) =>
+                IsStructDeclaration(node) && ((TypeDeclarationSyntax)node).AttributeLists.Count > 0,
             transform: static (ctx, ct) => GetNodeInfo(ctx, ct)
         ).Where(static info => info.HasValue)
          .Select(static (info, _) => info!.Value);
@@ -63,7 +65,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         // used to have no [Builder] at all, back when a factory built it. Keying registration
         // on [Builder] would silently drop it, and with it every timer node in every tree.
         var registrable = context.SyntaxProvider.CreateSyntaxProvider(
-            predicate: static (node, _) => node is StructDeclarationSyntax { BaseList.Types.Count: > 0 },
+            predicate: static (node, _) =>
+                IsStructDeclaration(node) && ((TypeDeclarationSyntax)node).BaseList?.Types.Count > 0,
             transform: static (ctx, ct) => GetRegistrableNode(ctx, ct)
         ).Where(static name => name is not null)
          .Select(static (name, _) => name!);
@@ -121,7 +124,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     private static NodeInfo? GetNodeInfo(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var structDecl = (StructDeclarationSyntax)ctx.Node;
+        var structDecl = (TypeDeclarationSyntax)ctx.Node;
         if (ctx.SemanticModel.GetDeclaredSymbol(structDecl, ct) is not INamedTypeSymbol structSymbol)
             return null;
 
@@ -326,6 +329,12 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         };
     }
 
+    /// <summary>A struct-kind declaration: `struct` or `record struct` — the latter is a
+    /// <see cref="RecordDeclarationSyntax"/>, which a `StructDeclarationSyntax` pattern silently
+    /// drops.</summary>
+    internal static bool IsStructDeclaration(SyntaxNode node) =>
+        node is StructDeclarationSyntax || node.IsKind(SyntaxKind.RecordStructDeclaration);
+
     private const string NodeDataFullName = "Paradise.BT.INodeData";
 
     /// <summary>
@@ -342,7 +351,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (ctx.SemanticModel.GetDeclaredSymbol((StructDeclarationSyntax)ctx.Node, ct)
+        if (ctx.SemanticModel.GetDeclaredSymbol((TypeDeclarationSyntax)ctx.Node, ct)
             is not INamedTypeSymbol symbol)
         {
             return null;

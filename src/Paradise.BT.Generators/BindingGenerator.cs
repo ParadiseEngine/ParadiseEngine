@@ -82,7 +82,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
         // so a tree saying `new ThreatNear(0.1f)` is recovered by name against this table.
         var builders = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) =>
-                    node is StructDeclarationSyntax { AttributeLists.Count: > 0, BaseList.Types.Count: > 0 },
+                    BTreeNodeGenerator.IsStructDeclaration(node)
+                    && ((TypeDeclarationSyntax)node) is { AttributeLists.Count: > 0, BaseList.Types.Count: > 0 },
                 transform: static (ctx, ct) => GetBuilder(ctx, ct))
             .Where(static b => b.HasValue)
             .Select(static (b, _) => b!.Value);
@@ -201,7 +202,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (ctx.SemanticModel.GetDeclaredSymbol((StructDeclarationSyntax)ctx.Node, ct)
+        if (ctx.SemanticModel.GetDeclaredSymbol((TypeDeclarationSyntax)ctx.Node, ct)
                 is not INamedTypeSymbol symbol
             || !Implements(symbol, NodeDataInterface))
         {

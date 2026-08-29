@@ -267,6 +267,34 @@ public sealed class BTreeNodeGeneratorTests
             + ": base(new global::Game.CooldownNode(seconds), child) { }");
     }
 
+    /// <summary>A record struct's primary constructor is a declared public constructor too, so
+    /// the same surface rules apply; its positional members are properties, not fields, so the
+    /// field fallback and PBT0012 stay quiet.</summary>
+    [Test]
+    public async Task A_Record_Struct_Primary_Constructor_Works()
+    {
+        var (sources, compileErrors, diagnostics) = Run(
+            """
+            namespace Game;
+
+            [System.Runtime.InteropServices.Guid("BF607182-93A4-45B6-C7D8-E9F0A1B2C3D4")]
+            [Paradise.BT.Builder]
+            public record struct PatrolNode(float Radius, int Waypoints = 4) : Paradise.BT.INodeData
+            {
+                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
+                    int index, TNodeBlob blob, TBlackboard bb)
+                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
+                    => Paradise.BT.NodeState.Success;
+            }
+            """);
+
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(diagnostics.Where(d => d.Id.StartsWith("PBT", StringComparison.Ordinal))).IsEmpty();
+        await Assert.That(string.Join("\n", sources)).Contains(
+            "public Patrol(float radius, int waypoints = 4) : base(new global::Game.PatrolNode(radius, waypoints)) { }");
+    }
+
     [Test]
     public async Task Two_Public_Constructors_Are_Refused()
     {
