@@ -12,7 +12,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
-        WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene.toml");
+        WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -46,7 +46,7 @@ public class ProjectVerifierTests
     public async Task an_orphaned_sidecar_is_an_error()
     {
         using var fileSystem = CreateProject();
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/gone.glb.meta.toml");
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/gone.glb.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -61,14 +61,14 @@ public class ProjectVerifierTests
         var meta = SidecarMeta.Mint(SidecarAssetKind.Mesh);
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/b.glb", [2]);
-        meta.Save(fileSystem, "/game/assets/models/a.glb.meta.toml");
-        meta.Save(fileSystem, "/game/assets/models/b.glb.meta.toml");
+        meta.Save(fileSystem, "/game/assets/models/a.glb.meta");
+        meta.Save(fileSystem, "/game/assets/models/b.glb.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].Message).Contains("a.glb.meta.toml");
-        await Assert.That(findings[0].Path).IsEqualTo(new UPath("/game/assets/models/b.glb.meta.toml"));
+        await Assert.That(findings[0].Message).Contains("a.glb.meta");
+        await Assert.That(findings[0].Path).IsEqualTo(new UPath("/game/assets/models/b.glb.meta"));
     }
 
     [Test]
@@ -76,7 +76,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/textures/fire.png.meta.toml");
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/textures/fire.png.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -89,7 +89,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
-        fileSystem.WriteAllText("/game/assets/models/a.glb.meta.toml", "kind = \"mesh\"\n");
+        fileSystem.WriteAllText("/game/assets/models/a.glb.meta", "kind = \"mesh\"\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -101,7 +101,7 @@ public class ProjectVerifierTests
     public async Task an_invalid_scene_is_an_error()
     {
         using var fileSystem = CreateProject();
-        fileSystem.WriteAllText("/game/assets/scenes/bad.scene.toml", "schema_version = 1\nobjects = 3\n");
+        fileSystem.WriteAllText("/game/assets/scenes/bad.scene", "schema_version = 1\nobjects = 3\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -115,7 +115,7 @@ public class ProjectVerifierTests
         using var fileSystem = CreateProject();
         // Valid, but keys in a non-canonical order — a hand edit.
         fileSystem.WriteAllText(
-            "/game/assets/scenes/edited.scene.toml",
+            "/game/assets/scenes/edited.scene",
             "schema_version = 1\n\n[[objects]]\nname = \"crate\"\nguid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);

@@ -3,7 +3,7 @@ using System.Numerics;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// The authoring scene document — the committed source of truth a <c>*.scene.toml</c> holds.
+/// The authoring scene document — the committed source of truth a <c>*.scene</c> holds.
 /// </summary>
 /// <remarks>
 /// <para>

@@ -33,7 +33,7 @@ public class SidecarMetaTests
     {
         var text = $"schema_version = 1\nguid = \"{AssetGuid}\"\nkind = \"texture\"\n\n[texture]\npreset = \"color-linear\"\n";
 
-        var meta = SidecarMeta.Parse(text, "fire.png.meta.toml");
+        var meta = SidecarMeta.Parse(text, "fire.png.meta");
 
         await Assert.That(meta.Kind).IsEqualTo(SidecarAssetKind.Texture);
         await Assert.That(meta.Texture!.Preset).IsEqualTo(TexturePreset.ColorLinear);
@@ -55,7 +55,7 @@ public class SidecarMetaTests
     {
         var sidecar = SidecarMeta.PathFor("/game/assets/models/crate.glb");
 
-        await Assert.That(sidecar).IsEqualTo(new UPath("/game/assets/models/crate.glb.meta.toml"));
+        await Assert.That(sidecar).IsEqualTo(new UPath("/game/assets/models/crate.glb.meta"));
         await Assert.That(SidecarMeta.IsSidecarPath(sidecar)).IsTrue();
         await Assert.That(SidecarMeta.IsSidecarPath("/game/assets/models/crate.glb")).IsFalse();
         await Assert.That(SidecarMeta.AssetPathFor(sidecar)).IsEqualTo(new UPath("/game/assets/models/crate.glb"));
@@ -68,11 +68,11 @@ public class SidecarMetaTests
     [Arguments("schema_version = 1\nguid = \"3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041\"\nkind = \"mesh\"\nx = 1\n", "unknown key 'x'")]
     public async Task invalid_sidecars_name_the_offence(string toml, string fragment)
     {
-        var error = await Assert.That(() => SidecarMeta.Parse(toml, "bad.meta.toml"))
+        var error = await Assert.That(() => SidecarMeta.Parse(toml, "bad.meta"))
             .Throws<SidecarMetaException>();
 
         await Assert.That(error!.Message).Contains(fragment);
-        await Assert.That(error.Message).Contains("bad.meta.toml");
+        await Assert.That(error.Message).Contains("bad.meta");
     }
 
     [Test]

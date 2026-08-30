@@ -10,13 +10,13 @@ public enum AssetClass
     /// <summary>The project manifest, <c>project.toml</c>.</summary>
     Manifest,
 
-    /// <summary>An authoring scene document, <c>*.scene.toml</c>.</summary>
+    /// <summary>An authoring scene document, <c>*.scene</c>.</summary>
     Scene,
 
     /// <summary>An authored config document — any other <c>*.toml</c>.</summary>
     Config,
 
-    /// <summary>A sidecar meta file, <c>*.meta.toml</c>.</summary>
+    /// <summary>A sidecar meta file, <c>*.meta</c>.</summary>
     Sidecar,
 
     /// <summary>A foreign/binary asset that must have a sidecar.</summary>
@@ -38,7 +38,7 @@ public enum AssetClass
 public static class AssetClassifier
 {
     /// <summary>The scene-document double extension.</summary>
-    public const string SceneSuffix = ".scene.toml";
+    public const string SceneSuffix = ".scene";
 
     private static readonly Dictionary<string, SidecarAssetKind> s_foreignKinds = new(StringComparer.OrdinalIgnoreCase)
     {

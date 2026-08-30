@@ -34,7 +34,7 @@ public class SceneDocumentTests
     {
         // THE property of the format: read → write must be the identity on canonical input,
         // or every tool touching a scene would litter diffs with reformatting.
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene.toml");
+        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
 
         await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(Canonical);
     }
@@ -42,7 +42,7 @@ public class SceneDocumentTests
     [Test]
     public async Task the_model_reflects_the_document()
     {
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene.toml");
+        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
 
         await Assert.That(document.Objects.Count).IsEqualTo(2);
         var crate = document.Objects[0];
@@ -115,11 +115,11 @@ public class SceneDocumentTests
     [Arguments("schema_version = 1\nextra = 1\n", "unknown key 'extra'")]
     public async Task document_level_problems_name_the_offence(string toml, string fragment)
     {
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "bad.scene.toml"))
+        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "bad.scene"))
             .Throws<SceneDocumentException>();
 
         await Assert.That(error!.Message).Contains(fragment);
-        await Assert.That(error.Message).Contains("bad.scene.toml");
+        await Assert.That(error.Message).Contains("bad.scene");
     }
 
     [Test]
@@ -231,8 +231,8 @@ public class SceneDocumentTests
         fileSystem.CreateDirectory("/game/assets/scenes");
         var document = SceneDocumentSerializer.Parse(Canonical, "seed");
 
-        SceneDocumentSerializer.Save(fileSystem, "/game/assets/scenes/district.scene.toml", document);
-        var reread = SceneDocumentSerializer.Load(fileSystem, "/game/assets/scenes/district.scene.toml");
+        SceneDocumentSerializer.Save(fileSystem, "/game/assets/scenes/district.scene", document);
+        var reread = SceneDocumentSerializer.Load(fileSystem, "/game/assets/scenes/district.scene");
 
         await Assert.That(SceneDocumentSerializer.Write(reread)).IsEqualTo(Canonical);
     }
@@ -242,9 +242,9 @@ public class SceneDocumentTests
     {
         using var fileSystem = new MemoryFileSystem();
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Load(fileSystem, "/absent.scene.toml"))
+        var error = await Assert.That(() => SceneDocumentSerializer.Load(fileSystem, "/absent.scene"))
             .Throws<SceneDocumentException>();
 
-        await Assert.That(error!.Message).Contains("/absent.scene.toml");
+        await Assert.That(error!.Message).Contains("/absent.scene");
     }
 }

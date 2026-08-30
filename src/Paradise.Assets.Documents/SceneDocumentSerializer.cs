@@ -7,7 +7,7 @@ using Zio;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// Reads and writes <c>*.scene.toml</c> documents.
+/// Reads and writes <c>*.scene</c> documents.
 /// </summary>
 /// <remarks>
 /// <para>

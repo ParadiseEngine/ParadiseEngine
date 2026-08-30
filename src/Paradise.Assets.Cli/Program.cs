@@ -90,7 +90,7 @@ static int Usage()
 
         verbs:
           verify                 check the assets/ tree: sidecars, identities, document validity
-          scene-check [--fix]    police (or restore) canonical form of *.scene.toml documents
+          scene-check [--fix]    police (or restore) canonical form of *.scene documents
           build [--profile p]    compile assets/ into build/ (or .editor/play with --play)
           clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
 

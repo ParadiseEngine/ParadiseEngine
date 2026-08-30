@@ -28,7 +28,7 @@ public enum SceneCheckOutcome
 public readonly record struct SceneCheckResult(UPath Path, SceneCheckOutcome Outcome, string Message = "");
 
 /// <summary>
-/// The <c>scene-check</c> verb: the canonical-form drift guard over every <c>*.scene.toml</c>.
+/// The <c>scene-check</c> verb: the canonical-form drift guard over every <c>*.scene</c>.
 /// </summary>
 /// <remarks>
 /// This is the same mechanism <c>contract-check</c> proves out for the JSON contract, pointed at

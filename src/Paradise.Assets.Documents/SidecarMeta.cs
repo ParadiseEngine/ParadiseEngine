@@ -5,13 +5,13 @@ using Zio;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// The sidecar meta document: one <c>&lt;asset&gt;.meta.toml</c> per foreign/binary asset,
+/// The sidecar meta document: one <c>&lt;asset&gt;.meta</c> per foreign/binary asset,
 /// carrying the asset's GUID and its per-asset import settings.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Sidecars exist for assets whose bytes cannot carry an id — GLBs, textures, audio banks. The
-/// project's own text documents (<c>*.scene.toml</c>, config) carry their identity in-file and
+/// project's own text documents (<c>*.scene</c>, config) carry their identity in-file and
 /// get no sidecar. References between documents stay <b>paths</b>; the GUID is authoring
 /// identity, which is what defangs the classic sidecar failure: a lost sidecar degrades to a
 /// re-mint plus a re-link by content hash, instead of breaking every reference.
@@ -29,7 +29,7 @@ public sealed class SidecarMeta
     public const int SupportedSchemaVersion = 1;
 
     /// <summary>The suffix appended to an asset's file name to form its sidecar's.</summary>
-    public const string Suffix = ".meta.toml";
+    public const string Suffix = ".meta";
 
     /// <summary>Creates a sidecar document.</summary>
     /// <param name="guid">The asset's authoring identity.</param>
