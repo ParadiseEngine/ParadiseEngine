@@ -3,24 +3,18 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BT;
 
-internal readonly struct BehaviorNodeMetadata
+internal readonly struct BehaviorNodeMetadata(Type nodeType)
 {
-    public BehaviorNodeMetadata(Guid guid)
-    {
-        Guid = guid;
-        Id = guid.GetHashCode();
-    }
+    public Guid Guid { get; } = nodeType.GetNodeGuid();
 
-    public Guid Guid { get; }
-
-    public int Id { get; }
+    public NodeCardinality Cardinality { get; } = nodeType.GetCustomAttribute<BuilderAttribute>()?.Cardinality ?? NodeCardinality.Leaf;
 }
 
 internal static class GuidAttributeExtensions
 {
     public static Guid GetNodeGuid(this Type type)
     {
-        ThrowHelper.ThrowIfNull(type, nameof(type));
+        ArgumentNullException.ThrowIfNull(type);
 
         GuidAttribute? attribute = type.GetCustomAttribute<GuidAttribute>();
         if (attribute is null)

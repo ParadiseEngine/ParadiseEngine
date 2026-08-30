@@ -1,55 +1,45 @@
 namespace Paradise.BT;
 
 /// <summary>
-/// Exact VM entrypoints shaped like EntitiesBT, backed by Paradise.BT's managed node blob.
+/// Tick and reset over a node blob: each node dispatches by its GUID through
+/// <see cref="NodeTypeRegistry"/>, straight from its bytes.
 /// </summary>
 public static class VirtualMachine
 {
-    public static NodeState Tick<TNodeBlob, TBlackboard>(ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
-        => Tick(0, ref blob, ref bb);
+    public static NodeState Tick<TBehaviorTree, TBlackboard>(TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
+        => Tick(0, blob, bb);
 
-    public static NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
+    public static NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        IRuntimeNodeProvider provider = GetProvider(blob);
-        IRuntimeNode runtimeNode = provider.GetRuntimeNode(index);
-        NodeState state = runtimeNode.Tick(index, ref blob, ref bb);
+        NodeState state = NodeTypeRegistry.Invoker(blob.GetTypeGuid(index))
+            .Tick(ref blob.RuntimeData(index), index, blob, bb);
         blob.SetState(index, state);
         return state;
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(int fromIndex, ref TNodeBlob blob, ref TBlackboard bb, int count = 1)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
+    public static void Reset<TBehaviorTree, TBlackboard>(int fromIndex, TBehaviorTree blob, TBlackboard bb, int count = 1)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         blob.ResetStates(fromIndex, count);
-        IRuntimeNodeProvider provider = GetProvider(blob);
-        provider.ResetRuntimeData(fromIndex, count);
+        blob.ResetRuntimeData(fromIndex, count);
+
         for (int i = fromIndex; i < fromIndex + count; i++)
         {
-            provider.GetRuntimeNode(i).Reset(i, ref blob, ref bb);
+            NodeTypeRegistry.Invoker(blob.GetTypeGuid(i)).Reset(
+                ref blob.RuntimeData(i), i, blob, bb);
         }
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(ref TNodeBlob blob, ref TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob
-        where TBlackboard : struct, IBlackboard
+    public static void Reset<TBehaviorTree, TBlackboard>(TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
+        where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int count = blob.GetEndIndex(0);
-        Reset(0, ref blob, ref bb, count);
-    }
-
-    private static IRuntimeNodeProvider GetProvider<TNodeBlob>(TNodeBlob blob)
-        where TNodeBlob : struct, INodeBlob
-    {
-        if (blob is IRuntimeNodeProvider provider)
-        {
-            return provider;
-        }
-
-        throw new NotSupportedException("VirtualMachine dispatch requires the Paradise.BT NodeBlob runtime implementation.");
+        Reset(0, blob, bb, count);
     }
 }

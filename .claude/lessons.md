@@ -37,6 +37,33 @@
   `await` boundaries (CS4007) — in fluent-async test projects, use arrays and let them convert
   to spans at call sites.
 
+## C# / .NET gotchas
+
+- [hits: 1] **`MemoryMarshal.CreateReadOnlySpan(ref local, 1)` over a stack local COMPILES even
+  when the span escapes the method** — the parameter is `scoped ref`, so ref-safety analysis does
+  not tie the returned span's lifetime to the local, and a `private ReadOnlySpan<byte> AsBytes()
+  { var copy = _data; return MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref copy, 1)); }`
+  helper returns a span over a dead frame. Found 2026-08-30 in `RuntimeNodeFactory<T>` (a
+  DRY-motivated extraction of two identical span expressions): every behavior node's authored
+  defaults became stack garbage — `IndexOutOfRangeException` in `ProbeNode.Tick` and dozens of
+  wrong-NodeState failures, nothing pointing at serialization. **Rule**: a span created over a
+  local via `MemoryMarshal.CreateSpan`/`CreateReadOnlySpan`/`AsBytes` must be CONSUMED in the
+  same method — never returned, even from a private helper; dedupe with a
+  `CopyTo(destination)`-shaped helper instead. Symptom signature: garbage node/struct data with
+  no error at the write site.
+
+## Paradise.BT
+
+- [hits: 1] **The BT generators/analyzers match core types BY FULL-NAME STRING (`Paradise.BT.INode`,
+  formerly `INodeData`) — renaming the core type does not break the build, it silently EMPTIES the
+  output.** Found 2026-08-30: after the INodeData→INode rename, `BindingGenerator` resolved zero
+  node access and emitted a blackboard commented "This tree touches nothing"; the only symptom was
+  a CS1739 at the Bind call site (missing parameter), nowhere near the cause. `DuplicateGuidAnalyzer`
+  and `BlackboardAccessAnalyzer` key on the same constant and just stop reporting. **Rule**: when
+  renaming any type the generators reference, grep `src/Paradise.BT.Generators` for the old
+  full name first — and treat a generated "touches nothing" blackboard as a resolution failure,
+  not as truth.
+
 ## Paradise.Physics
 
 - [hits: 2] **An invalid (`default`) `CollisionWorldHandle` must mean "unobstructed", never
