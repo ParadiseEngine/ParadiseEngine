@@ -26,11 +26,28 @@ namespace Paradise.Assets.Pipeline
                 return false;
             }
 
+            return TryRead(File.OpenRead(glbPath), out gltf, out binChunk);
+        }
+
+        /// <summary>
+        /// The container from BYTES rather than a path — what a caller working over an
+        /// <c>IFileSystem</c> needs, since the build reads and writes GLBs through Zio (a
+        /// MemoryFileSystem in tests) and never touches <see cref="File"/>. Same parse as the
+        /// path overload, which now delegates here: one container implementation, not two.
+        /// </summary>
+        public static bool TryRead(byte[] glb, out JsonObject gltf, out byte[] binChunk)
+            => TryRead(new MemoryStream(glb, writable: false), out gltf, out binChunk);
+
+        private static bool TryRead(Stream stream, out JsonObject gltf, out byte[] binChunk)
+        {
+            gltf = new JsonObject();
+            binChunk = Array.Empty<byte>();
+
             // A truncated stream (EndOfStreamException) or malformed JSON (JsonReaderException) means
             // a corrupt GLB; treat it as "not readable" and skip rather than unwinding the batch.
             try
             {
-                using var reader = new BinaryReader(File.OpenRead(glbPath));
+                using var reader = new BinaryReader(stream);
                 if (reader.BaseStream.Length < 20 || reader.ReadUInt32() != Magic || reader.ReadUInt32() != 2)
                 {
                     return false;
@@ -69,6 +86,13 @@ namespace Paradise.Assets.Pipeline
         }
 
         public static void Write(string glbPath, JsonObject gltf, byte[] binChunk)
+            => File.WriteAllBytes(glbPath, Write(gltf, binChunk));
+
+        /// <summary>
+        /// The container as BYTES — the write half of the byte-based pair, for the same callers
+        /// that need <see cref="TryRead(byte[], out JsonObject, out byte[])"/>.
+        /// </summary>
+        public static byte[] Write(JsonObject gltf, byte[] binChunk)
         {
             string json = gltf.ToJsonString();
             byte[] jsonBytes = PadToFour(Encoding.UTF8.GetBytes(json), (byte)' ');
@@ -76,7 +100,8 @@ namespace Paradise.Assets.Pipeline
             bool hasBin = paddedBin.Length > 0;
             uint totalLength = (uint)(12 + 8 + jsonBytes.Length + (hasBin ? 8 + paddedBin.Length : 0));
 
-            using var writer = new BinaryWriter(File.Create(glbPath));
+            var buffer = new MemoryStream((int)totalLength);
+            using var writer = new BinaryWriter(buffer);
             writer.Write(Magic);
             writer.Write(2u);
             writer.Write(totalLength);
@@ -89,6 +114,9 @@ namespace Paradise.Assets.Pipeline
                 writer.Write(BinChunkType);
                 writer.Write(paddedBin);
             }
+
+            writer.Flush();
+            return buffer.ToArray();
         }
 
         public static int AlignToFour(int value) => (value + 3) & ~3;

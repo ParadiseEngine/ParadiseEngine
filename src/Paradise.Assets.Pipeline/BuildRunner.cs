@@ -206,8 +206,34 @@ public sealed class BuildRunner
             return;
         }
 
-        CopyThrough(path, output, manifest, bytes);
+        // The mesh names its textures as the author has them (../textures/rust.png); the build
+        // writes them as KTX2 at the same relative place, so the copy has to be repointed.
+        var rewrite = MeshTextureReferences.Rewrite(bytes);
+
+        // Checked against the SOURCE tree, not the output: build order is alphabetical, so
+        // Models/ is compiled before textures/ and the KTX2 does not exist yet. What matters is
+        // that a source exists to compile at all — a reference naming nothing is a broken mesh
+        // however the steps are ordered.
+        var directory = path.GetDirectory();
+        foreach (var reference in rewrite.Sources)
+        {
+            if (_fileSystem.FileExists(Resolve(directory, reference))) continue;
+
+            errors.Add(
+                $"{source}: references texture '{reference}', which does not exist under assets/ " +
+                "(a moved or renamed texture; the mesh and the reference move together)");
+        }
+
+        CopyThrough(path, output, manifest, rewrite.Glb);
     }
+
+    /// <summary>
+    /// A glTF URI as a path in the assets tree. glTF URIs are '/'-separated and percent-encoded
+    /// per the spec, and they are relative to the referencing document — never to the project
+    /// root — which is what makes <c>../textures/x.png</c> mean what an author expects.
+    /// </summary>
+    private static UPath Resolve(UPath directory, string uri)
+        => (directory / Uri.UnescapeDataString(uri)).ToAbsolute();
 
     private void BuildConfig(UPath path, BuildProfile profile, UPath output, BuildManifest manifest, List<string> errors)
     {
@@ -280,30 +306,13 @@ public sealed class BuildRunner
     }
 
     /// <summary>
-    /// Whether a GLB carries embedded (buffer-view-backed) PNG/JPEG images. Reads the container
-    /// directly rather than through <see cref="GlbBinary"/> so in-memory filesystems work.
+    /// Whether a GLB carries embedded (buffer-view-backed) PNG/JPEG images.
     /// </summary>
     internal static bool HasEmbeddedEncodedImages(byte[] glb, out string mimeType)
     {
         mimeType = "";
-        // Header: magic 'glTF', version, length; then chunk 0 header: length, type 'JSON'.
-        if (glb.Length < 20) return false;
-        if (BitConverter.ToUInt32(glb, 0) != 0x46546C67) return false;
-        var jsonLength = BitConverter.ToInt32(glb, 12);
-        if (BitConverter.ToUInt32(glb, 16) != 0x4E4F534A) return false;
-        if (jsonLength <= 0 || 20 + jsonLength > glb.Length) return false;
-
-        JsonNode? gltf;
-        try
-        {
-            gltf = JsonNode.Parse(System.Text.Encoding.UTF8.GetString(glb, 20, jsonLength));
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return false;
-        }
-
-        if (gltf?["images"] is not JsonArray images) return false;
+        if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
+        if (gltf["images"] is not JsonArray images) return false;
         foreach (var image in images)
         {
             var mime = image?["mimeType"]?.GetValue<string>();

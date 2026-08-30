@@ -79,7 +79,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
         var meta = SidecarMeta.Mint(SidecarAssetKind.Texture);
         meta.Texture = new TextureImportSettings { Preset = TexturePreset.Normal };
-        meta.Save(fileSystem, "/game/assets/textures/fire.png.meta.toml");
+        meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
         var encoder = new FakeEncoder();
 
         var result = new BuildRunner(fileSystem, s_layout, encoder).Run("fastdev");
@@ -122,12 +122,48 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var glb = MakeGlb("{\"images\":[{\"mimeType\":\"image/png\",\"bufferView\":0}]}");
         fileSystem.WriteAllBytes("/game/assets/models/bad.glb", glb);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/bad.glb.meta.toml");
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/bad.glb.meta");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("embedded image/png");
+    }
+
+    [Test]
+    public async Task a_mesh_texture_reference_is_repointed_at_the_built_ktx2()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png", SidecarAssetKind.Texture);
+        var glb = MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Succeeded).IsTrue();
+        var built = fileSystem.ReadAllBytes("/game/build/models/crate.glb");
+        GlbBinary.TryRead(built, out var gltf, out _);
+        await Assert.That(gltf["images"]![0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
+        // …and the file it now names was actually produced, at that relative place.
+        await Assert.That(fileSystem.FileExists("/game/build/textures/rust.ktx2")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_mesh_referencing_a_texture_that_is_not_there_fails_the_build()
+    {
+        // The guard that stops the old failure mode: a mesh shipped pointing at a texture nothing
+        // wrote, discovered as a blank surface in a renderer log rather than at the build.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var glb = MakeGlb("""{"images":[{"uri":"../textures/gone.png","mimeType":"image/png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("../textures/gone.png");
+        await Assert.That(result.Errors[0]).Contains("models/crate.glb");
     }
 
     [Test]
@@ -148,7 +184,7 @@ public class BuildRunnerTests
     public async Task scenes_refuse_the_build_until_the_bake_exists()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene.toml");
+        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -225,7 +261,7 @@ public class BuildRunnerTests
     public async Task no_manifest_is_written_on_a_failed_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene.toml");
+        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
