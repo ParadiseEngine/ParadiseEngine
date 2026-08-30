@@ -61,3 +61,22 @@ public readonly ref struct BehaviorTreeRef : IBehaviorTree
     public ref byte RuntimeData(int nodeIndex) =>
         ref Unsafe.Add(ref MemoryMarshal.GetReference(_runtime), _layout.Offsets[nodeIndex]);
 }
+
+/// <summary>
+/// <see cref="BehaviorTreeRef"/> plus the tree's identity: Tick and Reset only accept a
+/// blackboard the binding generator stamped for the same <typeparamref name="TTree"/>.
+/// </summary>
+public readonly ref struct BehaviorTreeRef<TTree>(BehaviorTreeRef untyped)
+{
+    public BehaviorTreeRef Untyped { get; } = untyped;
+
+    public NodeState Status => Untyped.GetState(0);
+
+    public NodeState Tick<TBlackboard>(TBlackboard blackboard)
+        where TBlackboard : struct, IBlackboardFor<TTree>, allows ref struct
+        => VirtualMachine.Tick(Untyped, blackboard);
+
+    public void Reset<TBlackboard>(TBlackboard blackboard)
+        where TBlackboard : struct, IBlackboardFor<TTree>, allows ref struct
+        => VirtualMachine.Reset(Untyped, blackboard);
+}

@@ -61,16 +61,17 @@ for (int i = 0; i < 10; i++)
 Console.WriteLine();
 Console.WriteLine("Forager — the generated blackboard, over a row:");
 
-BehaviorTreeLayout layout = BehaviorTrees.Compile<ForagerTree>();
+BehaviorTreeLayout<ForagerTree> layout = BehaviorTrees.Compile<ForagerTree>();
 
 // The two per-agent buffers; the blackboard is bound per tick, because a generated blackboard
-// is a ref struct no field can hold.
-var foragerStates = new NodeState[layout.Blob.Count];
-var foragerData = new byte[layout.Blob.DataSize];
-BehaviorTreeRef Forager() => new(ref layout.Blob, foragerStates, foragerData);
-Forager().ResetRuntimeData(0, layout.Blob.Count);
+// is a ref struct no field can hold. The layout is TYPED — Compile<ForagerTree> proved it — so
+// Tick below only accepts ForagerTreeBlackboard; handing it the enemy's would not compile.
+var foragerStates = new NodeState[layout.Untyped.Blob.Count];
+var foragerData = new byte[layout.Untyped.Blob.DataSize];
+BehaviorTreeRef<ForagerTree> Forager() => layout.Ref(foragerStates, foragerData);
+Forager().Untyped.ResetRuntimeData(0, layout.Untyped.Blob.Count);
 
-Console.WriteLine($"  {layout.Blob.Count} nodes, {layout.Blob.DataSize} bytes of node data.");
+Console.WriteLine($"  {layout.Untyped.Blob.Count} nodes, {layout.Untyped.Blob.DataSize} bytes of node data.");
 
 // One forager, walking a line. In a game these three come off a chunk; here they are locals,
 // because the generated Bind takes components rather than a query.
@@ -103,12 +104,12 @@ foreach ((string label, Senses senses, float energy) in situations)
         senses: in senses,
         stamina: in stamina);
 
-    if (Forager().GetState(0).IsCompleted())
+    if (Forager().Status.IsCompleted())
     {
-        VirtualMachine.Reset(Forager(), bb);
+        Forager().Reset(bb);
     }
 
-    NodeState state = VirtualMachine.Tick(Forager(), bb);
+    NodeState state = Forager().Tick(bb);
 
     Console.WriteLine(
         $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
@@ -147,12 +148,12 @@ for (int step = 1; step <= 5; step++)
         senses: in world,
         stamina: in stamina);
 
-    if (Forager().GetState(0).IsCompleted())
+    if (Forager().Status.IsCompleted())
     {
-        VirtualMachine.Reset(Forager(), bb);
+        Forager().Reset(bb);
     }
 
-    VirtualMachine.Tick(Forager(), bb);
+    Forager().Tick(bb);
 
     // The caller owns the component, so the caller applies the decision.
     float before = position.X;

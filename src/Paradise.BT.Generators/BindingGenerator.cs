@@ -583,7 +583,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("/// Passed by <c>ref</c> instead, this would be unusable: CS8350/CS8352 reject the");
         sb.AppendLine("/// combination of two by-ref arguments whose contents could capture each other.");
         sb.AppendLine("/// </summary>");
-        sb.AppendLine("public readonly ref struct " + bb + " : global::Paradise.BT.IBlackboard");
+        string treeFqn = binding.Namespace.Length == 0
+            ? binding.ClassName
+            : binding.Namespace + "." + binding.ClassName;
+        sb.AppendLine(
+            "public readonly ref struct " + bb
+            + " : global::Paradise.BT.IBlackboardFor<global::" + treeFqn + ">");
         sb.AppendLine("{");
         foreach (Access a in access)
         {

@@ -64,3 +64,18 @@ public sealed class BehaviorTreeLayout : IDisposable
             Offsets[startNodeIndex + count] - Offsets[startNodeIndex];
     }
 }
+
+/// <summary>
+/// A layout provably compiled from <typeparamref name="TTree"/> — the phantom the typed tick
+/// path checks blackboards against. Only <c>BehaviorTrees.Compile&lt;TTree&gt;</c> creates one.
+/// </summary>
+public readonly struct BehaviorTreeLayout<TTree>(BehaviorTreeLayout untyped) : IDisposable
+{
+    public BehaviorTreeLayout Untyped { get; } = untyped;
+
+    /// <summary>The typed tickable view over caller-owned buffers.</summary>
+    public BehaviorTreeRef<TTree> Ref(Span<NodeState> states, Span<byte> runtime)
+        => new(new BehaviorTreeRef(ref Untyped.Blob, states, runtime));
+
+    public void Dispose() => Untyped?.Dispose();
+}

@@ -7,11 +7,11 @@ namespace Paradise.BT.Builder;
 /// </summary>
 public static class BehaviorTrees
 {
-    public static BehaviorTreeLayout Compile<TTree>()
+    public static BehaviorTreeLayout<TTree> Compile<TTree>()
         where TTree : IBehaviorTreeBuilder
-        => TTree.Build().Build();
+        => new(TTree.Build().Build());
 
-    public static BehaviorTreeLayout Compile<TTree, TArgs>(TArgs args)
+    public static BehaviorTreeLayout<TTree> Compile<TTree, TArgs>(TArgs args)
         where TTree : IBehaviorTreeBuilder<TArgs>
-        => TTree.Build(args).Build();
+        => new(TTree.Build(args).Build());
 }

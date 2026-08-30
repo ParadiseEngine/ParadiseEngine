@@ -38,6 +38,8 @@ public sealed class BindingGeneratorTests
                 void SetData<T>(T value) where T : struct;
             }
 
+            public interface IBlackboardFor<TTree> : IBlackboard { }
+
             public interface INode
             {
                 NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
