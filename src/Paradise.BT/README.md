@@ -57,8 +57,8 @@ Two semantics worth knowing before writing a tree:
   three-step sequence whose second step is `Running` picks up at step two next tick.
 - **Reset restores authored data.** Resetting a subtree clears its states and memcpys the
   authored defaults back over its runtime data — one copy, because a subtree is contiguous. A
-  finished `BehaviorTreeInstance` resets itself on the next tick by default
-  (`AutoResetOnCompletion`).
+  finished tree is restarted by its owner's next tick (`FixedBehaviorTree` does this
+  automatically).
 
 ## Architecture
 
@@ -78,10 +78,10 @@ The layout is the tree's shared, immutable half: end indices (node *i*'s subtree
 contiguous range `[i, End[i])`, so its first child is `i+1` and a sibling is one jump), a GUID
 table with one entry per distinct node type plus each node's index into it — a node's type is its
 GUID, the same identity at rest, in memory, and at dispatch — per-node data offsets packed at
-each type's natural alignment, and the authored defaults. A thousand agents share one layout;
-each owns only the two buffers. Dispatch goes through a process-wide registry of static-generic
-invokers keyed by that GUID — no reflection, no boxing, no lock on the hot path (registration
-copies the map and publishes it, so readers never synchronize).
+each type's natural alignment (capped at the blob's 16-byte alignment), and the authored
+defaults. A thousand agents share one layout; each owns only the two buffers. Dispatch goes
+through a process-wide registry of static-generic invokers keyed by that GUID — no reflection,
+no boxing, no lock on the tick path.
 
 **Ownership:** whoever compiles a layout owns it (`IDisposable`, native memory) and must keep it
 alive while instances tick against it.
@@ -169,9 +169,11 @@ using BehaviorTreeLayout tree = new Selector(
     new Failure()
 ).Build();
 
-BehaviorTreeInstance instance = tree.CreateInstance();
+var states = new NodeState[tree.Blob.Count];
+var data = new byte[tree.Blob.DataSize];
 var bb = new Blackboard();
-NodeState state = instance.Tick(bb);   // the blackboard is passed per tick, never stored
+NodeState state = VirtualMachine.Tick(
+    new BehaviorTreeRef(ref tree.Blob, states, data), bb);   // the blackboard is passed per tick
 ```
 
 The runtime never reads a clock, which is what keeps a run reproducible.
@@ -193,11 +195,19 @@ public readonly struct PatrolTree : IBehaviorTreeBuilder
             new Repeat(2, new Success()));
 }
 
-using BehaviorTreeLayout layout = BehaviorTrees.CompileLayout<PatrolTree>();
-BehaviorTreeInstance agent = layout.CreateInstance();
+using BehaviorTreeLayout<PatrolTree> layout = BehaviorTrees.Compile<PatrolTree>();
+
+// States16 / Bytes256: your own [InlineArray] buffer structs — their sizes are the capacity.
+var agent = default(FixedBehaviorTree<PatrolTree, States16, Bytes256>);
+agent.Initialize(layout);   // refuses another tree's layout — the layout is TYPED
 
 NodeState state = agent.Tick(PatrolTreeBlackboard.Bind(/* one named ref per accessed type */));
 ```
+
+`Compile<TTree>` is where type safety is born: the generated blackboard is stamped
+`IBlackboardFor<PatrolTree>`, and the typed layout, `BehaviorTreeRef<PatrolTree>` and
+`FixedBehaviorTree` all refuse any other tree's blackboard at compile time. Hand-built trees
+(`BTreeNode.Build()`) stay on the untyped path — they have no generated blackboard to check.
 
 The generator sweeps the tree type for the nodes it composes — through builders, factories
 returning builders, `[Builds<T>]`-annotated factories, or `[BehaviorTreeBinding(Also = […])]` as
@@ -222,15 +232,14 @@ can reorder them.
 
 The framework takes no ECS dependency, but its shapes are ECS-shaped on purpose:
 
-- An instance's state is a `NodeState` span plus a byte span — storable inline in a component,
-  copied by any world-snapshot memcpy, pointed at the shared layout through a stored
-  `LayoutBlob` pointer.
-- The raw path skips the instance class entirely: build a `BehaviorTree` over your own
-  memory each tick and call the VM.
+- An instance's state is a `NodeState` span plus a byte span — storable inline in a component
+  via `FixedBehaviorTree<TTree, TStates, TData>`, copied by any world-snapshot memcpy, pointed
+  at the shared layout through a stored `LayoutBlob` pointer.
+- The raw path builds a `BehaviorTreeRef` over your own memory each tick and calls the VM.
 
 ```csharp
-var tree = new BehaviorTree(ref layout.Blob, statesSpan, dataSpan);
-NodeState state = VirtualMachine.Tick(tree, blackboard);
+var blob = new BehaviorTreeRef(ref layout.Blob, statesSpan, dataSpan);
+NodeState state = VirtualMachine.Tick(blob, blackboard);
 ```
 
 - A type marked `[Component]` (or implementing an interface named `Paradise.ECS.IComponent` —
@@ -264,5 +273,4 @@ All enforced at compile time by `Paradise.BT.Generators`:
 - The tick path allocates nothing: dispatch is a lock-free GUID lookup into static-generic invokers,
   and the generated blackboard's `GetData<T>`/`SetData<T>` fold to direct field access at JIT
   time.
-- Determinism is a design goal throughout: no clocks, no reflection at tick time, and
-  byte-stable serialization.
+- Determinism is a design goal throughout: no clocks and no reflection at tick time.

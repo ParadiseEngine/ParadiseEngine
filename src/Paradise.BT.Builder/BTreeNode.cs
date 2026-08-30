@@ -58,7 +58,11 @@ public abstract class BTreeNode
         }
     }
 
-    private static BehaviorTreeLayout BuildLayout(ReadOnlySpan<INodeBuilder> compiledNodes, int alignment = 16)
+    /// <summary>Alignment of the blob and of each array within it — and the cap on a node's own
+    /// alignment, since the block guarantees nothing wider.</summary>
+    private const int DataAlignment = 16;
+
+    private static BehaviorTreeLayout BuildLayout(ReadOnlySpan<INodeBuilder> compiledNodes)
     {
         int count = compiledNodes.Length;
         var typeIds = new int[count];
@@ -92,7 +96,7 @@ public abstract class BTreeNode
             }
 
             typeIds[i] = tableIndex;
-            size = Align(size, builder.DataAlignment);
+            size = Align(size, Math.Min(builder.DataAlignment, DataAlignment));
             offsets[i] = size;
             size += builder.DataSize;
         }
@@ -109,12 +113,12 @@ public abstract class BTreeNode
         }
 
         var blobBuilder = new StructBuilder<BehaviorTreeLayout.LayoutBlob>();
-        blobBuilder.SetArray(ref blobBuilder.Value.EndIndices, endIndices, alignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Types, typeIds, alignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Guids, guidTable, alignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Offsets, offsets, alignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.DefaultData, defaultData, alignment);
-        return new BehaviorTreeLayout(blobBuilder.CreateNativeBlobAssetReference(alignment));
+        blobBuilder.SetArray(ref blobBuilder.Value.EndIndices, endIndices, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Types, typeIds, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Guids, guidTable, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Offsets, offsets, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.DefaultData, defaultData, DataAlignment);
+        return new BehaviorTreeLayout(blobBuilder.CreateNativeBlobAssetReference(DataAlignment));
     }
 
     private static int Align(int value, int alignment) =>

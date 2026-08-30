@@ -10,19 +10,26 @@ namespace Paradise.BT;
 /// </summary>
 public sealed class BehaviorTreeLayout : IDisposable
 {
-    private NativeBlobAssetReference<LayoutBlob> _blob;
+    private NativeBlobAssetReference<LayoutBlob>? _blob;
 
     internal BehaviorTreeLayout(NativeBlobAssetReference<LayoutBlob> blob)
     {
         _blob = blob;
     }
 
-    public ref LayoutBlob Blob => ref _blob.Value;
+    public ref LayoutBlob Blob
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_blob is null, this);
+            return ref _blob.Value;
+        }
+    }
 
     public void Dispose()
     {
-        _blob.Dispose();
-        _blob = null!;
+        _blob?.Dispose();
+        _blob = null;
     }
 
     /// <summary>
@@ -69,9 +76,11 @@ public sealed class BehaviorTreeLayout : IDisposable
 /// A layout provably compiled from <typeparamref name="TTree"/> — the phantom the typed tick
 /// path checks blackboards against. Only <c>BehaviorTrees.Compile&lt;TTree&gt;</c> creates one.
 /// </summary>
-public readonly struct BehaviorTreeLayout<TTree>(BehaviorTreeLayout untyped) : IDisposable
+public readonly struct BehaviorTreeLayout<TTree> : IDisposable
 {
-    public BehaviorTreeLayout Untyped { get; } = untyped;
+    internal BehaviorTreeLayout(BehaviorTreeLayout untyped) => Untyped = untyped;
+
+    public BehaviorTreeLayout Untyped { get; }
 
     /// <summary>The typed tickable view over caller-owned buffers.</summary>
     public BehaviorTreeRef<TTree> Ref(Span<NodeState> states, Span<byte> runtime)

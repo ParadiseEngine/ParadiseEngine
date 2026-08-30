@@ -66,9 +66,11 @@ public readonly ref struct BehaviorTreeRef : IBehaviorTree
 /// <see cref="BehaviorTreeRef"/> plus the tree's identity: Tick and Reset only accept a
 /// blackboard the binding generator stamped for the same <typeparamref name="TTree"/>.
 /// </summary>
-public readonly ref struct BehaviorTreeRef<TTree>(BehaviorTreeRef untyped)
+public readonly ref struct BehaviorTreeRef<TTree>
 {
-    public BehaviorTreeRef Untyped { get; } = untyped;
+    internal BehaviorTreeRef(BehaviorTreeRef untyped) => Untyped = untyped;
+
+    public BehaviorTreeRef Untyped { get; }
 
     public NodeState Status => Untyped.GetState(0);
 

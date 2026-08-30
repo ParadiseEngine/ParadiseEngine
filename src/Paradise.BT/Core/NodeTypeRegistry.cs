@@ -47,8 +47,6 @@ internal interface INodeInvoker
 {
     Type NodeType { get; }
 
-    int Size { get; }
-
     NodeState Tick<TBehaviorTree, TBlackboard>(
         scoped ref byte data, int index, TBehaviorTree blob, TBlackboard bb)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
@@ -66,8 +64,6 @@ internal sealed class NodeInvoker<TNodeData> : INodeInvoker
     public static readonly NodeInvoker<TNodeData> Instance = new();
 
     public Type NodeType => typeof(TNodeData);
-
-    public int Size => Unsafe.SizeOf<TNodeData>();
 
     public NodeState Tick<TBehaviorTree, TBlackboard>(
         scoped ref byte data, int index, TBehaviorTree blob, TBlackboard bb)

@@ -68,7 +68,7 @@ public unsafe struct FixedBehaviorTree<TTree, TStateBuffer, TDataBuffer>
     /// <summary>The typed view over this struct's own bytes, built per use.</summary>
     public BehaviorTreeRef<TTree> Ref => new(UntypedRef);
 
-    /// <summary>Tick, restarting a finished tree first — an instance loops by default.</summary>
+    /// <summary>Tick, restarting a finished tree first — an instance always loops.</summary>
     public NodeState Tick<TBlackboard>(TBlackboard blackboard)
         where TBlackboard : struct, IBlackboardFor<TTree>, allows ref struct
     {

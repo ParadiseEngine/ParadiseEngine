@@ -777,4 +777,30 @@ public sealed class BindingGeneratorTests
                 .ToImmutableArray(),
             compileErrors);
     }
+
+    /// <summary>The IBlackboardFor argument must come from the symbol's display string — a
+    /// namespace + name concatenation mangles a NESTED tree into a type that does not exist,
+    /// and the failure would be CS0246 in a generated file the user cannot edit.</summary>
+    [Test]
+    public async Task A_Nested_Tree_Gets_A_Correctly_Qualified_Blackboard_Marker()
+    {
+        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
+            namespace Game
+            {
+                public static class Outer
+                {
+                    public struct InnerTree : Paradise.BT.Builder.IBehaviorTreeBuilder
+                    {
+                        public static Paradise.BT.Builder.BTreeNode Build() => null!;
+                    }
+                }
+            }
+            """);
+
+        await Assert.That(diagnostics).IsEmpty();
+        await Assert.That(compileErrors).IsEmpty();
+        await Assert.That(string.Join("\n", sources))
+            .Contains("IBlackboardFor<global::Game.Outer.InnerTree>");
+    }
+
 }

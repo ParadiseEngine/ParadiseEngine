@@ -82,31 +82,30 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 
 ### Behavior Tree Pipeline
 
-1. **Authoring** — generated builder classes (from `[Builder]` via `BTreeNodeGenerator`) or raw `BehaviorNodes.Node(...)` compose a mutable `BehaviorNodeDefinition` tree.
-2. **Compilation** — `BehaviorTreeBuilder.Build(definition)` validates child counts against each node's `[Builder]` cardinality (Leaf = 0, Decorator = 1; nodes without the attribute are not checked) and produces an immutable `BehaviorTree` (flat pre-order array + end indices).
-3. **Layout** — `BehaviorTreeLayout.Build(tree)` flattens into a shared, immutable `NodeBlob` in native memory: end indices, node type ids, GUIDs, per-node data offsets (packed at each node's natural alignment), and authored defaults. A thousand agents share one layout.
-4. **Instantiation** — `BehaviorTreeInstance` owns the per-agent state (a `NodeState[]` and a `byte[]` of node data) and takes the blackboard per `Tick(bb)` call, so `ref struct` (generated) blackboards work. `BehaviorTreeInstance<TBlackboard>` adds an owned blackboard for plain-struct blackboards; `tree.CreateInstance(...)` / `layout.CreateInstance()` construct them.
-5. **Execution** — `VirtualMachine.Tick()` looks each node up in `NodeTypeRegistry` by dense id and ticks it through its bytes. Registration is emitted per assembly by the generator as a module initializer.
-6. **Serialization** — two forms. **Layout bytes** (preferred for shipping): `layout.SerializeToBytes()` / `tree.SerializeLayoutToBytes()` is a raw copy of the position-independent blob; `BehaviorTreeLayout.Deserialize(bytes)` validates it and re-resolves GUIDs to this process's type ids — no managed tree, no registry argument. **Interchange**: `tree.Serialize()` via `BehaviorTreeBlobSerializer` round-trips a managed `BehaviorTree`; node types resolve through the same `NodeTypeRegistry`.
+1. **Authoring** — generated builder classes (from `[Builder]` via `BTreeNodeGenerator`) or the raw generic wrappers (`LeafNode<T>` / `DecoratorNode<T>` / `CompositeNode<T>`) compose a `BTreeNode` graph (`Paradise.BT.Builder`).
+2. **Compilation** — `BTreeNode.Build()` validates each builder's arity against its node's `[Builder]` cardinality (Leaf = 0, Decorator = 1; no attribute claims Leaf) and flattens straight into a `BehaviorTreeLayout`: one shared native blob of end indices, a GUID table, per-node data offsets (natural alignment, capped at 16) and authored defaults. `BehaviorTrees.Compile<TTree>()` does the same from a tree TYPE and returns a typed `BehaviorTreeLayout<TTree>`. A thousand agents share one layout; there is no serialization — trees compile from code.
+3. **Instantiation** — an instance is two caller-owned buffers over the layout: `BehaviorTreeRef` (a ref struct view) for arbitrary spans, or `FixedBehaviorTree<TTree, TStates, TData>` for inline-in-a-component storage. The blackboard is passed per `Tick(bb)` call, so `ref struct` (generated) blackboards work.
+4. **Execution** — `VirtualMachine.Tick()` dispatches each node by its GUID through `NodeTypeRegistry` and ticks it through its bytes. Registration is emitted per assembly by the generator as a module initializer.
+5. **Type safety** — the binding generator stamps each generated blackboard `IBlackboardFor<TTree>`; the typed layout/ref and `FixedBehaviorTree` only accept that tree's blackboard, so a mismatch is a compile error.
 
 ### Key Abstractions
 
-- **`INodeData`** — The core node contract: unmanaged struct with generic `Tick<TNodeBlob, TBlackboard>(int index, blob, bb)`; optional `static virtual Reset`. Identity is `[Guid]`.
-- **`INodeBlob` / `UnmanagedNodeBlob`** — Blob contract over a shared `NodeBlob*` plus caller-owned spans (states + runtime data). Data is reached by `ref byte`, so buffers may be managed arrays or native/chunk memory.
-- **`NodeTypeRegistry`** — Process-wide GUID → dense id → invoker table; ids are process-local, GUIDs are the durable identity.
+- **`INode`** — The core node contract: unmanaged struct with generic `Tick<TBehaviorTree, TBlackboard>(int index, blob, bb)`; optional `static virtual Reset`. Identity is `[Guid]`.
+- **`IBehaviorTree` / `BehaviorTreeRef`** — The instance view over the shared `LayoutBlob` plus caller-owned spans (states + runtime data). Data is reached by `ref byte`, so buffers may be managed arrays or native/chunk memory.
+- **`NodeTypeRegistry`** — Process-wide GUID → invoker table; the GUID is the whole identity.
 - **`IBlackboard`** — Three members (`HasData`/`GetData`/`SetData`), no ref returns, which is what makes read/write intent statically checkable by the generators.
 - **`NodeState`** — Flags enum (`None`, `Success`, `Failure`, `Running`); `None` means "never ticked / reset".
 
 ### Custom Node Pattern
 
-Implement `INodeData` on an unmanaged struct, tag with `[Guid("...")]` for serialization, then use `BehaviorNodes.Node(new MyNode(), children)` to include in a tree:
+Implement `INode` on an unmanaged struct, tag with `[Guid("...")]` (and `[Builder]` for a generated builder class), then compose it via its builder or `new LeafNode<MyNode>(...)`:
 
 ```csharp
 [Guid("...")]
-public struct MyNode : INodeData
+public struct MyNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         // access runtime/default data via blob.GetNodeData<MyNode>(index)
@@ -118,7 +117,7 @@ public struct MyNode : INodeData
 
 ### Paradise.BLOB
 
-Low-level unmanaged binary blob library used by BT serialization. Key types: `BlobArray<T>`, `BlobString<TEncoding>`, `BlobPtr<T>`, `ManagedBlobAssetReference<T>`. Builders (`ValueBuilder`, `StructBuilder`, `ArrayBuilder`, `TreeBuilder`, `SortedArrayBuilder`) produce pinned memory blocks.
+Low-level unmanaged binary blob library backing the BT layout. Key types: `BlobArray<T>`, `BlobString<TEncoding>`, `BlobPtr<T>`, `ManagedBlobAssetReference<T>`. Builders (`ValueBuilder`, `StructBuilder`, `ArrayBuilder`, `TreeBuilder`, `SortedArrayBuilder`) produce pinned memory blocks.
 
 ## Code Style
 

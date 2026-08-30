@@ -387,6 +387,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return new BindingModel(
             ns,
             symbol.Name,
+            symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             access.ToImmutable(),
             unresolved.ToImmutable(),
             decl.Identifier.GetLocation());
@@ -583,12 +584,9 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("/// Passed by <c>ref</c> instead, this would be unusable: CS8350/CS8352 reject the");
         sb.AppendLine("/// combination of two by-ref arguments whose contents could capture each other.");
         sb.AppendLine("/// </summary>");
-        string treeFqn = binding.Namespace.Length == 0
-            ? binding.ClassName
-            : binding.Namespace + "." + binding.ClassName;
         sb.AppendLine(
             "public readonly ref struct " + bb
-            + " : global::Paradise.BT.IBlackboardFor<global::" + treeFqn + ">");
+            + " : global::Paradise.BT.IBlackboardFor<" + binding.TreeFqn + ">");
         sb.AppendLine("{");
         foreach (Access a in access)
         {
@@ -809,6 +807,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public readonly string Namespace;
         public readonly string ClassName;
 
+        /// <summary>The tree type's fully qualified name (with <c>global::</c>) — the identity
+        /// the generated blackboard's <c>IBlackboardFor&lt;&gt;</c> names. Never assembled from
+        /// <see cref="Namespace"/> + <see cref="ClassName"/>, which mangles nested and generic
+        /// trees.</summary>
+        public readonly string TreeFqn;
+
         /// <summary>Every access every node in this tree declares, already resolved. Flattened
         /// rather than grouped per node: nothing downstream needs the grouping, and each entry
         /// remembers its own <see cref="Access.DeclaringNode"/>.</summary>
@@ -822,12 +826,14 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public BindingModel(
             string ns,
             string className,
+            string treeFqn,
             ImmutableArray<Access> access,
             ImmutableArray<string> unresolved,
             Location location)
         {
             Namespace = ns;
             ClassName = className;
+            TreeFqn = treeFqn;
             Access = access;
             Unresolved = unresolved;
             Location = location;
@@ -836,6 +842,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public bool Equals(BindingModel other) =>
             Namespace == other.Namespace
             && ClassName == other.ClassName
+            && TreeFqn == other.TreeFqn
             && Access.SequenceEqual(other.Access)
             && Unresolved.SequenceEqual(other.Unresolved);
 
