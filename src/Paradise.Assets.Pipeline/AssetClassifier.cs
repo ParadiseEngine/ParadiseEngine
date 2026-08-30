@@ -85,16 +85,24 @@ public static class AssetClassifier
     /// class needs no sidecar.
     /// </summary>
     /// <remarks>
-    /// EVERY asset has a sidecar, documents included — one rule rather than "binaries get one and
-    /// text carries its id inside", which needed two lookups for one question. The exceptions are
-    /// not assets: the manifest is the project's own description rather than content in it, a
-    /// sidecar has no sidecar, and a file the pipeline does not recognise is carried rather than
-    /// owned.
+    /// <para>
+    /// <b>Everything under <c>assets/</c> is an asset.</b> There is exactly one exception, and it
+    /// is forced rather than chosen: a sidecar describing a sidecar is an infinite regress. The
+    /// manifest, a baked <c>.navmesh.bin</c>, a Wwise <c>.xml</c> — all of them get one, because
+    /// "the pipeline does not process this" and "this is not an asset" are different statements
+    /// and only the first is ever true here.
+    /// </para>
+    /// <para>
+    /// One rule, so identity has one home. The alternative — a list of things that do and do not
+    /// need an id — is a list somebody has to maintain and everybody has to remember.
+    /// </para>
     /// </remarks>
     public static SidecarAssetKind? RequiredKind(AssetClass assetClass, UPath path) => assetClass switch
     {
-        AssetClass.Foreign => TryGetForeignKind(path, out var kind) ? kind : null,
-        AssetClass.Scene or AssetClass.Prefab or AssetClass.Config => SidecarAssetKind.Document,
-        _ => null,
+        AssetClass.Sidecar => null,
+        AssetClass.Foreign => TryGetForeignKind(path, out var kind) ? kind : SidecarAssetKind.Opaque,
+        AssetClass.Manifest or AssetClass.Scene or AssetClass.Prefab or AssetClass.Config =>
+            SidecarAssetKind.Document,
+        _ => SidecarAssetKind.Opaque,
     };
 }

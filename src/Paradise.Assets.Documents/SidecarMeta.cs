@@ -54,10 +54,44 @@ public sealed class SidecarMeta
     public SidecarAssetKind Kind { get; }
 
     /// <summary>
+    /// SHA-256 of the asset's bytes when the sidecar was written, lowercase hex — or
+    /// <see langword="null"/> when the sidecar does not record one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two jobs, neither of which the GUID can do. It tells you an asset changed since its
+    /// sidecar was written, which is what a cache needs to know; and it is what lets a LOST
+    /// sidecar be re-linked, because content is the only thing left to recognise an asset by once
+    /// its id is gone.
+    /// </para>
+    /// <para>
+    /// A mismatch is a <b>warning</b>, never an error. Every legitimate edit to an asset makes
+    /// the recorded hash stale, and a rule that turned "someone edited a texture" into a failing
+    /// build would be red more often than green — and would train everybody to ignore it.
+    /// </para>
+    /// <para>
+    /// Optional in the format, always written by tooling. A hand-written sidecar with an identity
+    /// and no hash is a perfectly good sidecar; it just cannot answer those two questions.
+    /// </para>
+    /// </remarks>
+    public string? Hash { get; set; }
+
+    /// <summary>
     /// Texture import settings. Only meaningful when <see cref="Kind"/> is
     /// <see cref="SidecarAssetKind.Texture"/>; absent means "use the defaults".
     /// </summary>
     public TextureImportSettings? Texture { get; set; }
+
+    /// <summary>The hash to record for an asset's bytes.</summary>
+    public static string ComputeHash(ReadOnlySpan<byte> bytes)
+        => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+
+    /// <summary>Reads <paramref name="path"/> and returns the hash of its bytes.</summary>
+    public static string ComputeHash(IFileSystem fileSystem, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return ComputeHash(fileSystem.ReadAllBytes(path));
+    }
 
     /// <summary>Mints a sidecar for a new asset: fresh GUID, default settings.</summary>
     /// <param name="kind">What the asset is.</param>
@@ -115,7 +149,7 @@ public sealed class SidecarMeta
         Exception Fail(string problem) => new SidecarMetaException(sourceName, problem);
 
         var root = TomlDocumentReader.Parse(toml, Fail);
-        TomlDocumentReader.RejectUnknownKeys(root, "at the document root", ["schema_version", "guid", "kind", "texture"], Fail);
+        TomlDocumentReader.RejectUnknownKeys(root, "at the document root", ["schema_version", "guid", "kind", "hash", "texture"], Fail);
 
         var schemaVersion = TomlDocumentReader.RequireInteger(root, "schema_version", "at the document root", Fail);
         if (schemaVersion != SupportedSchemaVersion)
@@ -136,10 +170,24 @@ public sealed class SidecarMeta
             "mesh" => SidecarAssetKind.Mesh,
             "audio" => SidecarAssetKind.Audio,
             "document" => SidecarAssetKind.Document,
-            _ => throw Fail($"sets kind = \"{kindText}\"; expected \"texture\", \"mesh\", \"audio\" or \"document\""),
+            "opaque" => SidecarAssetKind.Opaque,
+            _ => throw Fail($"sets kind = \"{kindText}\"; expected \"texture\", \"mesh\", \"audio\", \"document\" or \"opaque\""),
         };
 
         var meta = new SidecarMeta(guid, kind);
+
+        if (TomlDocumentReader.OptionalString(root, "hash", "at the document root", Fail) is { } hash)
+        {
+            // Shape-checked rather than trusted: a truncated or upper-case hash would silently
+            // never match, turning the change detector into a permanent false alarm.
+            if (hash.Length != 64 || !hash.All(static c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f')))
+            {
+                throw Fail($"holds '{hash}' where 'hash' must be a 64-character lowercase hex SHA-256");
+            }
+
+            meta.Hash = hash;
+        }
+
         if (TomlDocumentReader.OptionalTable(root, "texture", "at the document root", Fail) is { } texture)
         {
             if (kind != SidecarAssetKind.Texture)
@@ -195,10 +243,15 @@ public sealed class SidecarMeta
                     SidecarAssetKind.Mesh => "mesh",
                     SidecarAssetKind.Audio => "audio",
                     SidecarAssetKind.Document => "document",
+                    SidecarAssetKind.Opaque => "opaque",
                     _ => throw new InvalidOperationException($"Unknown kind {Kind}."),
                 }
             },
         };
+
+        // After kind, before the import settings: identity, then what the asset IS, then what it
+        // was, then how to process it -- and model order is what the writer emits.
+        if (Hash is { } hash) root.Add("hash", hash);
 
         if (Texture is { Preset: { } preset })
         {
@@ -241,11 +294,23 @@ public enum SidecarAssetKind
     Audio,
 
     /// <summary>
-    /// An authored text document — a scene, a prefab, or a config. One kind rather than three,
-    /// because the extension already says which and the kind's job is to say which build step
-    /// owns the file.
+    /// An authored text document — a scene, a prefab, a config, or the project manifest. One kind
+    /// rather than four, because the extension already says which and the kind's job is to say
+    /// which build step owns the file.
     /// </summary>
     Document,
+
+    /// <summary>
+    /// A file the pipeline carries but has no opinion about — a Wwise <c>.xml</c>, a baked
+    /// <c>.navmesh.bin</c>.
+    /// </summary>
+    /// <remarks>
+    /// It still has an identity, because it is still an asset: something references it, something
+    /// may move it, and both of those want a stable id rather than a path. "The pipeline does not
+    /// process this" and "this is not an asset" are different statements, and only the first one
+    /// is true here.
+    /// </remarks>
+    Opaque,
 }
 
 /// <summary>Per-asset texture import settings. Absent values fall back to the token defaults.</summary>

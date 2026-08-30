@@ -132,12 +132,56 @@ public class ProjectVerifierTests
     public async Task an_unknown_file_kind_is_a_warning()
     {
         using var fileSystem = CreateProject();
-        fileSystem.WriteAllText("/game/assets/notes.txt", "todo");
+        WriteCarried(fileSystem, "/game/assets/notes.txt", "todo");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+    }
+
+    [Test]
+    public async Task the_manifest_needs_a_sidecar_like_everything_else()
+    {
+        using var fileSystem = CreateProject();
+        fileSystem.DeleteFile(SidecarMeta.PathFor(s_layout.Manifest));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Message).Contains("no sidecar");
+    }
+
+    [Test]
+    public async Task a_stale_hash_is_a_warning_not_an_error()
+    {
+        // Every legitimate edit makes the recorded hash stale. Erroring would keep the tree red
+        // and teach everybody to ignore the one signal that says "this asset moved on".
+        using var fileSystem = CreateProject();
+        fileSystem.CreateDirectory("/game/assets/models");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
+        new SidecarMeta(Guid.NewGuid(), SidecarAssetKind.Mesh) { Hash = new string('a', 64) }
+            .Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("changed since");
+    }
+
+    [Test]
+    public async Task a_matching_hash_is_silent()
+    {
+        using var fileSystem = CreateProject();
+        fileSystem.CreateDirectory("/game/assets/models");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
+        new SidecarMeta(Guid.NewGuid(), SidecarAssetKind.Mesh)
+        {
+            Hash = SidecarMeta.ComputeHash(new byte[] { 1, 2, 3 }),
+        }.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Count).IsEqualTo(0);
     }
 
     [Test]
@@ -156,7 +200,7 @@ public class ProjectVerifierTests
     public async Task errors_come_before_warnings()
     {
         using var fileSystem = CreateProject();
-        fileSystem.WriteAllText("/game/assets/zz-notes.txt", "todo");
+        WriteCarried(fileSystem, "/game/assets/zz-notes.txt", "todo");
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
@@ -174,7 +218,10 @@ public class ProjectVerifierTests
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.CreateDirectory("/game/assets/textures");
         fileSystem.CreateDirectory("/game/assets/scenes");
-        fileSystem.WriteAllText("/game/assets/project.toml", "name = \"shiningpie\"\nschema_version = 1\n");
+        // The manifest is an asset like everything else under assets/, so it carries an identity
+        // too -- the only thing that does not is a sidecar, because one describing a sidecar is
+        // an infinite regress.
+        WriteDocument(fileSystem, "/game/assets/project.toml", "name = \"shiningpie\"\nschema_version = 1\n");
         return fileSystem;
     }
 
@@ -211,4 +258,19 @@ public class ProjectVerifierTests
 
     internal static void MintDocumentSidecar(MemoryFileSystem fileSystem, UPath path)
         => SidecarMeta.Mint(SidecarAssetKind.Document).Save(fileSystem, SidecarMeta.PathFor(path));
+
+    /// <summary>
+    /// Writes a file the pipeline has no opinion about, plus its sidecar.
+    /// </summary>
+    /// <remarks>
+    /// "The pipeline does not process this" and "this is not an asset" are different statements,
+    /// and only the first is true of a stray .txt — so it still carries an identity, and a
+    /// fixture that omits one is testing a missing sidecar rather than whatever it meant to.
+    /// </remarks>
+    internal static void WriteCarried(MemoryFileSystem fileSystem, UPath path, string text)
+    {
+        fileSystem.CreateDirectory(path.GetDirectory());
+        fileSystem.WriteAllText(path, text);
+        SidecarMeta.Mint(SidecarAssetKind.Opaque).Save(fileSystem, SidecarMeta.PathFor(path));
+    }
 }
