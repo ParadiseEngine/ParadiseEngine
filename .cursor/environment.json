@@ -1,0 +1,4 @@
+{
+  "name": "Paradise Engine",
+  "install": "bash .cursor/install.sh"
+}
