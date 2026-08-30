@@ -111,15 +111,74 @@ internal static class TomlDocumentReader
         return result;
     }
 
-    private static object ToCanonicalValue(object? value, string context, Func<string, Exception> fail) => value switch
+    /// <summary>
+    /// A parsed table as the model type it was WRITTEN as: inline when it is asset-reference
+    /// shaped, a generic table otherwise.
+    /// </summary>
+    /// <remarks>
+    /// TOML parses <c>x = { … }</c> and <c>[x]</c> to the same thing, so the form cannot be
+    /// recovered from the parse — only from the shape. See
+    /// <see cref="AssetReferenceCodec.IsReferenceShaped"/> for why the predicate is exact rather
+    /// than a judgement about how table-ish the contents look.
+    /// </remarks>
+    private static object ToCanonicalTable(TomlTable table, string context, Func<string, Exception> fail)
+    {
+        var pairs = new List<KeyValuePair<string, object>>();
+        foreach (var (key, member) in table)
+        {
+            if (member is TomlTable or TomlTableArray)
+            {
+                // A nested table means this is structural, never a reference -- and an inline
+                // table may not nest one, so the generic form is the only possibility.
+                return ToCanonical(table, context, fail);
+            }
+
+            pairs.Add(new KeyValuePair<string, object>(key, ToCanonicalValue(member, $"'{key}' {context}", fail)));
+        }
+
+        if (!AssetReferenceCodec.IsReferenceShaped(pairs)) return ToCanonical(table, context, fail);
+
+        var inline = new CanonicalInlineTable();
+        foreach (var (key, value) in pairs) inline.Add(key, value);
+        return inline;
+    }
+
+    /// <summary>One document value as its model form. Public because the structural readers
+    /// (scene, prefab) need it for the payload fields they carry through opaquely.</summary>
+    public static object ToCanonicalValue(object? value, string context, Func<string, Exception> fail) => value switch
     {
         bool or long or double or string => value,
-        TomlTable table => ToCanonical(table, context, fail),
+        TomlTable table => ToCanonicalTable(table, context, fail),
         TomlTableArray tables => tables.Select(element => ToCanonical(element, context, fail)).ToArray(),
-        TomlArray array => array.Select(element => ToCanonicalValue(element, context, fail)).ToList(),
+        TomlArray array => array.Select(element => ToCanonicalElement(element, context, fail)).ToList(),
         null => throw fail($"holds an empty value at {context}"),
         _ => throw fail($"holds a {DescribeType(value)} at {context}, which authored documents do not use"),
     };
+
+    /// <summary>
+    /// One element of an array. A table here becomes a <see cref="CanonicalInlineTable"/>, because
+    /// inline is the only form a table can take inside an array — an array-of-tables is a
+    /// <see cref="TomlTableArray"/>, which the parser hands back as a different type entirely.
+    /// Reading it back as anything else would break the round trip: the writer would then emit
+    /// <c>[[headers]]</c> where the source had <c>{ … }</c>.
+    /// </summary>
+    private static object ToCanonicalElement(object? value, string context, Func<string, Exception> fail)
+    {
+        if (value is not TomlTable table) return ToCanonicalValue(value, context, fail);
+
+        var inline = new CanonicalInlineTable();
+        foreach (var (key, member) in table)
+        {
+            if (member is TomlTable or TomlTableArray)
+            {
+                throw fail($"nests a table inside an inline table at '{key}' {context}");
+            }
+
+            inline.Add(key, ToCanonicalValue(member, $"'{key}' {context}", fail));
+        }
+
+        return inline;
+    }
 
     private static string DescribeType(object? value) => value switch
     {

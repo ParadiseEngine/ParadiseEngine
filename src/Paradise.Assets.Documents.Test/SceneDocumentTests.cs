@@ -1,250 +1,277 @@
-using System.Numerics;
-
-using Zio.FileSystems;
+using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents.Test;
 
+/// <summary>
+/// The all-components scene document: identity, name, parent and placement are components like
+/// any other, which is what lets a prefab instance override them through one mechanism.
+/// </summary>
 public class SceneDocumentTests
 {
-    private const string CrateGuid = "1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f";
-    private const string LidGuid = "2d0b3f5f-1e4c-5d6b-9f70-8b9c0d1e2f30";
-    private const string RenderableId = "f2c0357e-94dd-4a5a-9803-518066cb54b2";
+    private const string CrateGuid = "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8";
+    private const string LidGuid = "9a8b7c6d-5e4f-4031-8213-4c5d6e7f8091";
+    private const string RenderableId = "bdc4fc87-d7b4-41f1-bc90-fc827005adfc";
 
-    private const string Canonical =
+    private static readonly string Meta = DocumentGuid.Format(WellKnownComponents.MetaId);
+    private static readonly string Transform = DocumentGuid.Format(WellKnownComponents.TransformId);
+
+    private static readonly string Canonical =
         "schema_version = 1\n" +
         "\n[[objects]]\n" +
-        $"guid = \"{CrateGuid}\"\n" +
-        "name = \"crate_01\"\n" +
-        "\n[objects.transform]\n" +
-        "position = [0.0, 1.5, 0.0]\n" +
-        "rotation = [0.0, 0.0, 0.0, 1.0]\n" +
-        "scale = [1.0, 1.0, 1.0]\n" +
+        "\n[[objects.components]]\n" +
+        $"id = \"{Meta}\"\n" +
+        "type = \"meta\"\n" +
+        $"Guid = \"{CrateGuid}\"\n" +
+        "Name = \"crate_01\"\n" +
+        "\n[[objects.components]]\n" +
+        $"id = \"{Transform}\"\n" +
+        "type = \"transform\"\n" +
+        "Position = [0.0, 1.5, 0.0]\n" +
+        "Rotation = [0.0, 0.0, 0.0, 1.0]\n" +
+        "Scale = [1.0, 1.0, 1.0]\n" +
         "\n[[objects.components]]\n" +
         $"id = \"{RenderableId}\"\n" +
         "type = \"Paradise.Export.Data.RenderableComponentData\"\n" +
-        "\n[objects.components.data]\n" +
-        "Mesh = \"models/crate.glb\"\n" +
+        "Mesh = { guid = \"11111111-2222-4333-8444-555555555555\", path = \"Models/crate.glb\" }\n" +
         "\n[[objects]]\n" +
-        $"guid = \"{LidGuid}\"\n" +
-        "name = \"lid\"\n" +
-        $"parent = \"{CrateGuid}\"\n";
+        "\n[[objects.components]]\n" +
+        $"id = \"{Meta}\"\n" +
+        "type = \"meta\"\n" +
+        $"Guid = \"{LidGuid}\"\n" +
+        "Name = \"lid\"\n" +
+        $"Parent = \"{CrateGuid}\"\n";
+
+    private static SceneDocumentException Rejects(string text)
+    {
+        try
+        {
+            SceneDocumentSerializer.Parse(text, "x.scene");
+        }
+        catch (SceneDocumentException error)
+        {
+            return error;
+        }
+
+        throw new Exception("expected the document to be rejected");
+    }
+
+    /// <summary>A minimal object: just a meta component carrying an identity.</summary>
+    private static string Object(string guid, string name = "x", string? extra = null) =>
+        "\n[[objects]]\n\n[[objects.components]]\n" +
+        $"id = \"{Meta}\"\ntype = \"meta\"\nGuid = \"{guid}\"\nName = \"{name}\"\n" + (extra ?? "");
 
     [Test]
     public async Task a_canonical_document_round_trips_byte_for_byte()
     {
-        // THE property of the format: read → write must be the identity on canonical input,
-        // or every tool touching a scene would litter diffs with reformatting.
+        // THE property of the format: read → write is the identity on canonical input, or every
+        // tool touching a scene would litter diffs with reformatting.
         var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
 
         await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(Canonical);
     }
 
     [Test]
-    public async Task the_model_reflects_the_document()
+    public async Task identity_name_and_parent_are_read_from_the_meta_component()
     {
         var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
 
         await Assert.That(document.Objects.Count).IsEqualTo(2);
         var crate = document.Objects[0];
+        await Assert.That(crate.Guid).IsEqualTo(Guid.Parse(CrateGuid));
         await Assert.That(crate.Name).IsEqualTo("crate_01");
         await Assert.That(crate.Parent).IsNull();
-        await Assert.That(crate.Transform.Position).IsEqualTo(new Vector3(0f, 1.5f, 0f));
-        await Assert.That(crate.Components.Count).IsEqualTo(1);
-        await Assert.That(crate.Components[0].Id).IsEqualTo(Guid.Parse(RenderableId));
-
-        var lid = document.Objects[1];
-        await Assert.That(lid.Parent).IsEqualTo(Guid.Parse(CrateGuid));
-        await Assert.That(lid.Transform).IsEqualTo(SceneTransform.Identity);
-        await Assert.That(lid.Components.Count).IsEqualTo(0);
+        await Assert.That(document.Objects[1].Parent).IsEqualTo(Guid.Parse(CrateGuid));
     }
 
     [Test]
-    public async Task an_identity_transform_is_omitted_on_write_and_defaulted_on_read()
+    public async Task a_payload_sits_flat_beside_id_and_type()
     {
-        var document = new SceneDocument();
-        document.Objects.Add(new SceneObject(Guid.Parse(CrateGuid), "crate"));
+        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
 
-        var text = SceneDocumentSerializer.Write(document);
-        await Assert.That(text).IsEqualTo(
-            "schema_version = 1\n\n[[objects]]\n" + $"guid = \"{CrateGuid}\"\n" + "name = \"crate\"\n");
-        await Assert.That(SceneDocumentSerializer.Parse(text, "x").Objects[0].Transform).IsEqualTo(SceneTransform.Identity);
+        var renderable = document.Objects[0].Component(Guid.Parse(RenderableId));
+        await Assert.That(renderable!.Type).IsEqualTo("Paradise.Export.Data.RenderableComponentData");
+        await Assert.That(renderable.Data.ContainsKey("Mesh")).IsTrue();
+        // and the reserved keys are structure, not payload
+        await Assert.That(renderable.Data.ContainsKey("id")).IsFalse();
+        await Assert.That(renderable.Data.ContainsKey("type")).IsFalse();
+    }
+
+    [Test]
+    public async Task an_asset_reference_in_a_payload_survives_the_round_trip()
+    {
+        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
+        var mesh = document.Objects[0].Component(Guid.Parse(RenderableId))!.Data.Value("Mesh");
+
+        var reference = AssetReferenceCodec.Read(mesh, "on the crate", m => new SceneDocumentException("x", m));
+
+        await Assert.That(reference!.Path).IsEqualTo("Models/crate.glb");
     }
 
     [Test]
     public async Task an_empty_scene_is_just_its_version()
     {
-        var text = SceneDocumentSerializer.Write(new SceneDocument());
-
-        await Assert.That(text).IsEqualTo("schema_version = 1\n");
-        await Assert.That(SceneDocumentSerializer.Parse(text, "x").Objects.Count).IsEqualTo(0);
+        await Assert.That(SceneDocumentSerializer.Write(new SceneDocument())).IsEqualTo("schema_version = 1\n");
     }
 
     [Test]
     public async Task component_order_survives_the_round_trip()
     {
-        // Component order is data: the runtime applies entries in document order, and the
-        // export contract calls that order load-bearing.
-        var sceneObject = new SceneObject(Guid.Parse(CrateGuid), "crate");
-        sceneObject.Components.Add(new SceneComponent(Guid.Parse(LidGuid)));
-        sceneObject.Components.Add(new SceneComponent(Guid.Parse(RenderableId)));
-        var document = new SceneDocument();
-        document.Objects.Add(sceneObject);
+        // Order is data: the runtime applies components in document order.
+        var document = SceneDocumentSerializer.Parse(Canonical, "x.scene");
+        var ids = document.Objects[0].Components.Select(c => c.Id).ToList();
 
-        var reread = SceneDocumentSerializer.Parse(SceneDocumentSerializer.Write(document), "x");
-
-        await Assert.That(reread.Objects[0].Components.Select(c => c.Id).ToArray())
-            .IsEquivalentTo(new[] { Guid.Parse(LidGuid), Guid.Parse(RenderableId) });
+        await Assert.That(ids[0]).IsEqualTo(WellKnownComponents.MetaId);
+        await Assert.That(ids[1]).IsEqualTo(WellKnownComponents.TransformId);
+        await Assert.That(ids[2]).IsEqualTo(Guid.Parse(RenderableId));
     }
 
     [Test]
-    public async Task guids_parse_undashed_but_write_hyphenated()
+    public async Task an_object_with_no_identity_is_refused()
     {
-        // The Godot host stored 32-digit ids in node metadata; migrated scenes keep their
-        // identities, but the canonical write normalizes the spelling.
-        var undashed = CrateGuid.Replace("-", "");
-        var document = SceneDocumentSerializer.Parse(
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{undashed}\"\nname = \"crate\"\n", "x");
+        // Without meta.Guid an object cannot be addressed, parented, or merged into on save.
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\n" +
+                   $"id = \"{Transform}\"\ntype = \"transform\"\nPosition = [0.0, 0.0, 0.0]\n";
 
-        await Assert.That(document.Objects[0].Guid).IsEqualTo(Guid.Parse(CrateGuid));
-        await Assert.That(SceneDocumentSerializer.Write(document)).Contains($"guid = \"{CrateGuid}\"");
+        await Assert.That(Rejects(text).Message).Contains("meta");
     }
 
     [Test]
-    [Arguments("schema_version = 2\n", "schema_version = 2")]
-    [Arguments("objects = 3\nschema_version = 1\n", "array of tables")]
-    [Arguments("schema_version = 1\nextra = 1\n", "unknown key 'extra'")]
-    public async Task document_level_problems_name_the_offence(string toml, string fragment)
+    public async Task a_duplicate_identity_is_refused()
     {
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "bad.scene"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains(fragment);
-        await Assert.That(error.Message).Contains("bad.scene");
+        await Assert.That(Rejects($"schema_version = 1\n{Object(CrateGuid)}{Object(CrateGuid, "other")}").Message)
+            .Contains("twice");
     }
 
     [Test]
-    public async Task a_missing_version_is_an_error_not_a_default()
+    public async Task a_duplicate_component_id_on_one_object_is_refused()
     {
-        await Assert.That(() => SceneDocumentSerializer.Parse("", "x")).Throws<SceneDocumentException>();
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{Meta}\"\ntype = \"meta\"\nGuid = \"{LidGuid}\"\n";
+
+        await Assert.That(Rejects(text).Message).Contains("twice");
     }
 
     [Test]
-    [Arguments("guid = \"not-a-guid\"\nname = \"a\"", "non-empty UUID")]
-    [Arguments("guid = \"00000000-0000-0000-0000-000000000000\"\nname = \"a\"", "non-empty UUID")]
-    [Arguments("name = \"a\"", "missing 'guid'")]
-    [Arguments("guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"", "missing 'name'")]
-    [Arguments("guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\nname = \"\"", "non-empty 'name'")]
-    [Arguments("guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\nname = \"a\"\nsurprise = 1", "unknown key 'surprise'")]
-    public async Task object_level_problems_name_the_offence(string objectBody, string fragment)
+    public async Task a_dangling_parent_is_refused()
     {
-        var toml = $"schema_version = 1\n\n[[objects]]\n{objectBody}\n";
+        var text = $"schema_version = 1\n{Object(CrateGuid, "a", $"Parent = \"{LidGuid}\"\n")}";
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains(fragment);
+        await Assert.That(Rejects(text).Message).Contains("does not exist");
     }
 
     [Test]
-    public async Task duplicate_object_guids_are_rejected()
+    public async Task a_parent_cycle_is_refused()
     {
-        var toml =
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\n" +
-            $"\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"b\"\n";
+        var text = "schema_version = 1\n" +
+                   Object(CrateGuid, "a", $"Parent = \"{LidGuid}\"\n") +
+                   Object(LidGuid, "b", $"Parent = \"{CrateGuid}\"\n");
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains("twice");
+        await Assert.That(Rejects(text).Message).Contains("cycle");
     }
 
     [Test]
-    public async Task duplicate_component_ids_on_one_object_are_rejected()
+    public async Task an_unknown_document_key_is_refused()
     {
-        var toml =
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\n" +
-            $"\n[[objects.components]]\nid = \"{RenderableId}\"\n" +
-            $"\n[[objects.components]]\nid = \"{RenderableId}\"\n";
-
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains("twice");
+        // Before any header, so it really is a document-root key -- after one it would belong to
+        // that table, and inside a component that makes it an ordinary payload field.
+        await Assert.That(Rejects($"schema_version = 1\nnope = 1\n{Object(CrateGuid)}").Message)
+            .Contains("unknown key");
     }
 
     [Test]
-    public async Task a_dangling_parent_is_rejected()
+    public async Task an_unknown_key_on_an_object_is_refused()
     {
-        var toml =
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\nparent = \"{LidGuid}\"\n";
-
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains("does not exist");
+        await Assert.That(Rejects("schema_version = 1\n\n[[objects]]\nnope = 1\n").Message)
+            .Contains("unknown key");
     }
 
     [Test]
-    public async Task a_parent_cycle_is_rejected()
+    public async Task a_component_without_an_id_is_refused()
     {
-        var toml =
-            $"schema_version = 1\n" +
-            $"\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\nparent = \"{LidGuid}\"\n" +
-            $"\n[[objects]]\nguid = \"{LidGuid}\"\nname = \"b\"\nparent = \"{CrateGuid}\"\n";
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\ntype = \"meta\"\n";
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains("cycle");
+        await Assert.That(Rejects(text).Message).Contains("id");
     }
 
     [Test]
-    public async Task a_malformed_transform_is_rejected()
+    public async Task a_removed_component_carrying_fields_is_refused()
     {
-        var toml =
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\n" +
-            "\n[objects.transform]\nposition = [0.0, 1.0]\nrotation = [0.0, 0.0, 0.0, 1.0]\nscale = [1.0, 1.0, 1.0]\n";
+        // "Remove this, and also here is what it should contain" has no meaning, and is almost
+        // certainly an edit that deleted only half of what it meant to.
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{RenderableId}\"\nremoved = true\nMesh = \"x\"\n";
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Parse(toml, "x"))
-            .Throws<SceneDocumentException>();
-
-        await Assert.That(error!.Message).Contains("array of 3 numbers");
+        await Assert.That(Rejects(text).Message).Contains("removed");
     }
 
     [Test]
-    public async Task an_absent_payload_reads_as_an_empty_table()
+    public async Task a_removed_marker_round_trips()
     {
-        // Matching AuthoredDocument: a component may be pure presence.
-        var toml =
-            $"schema_version = 1\n\n[[objects]]\nguid = \"{CrateGuid}\"\nname = \"a\"\n" +
-            $"\n[[objects.components]]\nid = \"{RenderableId}\"\n";
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{RenderableId}\"\nremoved = true\n";
 
-        var document = SceneDocumentSerializer.Parse(toml, "x");
+        var document = SceneDocumentSerializer.Parse(text, "x.scene");
 
-        await Assert.That(document.Objects[0].Components[0].Data.Count).IsEqualTo(0);
+        await Assert.That(document.Objects[0].Component(Guid.Parse(RenderableId))!.Removed).IsTrue();
+        await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(text);
     }
 
     [Test]
-    public async Task load_and_save_go_through_the_filesystem()
+    public async Task a_prefab_reference_round_trips()
     {
-        using var fileSystem = new MemoryFileSystem();
-        fileSystem.CreateDirectory("/game/assets/scenes");
-        var document = SceneDocumentSerializer.Parse(Canonical, "seed");
+        var text = "schema_version = 1\n\n[[objects]]\n" +
+                   $"prefab = {{ guid = \"{LidGuid}\", path = \"prefabs/rail.prefab\" }}\n" +
+                   $"\n[[objects.components]]\nid = \"{Meta}\"\ntype = \"meta\"\nGuid = \"{CrateGuid}\"\n";
 
-        SceneDocumentSerializer.Save(fileSystem, "/game/assets/scenes/district.scene", document);
-        var reread = SceneDocumentSerializer.Load(fileSystem, "/game/assets/scenes/district.scene");
+        var document = SceneDocumentSerializer.Parse(text, "x.scene");
 
-        await Assert.That(SceneDocumentSerializer.Write(reread)).IsEqualTo(Canonical);
+        await Assert.That(document.Objects[0].Prefab!.Path).IsEqualTo("prefabs/rail.prefab");
+        await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(text);
     }
 
     [Test]
-    public async Task a_missing_file_reports_the_path()
+    public async Task a_target_carrier_needs_no_identity_of_its_own()
     {
-        using var fileSystem = new MemoryFileSystem();
+        // A carrier addresses a prefab-local object; the resolved child's guid is always minted,
+        // so requiring one here would mean inventing an identity nothing uses.
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\n" +
+                   $"id = \"{Meta}\"\ntype = \"meta\"\nParent = \"{CrateGuid}\"\nTarget = \"{LidGuid}\"\n" +
+                   Object(CrateGuid);
 
-        var error = await Assert.That(() => SceneDocumentSerializer.Load(fileSystem, "/absent.scene"))
-            .Throws<SceneDocumentException>();
+        var document = SceneDocumentSerializer.Parse(text, "x.scene");
 
-        await Assert.That(error!.Message).Contains("/absent.scene");
+        await Assert.That(document.Objects[0].Target).IsEqualTo(Guid.Parse(LidGuid));
+        await Assert.That(document.Objects[0].Guid).IsNull();
+    }
+
+    [Test]
+    public async Task the_single_root_is_inferred_from_the_absence_of_a_parent()
+    {
+        var document = SceneDocumentSerializer.Parse(Canonical, "x.scene");
+
+        await Assert.That(document.SingleRoot()!.Guid).IsEqualTo(Guid.Parse(CrateGuid));
+    }
+
+    [Test]
+    public async Task a_document_with_two_roots_has_no_single_root()
+    {
+        // Not an error here — the serializer reads scenes too, and a scene has many roots. It is
+        // PrefabDocument that requires exactly one.
+        var document = SceneDocumentSerializer.Parse($"schema_version = 1\n{Object(CrateGuid)}{Object(LidGuid)}", "x");
+
+        await Assert.That(document.SingleRoot()).IsNull();
+    }
+
+    [Test]
+    public async Task an_unrecognised_payload_survives_a_round_trip()
+    {
+        // What makes it safe to open a document full of components this build has never heard of.
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{RenderableId}\"\ntype = \"Nobody.Knows\"\n" +
+                   "Count = 3\nRatio = 0.5\nFlag = true\nList = [1, 2]\n" +
+                   "\n[objects.components.Nested]\nInner = \"deep\"\n";
+
+        await Assert.That(SceneDocumentSerializer.Write(SceneDocumentSerializer.Parse(text, "x.scene")))
+            .IsEqualTo(text);
     }
 }

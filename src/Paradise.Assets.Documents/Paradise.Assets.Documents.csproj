@@ -28,6 +28,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
+    <!--
+      For AssetReference. It lives in Paradise.Authoring rather than here because the GAME's
+      [Authored] records declare fields of that type, and a game already references Authoring for
+      the attributes; putting it here would make every game depend on the asset tooling. The
+      dependency runs one way only — Authoring knows nothing about documents.
+    -->
+    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
   </ItemGroup>
 
   <ItemGroup>

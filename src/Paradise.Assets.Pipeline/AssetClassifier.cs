@@ -10,6 +10,13 @@ public enum AssetClass
     /// <summary>The project manifest, <c>project.toml</c>.</summary>
     Manifest,
 
+    /// <summary>
+    /// A prefab, <c>*.prefab</c> — structurally a scene document, but instantiated by scenes
+    /// rather than loaded on its own. The build resolves instances away, so nothing downstream
+    /// ever sees one.
+    /// </summary>
+    Prefab,
+
     /// <summary>An authoring scene document, <c>*.scene</c>.</summary>
     Scene,
 
@@ -40,6 +47,9 @@ public static class AssetClassifier
     /// <summary>The scene-document double extension.</summary>
     public const string SceneSuffix = ".scene";
 
+    /// <summary>The prefab double extension. Structurally a scene, but instantiated rather than loaded.</summary>
+    public const string PrefabSuffix = ".prefab";
+
     private static readonly Dictionary<string, SidecarAssetKind> s_foreignKinds = new(StringComparer.OrdinalIgnoreCase)
     {
         [".glb"] = SidecarAssetKind.Mesh,
@@ -60,6 +70,7 @@ public static class AssetClassifier
         if (SidecarMeta.IsSidecarPath(path)) return AssetClass.Sidecar;
         if (path == assetsRoot / Paradise.Assets.Project.AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
         if (name.EndsWith(SceneSuffix, StringComparison.Ordinal)) return AssetClass.Scene;
+        if (name.EndsWith(PrefabSuffix, StringComparison.Ordinal)) return AssetClass.Prefab;
         if (name.EndsWith(".toml", StringComparison.Ordinal)) return AssetClass.Config;
         if (s_foreignKinds.ContainsKey(path.GetExtensionWithDot() ?? string.Empty)) return AssetClass.Foreign;
         return AssetClass.Other;

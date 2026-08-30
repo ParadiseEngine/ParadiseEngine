@@ -81,7 +81,11 @@ public static class ProjectVerifier
                     break;
 
                 case AssetClass.Scene:
-                    VerifyScene(fileSystem, path, findings);
+                    VerifyScene(fileSystem, layout, path, findings);
+                    break;
+
+                case AssetClass.Prefab:
+                    VerifyPrefab(fileSystem, layout, path, findings);
                     break;
 
                 case AssetClass.Other:
@@ -150,7 +154,7 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifyScene(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    private static void VerifyScene(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
     {
         SceneDocument document;
         try
@@ -172,6 +176,120 @@ public static class ProjectVerifier
             findings.Add(new VerifyFinding(
                 VerifySeverity.Warning, path,
                 "is valid but not in canonical form; rewrite it (scene-check --fix) so machine edits stay out of your diffs"));
+        }
+
+        VerifyReferences(fileSystem, layout, path, document, findings);
+        VerifyInstances(fileSystem, layout, path, document, findings);
+    }
+
+    /// <summary>
+    /// A prefab, which is a scene document plus the single-root rule.
+    /// </summary>
+    private static void VerifyPrefab(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
+    {
+        try
+        {
+            var prefab = PrefabDocument.Load(fileSystem, path);
+            VerifyReferences(fileSystem, layout, path, prefab.Document, findings);
+        }
+        catch (SceneDocumentException error)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
+        }
+    }
+
+    /// <summary>
+    /// Every asset reference in a document: the two halves must agree, and the asset must exist.
+    /// </summary>
+    /// <remarks>
+    /// Carrying a guid AND a path is only worth anything if something checks they still name the
+    /// same asset. Without this a half-finished move — the path updated, the guid stale, or the
+    /// reverse — resolves to whichever half the resolver happens to prefer, which is exactly the
+    /// silent wrong-asset failure the pair was introduced to prevent.
+    /// </remarks>
+    private static void VerifyReferences(
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, SceneDocument document, List<VerifyFinding> findings)
+    {
+        foreach (var candidate in document.Objects)
+        {
+            if (candidate.Prefab is { } prefab) Check(prefab, "prefab");
+
+            foreach (var component in candidate.Components)
+            {
+                foreach (var (key, value) in component.Data)
+                {
+                    if (value is not CanonicalInlineTable table || table.Count == 0) continue;
+                    if (AssetReferenceCodec.Read(table, "", _ => new SceneDocumentException("", "")) is { } reference)
+                    {
+                        Check(reference, $"{component.Type ?? DocumentGuid.Format(component.Id)}.{key}");
+                    }
+                }
+            }
+        }
+
+        void Check(Paradise.Authoring.AssetReference reference, string where)
+        {
+            var target = layout.Assets / reference.Path;
+            if (!fileSystem.FileExists(target))
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Error, path,
+                    $"references '{reference.Path}' in {where}, which does not exist under assets/"));
+                return;
+            }
+
+            if (IdentityOf(fileSystem, target) is { } identity && identity != reference.Guid)
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Error, path,
+                    $"references '{reference.Path}' in {where} with guid " +
+                    $"'{DocumentGuid.Format(reference.Guid)}', but that asset's identity is " +
+                    $"'{DocumentGuid.Format(identity)}' — a half-finished move, and the two halves " +
+                    "must name the same asset"));
+            }
+        }
+    }
+
+    /// <summary>The asset's own identity: a sidecar for a binary, the document itself otherwise.</summary>
+    private static Guid? IdentityOf(IFileSystem fileSystem, UPath target)
+    {
+        var sidecar = SidecarMeta.PathFor(target);
+        if (fileSystem.FileExists(sidecar))
+        {
+            try
+            {
+                return SidecarMeta.Load(fileSystem, sidecar).Guid;
+            }
+            catch (SidecarMetaException)
+            {
+                return null;   // reported against the sidecar itself, not against every reference
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Every prefab instance in a scene must actually resolve.</summary>
+    private static void VerifyInstances(
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, SceneDocument document, List<VerifyFinding> findings)
+    {
+        if (!document.Objects.Any(o => o.Prefab is not null || o.Target is not null)) return;
+
+        var result = PrefabResolver.Resolve(document, reference =>
+        {
+            try
+            {
+                return PrefabDocument.Load(fileSystem, layout.Assets / reference.Path);
+            }
+            catch (SceneDocumentException)
+            {
+                return null;   // reported against the prefab itself
+            }
+        });
+
+        foreach (var error in result.Errors)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
         }
     }
 }

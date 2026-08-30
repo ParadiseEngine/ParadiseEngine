@@ -41,13 +41,31 @@ namespace Paradise.Assets.Documents;
 /// CPython's repr is deliberate: it makes the Python mirror's implementation one call.</item>
 /// <item>Booleans: <c>true</c> / <c>false</c>.</item>
 /// <item>Arrays are one line: <c>[1, 2, 3]</c> — <c>", "</c> between elements, no trailing
-/// comma, empty is <c>[]</c>. Arrays hold scalars or nested arrays, never inline tables (a table
-/// in an array is an array-of-tables, item 9).</item>
-/// <item>Every nested table is a <c>[dotted.path]</c> header; every array of tables is one
-/// <c>[[dotted.path]]</c> header per element, in element order. Dotted-path segments are
-/// formatted as keys (item 4). One blank line precedes every header except at the start of the
-/// document. Empty tables still get their header — presence is meaning. Never dotted keys,
-/// never inline tables.</item>
+/// comma, empty is <c>[]</c>. Arrays hold scalars, nested arrays, or <b>inline tables</b>
+/// (item 11). A generic <see cref="CanonicalTomlTable"/> in an array is an array-of-tables,
+/// item 9.</item>
+/// <item>Every nested <see cref="CanonicalTomlTable"/> is a <c>[dotted.path]</c> header; every
+/// array of tables is one <c>[[dotted.path]]</c> header per element, in element order.
+/// Dotted-path segments are formatted as keys (item 4). One blank line precedes every header
+/// except at the start of the document. Empty tables still get their header — presence is
+/// meaning. Never dotted keys.</item>
+/// <item>A <see cref="CanonicalInlineTable"/> is written on one line as
+/// <c>{ key = value, … }</c> — <c>", "</c> between pairs, in model order, keys by item 4 and
+/// values by items 5–9. An empty one is <c>{}</c>, which is how a null element inside an array
+/// is spelled. Inline tables never nest another table.
+/// <para>WRITING chooses the form by TYPE, never by inspecting the data — so a caller that
+/// builds a model controls exactly what comes out.</para>
+/// <para>READING cannot: TOML gives <c>x = { … }</c> and <c>[x]</c> the same parse, so the
+/// form is unrecoverable from the document. The reader restores the type with one exact
+/// predicate — <b>a table is inline iff it is empty or has exactly the two string keys
+/// <c>guid</c> and <c>path</c></b> (<see cref="AssetReferenceCodec.IsReferenceShaped"/>) — and
+/// that shape is therefore RESERVED for asset references. Exact, because a vaguer rule ("all
+/// its values are scalars") would have the two implementations agreeing until the first
+/// document where they read it differently, surfacing as a <c>scene-check</c> byte failure
+/// with nothing pointing at formatting.</para>
+/// <para>One consequence for item 10: an empty table is written <c>{}</c> rather than under a
+/// header, because in these documents the only empty table that occurs is a reference to
+/// nothing.</para></item>
 /// </list>
 /// </remarks>
 public static class CanonicalTomlWriter
@@ -132,6 +150,10 @@ public static class CanonicalTomlWriter
                 WriteBasicString(builder, text);
                 break;
 
+            case CanonicalInlineTable inline:
+                WriteInlineTable(builder, inline);
+                break;
+
             case IReadOnlyList<object> array:
                 builder.Append('[');
                 for (var i = 0; i < array.Count; i++)
@@ -147,6 +169,28 @@ public static class CanonicalTomlWriter
                 // CanonicalTomlTable.Add is the gate; reaching this is a bug in THIS file.
                 throw new InvalidOperationException($"Unwritable value of type {value.GetType().Name}.");
         }
+    }
+
+    /// <summary>Spec item 11: <c>{ key = value, … }</c>, one line, model order, <c>{}</c> when empty.</summary>
+    private static void WriteInlineTable(StringBuilder builder, CanonicalInlineTable table)
+    {
+        if (table.Count == 0)
+        {
+            builder.Append("{}");
+            return;
+        }
+
+        builder.Append("{ ");
+        var first = true;
+        foreach (var (key, value) in table)
+        {
+            if (!first) builder.Append(", ");
+            first = false;
+            builder.Append(FormatKey(key)).Append(" = ");
+            WriteValue(builder, value);
+        }
+
+        builder.Append(" }");
     }
 
     private static string FormatKey(string key)

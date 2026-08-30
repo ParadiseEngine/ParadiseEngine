@@ -49,6 +49,17 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
     /// <summary>Whether <paramref name="key"/> exists in this table.</summary>
     public bool ContainsKey(string key) => _keys.Contains(key);
 
+    /// <summary>The value under <paramref name="key"/>, or <see langword="null"/> when absent.</summary>
+    public object? Value(string key)
+    {
+        foreach (var (candidate, value) in _pairs)
+        {
+            if (string.Equals(candidate, key, StringComparison.Ordinal)) return value;
+        }
+
+        return null;
+    }
+
     /// <inheritdoc />
     public IEnumerator<KeyValuePair<string, object>> GetEnumerator() => _pairs.GetEnumerator();
 
@@ -56,14 +67,15 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
 
     private static object Normalize(object value, string key) => value switch
     {
-        bool or long or double or string or CanonicalTomlTable => value,
+        bool or long or double or string or CanonicalTomlTable or CanonicalInlineTable => value,
         int widened => (long)widened,
         float widened => WidenFloat(widened),
         IReadOnlyList<CanonicalTomlTable> => value,
         IEnumerable<object> array => NormalizeArray(array, key),
         _ => throw new ArgumentException(
             $"Value for '{key}' is a {value.GetType().Name}; canonical TOML holds bool, long, " +
-            "double, string, arrays of those, tables and arrays of tables.", nameof(value)),
+            "double, string, arrays of those, tables, arrays of tables and inline tables.",
+            nameof(value)),
     };
 
     /// <summary>
@@ -91,9 +103,13 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
             var normalized = Normalize(element, key);
             if (normalized is CanonicalTomlTable)
             {
+                // A CanonicalInlineTable IS allowed here -- that is what it is for. This refuses
+                // only the generic table, whose writer form is a [[header]] per element and so
+                // cannot appear mid-array.
                 throw new ArgumentException(
-                    $"Array '{key}' contains a table. Tables in arrays must be an " +
-                    "IReadOnlyList<CanonicalTomlTable>, which the writer emits as [[array of tables]].",
+                    $"Array '{key}' contains a table. Use CanonicalInlineTable for a table INSIDE " +
+                    "an array; a list of CanonicalTomlTable is an array-of-tables, which the writer " +
+                    "emits as [[headers]].",
                     nameof(array));
             }
 

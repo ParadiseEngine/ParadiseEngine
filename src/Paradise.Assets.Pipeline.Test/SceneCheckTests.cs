@@ -1,3 +1,4 @@
+using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -6,8 +7,22 @@ public class SceneCheckTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");
 
-    private const string NonCanonical =
-        "schema_version = 1\n\n[[objects]]\nname = \"crate\"\nguid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n";
+    /// <summary>
+    /// Valid but not canonical: spacing a machine write never produces.
+    /// </summary>
+    /// <remarks>
+    /// Note what is NOT usable here any more — reordering the payload keys. A component's fields
+    /// sit flat and their order comes from the document, because payload order is data the writer
+    /// must preserve. So <c>Name</c> before <c>Guid</c> round-trips byte for byte and is
+    /// perfectly canonical; only the things the writer actually normalizes (spacing, blank lines
+    /// before headers, float spelling) can be non-canonical.
+    /// </remarks>
+    private static readonly string NonCanonical =
+        "schema_version=1\n\n[[objects]]\n\n[[objects.components]]\n" +
+        $"id = \"{DocumentGuid.Format(WellKnownComponents.MetaId)}\"\n" +
+        "type = \"meta\"\n" +
+        "Guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n" +
+        "Name = \"crate\"\n";
 
     [Test]
     public async Task canonical_documents_pass()
@@ -47,8 +62,9 @@ public class SceneCheckTests
 
         await Assert.That(fixResults[0].Outcome).IsEqualTo(SceneCheckOutcome.Rewritten);
         await Assert.That(recheck[0].Outcome).IsEqualTo(SceneCheckOutcome.Canonical);
+        // Canonical order is MODEL order, and the model puts Guid before Name.
         await Assert.That(fileSystem.ReadAllText("/game/assets/scenes/edited.scene"))
-            .Contains("guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\nname = \"crate\"\n");
+            .Contains("Guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\nName = \"crate\"\n");
     }
 
     [Test]

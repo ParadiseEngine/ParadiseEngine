@@ -113,10 +113,12 @@ public class ProjectVerifierTests
     public async Task a_non_canonical_scene_is_a_warning_not_an_error()
     {
         using var fileSystem = CreateProject();
-        // Valid, but keys in a non-canonical order — a hand edit.
+        // Valid, but spaced the way a person types and a machine never writes.
         fileSystem.WriteAllText(
             "/game/assets/scenes/edited.scene",
-            "schema_version = 1\n\n[[objects]]\nname = \"crate\"\nguid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n");
+            "schema_version=1\n\n[[objects]]\n\n[[objects.components]]\n" +
+            $"id = \"{DocumentGuid.Format(WellKnownComponents.MetaId)}\"\ntype = \"meta\"\n" +
+            "Guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -186,7 +188,7 @@ public class ProjectVerifierTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         var document = new SceneDocument();
-        document.Objects.Add(new SceneObject(Guid.NewGuid(), "crate"));
+        document.Objects.Add(SceneObject.WithMeta(Guid.NewGuid(), "crate"));
         SceneDocumentSerializer.Save(fileSystem, path, document);
     }
 }
