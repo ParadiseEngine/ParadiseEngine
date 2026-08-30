@@ -1,3 +1,5 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 namespace Paradise.BT.Test;
 
 public sealed class GenericBlackboardTests
@@ -9,12 +11,6 @@ public sealed class GenericBlackboardTests
 
         public bool HasData<T>() where T : struct => _inner.HasData<T>();
         public T GetData<T>() where T : struct => _inner.GetData<T>();
-        public ref T GetDataRef<T>() where T : struct => ref _inner.GetDataRef<T>();
-        public bool HasData(Type type) => _inner.HasData(type);
-        public IntPtr GetDataPtrRO(Type type) => _inner.GetDataPtrRO(type);
-        public IntPtr GetDataPtrRW(Type type) => _inner.GetDataPtrRW(type);
-        public T GetObject<T>() where T : class => _inner.GetObject<T>();
-
         public void SetData<T>(T value) where T : struct
         {
             SetDataCount++;
@@ -25,7 +21,7 @@ public sealed class GenericBlackboardTests
     [Test]
     public async Task Generic_CreateInstance_Exposes_Custom_Blackboard_By_Ref()
     {
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
+        var tree = BTreeNode.Build(new Success());
         var instance = tree.CreateInstance(new CountingBlackboard());
 
         // Caller writes persist through the ref exposed by the instance.
@@ -42,19 +38,16 @@ public sealed class GenericBlackboardTests
     [Test]
     public async Task Generic_CreateInstance_Runs_Tree_To_Completion_With_Custom_Blackboard()
     {
-        var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Delay(0.5f),
-                BuiltInBehaviorNodes.Success()));
+        var tree = BTreeNode.Build(
+            new Sequence(
+                new Repeat(2, new Success()),
+                new Success()));
 
         var instance = tree.CreateInstance(new CountingBlackboard());
 
-        // Caller writes delta time before each tick — the library does not.
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
+        // Tick 1: Repeat has one completion of two -> Running. Tick 2: Repeat completes and the
+        // sequence advances through its last child in the same tick -> Success.
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 }

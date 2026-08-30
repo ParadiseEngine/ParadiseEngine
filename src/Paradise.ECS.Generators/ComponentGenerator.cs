@@ -144,7 +144,6 @@ public class ComponentGenerator : IIncrementalGenerator
         var (validComponents, _) = GeneratorUtilities.ProcessTypes(
             context, components, config.MaxComponentTypeId,
             DiagnosticDescriptors.ComponentNotUnmanaged,
-            DiagnosticDescriptors.InvalidGuidFormat,
             DiagnosticDescriptors.UnsupportedContainingType,
             DiagnosticDescriptors.ComponentIdExceedsLimit,
             DiagnosticDescriptors.DuplicateComponentId,
@@ -163,7 +162,6 @@ public class ComponentGenerator : IIncrementalGenerator
                 "EntityTags",
                 ImmutableArray<ContainingTypeInfo>.Empty,
                 Guid: null,
-                InvalidGuid: null,
                 InvalidContainingType: null,
                 HasInstanceFields: true, // The mask field
                 ManualId: null);
@@ -276,9 +274,6 @@ public class ComponentGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}{{");
             indent += "    ";
         }
-
-        if (info.Guid != null)
-            sb.AppendLine($"{indent}[global::System.Runtime.InteropServices.Guid(\"{info.Guid}\")]");
 
         sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.IComponent");
         sb.AppendLine($"{indent}{{");

@@ -1,16 +1,12 @@
 namespace Paradise.BT.Builder;
 
-public class DecoratorNode<T> : BTreeNode where T : struct, INodeData
+public class DecoratorNode<T>(T data, BTreeNode child) : BTreeNode<T>(data)
+    where T : struct, INode
 {
-    private readonly T _data;
-    private readonly BTreeNode _child;
+    private readonly BTreeNode _child = child ?? throw new ArgumentNullException(nameof(child));
 
-    public DecoratorNode(T data, BTreeNode child)
-    {
-        _data = data;
-        _child = child;
-    }
+    internal sealed override int ChildCount => 1;
 
-    protected internal override BehaviorNodeDefinition ToDefinition()
-        => BehaviorNodes.Node(_data, _child.ToDefinition());
+    internal sealed override void CompileChildren(List<INodeBuilder> nodes)
+        => _child.Compile(nodes);
 }

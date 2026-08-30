@@ -8,13 +8,13 @@ namespace Paradise.BT.Generators;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class DuplicateGuidAnalyzer : DiagnosticAnalyzer
 {
-    private const string INodeDataFullName = "Paradise.BT.INodeData";
+    private const string INodeFullName = "Paradise.BT.INode";
     private const string GuidAttributeFullName = "System.Runtime.InteropServices.GuidAttribute";
 
     internal static readonly DiagnosticDescriptor s_duplicateGuidDiagnostic = new(
         id: "PBT0003",
-        title: "Duplicate Guid on INodeData struct",
-        messageFormat: "Duplicate Guid \"{0}\" on INodeData struct '{1}' — also used by '{2}'. Each node type must have a unique Guid.",
+        title: "Duplicate Guid on INode struct",
+        messageFormat: "Duplicate Guid \"{0}\" on INode struct '{1}' — also used by '{2}'. Each node type must have a unique Guid.",
         category: "Paradise.BT.Design",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
@@ -31,7 +31,7 @@ public sealed class DuplicateGuidAnalyzer : DiagnosticAnalyzer
 
         context.RegisterCompilationStartAction(compilationContext =>
         {
-            var nodeDataInterface = compilationContext.Compilation.GetTypeByMetadataName(INodeDataFullName);
+            var nodeDataInterface = compilationContext.Compilation.GetTypeByMetadataName(INodeFullName);
             if (nodeDataInterface is null)
                 return;
 

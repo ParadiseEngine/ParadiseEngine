@@ -36,7 +36,7 @@ public interface IComponent
     /// <remarks>
     /// Unlike <see cref="TypeId"/> which changes based on alphabetical ordering,
     /// this GUID provides stable identification across compilations when specified
-    /// via <see cref="ComponentAttribute.Guid"/>.
+    /// via <see cref="System.Runtime.InteropServices.GuidAttribute"/>.
     /// </remarks>
     static abstract Guid Guid { get; }
 

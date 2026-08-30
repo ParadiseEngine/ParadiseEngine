@@ -77,7 +77,6 @@ public class TagGenerator : IIncrementalGenerator
         var (validTags, tagMaskType) = GeneratorUtilities.ProcessTypes(
             context, tags, DefaultMaxTagId,
             DiagnosticDescriptors.TagNotUnmanaged,
-            DiagnosticDescriptors.InvalidTagGuidFormat,
             DiagnosticDescriptors.UnsupportedTagContainingType,
             DiagnosticDescriptors.TagIdExceedsLimit,
             DiagnosticDescriptors.DuplicateTagId,
@@ -128,9 +127,6 @@ public class TagGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}{{");
             indent += "    ";
         }
-
-        if (info.Guid != null)
-            sb.AppendLine($"{indent}[global::System.Runtime.InteropServices.Guid(\"{info.Guid}\")]");
 
         sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.ITag");
         sb.AppendLine($"{indent}{{");

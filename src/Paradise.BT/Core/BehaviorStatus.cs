@@ -1,19 +1,14 @@
 namespace Paradise.BT;
 
-/// <summary>
-/// Exact runtime state values used by EntitiesBT-style nodes.
-/// </summary>
 [Flags]
 public enum NodeState
 {
+    None = 0,
     Success = 1 << 0,
     Failure = 1 << 1,
     Running = 1 << 2,
 }
 
-/// <summary>
-/// Helper methods for working with <see cref="NodeState"/> values.
-/// </summary>
 public static class NodeStateExtensions
 {
     public static bool HasFlagFast(this NodeState flags, NodeState flag)

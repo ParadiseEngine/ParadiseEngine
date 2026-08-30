@@ -13,6 +13,10 @@ namespace Paradise.ECS;
 /// You can manually specify an ID using the <see cref="Id"/> property. Manual IDs
 /// take precedence, and auto-assigned IDs will skip over any manually assigned values.
 /// </para>
+/// <para>
+/// A stable identity that survives ID reassignment comes from the standard
+/// <see cref="System.Runtime.InteropServices.GuidAttribute"/> applied to the same struct.
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>
@@ -27,29 +31,19 @@ namespace Paradise.ECS;
 /// {
 ///     public int Value;
 /// }
+///
+/// // Stable cross-compilation identity
+/// [System.Runtime.InteropServices.Guid("12345678-1234-1234-1234-123456789012")]
+/// [Component]
+/// public partial struct StableComponent
+/// {
+///     public int Value;
+/// }
 /// </code>
 /// </example>
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class ComponentAttribute : Attribute
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ComponentAttribute"/> class.
-    /// </summary>
-    /// <param name="guid">Optional GUID for stable component identification.</param>
-    public ComponentAttribute(string? guid = null)
-    {
-        Guid = guid;
-    }
-
-    /// <summary>
-    /// Gets the optional GUID for stable component identification across compilations.
-    /// </summary>
-    /// <remarks>
-    /// When specified, this GUID provides a stable identifier that persists even when
-    /// components are added/removed (unlike TypeId which changes based on auto-assignment).
-    /// </remarks>
-    public string? Guid { get; }
-
     /// <summary>
     /// Gets or sets the manual component ID. When set, this ID is used instead of auto-assignment.
     /// </summary>

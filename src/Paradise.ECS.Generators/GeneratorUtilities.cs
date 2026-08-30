@@ -8,6 +8,9 @@ namespace Paradise.ECS.Generators;
 /// </summary>
 internal static class GeneratorUtilities
 {
+    private const string GuidAttributeName = "GuidAttribute";
+    private const string GuidAttributeFullName = "System.Runtime.InteropServices." + GuidAttributeName;
+
     /// <summary>
     /// Gets the optimal mask type string based on the number of bits required.
     /// </summary>
@@ -87,38 +90,19 @@ internal static class GeneratorUtilities
             }
         }
 
-        // Extract GUID and manual ID from attributes
-        string? validGuid = null, invalidGuid = null;
+        // Extract the manual ID from the [Component]/[Tag] attribute
         int? manualId = null;
         foreach (var attr in context.Attributes)
         {
-            if (attr.ConstructorArguments.Length > 0 && attr.ConstructorArguments[0].Value is string ctorGuid)
-            {
-                if (Guid.TryParse(ctorGuid, out _))
-                    validGuid = ctorGuid;
-                else
-                    invalidGuid = ctorGuid;
-            }
-
             foreach (var arg in attr.NamedArguments)
             {
-                if (arg.Key == "Guid" && arg.Value.Value is string g)
-                {
-                    if (Guid.TryParse(g, out _))
-                    {
-                        validGuid = g;
-                        invalidGuid = null;
-                    }
-                    else
-                    {
-                        validGuid = null;
-                        invalidGuid = g;
-                    }
-                }
-                else if (arg.Key == "Id" && arg.Value.Value is int id && id >= 0)
+                if (arg.Key == "Id" && arg.Value.Value is int id && id >= 0)
                     manualId = id;
             }
         }
+
+        // Stable identity comes from the standard [System.Runtime.InteropServices.Guid] attribute
+        var guid = ExtractGuid(typeSymbol);
 
         var hasInstanceFields = typeSymbol.GetMembers().OfType<IFieldSymbol>().Any(f => !f.IsStatic);
 
@@ -130,11 +114,37 @@ internal static class GeneratorUtilities
             ns,
             typeSymbol.Name,
             containingTypes,
-            validGuid,
-            invalidGuid,
+            guid,
             invalidContainingType,
             hasInstanceFields,
             manualId);
+    }
+
+    /// <summary>
+    /// Reads the stable GUID declared by <c>[System.Runtime.InteropServices.Guid]</c> on a type.
+    /// </summary>
+    /// <remarks>
+    /// A malformed value needs no diagnostic of ours: the compiler already rejects it with CS0591
+    /// before this generator's output could matter. Parsing is therefore restricted to the exact
+    /// "D" format the compiler accepts, so a value this method calls valid is one that compiles.
+    /// </remarks>
+    /// <returns>The GUID string, or <c>null</c> when the type declares no usable GUID.</returns>
+    private static string? ExtractGuid(INamedTypeSymbol typeSymbol)
+    {
+        foreach (var attr in typeSymbol.GetAttributes())
+        {
+            var attributeClass = attr.AttributeClass;
+            if (attributeClass is null || attributeClass.Name != GuidAttributeName)
+                continue;
+            if (attributeClass.ToDisplayString() != GuidAttributeFullName)
+                continue;
+            if (attr.ConstructorArguments.Length == 0 || attr.ConstructorArguments[0].Value is not string value)
+                continue;
+
+            return Guid.TryParseExact(value, "D", out _) ? value : null;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -145,7 +155,6 @@ internal static class GeneratorUtilities
         ImmutableArray<TypeInfo> types,
         int maxId,
         DiagnosticDescriptor notUnmanaged,
-        DiagnosticDescriptor invalidGuid,
         DiagnosticDescriptor invalidContaining,
         DiagnosticDescriptor idExceedsLimit,
         DiagnosticDescriptor duplicateId,
@@ -162,8 +171,6 @@ internal static class GeneratorUtilities
         {
             if (!t.IsUnmanaged)
                 context.ReportDiagnostic(Diagnostic.Create(notUnmanaged, t.Location, t.FullyQualifiedName));
-            if (t.InvalidGuid != null)
-                context.ReportDiagnostic(Diagnostic.Create(invalidGuid, t.Location, t.FullyQualifiedName, t.InvalidGuid));
             if (t.InvalidContainingType != null)
                 context.ReportDiagnostic(Diagnostic.Create(invalidContaining, t.Location, t.FullyQualifiedName, t.InvalidContainingType, "a generic type"));
             if (t.ManualId > maxId)
@@ -246,7 +253,6 @@ internal readonly struct TypeInfo
     public string TypeName { get; }
     public ImmutableArray<ContainingTypeInfo> ContainingTypes { get; }
     public string? Guid { get; }
-    public string? InvalidGuid { get; }
     public string? InvalidContainingType { get; }
     public bool HasInstanceFields { get; }
     public int? ManualId { get; }
@@ -260,7 +266,6 @@ internal readonly struct TypeInfo
         string TypeName,
         ImmutableArray<ContainingTypeInfo> ContainingTypes,
         string? Guid,
-        string? InvalidGuid,
         string? InvalidContainingType,
         bool HasInstanceFields,
         int? ManualId)
@@ -273,7 +278,6 @@ internal readonly struct TypeInfo
         this.TypeName = TypeName;
         this.ContainingTypes = ContainingTypes;
         this.Guid = Guid;
-        this.InvalidGuid = InvalidGuid;
         this.InvalidContainingType = InvalidContainingType;
         this.HasInstanceFields = HasInstanceFields;
         this.ManualId = ManualId;

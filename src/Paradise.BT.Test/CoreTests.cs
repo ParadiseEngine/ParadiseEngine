@@ -1,57 +1,56 @@
+using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 namespace Paradise.BT.Test;
 
 public sealed class CoreTests
 {
     // ============================
-    // BehaviorTreeBuilder validation
+    // BTreeNode compilation
     // ============================
 
     [Test]
     public async Task Builder_Accepts_Node_With_Zero_Children()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new SequenceNode()));
+        BehaviorTreeLayout tree = BTreeNode.Build(new Sequence());
 
-        await Assert.That(tree.Count).IsEqualTo(1);
+        await Assert.That(tree.Blob.Count).IsEqualTo(1);
     }
 
     [Test]
     public async Task Builder_Accepts_Node_With_One_Child()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new InverterNode(), BuiltInBehaviorNodes.Success()));
+        BehaviorTreeLayout tree = BTreeNode.Build(new Inverter(new Success()));
 
-        await Assert.That(tree.Count).IsEqualTo(2);
+        await Assert.That(tree.Blob.Count).IsEqualTo(2);
     }
 
     [Test]
     public async Task Builder_Accepts_Node_With_Multiple_Children()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BehaviorNodes.Node(new SequenceNode(), BuiltInBehaviorNodes.Success(), BuiltInBehaviorNodes.Failure()));
+        BehaviorTreeLayout tree = BTreeNode.Build(new Sequence(new Success(), new Failure()));
 
-        await Assert.That(tree.Count).IsEqualTo(3);
+        await Assert.That(tree.Blob.Count).IsEqualTo(3);
     }
 
     [Test]
-    public async Task Builder_Instance_Method_Produces_Same_Result()
+    public async Task Instance_Build_Produces_Same_Result_As_Static()
     {
-        var definition = BuiltInBehaviorNodes.Sequence(
-            BuiltInBehaviorNodes.Success(),
-            BuiltInBehaviorNodes.Failure());
+        var root = new Sequence(
+            new Success(),
+            new Failure());
 
-        BehaviorTree tree = new BehaviorTreeBuilder(definition).Build();
+        BehaviorTreeLayout tree = root.Build();
 
-        await Assert.That(tree.Count).IsEqualTo(3);
+        await Assert.That(tree.Blob.Count).IsEqualTo(3);
     }
 
     [Test]
-    public async Task Builder_Null_Root_Throws_ArgumentNullException()
+    public async Task Build_Null_Root_Throws_ArgumentNullException()
     {
         ArgumentNullException? ex = null;
         try
         {
-            _ = new BehaviorTreeBuilder(null!);
+            _ = BTreeNode.Build(null!);
         }
         catch (ArgumentNullException e)
         {
@@ -62,27 +61,27 @@ public sealed class CoreTests
     }
 
     // ============================
-    // BehaviorTree public API
+    // Layout topology
     // ============================
 
     [Test]
     public async Task BehaviorTree_Count_Matches_Total_Node_Count()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Success(),
-                BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Failure())));
+        BehaviorTreeLayout tree = BTreeNode.Build(
+            new Sequence(
+                new Success(),
+                new Inverter(new Failure())));
 
         // Sequence(1) + Success(1) + Inverter(1) + Failure(1) = 4
-        await Assert.That(tree.Count).IsEqualTo(4);
+        await Assert.That(tree.Blob.Count).IsEqualTo(4);
     }
 
     [Test]
     public async Task BehaviorTree_GetNodeType_Returns_Correct_Types()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Success()));
+        BehaviorTreeLayout tree = BTreeNode.Build(
+            new Sequence(
+                new Success()));
 
         await Assert.That(tree.GetNodeType(0)).IsEqualTo(typeof(SequenceNode));
         await Assert.That(tree.GetNodeType(1)).IsEqualTo(typeof(SuccessNode));
@@ -91,10 +90,10 @@ public sealed class CoreTests
     [Test]
     public async Task BehaviorTree_GetEndIndex_Returns_Correct_Indices()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Success(),
-                BuiltInBehaviorNodes.Failure()));
+        BehaviorTreeLayout tree = BTreeNode.Build(
+            new Sequence(
+                new Success(),
+                new Failure()));
 
         // Sequence at 0 ends at 3 (total count)
         await Assert.That(tree.GetEndIndex(0)).IsEqualTo(3);
@@ -104,42 +103,6 @@ public sealed class CoreTests
         await Assert.That(tree.GetEndIndex(2)).IsEqualTo(3);
     }
 
-    [Test]
-    public async Task BehaviorTree_GetNodeType_Out_Of_Range_Throws()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
-
-        ArgumentOutOfRangeException? ex = null;
-        try
-        {
-            tree.GetNodeType(5);
-        }
-        catch (ArgumentOutOfRangeException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
-    }
-
-    [Test]
-    public async Task BehaviorTree_GetNodeType_Negative_Index_Throws()
-    {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
-
-        ArgumentOutOfRangeException? ex = null;
-        try
-        {
-            tree.GetNodeType(-1);
-        }
-        catch (ArgumentOutOfRangeException e)
-        {
-            ex = e;
-        }
-
-        await Assert.That(ex).IsNotNull();
-    }
-
     // ============================
     // BehaviorTreeInstance lifecycle
     // ============================
@@ -147,8 +110,8 @@ public sealed class CoreTests
     [Test]
     public async Task Instance_Status_Reflects_Last_Tick_Result()
     {
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        var tree = BTreeNode.Build(new Success());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
         instance.Tick();
@@ -159,15 +122,10 @@ public sealed class CoreTests
     [Test]
     public async Task Instance_AutoReset_Disabled_Does_Not_Reset_On_Completion()
     {
-        int executions = 0;
-        var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Action(_ =>
-            {
-                executions++;
-                return NodeState.Success;
-            }));
+        var tree = BTreeNode.Build(
+            TestBehaviorNodes.Probe());
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
         instance.Tick();
@@ -181,27 +139,22 @@ public sealed class CoreTests
     [Test]
     public async Task Instance_AutoReset_Enabled_Resets_And_Reticks()
     {
-        int executions = 0;
-        var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Action(_ =>
-            {
-                executions++;
-                return NodeState.Success;
-            }));
+        var tree = BTreeNode.Build(
+            TestBehaviorNodes.Probe());
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         instance.Tick();
         instance.Tick();
 
-        await Assert.That(executions).IsEqualTo(2);
+        await Assert.That(instance.ProbeCount()).IsEqualTo(2);
     }
 
     [Test]
     public async Task Instance_Reset_Clears_State_To_Running()
     {
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Running());
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        var tree = BTreeNode.Build(new Running());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
         instance.Tick();
@@ -213,27 +166,10 @@ public sealed class CoreTests
     }
 
     [Test]
-    public async Task Instance_Tick_Sets_DeltaTime_On_Blackboard()
-    {
-        float capturedDeltaTime = 0f;
-        var tree = BehaviorTreeBuilder.Build(
-            TestBehaviorNodes.Action(bb =>
-            {
-                capturedDeltaTime = bb.GetData<BehaviorTreeTickDeltaTime>().Value;
-                return NodeState.Success;
-            }));
-
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
-        instance.Tick(0.016f);
-
-        await Assert.That(capturedDeltaTime).IsEqualTo(0.016f);
-    }
-
-    [Test]
     public async Task Instance_CreateInstance_Without_Blackboard_Works()
     {
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        var tree = BTreeNode.Build(new Success());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
@@ -244,8 +180,8 @@ public sealed class CoreTests
         var blackboard = new Blackboard();
         blackboard.SetData(42);
 
-        var tree = BehaviorTreeBuilder.Build(BuiltInBehaviorNodes.Success());
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(blackboard);
+        var tree = BTreeNode.Build(new Success());
+        TestInstance<Blackboard> instance = tree.CreateInstance(blackboard);
 
         await Assert.That(instance.Blackboard.GetData<int>()).IsEqualTo(42);
     }
@@ -259,12 +195,12 @@ public sealed class CoreTests
     {
         // Sequence -> Inverter -> Failure = Sequence(Inverter(Failure))
         // Inverter turns Failure into Success, Sequence with one child returns that
-        var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Sequence(
-                BuiltInBehaviorNodes.Inverter(BuiltInBehaviorNodes.Failure()),
-                BuiltInBehaviorNodes.Succeeder(BuiltInBehaviorNodes.Failure())));
+        var tree = BTreeNode.Build(
+            new Sequence(
+                new Inverter(new Failure()),
+                new Succeeder(new Failure())));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         // Both children return Success -> Sequence returns Success
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
@@ -273,17 +209,12 @@ public sealed class CoreTests
     [Test]
     public async Task Selector_With_Running_Then_Success_Returns_Running_First()
     {
-        int tickCount = 0;
-        var tree = BehaviorTreeBuilder.Build(
-            BuiltInBehaviorNodes.Selector(
-                TestBehaviorNodes.Action(_ =>
-                {
-                    tickCount++;
-                    return tickCount == 1 ? NodeState.Running : NodeState.Failure;
-                }),
-                BuiltInBehaviorNodes.Success()));
+        var tree = BTreeNode.Build(
+            new Selector(
+                TestBehaviorNodes.ProbeUntil(2, NodeState.Running, NodeState.Failure),
+                new Success()));
 
-        BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(new Blackboard());
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         // First tick: first child is Running -> Selector returns Running
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);

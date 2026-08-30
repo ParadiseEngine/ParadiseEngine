@@ -14,7 +14,7 @@ public class DuplicateGuidAnalyzerTests
     }
 
     [Test]
-    public async Task DuplicateGuids_OnINodeDataStructs_ReportsError()
+    public async Task DuplicateGuids_OnINodeStructs_ReportsError()
     {
         const string testCode = """
             using System.Runtime.InteropServices;
@@ -22,20 +22,20 @@ public class DuplicateGuidAnalyzerTests
             namespace Paradise.BT
             {
                 public enum NodeState { Success, Failure, Running }
-                public interface INodeBlob { }
+                public interface IBehaviorTree { }
                 public interface IBlackboard { }
-                public interface INodeData
+                public interface INode
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard;
                 }
 
                 [Guid("11111111-1111-1111-1111-111111111111")]
-                public struct NodeA : INodeData
+                public struct NodeA : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
@@ -43,10 +43,10 @@ public class DuplicateGuidAnalyzerTests
                 }
 
                 [Guid("11111111-1111-1111-1111-111111111111")]
-                public struct NodeB : INodeData
+                public struct NodeB : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
@@ -71,7 +71,7 @@ public class DuplicateGuidAnalyzerTests
     }
 
     [Test]
-    public async Task UniqueGuids_OnINodeDataStructs_NoDiagnostic()
+    public async Task UniqueGuids_OnINodeStructs_NoDiagnostic()
     {
         const string testCode = """
             using System.Runtime.InteropServices;
@@ -79,20 +79,20 @@ public class DuplicateGuidAnalyzerTests
             namespace Paradise.BT
             {
                 public enum NodeState { Success, Failure, Running }
-                public interface INodeBlob { }
+                public interface IBehaviorTree { }
                 public interface IBlackboard { }
-                public interface INodeData
+                public interface INode
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard;
                 }
 
                 [Guid("11111111-1111-1111-1111-111111111111")]
-                public struct NodeA : INodeData
+                public struct NodeA : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
@@ -100,10 +100,10 @@ public class DuplicateGuidAnalyzerTests
                 }
 
                 [Guid("22222222-2222-2222-2222-222222222222")]
-                public struct NodeB : INodeData
+                public struct NodeB : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
@@ -121,7 +121,7 @@ public class DuplicateGuidAnalyzerTests
     }
 
     [Test]
-    public async Task DuplicateGuids_OnNonINodeDataStructs_NoDiagnostic()
+    public async Task DuplicateGuids_OnNonINodeStructs_NoDiagnostic()
     {
         const string testCode = """
             using System.Runtime.InteropServices;
@@ -129,12 +129,12 @@ public class DuplicateGuidAnalyzerTests
             namespace Paradise.BT
             {
                 public enum NodeState { Success, Failure, Running }
-                public interface INodeBlob { }
+                public interface IBehaviorTree { }
                 public interface IBlackboard { }
-                public interface INodeData
+                public interface INode
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard;
                 }
             }
@@ -172,20 +172,20 @@ public class DuplicateGuidAnalyzerTests
             namespace Paradise.BT
             {
                 public enum NodeState { Success, Failure, Running }
-                public interface INodeBlob { }
+                public interface IBehaviorTree { }
                 public interface IBlackboard { }
-                public interface INodeData
+                public interface INode
                 {
-                    NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard;
                 }
 
                 [Guid("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")]
-                public struct NodeA : INodeData
+                public struct NodeA : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
@@ -193,10 +193,10 @@ public class DuplicateGuidAnalyzerTests
                 }
 
                 [Guid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")]
-                public struct NodeB : INodeData
+                public struct NodeB : INode
                 {
-                    public NodeState Tick<TNodeBlob, TBlackboard>(int index, ref TNodeBlob blob, ref TBlackboard bb)
-                        where TNodeBlob : struct, INodeBlob
+                    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, IBehaviorTree
                         where TBlackboard : struct, IBlackboard
                     {
                         return NodeState.Success;
