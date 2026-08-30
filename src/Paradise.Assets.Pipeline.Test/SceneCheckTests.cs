@@ -41,7 +41,7 @@ public class SceneCheckTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.CreateDirectory("/game/assets/scenes");
-        fileSystem.WriteAllText("/game/assets/scenes/edited.scene", NonCanonical);
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/scenes/edited.scene", NonCanonical);
 
         var results = SceneCheck.Run(fileSystem, s_layout);
 
@@ -55,7 +55,7 @@ public class SceneCheckTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.CreateDirectory("/game/assets/scenes");
-        fileSystem.WriteAllText("/game/assets/scenes/edited.scene", NonCanonical);
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/scenes/edited.scene", NonCanonical);
 
         var fixResults = SceneCheck.Run(fileSystem, s_layout, fix: true);
         var recheck = SceneCheck.Run(fileSystem, s_layout);

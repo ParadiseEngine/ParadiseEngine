@@ -5,16 +5,23 @@ using Zio;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// The sidecar meta document: one <c>&lt;asset&gt;.meta</c> per foreign/binary asset,
-/// carrying the asset's GUID and its per-asset import settings.
+/// The sidecar meta document: one <c>&lt;asset&gt;.meta</c> per asset, carrying the asset's GUID
+/// and its per-asset import settings.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Sidecars exist for assets whose bytes cannot carry an id — GLBs, textures, audio banks. The
-/// project's own text documents (<c>*.scene</c>, config) carry their identity in-file and
-/// get no sidecar. References between documents stay <b>paths</b>; the GUID is authoring
-/// identity, which is what defangs the classic sidecar failure: a lost sidecar degrades to a
-/// re-mint plus a re-link by content hash, instead of breaking every reference.
+/// <b>EVERY asset has one</b> — GLBs, textures and audio banks, whose bytes cannot carry an id,
+/// and the project's own text documents too. An earlier design had scenes and configs carry their
+/// identity in-file to halve the sidecar count; the saving was not worth what it cost. Identity
+/// then had two lookup paths, <c>verify</c> needed two rules for the same question, and a guid
+/// key inside a document is a key every reader has to know is structure rather than payload —
+/// while a payload is meant to be opaque. One rule for everything is shorter to state, shorter to
+/// implement, and leaves nothing to remember.
+/// </para>
+/// <para>
+/// References carry the GUID <b>and</b> the path (<see cref="Paradise.Authoring.AssetReference"/>),
+/// so a lost sidecar degrades to a hand-fixable reference rather than breaking every use of its
+/// asset — and <c>verify</c> refuses a document where the two halves name different assets.
 /// </para>
 /// <para>
 /// Sidecars are minted and moved by tooling only (<c>mv</c> moves the pair and rewrites the
@@ -128,7 +135,8 @@ public sealed class SidecarMeta
             "texture" => SidecarAssetKind.Texture,
             "mesh" => SidecarAssetKind.Mesh,
             "audio" => SidecarAssetKind.Audio,
-            _ => throw Fail($"sets kind = \"{kindText}\"; expected \"texture\", \"mesh\" or \"audio\""),
+            "document" => SidecarAssetKind.Document,
+            _ => throw Fail($"sets kind = \"{kindText}\"; expected \"texture\", \"mesh\", \"audio\" or \"document\""),
         };
 
         var meta = new SidecarMeta(guid, kind);
@@ -186,6 +194,7 @@ public sealed class SidecarMeta
                     SidecarAssetKind.Texture => "texture",
                     SidecarAssetKind.Mesh => "mesh",
                     SidecarAssetKind.Audio => "audio",
+                    SidecarAssetKind.Document => "document",
                     _ => throw new InvalidOperationException($"Unknown kind {Kind}."),
                 }
             },
@@ -212,7 +221,14 @@ public sealed class SidecarMeta
     }
 }
 
-/// <summary>What a sidecar's asset is. Scenes and config documents carry ids in-file — no sidecar.</summary>
+/// <summary>What a sidecar's asset is.</summary>
+/// <remarks>
+/// EVERY asset has a sidecar, documents included. An earlier design had text formats carry their
+/// id in-file to halve the sidecar count, and the saving was not worth what it cost: identity
+/// then had two lookup paths, `verify` had two rules, and adding a guid key to a document meant
+/// every reader had to know it was structure rather than payload. One rule for everything is
+/// shorter to state and shorter to implement.
+/// </remarks>
 public enum SidecarAssetKind
 {
     /// <summary>A source image (<c>textures/**</c>, <c>sprites/**</c>), compiled to KTX2.</summary>
@@ -223,6 +239,13 @@ public enum SidecarAssetKind
 
     /// <summary>A committed audio bank (<c>audio/**</c>), verified and copied through.</summary>
     Audio,
+
+    /// <summary>
+    /// An authored text document — a scene, a prefab, or a config. One kind rather than three,
+    /// because the extension already says which and the kind's job is to say which build step
+    /// owns the file.
+    /// </summary>
+    Document,
 }
 
 /// <summary>Per-asset texture import settings. Absent values fall back to the token defaults.</summary>

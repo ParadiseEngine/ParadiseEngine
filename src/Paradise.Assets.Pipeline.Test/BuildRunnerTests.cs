@@ -170,8 +170,8 @@ public class BuildRunnerTests
     public async Task config_documents_are_emitted_canonically_for_toml_profiles()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        fileSystem.CreateDirectory("/game/assets/config");
-        fileSystem.WriteAllText("/game/assets/config/game.toml", "# authored comment\nb = 2\na = 1\n");
+        ProjectVerifierTests.WriteDocument(
+            fileSystem, "/game/assets/config/game.toml", "# authored comment\nb = 2\na = 1\n");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 

@@ -79,4 +79,22 @@ public static class AssetClassifier
     /// <summary>The sidecar kind a foreign asset's extension implies, when it implies one.</summary>
     public static bool TryGetForeignKind(UPath path, out SidecarAssetKind kind)
         => s_foreignKinds.TryGetValue(path.GetExtensionWithDot() ?? string.Empty, out kind);
+
+    /// <summary>
+    /// The sidecar kind an asset of this class must declare, or <see langword="null"/> when the
+    /// class needs no sidecar.
+    /// </summary>
+    /// <remarks>
+    /// EVERY asset has a sidecar, documents included — one rule rather than "binaries get one and
+    /// text carries its id inside", which needed two lookups for one question. The exceptions are
+    /// not assets: the manifest is the project's own description rather than content in it, a
+    /// sidecar has no sidecar, and a file the pipeline does not recognise is carried rather than
+    /// owned.
+    /// </remarks>
+    public static SidecarAssetKind? RequiredKind(AssetClass assetClass, UPath path) => assetClass switch
+    {
+        AssetClass.Foreign => TryGetForeignKind(path, out var kind) ? kind : null,
+        AssetClass.Scene or AssetClass.Prefab or AssetClass.Config => SidecarAssetKind.Document,
+        _ => null,
+    };
 }

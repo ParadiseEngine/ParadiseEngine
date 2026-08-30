@@ -64,20 +64,22 @@ public static class ProjectVerifier
         var guids = new Dictionary<Guid, UPath>();
         foreach (var path in fileSystem.EnumerateFiles(layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
-            switch (AssetClassifier.Classify(layout.Assets, path))
+            var assetClass = AssetClassifier.Classify(layout.Assets, path);
+
+            // Every asset carries an identity, and identity lives in ONE place -- the sidecar --
+            // whether the asset is a GLB or a scene document.
+            if (AssetClassifier.RequiredKind(assetClass, path) is not null
+                && !fileSystem.FileExists(SidecarMeta.PathFor(path)))
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Error, path,
+                    "has no sidecar — mint one so the asset has an identity (tooling owns sidecars; see the mv/import verbs)"));
+            }
+
+            switch (assetClass)
             {
                 case AssetClass.Sidecar:
-                    VerifySidecar(fileSystem, path, guids, findings);
-                    break;
-
-                case AssetClass.Foreign:
-                    if (!fileSystem.FileExists(SidecarMeta.PathFor(path)))
-                    {
-                        findings.Add(new VerifyFinding(
-                            VerifySeverity.Error, path,
-                            "has no sidecar — mint one so the asset has an identity (tooling owns sidecars; see the mv/import verbs)"));
-                    }
-
+                    VerifySidecar(fileSystem, layout.Assets, path, guids, findings);
                     break;
 
                 case AssetClass.Scene:
@@ -114,7 +116,7 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifySidecar(IFileSystem fileSystem, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
+    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
     {
         var asset = SidecarMeta.AssetPathFor(path);
         if (!fileSystem.FileExists(asset))
@@ -146,7 +148,8 @@ public static class ProjectVerifier
             guids.Add(meta.Guid, path);
         }
 
-        if (AssetClassifier.TryGetForeignKind(asset, out var expected) && expected != meta.Kind)
+        var assetClass = AssetClassifier.Classify(assetsRoot, asset);
+        if (AssetClassifier.RequiredKind(assetClass, asset) is { } expected && expected != meta.Kind)
         {
             findings.Add(new VerifyFinding(
                 VerifySeverity.Error, path,

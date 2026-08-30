@@ -101,7 +101,7 @@ public class ProjectVerifierTests
     public async Task an_invalid_scene_is_an_error()
     {
         using var fileSystem = CreateProject();
-        fileSystem.WriteAllText("/game/assets/scenes/bad.scene", "schema_version = 1\nobjects = 3\n");
+        WriteDocument(fileSystem, "/game/assets/scenes/bad.scene", "schema_version = 1\nobjects = 3\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -114,7 +114,8 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         // Valid, but spaced the way a person types and a machine never writes.
-        fileSystem.WriteAllText(
+        WriteDocument(
+            fileSystem,
             "/game/assets/scenes/edited.scene",
             "schema_version=1\n\n[[objects]]\n\n[[objects.components]]\n" +
             $"id = \"{DocumentGuid.Format(WellKnownComponents.MetaId)}\"\ntype = \"meta\"\n" +
@@ -186,9 +187,28 @@ public class ProjectVerifierTests
 
     internal static void WriteCanonicalScene(MemoryFileSystem fileSystem, UPath path)
     {
-        fileSystem.CreateDirectory(path.GetDirectory());
         var document = new SceneDocument();
         document.Objects.Add(SceneObject.WithMeta(Guid.NewGuid(), "crate"));
+        fileSystem.CreateDirectory(path.GetDirectory());
         SceneDocumentSerializer.Save(fileSystem, path, document);
+        MintDocumentSidecar(fileSystem, path);
     }
+
+    /// <summary>
+    /// Writes a text document AND its sidecar.
+    /// </summary>
+    /// <remarks>
+    /// Every asset carries an identity and identity lives in the sidecar, documents included — so
+    /// a fixture that writes a scene without one is not a scene, it is a `verify` error. Which is
+    /// exactly what this helper exists to stop a test from asserting by accident.
+    /// </remarks>
+    internal static void WriteDocument(MemoryFileSystem fileSystem, UPath path, string text)
+    {
+        fileSystem.CreateDirectory(path.GetDirectory());
+        fileSystem.WriteAllText(path, text);
+        MintDocumentSidecar(fileSystem, path);
+    }
+
+    internal static void MintDocumentSidecar(MemoryFileSystem fileSystem, UPath path)
+        => SidecarMeta.Mint(SidecarAssetKind.Document).Save(fileSystem, SidecarMeta.PathFor(path));
 }
