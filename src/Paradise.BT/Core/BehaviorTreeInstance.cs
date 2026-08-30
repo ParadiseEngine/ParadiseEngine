@@ -34,7 +34,7 @@ public class BehaviorTreeInstance
 
     /// <summary>The blob over this instance's arrays. Built per use: a ref struct cannot be a
     /// field.</summary>
-    private BehaviorTreeRef Blob => new(_layout, _states, _data);
+    private BehaviorTreeRef Blob => new(ref _layout.Blob, _states, _data);
 
     public NodeState Tick<TBlackboard>(TBlackboard blackboard)
         where TBlackboard : struct, IBlackboard, allows ref struct

@@ -32,7 +32,7 @@ public sealed class UnmanagedBlobTests
             _runtimeSize = Math.Max(1, layout.Blob.DataSize);
             _states = (NodeState*)NativeMemory.Alloc((nuint)(sizeof(NodeState) * _nodeCount));
             _runtime = (byte*)NativeMemory.Alloc((nuint)_runtimeSize);
-            BehaviorTree.Initialize(_layout, States, Runtime);
+            BehaviorTreeRef.Initialize(_layout, States, Runtime);
         }
 
         /// <summary>Native memory, so the blob may take an address into it.</summary>
@@ -42,14 +42,14 @@ public sealed class UnmanagedBlobTests
 
         /// <summary>Built fresh at each use: a ref struct cannot be stored in a class, nor live
         /// across an <c>await</c> (CS4007).</summary>
-        public BehaviorTree Blob => new(_layout, States, Runtime);
+        public BehaviorTreeRef Blob => new(ref _layout.Blob, States, Runtime);
 
         public NodeState Status => _states[0];
 
         /// <summary>Copied OUT, so an assertion can await without the blob being live.</summary>
         public (int Count, int[] EndIndices) Topology()
         {
-            BehaviorTree blob = Blob;
+            BehaviorTreeRef blob = Blob;
             var ends = new int[_nodeCount];
             for (var i = 0; i < ends.Length; i++)
             {
@@ -62,7 +62,7 @@ public sealed class UnmanagedBlobTests
         /// machine.</summary>
         public void Reset(ref Blackboard bb)
         {
-            BehaviorTree blob = Blob;
+            BehaviorTreeRef blob = Blob;
             VirtualMachine.Reset(blob, bb);
         }
 
@@ -70,7 +70,7 @@ public sealed class UnmanagedBlobTests
         /// comparison is against the same policy.</summary>
         public NodeState Tick(ref Blackboard bb)
         {
-            BehaviorTree blob = Blob;
+            BehaviorTreeRef blob = Blob;
             if (Status.IsCompleted())
             {
                 VirtualMachine.Reset(blob, bb);
@@ -230,14 +230,14 @@ public sealed class UnmanagedBlobTests
         {
             Span<NodeState> shortStates = stackalloc NodeState[nodeCount - 1];
             Span<byte> runtime = stackalloc byte[dataSize];
-            _ = new BehaviorTree(layout, shortStates, runtime);
+            _ = new BehaviorTreeRef(ref layout.Blob, shortStates, runtime);
         }).Throws<ArgumentException>().WithMessageContaining("states");
 
         await Assert.That(() =>
         {
             Span<NodeState> states = stackalloc NodeState[nodeCount];
             Span<byte> shortRuntime = stackalloc byte[dataSize - 1];
-            _ = new BehaviorTree(layout, states, shortRuntime);
+            _ = new BehaviorTreeRef(ref layout.Blob, states, shortRuntime);
         }).Throws<ArgumentException>().WithMessageContaining("runtime");
     }
 
