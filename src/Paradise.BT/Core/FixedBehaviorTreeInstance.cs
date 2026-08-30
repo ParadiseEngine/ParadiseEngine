@@ -68,7 +68,7 @@ public unsafe struct FixedBehaviorTreeInstance<TStateBuffer, TDataBuffer>
 
         _layout = (BehaviorTreeLayout.LayoutBlob*)Unsafe.AsPointer(ref blob);
         _autoResetOnCompletion = true;
-        BehaviorTreeRef.Initialize(layout, States, Data);
+        BehaviorTreeRef.Initialize(ref blob, States, Data);
     }
 
     public NodeState Tick<TBlackboard>(TBlackboard blackboard)

@@ -24,7 +24,7 @@ public class BehaviorTreeInstance
         _states = new NodeState[layout.Blob.Count];
         _data = new byte[Math.Max(1, layout.Blob.DataSize)];
         AutoResetOnCompletion = true;
-        BehaviorTreeRef.Initialize(_layout, _states, _data);
+        BehaviorTreeRef.Initialize(ref _layout.Blob, _states, _data);
     }
 
     /// <summary>Restart a finished tree on its next tick, so an instance loops by default.</summary>

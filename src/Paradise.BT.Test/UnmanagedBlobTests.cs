@@ -32,7 +32,7 @@ public sealed class UnmanagedBlobTests
             _runtimeSize = Math.Max(1, layout.Blob.DataSize);
             _states = (NodeState*)NativeMemory.Alloc((nuint)(sizeof(NodeState) * _nodeCount));
             _runtime = (byte*)NativeMemory.Alloc((nuint)_runtimeSize);
-            BehaviorTreeRef.Initialize(_layout, States, Runtime);
+            BehaviorTreeRef.Initialize(ref _layout.Blob, States, Runtime);
         }
 
         /// <summary>Native memory, so the blob may take an address into it.</summary>
