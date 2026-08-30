@@ -42,12 +42,6 @@ public readonly ref struct BehaviorTreeRef : IBehaviorTree
         _runtime = runtime;
     }
 
-    public static void Initialize(ref BehaviorTreeLayout.LayoutBlob layout, Span<NodeState> states, Span<byte> runtime)
-    {
-        states[..layout.Count].Clear();
-        layout.DefaultData.ToSpan().CopyTo(runtime);
-    }
-
     public Guid GetTypeGuid(int nodeIndex) => _layout.TypeGuid(nodeIndex);
 
     public int GetEndIndex(int nodeIndex) => _layout.EndIndices[nodeIndex];

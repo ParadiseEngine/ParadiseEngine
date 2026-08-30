@@ -5,7 +5,7 @@ public class LeafNode<T>(T data) : BTreeNode<T>(data)
 {
     internal sealed override int ChildCount => 0;
 
-    internal sealed override void CompileChildren(List<BehaviorTreeNode> nodes)
+    internal sealed override void CompileChildren(List<INodeBuilder> nodes)
     {
     }
 }

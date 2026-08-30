@@ -1,46 +1,15 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Paradise.BT;
+namespace Paradise.BT.Builder;
 
-internal readonly struct BehaviorTreeNode(IRuntimeNodeFactory factory, int endIndex)
-{
-    public IRuntimeNodeFactory Factory { get; } = factory ?? throw new ArgumentNullException(nameof(factory));
-
-    public int EndIndex { get; } = endIndex;
-}
-
-internal interface IRuntimeNodeFactory
-{
-    Type NodeType { get; }
-
-    Guid NodeGuid { get; }
-
-    /// <summary>Child-count claim from the node's <c>[Builder]</c> attribute; a node carrying
-    /// none claims <see cref="NodeCardinality.Leaf"/>.</summary>
-    NodeCardinality Cardinality { get; }
-
-    /// <summary>How many bytes this node's data occupies — what an unmanaged instance reserves
-    /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
-    int DataSize { get; }
-
-    /// <summary>The node struct's natural alignment — a layout packs each node's data to this,
-    /// and no wider.</summary>
-    int DataAlignment { get; }
-
-    /// <summary>
-    /// Copy this node's authored default data into <paramref name="destination"/>, which is
-    /// exactly <see cref="DataSize"/> bytes. Refused for a node holding a managed reference —
-    /// such a node has no byte representation.
-    /// </summary>
-    void WriteDefaultData(Span<byte> destination);
-}
-
-internal sealed class RuntimeNodeFactory<TNodeData>(TNodeData data, BehaviorNodeMetadata metadata)
-    : IRuntimeNodeFactory
+internal sealed class NodeBuilder<TNodeData>(TNodeData data, BehaviorNodeMetadata metadata)
+    : INodeBuilder
     where TNodeData : struct, INode
 {
     public Type NodeType => typeof(TNodeData);
+
+    public int EndIndex { get; set; }
 
     public Guid NodeGuid => metadata.Guid;
 

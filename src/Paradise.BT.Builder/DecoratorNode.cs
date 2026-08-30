@@ -7,6 +7,6 @@ public class DecoratorNode<T>(T data, BTreeNode child) : BTreeNode<T>(data)
 
     internal sealed override int ChildCount => 1;
 
-    internal sealed override void CompileChildren(List<BehaviorTreeNode> nodes)
+    internal sealed override void CompileChildren(List<INodeBuilder> nodes)
         => _child.Compile(nodes);
 }

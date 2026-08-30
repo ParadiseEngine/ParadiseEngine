@@ -131,46 +131,56 @@ public struct Blackboard : IBlackboard
 }
 
 /// <summary>
-/// Test-only pairing of a <see cref="BehaviorTreeInstance"/> with the blackboard it ticks
+/// Test-only pairing of a tree instance (layout + owned buffers) with the blackboard it ticks
 /// against. The library deliberately has no owned-blackboard instance — the blackboard is passed
 /// per call — but a test reads much better when the pair travels together.
 /// </summary>
 internal sealed class TestInstance<TBlackboard>
     where TBlackboard : struct, IBlackboard
 {
-    private readonly BehaviorTreeInstance _inner;
+    private readonly BehaviorTreeLayout _layout;
+    private readonly NodeState[] _states;
+    private readonly byte[] _data;
     private TBlackboard _blackboard;
 
-    public TestInstance(BehaviorTreeInstance inner, TBlackboard blackboard)
+    public TestInstance(BehaviorTreeLayout layout, TBlackboard blackboard)
     {
-        _inner = inner;
+        _layout = layout;
+        _states = new NodeState[layout.Blob.Count];
+        _data = new byte[Math.Max(1, layout.Blob.DataSize)];
         _blackboard = blackboard;
         Reset();
     }
 
     public ref TBlackboard Blackboard => ref _blackboard;
 
-    public NodeState Status => _inner.Status;
+    public NodeState Status => _states[0];
 
-    public bool AutoResetOnCompletion
+    public bool AutoResetOnCompletion { get; set; } = true;
+
+    private BehaviorTreeRef Blob => new(ref _layout.Blob, _states, _data);
+
+    public NodeState Tick()
     {
-        get => _inner.AutoResetOnCompletion;
-        set => _inner.AutoResetOnCompletion = value;
+        if (AutoResetOnCompletion && Status.IsCompleted())
+        {
+            VirtualMachine.Reset(Blob, _blackboard);
+        }
+
+        return VirtualMachine.Tick(Blob, _blackboard);
     }
 
-    public NodeState Tick() => _inner.Tick(_blackboard);
-
-    public void Reset() => _inner.Reset(_blackboard);
+    public void Reset() => VirtualMachine.Reset(Blob, _blackboard);
 }
 
 internal static class TestTickExtensions
 {
-    /// <summary>The owned-blackboard shape the deleted <c>BehaviorTreeInstance&lt;T&gt;</c> gave
-    /// tests, rebuilt over the public per-call API.</summary>
+    /// <summary>The owned-blackboard, owned-buffer shape tests read best with, rebuilt over the
+    /// public per-call API.</summary>
     public static TestInstance<TBlackboard> CreateInstance<TBlackboard>(
         this BehaviorTreeLayout layout, TBlackboard blackboard)
         where TBlackboard : struct, IBlackboard
-        => new(layout.CreateInstance(), blackboard);
+        => new(layout, blackboard);
 
     /// <summary>How many times the probe in <paramref name="slot"/> has run.</summary>
     public static int ProbeCount(this TestInstance<Blackboard> instance, int slot = 0)

@@ -26,15 +26,24 @@ using var tree = new Selector(
     new Idle()
 ).Build();
 
-// The instance stores no blackboard — it is passed per tick, the shape that also fits the
+// An instance is just two caller-owned buffers over the shared layout; a BehaviorTreeRef is
+// built where it is used and the blackboard is passed per tick — the shape that also fits the
 // generated ref-struct blackboards below.
-BehaviorTreeInstance instance = tree.CreateInstance();
-instance.Reset(blackboard);
+var states = new NodeState[tree.Blob.Count];
+var data = new byte[tree.Blob.DataSize];
+BehaviorTreeRef Tree() => new(ref tree.Blob, states, data);
+
+VirtualMachine.Reset(Tree(), blackboard);
 
 for (int i = 0; i < 10; i++)
 {
     blackboard.SetData(new TickDeltaTime(0.25f));
-    NodeState status = instance.Tick(blackboard);
+    if (Tree().GetState(0).IsCompleted())
+    {
+        VirtualMachine.Reset(Tree(), blackboard);
+    }
+
+    NodeState status = VirtualMachine.Tick(Tree(), blackboard);
     Console.WriteLine($"Tick {i + 1}: {status}");
 }
 
@@ -54,9 +63,12 @@ Console.WriteLine("Forager — the generated blackboard, over a row:");
 
 BehaviorTreeLayout layout = BehaviorTrees.Compile<ForagerTree>();
 
-// The instance owns the two per-agent buffers; the blackboard is bound per tick, because a
-// generated blackboard is a ref struct no field can hold.
-BehaviorTreeInstance foragerInstance = layout.CreateInstance();
+// The two per-agent buffers; the blackboard is bound per tick, because a generated blackboard
+// is a ref struct no field can hold.
+var foragerStates = new NodeState[layout.Blob.Count];
+var foragerData = new byte[layout.Blob.DataSize];
+BehaviorTreeRef Forager() => new(ref layout.Blob, foragerStates, foragerData);
+Forager().ResetRuntimeData(0, layout.Blob.Count);
 
 Console.WriteLine($"  {layout.Blob.Count} nodes, {layout.Blob.DataSize} bytes of node data.");
 
@@ -91,7 +103,12 @@ foreach ((string label, Senses senses, float energy) in situations)
         senses: in senses,
         stamina: in stamina);
 
-    NodeState state = foragerInstance.Tick(bb);
+    if (Forager().GetState(0).IsCompleted())
+    {
+        VirtualMachine.Reset(Forager(), bb);
+    }
+
+    NodeState state = VirtualMachine.Tick(Forager(), bb);
 
     Console.WriteLine(
         $"  {label,-14} stamina {energy:0.0} -> {state,-7} {intent.Kind} "
@@ -130,7 +147,12 @@ for (int step = 1; step <= 5; step++)
         senses: in world,
         stamina: in stamina);
 
-    foragerInstance.Tick(bb);
+    if (Forager().GetState(0).IsCompleted())
+    {
+        VirtualMachine.Reset(Forager(), bb);
+    }
+
+    VirtualMachine.Tick(Forager(), bb);
 
     // The caller owns the component, so the caller applies the decision.
     float before = position.X;

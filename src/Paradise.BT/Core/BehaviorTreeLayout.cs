@@ -11,7 +11,7 @@ namespace Paradise.BT;
 public sealed class BehaviorTreeLayout : IDisposable
 {
     /// <summary>Alignment of the blob and of each array within it. Individual nodes pack at
-    /// their own natural alignment (see <see cref="IRuntimeNodeFactory.DataAlignment"/>), capped
+    /// their own natural alignment (see <see cref="INodeBuilder.DataAlignment"/>), capped
     /// by this.</summary>
     private const int DataAlignment = 16;
 
@@ -22,10 +22,15 @@ public sealed class BehaviorTreeLayout : IDisposable
         _blob = blob;
     }
 
-    public BehaviorTreeInstance CreateInstance() => new(this);
     public ref LayoutBlob Blob => ref _blob.Value;
 
-    internal static BehaviorTreeLayout Build(ReadOnlySpan<BehaviorTreeNode> compiledNodes)
+    public void Initialize(Span<NodeState> states, Span<byte> runtime)
+    {
+        states[..Blob.Count].Clear();
+        Blob.DefaultData.ToSpan().CopyTo(runtime);
+    }
+
+    internal static BehaviorTreeLayout Build(ReadOnlySpan<INodeBuilder> compiledNodes)
     {
         int count = compiledNodes.Length;
         var typeIds = new int[count];
@@ -39,11 +44,11 @@ public sealed class BehaviorTreeLayout : IDisposable
         int size = 0;
         for (int i = 0; i < count; i++)
         {
-            IRuntimeNodeFactory factory = compiledNodes[i].Factory;
-            if (!NodeTypeRegistry.IsRegistered(factory.NodeGuid))
+            INodeBuilder builder = compiledNodes[i];
+            if (!NodeTypeRegistry.IsRegistered(builder.NodeGuid))
             {
                 throw new InvalidOperationException(
-                    $"Node type '{factory.NodeType.FullName}' (GUID '{factory.NodeGuid}') "
+                    $"Node type '{builder.NodeType.FullName}' (GUID '{builder.NodeGuid}') "
                     + "is not registered. Node types register themselves through the module "
                     + "initializer the BT generator emits, so this usually means the declaring "
                     + "project does not reference Paradise.BT.Generators as an analyzer, or the "
@@ -51,17 +56,17 @@ public sealed class BehaviorTreeLayout : IDisposable
                     + "explicitly for such a node.");
             }
 
-            if (!tableIndexByGuid.TryGetValue(factory.NodeGuid, out int tableIndex))
+            if (!tableIndexByGuid.TryGetValue(builder.NodeGuid, out int tableIndex))
             {
                 tableIndex = guidTable.Count;
-                tableIndexByGuid[factory.NodeGuid] = tableIndex;
-                guidTable.Add(factory.NodeGuid);
+                tableIndexByGuid[builder.NodeGuid] = tableIndex;
+                guidTable.Add(builder.NodeGuid);
             }
 
             typeIds[i] = tableIndex;
-            size = Align(size, Math.Min(factory.DataAlignment, DataAlignment));
+            size = Align(size, Math.Min(builder.DataAlignment, DataAlignment));
             offsets[i] = size;
-            size += factory.DataSize;
+            size += builder.DataSize;
         }
 
         offsets[count] = size;
@@ -70,25 +75,24 @@ public sealed class BehaviorTreeLayout : IDisposable
         var defaultData = new byte[size];
         for (int i = 0; i < count; i++)
         {
-            BehaviorTreeNode node = compiledNodes[i];
+            INodeBuilder node = compiledNodes[i];
             endIndices[i] = node.EndIndex;
-            node.Factory.WriteDefaultData(
-                defaultData.AsSpan(offsets[i], node.Factory.DataSize));
+            node.WriteDefaultData(defaultData.AsSpan(offsets[i], node.DataSize));
         }
 
         // Aligning every array to DataAlignment aligns the START of the one that follows it, which
         // is how DefaultData ends up on a 16-byte boundary within the blob. Per-node offsets then
         // respect each node's own alignment relative to that start, so a node's data is aligned in
         // the shared block and identically placed in whatever buffer an instance copies it into.
-        var builder = new StructBuilder<LayoutBlob>();
-        builder.SetArray(ref builder.Value.EndIndices, endIndices, DataAlignment);
-        builder.SetArray(ref builder.Value.Types, typeIds, DataAlignment);
-        builder.SetArray(ref builder.Value.Guids, guidTable, DataAlignment);
-        builder.SetArray(ref builder.Value.Offsets, offsets, DataAlignment);
-        builder.SetArray(ref builder.Value.DefaultData, defaultData, DataAlignment);
+        var blobBuilder = new StructBuilder<LayoutBlob>();
+        blobBuilder.SetArray(ref blobBuilder.Value.EndIndices, endIndices, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Types, typeIds, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Guids, guidTable, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Offsets, offsets, DataAlignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.DefaultData, defaultData, DataAlignment);
 
         return new BehaviorTreeLayout(
-            builder.CreateNativeBlobAssetReference(DataAlignment));
+            blobBuilder.CreateNativeBlobAssetReference(DataAlignment));
     }
 
     private static int Align(int value, int alignment) =>

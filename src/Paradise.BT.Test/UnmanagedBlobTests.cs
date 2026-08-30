@@ -32,7 +32,9 @@ public sealed class UnmanagedBlobTests
             _runtimeSize = Math.Max(1, layout.Blob.DataSize);
             _states = (NodeState*)NativeMemory.Alloc((nuint)(sizeof(NodeState) * _nodeCount));
             _runtime = (byte*)NativeMemory.Alloc((nuint)_runtimeSize);
-            BehaviorTreeRef.Initialize(ref _layout.Blob, States, Runtime);
+            BehaviorTreeRef blob = Blob;
+            blob.ResetStates(0, _nodeCount);
+            blob.ResetRuntimeData(0, _nodeCount);
         }
 
         /// <summary>Native memory, so the blob may take an address into it.</summary>
@@ -66,8 +68,8 @@ public sealed class UnmanagedBlobTests
             VirtualMachine.Reset(blob, bb);
         }
 
-        /// <summary>Mirrors <see cref="BehaviorTreeInstance.Tick{T}"/>, auto-reset included, so the
-        /// comparison is against the same policy.</summary>
+        /// <summary>Auto-reset included, so the comparison is against the same policy as
+        /// <see cref="TestInstance{T}"/>.</summary>
         public NodeState Tick(ref Blackboard bb)
         {
             BehaviorTreeRef blob = Blob;

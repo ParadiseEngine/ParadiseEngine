@@ -12,7 +12,7 @@ public class CompositeNode<T> : BTreeNode<T> where T : struct, INode
 
     internal sealed override int ChildCount => _children.Length;
 
-    internal sealed override void CompileChildren(List<BehaviorTreeNode> nodes)
+    internal sealed override void CompileChildren(List<INodeBuilder> nodes)
     {
         foreach (BTreeNode child in _children)
         {
