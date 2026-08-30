@@ -21,7 +21,7 @@ public sealed class GenericBlackboardTests
     [Test]
     public async Task Generic_CreateInstance_Exposes_Custom_Blackboard_By_Ref()
     {
-        var tree = BehaviorTreeBuilder.Build(new Success());
+        var tree = BTreeNode.Build(new Success());
         var instance = tree.CreateInstance(new CountingBlackboard());
 
         // Caller writes persist through the ref exposed by the instance.
@@ -38,19 +38,16 @@ public sealed class GenericBlackboardTests
     [Test]
     public async Task Generic_CreateInstance_Runs_Tree_To_Completion_With_Custom_Blackboard()
     {
-        var tree = BehaviorTreeBuilder.Build(
+        var tree = BTreeNode.Build(
             new Sequence(
-                new Delay(0.5f),
+                new Repeat(2, new Success()),
                 new Success()));
 
         var instance = tree.CreateInstance(new CountingBlackboard());
 
-        // Caller writes delta time before each tick — the library does not.
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
+        // Tick 1: Repeat has one completion of two -> Running. Tick 2: Repeat completes and the
+        // sequence advances through its last child in the same tick -> Success.
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.2f));
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 }

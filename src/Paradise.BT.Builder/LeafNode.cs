@@ -1,11 +1,11 @@
 namespace Paradise.BT.Builder;
 
-public class LeafNode<T> : BTreeNode where T : struct, INodeData
+public class LeafNode<T>(T data) : BTreeNode<T>(data)
+    where T : struct, INode
 {
-    private readonly T _data;
+    internal sealed override int ChildCount => 0;
 
-    public LeafNode(T data) => _data = data;
-
-    protected internal override BehaviorNodeDefinition ToDefinition()
-        => BehaviorNodes.Node(_data);
+    internal sealed override void CompileChildren(List<BehaviorTreeNode> nodes)
+    {
+    }
 }

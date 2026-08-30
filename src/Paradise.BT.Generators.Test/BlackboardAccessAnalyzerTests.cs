@@ -23,7 +23,7 @@ public class BlackboardAccessAnalyzerTests
         {
             public enum NodeState { Success, Failure, Running }
 
-            public interface INodeBlob { }
+            public interface IBehaviorTree { }
 
             public interface IBlackboard
             {
@@ -32,10 +32,10 @@ public class BlackboardAccessAnalyzerTests
                 void SetData<T>(T value) where T : struct;
             }
 
-            public interface INodeData
+            public interface INode
             {
-                NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, INodeBlob
+                NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, IBehaviorTree
                     where TBlackboard : struct, IBlackboard;
             }
 
@@ -65,11 +65,11 @@ public class BlackboardAccessAnalyzerTests
                 // Declares SOMETHING, which is what opts a node into the strict reading. A node
                 // declaring nothing at all is read off its body by the generator instead.
                 [Paradise.BT.Reads<Decision>]
-                public struct PeekNode : Paradise.BT.INodeData
+                public struct PeekNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
                         _ = bb.GetData<Decision>().Strike;
@@ -97,11 +97,11 @@ public class BlackboardAccessAnalyzerTests
             namespace Game
             {
                 [Paradise.BT.Reads<Decision>]
-                public struct StrikeNode : Paradise.BT.INodeData
+                public struct StrikeNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
                         bb.SetData(bb.GetData<Decision>() with { Strike = true });
@@ -128,11 +128,11 @@ public class BlackboardAccessAnalyzerTests
             {
                 [Paradise.BT.Reads<Pose>]
                 [Paradise.BT.Writes<Decision>]
-                public struct SeekNode : Paradise.BT.INodeData
+                public struct SeekNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
                         _ = bb.GetData<Pose>().X;
@@ -154,15 +154,15 @@ public class BlackboardAccessAnalyzerTests
         var test = Test("""
             namespace Game
             {
-                public struct DelegatingNode : Paradise.BT.INodeData
+                public struct DelegatingNode : Paradise.BT.INode
                 {
                     private static void Helper<TBlackboard>(TBlackboard bb)
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                         => bb.SetData(default(Decision));
 
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree
                         where TBlackboard : struct, Paradise.BT.IBlackboard
                     {
                         Helper(bb);

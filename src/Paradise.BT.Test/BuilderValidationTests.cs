@@ -1,23 +1,25 @@
 namespace Paradise.BT.Test;
 
+using Paradise.BT.Builder;
 using Paradise.BT.Nodes;
 
 /// <summary>
-/// The generated builders make a miswired tree hard to write; raw
-/// <see cref="BehaviorNodes.Node{T}"/> composition does not, and traversal is index math that
-/// SILENTLY ignores an impossible child. Compilation is where the claim a node's
-/// <c>[Builder]</c> attribute makes about child count gets checked.
+/// The generated builders make a miswired tree hard to write; the raw generic wrappers
+/// (<see cref="LeafNode{T}"/> and friends) do not — nothing stops a leaf's data from being
+/// wrapped in a decorator builder — and traversal is index math that SILENTLY ignores an
+/// impossible child. Compilation is where the builder's arity gets checked against the claim
+/// the node's <c>[Builder]</c> attribute makes.
 /// </summary>
 public sealed class BuilderValidationTests
 {
     [Test]
     public async Task A_Leaf_With_A_Child_Is_Refused()
     {
-        BehaviorNodeDefinition tree = BehaviorNodes.Node(
+        BTreeNode tree = new DecoratorNode<SuccessNode>(
             new SuccessNode(),
-            BehaviorNodes.Node(new SuccessNode()));
+            new LeafNode<SuccessNode>(new SuccessNode()));
 
-        await Assert.That(() => BehaviorTreeBuilder.Build(tree))
+        await Assert.That(() => tree.Build())
             .Throws<InvalidOperationException>()
             .WithMessageContaining(nameof(SuccessNode));
     }
@@ -25,9 +27,9 @@ public sealed class BuilderValidationTests
     [Test]
     public async Task A_Decorator_Without_A_Child_Is_Refused()
     {
-        BehaviorNodeDefinition tree = BehaviorNodes.Node(new InverterNode());
+        BTreeNode tree = new LeafNode<InverterNode>(new InverterNode());
 
-        await Assert.That(() => BehaviorTreeBuilder.Build(tree))
+        await Assert.That(() => tree.Build())
             .Throws<InvalidOperationException>()
             .WithMessageContaining(nameof(InverterNode));
     }
@@ -35,12 +37,12 @@ public sealed class BuilderValidationTests
     [Test]
     public async Task A_Decorator_With_Two_Children_Is_Refused()
     {
-        BehaviorNodeDefinition tree = BehaviorNodes.Node(
+        BTreeNode tree = new CompositeNode<InverterNode>(
             new InverterNode(),
-            BehaviorNodes.Node(new SuccessNode()),
-            BehaviorNodes.Node(new SuccessNode()));
+            new LeafNode<SuccessNode>(new SuccessNode()),
+            new LeafNode<SuccessNode>(new SuccessNode()));
 
-        await Assert.That(() => BehaviorTreeBuilder.Build(tree))
+        await Assert.That(() => tree.Build())
             .Throws<InvalidOperationException>()
             .WithMessageContaining(nameof(InverterNode));
     }
@@ -49,20 +51,22 @@ public sealed class BuilderValidationTests
     [Test]
     public async Task A_Composite_With_No_Children_Is_Allowed()
     {
-        BehaviorNodeDefinition tree = BehaviorNodes.Node(new SequenceNode());
+        BTreeNode tree = new CompositeNode<SequenceNode>(new SequenceNode());
 
-        await Assert.That(() => BehaviorTreeBuilder.Build(tree)).ThrowsNothing();
+        await Assert.That(() => tree.Build()).ThrowsNothing();
     }
 
-    /// <summary>A node claiming nothing is checked against nothing: cardinality comes from the
-    /// node's own <c>[Builder]</c> attribute, and <see cref="ProbeNode"/> carries none.</summary>
+    /// <summary>A node claiming nothing claims Leaf: cardinality comes from the node's own
+    /// <c>[Builder]</c> attribute, and <see cref="ProbeNode"/> carries none.</summary>
     [Test]
-    public async Task A_Node_Without_A_Builder_Attribute_Is_Not_Checked()
+    public async Task A_Node_Without_A_Builder_Attribute_Defaults_To_Leaf()
     {
-        BehaviorNodeDefinition tree = BehaviorNodes.Node(
+        BTreeNode tree = new DecoratorNode<ProbeNode>(
             new ProbeNode { Result = NodeState.Success },
-            BehaviorNodes.Node(new SuccessNode()));
+            new LeafNode<SuccessNode>(new SuccessNode()));
 
-        await Assert.That(() => BehaviorTreeBuilder.Build(tree)).ThrowsNothing();
+        await Assert.That(() => tree.Build())
+            .Throws<InvalidOperationException>()
+            .WithMessageContaining(nameof(ProbeNode));
     }
 }

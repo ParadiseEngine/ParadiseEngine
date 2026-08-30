@@ -9,54 +9,53 @@ namespace Paradise.BT.Test;
 /// same layout, and that the defaults are still aligned. Everything about how a tree BEHAVES over
 /// this blob is covered by <see cref="UnmanagedBlobTests"/>.
 ///
-/// Values are read through a <c>NodeBlob*</c> and copied out before any assertion: the blob's
+/// Values are read through a <c>BehaviorTreeLayout.LayoutBlob*</c> and copied out before any assertion: the blob's
 /// arrays resolve against their own address, so a copy of the struct would read whatever follows
 /// the copy, and a pointer cannot live across an <c>await</c>.
 /// </summary>
 public sealed class NodeBlobTests
 {
-    private static BehaviorNodeDefinition SampleTree() =>
+    private static BTreeNode SampleTree() =>
         new Selector(
             new Sequence(
                 new Success(),
-                new Delay(0.5f),
+                new Repeat(2, new Success()),
                 new Success()),
             new Inverter(new Failure()));
 
-    /// <summary>Read out of the blob in one go, so no pointer outlives this call.</summary>
-    private static unsafe (int Count, int[] Ends, Type[] Types, int[] Offsets, int DefaultLength, int FormatVersion, nint DefaultAddress)
+    /// <summary>Read out of the blob in one go, so no ref outlives this call.</summary>
+    private static unsafe (int Count, int[] Ends, Type[] Types, int[] Offsets, int DefaultLength, nint DefaultAddress)
         Read(BehaviorTreeLayout layout)
     {
-        NodeBlob* blob = layout.Handle.Blob;
-        int count = blob->Count;
+        ref var blob = ref layout.Blob;
+        int count = blob.Count;
         var ends = new int[count];
         var types = new Type[count];
         var offsets = new int[count + 1];
 
         for (int i = 0; i < count; i++)
         {
-            ends[i] = blob->EndIndices[i];
-            types[i] = NodeTypeRegistry.TypeOf(blob->TypeGuid(i));
-            offsets[i] = blob->Offsets[i];
+            ends[i] = blob.EndIndices[i];
+            types[i] = NodeTypeRegistry.Invoker(blob.TypeGuid(i)).NodeType;
+            offsets[i] = blob.Offsets[i];
         }
 
-        offsets[count] = blob->Offsets[count];
+        offsets[count] = blob.Offsets[count];
 
-        return (count, ends, types, offsets, blob->DefaultData.Length, blob->FormatVersion,
-            (nint)blob->DefaultData.UnsafePtr);
+        return (count, ends, types, offsets, blob.DefaultData.Length,
+            (nint)blob.DefaultData.UnsafePtr);
     }
 
     [Test]
     public async Task Blob_Describes_The_Same_Tree()
     {
-        BehaviorTree tree = BehaviorTreeBuilder.Build(SampleTree());
-        using BehaviorTreeLayout layout = BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(SampleTree()));
+        using BehaviorTreeLayout tree = BTreeNode.Build(SampleTree());
+        using BehaviorTreeLayout layout = BTreeNode.Build(SampleTree());
         var blob = Read(layout);
 
-        await Assert.That(blob.FormatVersion).IsEqualTo(NodeBlob.CurrentFormatVersion);
-        await Assert.That(blob.Count).IsEqualTo(tree.Count);
+        await Assert.That(blob.Count).IsEqualTo(tree.Blob.Count);
 
-        for (int i = 0; i < tree.Count; i++)
+        for (int i = 0; i < tree.Blob.Count; i++)
         {
             await Assert.That(blob.Ends[i]).IsEqualTo(tree.GetEndIndex(i));
             await Assert.That(blob.Types[i]).IsEqualTo(tree.GetNodeType(i));
@@ -69,7 +68,7 @@ public sealed class NodeBlobTests
     [Test]
     public async Task Offsets_Cover_The_Runtime_Data_Exactly()
     {
-        using BehaviorTreeLayout layout = BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(SampleTree()));
+        using BehaviorTreeLayout layout = BTreeNode.Build(SampleTree());
         var blob = Read(layout);
 
         await Assert.That(blob.Offsets[0]).IsEqualTo(0);
@@ -84,7 +83,7 @@ public sealed class NodeBlobTests
         }
 
         await Assert.That(blob.Offsets[blob.Count]).IsEqualTo(blob.DefaultLength);
-        await Assert.That(blob.DefaultLength).IsEqualTo(layout.RuntimeDataSize);
+        await Assert.That(blob.DefaultLength).IsEqualTo(layout.Blob.DataSize);
     }
 
     /// <summary>The offsets above are only worth their alignment if the block they index is itself
@@ -93,7 +92,7 @@ public sealed class NodeBlobTests
     [Test]
     public async Task Default_Data_Block_Is_Aligned()
     {
-        using BehaviorTreeLayout layout = BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(SampleTree()));
+        using BehaviorTreeLayout layout = BTreeNode.Build(SampleTree());
         var blob = Read(layout);
 
         await Assert.That(blob.DefaultAddress % 16).IsEqualTo((nint)0);
@@ -123,12 +122,4 @@ public sealed class NodeBlobTests
         }
     }
 
-    [Test]
-    public async Task A_Disposed_Layout_Hands_Out_No_Handle()
-    {
-        BehaviorTreeLayout layout = BehaviorTreeLayout.Build(BehaviorTreeBuilder.Build(SampleTree()));
-        layout.Dispose();
-
-        await Assert.That(() => layout.Handle).Throws<ObjectDisposedException>();
-    }
 }

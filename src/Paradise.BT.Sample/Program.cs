@@ -3,6 +3,7 @@ using Paradise.BT.Nodes;
 using Paradise.BT.Builder;
 using Paradise.BT.Nodes.Builder;
 using Paradise.BT.Sample;
+using Paradise.BT.Sample.Builder;
 
 // ---------------------------------------------------------------------------------------------
 // 1. The builder DSL, over a hand-written blackboard.
@@ -13,8 +14,8 @@ blackboard.SetData(new HasTargetData { Value = true });
 blackboard.SetData(new ShotsFiredData());
 
 // Every leaf is an unmanaged struct declared in SampleNodes.cs; the builder classes around them
-// are generated from [Builder].
-var tree = new Selector(
+// are generated from [Builder]. Build() compiles straight to the shared layout.
+using var tree = new Selector(
     new Sequence(
         new HasTarget(),
         new Repeat(
@@ -25,12 +26,15 @@ var tree = new Selector(
     new Idle()
 ).Build();
 
-BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(blackboard);
+// The instance stores no blackboard — it is passed per tick, the shape that also fits the
+// generated ref-struct blackboards below.
+BehaviorTreeInstance instance = tree.CreateInstance();
+instance.Reset(blackboard);
 
 for (int i = 0; i < 10; i++)
 {
-    instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.25f));
-    NodeState status = instance.Tick();
+    blackboard.SetData(new TickDeltaTime(0.25f));
+    NodeState status = instance.Tick(blackboard);
     Console.WriteLine($"Tick {i + 1}: {status}");
 }
 
@@ -48,13 +52,13 @@ for (int i = 0; i < 10; i++)
 Console.WriteLine();
 Console.WriteLine("Forager — the generated blackboard, over a row:");
 
-BehaviorTreeLayout layout = BehaviorTrees.CompileLayout<ForagerTree>();
+BehaviorTreeLayout layout = BehaviorTrees.Compile<ForagerTree>();
 
 // The instance owns the two per-agent buffers; the blackboard is bound per tick, because a
 // generated blackboard is a ref struct no field can hold.
 BehaviorTreeInstance foragerInstance = layout.CreateInstance();
 
-Console.WriteLine($"  {layout.NodeCount} nodes, {layout.RuntimeDataSize} bytes of node data.");
+Console.WriteLine($"  {layout.Blob.Count} nodes, {layout.Blob.DataSize} bytes of node data.");
 
 // One forager, walking a line. In a game these three come off a chunk; here they are locals,
 // because the generated Bind takes components rather than a query.
@@ -70,7 +74,7 @@ var stamina = new Stamina { Value = 1f };
     ("nothing doing", new Senses(), 0.5f),
 ];
 
-var deltaTime = new BehaviorTreeTickDeltaTime(0.5f);
+var deltaTime = new TickDeltaTime(0.5f);
 
 foreach ((string label, Senses senses, float energy) in situations)
 {
@@ -80,7 +84,7 @@ foreach ((string label, Senses senses, float energy) in situations)
     var intent = default(Intent);
     var decisions = default(Decisions);
     var bb = ForagerTreeBlackboard.Bind(
-        behaviorTreeTickDeltaTime: in deltaTime,
+        tickDeltaTime: in deltaTime,
         decisions: ref decisions,
         intent: ref intent,
         position: in position,
@@ -119,7 +123,7 @@ for (int step = 1; step <= 5; step++)
     var intent = default(Intent);
     var decisions = default(Decisions);
     var bb = ForagerTreeBlackboard.Bind(
-        behaviorTreeTickDeltaTime: in deltaTime,
+        tickDeltaTime: in deltaTime,
         decisions: ref decisions,
         intent: ref intent,
         position: in position,
@@ -142,35 +146,6 @@ for (int step = 1; step <= 5; step++)
     Console.WriteLine(
         $"  step {step}: {intent.Kind,-6} goal x={intent.GoalX:0.0}"
         + $" -> moved {before:0.0} to {position.X:0.0}, stamina now {stamina.Value:0.0}");
-}
-
-// ---------------------------------------------------------------------------------------------
-// 4. The layout IS the asset: a byte copy of the compiled blob, loaded back with no managed tree
-//    in between. Node identity crosses the boundary as a GUID table; type ids are re-resolved on
-//    load.
-// ---------------------------------------------------------------------------------------------
-
-Console.WriteLine();
-Console.WriteLine("Round-tripping the compiled layout through bytes:");
-
-byte[] shipped = layout.SerializeToBytes();
-using (BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(shipped))
-{
-    BehaviorTreeInstance loadedInstance = loaded.CreateInstance();
-
-    var intent = default(Intent);
-    var decisions = default(Decisions);
-    var senses = new Senses { FoodVisible = true, FoodX = 4f };
-    NodeState state = loadedInstance.Tick(ForagerTreeBlackboard.Bind(
-        behaviorTreeTickDeltaTime: in deltaTime,
-        decisions: ref decisions,
-        intent: ref intent,
-        position: in position,
-        senses: in senses,
-        stamina: in stamina));
-
-    Console.WriteLine(
-        $"  {shipped.Length} bytes -> {loaded.NodeCount} nodes -> {state}, intent {intent.Kind}");
 }
 
 layout.Dispose();

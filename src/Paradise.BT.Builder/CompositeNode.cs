@@ -1,29 +1,22 @@
 namespace Paradise.BT.Builder;
 
-public class CompositeNode<T> : BTreeNode where T : struct, INodeData
+public class CompositeNode<T> : BTreeNode<T> where T : struct, INode
 {
-    private readonly T _data;
     private readonly BTreeNode[] _children;
 
-    /// <summary>
-    /// A span rather than an array, for ownership rather than allocation — the count is the same
-    /// either way. The array form stored the CALLER's array, so writing to it afterwards rewired
-    /// an already-built tree. A span cannot be retained, so the copy is forced.
-    /// </summary>
+    /// <summary>A span rather than an array so the copy is forced — a stored caller array could
+    /// be rewired after the fact.</summary>
     public CompositeNode(T data, params ReadOnlySpan<BTreeNode> children)
-    {
-        _data = data;
-        _children = children.ToArray();
-    }
+        : base(data)
+        => _children = children.ToArray();
 
-    protected internal override BehaviorNodeDefinition ToDefinition()
+    internal sealed override int ChildCount => _children.Length;
+
+    internal sealed override void CompileChildren(List<BehaviorTreeNode> nodes)
     {
-        var childDefs = new BehaviorNodeDefinition[_children.Length];
-        for (int i = 0; i < _children.Length; i++)
+        foreach (BTreeNode child in _children)
         {
-            childDefs[i] = _children[i].ToDefinition();
+            child.Compile(nodes);
         }
-
-        return BehaviorNodes.Node(_data, childDefs);
     }
 }

@@ -22,14 +22,14 @@ public sealed class BTreeNodeGeneratorTests
         {
             public enum NodeState { Success, Failure, Running }
 
-            public interface INodeBlob { }
+            public interface IBehaviorTree { }
 
             public interface IBlackboard { }
 
-            public interface INodeData
+            public interface INode
             {
-                NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, INodeBlob, allows ref struct
+                NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, IBehaviorTree, allows ref struct
                     where TBlackboard : struct, IBlackboard, allows ref struct;
             }
 
@@ -44,7 +44,7 @@ public sealed class BTreeNodeGeneratorTests
 
             public static class NodeTypeRegistry
             {
-                public static int Register<T>() where T : unmanaged, INodeData => 0;
+                public static int Register<T>() where T : unmanaged, INode => 0;
             }
 
             [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method)]
@@ -63,17 +63,17 @@ public sealed class BTreeNodeGeneratorTests
         {
             public abstract class BTreeNode { }
 
-            public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+            public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INode
             {
                 public LeafNode(T data) { }
             }
 
-            public class DecoratorNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+            public class DecoratorNode<T> : BTreeNode where T : struct, Paradise.BT.INode
             {
                 public DecoratorNode(T data, BTreeNode child) { }
             }
 
-            public class CompositeNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+            public class CompositeNode<T> : BTreeNode where T : struct, Paradise.BT.INode
             {
                 public CompositeNode(T data, params ReadOnlySpan<BTreeNode> children) { }
             }
@@ -89,14 +89,14 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("3E1A2B3C-4D5E-4F60-8172-93A4B5C6D7E8")]
             [Paradise.BT.Builder("Weighted", Paradise.BT.NodeCardinality.Composite)]
-            public struct WeightedSelectorNode : Paradise.BT.INodeData
+            public struct WeightedSelectorNode : Paradise.BT.INode
             {
                 public int Seed;
                 public float Bias;
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -123,11 +123,11 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("A1B2C3D4-E5F6-4708-9A0B-1C2D3E4F5A6B")]
             [Paradise.BT.Builder(Paradise.BT.NodeCardinality.Composite)]
-            public struct AllNode : Paradise.BT.INodeData
+            public struct AllNode : Paradise.BT.INode
             {
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -147,7 +147,7 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("5F0A1B2C-3D4E-4F50-A162-73B4C5D6E7F8")]
             [Paradise.BT.Builder]
-            public struct AimNode : Paradise.BT.INodeData
+            public struct AimNode : Paradise.BT.INode
             {
                 public float Speed;
                 public int Retries;
@@ -160,9 +160,9 @@ public sealed class BTreeNodeGeneratorTests
                     _progress = 0f;
                 }
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -188,7 +188,7 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("6A1B2C3D-4E5F-4061-8273-94A5B6C7D8E9")]
             [Paradise.BT.Builder(Paradise.BT.NodeCardinality.Decorator)]
-            public struct RetryNode : Paradise.BT.INodeData
+            public struct RetryNode : Paradise.BT.INode
             {
                 public int Times;
                 public Paradise.BT.NodeState Pass;
@@ -199,9 +199,9 @@ public sealed class BTreeNodeGeneratorTests
                     Pass = pass;
                 }
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -228,15 +228,15 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("9D4E5F60-7182-4394-A5B6-C7D8E9F0A1B2")]
             [Paradise.BT.Builder]
-            public struct DashNode(float speed, int charges = 2) : Paradise.BT.INodeData
+            public struct DashNode(float speed, int charges = 2) : Paradise.BT.INode
             {
                 public float Speed = speed;
                 public int Charges = charges;
                 private float _cooldown = 0f;
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -259,11 +259,11 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("AE5F6071-8293-44A5-B6C7-D8E9F0A1B2C3")]
             [Paradise.BT.Builder(Paradise.BT.NodeCardinality.Decorator)]
-            public struct CooldownNode(float seconds) : Paradise.BT.INodeData
+            public struct CooldownNode(float seconds) : Paradise.BT.INode
             {
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                 {
                     seconds -= 0.1f; // captured parameter is mutable node state
@@ -290,11 +290,11 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("BF607182-93A4-45B6-C7D8-E9F0A1B2C3D4")]
             [Paradise.BT.Builder]
-            public record struct PatrolNode(float Radius, int Waypoints = 4) : Paradise.BT.INodeData
+            public record struct PatrolNode(float Radius, int Waypoints = 4) : Paradise.BT.INode
             {
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -315,11 +315,11 @@ public sealed class BTreeNodeGeneratorTests
         const string node = """
             [System.Runtime.InteropServices.Guid("{0}")]
             [Paradise.BT.Builder]
-            public struct DashNode : Paradise.BT.INodeData
+            public struct DashNode : Paradise.BT.INode
             {{
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }}
@@ -348,16 +348,16 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("7B2C3D4E-5F60-4172-8394-A5B6C7D8E9F0")]
             [Paradise.BT.Builder]
-            public struct TornNode : Paradise.BT.INodeData
+            public struct TornNode : Paradise.BT.INode
             {
                 public int A;
 
                 public TornNode(int a) { A = a; }
                 public TornNode(float a) { A = (int)a; }
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }
@@ -376,16 +376,16 @@ public sealed class BTreeNodeGeneratorTests
 
             [System.Runtime.InteropServices.Guid("8C3D4E5F-6071-4283-94A5-B6C7D8E9F0A1")]
             [Paradise.BT.Builder]
-            public struct LeakyNode : Paradise.BT.INodeData
+            public struct LeakyNode : Paradise.BT.INode
             {
                 public float Speed;
                 public float Elapsed; // runtime state, but public and not a constructor parameter
 
                 public LeakyNode(float speed) { Speed = speed; Elapsed = 0f; }
 
-                public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                    int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                    int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                     where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     => Paradise.BT.NodeState.Success;
             }

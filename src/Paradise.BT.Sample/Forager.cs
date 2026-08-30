@@ -73,13 +73,13 @@ public struct Decisions
 /// <summary>Reads two things at once, which is the case a single-access node never covers.</summary>
 [Guid("A0000000-0000-4000-8000-000000000001")]
 [Builder]
-public struct ThreatNearNode(float panicStamina) : INodeData
+public struct ThreatNearNode(float panicStamina) : INode
 {
     public float PanicStamina = panicStamina;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => (bb.GetData<Senses>().ThreatNear && bb.GetData<Stamina>().Value > PanicStamina)
             .ToNodeState();
@@ -88,11 +88,11 @@ public struct ThreatNearNode(float panicStamina) : INodeData
 /// <summary>The second reader of <see cref="Senses"/>: one field in the blackboard, two nodes.</summary>
 [Guid("A0000000-0000-4000-8000-000000000002")]
 [Builder]
-public struct FoodVisibleNode : INodeData
+public struct FoodVisibleNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<Senses>().FoodVisible.ToNodeState();
 }
@@ -100,13 +100,13 @@ public struct FoodVisibleNode : INodeData
 /// <summary>The second reader of <see cref="Stamina"/>: a pure condition, writing nothing.</summary>
 [Guid("A0000000-0000-4000-8000-000000000003")]
 [Builder]
-public struct ExhaustedNode(float restBelow) : INodeData
+public struct ExhaustedNode(float restBelow) : INode
 {
     public float RestBelow = restBelow;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => (bb.GetData<Stamina>().Value < RestBelow).ToNodeState();
 }
@@ -120,7 +120,7 @@ public struct ExhaustedNode(float restBelow) : INodeData
 /// </summary>
 [Guid("A0000000-0000-4000-8000-00000000000A")]
 [Builder]
-public struct ForageWorthItNode(float minStamina, float maxDistance, bool requireVisible) : INodeData
+public struct ForageWorthItNode(float minStamina, float maxDistance, bool requireVisible) : INode
 {
     /// <summary>Below this there is no point setting out.</summary>
     public float MinStamina = minStamina;
@@ -132,9 +132,9 @@ public struct ForageWorthItNode(float minStamina, float maxDistance, bool requir
     /// spot.</summary>
     public bool RequireVisible = requireVisible;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         Senses senses = bb.GetData<Senses>();
@@ -153,11 +153,11 @@ public struct ForageWorthItNode(float minStamina, float maxDistance, bool requir
 /// the generator's merge has to keep it a write rather than demote it.</summary>
 [Guid("A0000000-0000-4000-8000-000000000004")]
 [Builder]
-public struct AlreadyDecidedNode : INodeData
+public struct AlreadyDecidedNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => bb.GetData<Intent>().HasGoal.ToNodeState();
 }
@@ -167,13 +167,13 @@ public struct AlreadyDecidedNode : INodeData
 /// <summary>Runs away: reads the pose it is fleeing FROM and writes where to go.</summary>
 [Guid("A0000000-0000-4000-8000-000000000005")]
 [Builder]
-public struct FleeNode(float distance) : INodeData
+public struct FleeNode(float distance) : INode
 {
     public float Distance = distance;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         float here = bb.GetData<Position>().X;
@@ -193,13 +193,13 @@ public struct FleeNode(float distance) : INodeData
 /// <summary>The second reader of <see cref="Position"/> and the second writer of both extras.</summary>
 [Guid("A0000000-0000-4000-8000-000000000006")]
 [Builder]
-public struct SeekFoodNode(float arriveWithin) : INodeData
+public struct SeekFoodNode(float arriveWithin) : INode
 {
     public float ArriveWithin = arriveWithin;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         float food = bb.GetData<Senses>().FoodX;
@@ -219,11 +219,11 @@ public struct SeekFoodNode(float arriveWithin) : INodeData
 /// Selector always concludes something.</summary>
 [Guid("A0000000-0000-4000-8000-000000000007")]
 [Builder]
-public struct RestNode : INodeData
+public struct RestNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         bb.SetData(bb.GetData<Intent>() with
@@ -241,11 +241,11 @@ public struct RestNode : INodeData
 /// one thing.</summary>
 [Guid("A0000000-0000-4000-8000-000000000008")]
 [Builder]
-public struct TallyNode : INodeData
+public struct TallyNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         bb.SetData(bb.GetData<Decisions>() with { Count = bb.GetData<Decisions>().Count + 1 });
@@ -257,11 +257,11 @@ public struct TallyNode : INodeData
 /// field, which is what stops the blackboard growing with the tree.</summary>
 [Guid("A0000000-0000-4000-8000-000000000009")]
 [Builder]
-public struct NoopNode : INodeData
+public struct NoopNode : INode
 {
-    public NodeState Tick<TNodeBlob, TBlackboard>(
-        int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(
+        int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => NodeState.Success;
 }

@@ -14,9 +14,9 @@ with static generics.
 
 | package | what it holds |
 |---|---|
-| `Paradise.BT` | the runtime: node contract, layout, instances, virtual machine, serialization |
+| `Paradise.BT` | the runtime: node contract, layout, instances, virtual machine |
 | `Paradise.BT.Builder` | authoring: `BTreeNode`, `IBehaviorTreeBuilder`, `BehaviorTrees` |
-| `Paradise.BT.Nodes` | the built-in nodes and a reference dictionary `Blackboard` |
+| `Paradise.BT.Nodes` | the built-in nodes |
 | `Paradise.BT.Generators` | source generators + analyzers — **reference as an analyzer from every project that declares node types or trees** |
 | `Paradise.BLOB` | the binary blob primitives the layout is built on (transitive) |
 
@@ -48,7 +48,6 @@ route among many. The built-in composites give the classic semantics:
 | `RepeatForever(breakStates, child)` | `RepeatForeverNode` | re-run the child until a state in `breakStates` |
 | `Inverter(child)` | `InverterNode` | swap `Success` and `Failure` |
 | `Succeeder(child)` | `SucceederNode` | any completion becomes `Success` |
-| `Delay(seconds)` | `DelayTimerNode` | `Running` until the accumulated delta time elapses |
 | `Success()` / `Failure()` / `Running()` | — | constants, for shaping a tree |
 
 Two semantics worth knowing before writing a tree:
@@ -64,17 +63,15 @@ Two semantics worth knowing before writing a tree:
 ## Architecture
 
 ```
-authoring                    compile                        runtime (per agent)
-─────────                    ───────                        ───────────────────
-BTreeNode graph   ──────▶    BehaviorTree     ──────▶       NodeState[ ]  (1 per node)
-(builders, or raw            (flat pre-order array          byte[ ]       (node data)
- BehaviorNodes.Node)          + end indices)                      │
-                                  │                               │ both point into
-                                  ▼                               ▼
-                             BehaviorTreeLayout ◀────── UnmanagedNodeBlob (ref struct view)
-                             one shared native blob:              │
-                             topology · GUID table +           ▼
-                             indices · offsets · defaults   VirtualMachine.Tick
+authoring                        compile                       runtime (per agent)
+─────────                        ───────                       ───────────────────
+BTreeNode graph      ──────▶     BehaviorTreeLayout            NodeState[ ]  (1 per node)
+(generated builders, or          one shared native blob:       byte[ ]       (node data)
+ raw LeafNode<T> et al.)         topology · GUID table +            │ both point into
+                                 offsets · defaults                 ▼
+                                        ▲                      BehaviorTree (ref struct view)
+                                        └──────────────────────────┘
+                                                              VirtualMachine.Tick
 ```
 
 The layout is the tree's shared, immutable half: end indices (node *i*'s subtree is the
@@ -91,7 +88,7 @@ alive while instances tick against it.
 
 ## Writing a node
 
-A node is an unmanaged struct implementing `INodeData`, identified by `[Guid]`. Its **primary
+A node is an unmanaged struct implementing `INode`, identified by `[Guid]`. Its **primary
 constructor is its exposed surface**: `[Builder]` makes the generator emit a builder class
 mirroring those parameters — order and declared defaults included — and everything else in the
 struct is runtime state the builder never shows.
@@ -102,13 +99,13 @@ using System.Runtime.InteropServices;
 
 [Guid("7D4E31B3-0D57-4211-9C1F-91EAB87734E5")]
 [Builder]                                       // emits `Counter`; name defaults to the type minus "Node"
-public struct CounterNode(int threshold) : INodeData
+public struct CounterNode(int threshold) : INode
 {
     public int Threshold = threshold;           // exposed: mirrored by the builder
     private int _count;                         // runtime state: invisible to the builder
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         _count++;                               // persists: a node ticks THROUGH its bytes
@@ -119,7 +116,7 @@ public struct CounterNode(int threshold) : INodeData
 
 - **Field writes persist** across ticks (the node is reinterpreted in place over the instance's
   bytes) and are undone by a reset, which restores the authored value.
-- **`record struct`** works as the one-line form: `record struct Patrol(float Radius) : INodeData`.
+- **`record struct`** works as the one-line form: `record struct Patrol(float Radius) : INode`.
 - **Captured parameters** work too — `struct Cooldown(float seconds)` mutating `seconds` in
   `Tick` is the shortest possible stateful node.
 - **Cardinality** is part of `[Builder]`: `[Builder(NodeCardinality.Decorator)]` gives the
@@ -128,7 +125,7 @@ public struct CounterNode(int threshold) : INodeData
 - **Optional `Reset` hook**: implement `static virtual void Reset<…>` for side effects beyond
   data restoration (it is static — receiverless — so it cannot read the node's own fields).
 - Builder calls passing **two or more values must name them** (`PBT0013`); a single value or a
-  child argument stays positional — `Delay(0.5f)` and `Repeat(3, child)` are fine,
+  child argument stays positional — `Counter(3)` and `Repeat(3, child)` are fine,
   `Forage(0.3f, 6f)` is not.
 
 Registration is automatic: the generator emits one module initializer per assembly. Only a node
@@ -152,24 +149,32 @@ public interface IBlackboard
 
 Two implementations ship, for two situations:
 
-**The reference `Blackboard`** (`Paradise.BT.Nodes`) is a managed dictionary — right for setup
-code, tests, and getting started:
+**A hand-written blackboard** is a handle-shaped struct implementing the three-member
+`IBlackboard` — the library ships no implementation, no clock, and no delta-time type; time, when
+a tree needs it, is caller data read by the caller's own node. A minimal one is a struct holding
+one dictionary reference:
 
 ```csharp
-BehaviorTree tree = new Selector(
-    new Sequence(new Delay(0.5f), new Success()),
+public struct Blackboard : IBlackboard
+{
+    private Dictionary<Type, object>? _data;
+    private Dictionary<Type, object> Data => _data ??= new();
+    public bool HasData<T>() where T : struct => Data.ContainsKey(typeof(T));
+    public T GetData<T>() where T : struct => (T)Data[typeof(T)];
+    public void SetData<T>(T value) where T : struct => Data[typeof(T)] = value;
+}
+
+using BehaviorTreeLayout tree = new Selector(
+    new Sequence(new Repeat(2, new Success()), new Success()),
     new Failure()
 ).Build();
 
+BehaviorTreeInstance instance = tree.CreateInstance();
 var bb = new Blackboard();
-BehaviorTreeInstance<Blackboard> instance = tree.CreateInstance(bb);
-
-instance.Blackboard.SetData(new BehaviorTreeTickDeltaTime(0.25f));
-NodeState state = instance.Tick();   // Running — the delay has 0.25s left
+NodeState state = instance.Tick(bb);   // the blackboard is passed per tick, never stored
 ```
 
-Delta time is always the caller's to supply; the runtime never reads a clock, which is what
-keeps a run reproducible.
+The runtime never reads a clock, which is what keeps a run reproducible.
 
 **The generated per-tree blackboard** is the zero-allocation path. A tree is a type implementing
 `IBehaviorTreeBuilder` (or `IBehaviorTreeBuilder<TArgs>` when built from a config) — that
@@ -185,14 +190,13 @@ public readonly struct PatrolTree : IBehaviorTreeBuilder
     public static BTreeNode Build() =>
         new Sequence(
             new Counter(3),
-            new Delay(0.5f));
+            new Repeat(2, new Success()));
 }
 
 using BehaviorTreeLayout layout = BehaviorTrees.CompileLayout<PatrolTree>();
 BehaviorTreeInstance agent = layout.CreateInstance();
 
-var dt = new BehaviorTreeTickDeltaTime(0.25f);
-NodeState state = agent.Tick(PatrolTreeBlackboard.Bind(behaviorTreeTickDeltaTime: in dt));
+NodeState state = agent.Tick(PatrolTreeBlackboard.Bind(/* one named ref per accessed type */));
 ```
 
 The generator sweeps the tree type for the nodes it composes — through builders, factories
@@ -219,14 +223,14 @@ can reorder them.
 The framework takes no ECS dependency, but its shapes are ECS-shaped on purpose:
 
 - An instance's state is a `NodeState` span plus a byte span — storable inline in a component,
-  copied by any world-snapshot memcpy, pointed at a shared layout through the unmanaged
-  `BehaviorTreeLayoutHandle`.
-- The raw path skips the instance class entirely: build an `UnmanagedNodeBlob` over your own
+  copied by any world-snapshot memcpy, pointed at the shared layout through a stored
+  `LayoutBlob` pointer.
+- The raw path skips the instance class entirely: build a `BehaviorTree` over your own
   memory each tick and call the VM.
 
 ```csharp
-var blob = new UnmanagedNodeBlob(layoutHandle, statesSpan, dataSpan);
-NodeState state = VirtualMachine.Tick(blob, blackboard);
+var tree = new BehaviorTree(ref layout.Blob, statesSpan, dataSpan);
+NodeState state = VirtualMachine.Tick(tree, blackboard);
 ```
 
 - A type marked `[Component]` (or implementing an interface named `Paradise.ECS.IComponent` —
@@ -234,25 +238,6 @@ NodeState state = VirtualMachine.Tick(blob, blackboard);
   and a node that writes one is refused at compile time (`PBT0008`). The pattern that follows:
   a tree writes a *conclusion* — plain structs like an `Intent` — and the owning system applies
   it to the world. That is what lets one tree drive bodies steered any way you like.
-
-## Serialization
-
-The layout blob is the shippable asset — a raw, position-independent byte block:
-
-```csharp
-byte[] bytes = layout.SerializeToBytes();              // or tree.SerializeLayoutToBytes()
-using BehaviorTreeLayout loaded = BehaviorTreeLayout.Deserialize(bytes);
-```
-
-- Node identity crosses as a **GUID table**, one entry per distinct type — the same identity
-  dispatch resolves by, so nothing needs re-mapping on load.
-- Loading **validates before anything ticks**: format version, array bounds, topology sanity,
-  and that every GUID is registered with a compatible size.
-- Nothing process-local reaches the bytes, so the same tree serializes **identically in every
-  process** — layout blobs are content-hashable and diffable.
-
-A second form, `tree.Serialize()` / `BehaviorTreeBlobSerializer.Deserialize(bytes)`, round-trips
-a managed `BehaviorTree` for interchange and re-editing.
 
 ## Diagnostics
 

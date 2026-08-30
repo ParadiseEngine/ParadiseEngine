@@ -29,7 +29,7 @@ public sealed class BindingGeneratorTests
         {
             public enum NodeState { Success, Failure, Running }
 
-            public interface INodeBlob { }
+            public interface IBehaviorTree { }
 
             public interface IBlackboard
             {
@@ -38,10 +38,10 @@ public sealed class BindingGeneratorTests
                 void SetData<T>(T value) where T : struct;
             }
 
-            public interface INodeData
+            public interface INode
             {
-                NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-                    where TNodeBlob : struct, INodeBlob, allows ref struct
+                NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+                    where TBehaviorTree : struct, IBehaviorTree, allows ref struct
                     where TBlackboard : struct, IBlackboard, allows ref struct;
             }
 
@@ -50,12 +50,6 @@ public sealed class BindingGeneratorTests
 
             [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
             public sealed class WritesAttribute<T> : Attribute where T : struct { }
-
-            [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
-            public sealed class OptionalReadsAttribute<T> : Attribute where T : struct { }
-
-            [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
-            public sealed class BuildsAttribute<T> : Attribute where T : struct { }
 
             [AttributeUsage(AttributeTargets.Struct)]
             public sealed class BuilderAttribute : Attribute
@@ -74,7 +68,7 @@ public sealed class BindingGeneratorTests
         {
             public abstract class BTreeNode { }
 
-            public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INodeData
+            public class LeafNode<T> : BTreeNode where T : struct, Paradise.BT.INode
             {
                 public LeafNode() { }
                 public LeafNode(T data) { }
@@ -169,11 +163,11 @@ public sealed class BindingGeneratorTests
                 [Paradise.BT.Reads<WorldTransform>]
                 [Paradise.BT.Reads<ChaseIntent>]
                 [Paradise.BT.Writes<Decision>]
-                public struct SeekNode : Paradise.BT.INodeData
+                public struct SeekNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<Decision>() with { Strike = true });
@@ -220,11 +214,11 @@ public sealed class BindingGeneratorTests
             namespace Game
             {
                 [Paradise.BT.Writes<WorldTransform>]
-                public struct ShoveNode : Paradise.BT.INodeData
+                public struct ShoveNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
                 }
@@ -250,11 +244,11 @@ public sealed class BindingGeneratorTests
             namespace Game
             {
                 [Paradise.BT.Reads<Stunned>]
-                public struct CheckNode : Paradise.BT.INodeData
+                public struct CheckNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
                 }
@@ -273,43 +267,16 @@ public sealed class BindingGeneratorTests
     }
 
     [Test]
-    public async Task Optional_Access_Is_Refused_With_The_Reason()
-    {
-        var (diagnostics, _, _) = Run(Prelude + World + """
-            namespace Game
-            {
-                [Paradise.BT.OptionalReads<Stunned>]
-                public struct MaybeNode : Paradise.BT.INodeData
-                {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
-                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
-                        => Paradise.BT.NodeState.Success;
-                }
-
-                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
-                {
-                    public static Paradise.BT.Builder.BTreeNode Build() { _ = new MaybeNode(); return null!; }
-                }
-            }
-            """);
-
-        await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0006");
-        await Assert.That(diagnostics[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("Segments view");
-    }
-
-    [Test]
     public async Task A_Tree_Whose_Nodes_Declare_Nothing_Emits_An_Empty_Binding()
     {
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
             namespace Game
             {
-                public struct PlainNode : Paradise.BT.INodeData
+                public struct PlainNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
                 }
@@ -339,11 +306,11 @@ public sealed class BindingGeneratorTests
             namespace Game
             {
                 [Paradise.BT.Reads<Decision>]
-                public struct TimerNode : Paradise.BT.INodeData
+                public struct TimerNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => Paradise.BT.NodeState.Success;
                 }
@@ -378,11 +345,11 @@ public sealed class BindingGeneratorTests
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
             namespace Game
             {
-                public struct SilentNode : Paradise.BT.INodeData
+                public struct SilentNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         // Never declared, only performed.
@@ -417,11 +384,11 @@ public sealed class BindingGeneratorTests
         var (diagnostics, _, _) = Run(Prelude + World + """
             namespace Game
             {
-                public struct ShoveNode : Paradise.BT.INodeData
+                public struct ShoveNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<WorldTransform>() with { X = 1f });
@@ -440,48 +407,6 @@ public sealed class BindingGeneratorTests
     }
 
     /// <summary>
-    /// A factory hides the node type from the tree that uses it: a method returning a definition
-    /// says nothing about what it built. The factory declares it instead, and the scan follows it
-    /// there, so no tree has to know which calls conceal a node.
-    /// </summary>
-    [Test]
-    public async Task A_Factory_Declares_What_It_Builds_So_The_Tree_Need_Not()
-    {
-        var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
-            namespace Game
-            {
-                public struct HiddenNode : Paradise.BT.INodeData
-                {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
-                        where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
-                    {
-                        bb.SetData(bb.GetData<Decision>() with { Strike = true });
-                        return Paradise.BT.NodeState.Success;
-                    }
-                }
-
-                public static class Factory
-                {
-                    [Paradise.BT.Builds<HiddenNode>]
-                    public static object Hidden() => new HiddenNode();
-                }
-
-                public struct EnemyTree : Paradise.BT.Builder.IBehaviorTreeBuilder
-                {
-                    // Never names HiddenNode. Only the factory does.
-                    public static Paradise.BT.Builder.BTreeNode Build() { _ = Factory.Hidden(); return null!; }
-                }
-            }
-            """);
-
-        await Assert.That(diagnostics).IsEmpty();
-        await Assert.That(compileErrors).IsEmpty();
-        await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
-    }
-
-    /// <summary>
     /// A tree written with the builder DSL binds too. A builder derives from
     /// <c>CompositeNode&lt;T&gt;</c> and friends, so the node type survives as a generic argument
     /// on the base — the tree's source never says <c>HiddenNode</c>, and the scan finds it anyway.
@@ -495,11 +420,11 @@ public sealed class BindingGeneratorTests
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
             namespace Game
             {
-                public struct HiddenNode : Paradise.BT.INodeData
+                public struct HiddenNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<Decision>() with { Strike = true });
@@ -538,11 +463,11 @@ public sealed class BindingGeneratorTests
             namespace Game
             {
                 [Paradise.BT.Builder]
-                public struct HiddenNode : Paradise.BT.INodeData
+                public struct HiddenNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<Decision>() with { Strike = true });
@@ -576,11 +501,11 @@ public sealed class BindingGeneratorTests
         var (diagnostics, sources, compileErrors) = Run(Prelude + World + """
             namespace Game
             {
-                public struct HiddenNode : Paradise.BT.INodeData
+                public struct HiddenNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<Decision>() with { Strike = true });
@@ -621,11 +546,11 @@ public sealed class BindingGeneratorTests
             {
                 public struct Event { public int Id; }
 
-                public struct BusyNode : Paradise.BT.INodeData
+                public struct BusyNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                     {
                         bb.SetData(bb.GetData<North.Target>());
@@ -705,7 +630,7 @@ public sealed class BindingGeneratorTests
 
                 public static class NodeTypeRegistry
                 {
-                    public static int Register<T>() where T : unmanaged, INodeData => 0;
+                    public static int Register<T>() where T : unmanaged, INode => 0;
                 }
             }
 
@@ -716,11 +641,11 @@ public sealed class BindingGeneratorTests
 
                 [System.Runtime.InteropServices.Guid("C0FFEE00-1234-4ABC-8DEF-000000000001")]
                 [Paradise.BT.Builder]
-                public struct ClockNode : Paradise.BT.INodeData
+                public struct ClockNode : Paradise.BT.INode
                 {
-                    public Paradise.BT.NodeState Tick<TNodeBlob, TBlackboard>(
-                        int index, TNodeBlob blob, TBlackboard bb)
-                        where TNodeBlob : struct, Paradise.BT.INodeBlob, allows ref struct
+                    public Paradise.BT.NodeState Tick<TBehaviorTree, TBlackboard>(
+                        int index, TBehaviorTree blob, TBlackboard bb)
+                        where TBehaviorTree : struct, Paradise.BT.IBehaviorTree, allows ref struct
                         where TBlackboard : struct, Paradise.BT.IBlackboard, allows ref struct
                         => bb.GetData<Pulse>().Ticks > 0
                             ? Paradise.BT.NodeState.Success

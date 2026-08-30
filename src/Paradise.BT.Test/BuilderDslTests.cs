@@ -8,7 +8,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Success_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(new Success());
+        var factoryTree = BTreeNode.Build(new Success());
         var builderTree = new Success().Build();
 
         var factoryInstance = factoryTree.CreateInstance(new Blackboard());
@@ -21,7 +21,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Failure_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(new Failure());
+        var factoryTree = BTreeNode.Build(new Failure());
         var builderTree = new Failure().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Failure);
@@ -30,7 +30,7 @@ public sealed class BuilderDslTests
     [Test]
     public async Task Leaf_Running_Builds_Same_As_Factory()
     {
-        var factoryTree = BehaviorTreeBuilder.Build(new Running());
+        var factoryTree = BTreeNode.Build(new Running());
         var builderTree = new Running().Build();
 
         await Assert.That(builderTree.CreateInstance(new Blackboard()).Tick()).IsEqualTo(NodeState.Running);
@@ -111,7 +111,7 @@ public sealed class BuilderDslTests
     public async Task Nested_Tree_Matches_Factory_Behavior()
     {
         // Build with factory
-        var factoryTree = BehaviorTreeBuilder.Build(
+        var factoryTree = BTreeNode.Build(
             new Selector(
                 new Sequence(
                     new Success(),
@@ -165,12 +165,12 @@ public sealed class BuilderDslTests
     // and so could not live in a blob at all.
     [System.Runtime.InteropServices.Guid("E1234567-ABCD-4321-FEDC-BA9876543210")]
     [Writes<ProbeData>]
-    internal struct CounterNode : INodeData
+    internal struct CounterNode : INode
     {
         public int Slot;
 
-        public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-            where TNodeBlob : struct, INodeBlob, allows ref struct
+        public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+            where TBehaviorTree : struct, IBehaviorTree, allows ref struct
             where TBlackboard : struct, IBlackboard, allows ref struct
         {
             var probe = bb.GetData<ProbeData>();

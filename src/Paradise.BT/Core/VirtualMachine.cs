@@ -3,22 +3,18 @@ using System.Runtime.CompilerServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// VM entrypoints shaped like EntitiesBT, over the one node blob.
-///
-/// There used to be two blobs and a branch: a managed one that boxed a node per node per instance
-/// and dispatched through an interface, and a byte-backed one that looks the node's type up in
-/// <see cref="NodeTypeRegistry"/>. The managed one existed only to host nodes whose data was
-/// managed — the delegate-backed pair — and those are gone, so this is one path over bytes.
+/// Tick and reset over a node blob: each node dispatches by its GUID through
+/// <see cref="NodeTypeRegistry"/>, straight from its bytes.
 /// </summary>
 public static class VirtualMachine
 {
-    public static NodeState Tick<TNodeBlob, TBlackboard>(TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static NodeState Tick<TBehaviorTree, TBlackboard>(TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
         => Tick(0, blob, bb);
 
-    public static NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         NodeState state = NodeTypeRegistry.Invoker(blob.GetTypeGuid(index))
@@ -27,8 +23,8 @@ public static class VirtualMachine
         return state;
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(int fromIndex, TNodeBlob blob, TBlackboard bb, int count = 1)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static void Reset<TBehaviorTree, TBlackboard>(int fromIndex, TBehaviorTree blob, TBlackboard bb, int count = 1)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         blob.ResetStates(fromIndex, count);
@@ -41,8 +37,8 @@ public static class VirtualMachine
         }
     }
 
-    public static void Reset<TNodeBlob, TBlackboard>(TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static void Reset<TBehaviorTree, TBlackboard>(TBehaviorTree blob, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int count = blob.GetEndIndex(0);

@@ -1,20 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paradise.BLOB;
 
 namespace Paradise.BT;
 
-internal readonly struct BehaviorTreeNode
+internal readonly struct BehaviorTreeNode(IRuntimeNodeFactory factory, int endIndex)
 {
-    public BehaviorTreeNode(IRuntimeNodeFactory factory, int endIndex)
-    {
-        Factory = factory ?? throw new ArgumentNullException(nameof(factory));
-        EndIndex = endIndex;
-    }
+    public IRuntimeNodeFactory Factory { get; } = factory ?? throw new ArgumentNullException(nameof(factory));
 
-    public IRuntimeNodeFactory Factory { get; }
-
-    public int EndIndex { get; }
+    public int EndIndex { get; } = endIndex;
 }
 
 internal interface IRuntimeNodeFactory
@@ -23,9 +16,9 @@ internal interface IRuntimeNodeFactory
 
     Guid NodeGuid { get; }
 
-    /// <summary>Child-count claim from the node's <c>[Builder]</c> attribute; null (no
-    /// attribute) skips validation.</summary>
-    NodeCardinality? Cardinality { get; }
+    /// <summary>Child-count claim from the node's <c>[Builder]</c> attribute; a node carrying
+    /// none claims <see cref="NodeCardinality.Leaf"/>.</summary>
+    NodeCardinality Cardinality { get; }
 
     /// <summary>How many bytes this node's data occupies — what an unmanaged instance reserves
     /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
@@ -35,38 +28,23 @@ internal interface IRuntimeNodeFactory
     /// and no wider.</summary>
     int DataAlignment { get; }
 
-    IBuilder CreateSerializedDefaultDataBuilder();
-
     /// <summary>
     /// Copy this node's authored default data into <paramref name="destination"/>, which is
-    /// exactly <see cref="DataSize"/> bytes.
-    ///
-    /// The same bytes <see cref="CreateSerializedDefaultDataBuilder"/> would serialize, and
-    /// refused on the same grounds — a node holding a managed reference has no byte
-    /// representation — but written straight into a caller's buffer rather than through a blob
-    /// builder, because a layout is assembling one contiguous block and has nowhere to put an
-    /// <c>IBuilder</c>.
+    /// exactly <see cref="DataSize"/> bytes. Refused for a node holding a managed reference —
+    /// such a node has no byte representation.
     /// </summary>
     void WriteDefaultData(Span<byte> destination);
 }
 
-internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
-    where TNodeData : struct, INodeData
+internal sealed class RuntimeNodeFactory<TNodeData>(TNodeData data, BehaviorNodeMetadata metadata)
+    : IRuntimeNodeFactory
+    where TNodeData : struct, INode
 {
-    private TNodeData _nodeData;
-    private readonly BehaviorNodeMetadata _metadata;
-
-    public RuntimeNodeFactory(TNodeData nodeData, BehaviorNodeMetadata metadata)
-    {
-        _nodeData = nodeData;
-        _metadata = metadata;
-    }
-
     public Type NodeType => typeof(TNodeData);
 
-    public Guid NodeGuid => _metadata.Guid;
+    public Guid NodeGuid => metadata.Guid;
 
-    public NodeCardinality? Cardinality => _metadata.Cardinality;
+    public NodeCardinality Cardinality => metadata.Cardinality;
 
     public int DataSize => Unsafe.SizeOf<TNodeData>();
 
@@ -81,25 +59,11 @@ internal sealed class RuntimeNodeFactory<TNodeData> : IRuntimeNodeFactory
                 + "instance because it contains managed references.");
         }
 
-        TNodeData nodeData = _nodeData;
+        // The span over the local copy must not outlive this frame — CreateReadOnlySpan takes a
+        // scoped ref, so nothing stops a returned span from dangling.
+        TNodeData nodeData = data;
         MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref nodeData, 1))
             .CopyTo(destination);
-    }
-
-    public IBuilder CreateSerializedDefaultDataBuilder()
-    {
-        if (RuntimeHelpers.IsReferenceOrContainsReferences<TNodeData>())
-        {
-            throw new NotSupportedException(
-                $"Node '{typeof(TNodeData).FullName}' cannot be serialized with Paradise.BLOB because it contains managed references.");
-        }
-
-        TNodeData nodeData = _nodeData;
-        var builder = new AnyValueBuilder();
-        builder.SetBytes(
-            MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref nodeData, 1)),
-            GetAlignment<TNodeData>());
-        return builder;
     }
 
     private static int GetAlignment<T>() where T : struct

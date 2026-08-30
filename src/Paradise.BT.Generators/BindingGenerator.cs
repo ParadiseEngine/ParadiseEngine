@@ -27,17 +27,9 @@ public sealed class BindingGenerator : IIncrementalGenerator
     private const string TreeBuilderInterfaceName = "IBehaviorTreeBuilder";
     private const string TreeBuilderInterfaceNamespace = "Paradise.BT.Builder";
     private const string BindingAttributeFullName = "Paradise.BT.BehaviorTreeBindingAttribute";
-    private const string NodeDataInterface = "Paradise.BT.INodeData";
+    private const string NodeDataInterface = "Paradise.BT.INode";
     private const string ComponentInterface = "Paradise.ECS.IComponent";
     private const string BlackboardInterface = "Paradise.BT.IBlackboard";
-
-    private static readonly DiagnosticDescriptor s_optionalUnsupported = new(
-        id: "PBT0006",
-        title: "Optional component access is not supported",
-        messageFormat: "Node '{0}' declares [OptionalReads<{1}>], which is not supported yet: the ECS emits optional accessors on a queryable's per-entity view only, never on the Segments view a world system iterates. Use [Reads<{1}>] and a required claim.",
-        category: "Paradise.BT.Generators",
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true);
 
     private static readonly DiagnosticDescriptor s_componentWriteUnsupported = new(
         id: "PBT0008",
@@ -106,9 +98,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
                     break;
                 case "WritesAttribute":
                     kind = AccessKind.Write;
-                    break;
-                case "OptionalReadsAttribute":
-                    kind = AccessKind.OptionalRead;
                     break;
                 default:
                     continue;
@@ -338,10 +327,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
             }
         }
 
-        // Nodes a FACTORY builds, which the sweep above cannot see: a method returning a definition
-        // discards what it built, so the tree calling it names no node.
-        // The factory knows, and says so with [Builds<T>] — read here off the resolved method, so
-        // it works for a factory in a referenced assembly exactly as for one in source.
+        // Nodes a FACTORY builds: a factory returning a concrete builder keeps the node type in
+        // its return type, so the sweep can follow it — even for a factory in a referenced
+        // assembly. One returning the bare BTreeNode base discards it; name such nodes in
+        // [BehaviorTreeBinding(Also = ...)].
         foreach (InvocationExpressionSyntax invocation in
             decl.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
@@ -361,22 +350,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 access.AddRange(CollectAccess(returnedNode, ctx.SemanticModel.Compilation, ct));
             }
 
-            foreach (AttributeData built in factory.GetAttributes())
-            {
-                INamedTypeSymbol? ac = built.AttributeClass;
-                if (ac is null
-                    || !ac.IsGenericType
-                    || ac.Name != "BuildsAttribute"
-                    || ac.ContainingNamespace?.ToDisplayString() != "Paradise.BT"
-                    || ac.TypeArguments[0] is not INamedTypeSymbol builds
-                    || !Implements(builds, NodeDataInterface)
-                    || !seen.Add(builds.ToDisplayString()))
-                {
-                    continue;
-                }
-
-                access.AddRange(CollectAccess(builds, ctx.SemanticModel.Compilation, ct));
-            }
         }
 
         // The escape hatch: [BehaviorTreeBinding(Also = ...)] names nodes the tree composes only
@@ -523,14 +496,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
             foreach (Access a in resolvedAccess)
             {
-                if (a.Kind == AccessKind.OptionalRead)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        s_optionalUnsupported, binding.Location, a.DeclaringNode, a.TypeName));
-                    refused = true;
-                    continue;
-                }
-
                 // A component binds read-only by value — there is no claim to write through, and
                 // the union IS the contract, so the one rule left is that a write cannot land.
                 if (a.IsComponent && a.Kind == AccessKind.Write)
@@ -769,7 +734,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
     {
         Read,
         Write,
-        OptionalRead,
     }
 
     // Plain structs with explicit IEquatable, matching BTreeNodeGenerator. Not records: the

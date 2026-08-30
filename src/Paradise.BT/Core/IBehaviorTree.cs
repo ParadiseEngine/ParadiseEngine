@@ -4,20 +4,12 @@ using System.Runtime.InteropServices;
 namespace Paradise.BT;
 
 /// <summary>
-/// Node blob contract, shaped after EntitiesBT: the per-instance state of a running tree — what
-/// each node returned last tick, and each node's live data.
-///
-/// <b>Data is reached by <c>ref byte</c>, not by pointer.</b> It used to be <c>IntPtr</c>, which
-/// forced every implementation onto memory the GC cannot move: a blob over a plain <c>byte[]</c>
-/// could have its buffer relocated mid-tick and the address would dangle. A managed ref survives
-/// compaction, so an instance can now hold ordinary arrays and needs no pinning and no lifetime.
+/// The per-instance state of a running tree — what each node returned last tick, and each node's
+/// live data. <b>Data is reached by <c>ref byte</c>, not by pointer</b>: a managed ref survives
+/// GC compaction, so a blob may sit over plain arrays with no pinning.
 /// </summary>
-public interface INodeBlob
+public interface IBehaviorTree
 {
-    int RuntimeId { get; }
-
-    int Count { get; }
-
     /// <summary>The node's durable type identity — what <see cref="VirtualMachine"/> hands to
     /// <see cref="NodeTypeRegistry"/> for dispatch.</summary>
     Guid GetTypeGuid(int nodeIndex);
@@ -43,12 +35,12 @@ public interface INodeBlob
 }
 
 /// <summary>
-/// EntitiesBT-compatible blob helpers.
+/// Blob traversal and data helpers.
 /// </summary>
-public static class NodeBlobExtensions
+public static class BehaviorTreeExtensions
 {
-    public static int FirstOrDefaultChildIndex<TNodeBlob>(this TNodeBlob blob, int parentIndex, Predicate<NodeState> predicate)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static int FirstOrDefaultChildIndex<TBehaviorTree>(this TBehaviorTree blob, int parentIndex, Predicate<NodeState> predicate)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
     {
         int endIndex = blob.GetEndIndex(parentIndex);
         int childIndex = parentIndex + 1;
@@ -65,8 +57,8 @@ public static class NodeBlobExtensions
         return default;
     }
 
-    public static int ParentIndex<TNodeBlob>(this TNodeBlob blob, int childIndex)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static int ParentIndex<TBehaviorTree>(this TBehaviorTree blob, int childIndex)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
     {
         int endIndex = blob.GetEndIndex(childIndex);
         for (int i = childIndex - 1; i >= 0; i--)
@@ -82,8 +74,8 @@ public static class NodeBlobExtensions
 
     /// <summary>Restore a run of nodes' authored data — what restarts a timer on reset. One copy,
     /// because nodes are laid out contiguously.</summary>
-    public static void ResetRuntimeData<TNodeBlob>(this TNodeBlob blob, int index, int count = 1)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public static void ResetRuntimeData<TBehaviorTree>(this TBehaviorTree blob, int index, int count = 1)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
     {
         int size = blob.GetNodeDataSize(index, count);
         if (size > 0)
@@ -94,14 +86,14 @@ public static class NodeBlobExtensions
     }
 
     /// <summary>A node's live data, typed.</summary>
-    public static ref T GetNodeData<T, TNodeBlob>(this TNodeBlob blob, int index)
+    public static ref T GetNodeData<T, TBehaviorTree>(this TBehaviorTree blob, int index)
         where T : struct
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         => ref Unsafe.As<byte, T>(ref blob.RuntimeData(index));
 
-    /// <inheritdoc cref="GetNodeData{T, TNodeBlob}"/>
-    public static ref T GetNodeDefaultData<T, TNodeBlob>(this TNodeBlob blob, int index)
+    /// <inheritdoc cref="GetNodeData{T, TBehaviorTree}"/>
+    public static ref T GetNodeDefaultData<T, TBehaviorTree>(this TBehaviorTree blob, int index)
         where T : struct
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         => ref Unsafe.As<byte, T>(ref blob.DefaultData(index));
 }

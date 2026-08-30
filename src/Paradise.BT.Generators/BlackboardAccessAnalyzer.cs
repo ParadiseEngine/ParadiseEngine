@@ -20,7 +20,7 @@ namespace Paradise.BT.Generators;
 public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
 {
     private const string BlackboardInterface = "Paradise.BT.IBlackboard";
-    private const string NodeDataInterface = "Paradise.BT.INodeData";
+    private const string NodeDataInterface = "Paradise.BT.INode";
 
     internal static readonly DiagnosticDescriptor s_undeclaredAccess = new(
         id: "PBT0009",
@@ -54,7 +54,7 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
         var invocation = (IInvocationOperation)context.Operation;
         IMethodSymbol target = invocation.TargetMethod;
 
-        // The node is a struct implementing INodeData; anything else may use a blackboard freely.
+        // The node is a struct implementing INode; anything else may use a blackboard freely.
         if (context.ContainingSymbol.ContainingType is not INamedTypeSymbol node
             || !Implements(node, NodeDataInterface))
         {
@@ -168,7 +168,7 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
             if (ac is not null
                 && ac.IsGenericType
                 && ac.ContainingNamespace?.ToDisplayString() == "Paradise.BT"
-                && ac.Name is "ReadsAttribute" or "WritesAttribute" or "OptionalReadsAttribute")
+                && ac.Name is "ReadsAttribute" or "WritesAttribute")
             {
                 return true;
             }

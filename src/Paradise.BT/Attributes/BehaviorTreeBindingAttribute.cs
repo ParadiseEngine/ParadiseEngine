@@ -8,10 +8,5 @@ namespace Paradise.BT;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class BehaviorTreeBindingAttribute : Attribute
 {
-    /// <summary>
-    /// Nodes the tree uses but never names. The escape hatch of last resort, for somebody else's
-    /// factory carrying no <see cref="BuildsAttribute{T}"/>; prefer annotating the factory, so the
-    /// answer travels with it to every tree.
-    /// </summary>
     public Type[]? Also { get; set; }
 }

@@ -24,7 +24,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     private static readonly DiagnosticDescriptor s_notUnmanagedDiagnostic = new(
         id: "PBT0002",
         title: "Builder struct is not unmanaged",
-        messageFormat: "Struct '{0}' has [Builder] but contains managed references and cannot be used as an INodeData builder",
+        messageFormat: "Struct '{0}' has [Builder] but contains managed references and cannot be used as an INode builder",
         category: "Paradise.BT.Generators",
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true
@@ -60,7 +60,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         ).Where(static info => info.HasValue)
          .Select(static (info, _) => info!.Value);
 
-        // Registration is emitted from a SEPARATE pass over every INodeData struct, not from the
+        // Registration is emitted from a SEPARATE pass over every INode struct, not from the
         // [Builder] pass above. The two sets are not the same: DelayTimerNode is registerable and
         // used to have no [Builder] at all, back when a factory built it. Keying registration
         // on [Builder] would silently drop it, and with it every timer node in every tree.
@@ -342,12 +342,12 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
     internal static bool IsStructDeclaration(SyntaxNode node) =>
         node is StructDeclarationSyntax || node.IsKind(SyntaxKind.RecordStructDeclaration);
 
-    private const string NodeDataFullName = "Paradise.BT.INodeData";
+    private const string NodeDataFullName = "Paradise.BT.INode";
 
     /// <summary>
     /// The fully-qualified name of a node type that can be registered, or null.
     ///
-    /// Three conditions, and each drops a real case: it must implement INodeData, it must be
+    /// Three conditions, and each drops a real case: it must implement INode, it must be
     /// unmanaged (a node holding a reference cannot be stored as bytes), and it must carry a
     /// [Guid] (the identity a layout resolves through). Generic and inaccessible types are
     /// skipped too — the emitted initializer is an ordinary internal class, so it can only name

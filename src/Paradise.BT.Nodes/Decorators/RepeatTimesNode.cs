@@ -4,20 +4,20 @@ namespace Paradise.BT.Nodes;
 /// defaults included.</summary>
 [System.Runtime.InteropServices.Guid("76E27039-91C1-4DEF-AFEF-1EDDBAAE8CCE")]
 [Builder("Repeat", NodeCardinality.Decorator)]
-public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None) : INodeData
+public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None) : INode
 {
     public int TickTimes = tickTimes;
     public NodeState BreakStates = breakStates;
 
-    public NodeState Tick<TNodeBlob, TBlackboard>(int index, TNodeBlob blob, TBlackboard bb)
-        where TNodeBlob : struct, INodeBlob, allows ref struct
+    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree tree, TBlackboard bb)
+        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState childState = index.TickChild(blob, bb);
+        NodeState childState = index.TickChild(tree, bb);
         if (childState == NodeState.None)
         {
-            index.ResetChildren(blob, bb);
-            childState = index.TickChild(blob, bb);
+            index.ResetChildren(tree, bb);
+            childState = index.TickChild(tree, bb);
         }
 
         if (BreakStates.HasFlagFast(childState))
