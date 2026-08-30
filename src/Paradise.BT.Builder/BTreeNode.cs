@@ -1,3 +1,5 @@
+using Paradise.BLOB;
+
 namespace Paradise.BT.Builder;
 
 public abstract class BTreeNode
@@ -18,7 +20,7 @@ public abstract class BTreeNode
     {
         var nodes = new List<INodeBuilder>();
         Compile(nodes);
-        return BehaviorTreeLayout.Build(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nodes));
+        return BuildLayout(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nodes));
     }
 
     /// <inheritdoc cref="Build()"/>
@@ -55,6 +57,69 @@ public abstract class BTreeNode
                     + $"child, got {ChildCount}.");
         }
     }
+
+    private static BehaviorTreeLayout BuildLayout(ReadOnlySpan<INodeBuilder> compiledNodes, int alignment = 16)
+    {
+        int count = compiledNodes.Length;
+        var typeIds = new int[count];
+        var endIndices = new int[count];
+        var offsets = new int[count + 1];
+
+        // One GUID per distinct type, ordered by first appearance. Types stores the table INDEX.
+        var guidTable = new List<Guid>();
+        var tableIndexByGuid = new Dictionary<Guid, int>();
+
+        int size = 0;
+        for (int i = 0; i < count; i++)
+        {
+            INodeBuilder builder = compiledNodes[i];
+            if (!NodeTypeRegistry.IsRegistered(builder.NodeGuid))
+            {
+                throw new InvalidOperationException(
+                    $"Node type '{builder.NodeType.FullName}' (GUID '{builder.NodeGuid}') "
+                    + "is not registered. Node types register themselves through the module "
+                    + "initializer the BT generator emits, so this usually means the declaring "
+                    + "project does not reference Paradise.BT.Generators as an analyzer, or the "
+                    + $"type is not visible to it. Call {nameof(NodeTypeRegistry)}.Register<T>() "
+                    + "explicitly for such a node.");
+            }
+
+            if (!tableIndexByGuid.TryGetValue(builder.NodeGuid, out int tableIndex))
+            {
+                tableIndex = guidTable.Count;
+                tableIndexByGuid[builder.NodeGuid] = tableIndex;
+                guidTable.Add(builder.NodeGuid);
+            }
+
+            typeIds[i] = tableIndex;
+            size = Align(size, builder.DataAlignment);
+            offsets[i] = size;
+            size += builder.DataSize;
+        }
+
+        offsets[count] = size;
+
+        // Padding between nodes stays zeroed, which is what a fresh array gives us.
+        var defaultData = new byte[size];
+        for (int i = 0; i < count; i++)
+        {
+            INodeBuilder node = compiledNodes[i];
+            endIndices[i] = node.EndIndex;
+            node.WriteDefaultData(defaultData.AsSpan(offsets[i], node.DataSize));
+        }
+
+        var blobBuilder = new StructBuilder<BehaviorTreeLayout.LayoutBlob>();
+        blobBuilder.SetArray(ref blobBuilder.Value.EndIndices, endIndices, alignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Types, typeIds, alignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Guids, guidTable, alignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.Offsets, offsets, alignment);
+        blobBuilder.SetArray(ref blobBuilder.Value.DefaultData, defaultData, alignment);
+        return new BehaviorTreeLayout(blobBuilder.CreateNativeBlobAssetReference(alignment));
+    }
+
+    private static int Align(int value, int alignment) =>
+        (value + (alignment - 1)) & ~(alignment - 1);
+
 }
 
 /// <summary>

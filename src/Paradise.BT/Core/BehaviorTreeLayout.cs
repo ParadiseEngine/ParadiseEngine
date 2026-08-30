@@ -10,93 +10,14 @@ namespace Paradise.BT;
 /// </summary>
 public sealed class BehaviorTreeLayout : IDisposable
 {
-    /// <summary>Alignment of the blob and of each array within it. Individual nodes pack at
-    /// their own natural alignment (see <see cref="INodeBuilder.DataAlignment"/>), capped
-    /// by this.</summary>
-    private const int DataAlignment = 16;
-
     private NativeBlobAssetReference<LayoutBlob> _blob;
 
-    private BehaviorTreeLayout(NativeBlobAssetReference<LayoutBlob> blob)
+    internal BehaviorTreeLayout(NativeBlobAssetReference<LayoutBlob> blob)
     {
         _blob = blob;
     }
 
     public ref LayoutBlob Blob => ref _blob.Value;
-
-    public void Initialize(Span<NodeState> states, Span<byte> runtime)
-    {
-        states[..Blob.Count].Clear();
-        Blob.DefaultData.ToSpan().CopyTo(runtime);
-    }
-
-    internal static BehaviorTreeLayout Build(ReadOnlySpan<INodeBuilder> compiledNodes)
-    {
-        int count = compiledNodes.Length;
-        var typeIds = new int[count];
-        var endIndices = new int[count];
-        var offsets = new int[count + 1];
-
-        // One GUID per distinct type, ordered by first appearance. Types stores the table INDEX.
-        var guidTable = new List<Guid>();
-        var tableIndexByGuid = new Dictionary<Guid, int>();
-
-        int size = 0;
-        for (int i = 0; i < count; i++)
-        {
-            INodeBuilder builder = compiledNodes[i];
-            if (!NodeTypeRegistry.IsRegistered(builder.NodeGuid))
-            {
-                throw new InvalidOperationException(
-                    $"Node type '{builder.NodeType.FullName}' (GUID '{builder.NodeGuid}') "
-                    + "is not registered. Node types register themselves through the module "
-                    + "initializer the BT generator emits, so this usually means the declaring "
-                    + "project does not reference Paradise.BT.Generators as an analyzer, or the "
-                    + $"type is not visible to it. Call {nameof(NodeTypeRegistry)}.Register<T>() "
-                    + "explicitly for such a node.");
-            }
-
-            if (!tableIndexByGuid.TryGetValue(builder.NodeGuid, out int tableIndex))
-            {
-                tableIndex = guidTable.Count;
-                tableIndexByGuid[builder.NodeGuid] = tableIndex;
-                guidTable.Add(builder.NodeGuid);
-            }
-
-            typeIds[i] = tableIndex;
-            size = Align(size, Math.Min(builder.DataAlignment, DataAlignment));
-            offsets[i] = size;
-            size += builder.DataSize;
-        }
-
-        offsets[count] = size;
-
-        // Padding between nodes stays zeroed, which is what a fresh array gives us.
-        var defaultData = new byte[size];
-        for (int i = 0; i < count; i++)
-        {
-            INodeBuilder node = compiledNodes[i];
-            endIndices[i] = node.EndIndex;
-            node.WriteDefaultData(defaultData.AsSpan(offsets[i], node.DataSize));
-        }
-
-        // Aligning every array to DataAlignment aligns the START of the one that follows it, which
-        // is how DefaultData ends up on a 16-byte boundary within the blob. Per-node offsets then
-        // respect each node's own alignment relative to that start, so a node's data is aligned in
-        // the shared block and identically placed in whatever buffer an instance copies it into.
-        var blobBuilder = new StructBuilder<LayoutBlob>();
-        blobBuilder.SetArray(ref blobBuilder.Value.EndIndices, endIndices, DataAlignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Types, typeIds, DataAlignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Guids, guidTable, DataAlignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.Offsets, offsets, DataAlignment);
-        blobBuilder.SetArray(ref blobBuilder.Value.DefaultData, defaultData, DataAlignment);
-
-        return new BehaviorTreeLayout(
-            blobBuilder.CreateNativeBlobAssetReference(DataAlignment));
-    }
-
-    private static int Align(int value, int alignment) =>
-        (value + (alignment - 1)) & ~(alignment - 1);
 
     public void Dispose()
     {
