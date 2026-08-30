@@ -14,7 +14,7 @@ namespace Paradise.Assets.Documents;
 /// alternative — "write a table inline when all its values are scalars" — makes the output depend
 /// on what the table happens to contain, so the C# and Python writers would agree until the first
 /// document where they read the rule differently, and the disagreement would surface as a
-/// <c>scene-check</c> byte failure nobody could trace back to a formatting rule. With a type, the
+/// <c>prefab-check</c> byte failure nobody could trace back to a formatting rule. With a type, the
 /// model says which form it wants and both writers obey it.
 /// </para>
 /// <para>

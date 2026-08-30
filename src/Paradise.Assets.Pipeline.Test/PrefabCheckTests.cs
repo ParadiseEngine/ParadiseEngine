@@ -3,7 +3,7 @@ using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline.Test;
 
-public class SceneCheckTests
+public class PrefabCheckTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");
 
@@ -28,42 +28,42 @@ public class SceneCheckTests
     public async Task canonical_documents_pass()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/a.scene");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/a.prefab");
 
-        var results = SceneCheck.Run(fileSystem, s_layout);
+        var results = PrefabCheck.Run(fileSystem, s_layout);
 
         await Assert.That(results.Count).IsEqualTo(1);
-        await Assert.That(results[0].Outcome).IsEqualTo(SceneCheckOutcome.Canonical);
+        await Assert.That(results[0].Outcome).IsEqualTo(PrefabCheckOutcome.Canonical);
     }
 
     [Test]
     public async Task a_hand_edited_document_is_reported_without_fix()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        fileSystem.CreateDirectory("/game/assets/scenes");
-        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/scenes/edited.scene", NonCanonical);
+        fileSystem.CreateDirectory("/game/assets/levels");
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/levels/edited.prefab", NonCanonical);
 
-        var results = SceneCheck.Run(fileSystem, s_layout);
+        var results = PrefabCheck.Run(fileSystem, s_layout);
 
-        await Assert.That(results[0].Outcome).IsEqualTo(SceneCheckOutcome.NotCanonical);
+        await Assert.That(results[0].Outcome).IsEqualTo(PrefabCheckOutcome.NotCanonical);
         // Reported only — check never mutates without --fix.
-        await Assert.That(fileSystem.ReadAllText("/game/assets/scenes/edited.scene")).IsEqualTo(NonCanonical);
+        await Assert.That(fileSystem.ReadAllText("/game/assets/levels/edited.prefab")).IsEqualTo(NonCanonical);
     }
 
     [Test]
     public async Task fix_rewrites_into_canonical_form_and_the_recheck_passes()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        fileSystem.CreateDirectory("/game/assets/scenes");
-        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/scenes/edited.scene", NonCanonical);
+        fileSystem.CreateDirectory("/game/assets/levels");
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/levels/edited.prefab", NonCanonical);
 
-        var fixResults = SceneCheck.Run(fileSystem, s_layout, fix: true);
-        var recheck = SceneCheck.Run(fileSystem, s_layout);
+        var fixResults = PrefabCheck.Run(fileSystem, s_layout, fix: true);
+        var recheck = PrefabCheck.Run(fileSystem, s_layout);
 
-        await Assert.That(fixResults[0].Outcome).IsEqualTo(SceneCheckOutcome.Rewritten);
-        await Assert.That(recheck[0].Outcome).IsEqualTo(SceneCheckOutcome.Canonical);
+        await Assert.That(fixResults[0].Outcome).IsEqualTo(PrefabCheckOutcome.Rewritten);
+        await Assert.That(recheck[0].Outcome).IsEqualTo(PrefabCheckOutcome.Canonical);
         // Canonical order is MODEL order, and the model puts Guid before Name.
-        await Assert.That(fileSystem.ReadAllText("/game/assets/scenes/edited.scene"))
+        await Assert.That(fileSystem.ReadAllText("/game/assets/levels/edited.prefab"))
             .Contains("Guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\nName = \"crate\"\n");
     }
 
@@ -71,26 +71,26 @@ public class SceneCheckTests
     public async Task an_invalid_document_is_reported_and_never_touched_by_fix()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        fileSystem.CreateDirectory("/game/assets/scenes");
-        fileSystem.WriteAllText("/game/assets/scenes/broken.scene", "schema_version = 7\n");
+        fileSystem.CreateDirectory("/game/assets/levels");
+        fileSystem.WriteAllText("/game/assets/levels/broken.prefab", "schema_version = 7\n");
 
-        var results = SceneCheck.Run(fileSystem, s_layout, fix: true);
+        var results = PrefabCheck.Run(fileSystem, s_layout, fix: true);
 
-        await Assert.That(results[0].Outcome).IsEqualTo(SceneCheckOutcome.Invalid);
+        await Assert.That(results[0].Outcome).IsEqualTo(PrefabCheckOutcome.Invalid);
         await Assert.That(results[0].Message).Contains("schema_version");
-        await Assert.That(fileSystem.ReadAllText("/game/assets/scenes/broken.scene")).IsEqualTo("schema_version = 7\n");
+        await Assert.That(fileSystem.ReadAllText("/game/assets/levels/broken.prefab")).IsEqualTo("schema_version = 7\n");
     }
 
     [Test]
     public async Task results_cover_every_scene_document_in_path_order()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/b.scene");
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/a.scene");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/b.prefab");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/a.prefab");
 
-        var results = SceneCheck.Run(fileSystem, s_layout);
+        var results = PrefabCheck.Run(fileSystem, s_layout);
 
         await Assert.That(results.Select(result => result.Path.GetName()).ToArray())
-            .IsEquivalentTo(new[] { "a.scene", "b.scene" });
+            .IsEquivalentTo(new[] { "a.prefab", "b.prefab" });
     }
 }

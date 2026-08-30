@@ -7,19 +7,18 @@ using Zio;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// Reads and writes <c>*.scene</c> and <c>*.prefab</c> documents — the same shape, so the same
-/// code.
+/// Reads and writes <c>*.prefab</c> documents — one shape, so one reader and one writer.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Reading is <b>strict</b>: unknown structural keys, malformed GUIDs, duplicate identities,
 /// reserved payload names, dangling or cyclic parents are all errors naming the object. The
 /// document is committed source of truth, and a reader that guessed would turn an authoring typo
-/// into a build that succeeds and renders the wrong scene.
+/// into a build that succeeds and renders the wrong thing.
 /// </para>
 /// <para>
 /// Writing is canonical (<see cref="CanonicalTomlWriter"/>), so read → write is byte-identical
-/// for a canonical input and the Python mirror produces the same bytes. <c>scene-check</c>
+/// for a canonical input and the Python mirror produces the same bytes. <c>prefab-check</c>
 /// polices exactly that.
 /// </para>
 /// <para>
@@ -28,14 +27,14 @@ namespace Paradise.Assets.Documents;
 /// payload using one is refused here rather than silently swallowed as structure.
 /// </para>
 /// </remarks>
-public static class SceneDocumentSerializer
+public static class PrefabDocumentSerializer
 {
     private static readonly string[] s_documentKeys = ["schema_version", "objects"];
     private static readonly string[] s_objectKeys = ["prefab", "components"];
 
     /// <summary>Reads and validates the document at <paramref name="path"/>.</summary>
-    /// <exception cref="SceneDocumentException">The file is unreadable, not TOML, or not valid.</exception>
-    public static SceneDocument Load(IFileSystem fileSystem, UPath path)
+    /// <exception cref="PrefabDocumentException">The file is unreadable, not TOML, or not valid.</exception>
+    public static PrefabDocument Load(IFileSystem fileSystem, UPath path)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         path.AssertNotNull(nameof(path));
@@ -47,76 +46,81 @@ public static class SceneDocumentSerializer
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            throw new SceneDocumentException(path.FullName, $"could not be read ({error.Message})", error);
+            throw new PrefabDocumentException(path.FullName, $"could not be read ({error.Message})", error);
         }
 
         return Parse(text, path.FullName);
     }
 
     /// <summary>Validates already-read text. The filesystem-free half of <see cref="Load"/>.</summary>
-    /// <exception cref="SceneDocumentException">The text is not TOML, or not a valid document.</exception>
-    public static SceneDocument Parse(string toml, string sourceName)
+    /// <exception cref="PrefabDocumentException">The text is not TOML, or not a valid document.</exception>
+    public static PrefabDocument Parse(string toml, string sourceName)
     {
         ArgumentNullException.ThrowIfNull(toml);
         ArgumentNullException.ThrowIfNull(sourceName);
 
-        Exception Fail(string problem) => new SceneDocumentException(sourceName, problem);
+        Exception Fail(string problem) => new PrefabDocumentException(sourceName, problem);
 
         var root = TomlDocumentReader.Parse(toml, Fail);
         TomlDocumentReader.RejectUnknownKeys(root, "at the document root", s_documentKeys, Fail);
 
         var schemaVersion = TomlDocumentReader.RequireInteger(root, "schema_version", "at the document root", Fail);
-        if (schemaVersion != SceneDocument.SupportedSchemaVersion)
+        if (schemaVersion != PrefabDocument.SupportedSchemaVersion)
         {
             throw Fail(
                 $"declares schema_version = {schemaVersion}, which this build cannot read " +
-                $"(supported: {SceneDocument.SupportedSchemaVersion})");
+                $"(supported: {PrefabDocument.SupportedSchemaVersion})");
         }
 
-        var document = new SceneDocument();
+        var document = new PrefabDocument();
         var parents = new Dictionary<Guid, Guid?>();
         if (TomlDocumentReader.OptionalTableArray(root, "objects", "at the document root", Fail) is { } objects)
         {
             foreach (var (table, index) in objects.Select(static (table, index) => (table, index)))
             {
-                var sceneObject = ReadObject(table, index, Fail);
+                var entry = ReadObject(table, index, Fail);
 
                 // A Target carrier addresses a prefab-local object and has no identity of its
                 // own -- the resolved child's guid is always minted. So it is exempt from the
                 // uniqueness map, which is about identities the document actually declares.
-                if (sceneObject.Target is not null)
+                if (entry.Target is not null)
                 {
-                    document.Objects.Add(sceneObject);
+                    document.Objects.Add(entry);
                     continue;
                 }
 
-                if (sceneObject.Guid is not { } guid)
+                if (entry.Guid is not { } guid)
                 {
                     throw Fail($"has an object at index {index} with no '{WellKnownComponents.MetaType}' component carrying a '{WellKnownComponents.Guid}'");
                 }
 
-                if (!parents.TryAdd(guid, sceneObject.Parent))
+                if (!parents.TryAdd(guid, entry.Parent))
                 {
                     throw Fail($"declares guid '{DocumentGuid.Format(guid)}' twice — identities must be unique per document");
                 }
 
-                document.Objects.Add(sceneObject);
+                document.Objects.Add(entry);
             }
         }
 
         ValidateParents(parents, Fail);
+
+        // Structure first, then the document's own rule. Every read goes through here, so "exactly
+        // one root" holds for anything downstream that has a document at all -- which is what lets
+        // the resolver and the bake take a root for granted instead of each re-deriving one.
+        document.Validate(sourceName);
         return document;
     }
 
     /// <summary>Renders <paramref name="document"/> as canonical TOML text.</summary>
-    public static string Write(SceneDocument document)
+    public static string Write(PrefabDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
         return CanonicalTomlWriter.WriteString(ToCanonical(document));
     }
 
     /// <summary>Writes <paramref name="document"/> to <paramref name="path"/> as UTF-8, no BOM.</summary>
-    public static void Save(IFileSystem fileSystem, UPath path, SceneDocument document)
+    public static void Save(IFileSystem fileSystem, UPath path, PrefabDocument document)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         path.AssertNotNull(nameof(path));
@@ -125,17 +129,17 @@ public static class SceneDocumentSerializer
         fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(ToCanonical(document)));
     }
 
-    private static SceneObject ReadObject(TomlTable table, int index, Func<string, Exception> fail)
+    private static PrefabObject ReadObject(TomlTable table, int index, Func<string, Exception> fail)
     {
         var context = $"on objects[{index}]";
         TomlDocumentReader.RejectUnknownKeys(table, context, s_objectKeys, fail);
 
-        var sceneObject = new SceneObject();
+        var result = new PrefabObject();
 
         if (table.TryGetValue("prefab", out var prefab))
         {
             var canonical = TomlDocumentReader.ToCanonicalValue(prefab, $"'prefab' {context}", fail);
-            sceneObject.Prefab = AssetReferenceCodec.Read(canonical, context, fail)
+            result.Prefab = AssetReferenceCodec.Read(canonical, context, fail)
                 ?? throw fail($"has an empty 'prefab' reference {context}");
         }
 
@@ -148,36 +152,36 @@ public static class SceneDocumentSerializer
                 throw fail($"declares component '{DocumentGuid.Format(component.Id)}' twice {context}");
             }
 
-            sceneObject.Components.Add(component);
+            result.Components.Add(component);
         }
 
-        return sceneObject;
+        return result;
     }
 
-    private static SceneComponent ReadComponent(TomlTable table, string objectContext, Func<string, Exception> fail)
+    private static PrefabComponent ReadComponent(TomlTable table, string objectContext, Func<string, Exception> fail)
     {
         var context = $"on a component {objectContext}";
 
-        if (!table.TryGetValue(SceneComponent.IdKey, out var idValue) || idValue is not string idText)
+        if (!table.TryGetValue(PrefabComponent.IdKey, out var idValue) || idValue is not string idText)
         {
-            throw fail($"needs a string '{SceneComponent.IdKey}' {context}");
+            throw fail($"needs a string '{PrefabComponent.IdKey}' {context}");
         }
 
         if (!DocumentGuid.TryParse(idText, out var id) || id == Guid.Empty)
         {
-            throw fail($"holds '{idText}' where '{SceneComponent.IdKey}' {context} must be a non-empty UUID");
+            throw fail($"holds '{idText}' where '{PrefabComponent.IdKey}' {context} must be a non-empty UUID");
         }
 
         string? type = null;
-        if (table.TryGetValue(SceneComponent.TypeKey, out var typeValue))
+        if (table.TryGetValue(PrefabComponent.TypeKey, out var typeValue))
         {
-            type = typeValue as string ?? throw fail($"holds a non-string '{SceneComponent.TypeKey}' {context}");
+            type = typeValue as string ?? throw fail($"holds a non-string '{PrefabComponent.TypeKey}' {context}");
         }
 
         var removed = false;
-        if (table.TryGetValue(SceneComponent.RemovedKey, out var removedValue))
+        if (table.TryGetValue(PrefabComponent.RemovedKey, out var removedValue))
         {
-            removed = removedValue as bool? ?? throw fail($"holds a non-boolean '{SceneComponent.RemovedKey}' {context}");
+            removed = removedValue as bool? ?? throw fail($"holds a non-boolean '{PrefabComponent.RemovedKey}' {context}");
         }
 
         // Everything else is payload. The reserved names are consumed above, so anything left
@@ -185,7 +189,7 @@ public static class SceneDocumentSerializer
         var data = new CanonicalTomlTable();
         foreach (var (key, value) in table)
         {
-            if (key is SceneComponent.IdKey or SceneComponent.TypeKey or SceneComponent.RemovedKey) continue;
+            if (key is PrefabComponent.IdKey or PrefabComponent.TypeKey or PrefabComponent.RemovedKey) continue;
             data.Add(key, TomlDocumentReader.ToCanonicalValue(value, $"'{key}' {context}", fail));
         }
 
@@ -194,15 +198,15 @@ public static class SceneDocumentSerializer
             // A dropped component carries no payload: the two together say "remove this, and also
             // here is what it should contain", which has no meaning and is almost certainly an
             // edit that forgot to delete one half.
-            throw fail($"marks a component '{SceneComponent.RemovedKey}' but also gives it fields {context}");
+            throw fail($"marks a component '{PrefabComponent.RemovedKey}' but also gives it fields {context}");
         }
 
-        return new SceneComponent(id, type, data, removed);
+        return new PrefabComponent(id, type, data, removed);
     }
 
-    private static CanonicalTomlTable ToCanonical(SceneDocument document)
+    private static CanonicalTomlTable ToCanonical(PrefabDocument document)
     {
-        var root = new CanonicalTomlTable { { "schema_version", (long)SceneDocument.SupportedSchemaVersion } };
+        var root = new CanonicalTomlTable { { "schema_version", (long)PrefabDocument.SupportedSchemaVersion } };
         if (document.Objects.Count > 0)
         {
             root.Add("objects", document.Objects.Select(ToCanonical).ToArray());
@@ -211,23 +215,23 @@ public static class SceneDocumentSerializer
         return root;
     }
 
-    private static CanonicalTomlTable ToCanonical(SceneObject sceneObject)
+    private static CanonicalTomlTable ToCanonical(PrefabObject entry)
     {
         var table = new CanonicalTomlTable();
-        if (sceneObject.Prefab is { } prefab) table.Add("prefab", AssetReferenceCodec.Write(prefab));
-        if (sceneObject.Components.Count > 0)
+        if (entry.Prefab is { } prefab) table.Add("prefab", AssetReferenceCodec.Write(prefab));
+        if (entry.Components.Count > 0)
         {
-            table.Add("components", sceneObject.Components.Select(ToCanonical).ToArray());
+            table.Add("components", entry.Components.Select(ToCanonical).ToArray());
         }
 
         return table;
     }
 
-    private static CanonicalTomlTable ToCanonical(SceneComponent component)
+    private static CanonicalTomlTable ToCanonical(PrefabComponent component)
     {
-        var table = new CanonicalTomlTable { { SceneComponent.IdKey, DocumentGuid.Format(component.Id) } };
-        if (component.Type is { } type) table.Add(SceneComponent.TypeKey, type);
-        if (component.Removed) table.Add(SceneComponent.RemovedKey, true);
+        var table = new CanonicalTomlTable { { PrefabComponent.IdKey, DocumentGuid.Format(component.Id) } };
+        if (component.Type is { } type) table.Add(PrefabComponent.TypeKey, type);
+        if (component.Removed) table.Add(PrefabComponent.RemovedKey, true);
         foreach (var (key, value) in component.Data) table.Add(key, value);
         return table;
     }

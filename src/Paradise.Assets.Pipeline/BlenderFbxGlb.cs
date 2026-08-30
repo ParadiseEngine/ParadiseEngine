@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json.Nodes;
 
-using Paradise.Assets.Pipeline;
 
-namespace Paradise.Export.Pipeline
+
+namespace Paradise.Assets.Pipeline
 {
     /// <summary>
     /// Converts an FBX to GLB using headless Blender. Engine-neutral port of the Unity

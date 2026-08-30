@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
+using Paradise.Export.Serialization;
 
 using Zio;
 
@@ -136,8 +137,8 @@ public sealed class BuildRunner
 
                     break;
 
-                case AssetClass.Scene:
-                    errors.Add($"{Relative(path)}: scene compilation is not implemented yet — the build cannot produce a complete tree");
+                case AssetClass.Prefab:
+                    BuildPrefab(path, profile!, output, manifest, errors);
                     break;
 
                 case AssetClass.Config:
@@ -235,12 +236,16 @@ public sealed class BuildRunner
     private static UPath Resolve(UPath directory, string uri)
         => (directory / Uri.UnescapeDataString(uri)).ToAbsolute();
 
+    /// <summary>The extension an authored document gets in the build, per the profile.</summary>
+    private static string DocumentExtension(BuildProfile profile)
+        => profile.DocumentFormat == DocumentFormat.Json ? ".json" : ".toml";
+
     private void BuildConfig(UPath path, BuildProfile profile, UPath output, BuildManifest manifest, List<string> errors)
     {
         var source = Relative(path);
-        if (profile.DocumentFormat != DocumentFormat.Toml)
+        if (profile.DocumentFormat is not (DocumentFormat.Toml or DocumentFormat.Json))
         {
-            errors.Add($"{source}: document_format \"{profile.DocumentFormat}\" output is not implemented yet (toml is)");
+            errors.Add($"{source}: document_format \"{profile.DocumentFormat}\" output is not implemented yet (toml and json are)");
             return;
         }
 
@@ -250,10 +255,74 @@ public sealed class BuildRunner
             return;
         }
 
-        var destination = output / source;
+        // Canonicalized first either way: the TOML reader is the one strict parser, so a document
+        // that would be refused as source is refused whichever format it is compiled into.
+        var destination = output / Path.ChangeExtension(source, DocumentExtension(profile));
         CreateParent(destination);
-        _fileSystem.WriteAllText(destination, canonical);
+        _fileSystem.WriteAllText(
+            destination,
+            profile.DocumentFormat == DocumentFormat.Json ? ConfigDocument.ToJson(canonical, source) : canonical);
+
         Record(manifest, destination, output, source, guid: null);
+    }
+
+    /// <summary>
+    /// Compiles one authoring document into the export contract the runtime loads.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every document is baked, not just the ones a game calls levels.</b> There is one kind of
+    /// document, so a prop compiles to a one-entity level and can be played on its own — which is
+    /// the whole point of having one kind. A prefab referenced by another is ALSO flattened into
+    /// it, so the same objects appear in both outputs; that is what an instance means.
+    /// </remarks>
+    private void BuildPrefab(UPath path, BuildProfile profile, UPath output, BuildManifest manifest, List<string> errors)
+    {
+        var source = Relative(path);
+        if (profile.DocumentFormat != DocumentFormat.Json)
+        {
+            errors.Add(
+                $"{source}: document_format \"{profile.DocumentFormat}\" cannot express the export contract — " +
+                "set the profile to json (the format the runtime's reader takes)");
+            return;
+        }
+
+        PrefabDocument document;
+        try
+        {
+            document = PrefabDocumentSerializer.Load(_fileSystem, path);
+        }
+        catch (PrefabDocumentException error)
+        {
+            errors.Add(error.Message);
+            return;
+        }
+
+        var failures = new List<string>();
+        var level = PrefabBake.Bake(document, Referenced, DocumentExtension(profile), failures);
+        if (failures.Count > 0)
+        {
+            foreach (var failure in failures) errors.Add($"{source}: {failure}");
+            return;
+        }
+
+        var destination = output / Path.ChangeExtension(source, ".json");
+        CreateParent(destination);
+        _fileSystem.WriteAllText(destination, ExportJsonWriter.SerializeToString(level));
+
+        var meta = SidecarMeta.Load(_fileSystem, SidecarMeta.PathFor(path));
+        Record(manifest, destination, output, source, meta.Guid);
+
+        PrefabDocument? Referenced(Paradise.Authoring.AssetReference reference)
+        {
+            try
+            {
+                return PrefabDocumentSerializer.Load(_fileSystem, _layout.Assets / reference.Path);
+            }
+            catch (PrefabDocumentException)
+            {
+                return null;   // reported against the referenced document, which is also built
+            }
+        }
     }
 
     private void CopyThrough(UPath path, UPath output, BuildManifest manifest, byte[]? bytes = null)

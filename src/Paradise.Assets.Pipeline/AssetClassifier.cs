@@ -11,14 +11,14 @@ public enum AssetClass
     Manifest,
 
     /// <summary>
-    /// A prefab, <c>*.prefab</c> — structurally a scene document, but instantiated by scenes
-    /// rather than loaded on its own. The build resolves instances away, so nothing downstream
-    /// ever sees one.
+    /// An authoring document, <c>*.prefab</c> — a level, a prop, or a piece of one.
     /// </summary>
+    /// <remarks>
+    /// There is no second kind. What a game calls a level is a document you open at the top;
+    /// what it calls a prop is the same document instantiated by another. The build resolves
+    /// instances away either way, so nothing downstream sees the difference.
+    /// </remarks>
     Prefab,
-
-    /// <summary>An authoring scene document, <c>*.scene</c>.</summary>
-    Scene,
 
     /// <summary>An authored config document — any other <c>*.toml</c>.</summary>
     Config,
@@ -44,10 +44,7 @@ public enum AssetClass
 /// </remarks>
 public static class AssetClassifier
 {
-    /// <summary>The scene-document double extension.</summary>
-    public const string SceneSuffix = ".scene";
-
-    /// <summary>The prefab double extension. Structurally a scene, but instantiated rather than loaded.</summary>
+    /// <summary>The authoring-document extension. The only one there is.</summary>
     public const string PrefabSuffix = ".prefab";
 
     private static readonly Dictionary<string, SidecarAssetKind> s_foreignKinds = new(StringComparer.OrdinalIgnoreCase)
@@ -69,7 +66,6 @@ public static class AssetClassifier
         var name = path.GetName();
         if (SidecarMeta.IsSidecarPath(path)) return AssetClass.Sidecar;
         if (path == assetsRoot / Paradise.Assets.Project.AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
-        if (name.EndsWith(SceneSuffix, StringComparison.Ordinal)) return AssetClass.Scene;
         if (name.EndsWith(PrefabSuffix, StringComparison.Ordinal)) return AssetClass.Prefab;
         if (name.EndsWith(".toml", StringComparison.Ordinal)) return AssetClass.Config;
         if (s_foreignKinds.ContainsKey(path.GetExtensionWithDot() ?? string.Empty)) return AssetClass.Foreign;
@@ -101,7 +97,7 @@ public static class AssetClassifier
     {
         AssetClass.Sidecar => null,
         AssetClass.Foreign => TryGetForeignKind(path, out var kind) ? kind : SidecarAssetKind.Opaque,
-        AssetClass.Manifest or AssetClass.Scene or AssetClass.Prefab or AssetClass.Config =>
+        AssetClass.Manifest or AssetClass.Prefab or AssetClass.Config =>
             SidecarAssetKind.Document,
         _ => SidecarAssetKind.Opaque,
     };

@@ -36,25 +36,58 @@ public static class PrefabResolver
     /// <param name="Document">The flattened document; every object is plain.</param>
     /// <param name="Errors">What could not be resolved; empty on success.</param>
     /// <param name="Expanded">How many instances were expanded.</param>
-    public readonly record struct ResolveResult(SceneDocument Document, IReadOnlyList<ResolveError> Errors, int Expanded);
+    public readonly record struct ResolveResult(PrefabDocument Document, IReadOnlyList<ResolveError> Errors, int Expanded);
 
     /// <summary>
     /// Expands every instance in <paramref name="document"/>.
     /// </summary>
-    /// <param name="document">The scene, which may contain instances and override carriers.</param>
+    /// <param name="document">The document, which may contain instances and override carriers.</param>
     /// <param name="prefabs">Resolves a prefab reference to its document, or returns null.</param>
-    public static ResolveResult Resolve(SceneDocument document, Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs)
+    public static ResolveResult Resolve(PrefabDocument document, Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(prefabs);
 
         var errors = new List<ResolveError>();
-        var resolved = new SceneDocument();
+        var resolved = new PrefabDocument();
+        var expanded = ExpandDocument(document, prefabs, resolved, errors, [], [], depth: 0);
+
+        return new ResolveResult(resolved, errors, expanded);
+    }
+
+    /// <summary>
+    /// How deep instances may nest before resolution gives up.
+    /// </summary>
+    /// <remarks>
+    /// The cycle stack already catches a prefab that reaches itself. This catches the other
+    /// runaway — a chain that is acyclic but absurd, or a bug that mints a fresh reference each
+    /// level — with a number no real asset approaches.
+    /// </remarks>
+    private const int MaxNestingDepth = 32;
+
+    /// <summary>
+    /// Expands the instances in one document into <paramref name="into"/>, and returns how many
+    /// of THIS document's instances were expanded.
+    /// </summary>
+    /// <remarks>
+    /// The count is deliberately not cumulative. A nested prefab is flattened once and reused by
+    /// every instance of it, so adding its internal expansions to the total would report a number
+    /// that grows with caching rather than with the document.
+    /// </remarks>
+    private static int ExpandDocument(
+        PrefabDocument document,
+        Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
+        PrefabDocument into,
+        List<ResolveError> errors,
+        List<string> stack,
+        Dictionary<string, PrefabDocument?> cache,
+        int depth)
+    {
         var expanded = 0;
 
         // Carriers are consumed by the instance they belong to and occupy no slot of their own,
         // so they are collected first and looked up by (instance guid, prefab-local target).
-        var carriers = new Dictionary<(Guid Instance, Guid Target), SceneObject>();
+        var carriers = new Dictionary<(Guid Instance, Guid Target), PrefabObject>();
         foreach (var candidate in document.Objects)
         {
             if (candidate.Target is not { } target) continue;
@@ -78,16 +111,16 @@ public static class PrefabResolver
 
             if (candidate.Prefab is null)
             {
-                resolved.Objects.Add(candidate);
+                into.Objects.Add(candidate);
                 continue;
             }
 
-            var prefab = prefabs(candidate.Prefab);
-            if (prefab is null)
-            {
-                errors.Add(new ResolveError($"prefab '{candidate.Prefab.Path}' could not be read"));
-                continue;
-            }
+            // FLATTEN THE PREFAB FIRST, then expand it. Doing it in this order is what makes
+            // nesting fall out: Expand only ever sees a prefab with no instances left in it, so
+            // it needs no notion of depth, and a prefab three levels deep is merged by exactly
+            // the code that merges one level deep.
+            var prefab = Flatten(candidate.Prefab, prefabs, errors, stack, cache, depth);
+            if (prefab is null) continue;   // the failure is already recorded
 
             if (candidate.Guid is not { } instanceGuid)
             {
@@ -95,25 +128,86 @@ public static class PrefabResolver
                 continue;
             }
 
-            Expand(candidate, instanceGuid, prefab, carriers, resolved, errors);
+            Expand(candidate, instanceGuid, prefab, carriers, into, errors);
             expanded++;
         }
 
-        return new ResolveResult(resolved, errors, expanded);
+        return expanded;
+    }
+
+    /// <summary>
+    /// A prefab with its own instances already expanded, or <see langword="null"/> if it could not
+    /// be resolved.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Cached by path.</b> A flattened prefab does not depend on who instantiates it — minting
+    /// happens at expansion time from the instance's guid — so the same file resolved twice gives
+    /// the same objects, and ShiningPie's 126 box instances flatten one prefab once.
+    /// </para>
+    /// <para>
+    /// <b>The stack is the cycle detector.</b> A prefab that reaches itself, directly or through
+    /// others, would otherwise recurse until the process died; instead the chain that closed the
+    /// loop is reported, because "box.prefab -> rail.prefab -> box.prefab" tells an author what to
+    /// go and delete, and "stack overflow" does not.
+    /// </para>
+    /// </remarks>
+    private static PrefabDocument? Flatten(
+        Paradise.Authoring.AssetReference reference,
+        Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
+        List<ResolveError> errors,
+        List<string> stack,
+        Dictionary<string, PrefabDocument?> cache,
+        int depth)
+    {
+        var key = reference.Path;
+
+        var loop = stack.FindIndex(entry => string.Equals(entry, key, StringComparison.OrdinalIgnoreCase));
+        if (loop >= 0)
+        {
+            errors.Add(new ResolveError(
+                $"prefabs form a cycle: {string.Join(" -> ", stack.Skip(loop).Append(key))}"));
+            return null;
+        }
+
+        if (depth >= MaxNestingDepth)
+        {
+            errors.Add(new ResolveError(
+                $"prefab '{key}' nests more than {MaxNestingDepth} deep; this is almost certainly a mistake"));
+            return null;
+        }
+
+        if (cache.TryGetValue(key, out var cached)) return cached;
+
+        var raw = prefabs(reference);
+        if (raw is null)
+        {
+            errors.Add(new ResolveError($"prefab '{key}' could not be read"));
+            cache[key] = null;
+            return null;
+        }
+
+        stack.Add(key);
+        var flat = new PrefabDocument();
+        ExpandDocument(raw, prefabs, flat, errors, stack, cache, depth + 1);
+        stack.RemoveAt(stack.Count - 1);
+
+        cache[key] = flat;
+        return flat;
     }
 
     private static void Expand(
-        SceneObject instance,
+        PrefabObject instance,
         Guid instanceGuid,
         PrefabDocument prefab,
-        IReadOnlyDictionary<(Guid, Guid), SceneObject> carriers,
-        SceneDocument into,
+        IReadOnlyDictionary<(Guid, Guid), PrefabObject> carriers,
+        PrefabDocument into,
         List<ResolveError> errors)
     {
         // Every prefab-local identity gets its scene identity up front, so a Parent link can be
         // remapped whichever order the objects come in.
         var minted = new Dictionary<Guid, Guid>();
-        foreach (var member in prefab.Document.Objects)
+        foreach (var member in prefab.Objects)
         {
             if (member.Guid is not { } local) continue;
             minted[local] = local == prefab.RootGuid ? instanceGuid : MintChildGuid(instanceGuid, local);
@@ -122,7 +216,7 @@ public static class PrefabResolver
         // ORDER: the instance first, then its children in PREFAB document order, immediately
         // after it. Order is load-bearing -- the runtime assigns entity handles in walk order --
         // so it is specified here rather than left to whatever the loop happens to do.
-        foreach (var member in prefab.Document.Objects)
+        foreach (var member in prefab.Objects)
         {
             if (member.Guid is not { } local) continue;
 
@@ -150,12 +244,12 @@ public static class PrefabResolver
 
     /// <summary>Whether any ancestor of <paramref name="member"/> is dropped by this instance.</summary>
     private static bool DropsAncestor(
-        SceneObject member,
+        PrefabObject member,
         PrefabDocument prefab,
         Guid instanceGuid,
-        IReadOnlyDictionary<(Guid, Guid), SceneObject> carriers)
+        IReadOnlyDictionary<(Guid, Guid), PrefabObject> carriers)
     {
-        var byGuid = prefab.Document.ByGuid();
+        var byGuid = prefab.ByGuid();
         var parent = member.Parent;
         while (parent is { } current)
         {
@@ -166,16 +260,16 @@ public static class PrefabResolver
         return false;
     }
 
-    private static SceneObject Merge(
-        SceneObject prefabObject,
-        SceneObject? overrides,
+    private static PrefabObject Merge(
+        PrefabObject prefabObject,
+        PrefabObject? overrides,
         bool isRoot,
         Guid instanceGuid,
         IReadOnlyDictionary<Guid, Guid> minted,
         PrefabDocument prefab,
         List<ResolveError> errors)
     {
-        var result = new SceneObject();
+        var result = new PrefabObject();
 
         // COMPONENT ORDER: prefab order first, then instance-only additions in instance order.
         foreach (var component in prefabObject.Components)
@@ -185,7 +279,7 @@ public static class PrefabResolver
 
             result.Components.Add(overriding is null
                 ? component
-                : new SceneComponent(component.Id, component.Type ?? overriding.Type, MergeData(component.Data, overriding.Data), removed: false));
+                : new PrefabComponent(component.Id, component.Type ?? overriding.Type, MergeData(component.Data, overriding.Data), removed: false));
         }
 
         if (overrides is not null)
@@ -214,12 +308,12 @@ public static class PrefabResolver
     /// carrier-only fields, which describe the override rather than the object.
     /// </summary>
     private static void RewriteMeta(
-        SceneObject result,
-        SceneObject prefabObject,
+        PrefabObject result,
+        PrefabObject prefabObject,
         bool isRoot,
         Guid instanceGuid,
         IReadOnlyDictionary<Guid, Guid> minted,
-        SceneObject? overrides)
+        PrefabObject? overrides)
     {
         var index = result.Components.FindIndex(c => c.Id == WellKnownComponents.MetaId);
         var existing = index >= 0 ? result.Components[index] : null;
@@ -258,7 +352,7 @@ public static class PrefabResolver
             }
         }
 
-        var component = new SceneComponent(WellKnownComponents.MetaId, WellKnownComponents.MetaType, data);
+        var component = new PrefabComponent(WellKnownComponents.MetaId, WellKnownComponents.MetaType, data);
         if (index >= 0) result.Components[index] = component;
         else result.Components.Insert(0, component);
     }

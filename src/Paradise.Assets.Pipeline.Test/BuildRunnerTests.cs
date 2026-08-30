@@ -181,15 +181,32 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task scenes_refuse_the_build_until_the_bake_exists()
+    public async Task a_document_bakes_to_the_export_contract()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject(documentFormat: "json");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Succeeded).IsTrue();
+
+        // The extension changes because the built form is the contract, not the authoring source.
+        var baked = fileSystem.ReadAllText("/game/build/levels/district.json");
+        await Assert.That(baked).Contains("\"Entities\"");
+        await Assert.That(baked).Contains("Paradise.Export.Data.TransformComponentData");
+    }
+
+    [Test]
+    public async Task a_document_refuses_a_toml_build_because_the_contract_is_json()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
         await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors[0]).Contains("scene compilation is not implemented yet");
+        await Assert.That(result.Errors[0]).Contains("cannot express the export contract");
     }
 
     [Test]
@@ -261,7 +278,7 @@ public class BuildRunnerTests
     public async Task no_manifest_is_written_on_a_failed_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 

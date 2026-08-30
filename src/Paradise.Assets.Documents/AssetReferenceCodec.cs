@@ -36,7 +36,7 @@ public static class AssetReferenceCodec
     /// <c>[Mesh]</c> the SAME parse — the form is not recoverable from position or from the
     /// parser's types when the table sits under a plain key. So the reader recovers the model type
     /// with a predicate, and the predicate has to be exact, because the C# and Python readers must
-    /// agree on every document or <c>scene-check</c> fails on bytes.
+    /// agree on every document or <c>prefab-check</c> fails on bytes.
     /// </para>
     /// <para>
     /// Exact means: <b>empty, or exactly the two string keys <c>guid</c> and <c>path</c></b>.

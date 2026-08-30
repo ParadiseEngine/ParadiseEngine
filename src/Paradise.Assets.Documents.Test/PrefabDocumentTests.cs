@@ -6,7 +6,7 @@ namespace Paradise.Assets.Documents.Test;
 /// The all-components scene document: identity, name, parent and placement are components like
 /// any other, which is what lets a prefab instance override them through one mechanism.
 /// </summary>
-public class SceneDocumentTests
+public class PrefabDocumentTests
 {
     private const string CrateGuid = "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8";
     private const string LidGuid = "9a8b7c6d-5e4f-4031-8213-4c5d6e7f8091";
@@ -41,13 +41,13 @@ public class SceneDocumentTests
         "Name = \"lid\"\n" +
         $"Parent = \"{CrateGuid}\"\n";
 
-    private static SceneDocumentException Rejects(string text)
+    private static PrefabDocumentException Rejects(string text)
     {
         try
         {
-            SceneDocumentSerializer.Parse(text, "x.scene");
+            PrefabDocumentSerializer.Parse(text, "x.scene");
         }
-        catch (SceneDocumentException error)
+        catch (PrefabDocumentException error)
         {
             return error;
         }
@@ -65,15 +65,15 @@ public class SceneDocumentTests
     {
         // THE property of the format: read → write is the identity on canonical input, or every
         // tool touching a scene would litter diffs with reformatting.
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "district.scene");
 
-        await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(Canonical);
+        await Assert.That(PrefabDocumentSerializer.Write(document)).IsEqualTo(Canonical);
     }
 
     [Test]
     public async Task identity_name_and_parent_are_read_from_the_meta_component()
     {
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "district.scene");
 
         await Assert.That(document.Objects.Count).IsEqualTo(2);
         var crate = document.Objects[0];
@@ -86,7 +86,7 @@ public class SceneDocumentTests
     [Test]
     public async Task a_payload_sits_flat_beside_id_and_type()
     {
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "district.scene");
 
         var renderable = document.Objects[0].Component(Guid.Parse(RenderableId));
         await Assert.That(renderable!.Type).IsEqualTo("Paradise.Export.Data.RenderableComponentData");
@@ -99,10 +99,10 @@ public class SceneDocumentTests
     [Test]
     public async Task an_asset_reference_in_a_payload_survives_the_round_trip()
     {
-        var document = SceneDocumentSerializer.Parse(Canonical, "district.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "district.scene");
         var mesh = document.Objects[0].Component(Guid.Parse(RenderableId))!.Data.Value("Mesh");
 
-        var reference = AssetReferenceCodec.Read(mesh, "on the crate", m => new SceneDocumentException("x", m));
+        var reference = AssetReferenceCodec.Read(mesh, "on the crate", m => new PrefabDocumentException("x", m));
 
         await Assert.That(reference!.Path).IsEqualTo("Models/crate.glb");
     }
@@ -110,14 +110,14 @@ public class SceneDocumentTests
     [Test]
     public async Task an_empty_scene_is_just_its_version()
     {
-        await Assert.That(SceneDocumentSerializer.Write(new SceneDocument())).IsEqualTo("schema_version = 1\n");
+        await Assert.That(PrefabDocumentSerializer.Write(new PrefabDocument())).IsEqualTo("schema_version = 1\n");
     }
 
     [Test]
     public async Task component_order_survives_the_round_trip()
     {
         // Order is data: the runtime applies components in document order.
-        var document = SceneDocumentSerializer.Parse(Canonical, "x.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "x.scene");
         var ids = document.Objects[0].Components.Select(c => c.Id).ToList();
 
         await Assert.That(ids[0]).IsEqualTo(WellKnownComponents.MetaId);
@@ -210,10 +210,10 @@ public class SceneDocumentTests
         var text = $"schema_version = 1\n{Object(CrateGuid)}" +
                    $"\n[[objects.components]]\nid = \"{RenderableId}\"\nremoved = true\n";
 
-        var document = SceneDocumentSerializer.Parse(text, "x.scene");
+        var document = PrefabDocumentSerializer.Parse(text, "x.scene");
 
         await Assert.That(document.Objects[0].Component(Guid.Parse(RenderableId))!.Removed).IsTrue();
-        await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(text);
+        await Assert.That(PrefabDocumentSerializer.Write(document)).IsEqualTo(text);
     }
 
     [Test]
@@ -223,10 +223,10 @@ public class SceneDocumentTests
                    $"prefab = {{ guid = \"{LidGuid}\", path = \"prefabs/rail.prefab\" }}\n" +
                    $"\n[[objects.components]]\nid = \"{Meta}\"\ntype = \"meta\"\nGuid = \"{CrateGuid}\"\n";
 
-        var document = SceneDocumentSerializer.Parse(text, "x.scene");
+        var document = PrefabDocumentSerializer.Parse(text, "x.scene");
 
         await Assert.That(document.Objects[0].Prefab!.Path).IsEqualTo("prefabs/rail.prefab");
-        await Assert.That(SceneDocumentSerializer.Write(document)).IsEqualTo(text);
+        await Assert.That(PrefabDocumentSerializer.Write(document)).IsEqualTo(text);
     }
 
     [Test]
@@ -238,7 +238,7 @@ public class SceneDocumentTests
                    $"id = \"{Meta}\"\ntype = \"meta\"\nParent = \"{CrateGuid}\"\nTarget = \"{LidGuid}\"\n" +
                    Object(CrateGuid);
 
-        var document = SceneDocumentSerializer.Parse(text, "x.scene");
+        var document = PrefabDocumentSerializer.Parse(text, "x.scene");
 
         await Assert.That(document.Objects[0].Target).IsEqualTo(Guid.Parse(LidGuid));
         await Assert.That(document.Objects[0].Guid).IsNull();
@@ -247,19 +247,32 @@ public class SceneDocumentTests
     [Test]
     public async Task the_single_root_is_inferred_from_the_absence_of_a_parent()
     {
-        var document = SceneDocumentSerializer.Parse(Canonical, "x.scene");
+        var document = PrefabDocumentSerializer.Parse(Canonical, "x.scene");
 
         await Assert.That(document.SingleRoot()!.Guid).IsEqualTo(Guid.Parse(CrateGuid));
     }
 
     [Test]
-    public async Task a_document_with_two_roots_has_no_single_root()
+    public async Task a_document_with_two_roots_is_refused()
     {
-        // Not an error here — the serializer reads scenes too, and a scene has many roots. It is
-        // PrefabDocument that requires exactly one.
-        var document = SceneDocumentSerializer.Parse($"schema_version = 1\n{Object(CrateGuid)}{Object(LidGuid)}", "x");
+        // There is one kind of document now, and every one of them is instantiable, so "exactly
+        // one root" is checked on EVERY read rather than only when something is used as a prefab.
+        // The message names the roots, because "which of these did you mean to be the root" is
+        // the question the author has to answer.
+        var error = Assert.Throws<PrefabDocumentException>(
+            () => PrefabDocumentSerializer.Parse($"schema_version = 1\n{Object(CrateGuid)}{Object(LidGuid)}", "x.prefab"));
 
-        await Assert.That(document.SingleRoot()).IsNull();
+        await Assert.That(error!.Message).Contains("has 2 root objects");
+        await Assert.That(error.Message).Contains("parent the others beneath it");
+    }
+
+    [Test]
+    public async Task a_document_with_no_objects_is_refused()
+    {
+        var error = Assert.Throws<PrefabDocumentException>(
+            () => PrefabDocumentSerializer.Parse("schema_version = 1\n", "empty.prefab"));
+
+        await Assert.That(error!.Message).Contains("has no objects");
     }
 
     [Test]
@@ -271,7 +284,7 @@ public class SceneDocumentTests
                    "Count = 3\nRatio = 0.5\nFlag = true\nList = [1, 2]\n" +
                    "\n[objects.components.Nested]\nInner = \"deep\"\n";
 
-        await Assert.That(SceneDocumentSerializer.Write(SceneDocumentSerializer.Parse(text, "x.scene")))
+        await Assert.That(PrefabDocumentSerializer.Write(PrefabDocumentSerializer.Parse(text, "x.scene")))
             .IsEqualTo(text);
     }
 }

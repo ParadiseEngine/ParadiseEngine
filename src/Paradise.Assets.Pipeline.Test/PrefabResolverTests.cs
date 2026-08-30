@@ -7,7 +7,7 @@ namespace Paradise.Assets.Pipeline.Test;
 /// The prefab resolver, and the normative rules the Python mirror has to match exactly.
 ///
 /// These are the fixtures both implementations run against: anything that differs here differs
-/// in the documents each writes, and the divergence surfaces long afterwards as a scene-check
+/// in the documents each writes, and the divergence surfaces long afterwards as a prefab-check
 /// failure or a scene whose entity handles moved.
 /// </summary>
 public class PrefabResolverTests
@@ -22,47 +22,59 @@ public class PrefabResolverTests
     private static readonly AssetReference PrefabRef =
         new(Guid.Parse("5f2a1111-2222-4333-8444-555555555555"), "prefabs/lamp.prefab");
 
+    /// <summary>The document, having checked it obeys the single-root rule.</summary>
+    /// <remarks>
+    /// Fixtures are built object by object rather than parsed, so they skip the serializer where
+    /// that rule is normally enforced. Running it here keeps a fixture from being something no
+    /// reader would ever hand the resolver.
+    /// </remarks>
+    private static PrefabDocument Validated(PrefabDocument document, string sourceName)
+    {
+        document.Validate(sourceName);
+        return document;
+    }
+
     /// <summary>A one-object prefab: meta, transform, a mesh and a tag.</summary>
     private static PrefabDocument SingleObjectPrefab()
     {
-        var document = new SceneDocument();
-        var root = SceneObject.WithMeta(Guid.Parse(RootLocal), "Post");
-        root.Components.Add(new SceneComponent(
+        var document = new PrefabDocument();
+        var root = PrefabObject.WithMeta(Guid.Parse(RootLocal), "Post");
+        root.Components.Add(new PrefabComponent(
             WellKnownComponents.TransformId, WellKnownComponents.TransformType,
             new CanonicalTomlTable
             {
                 { WellKnownComponents.Position, new object[] { 0.0, 0.0, 0.0 } },
                 { WellKnownComponents.Scale, new object[] { 1.0, 1.0, 1.0 } },
             }));
-        root.Components.Add(new SceneComponent(Guid.Parse(MeshId), "ObstacleMesh",
+        root.Components.Add(new PrefabComponent(Guid.Parse(MeshId), "ObstacleMesh",
             new CanonicalTomlTable { { "Mesh", "Models/unit_box.glb" } }));
-        root.Components.Add(new SceneComponent(Guid.Parse(TagId), "ObstacleTag"));
+        root.Components.Add(new PrefabComponent(Guid.Parse(TagId), "ObstacleTag"));
         document.Objects.Add(root);
-        return PrefabDocument.Validate(document, "lamp.prefab");
+        return Validated(document, "lamp.prefab");
     }
 
     /// <summary>A two-object prefab: Post, with Bulb parented beneath it.</summary>
     private static PrefabDocument TwoObjectPrefab()
     {
-        var document = SingleObjectPrefab().Document;
-        var child = SceneObject.WithMeta(Guid.Parse(ChildLocal), "Bulb", Guid.Parse(RootLocal));
-        child.Components.Add(new SceneComponent(Guid.Parse(MaterialsId), "Materials",
+        var document = SingleObjectPrefab();
+        var child = PrefabObject.WithMeta(Guid.Parse(ChildLocal), "Bulb", Guid.Parse(RootLocal));
+        child.Components.Add(new PrefabComponent(Guid.Parse(MaterialsId), "Materials",
             new CanonicalTomlTable { { "Slots", new object[] { "materials/warm.toml" } } }));
         document.Objects.Add(child);
-        return PrefabDocument.Validate(document, "lamp.prefab");
+        return Validated(document, "lamp.prefab");
     }
 
-    private static SceneObject Instance(params SceneComponent[] extra)
+    private static PrefabObject Instance(params PrefabComponent[] extra)
     {
-        var instance = SceneObject.WithMeta(Guid.Parse(InstanceGuid), "Lamp_03");
+        var instance = PrefabObject.WithMeta(Guid.Parse(InstanceGuid), "Lamp_03");
         instance.Prefab = PrefabRef;
         foreach (var component in extra) instance.Components.Add(component);
         return instance;
     }
 
-    private static PrefabResolver.ResolveResult Resolve(PrefabDocument prefab, params SceneObject[] objects)
+    private static PrefabResolver.ResolveResult Resolve(PrefabDocument prefab, params PrefabObject[] objects)
     {
-        var scene = new SceneDocument();
+        var scene = new PrefabDocument();
         foreach (var candidate in objects) scene.Objects.Add(candidate);
         return PrefabResolver.Resolve(scene, _ => prefab);
     }
@@ -95,7 +107,7 @@ public class PrefabResolverTests
     {
         // Scale is given, Position is not -- so Position must survive from the prefab. Anything
         // else would make every instance restate every field it did not want to change.
-        var instance = Instance(new SceneComponent(
+        var instance = Instance(new PrefabComponent(
             WellKnownComponents.TransformId, WellKnownComponents.TransformType,
             new CanonicalTomlTable { { WellKnownComponents.Scale, new object[] { 1.0, 0.08, 4.0 } } }));
 
@@ -109,7 +121,7 @@ public class PrefabResolverTests
     [Test]
     public async Task a_component_only_the_instance_has_is_added()
     {
-        var instance = Instance(new SceneComponent(Guid.Parse(MaterialsId), "Materials",
+        var instance = Instance(new PrefabComponent(Guid.Parse(MaterialsId), "Materials",
             new CanonicalTomlTable { { "Slots", new object[] { "materials/red.toml" } } }));
 
         var resolved = Resolve(SingleObjectPrefab(), instance).Document.Objects[0];
@@ -120,7 +132,7 @@ public class PrefabResolverTests
     [Test]
     public async Task a_removed_component_is_dropped()
     {
-        var instance = Instance(new SceneComponent(Guid.Parse(TagId), removed: true));
+        var instance = Instance(new PrefabComponent(Guid.Parse(TagId), removed: true));
 
         var resolved = Resolve(SingleObjectPrefab(), instance).Document.Objects[0];
 
@@ -131,7 +143,7 @@ public class PrefabResolverTests
     [Test]
     public async Task removing_a_component_the_prefab_does_not_have_is_an_error()
     {
-        var instance = Instance(new SceneComponent(Guid.Parse(MaterialsId), removed: true));
+        var instance = Instance(new PrefabComponent(Guid.Parse(MaterialsId), removed: true));
 
         var result = Resolve(SingleObjectPrefab(), instance);
 
@@ -144,7 +156,7 @@ public class PrefabResolverTests
     {
         // Order is data -- the runtime applies components in it -- so it is pinned rather than
         // left to whatever the merge loop happens to produce.
-        var instance = Instance(new SceneComponent(Guid.Parse(MaterialsId), "Materials"));
+        var instance = Instance(new PrefabComponent(Guid.Parse(MaterialsId), "Materials"));
 
         var ids = Resolve(SingleObjectPrefab(), instance).Document.Objects[0]
             .Components.Select(c => c.Id).ToList();
@@ -162,9 +174,9 @@ public class PrefabResolverTests
         // The rule that a naive "unknown field" check would forbid, and the commonest edit there
         // is: a prefab root deliberately has no Parent, because that absence is what makes it the
         // root.
-        var parent = SceneObject.WithMeta(Guid.Parse(ChildLocal), "Holder");
+        var parent = PrefabObject.WithMeta(Guid.Parse(ChildLocal), "Holder");
         var instance = Instance();
-        instance.Components[0] = new SceneComponent(
+        instance.Components[0] = new PrefabComponent(
             WellKnownComponents.MetaId, WellKnownComponents.MetaType,
             new CanonicalTomlTable
             {
@@ -206,7 +218,7 @@ public class PrefabResolverTests
     {
         // What makes the minting namespace the INSTANCE rather than the prefab: twenty instances
         // need twenty distinct sets of children, with no guid bookkeeping in the document.
-        var second = SceneObject.WithMeta(Guid.Parse("7c2e9a41-1111-4222-8333-444444444444"), "Lamp_04");
+        var second = PrefabObject.WithMeta(Guid.Parse("7c2e9a41-1111-4222-8333-444444444444"), "Lamp_04");
         second.Prefab = PrefabRef;
 
         var result = Resolve(TwoObjectPrefab(), Instance(), second);
@@ -243,15 +255,15 @@ public class PrefabResolverTests
     [Test]
     public async Task a_carrier_overrides_a_child_and_occupies_no_slot_of_its_own()
     {
-        var carrier = new SceneObject();
-        carrier.Components.Add(new SceneComponent(
+        var carrier = new PrefabObject();
+        carrier.Components.Add(new PrefabComponent(
             WellKnownComponents.MetaId, WellKnownComponents.MetaType,
             new CanonicalTomlTable
             {
                 { WellKnownComponents.Parent, InstanceGuid },
                 { WellKnownComponents.Target, ChildLocal },
             }));
-        carrier.Components.Add(new SceneComponent(Guid.Parse(MaterialsId), "Materials",
+        carrier.Components.Add(new PrefabComponent(Guid.Parse(MaterialsId), "Materials",
             new CanonicalTomlTable { { "Slots", new object[] { "materials/dead.toml" } } }));
 
         var result = Resolve(TwoObjectPrefab(), Instance(), carrier);
@@ -266,8 +278,8 @@ public class PrefabResolverTests
     [Test]
     public async Task a_dropped_child_is_removed()
     {
-        var carrier = new SceneObject();
-        carrier.Components.Add(new SceneComponent(
+        var carrier = new PrefabObject();
+        carrier.Components.Add(new PrefabComponent(
             WellKnownComponents.MetaId, WellKnownComponents.MetaType,
             new CanonicalTomlTable
             {
@@ -285,8 +297,8 @@ public class PrefabResolverTests
     [Test]
     public async Task a_carrier_targeting_nothing_in_the_prefab_is_an_error()
     {
-        var carrier = new SceneObject();
-        carrier.Components.Add(new SceneComponent(
+        var carrier = new PrefabObject();
+        carrier.Components.Add(new PrefabComponent(
             WellKnownComponents.MetaId, WellKnownComponents.MetaType,
             new CanonicalTomlTable
             {
@@ -305,30 +317,105 @@ public class PrefabResolverTests
     [Test]
     public async Task a_prefab_with_two_roots_is_refused()
     {
-        var document = SingleObjectPrefab().Document;
-        document.Objects.Add(SceneObject.WithMeta(Guid.Parse(ChildLocal), "Loose"));
+        var document = SingleObjectPrefab();
+        document.Objects.Add(PrefabObject.WithMeta(Guid.Parse(ChildLocal), "Loose"));
 
-        var error = Assert.Throws<SceneDocumentException>(() => PrefabDocument.Validate(document, "x.prefab"));
+        var error = Assert.Throws<PrefabDocumentException>(() => Validated(document, "x.prefab"));
 
         await Assert.That(error!.Message).Contains("2 root objects");
     }
 
     [Test]
-    public async Task a_prefab_instantiating_another_prefab_is_refused_for_now()
+    public async Task a_prefab_may_instantiate_another_prefab()
     {
-        var document = SingleObjectPrefab().Document;
-        document.Objects[0].Prefab = PrefabRef;
+        // fitting.prefab's own child is an instance of lamp.prefab, so resolving ONE instance of
+        // fitting has to expand two levels. This is the case the format always allowed and the
+        // resolver refused; a level is a document holding instances, so it is also every level.
+        var result = ResolveWith(TwoLevelLookup, OuterInstance());
 
-        var error = Assert.Throws<SceneDocumentException>(() => PrefabDocument.Validate(document, "x.prefab"));
-
-        await Assert.That(error!.Message).Contains("not supported yet");
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Document.Objects.Select(o => o.Name ?? "").ToArray())
+            .IsEquivalentTo(new[] { "Fitting_01", "Post" });
     }
+
+    [Test]
+    public async Task a_nested_instance_mints_identities_that_survive_two_levels()
+    {
+        var result = ResolveWith(TwoLevelLookup, OuterInstance());
+
+        // The inner prefab's root becomes the inner instance, whose own guid was minted from the
+        // outer instance's. Nothing may collide, and no prefab-local id may survive.
+        var guids = result.Document.Objects.Select(o => o.Guid).ToList();
+        await Assert.That(guids.Distinct().Count()).IsEqualTo(guids.Count);
+        await Assert.That(guids).DoesNotContain(Guid.Parse(RootLocal));
+        await Assert.That(guids).DoesNotContain(Guid.Parse(OuterInnerLocal));
+    }
+
+    [Test]
+    public async Task a_prefab_cycle_is_reported_rather_than_recursed()
+    {
+        // A prefab whose child instantiates the prefab it is in. Without the stack this recurses
+        // until the process dies, which tells an author nothing; the error names the chain.
+        var result = ResolveWith(_ => SelfReferencingPrefab(), Instance());
+
+        await Assert.That(result.Errors).Count().IsEqualTo(1);
+        await Assert.That(result.Errors[0].Message).Contains("form a cycle");
+        await Assert.That(result.Errors[0].Message).Contains("lamp.prefab");
+    }
+
+    /// <summary>A prefab whose child instantiates <c>prefabs/lamp.prefab</c>.</summary>
+    private static PrefabDocument OuterPrefab()
+    {
+        var document = new PrefabDocument();
+        document.Objects.Add(PrefabObject.WithMeta(Guid.Parse(OuterRootLocal), "Fitting"));
+
+        var inner = PrefabObject.WithMeta(Guid.Parse(OuterInnerLocal), "Post", Guid.Parse(OuterRootLocal));
+        inner.Prefab = PrefabRef;
+        document.Objects.Add(inner);
+
+        return Validated(document, "fitting.prefab");
+    }
+
+    /// <summary>A prefab that reaches itself through its own child.</summary>
+    private static PrefabDocument SelfReferencingPrefab()
+    {
+        var document = SingleObjectPrefab();
+        var child = PrefabObject.WithMeta(Guid.Parse(ChildLocal), "Inner", Guid.Parse(RootLocal));
+        child.Prefab = PrefabRef;
+        document.Objects.Add(child);
+        return Validated(document, "prefabs/lamp.prefab");
+    }
+
+    private static PrefabObject OuterInstance()
+    {
+        var instance = PrefabObject.WithMeta(Guid.Parse(InstanceGuid), "Fitting_01");
+        instance.Prefab = OuterRef;
+        return instance;
+    }
+
+    /// <summary>Hands back whichever of the two fixtures a reference names.</summary>
+    private static PrefabDocument? TwoLevelLookup(AssetReference reference)
+        => reference.Path == PrefabRef.Path ? SingleObjectPrefab() : OuterPrefab();
+
+    private static PrefabResolver.ResolveResult ResolveWith(
+        Func<AssetReference, PrefabDocument?> prefabs, params PrefabObject[] objects)
+    {
+        var scene = new PrefabDocument();
+        foreach (var candidate in objects) scene.Objects.Add(candidate);
+        return PrefabResolver.Resolve(scene, prefabs);
+    }
+
+    private static readonly AssetReference OuterRef =
+        new(Guid.Parse("5f2a6666-7777-4888-8999-aaaaaaaaaaaa"), "prefabs/fitting.prefab");
+
+    private const string OuterRootLocal = "c0ffee00-0000-4000-8000-000000000001";
+    private const string OuterInnerLocal = "c0ffee00-0000-4000-8000-000000000002";
 
     [Test]
     public async Task an_empty_prefab_is_refused()
     {
-        var error = Assert.Throws<SceneDocumentException>(
-            () => PrefabDocument.Validate(new SceneDocument(), "x.prefab"));
+        var error = Assert.Throws<PrefabDocumentException>(
+            () => Validated(new PrefabDocument(), "x.prefab"));
 
         await Assert.That(error!.Message).Contains("no objects");
     }
@@ -336,7 +423,7 @@ public class PrefabResolverTests
     [Test]
     public async Task a_plain_object_passes_through_untouched()
     {
-        var plain = SceneObject.WithMeta(Guid.Parse(ChildLocal), "Hand placed");
+        var plain = PrefabObject.WithMeta(Guid.Parse(ChildLocal), "Hand placed");
 
         var result = Resolve(SingleObjectPrefab(), plain);
 

@@ -82,12 +82,8 @@ public static class ProjectVerifier
                     VerifySidecar(fileSystem, layout.Assets, path, guids, findings);
                     break;
 
-                case AssetClass.Scene:
-                    VerifyScene(fileSystem, layout, path, findings);
-                    break;
-
                 case AssetClass.Prefab:
-                    VerifyPrefab(fileSystem, layout, path, findings);
+                    VerifyDocument(fileSystem, layout, path, findings);
                     break;
 
                 case AssetClass.Other:
@@ -170,48 +166,43 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifyScene(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
+    /// <summary>
+    /// One document, whatever a game calls it.
+    /// </summary>
+    /// <remarks>
+    /// This used to be two methods that checked overlapping halves of the same file: a scene got
+    /// canonical form, references and instances but no root rule, and a prefab got the root rule
+    /// and references but neither of the other two. Nothing justified the split -- a prefab that
+    /// drifted out of canonical form was as much a diff-noise problem as a level that did, and a
+    /// prefab holding a broken instance simply went unchecked.
+    /// </remarks>
+    private static void VerifyDocument(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
     {
-        SceneDocument document;
+        PrefabDocument document;
         try
         {
-            document = SceneDocumentSerializer.Load(fileSystem, path);
+            // Load validates the single-root rule, so it is checked here for every document.
+            document = PrefabDocumentSerializer.Load(fileSystem, path);
         }
-        catch (SceneDocumentException error)
+        catch (PrefabDocumentException error)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
             return;
         }
 
-        // The canonical-form drift guard (the scene-check half of the parity story): a scene a
+        // The canonical-form drift guard (the prefab-check half of the parity story): a document a
         // tool wrote is byte-canonical, so a difference means a hand edit — legal, but the next
         // machine write will reformat it, and that diff belongs to this commit, not that one.
-        var canonical = SceneDocumentSerializer.Write(document);
+        var canonical = PrefabDocumentSerializer.Write(document);
         if (fileSystem.ReadAllText(path) != canonical)
         {
             findings.Add(new VerifyFinding(
                 VerifySeverity.Warning, path,
-                "is valid but not in canonical form; rewrite it (scene-check --fix) so machine edits stay out of your diffs"));
+                "is valid but not in canonical form; rewrite it (prefab-check --fix) so machine edits stay out of your diffs"));
         }
 
         VerifyReferences(fileSystem, layout, path, document, findings);
         VerifyInstances(fileSystem, layout, path, document, findings);
-    }
-
-    /// <summary>
-    /// A prefab, which is a scene document plus the single-root rule.
-    /// </summary>
-    private static void VerifyPrefab(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
-    {
-        try
-        {
-            var prefab = PrefabDocument.Load(fileSystem, path);
-            VerifyReferences(fileSystem, layout, path, prefab.Document, findings);
-        }
-        catch (SceneDocumentException error)
-        {
-            findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
-        }
     }
 
     /// <summary>
@@ -224,7 +215,7 @@ public static class ProjectVerifier
     /// silent wrong-asset failure the pair was introduced to prevent.
     /// </remarks>
     private static void VerifyReferences(
-        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, SceneDocument document, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         foreach (var candidate in document.Objects)
         {
@@ -235,7 +226,7 @@ public static class ProjectVerifier
                 foreach (var (key, value) in component.Data)
                 {
                     if (value is not CanonicalInlineTable table || table.Count == 0) continue;
-                    if (AssetReferenceCodec.Read(table, "", _ => new SceneDocumentException("", "")) is { } reference)
+                    if (AssetReferenceCodec.Read(table, "", _ => new PrefabDocumentException("", "")) is { } reference)
                     {
                         Check(reference, $"{component.Type ?? DocumentGuid.Format(component.Id)}.{key}");
                     }
@@ -287,7 +278,7 @@ public static class ProjectVerifier
 
     /// <summary>Every prefab instance in a scene must actually resolve.</summary>
     private static void VerifyInstances(
-        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, SceneDocument document, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         if (!document.Objects.Any(o => o.Prefab is not null || o.Target is not null)) return;
 
@@ -295,9 +286,9 @@ public static class ProjectVerifier
         {
             try
             {
-                return PrefabDocument.Load(fileSystem, layout.Assets / reference.Path);
+                return PrefabDocumentSerializer.Load(fileSystem, layout.Assets / reference.Path);
             }
-            catch (SceneDocumentException)
+            catch (PrefabDocumentException)
             {
                 return null;   // reported against the prefab itself
             }

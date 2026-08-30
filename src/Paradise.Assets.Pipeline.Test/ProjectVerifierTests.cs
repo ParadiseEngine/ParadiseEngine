@@ -12,7 +12,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
-        WriteCanonicalScene(fileSystem, "/game/assets/scenes/district.scene");
+        WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -101,7 +101,7 @@ public class ProjectVerifierTests
     public async Task an_invalid_scene_is_an_error()
     {
         using var fileSystem = CreateProject();
-        WriteDocument(fileSystem, "/game/assets/scenes/bad.scene", "schema_version = 1\nobjects = 3\n");
+        WriteDocument(fileSystem, "/game/assets/levels/bad.prefab", "schema_version = 1\nobjects = 3\n");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -116,7 +116,7 @@ public class ProjectVerifierTests
         // Valid, but spaced the way a person types and a machine never writes.
         WriteDocument(
             fileSystem,
-            "/game/assets/scenes/edited.scene",
+            "/game/assets/levels/edited.prefab",
             "schema_version=1\n\n[[objects]]\n\n[[objects.components]]\n" +
             $"id = \"{DocumentGuid.Format(WellKnownComponents.MetaId)}\"\ntype = \"meta\"\n" +
             "Guid = \"1c9a2f4e-0d3b-4c5a-8e6f-7a8b9c0d1e2f\"\n");
@@ -210,18 +210,27 @@ public class ProjectVerifierTests
         await Assert.That(findings[1].Severity).IsEqualTo(VerifySeverity.Warning);
     }
 
-    internal static MemoryFileSystem CreateProject()
+    /// <param name="documentFormat">
+    /// The <c>dev</c> profile's <c>document_format</c>, or null to leave profiles undeclared (which
+    /// means the default, TOML).
+    /// </param>
+    internal static MemoryFileSystem CreateProject(string? documentFormat = null)
     {
         var fileSystem = new MemoryFileSystem();
         // The standard subtrees, because Zio does not create parents on write and empty
         // directories produce no findings anyway.
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.CreateDirectory("/game/assets/textures");
-        fileSystem.CreateDirectory("/game/assets/scenes");
+        fileSystem.CreateDirectory("/game/assets/levels");
+
+        var profiles = documentFormat is null
+            ? ""
+            : $"\n[build.profiles.dev]\ndocument_format = \"{documentFormat}\"\n";
+
         // The manifest is an asset like everything else under assets/, so it carries an identity
         // too -- the only thing that does not is a sidecar, because one describing a sidecar is
         // an infinite regress.
-        WriteDocument(fileSystem, "/game/assets/project.toml", "name = \"shiningpie\"\nschema_version = 1\n");
+        WriteDocument(fileSystem, "/game/assets/project.toml", $"name = \"shiningpie\"\nschema_version = 1\n{profiles}");
         return fileSystem;
     }
 
@@ -232,12 +241,12 @@ public class ProjectVerifierTests
         SidecarMeta.Mint(kind).Save(fileSystem, SidecarMeta.PathFor(asset));
     }
 
-    internal static void WriteCanonicalScene(MemoryFileSystem fileSystem, UPath path)
+    internal static void WriteCanonicalDocument(MemoryFileSystem fileSystem, UPath path)
     {
-        var document = new SceneDocument();
-        document.Objects.Add(SceneObject.WithMeta(Guid.NewGuid(), "crate"));
+        var document = new PrefabDocument();
+        document.Objects.Add(PrefabObject.WithMeta(Guid.NewGuid(), "crate"));
         fileSystem.CreateDirectory(path.GetDirectory());
-        SceneDocumentSerializer.Save(fileSystem, path, document);
+        PrefabDocumentSerializer.Save(fileSystem, path, document);
         MintDocumentSidecar(fileSystem, path);
     }
 

@@ -8,7 +8,7 @@ public class AssetClassifierTests
 
     [Test]
     [Arguments("/game/assets/project.toml", AssetClass.Manifest)]
-    [Arguments("/game/assets/scenes/district.scene", AssetClass.Scene)]
+    [Arguments("/game/assets/levels/district.prefab", AssetClass.Prefab)]
     [Arguments("/game/assets/config/game.toml", AssetClass.Config)]
     [Arguments("/game/assets/models/crate.glb.meta", AssetClass.Sidecar)]
     [Arguments("/game/assets/models/crate.glb", AssetClass.Foreign)]
@@ -27,9 +27,9 @@ public class AssetClassifierTests
     [Test]
     public async Task a_scene_sidecar_would_be_a_sidecar_not_a_scene()
     {
-        // ".scene.meta" should never exist (scenes carry ids in-file), but if one
+        // ".prefab.meta" should never exist (scenes carry ids in-file), but if one
         // appears the sidecar rules see it — and verify reports it as orphan or mismatch.
-        await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/scenes/a.scene.meta"))
+        await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta"))
             .IsEqualTo(AssetClass.Sidecar);
     }
 

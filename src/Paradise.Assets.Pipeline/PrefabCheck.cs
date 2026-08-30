@@ -6,7 +6,7 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>The outcome of checking one scene document.</summary>
-public enum SceneCheckOutcome
+public enum PrefabCheckOutcome
 {
     /// <summary>Parses and is byte-canonical.</summary>
     Canonical,
@@ -24,8 +24,8 @@ public enum SceneCheckOutcome
 /// <summary>One scene document's check result.</summary>
 /// <param name="Path">The document.</param>
 /// <param name="Outcome">What was found (or done).</param>
-/// <param name="Message">The parse error for <see cref="SceneCheckOutcome.Invalid"/>; empty otherwise.</param>
-public readonly record struct SceneCheckResult(UPath Path, SceneCheckOutcome Outcome, string Message = "");
+/// <param name="Message">The parse error for <see cref="PrefabCheckOutcome.Invalid"/>; empty otherwise.</param>
+public readonly record struct PrefabCheckResult(UPath Path, PrefabCheckOutcome Outcome, string Message = "");
 
 /// <summary>
 /// The <c>scene-check</c> verb: the canonical-form drift guard over every <c>*.scene</c>.
@@ -37,49 +37,49 @@ public readonly record struct SceneCheckResult(UPath Path, SceneCheckOutcome Out
 /// CI going red. Fix mode rewrites in place — safe because the rewrite is parse-then-write of
 /// the same data, and only a document that already parses is touched.
 /// </remarks>
-public static class SceneCheck
+public static class PrefabCheck
 {
     /// <summary>Checks (and with <paramref name="fix"/>, rewrites) every scene document under <c>assets/</c>.</summary>
     /// <param name="fileSystem">The filesystem holding the project.</param>
     /// <param name="layout">The located project.</param>
     /// <param name="fix">Rewrite non-canonical documents in place instead of just reporting them.</param>
-    public static IReadOnlyList<SceneCheckResult> Run(IFileSystem fileSystem, AssetProjectLayout layout, bool fix = false)
+    public static IReadOnlyList<PrefabCheckResult> Run(IFileSystem fileSystem, AssetProjectLayout layout, bool fix = false)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        var results = new List<SceneCheckResult>();
+        var results = new List<PrefabCheckResult>();
         if (!fileSystem.DirectoryExists(layout.Assets)) return results;
 
         foreach (var path in fileSystem
             .EnumerateFiles(layout.Assets, "*", SearchOption.AllDirectories)
-            .Where(path => AssetClassifier.Classify(layout.Assets, path) == AssetClass.Scene)
+            .Where(path => AssetClassifier.Classify(layout.Assets, path) == AssetClass.Prefab)
             .OrderBy(path => path.FullName, StringComparer.Ordinal))
         {
-            SceneDocument document;
+            PrefabDocument document;
             try
             {
-                document = SceneDocumentSerializer.Load(fileSystem, path);
+                document = PrefabDocumentSerializer.Load(fileSystem, path);
             }
-            catch (SceneDocumentException error)
+            catch (PrefabDocumentException error)
             {
-                results.Add(new SceneCheckResult(path, SceneCheckOutcome.Invalid, error.Message));
+                results.Add(new PrefabCheckResult(path, PrefabCheckOutcome.Invalid, error.Message));
                 continue;
             }
 
-            var canonical = SceneDocumentSerializer.Write(document);
+            var canonical = PrefabDocumentSerializer.Write(document);
             if (fileSystem.ReadAllText(path) == canonical)
             {
-                results.Add(new SceneCheckResult(path, SceneCheckOutcome.Canonical));
+                results.Add(new PrefabCheckResult(path, PrefabCheckOutcome.Canonical));
             }
             else if (fix)
             {
-                SceneDocumentSerializer.Save(fileSystem, path, document);
-                results.Add(new SceneCheckResult(path, SceneCheckOutcome.Rewritten));
+                PrefabDocumentSerializer.Save(fileSystem, path, document);
+                results.Add(new PrefabCheckResult(path, PrefabCheckOutcome.Rewritten));
             }
             else
             {
-                results.Add(new SceneCheckResult(path, SceneCheckOutcome.NotCanonical));
+                results.Add(new PrefabCheckResult(path, PrefabCheckOutcome.NotCanonical));
             }
         }
 

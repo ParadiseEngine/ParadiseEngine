@@ -1,0 +1,226 @@
+using Paradise.Assets.Pipeline;
+using Paradise.Assets.Project;
+
+using Zio;
+
+namespace Paradise.Cli;
+
+/// <summary>The verbs' console rendering. Logic lives in the pipeline library; this prints.</summary>
+internal static class Verbs
+{
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout)
+    {
+        var findings = ProjectVerifier.Verify(fileSystem, layout);
+        foreach (var finding in findings)
+        {
+            var severity = finding.Severity == VerifySeverity.Error ? "error" : "warning";
+            Console.WriteLine($"{severity}: {Display(fileSystem, finding.Path)}: {finding.Message}");
+        }
+
+        var errors = findings.Count(finding => finding.Severity == VerifySeverity.Error);
+        Console.WriteLine($"verify: {errors} error(s), {findings.Count - errors} warning(s)");
+        return errors == 0 ? 0 : 1;
+    }
+
+    public static int PrefabCheck(IFileSystem fileSystem, AssetProjectLayout layout, bool fix)
+    {
+        var results = Paradise.Assets.Pipeline.PrefabCheck.Run(fileSystem, layout, fix);
+        var failed = 0;
+        foreach (var result in results)
+        {
+            switch (result.Outcome)
+            {
+                case PrefabCheckOutcome.Invalid:
+                    Console.WriteLine($"error: {Display(fileSystem, result.Path)}: {result.Message}");
+                    failed++;
+                    break;
+
+                case PrefabCheckOutcome.NotCanonical:
+                    Console.WriteLine($"error: {Display(fileSystem, result.Path)}: not in canonical form (run prefab-check --fix)");
+                    failed++;
+                    break;
+
+                case PrefabCheckOutcome.Rewritten:
+                    Console.WriteLine($"fixed: {Display(fileSystem, result.Path)}");
+                    break;
+            }
+        }
+
+        Console.WriteLine($"prefab-check: {results.Count} document(s), {failed} problem(s)");
+        return failed == 0 ? 0 : 1;
+    }
+
+    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool play)
+    {
+        // A vendored third_party/tools/KTX-Software under the project root wins; PATH and
+        // PARADISE_KTX_PATH are the fallbacks — the same probe order as KtxCreate itself.
+        KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
+
+        var runner = new BuildRunner(
+            fileSystem, layout, encoder,
+            log: Console.WriteLine,
+            warn: message => Console.Error.WriteLine($"warning: {message}"));
+        var result = runner.Run(profile, play ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
+
+        foreach (var error in result.Errors)
+        {
+            Console.Error.WriteLine($"error: {error}");
+        }
+
+        Console.WriteLine(result.Succeeded
+            ? $"build: {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
+            : $"build: FAILED with {result.Errors.Count} error(s)");
+        return result.Succeeded ? 0 : 1;
+    }
+
+    public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)
+    {
+        foreach (var removed in ProjectCleaner.Clean(fileSystem, layout, keepEditor))
+        {
+            Console.WriteLine($"removed: {Display(fileSystem, removed)}");
+        }
+
+        return 0;
+    }
+
+    /// <summary>Creates a project and tells the user what to run next.</summary>
+    public static int New(IFileSystem fileSystem, UPath root, string name)
+    {
+        IReadOnlyList<ProjectScaffold.ScaffoldedFile> written;
+        try
+        {
+            written = ProjectScaffold.Create(fileSystem, root, name);
+        }
+        catch (IOException error)
+        {
+            Console.Error.WriteLine($"paradise: {error.Message}");
+            return 1;
+        }
+
+        foreach (var file in written)
+        {
+            Console.WriteLine($"  {Display(fileSystem, file.Path)}  — {file.Description}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"created '{name}' ({written.Count} files). Next:");
+        Console.WriteLine($"  cd {Display(fileSystem, root)}");
+        Console.WriteLine("  paradise assets verify");
+        Console.WriteLine("  paradise assets build");
+        return 0;
+    }
+
+    /// <summary>Reports every build tool: what was found, and what to do about what was not.</summary>
+    public static int ToolsDoctor(string repoRoot)
+    {
+        var findings = ToolReport.Collect(repoRoot);
+        var missing = 0;
+
+        foreach (var finding in findings)
+        {
+            if (finding.Status == ToolStatus.Ok)
+            {
+                Console.WriteLine($"  {finding.Name,-8} {finding.Version,-14} ok    {finding.Path}");
+                continue;
+            }
+
+            missing++;
+            Console.WriteLine($"  {finding.Name,-8} {"—",-14} MISSING");
+            if (finding.Fix is { } fix) Console.WriteLine($"           -> {fix}");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(missing == 0
+            ? $"tools: {findings.Count} tool(s), all present"
+            : $"tools: {missing} of {findings.Count} missing");
+
+        // Zero even when something is missing: `doctor` REPORTS, and a report that fails the shell
+        // cannot be run casually or in a prompt. `build` is what refuses to proceed.
+        return 0;
+    }
+
+    /// <summary>Installs one tool through its vendored bootstrap.</summary>
+    /// <remarks>
+    /// Elevation is passed through here and NOWHERE else. Khronos ships Windows KTX as an NSIS
+    /// installer that requires admin, so the bootstrap refuses that format unless asked — a build
+    /// must never raise a UAC prompt, while a person typing <c>tools install</c> has asked for
+    /// exactly this.
+    /// </remarks>
+    public static int ToolsInstall(string repoRoot, string tool)
+    {
+        var name = tool.ToLowerInvariant();
+        if (name is not ("ktx" or "slang"))
+        {
+            Console.Error.WriteLine($"paradise: unknown tool '{tool}' (known: ktx, slang)");
+            return 2;
+        }
+
+        var project = Path.Combine(repoRoot, "tools", name, name == "ktx" ? "KtxBootstrap.csproj" : "SlangBootstrap.csproj");
+        if (!File.Exists(project))
+        {
+            Console.Error.WriteLine(
+                $"paradise: no bootstrap at '{project}' — 'tools install' needs an engine checkout; " +
+                "from a game repo, install the tool yourself (see 'paradise tools doctor').");
+            return 1;
+        }
+
+        var manifest = Path.Combine(repoRoot, "tools", name, $"{name}.manifest.json");
+        var version = ManifestVersion(manifest);
+        if (version is null)
+        {
+            Console.Error.WriteLine($"paradise: could not read a version from '{manifest}'");
+            return 1;
+        }
+
+        var rid = HostRid();
+        var packages = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        var output = Path.Combine(packages, $"_{name}", version, rid);
+
+        Console.WriteLine($"installing {name} {version} ({rid}) into {output}");
+
+        var arguments = $"run --project \"{project}\" -- --manifest \"{manifest}\" --rid {rid} --out \"{output}\"";
+        if (name == "ktx") arguments += " --elevate";
+
+        var result = ProcessTools.Run("dotnet", arguments, timeoutMilliseconds: 20 * 60 * 1000);
+        if (!string.IsNullOrWhiteSpace(result.Stdout)) Console.WriteLine(result.Stdout.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(result.Stderr)) Console.Error.WriteLine(result.Stderr.TrimEnd());
+
+        if (!result.Succeeded)
+        {
+            Console.Error.WriteLine($"paradise: installing {name} failed");
+            return 1;
+        }
+
+        Console.WriteLine($"{name} installed. Run 'paradise tools doctor' to confirm.");
+        return 0;
+    }
+
+    private static string? ManifestVersion(string manifest)
+    {
+        if (!File.Exists(manifest)) return null;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest));
+            return document.RootElement.GetProperty("version").GetString();
+        }
+        catch (Exception error) when (error is System.Text.Json.JsonException or IOException)
+        {
+            return null;
+        }
+    }
+
+    private static string HostRid()
+    {
+        var os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+        var architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
+            .ToString().ToLowerInvariant();
+        return $"{os}-{architecture}";
+    }
+
+    /// <summary>
+    /// A path as the user's shell knows it. Findings print OS paths (<c>C:\…</c>, not Zio's
+    /// internal form) because they exist to be opened, copied, and pasted.
+    /// </summary>
+    private static string Display(IFileSystem fileSystem, UPath path) => fileSystem.ConvertPathToInternal(path);
+}

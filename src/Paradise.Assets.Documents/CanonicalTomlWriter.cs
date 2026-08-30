@@ -13,7 +13,7 @@ namespace Paradise.Assets.Documents;
 /// the same spec, and the two must produce identical bytes for equivalent documents: machine
 /// writes happen on both sides of the fence (the addon syncs scene documents back, the CLI's
 /// <c>mv</c> and build verbs rewrite documents), and only byte-identical output keeps a
-/// round-trip out of the diff. The check verbs (<c>scene-check</c>, <c>config-check</c>) police
+/// round-trip out of the diff. The check verbs (<c>prefab-check</c>, <c>config-check</c>) police
 /// exactly this property.
 /// </para>
 /// <para>The spec, normative:</para>
@@ -61,7 +61,7 @@ namespace Paradise.Assets.Documents;
 /// <c>guid</c> and <c>path</c></b> (<see cref="AssetReferenceCodec.IsReferenceShaped"/>) — and
 /// that shape is therefore RESERVED for asset references. Exact, because a vaguer rule ("all
 /// its values are scalars") would have the two implementations agreeing until the first
-/// document where they read it differently, surfacing as a <c>scene-check</c> byte failure
+/// document where they read it differently, surfacing as a <c>prefab-check</c> byte failure
 /// with nothing pointing at formatting.</para>
 /// <para>One consequence for item 10: an empty table is written <c>{}</c> rather than under a
 /// header, because in these documents the only empty table that occurs is a reference to
