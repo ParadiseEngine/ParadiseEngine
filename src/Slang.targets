@@ -147,8 +147,22 @@
 
     <!-- @(SlangIncludeDir) -> -I search paths: how a game shader resolves
          #include "Common/pbrCore.slang" against the engine's packaged (or source-checkout)
-         shader directory. slangc searches relative to the including file first, then -I. -->
-    <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; @(SlangIncludeDir-&gt;'-I &quot;%(FullPath)&quot;', ' ') -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
+         shader directory. slangc searches relative to the including file first, then -I.
+
+         THE TRAILING SEPARATOR IS STRIPPED, and on Windows that is load-bearing rather than
+         tidiness. %(FullPath) on a directory item ends in a separator, so the argument would be
+         -I "C:\...\Shaders\" — and in a Windows command line \" is an ESCAPED QUOTE, so the
+         include path swallows the closing quote and everything after it. slangc then reports
+         'include file not found' for a directory that plainly exists. On Linux the separator is
+         '/', nothing is escaped, and the same line works — which is why CI stayed green while
+         every Windows build of Paradise.Rendering.Pbr.Test failed. -->
+    <ItemGroup>
+      <_SlangIncludeArg Include="@(SlangIncludeDir)">
+        <SearchPath>$([System.IO.Path]::TrimEndingDirectorySeparator('%(FullPath)'))</SearchPath>
+      </_SlangIncludeArg>
+    </ItemGroup>
+
+    <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; @(_SlangIncludeArg-&gt;'-I &quot;%(SearchPath)&quot;', ' ') -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
           ConsoleToMSBuild="true" />
 
     <!--
