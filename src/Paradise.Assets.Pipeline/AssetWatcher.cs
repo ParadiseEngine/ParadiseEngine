@@ -16,10 +16,12 @@ namespace Paradise.Assets.Pipeline;
 /// </para>
 /// <para>
 /// <b>Its own writes must not wake it.</b> The watcher writes sidecars INTO the tree it is
-/// watching, so a mint fires a Created and a hash refresh fires a Changed, and without suppression
-/// each one feeds itself forever. Paths the maintainer writes are held in a suppression set for a
-/// moment afterwards and their events dropped — the same shape, and the same reason, as the Blender
-/// addon's save suppression: a tool's own writes are not the author's.
+/// watching, so a mint fires a Created and a hash refresh fires a Changed, and each would feed
+/// itself forever. What stops that is a flat rule rather than a timed one: <b>no sidecar event is
+/// ever acted on</b> (<see cref="Ignored"/>). Every one of them is either the maintainer's own
+/// write or the author editing an identity by hand, which is theirs to do — so there is nothing
+/// a window could buy. No suppression set, nothing to expire, and no race between suppressing a
+/// path and writing it.
 /// </para>
 /// <para>
 /// <b>An atomic write is not one event.</b> Both Blender and this CLI write temp-then-rename, and
@@ -55,7 +57,6 @@ public sealed class AssetWatcher : IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<UPath, DateTimeOffset> _pending = [];
     private readonly Dictionary<UPath, (UPath From, DateTimeOffset At)> _renames = [];
-    private readonly Dictionary<UPath, DateTimeOffset> _suppressed = [];
     private readonly Dictionary<UPath, DateTimeOffset> _deleted = [];
 
     private IFileSystemWatcher? _watcher;
@@ -138,8 +139,6 @@ public sealed class AssetWatcher : IDisposable
 
         lock (_gate)
         {
-            Forget(_suppressed, now, Debounce);
-
             deletes = Ripe(_deleted, now);
             renames = [.. Ripe(_renames.ToDictionary(e => e.Key, e => e.Value.At), now)
                 .Select(to => (to, _renames[to].From))];
@@ -155,12 +154,12 @@ public sealed class AssetWatcher : IDisposable
 
         foreach (var (to, from) in renames)
         {
-            if (Act(() => _maintainer.Carry(from, to), from, to)) actions++;
+            if (_maintainer.Carry(from, to) != SidecarAction.None) actions++;
         }
 
         foreach (var path in touched)
         {
-            if (Act(() => _maintainer.Ensure(path), path)) actions++;
+            if (_maintainer.Ensure(path) != SidecarAction.None) actions++;
         }
 
         // Only what a move could plausibly still be. Expiry forgets the chance to re-link; it
@@ -184,35 +183,16 @@ public sealed class AssetWatcher : IDisposable
     }
 
     /// <summary>Whether an event is one to act on at all.</summary>
-    private bool Ignored(UPath path)
-    {
-        // A sidecar's own events are never ours. Most of them ARE ours -- the maintainer just
-        // wrote it -- and the rest are the author editing an identity by hand, which is theirs to
-        // do. Either way, acting on one is how the watcher would chase its own tail.
-        if (SidecarMeta.IsSidecarPath(path)) return true;
-
-        lock (_gate)
-        {
-            if (_suppressed.ContainsKey(path)) return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>Runs a maintainer call and suppresses the sidecar writes it produces.</summary>
-    private bool Act(Func<SidecarAction> action, params UPath[] assets)
-    {
-        // Suppress BEFORE the write, not after: the watcher is another thread, and an event
-        // queued between the write and the suppression would be seen as the author's.
-        var now = _now();
-        lock (_gate)
-        {
-            foreach (var asset in assets) _suppressed[SidecarMeta.PathFor(asset)] = now;
-        }
-
-        return action() != SidecarAction.None;
-    }
-
+    /// <remarks>
+    /// <b>A sidecar event is never one to act on, and that single line is the whole loop
+    /// guard.</b> Most of them are the maintainer's own — it just wrote the file — and the rest
+    /// are the author editing an identity by hand, which is theirs to do. There is no third
+    /// case, so there is nothing for a per-path suppression window to catch that this does not:
+    /// every path such a set could hold is a <c>*.meta</c>, and every <c>*.meta</c> is refused
+    /// here. Flat beats timed for the same reason it usually does — no window to size, and no
+    /// gap between writing a path and marking it.
+    /// </remarks>
+    private static bool Ignored(UPath path) => SidecarMeta.IsSidecarPath(path);
 
     /// <summary>Takes everything quiet long enough, removing it from the queue.</summary>
     private static List<UPath> Ripe(Dictionary<UPath, DateTimeOffset> queue, DateTimeOffset now)
@@ -220,13 +200,5 @@ public sealed class AssetWatcher : IDisposable
         var ripe = queue.Where(entry => now - entry.Value >= Debounce).Select(entry => entry.Key).ToList();
         foreach (var path in ripe) queue.Remove(path);
         return ripe;
-    }
-
-    private static void Forget(Dictionary<UPath, DateTimeOffset> queue, DateTimeOffset now, TimeSpan after)
-    {
-        foreach (var path in queue.Where(entry => now - entry.Value > after).Select(entry => entry.Key).ToList())
-        {
-            queue.Remove(path);
-        }
     }
 }
