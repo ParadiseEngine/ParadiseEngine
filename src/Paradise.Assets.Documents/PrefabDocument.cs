@@ -1,5 +1,3 @@
-using System.Numerics;
-
 using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents;
@@ -226,16 +224,6 @@ public sealed class PrefabComponent
     /// false on a plain object, where there is nothing to drop.
     /// </summary>
     public bool Removed { get; }
-}
-
-/// <summary>
-/// A local TRS, in engine convention: right-handed Y-up, metres, quaternion as
-/// <c>[x, y, z, w]</c>.
-/// </summary>
-public readonly record struct LocalTransform(Vector3 Position, Quaternion Rotation, Vector3 Scale)
-{
-    /// <summary>No translation, no rotation, unit scale.</summary>
-    public static LocalTransform Identity { get; } = new(Vector3.Zero, Quaternion.Identity, Vector3.One);
 }
 
 /// <summary>A prefab document could not be read, parsed, or validated.</summary>

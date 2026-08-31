@@ -145,15 +145,12 @@ public static class PrefabBake
     /// <summary>An object's local TRS as a matrix, in System.Numerics' row-vector convention.</summary>
     private static Matrix4x4 Local(PrefabObject entry)
     {
-        if (entry.Component(WellKnownComponents.TransformId) is not { } transform) return Matrix4x4.Identity;
+        if (entry.Component(WellKnownComponents.TransformId) is not { } component) return Matrix4x4.Identity;
 
-        var position = Vector(transform.Data.Value(WellKnownComponents.Position), Vector3.Zero);
-        var scale = Vector(transform.Data.Value(WellKnownComponents.Scale), Vector3.One);
-        var rotation = Quat(transform.Data.Value(WellKnownComponents.Rotation));
-
-        return Matrix4x4.CreateScale(scale)
-             * Matrix4x4.CreateFromQuaternion(rotation)
-             * Matrix4x4.CreateTranslation(position);
+        var transform = LocalTransformCodec.Read(component.Data);
+        return Matrix4x4.CreateScale(transform.Scale)
+             * Matrix4x4.CreateFromQuaternion(transform.Rotation)
+             * Matrix4x4.CreateTranslation(transform.Position);
     }
 
     /// <summary>
@@ -178,20 +175,6 @@ public static class PrefabBake
             m.M14, m.M24, m.M34, m.M44,
         ];
     }
-
-    private static Vector3 Vector(object? value, Vector3 fallback)
-    {
-        if (value is not IReadOnlyList<object> numbers || numbers.Count != 3) return fallback;
-        return new Vector3(Single(numbers[0]), Single(numbers[1]), Single(numbers[2]));
-    }
-
-    private static Quaternion Quat(object? value)
-    {
-        if (value is not IReadOnlyList<object> numbers || numbers.Count != 4) return Quaternion.Identity;
-        return new Quaternion(Single(numbers[0]), Single(numbers[1]), Single(numbers[2]), Single(numbers[3]));
-    }
-
-    private static float Single(object value) => Convert.ToSingle(value, System.Globalization.CultureInfo.InvariantCulture);
 
     private static AuthoredComponentData Entry(Guid id, string? type, JsonObject data)
         => new() { Id = id, Type = type, Data = ToElement(data) };

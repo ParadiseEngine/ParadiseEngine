@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -177,13 +178,7 @@ public static class ProjectScaffold
     }
 
     private static PrefabComponent Transform(float x, float y, float z, float sx, float sy, float sz)
-        => new(WellKnownComponents.TransformId, WellKnownComponents.TransformType,
-            new CanonicalTomlTable
-            {
-                { WellKnownComponents.Position, new object[] { (double)x, (double)y, (double)z } },
-                { WellKnownComponents.Rotation, new object[] { 0.0, 0.0, 0.0, 1.0 } },
-                { WellKnownComponents.Scale, new object[] { (double)sx, (double)sy, (double)sz } },
-            });
+        => LocalTransformCodec.Write(new LocalTransform(new Vector3(x, y, z), Quaternion.Identity, new Vector3(sx, sy, sz)));
 
     // ---- the mesh -------------------------------------------------------------------------
 
