@@ -78,12 +78,22 @@ public sealed class BuildRunner
     }
 
     /// <summary>Builds the named profile into <paramref name="target"/>'s tree.</summary>
-    /// <param name="profileName">A profile declared in <c>project.toml</c>; <c>dev</c> falls back to defaults when undeclared.</param>
+    /// <param name="profileName">
+    /// A profile declared in <c>project.toml</c>, or <see langword="null"/> for
+    /// <see cref="BuildProfile.Default"/>.
+    /// </param>
     /// <param name="target">Which build-shaped tree to write.</param>
-    public BuildResult Run(string profileName, ProjectOutputTarget target = ProjectOutputTarget.Build)
+    /// <remarks>
+    /// <b>Naming a profile and not naming one are different requests, and null is how the
+    /// difference is said.</b> A name the manifest does not declare is an error however
+    /// plausible it sounds — the caller asked for something that does not exist. Null asks for
+    /// nothing in particular and gets the defaults, so a manifest that declares no profiles at
+    /// all is still buildable. What this must NOT do is bless a particular name: deciding what
+    /// an absent <c>--profile</c> means belongs to whoever left it absent, and a library that
+    /// guesses at one English word is a library the CLI can silently fall out of step with.
+    /// </remarks>
+    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build)
     {
-        ArgumentException.ThrowIfNullOrEmpty(profileName);
-
         var output = _layout.OutputFor(target);
         var errors = new List<string>();
 
@@ -97,19 +107,13 @@ public sealed class BuildRunner
             return new BuildResult(false, [failure.Message], 0, output);
         }
 
-        if (!projectManifest.TryGetProfile(profileName, out var profile))
+        BuildProfile? profile = BuildProfile.Default;
+        if (profileName is not null && !projectManifest.TryGetProfile(profileName, out profile))
         {
-            // An undeclared "dev" means the defaults: every project has an iteration loop
-            // whether or not it wrote a profiles table yet.
-            if (profileName != "dev")
-            {
-                return new BuildResult(
-                    false,
-                    [$"project.toml declares no build profile '{profileName}' (declared: {string.Join(", ", projectManifest.Profiles.Keys.DefaultIfEmpty("none"))})"],
-                    0, output);
-            }
-
-            profile = BuildProfile.Default;
+            return new BuildResult(
+                false,
+                [$"project.toml declares no build profile '{profileName}' (declared: {string.Join(", ", projectManifest.Profiles.Keys.DefaultIfEmpty("none"))})"],
+                0, output);
         }
 
         var findings = ProjectVerifier.Verify(_fileSystem, _layout);
@@ -123,7 +127,9 @@ public sealed class BuildRunner
         }
 
         var cache = ArtifactCache.ForProject(_fileSystem, _layout, _warn);
-        var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName };
+        // "" for an unnamed build, which is also BuildManifest's own default for the field. It
+        // cannot be mistaken for a declared profile: the manifest reader refuses an empty name.
+        var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName ?? "" };
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
         var index = BuildIndex.Load(_fileSystem, output, profileName, target);

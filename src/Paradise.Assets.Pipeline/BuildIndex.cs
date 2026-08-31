@@ -74,10 +74,17 @@ public sealed class BuildIndex
     }
 
     /// <summary>Reads the index for a tree, or an empty one when it cannot be trusted.</summary>
-    public static BuildIndex Load(IFileSystem fileSystem, UPath output, string profile, ProjectOutputTarget target)
+    /// <param name="profile">
+    /// The profile that was named, or <see langword="null"/> for a build that named none and
+    /// took <see cref="BuildProfile.Default"/>. Recorded as <c>""</c>, which no declared profile
+    /// can collide with — the manifest reader refuses an empty profile name — so an unnamed
+    /// build and a declared one never share a key.
+    /// </param>
+    public static BuildIndex Load(IFileSystem fileSystem, UPath output, string? profile, ProjectOutputTarget target)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
 
+        profile ??= "";
         var targetName = target.ToString();
         var path = output / FileName;
 

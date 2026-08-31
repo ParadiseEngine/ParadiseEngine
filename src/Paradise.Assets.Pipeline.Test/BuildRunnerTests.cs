@@ -41,7 +41,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
         var encoder = new FakeEncoder();
 
-        var result = new BuildRunner(fileSystem, s_layout, encoder).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, encoder).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(result.AssetCount).IsEqualTo(1);
@@ -60,9 +60,9 @@ public class BuildRunnerTests
         var encoder = new FakeEncoder();
         var runner = new BuildRunner(fileSystem, s_layout, encoder);
 
-        await Assert.That(runner.Run("dev").Succeeded).IsTrue();
+        await Assert.That(runner.Run().Succeeded).IsTrue();
         fileSystem.DeleteDirectory("/game/build", isRecursive: true);
-        await Assert.That(runner.Run("dev").Succeeded).IsTrue();
+        await Assert.That(runner.Run().Succeeded).IsTrue();
 
         // One encode total: the rebuild after deleting build/ came from .editor/cache.
         await Assert.That(encoder.Encodes).IsEqualTo(1);
@@ -97,7 +97,7 @@ public class BuildRunnerTests
         fileSystem.CreateDirectory("/game/assets/audio");
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk"))
@@ -110,7 +110,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
@@ -124,7 +124,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/assets/models/bad.glb", glb);
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/bad.glb.meta");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("embedded image/png");
@@ -139,7 +139,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         var built = fileSystem.ReadAllBytes("/game/build/models/crate.glb");
@@ -159,7 +159,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("../textures/gone.png");
@@ -173,7 +173,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.WriteDocument(
             fileSystem, "/game/assets/config/game.toml", "# authored comment\nb = 2\na = 1\n");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         // Values verbatim, formatting canonical, comments dropped — build output is derived.
@@ -208,7 +208,7 @@ public class BuildRunnerTests
 
         // No document_format declared, so BuildProfile.Default applies -- and its default is TOML,
         // which used to be a promise the pipeline could not keep.
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/levels/district.toml")).IsTrue();
@@ -240,7 +240,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]); // no sidecar
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("no sidecar");
@@ -252,10 +252,10 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
 
-        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder: null).Run("dev").Succeeded).IsTrue();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder: null).Run().Succeeded).IsTrue();
 
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
-        var result = new BuildRunner(fileSystem, s_layout, encoder: null).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, encoder: null).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("no ktx CLI");
@@ -267,7 +267,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("textures/fire.png");
@@ -285,13 +285,53 @@ public class BuildRunnerTests
         await Assert.That(result.Errors[0]).Contains("no build profile 'release'");
     }
 
+    /// <summary>
+    /// No name is privileged, <c>dev</c> included.
+    /// </summary>
+    /// <remarks>
+    /// The runner used to fall back to the defaults for an undeclared profile CALLED "dev",
+    /// which made one English word mean something to a library that has no business having an
+    /// opinion about it — and quietly diverged from whatever the CLI's <c>--profile</c> default
+    /// happened to be, since the two hardcoded the string independently. Asking for a profile
+    /// that does not exist is now an error whatever it is called; asking for none is null.
+    /// </remarks>
+    [Test]
+    public async Task an_undeclared_profile_named_dev_is_refused_like_any_other()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("no build profile 'dev'");
+    }
+
+    [Test]
+    public async Task naming_no_profile_builds_the_defaults_against_a_manifest_that_declares_none()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        // BuildProfile.Default is TOML, so the document lands as .toml -- a project is buildable
+        // before it has written a profiles table at all, which is what null is for.
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/district.toml")).IsTrue();
+
+        // Recorded as "", which no declared profile can be: the manifest reader refuses an empty
+        // profile name, so an unnamed build never shares a build-index key with a named one.
+        await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json"))
+            .Contains("\"profile\": \"\"");
+    }
+
     [Test]
     public async Task the_play_target_writes_the_editor_tree_in_the_same_shape()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/.editor/play/textures/fire.ktx2")).IsTrue();
@@ -306,7 +346,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
         // A failing encode, because a document no longer fails a TOML build -- it builds one.
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
@@ -347,7 +387,7 @@ public class BuildRunnerTests
         // The whole reason the chain is walked backwards: a project extends the pipeline by
         // APPENDING, and what it appends has to win against the built-in it is replacing.
         var result = new BuildRunner(
-            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, mine]).Run("dev");
+            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, mine]).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.mine")).IsTrue();
@@ -364,7 +404,7 @@ public class BuildRunnerTests
         var passive = new StubImporter("passive", ".glb", handles: false);
 
         var result = new BuildRunner(
-            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, passive]).Run("dev");
+            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, passive]).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(passive.Offers).IsEqualTo(1);
@@ -379,7 +419,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/notes.txt");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         // Unclaimed is not an error -- verify already warned about it, and the build simply has
         // nothing to do. There is no classification gate saying so; the chain running out IS it.
@@ -392,7 +432,7 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         // project.toml is a `.toml` the config importer must decline: compiling it would ship
         // the source project's profiles into the tree as if they were game data.
@@ -408,8 +448,8 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Build);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Build);
 
         // The editor traces a built asset back to the document that produced it; a player's
         // install has no use for authoring identity and must not ship it.
@@ -425,10 +465,10 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
         fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
 
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         // The marker survives, which is the only way to SEE a skip: the copy was not redone.
         await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 9, 9, 9 });
@@ -443,10 +483,10 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]);
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 4, 5, 6 });
     }
@@ -456,14 +496,14 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
         fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
 
         // A new sidecar means a new GUID, which lands in the manifest -- so the asset's output
         // changed even though not one of its own bytes did. A key blind to this would keep
         // serving the old identity.
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 1, 2, 3 });
     }
@@ -473,10 +513,10 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         fileSystem.DeleteFile("/game/.editor/play/models/crate.glb");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(fileSystem.FileExists("/game/.editor/play/models/crate.glb")).IsTrue();
     }
@@ -486,14 +526,14 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         // Hand the BUILD tree the PLAY tree's index. One source compiles to different artifacts
         // per profile and target, so reusing across them is the silently-wrong-artifact failure.
         fileSystem.CreateDirectory("/game/build");
         fileSystem.CopyFile("/game/.editor/play/.build-index.json", "/game/build/.build-index.json", overwrite: true);
 
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Build);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Build);
 
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
     }

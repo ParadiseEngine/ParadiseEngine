@@ -169,7 +169,7 @@ public sealed class AssetWatcher : IDisposable
     }
 
     /// <summary>Runs one build, so the mounted tree matches what was just fixed.</summary>
-    public BuildResult Rebuild(string profile, ProjectOutputTarget target, ITextureEncoder? encoder)
+    public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
         => new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"))
             .Run(profile, target);
 

@@ -62,7 +62,7 @@ int Assets(string? assetVerb, string[] arguments)
     if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, catalogue)");
 
     string? projectDirectory = null;
-    var profile = "dev";
+    string? profile = null;
     var editor = false;
     var fix = false;
     var keepEditor = false;

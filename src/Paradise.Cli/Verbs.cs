@@ -62,7 +62,7 @@ internal static class Verbs
     public static int Watch(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
-        string profile,
+        string? profile,
         bool editor,
         bool dryRun,
         bool build)
@@ -117,7 +117,7 @@ internal static class Verbs
         return 0;
     }
 
-    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool editor)
+    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor)
     {
         // A vendored third_party/tools/KTX-Software under the project root wins; PATH and
         // PARADISE_KTX_PATH are the fallbacks — the same probe order as KtxCreate itself.
