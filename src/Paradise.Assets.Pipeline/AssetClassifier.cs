@@ -26,24 +26,32 @@ public enum AssetClass
     /// <summary>A sidecar meta file, <c>*.meta</c>.</summary>
     Sidecar,
 
-    /// <summary>A foreign/binary asset that must have a sidecar.</summary>
+    /// <summary>
+    /// Anything else: a mesh, a texture, an audio bank — or a stray note nothing will ever
+    /// build.
+    /// </summary>
+    /// <remarks>
+    /// <b>Those are one class, because the classifier cannot tell them apart and no longer
+    /// pretends to.</b> Whether anything handles a file is decided by the import chain, on
+    /// whatever grounds each importer likes — extension, target, profile, or the bytes
+    /// themselves — and that answer exists only while a build is running. What the classifier
+    /// still knows is what it can see for itself: this is not one of the pipeline's own
+    /// document kinds.
+    /// </remarks>
     Foreign,
-
-    /// <summary>Anything else — carried along but not the pipeline's to interpret.</summary>
-    Other,
 }
 
 /// <summary>
 /// Classifies paths under <c>assets/</c> by extension.
 /// </summary>
 /// <remarks>
-/// A path is <see cref="AssetClass.Foreign"/> exactly when some importer lists its extension
-/// (<see cref="AssetImporters.Recognises"/>) — the extension list lives with the importers, so
-/// adding an asset type never edits this file. This is a target-independent answer, and
-/// deliberately so: <c>verify</c> runs no build, and whether a file is a kind the pipeline knows
-/// must not depend on which tree somebody is about to compile. Deliberately closed — an unknown
-/// binary lands in <see cref="AssetClass.Other"/> and is a <c>verify</c> warning rather than
-/// silently acquiring pipeline semantics.
+/// <b>Only what a path can be read to say.</b> The three classes below the manifest are the
+/// pipeline's own document kinds, spelled by suffix; everything else is
+/// <see cref="AssetClass.Foreign"/>. This file asks the importers nothing, because there is
+/// nothing they could truthfully answer outside a build: an importer claims an asset in its own
+/// <see cref="IAssetImporter.Import"/>, on whatever grounds it likes, and a declined asset may
+/// mean "not mine" or "not for this tree". Neither the classifier nor <c>verify</c> can tell
+/// those apart, so neither guesses.
 /// </remarks>
 public static class AssetClassifier
 {
@@ -60,8 +68,7 @@ public static class AssetClassifier
         if (path == assetsRoot / Paradise.Assets.Project.AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
         if (name.EndsWith(PrefabSuffix, StringComparison.Ordinal)) return AssetClass.Prefab;
         if (name.EndsWith(".toml", StringComparison.Ordinal)) return AssetClass.Config;
-        if (AssetImporters.Recognises(path)) return AssetClass.Foreign;
-        return AssetClass.Other;
+        return AssetClass.Foreign;
     }
 
     /// <summary>Whether an asset of this class must have a sidecar.</summary>

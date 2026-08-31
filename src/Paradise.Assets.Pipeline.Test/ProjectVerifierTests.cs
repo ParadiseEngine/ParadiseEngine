@@ -149,16 +149,40 @@ public class ProjectVerifierTests
         await Assert.That(findings[0].Message).Contains("canonical");
     }
 
+    /// <summary>
+    /// A file no build step will touch is not, by itself, a verify finding.
+    /// </summary>
+    /// <remarks>
+    /// <b>Verify cannot tell, so verify does not say.</b> An importer claims an asset inside its
+    /// own <c>Import</c>, on whatever grounds it likes, so the only place the question "does
+    /// anything handle this" is answerable is a running build — and even there a decline means
+    /// "not mine" OR "not for this tree" (a sidecar outside the play target is the standing
+    /// example). What still speaks for a stray file is the sidecar rule, which is the check that
+    /// was doing the work: everything under assets/ is an asset and carries an identity,
+    /// processed or not. See <see cref="a_file_nothing_builds_still_needs_its_identity"/>.
+    /// </remarks>
     [Test]
-    public async Task an_unknown_file_kind_is_a_warning()
+    public async Task a_file_no_step_will_build_is_not_a_finding_on_its_own()
     {
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/notes.txt", "todo");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
+        await Assert.That(findings).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_file_nothing_builds_still_needs_its_identity()
+    {
+        using var fileSystem = CreateProject();
+        fileSystem.WriteAllText("/game/assets/notes.txt", "todo");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
         await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("no sidecar");
     }
 
     [Test]
@@ -221,7 +245,14 @@ public class ProjectVerifierTests
     public async Task errors_come_before_warnings()
     {
         using var fileSystem = CreateProject();
-        WriteCarried(fileSystem, "/game/assets/zz-notes.txt", "todo");
+
+        // A misspelled settings domain: a warning, and one whose path sorts LAST, so ordering
+        // by severity is the only thing that can put it behind the error below.
+        fileSystem.WriteAllBytes("/game/assets/textures/zz-fire.png", [1]);
+        var meta = SidecarMeta.Mint();
+        meta.SetSetting("texure", new CanonicalTomlTable { { "preset", "normal" } });
+        meta.Save(fileSystem, "/game/assets/textures/zz-fire.png.meta");
+
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);

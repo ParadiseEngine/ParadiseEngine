@@ -86,11 +86,13 @@ public static class ProjectVerifier
                     VerifyDocument(fileSystem, layout, path, findings);
                     break;
 
-                case AssetClass.Other:
-                    findings.Add(new VerifyFinding(
-                        VerifySeverity.Warning, path,
-                        "is not a kind of file the pipeline knows; it will be ignored by every build step"));
-                    break;
+                // No "the pipeline does not know this file" warning: verify cannot tell. An
+                // importer claims an asset inside its own Import, on whatever grounds it likes,
+                // so the only truthful answer comes from running the chain — and a declined
+                // asset means "not mine" OR "not for this tree", which even the build cannot
+                // separate. A file nobody builds is still caught by the sidecar rule above,
+                // which is the check that actually matters: everything under assets/ is an
+                // asset, whether or not a step processes it.
             }
         }
 

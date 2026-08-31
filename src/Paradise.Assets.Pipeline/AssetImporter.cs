@@ -45,12 +45,12 @@ public sealed record ImportContext(
     /// <remarks>
     /// The first line of nearly every importer, because the extension is nearly always the first
     /// half of "is this mine". The other half — target, profile, where the file sits — is the
-    /// importer's own business, and it is spelled out beside this call rather than declared.
+    /// importer's own business, and it is spelled out beside this call. Both halves are one
+    /// expression in one place: an importer states what it takes by TAKING it, and there is no
+    /// declaration anywhere that a change here could drift from.
     /// </remarks>
-    public bool HasExtension(IReadOnlyList<string> extensions)
+    public bool HasExtension(params ReadOnlySpan<string> extensions)
     {
-        ArgumentNullException.ThrowIfNull(extensions);
-
         var extension = Asset.GetExtensionWithDot() ?? string.Empty;
         foreach (var claimed in extensions)
         {
@@ -92,18 +92,6 @@ public interface IAssetImporter
 {
     /// <summary>A short name for logs and diagnostics.</summary>
     string Name { get; }
-
-    /// <summary>The extensions (with dot) this importer can be interested in. Case-insensitive.</summary>
-    /// <remarks>
-    /// <b>Declaration, not dispatch.</b> Nothing routes on this — <see cref="Import"/> is the
-    /// only thing that decides. It exists so <c>verify</c>, which builds nothing and can
-    /// therefore run no chain, can still tell a texture it recognises from a stray
-    /// <c>notes.txt</c> (<see cref="AssetImporters.Recognises"/>). An importer may list an
-    /// extension it then declines — <see cref="SidecarImporter"/> does, outside the play target
-    /// — but it must not handle one it never listed, or verify will warn about a file the build
-    /// goes on to compile.
-    /// </remarks>
-    IReadOnlyList<string> Extensions { get; }
 
     /// <summary>
     /// Whether output is a pure function of the source and sidecar bytes, letting
@@ -159,27 +147,4 @@ public static class AssetImporters
         new MeshImporter(),
         new TextureImporter(),
     ];
-
-    /// <summary>
-    /// Whether any importer lists <paramref name="path"/>'s extension — "is this a kind of file
-    /// the pipeline knows", which is <c>verify</c>'s question and not the build's.
-    /// </summary>
-    /// <remarks>
-    /// Answered from <see cref="IAssetImporter.Extensions"/> rather than by running the chain,
-    /// because verify has no build to run one in. It is therefore the target-independent
-    /// answer: a sidecar is recognised whether or not the build being planned would carry it.
-    /// </remarks>
-    public static bool Recognises(UPath path)
-    {
-        var extension = path.GetExtensionWithDot() ?? string.Empty;
-        foreach (var importer in All)
-        {
-            foreach (var claimed in importer.Extensions)
-            {
-                if (string.Equals(claimed, extension, StringComparison.OrdinalIgnoreCase)) return true;
-            }
-        }
-
-        return false;
-    }
 }

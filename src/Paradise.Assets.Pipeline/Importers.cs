@@ -17,9 +17,6 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "texture";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".png", ".jpg", ".jpeg"];
-
     /// <summary>The encode depends on the argv and the encoder's version, which <see cref="ArtifactCache"/> keys on and the index does not.</summary>
     public bool DeterministicCopy => false;
 
@@ -29,7 +26,7 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(Extensions)) return false;
+        if (!context.HasExtension(".png", ".jpg", ".jpeg")) return false;
 
         var settings = context.Meta!.Setting(TextureImportSettings.Domain);
         if (settings is not null && TextureImportSettings.Instance.Problem(settings) is { } problem)
@@ -99,9 +96,6 @@ public sealed class MeshImporter : IAssetImporter
     public string Name => "mesh";
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".glb", ".gltf"];
-
-    /// <inheritdoc />
     public bool DeterministicCopy => true;
 
     /// <inheritdoc />
@@ -110,7 +104,7 @@ public sealed class MeshImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(Extensions)) return false;
+        if (!context.HasExtension(".glb", ".gltf")) return false;
 
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         if (HasEmbeddedEncodedImages(bytes, out var mimeType))
@@ -178,9 +172,6 @@ public sealed class AudioImporter : IAssetImporter
     public string Name => "audio";
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".bnk", ".wem"];
-
-    /// <inheritdoc />
     public bool DeterministicCopy => true;
 
     /// <inheritdoc />
@@ -189,7 +180,7 @@ public sealed class AudioImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(Extensions)) return false;
+        if (!context.HasExtension(".bnk", ".wem")) return false;
 
         context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
         return true;
@@ -210,9 +201,6 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "prefab";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [AssetClassifier.PrefabSuffix];
-
     /// <summary>A prefab bakes the prefabs it instances, so its output changes when a file it merely REFERENCES does — nothing about its own bytes says so.</summary>
     public bool DeterministicCopy => false;
 
@@ -222,7 +210,7 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(Extensions)) return false;
+        if (!context.HasExtension(AssetClassifier.PrefabSuffix)) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         PrefabDocument document;
@@ -275,9 +263,6 @@ public sealed class ConfigImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "config";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".toml"];
-
     /// <summary>The output depends on the profile's document format, which the index does not key on.</summary>
     public bool DeterministicCopy => false;
 
@@ -290,7 +275,7 @@ public sealed class ConfigImporter : IAssetImporter
         // The manifest is the one `.toml` this importer must NOT claim: it configures the build
         // rather than being built by it, and compiling it into the output tree would ship the
         // source project's profiles as if they were game data.
-        if (!context.HasExtension(Extensions) || context.IsManifest) return false;
+        if (!context.HasExtension(".toml") || context.IsManifest) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         if (!ConfigDocument.TryCanonicalize(context.FileSystem.ReadAllText(context.Asset), out var canonical, out var error))
@@ -338,9 +323,6 @@ public sealed class SidecarImporter : IAssetImporter
     public string Name => "sidecar";
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [SidecarMeta.Suffix];
-
-    /// <inheritdoc />
     public bool DeterministicCopy => true;
 
     /// <inheritdoc />
@@ -349,7 +331,7 @@ public sealed class SidecarImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (context.Target != ProjectOutputTarget.Play || !context.HasExtension(Extensions)) return false;
+        if (context.Target != ProjectOutputTarget.Play || !context.HasExtension(SidecarMeta.Suffix)) return false;
 
         context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
         return true;

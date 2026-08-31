@@ -321,15 +321,13 @@ public class BuildRunnerTests
 
         public string Name => name;
 
-        public IReadOnlyList<string> Extensions { get; } = [extension];
-
         public bool DeterministicCopy => true;
 
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
         {
-            if (!context.HasExtension(Extensions)) return false;
+            if (!context.HasExtension(extension)) return false;
 
             Offers++;
             if (!handles) return false;

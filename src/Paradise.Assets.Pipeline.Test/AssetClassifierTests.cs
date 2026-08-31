@@ -17,7 +17,9 @@ public class AssetClassifierTests
     [Arguments("/game/assets/textures/fire.jpg", AssetClass.Foreign)]
     [Arguments("/game/assets/audio/init.bnk", AssetClass.Foreign)]
     [Arguments("/game/assets/audio/music.wem", AssetClass.Foreign)]
-    [Arguments("/game/assets/notes.txt", AssetClass.Other)]
+    // A file nothing will ever build is Foreign too. The classifier reads paths, not importers,
+    // so it cannot tell this from the mesh above -- and does not pretend to.
+    [Arguments("/game/assets/notes.txt", AssetClass.Foreign)]
     [Arguments("/game/assets/other/project.toml", AssetClass.Config)]
     public async Task files_classify_by_extension_and_place(string path, AssetClass expected)
     {
@@ -31,26 +33,6 @@ public class AssetClassifierTests
         // appears the sidecar rules see it — and verify reports it as orphan or mismatch.
         await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta"))
             .IsEqualTo(AssetClass.Sidecar);
-    }
-
-    [Test]
-    public async Task what_the_pipeline_recognises_is_the_union_of_the_importers_extensions()
-    {
-        await Assert.That(AssetImporters.Recognises("/a/x.glb")).IsTrue();
-        await Assert.That(AssetImporters.Recognises("/a/x.jpeg")).IsTrue();
-        await Assert.That(AssetImporters.Recognises("/a/x.bnk")).IsTrue();
-        await Assert.That(AssetImporters.Recognises("/a/x.txt")).IsFalse();
-    }
-
-    /// <summary>
-    /// Recognition is target-independent, and a sidecar is the case that proves it: only the
-    /// play tree carries one, but <c>verify</c> — which builds nothing — must still call it a
-    /// file the pipeline knows rather than warn about it.
-    /// </summary>
-    [Test]
-    public async Task a_sidecars_extension_is_recognised_whatever_tree_is_being_built()
-    {
-        await Assert.That(AssetImporters.Recognises("/a/x" + SidecarMeta.Suffix)).IsTrue();
     }
 
     /// <summary>
