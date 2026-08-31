@@ -115,9 +115,27 @@ public sealed class BuildRunner
         var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName };
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
+        var index = BuildIndex.Load(_fileSystem, output, profileName, target);
+
         foreach (var path in _fileSystem.EnumerateFiles(_layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
-            switch (AssetClassifier.Classify(_layout.Assets, path))
+            var classification = AssetClassifier.Classify(_layout.Assets, path);
+
+            // Only what the index may legitimately answer for -- see BuildIndex's remarks for why
+            // textures and documents are excluded, and why excluding them is the point.
+            if (Reusable(classification, path)
+                && index.TryReuse(_fileSystem, path, Relative(path), output, out var already))
+            {
+                manifest.Assets.AddRange(already);
+                continue;
+            }
+
+            // What this source produced, taken as the entries the dispatch below appends. Doing it
+            // here rather than inside each builder keeps every Build*/Copy* method unaware that an
+            // index exists -- one place to be wrong instead of five.
+            var produced = manifest.Assets.Count;
+
+            switch (classification)
             {
                 case AssetClass.Foreign when AssetClassifier.TryGetForeignKind(path, out var kind):
                     switch (kind)
@@ -144,10 +162,27 @@ public sealed class BuildRunner
                 case AssetClass.Config:
                     BuildConfig(path, profile!, output, manifest, errors);
                     break;
+
+                // Sidecars travel only into the EDITOR tree. They carry authoring identity, which
+                // the editor's playmode wants -- it is how a built asset is traced back to the
+                // document that produced it -- and which a player's install has no use for at all.
+                // Shipping them would put source-tree bookkeeping in the game.
+                case AssetClass.Sidecar when target == ProjectOutputTarget.Play:
+                    CopySidecar(path, output, manifest);
+                    break;
+            }
+
+            if (Reusable(classification, path) && errors.Count == 0)
+            {
+                index.Record(_fileSystem, path, Relative(path), manifest.Assets[produced..]);
             }
         }
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
+
+        // Only after a clean build. An index written beside a tree that failed halfway would claim
+        // outputs that were never produced, and the next run would trust it.
+        index.Save(_fileSystem, output);
 
         manifest.Save(_fileSystem, output / BuildManifest.FileName);
         return new BuildResult(true, [], manifest.Assets.Count, output);
@@ -323,6 +358,42 @@ public sealed class BuildRunner
                 return null;   // reported against the referenced document, which is also built
             }
         }
+    }
+
+    /// <summary>
+    /// Whether <see cref="BuildIndex"/> may answer for this asset — true only when the source
+    /// bytes (plus its sidecar, which the index also keys on) are the step's COMPLETE input.
+    /// </summary>
+    /// <remarks>
+    /// Meshes, audio and sidecars are copies: output is input. Textures are excluded because their
+    /// encode depends on the argv and the encoder's version, which <see cref="ArtifactCache"/>
+    /// already keys on and this does not. Documents are excluded because a prefab bakes the
+    /// prefabs it instances, so its output changes when a file it merely REFERENCES does — and
+    /// nothing about the level's own bytes says so.
+    /// </remarks>
+    private static bool Reusable(AssetClass classification, UPath path) => classification switch
+    {
+        AssetClass.Sidecar => true,
+        AssetClass.Foreign => AssetClassifier.TryGetForeignKind(path, out var kind)
+            && kind is SidecarAssetKind.Mesh or SidecarAssetKind.Audio,
+        _ => false,
+    };
+
+    /// <summary>Copies a <c>*.meta</c> into the output tree verbatim.</summary>
+    /// <remarks>
+    /// Not <see cref="CopyThrough"/>, which loads the asset's sidecar to record its identity: a
+    /// sidecar has no sidecar of its own, so that lookup would go looking for <c>x.meta.meta</c>
+    /// and throw. The manifest entry carries a null guid for the same reason the file exists --
+    /// a sidecar DESCRIBES an identity rather than having one, and recording the guid it names
+    /// would give two manifest entries the same value and break any guid-to-asset lookup.
+    /// </remarks>
+    private void CopySidecar(UPath path, UPath output, BuildManifest manifest)
+    {
+        var source = Relative(path);
+        var destination = output / source;
+        CreateParent(destination);
+        _fileSystem.WriteAllBytes(destination, _fileSystem.ReadAllBytes(path));
+        Record(manifest, destination, output, source, guid: null);
     }
 
     private void CopyThrough(UPath path, UPath output, BuildManifest manifest, byte[]? bytes = null)

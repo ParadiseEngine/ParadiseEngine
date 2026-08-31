@@ -286,6 +286,104 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
     }
 
+    // ---- sidecars in the editor tree ----------------------------------------------------
+
+    [Test]
+    public async Task an_editor_build_carries_the_sidecars_and_a_shipped_build_does_not()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Build);
+
+        // The editor traces a built asset back to the document that produced it; a player's
+        // install has no use for authoring identity and must not ship it.
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/models/crate.glb.meta")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.meta")).IsFalse();
+    }
+
+    // ---- the build index ----------------------------------------------------------------
+
+    [Test]
+    public async Task an_unchanged_source_is_not_rebuilt()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
+
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        // The marker survives, which is the only way to SEE a skip: the copy was not redone.
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 9, 9, 9 });
+        // ...and the manifest still describes it. A skip that dropped the entry would leave the
+        // manifest listing only what CHANGED, which is not what a manifest is.
+        await Assert.That(fileSystem.ReadAllText("/game/.editor/play/manifest.json"))
+            .Contains("\"path\": \"models/crate.glb\"");
+    }
+
+    [Test]
+    public async Task a_changed_source_is_rebuilt()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 4, 5, 6 });
+    }
+
+    [Test]
+    public async Task a_changed_sidecar_rebuilds_the_asset_it_describes()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+        fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
+
+        // A new sidecar means a new GUID, which lands in the manifest -- so the asset's output
+        // changed even though not one of its own bytes did. A key blind to this would keep
+        // serving the old identity.
+        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+    }
+
+    [Test]
+    public async Task a_deleted_output_is_rebuilt_even_though_the_source_is_unchanged()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        fileSystem.DeleteFile("/game/.editor/play/models/crate.glb");
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/models/crate.glb")).IsTrue();
+    }
+
+    [Test]
+    public async Task an_index_from_another_target_is_not_trusted()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        // Hand the BUILD tree the PLAY tree's index. One source compiles to different artifacts
+        // per profile and target, so reusing across them is the silently-wrong-artifact failure.
+        fileSystem.CreateDirectory("/game/build");
+        fileSystem.CopyFile("/game/.editor/play/.build-index.json", "/game/build/.build-index.json", overwrite: true);
+
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Build);
+
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+    }
+
     private static byte[] MakeGlb(string json)
     {
         var payload = Encoding.UTF8.GetBytes(json);
