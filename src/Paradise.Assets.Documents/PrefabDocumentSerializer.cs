@@ -10,23 +10,13 @@ namespace Paradise.Assets.Documents;
 /// Reads and writes <c>*.prefab</c> documents — one shape, so one reader and one writer.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Reading is <b>strict</b>: unknown structural keys, malformed GUIDs, duplicate identities,
-/// reserved payload names, dangling or cyclic parents, and malformed well-known payloads
-/// (<see cref="WellKnownComponents.PayloadProblem"/>) are all errors naming the object. The
-/// document is committed source of truth, and a reader that guessed would turn an authoring typo
-/// into a build that succeeds and renders the wrong thing.
-/// </para>
-/// <para>
-/// Writing is canonical (<see cref="CanonicalTomlWriter"/>), so read → write is byte-identical
-/// for a canonical input and the Python mirror produces the same bytes. <c>prefab-check</c>
-/// polices exactly that.
-/// </para>
-/// <para>
-/// The payload is <b>flat</b> — a component's fields sit beside <c>id</c>, <c>type</c> and
-/// <c>removed</c> rather than under a nested table — so those three names are reserved and a
-/// payload using one is refused here rather than silently swallowed as structure.
-/// </para>
+/// Reading is <b>strict</b> — unknown keys, malformed GUIDs, duplicate identities, dangling or
+/// cyclic parents, malformed well-known payloads (<see cref="WellKnownComponents.PayloadProblem"/>)
+/// are all errors naming the object, because a reader that guessed would turn an authoring typo
+/// into a build that renders the wrong thing. Writing is canonical
+/// (<see cref="CanonicalTomlWriter"/>), so read → write is byte-identical for canonical input,
+/// in C# and in the Python mirror alike — <c>prefab-check</c> polices exactly that. The payload
+/// is flat, so <c>id</c>, <c>type</c> and <c>removed</c> are reserved names.
 /// </remarks>
 public static class PrefabDocumentSerializer
 {

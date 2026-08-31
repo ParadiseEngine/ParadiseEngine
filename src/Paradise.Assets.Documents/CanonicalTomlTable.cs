@@ -6,19 +6,11 @@ namespace Paradise.Assets.Documents;
 /// The document model the canonical writer emits: an ordered map of keys to values.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Order is the point. Canonical TOML defines key order as <i>schema declaration order</i>, and
-/// this type realizes that by writing keys exactly in the order they were added — the writer
-/// never sorts. A document builder that adds keys in its schema's order therefore produces the
-/// canonical document by construction, in C# and in the Python mirror alike.
-/// </para>
-/// <para>
-/// The value vocabulary is deliberately the intersection both toolchains handle losslessly:
-/// <see cref="bool"/>, <see cref="long"/>, <see cref="double"/>, <see cref="string"/>, arrays
-/// (<c>IReadOnlyList&lt;object&gt;</c> of these), nested tables, and arrays of tables. No dates:
-/// no authored document needs one, and TOML datetimes are where TOML implementations disagree
-/// most.
-/// </para>
+/// Order is the point: keys are written exactly as added, never sorted, so a builder that adds
+/// keys in schema order produces the canonical document by construction — in C# and the Python
+/// mirror alike. The value vocabulary is the intersection both toolchains handle losslessly
+/// (bool, long, double, string, arrays, tables, arrays of tables); no dates, which is where
+/// TOML implementations disagree most.
 /// </remarks>
 public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object>>
 {

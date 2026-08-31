@@ -9,25 +9,12 @@ namespace Paradise.Assets.Documents;
 /// <c>[header]</c>. Spec item 11 of <see cref="CanonicalTomlWriter"/>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// A distinct TYPE rather than a property of the data, and that is the whole design. The obvious
-/// alternative — "write a table inline when all its values are scalars" — makes the output depend
-/// on what the table happens to contain, so the C# and Python writers would agree until the first
-/// document where they read the rule differently, and the disagreement would surface as a
-/// <c>prefab-check</c> byte failure nobody could trace back to a formatting rule. With a type, the
-/// model says which form it wants and both writers obey it.
-/// </para>
-/// <para>
-/// This exists because an <see cref="AssetReference"/> is table-shaped and has to sit INSIDE an
-/// array — <c>Slots = [{ … }, { … }]</c> — which an array-of-tables cannot express, because
-/// <c>[[header]]</c> per element has no spelling for the null slot the materials contract
-/// requires ("a null entry keeps the GLB's own"). An empty inline table, <c>{}</c>, is that null.
-/// </para>
-/// <para>
-/// Inline tables hold scalars and arrays only. Nesting one inside another is refused: TOML allows
-/// it, but the value vocabulary here is deliberately the intersection both toolchains handle
-/// losslessly, and an arbitrarily deep one-line table is neither readable nor diffable.
-/// </para>
+/// A distinct TYPE, so the model — not the data — decides the written form and both writers obey
+/// it (a content-based "inline when scalar-ish" rule would drift between the C# and Python
+/// implementations). It exists because an <see cref="AssetReference"/> must sit inside an array
+/// — <c>Slots = [{ … }, {}]</c> — where <c>[[header]]</c> form has no spelling for the null
+/// slot; the empty inline table is that null. Holds scalars and arrays only, never a nested
+/// table: an arbitrarily deep one-line table is neither readable nor diffable.
 /// </remarks>
 public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, object>>
 {

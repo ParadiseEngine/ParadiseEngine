@@ -8,34 +8,22 @@ namespace Paradise.Assets.Documents;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>EVERY asset has one</b> — GLBs, textures and audio banks, whose bytes cannot carry an id,
-/// and the project's own text documents too. An earlier design had scenes and configs carry their
-/// identity in-file to halve the sidecar count; the saving was not worth what it cost. Identity
-/// then had two lookup paths, <c>verify</c> needed two rules for the same question, and a guid
-/// key inside a document is a key every reader has to know is structure rather than payload —
-/// while a payload is meant to be opaque. One rule for everything is shorter to state, shorter to
-/// implement, and leaves nothing to remember.
+/// <b>EVERY asset has one</b> — binaries whose bytes cannot carry an id, and the project's own
+/// text documents too: one lookup path for identity, one <c>verify</c> rule, nothing to
+/// remember. <b>There is no <c>kind</c></b>: what an asset is derives from its path (the build
+/// always dispatched on the extension), so a stored kind was the same fact written twice. A
+/// sidecar carries what the path CANNOT say — identity, the recorded hash, and import settings.
 /// </para>
 /// <para>
-/// <b>There is no <c>kind</c>.</b> What an asset is, is derived from its path by the classifier —
-/// the build always dispatched on the extension, never on the sidecar — so a stored kind was the
-/// same fact written twice plus the <c>verify</c> rule policing their agreement. What a sidecar
-/// carries instead is what the path CANNOT say: identity, the recorded hash, and import settings.
+/// <b>Import settings are open tables, one per domain</b> (<c>[texture]</c> today): any
+/// non-structural root table, carried opaquely and round-tripped canonically. The owning
+/// pipeline step gives a domain meaning; <c>verify</c> polices unknown and malformed domains
+/// there, because the pipeline is where the list of steps lives.
 /// </para>
 /// <para>
-/// <b>Import settings are open tables, one per domain.</b> Any root table that is not a
-/// structural field is a settings domain (<c>[texture]</c> today), preserved opaquely and
-/// round-tripped canonically — the same open/strict split as component payloads. The pipeline
-/// step that owns a domain interprets and validates it, and <c>verify</c> polices unknown
-/// domains there, because the pipeline is where the list of steps lives. The token defaults
-/// remain the fallback when a setting is absent.
-/// </para>
-/// <para>
-/// References carry the GUID <b>and</b> the path (<see cref="Paradise.Authoring.AssetReference"/>),
-/// so a lost sidecar degrades to a hand-fixable reference rather than breaking every use of its
-/// asset — and <c>verify</c> refuses a document where the two halves name different assets.
-/// Sidecars are minted and moved by tooling only (<c>mv</c> moves the pair and rewrites the
-/// referencing documents); <c>verify</c> fails on orphans and duplicate GUIDs.
+/// Sidecars are minted and moved by tooling only; <c>verify</c> fails on orphans and duplicate
+/// GUIDs, and a lost sidecar degrades to a hand-fixable reference because references carry the
+/// guid AND the path.
 /// </para>
 /// </remarks>
 public sealed class SidecarMeta
@@ -66,21 +54,11 @@ public sealed class SidecarMeta
     /// <see langword="null"/> when the sidecar does not record one.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Two jobs, neither of which the GUID can do. It tells you an asset changed since its
-    /// sidecar was written, which is what a cache needs to know; and it is what lets a LOST
-    /// sidecar be re-linked, because content is the only thing left to recognise an asset by once
-    /// its id is gone.
-    /// </para>
-    /// <para>
-    /// A mismatch is a <b>warning</b>, never an error. Every legitimate edit to an asset makes
-    /// the recorded hash stale, and a rule that turned "someone edited a texture" into a failing
-    /// build would be red more often than green — and would train everybody to ignore it.
-    /// </para>
-    /// <para>
-    /// Optional in the format, always written by tooling. A hand-written sidecar with an identity
-    /// and no hash is a perfectly good sidecar; it just cannot answer those two questions.
-    /// </para>
+    /// Two jobs the GUID cannot do: telling a cache the asset changed, and re-linking a LOST
+    /// sidecar (content is all that is left to recognise an asset by). A mismatch is a
+    /// <b>warning</b>, never an error — every legitimate edit makes the hash stale, and a rule
+    /// that failed the build on that would train everybody to ignore it. Optional in the format,
+    /// always written by tooling.
     /// </remarks>
     public string? Hash { get; set; }
 

@@ -43,17 +43,9 @@ public static class ConfigDocument
     /// Renders an authored config document as JSON, for a <c>document_format = "json"</c> build.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Schema-free like the rest of this type: the untyped model goes straight across, so a key
-    /// the engine has never heard of survives with its structure and its value intact. Only the
-    /// SYNTAX changes.
-    /// </para>
-    /// <para>
-    /// An inline table is written as an ordinary JSON object. The distinction between an inline
-    /// table and a header table is a TOML spelling — it exists so a canonical write is
-    /// byte-stable — and JSON has one way to write an object, so it does not survive and does not
-    /// need to.
-    /// </para>
+    /// Schema-free: the untyped model goes straight across, so unknown keys survive with value
+    /// and structure intact — only the SYNTAX changes. Inline vs header is a TOML spelling; JSON
+    /// has one way to write an object, so the distinction does not survive and does not need to.
     /// </remarks>
     /// <param name="toml">Canonical document text, as produced by <see cref="TryCanonicalize"/>.</param>
     /// <param name="sourceName">Named in the exception if the text will not parse.</param>

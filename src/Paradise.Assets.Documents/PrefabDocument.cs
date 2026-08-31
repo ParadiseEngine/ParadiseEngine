@@ -9,18 +9,10 @@ namespace Paradise.Assets.Documents;
 /// calls it a level, a prop, or a piece of one.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Deliberately NOT the export contract. The contract JSON is a bake: world-space matrices,
-/// references resolved to values, no identities. The authoring document is what the bake is
-/// computed <i>from</i>, so it keeps exactly what baking destroys — durable identity, local
-/// transforms and parents, and references left as references.
-/// </para>
-/// <para>
-/// <b>An object has no privileged members.</b> Identity, name, parent and placement are all
-/// components (<see cref="WellKnownComponents"/>), addressed exactly the way a game's components
-/// are. That is the whole reason a prefab instance needs only one override mechanism: a component
-/// it repeats is overridden field by field, and identity and placement are not special cases.
-/// </para>
+/// Deliberately NOT the export contract — that is a bake (world matrices, resolved references,
+/// no identities); this keeps exactly what baking destroys. <b>An object has no privileged
+/// members</b>: identity, name, parent and placement are components
+/// (<see cref="WellKnownComponents"/>), which is why one override mechanism covers everything.
 /// </remarks>
 public sealed class PrefabDocument
 {
@@ -44,10 +36,8 @@ public sealed class PrefabDocument
 
     /// <summary>
     /// The single object with no parent, or <see langword="null"/> when there is not exactly one.
-    /// </summary>
-    /// <remarks>
     /// Inferred rather than declared, so nothing can disagree with the hierarchy.
-    /// </remarks>
+    /// </summary>
     public PrefabObject? SingleRoot()
     {
         PrefabObject? root = null;
@@ -73,19 +63,9 @@ public sealed class PrefabDocument
     /// Applies the one rule a document adds to its object list: <b>exactly one root</b>.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Exactly one because an instance places exactly one thing, and "which of these several is
-    /// the instance" has no good answer. Every comparable system — Unity prefabs, Godot's
-    /// PackedScene, Unreal blueprints — lands on the same rule, and it is what lets any document
-    /// be instantiated into any other rather than only a privileged kind.
-    /// </para>
-    /// <para>
-    /// A document that instantiates another is <b>fine</b>, and so is one carrying an override
-    /// carrier. Both were once refused here — the first because the resolver could not recurse,
-    /// the second because carriers were "a scene thing" and this was "a prefab". There is one kind
-    /// of document now, and <see cref="Paradise.Assets.Documents"/> has no opinion on which of
-    /// them a game calls a level.
-    /// </para>
+    /// Exactly one, because an instance places exactly one thing — the rule every comparable
+    /// system lands on, and what lets any document be instantiated into any other. Instances and
+    /// override carriers are fine here; there is one kind of document.
     /// </remarks>
     /// <exception cref="PrefabDocumentException">No objects, no root, or several roots.</exception>
     public void Validate(string sourceName)
@@ -130,10 +110,9 @@ public sealed class PrefabObject
     /// An object carrying just a <c>meta</c> component — identity, name, and optionally a parent.
     /// </summary>
     /// <remarks>
-    /// Building meta by hand is three lines every time and easy to get subtly wrong (a guid
-    /// written unformatted, a parent set to <see cref="System.Guid.Empty"/> rather than omitted),
-    /// so the one shape every caller needs gets a factory. <c>meta</c> goes first because
-    /// document order is preserved and identity reads best at the top of an object.
+    /// A factory because hand-building meta is easy to get subtly wrong (an unformatted guid, a
+    /// parent set to <see cref="System.Guid.Empty"/> instead of omitted). <c>meta</c> goes first:
+    /// order is preserved, and identity reads best at the top.
     /// </remarks>
     public static PrefabObject WithMeta(Guid guid, string? name = null, Guid? parent = null)
     {
@@ -188,11 +167,9 @@ public sealed class PrefabObject
 /// beside them rather than under a nested table.
 /// </summary>
 /// <remarks>
-/// Flattening the payload costs three reserved names — <c>id</c>, <c>type</c> and
-/// <c>removed</c> — and buys about a quarter of the lines in a document this shape. The
-/// constructor refuses a payload using one, so the collision is a named error at the code that
-/// built it rather than a confusing duplicate key on write. (Parsed text cannot collide: TOML
-/// itself rejects a duplicate key.)
+/// Flattening costs three reserved names and buys about a quarter of a document's lines. The
+/// constructor refuses a payload using one — a named error at the code that built it, not a
+/// duplicate key on write. (Parsed text cannot collide; TOML rejects duplicate keys.)
 /// </remarks>
 public sealed class PrefabComponent
 {

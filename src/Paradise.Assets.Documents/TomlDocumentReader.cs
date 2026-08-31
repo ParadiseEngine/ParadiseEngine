@@ -8,10 +8,9 @@ namespace Paradise.Assets.Documents;
 /// values out of it with errors that name the source, the key and what was expected.
 /// </summary>
 /// <remarks>
-/// Untyped (<see cref="TomlTable"/>) rather than serializer-mapped on purpose: these documents
-/// carry open component payloads no static model can enumerate, and strictness here means
-/// <b>rejecting unknown keys</b> — a typo'd optional key that a lenient reader ignored would be
-/// silently dropped by the next machine rewrite, which is data loss with no error at any point.
+/// Untyped (<see cref="TomlTable"/>) on purpose — documents carry open payloads no static model
+/// can enumerate — and strict about unknown keys: a typo a lenient reader ignored would be
+/// silently dropped by the next machine rewrite, which is data loss with no error anywhere.
 /// </remarks>
 internal static class TomlDocumentReader
 {
@@ -116,10 +115,12 @@ internal static class TomlDocumentReader
     /// shaped, a generic table otherwise.
     /// </summary>
     /// <remarks>
-    /// TOML parses <c>x = { … }</c> and <c>[x]</c> to the same thing, so the form cannot be
-    /// recovered from the parse — only from the shape. See
-    /// <see cref="AssetReferenceCodec.IsReferenceShaped"/> for why the predicate is exact rather
-    /// than a judgement about how table-ish the contents look.
+    /// Deliberately decided from the CONTENT, not the parse. Tomlyn does remember the source form
+    /// (<c>TomlTable.Kind</c>), but the Python mirror's <c>tomllib</c> does not, and both readers
+    /// must rebuild the same model from the same bytes — so the shared rule is the shape. See
+    /// <see cref="AssetReferenceCodec.IsWrittenInline"/> for why the predicate is exact rather
+    /// than a judgement about how table-ish the contents look, and issue #187 for the decision
+    /// record.
     /// </remarks>
     private static object ToCanonicalTable(TomlTable table, string context, Func<string, Exception> fail)
     {
@@ -136,7 +137,7 @@ internal static class TomlDocumentReader
             pairs.Add(new KeyValuePair<string, object>(key, ToCanonicalValue(member, $"'{key}' {context}", fail)));
         }
 
-        if (!AssetReferenceCodec.IsReferenceShaped(pairs)) return ToCanonical(table, context, fail);
+        if (!AssetReferenceCodec.IsWrittenInline(pairs)) return ToCanonical(table, context, fail);
 
         var inline = new CanonicalInlineTable();
         foreach (var (key, value) in pairs) inline.Add(key, value);
@@ -156,11 +157,9 @@ internal static class TomlDocumentReader
     };
 
     /// <summary>
-    /// One element of an array. A table here becomes a <see cref="CanonicalInlineTable"/>, because
-    /// inline is the only form a table can take inside an array — an array-of-tables is a
-    /// <see cref="TomlTableArray"/>, which the parser hands back as a different type entirely.
-    /// Reading it back as anything else would break the round trip: the writer would then emit
-    /// <c>[[headers]]</c> where the source had <c>{ … }</c>.
+    /// One element of an array. A table here is always a <see cref="CanonicalInlineTable"/> —
+    /// inline is the only form TOML allows inside an array (an array-of-tables arrives as a
+    /// <see cref="TomlTableArray"/>, a different type entirely).
     /// </summary>
     private static object ToCanonicalElement(object? value, string context, Func<string, Exception> fail)
     {

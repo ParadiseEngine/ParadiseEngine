@@ -53,19 +53,13 @@ namespace Paradise.Assets.Documents;
 /// <c>{ key = value, … }</c> — <c>", "</c> between pairs, in model order, keys by item 4 and
 /// values by items 5–9. An empty one is <c>{}</c>, which is how a null element inside an array
 /// is spelled. Inline tables never nest another table.
-/// <para>WRITING chooses the form by TYPE, never by inspecting the data — so a caller that
-/// builds a model controls exactly what comes out.</para>
-/// <para>READING cannot: TOML gives <c>x = { … }</c> and <c>[x]</c> the same parse, so the
-/// form is unrecoverable from the document. The reader restores the type with one exact
-/// predicate — <b>a table is inline iff it is empty or has exactly the two string keys
-/// <c>guid</c> and <c>path</c></b> (<see cref="AssetReferenceCodec.IsReferenceShaped"/>) — and
-/// that shape is therefore RESERVED for asset references. Exact, because a vaguer rule ("all
-/// its values are scalars") would have the two implementations agreeing until the first
-/// document where they read it differently, surfacing as a <c>prefab-check</c> byte failure
-/// with nothing pointing at formatting.</para>
-/// <para>One consequence for item 10: an empty table is written <c>{}</c> rather than under a
-/// header, because in these documents the only empty table that occurs is a reference to
-/// nothing.</para></item>
+/// <para>Writing chooses the form by TYPE; reading restores it by CONTENT — <b>a table is
+/// inline iff it is empty or has exactly the two string keys <c>guid</c> and <c>path</c></b>
+/// (<see cref="AssetReferenceCodec.IsWrittenInline"/>), a shape therefore RESERVED for asset
+/// references. Content, because the Python mirror's parser cannot see the source form and both
+/// readers must rebuild the same model from the same bytes (issue #187). It follows for item 10
+/// that an empty table is written <c>{}</c>, never under a header: the only empty table these
+/// documents hold is a reference to nothing.</para></item>
 /// </list>
 /// </remarks>
 public static class CanonicalTomlWriter

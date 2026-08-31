@@ -6,18 +6,11 @@ namespace Paradise.Assets.Documents;
 /// Reading and writing an <see cref="AssetReference"/> as a document value.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The wire form is an inline table, <c>{ guid = "…", path = "…" }</c>, and an absent reference is
-/// the empty one, <c>{}</c>. Key order is fixed at <c>guid</c> then <c>path</c> — guid first
-/// because it is the authoritative half, and fixed because the canonical writer emits model order
-/// and the Python mirror has to produce the same bytes.
-/// </para>
-/// <para>
-/// <c>{}</c> rather than an omitted element, because a reference most often appears inside an
-/// array where position is meaning: <c>MaterialsComponentData.Slots</c> is one entry per GLB
-/// primitive, and "dropping a null shifts every override after it onto the wrong primitive, which
-/// renders, and is wrong".
-/// </para>
+/// The wire form is an inline table, <c>{ guid = "…", path = "…" }</c> in that fixed order
+/// (guid is the authoritative half, and the Python mirror must produce the same bytes). An
+/// absent reference is <c>{}</c> rather than an omitted element, because references sit in
+/// arrays where position is meaning — dropping a null slot would shift every entry after it
+/// onto the wrong GLB primitive.
 /// </remarks>
 public static class AssetReferenceCodec
 {
@@ -28,29 +21,18 @@ public static class AssetReferenceCodec
     public const string PathKey = "path";
 
     /// <summary>
-    /// Whether a parsed table is an asset reference, and therefore was written inline.
+    /// Whether a parsed table was written inline — which in this format means: whether it is an
+    /// asset reference, the one thing written inline at value position.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>Writing is by type; reading needs this.</b> TOML gives <c>Mesh = { guid = "…" }</c> and
-    /// <c>[Mesh]</c> the SAME parse — the form is not recoverable from position or from the
-    /// parser's types when the table sits under a plain key. So the reader recovers the model type
-    /// with a predicate, and the predicate has to be exact, because the C# and Python readers must
-    /// agree on every document or <c>prefab-check</c> fails on bytes.
-    /// </para>
-    /// <para>
-    /// Exact means: <b>empty, or exactly the two string keys <c>guid</c> and <c>path</c></b>.
-    /// Nothing about "looks scalar-ish", nothing about position. A payload table wanting those two
-    /// string keys and nothing else IS a reference by this format's definition — that shape is
-    /// reserved, and <c>verify</c> says so when a payload tries to use it for something else.
-    /// </para>
-    /// <para>
-    /// The empty case is what makes the null slot work, and it is why an empty table is written
-    /// <c>{}</c> rather than under a header: in these documents the only empty table that occurs
-    /// is a reference to nothing.
-    /// </para>
+    /// Decided from CONTENT, not the parse: the Python mirror's <c>tomllib</c> cannot see the
+    /// source form, and both readers must rebuild the same model from the same bytes (the full
+    /// argument is issue #187). Exact by definition — <b>empty, or exactly the two string keys
+    /// <c>guid</c> and <c>path</c></b> — so that shape is reserved: a payload table matching it
+    /// IS a reference, and the empty table <c>{}</c> is a reference to nothing, which is what
+    /// makes the null array slot work.
     /// </remarks>
-    public static bool IsReferenceShaped(IReadOnlyCollection<KeyValuePair<string, object>> table)
+    public static bool IsWrittenInline(IReadOnlyCollection<KeyValuePair<string, object>> table)
     {
         ArgumentNullException.ThrowIfNull(table);
         if (table.Count == 0) return true;
