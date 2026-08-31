@@ -74,6 +74,19 @@ public static class WellKnownComponents
     /// </remarks>
     public const string Dropped = "Dropped";
 
+    /// <summary>
+    /// Whether <paramref name="key"/> is a <c>meta</c> field the format itself defines, as
+    /// opposed to a game-extended payload field riding along in the same table.
+    /// </summary>
+    /// <remarks>
+    /// The resolver rebuilds every format-owned field itself — identity is minted, the parent is
+    /// remapped, and the carrier-only fields describe the override rather than the object — so
+    /// this is the set it must NOT copy through. Adding a meta field means adding it here, and
+    /// the copy-through loop needs no edit.
+    /// </remarks>
+    public static bool IsMetaField(string key) =>
+        key is Guid or Name or Parent or Target or Dropped;
+
     // ---- transform fields ----------------------------------------------------------------
 
     /// <summary>Local translation, engine convention (Y-up, metres).</summary>

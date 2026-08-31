@@ -342,11 +342,7 @@ public static class PrefabResolver
         {
             foreach (var (key, member) in existing.Data)
             {
-                if (key is WellKnownComponents.Guid or WellKnownComponents.Name or WellKnownComponents.Parent
-                    or WellKnownComponents.Target or WellKnownComponents.Dropped)
-                {
-                    continue;
-                }
+                if (WellKnownComponents.IsMetaField(key)) continue;
 
                 data.Add(key, member);
             }
