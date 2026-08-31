@@ -39,6 +39,9 @@
     <PackageReference Include="DotRecast.Core" />
     <PackageReference Include="DotRecast.Detour" />
     <PackageReference Include="DotRecast.Recast" />
+    <!-- The contract's TOML form. Untyped model + source-generated context only, so the AOT
+         promise the JSON path makes is unchanged. -->
+    <PackageReference Include="Tomlyn" />
   </ItemGroup>
 
 </Project>
