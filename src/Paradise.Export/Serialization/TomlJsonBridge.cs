@@ -43,6 +43,36 @@ namespace Paradise.Export.Serialization
     /// </remarks>
     internal static class TomlJsonBridge
     {
+        /// <summary>
+        /// The contract's one array-of-arrays member, and the key its elements are wrapped in so
+        /// TOML can give them headers.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>LevelData.Entities</c> is <c>List&lt;List&lt;AuthoredComponentData&gt;&gt;</c> — an
+        /// entity has no shape of its own, which is the whole assertion of contract v5. TOML has
+        /// no header form for an array of ARRAYS, so mirroring that shape mechanically collapses
+        /// every entity in the document onto one enormous inline line, which is worse to read and
+        /// diff than the JSON it was meant to improve on.
+        /// </para>
+        /// <para>
+        /// It is not a limitation of the format: the authored <c>*.prefab</c> documents are TOML
+        /// and read beautifully, because they nest through OBJECTS — each is a table, so
+        /// <c>[[objects.components]]</c> has something to hang a header on. So the TOML form wraps
+        /// each entity in a table with this one key, and unwraps it on read.
+        /// </para>
+        /// <para>
+        /// <b>This changes the encoding, never the value.</b> The contract is value-based rather
+        /// than byte-based, and the JSON form is untouched — it keeps the array of arrays exactly
+        /// as v5 specifies. Choosing how to spell a value is what a second serialization is FOR;
+        /// the parity test is what holds the two spellings to the same meaning.
+        /// </para>
+        /// </remarks>
+        internal const string EntitiesKey = "Entities";
+
+        /// <summary>The key each entity's component list is wrapped in. See <see cref="EntitiesKey"/>.</summary>
+        internal const string ComponentsKey = "Components";
+
         /// <summary>Converts a serialized document to Tomlyn's model.</summary>
         /// <exception cref="InvalidOperationException">The root is not an object.</exception>
         public static TomlTable ToToml(JsonNode? node)
@@ -53,14 +83,61 @@ namespace Paradise.Export.Serialization
                     "the contract's documents are objects at the root, and TOML has no other shape for one");
             }
 
-            return (TomlTable)Convert(root)!;
+            return (TomlTable)Convert(Wrap(root))!;
         }
 
         /// <summary>Converts Tomlyn's model back to a node tree the contract's reader accepts.</summary>
         public static JsonNode ToJson(TomlTable table)
         {
             ArgumentNullException.ThrowIfNull(table);
-            return (JsonNode)Convert(table)!;
+            return Unwrap((JsonNode)Convert(table)!);
+        }
+
+        /// <summary>Wraps each entity's component list in a table, so TOML can head it.</summary>
+        /// <remarks>Symmetric with <see cref="Unwrap"/>; see <see cref="EntitiesKey"/> for why.</remarks>
+        private static JsonNode Wrap(JsonNode node)
+        {
+            if (node is not JsonObject root || root[EntitiesKey] is not JsonArray entities) return node;
+
+            var wrapped = new JsonArray();
+            foreach (var entity in entities.ToList())
+            {
+                // Detached first: a node belongs to one parent, and adding one that still has a
+                // parent throws rather than moving it.
+                entities.Remove(entity);
+                wrapped.Add((JsonNode)new JsonObject { [ComponentsKey] = entity });
+            }
+
+            root[EntitiesKey] = wrapped;
+            return root;
+        }
+
+        /// <summary>Undoes <see cref="Wrap"/>, so the reader sees the contract's own shape.</summary>
+        private static JsonNode Unwrap(JsonNode node)
+        {
+            if (node is not JsonObject root || root[EntitiesKey] is not JsonArray entities) return node;
+
+            var flat = new JsonArray();
+            foreach (var entry in entities.ToList())
+            {
+                entities.Remove(entry);
+
+                // A bare array is accepted as well as the wrapped form: a hand-written document
+                // spelling it the JSON way is still the same value, and refusing it would make the
+                // wrapper a rule rather than a convenience.
+                if (entry is JsonObject wrapper && wrapper[ComponentsKey] is JsonArray components)
+                {
+                    wrapper.Remove(ComponentsKey);
+                    flat.Add((JsonNode?)components);
+                }
+                else
+                {
+                    flat.Add((JsonNode?)entry);
+                }
+            }
+
+            root[EntitiesKey] = flat;
+            return root;
         }
 
         /// <param name="nested">Whether this value sits inside an array, where `[[header]]` is illegal.</param>

@@ -25,6 +25,12 @@ namespace Paradise.Export.Serialization
         /// <summary>Reads a level document.</summary>
         public static LevelData ReadLevel(string toml) => Read<LevelData>(toml);
 
+        /// <summary>Reads a material document.</summary>
+        public static LevelMaterialData ReadMaterial(string toml) => Read<LevelMaterialData>(toml);
+
+        /// <summary>Reads the project settings document.</summary>
+        public static ProjectSettingsData ReadProjectSettings(string toml) => Read<ProjectSettingsData>(toml);
+
         /// <summary>Reads any contract document.</summary>
         public static T Read<T>(string toml)
         {
