@@ -68,7 +68,7 @@ public static class ProjectVerifier
 
             // Every asset carries an identity, and identity lives in ONE place -- the sidecar --
             // whether the asset is a GLB or a scene document.
-            if (AssetClassifier.RequiredKind(assetClass, path) is not null
+            if (AssetClassifier.NeedsSidecar(assetClass)
                 && !fileSystem.FileExists(SidecarMeta.PathFor(path)))
             {
                 findings.Add(new VerifyFinding(
@@ -144,12 +144,24 @@ public static class ProjectVerifier
             guids.Add(meta.Guid, path);
         }
 
-        var assetClass = AssetClassifier.Classify(assetsRoot, asset);
-        if (AssetClassifier.RequiredKind(assetClass, asset) is { } expected && expected != meta.Kind)
+        // Settings are opaque to the format, so this is where they meet the registry of steps
+        // that actually read them. An unknown domain is a WARNING — it may be a typo, or a
+        // sidecar written by a newer pipeline — but a malformed KNOWN domain is an error, because
+        // the build would refuse it with less context.
+        foreach (var (name, settings) in meta.Settings)
         {
-            findings.Add(new VerifyFinding(
-                VerifySeverity.Error, path,
-                $"declares kind '{meta.Kind}' but '{asset.GetName()}' is a {expected} asset"));
+            if (ImportSettings.Find(name) is not { } domain)
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Warning, path,
+                    $"carries [{name}] settings no build step reads — a misspelled domain, or a sidecar from a newer pipeline"));
+                continue;
+            }
+
+            if (domain.Problem(settings) is { } problem)
+            {
+                findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
+            }
         }
 
         // A WARNING, not an error. Every legitimate edit makes the recorded hash stale, and a

@@ -34,12 +34,11 @@ public class AssetClassifierTests
     }
 
     [Test]
-    public async Task foreign_kinds_follow_the_extension()
+    public async Task the_importer_claiming_a_path_follows_the_extension()
     {
-        await Assert.That(AssetClassifier.TryGetForeignKind("/a/x.glb", out var mesh)).IsTrue();
-        await Assert.That(mesh).IsEqualTo(SidecarAssetKind.Mesh);
-        await Assert.That(AssetClassifier.TryGetForeignKind("/a/x.jpeg", out var texture)).IsTrue();
-        await Assert.That(texture).IsEqualTo(SidecarAssetKind.Texture);
-        await Assert.That(AssetClassifier.TryGetForeignKind("/a/x.txt", out _)).IsFalse();
+        await Assert.That(AssetImporters.Find("/a/x.glb")).IsTypeOf<MeshImporter>();
+        await Assert.That(AssetImporters.Find("/a/x.jpeg")).IsTypeOf<TextureImporter>();
+        await Assert.That(AssetImporters.Find("/a/x.bnk")).IsTypeOf<AudioImporter>();
+        await Assert.That(AssetImporters.Find("/a/x.txt")).IsNull();
     }
 }

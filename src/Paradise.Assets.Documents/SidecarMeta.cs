@@ -1,5 +1,3 @@
-using Tomlyn.Model;
-
 using Zio;
 
 namespace Paradise.Assets.Documents;
@@ -19,15 +17,25 @@ namespace Paradise.Assets.Documents;
 /// implement, and leaves nothing to remember.
 /// </para>
 /// <para>
+/// <b>There is no <c>kind</c>.</b> What an asset is, is derived from its path by the classifier —
+/// the build always dispatched on the extension, never on the sidecar — so a stored kind was the
+/// same fact written twice plus the <c>verify</c> rule policing their agreement. What a sidecar
+/// carries instead is what the path CANNOT say: identity, the recorded hash, and import settings.
+/// </para>
+/// <para>
+/// <b>Import settings are open tables, one per domain.</b> Any root table that is not a
+/// structural field is a settings domain (<c>[texture]</c> today), preserved opaquely and
+/// round-tripped canonically — the same open/strict split as component payloads. The pipeline
+/// step that owns a domain interprets and validates it, and <c>verify</c> polices unknown
+/// domains there, because the pipeline is where the list of steps lives. The token defaults
+/// remain the fallback when a setting is absent.
+/// </para>
+/// <para>
 /// References carry the GUID <b>and</b> the path (<see cref="Paradise.Authoring.AssetReference"/>),
 /// so a lost sidecar degrades to a hand-fixable reference rather than breaking every use of its
 /// asset — and <c>verify</c> refuses a document where the two halves name different assets.
-/// </para>
-/// <para>
 /// Sidecars are minted and moved by tooling only (<c>mv</c> moves the pair and rewrites the
-/// referencing documents); <c>verify</c> fails on orphans and duplicate GUIDs. Import settings
-/// replace the filename-token heuristics as the override mechanism — the token defaults remain
-/// the fallback when a setting is absent.
+/// referencing documents); <c>verify</c> fails on orphans and duplicate GUIDs.
 /// </para>
 /// </remarks>
 public sealed class SidecarMeta
@@ -38,20 +46,20 @@ public sealed class SidecarMeta
     /// <summary>The suffix appended to an asset's file name to form its sidecar's.</summary>
     public const string Suffix = ".meta";
 
+    /// <summary>The root keys that are the sidecar's own structure; every other root table is a settings domain.</summary>
+    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "hash"];
+
+    private readonly List<KeyValuePair<string, CanonicalTomlTable>> _settings = [];
+
     /// <summary>Creates a sidecar document.</summary>
     /// <param name="guid">The asset's authoring identity.</param>
-    /// <param name="kind">What the asset is.</param>
-    public SidecarMeta(Guid guid, SidecarAssetKind kind)
+    public SidecarMeta(Guid guid)
     {
         Guid = guid;
-        Kind = kind;
     }
 
     /// <summary>The asset's authoring identity.</summary>
     public Guid Guid { get; }
-
-    /// <summary>What the asset is.</summary>
-    public SidecarAssetKind Kind { get; }
 
     /// <summary>
     /// SHA-256 of the asset's bytes when the sidecar was written, lowercase hex — or
@@ -77,10 +85,38 @@ public sealed class SidecarMeta
     public string? Hash { get; set; }
 
     /// <summary>
-    /// Texture import settings. Only meaningful when <see cref="Kind"/> is
-    /// <see cref="SidecarAssetKind.Texture"/>; absent means "use the defaults".
+    /// The import-settings tables in document order, one per domain. The format carries them
+    /// opaquely; the pipeline step owning a domain interprets it.
     /// </summary>
-    public TextureImportSettings? Texture { get; set; }
+    public IReadOnlyList<KeyValuePair<string, CanonicalTomlTable>> Settings => _settings;
+
+    /// <summary>The settings table for <paramref name="domain"/>, or <see langword="null"/>.</summary>
+    public CanonicalTomlTable? Setting(string domain)
+    {
+        foreach (var (candidate, settings) in _settings)
+        {
+            if (string.Equals(candidate, domain, StringComparison.Ordinal)) return settings;
+        }
+
+        return null;
+    }
+
+    /// <summary>Adds or replaces the settings table for <paramref name="domain"/>.</summary>
+    /// <exception cref="ArgumentException"><paramref name="domain"/> is a structural key.</exception>
+    public void SetSetting(string domain, CanonicalTomlTable settings)
+    {
+        ArgumentNullException.ThrowIfNull(domain);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (s_structuralKeys.Contains(domain))
+        {
+            throw new ArgumentException($"'{domain}' is a sidecar field, so it cannot name a settings domain.", nameof(domain));
+        }
+
+        var index = _settings.FindIndex(pair => string.Equals(pair.Key, domain, StringComparison.Ordinal));
+        var entry = new KeyValuePair<string, CanonicalTomlTable>(domain, settings);
+        if (index >= 0) _settings[index] = entry;
+        else _settings.Add(entry);
+    }
 
     /// <summary>The hash to record for an asset's bytes.</summary>
     public static string ComputeHash(ReadOnlySpan<byte> bytes)
@@ -93,9 +129,8 @@ public sealed class SidecarMeta
         return ComputeHash(fileSystem.ReadAllBytes(path));
     }
 
-    /// <summary>Mints a sidecar for a new asset: fresh GUID, default settings.</summary>
-    /// <param name="kind">What the asset is.</param>
-    public static SidecarMeta Mint(SidecarAssetKind kind) => new(Guid.NewGuid(), kind);
+    /// <summary>Mints a sidecar for a new asset: fresh GUID, no settings.</summary>
+    public static SidecarMeta Mint() => new(Guid.NewGuid());
 
     /// <summary>The sidecar path for <paramref name="assetPath"/> (its full name plus <see cref="Suffix"/>).</summary>
     public static UPath PathFor(UPath assetPath)
@@ -149,7 +184,6 @@ public sealed class SidecarMeta
         Exception Fail(string problem) => new SidecarMetaException(sourceName, problem);
 
         var root = TomlDocumentReader.Parse(toml, Fail);
-        TomlDocumentReader.RejectUnknownKeys(root, "at the document root", ["schema_version", "guid", "kind", "hash", "texture"], Fail);
 
         var schemaVersion = TomlDocumentReader.RequireInteger(root, "schema_version", "at the document root", Fail);
         if (schemaVersion != SupportedSchemaVersion)
@@ -163,18 +197,7 @@ public sealed class SidecarMeta
             throw Fail($"holds '{guidText}' where 'guid' must be a non-empty UUID");
         }
 
-        var kindText = TomlDocumentReader.RequireString(root, "kind", "at the document root", Fail);
-        var kind = kindText switch
-        {
-            "texture" => SidecarAssetKind.Texture,
-            "mesh" => SidecarAssetKind.Mesh,
-            "audio" => SidecarAssetKind.Audio,
-            "document" => SidecarAssetKind.Document,
-            "opaque" => SidecarAssetKind.Opaque,
-            _ => throw Fail($"sets kind = \"{kindText}\"; expected \"texture\", \"mesh\", \"audio\", \"document\" or \"opaque\""),
-        };
-
-        var meta = new SidecarMeta(guid, kind);
+        var meta = new SidecarMeta(guid);
 
         if (TomlDocumentReader.OptionalString(root, "hash", "at the document root", Fail) is { } hash)
         {
@@ -188,14 +211,19 @@ public sealed class SidecarMeta
             meta.Hash = hash;
         }
 
-        if (TomlDocumentReader.OptionalTable(root, "texture", "at the document root", Fail) is { } texture)
+        // Everything else is a settings domain, and a domain is a TABLE. A scalar here is either
+        // a typo'd structural key or settings written flat; both must fail rather than be dropped
+        // by the next machine rewrite.
+        foreach (var (key, value) in root)
         {
-            if (kind != SidecarAssetKind.Texture)
+            if (s_structuralKeys.Contains(key)) continue;
+            if (value is not Tomlyn.Model.TomlTable table)
             {
-                throw Fail($"has a [texture] table but kind = \"{kindText}\" — import settings must match the asset's kind");
+                throw Fail($"has an unknown key '{key}' at the document root — a settings domain is a table");
             }
 
-            meta.Texture = ReadTexture(texture, Fail);
+            meta._settings.Add(new KeyValuePair<string, CanonicalTomlTable>(
+                key, TomlDocumentReader.ToCanonical(table, $"in [{key}]", Fail)));
         }
 
         return meta;
@@ -212,131 +240,21 @@ public sealed class SidecarMeta
         fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(ToCanonical()));
     }
 
-    private static TextureImportSettings ReadTexture(TomlTable table, Func<string, Exception> fail)
-    {
-        TomlDocumentReader.RejectUnknownKeys(table, "in [texture]", ["preset"], fail);
-
-        var preset = TomlDocumentReader.OptionalString(table, "preset", "in [texture]", fail) switch
-        {
-            null => (TexturePreset?)null,
-            "color" => TexturePreset.Color,
-            "color-linear" => TexturePreset.ColorLinear,
-            "normal" => TexturePreset.Normal,
-            "data" => TexturePreset.Data,
-            { } other => throw fail(
-                $"sets preset = \"{other}\" in [texture]; expected \"color\", \"color-linear\", \"normal\" or \"data\""),
-        };
-
-        return new TextureImportSettings { Preset = preset };
-    }
-
     private CanonicalTomlTable ToCanonical()
     {
         var root = new CanonicalTomlTable
         {
             { "schema_version", (long)SupportedSchemaVersion },
             { "guid", DocumentGuid.Format(Guid) },
-            {
-                "kind", Kind switch
-                {
-                    SidecarAssetKind.Texture => "texture",
-                    SidecarAssetKind.Mesh => "mesh",
-                    SidecarAssetKind.Audio => "audio",
-                    SidecarAssetKind.Document => "document",
-                    SidecarAssetKind.Opaque => "opaque",
-                    _ => throw new InvalidOperationException($"Unknown kind {Kind}."),
-                }
-            },
         };
 
-        // After kind, before the import settings: identity, then what the asset IS, then what it
-        // was, then how to process it -- and model order is what the writer emits.
+        // Identity, then what the asset was, then how to process it -- and model order is what
+        // the writer emits, so settings keep their document order.
         if (Hash is { } hash) root.Add("hash", hash);
-
-        if (Texture is { Preset: { } preset })
-        {
-            root.Add("texture", new CanonicalTomlTable
-            {
-                {
-                    "preset", preset switch
-                    {
-                        TexturePreset.Color => "color",
-                        TexturePreset.ColorLinear => "color-linear",
-                        TexturePreset.Normal => "normal",
-                        TexturePreset.Data => "data",
-                        _ => throw new InvalidOperationException($"Unknown preset {preset}."),
-                    }
-                },
-            });
-        }
+        foreach (var (domain, settings) in _settings) root.Add(domain, settings);
 
         return root;
     }
-}
-
-/// <summary>What a sidecar's asset is.</summary>
-/// <remarks>
-/// EVERY asset has a sidecar, documents included. An earlier design had text formats carry their
-/// id in-file to halve the sidecar count, and the saving was not worth what it cost: identity
-/// then had two lookup paths, `verify` had two rules, and adding a guid key to a document meant
-/// every reader had to know it was structure rather than payload. One rule for everything is
-/// shorter to state and shorter to implement.
-/// </remarks>
-public enum SidecarAssetKind
-{
-    /// <summary>A source image (<c>textures/**</c>, <c>sprites/**</c>), compiled to KTX2.</summary>
-    Texture,
-
-    /// <summary>A source GLB (<c>models/**</c>), re-emitted with KTX2 texture sidecars.</summary>
-    Mesh,
-
-    /// <summary>A committed audio bank (<c>audio/**</c>), verified and copied through.</summary>
-    Audio,
-
-    /// <summary>
-    /// An authored text document — a scene, a prefab, a config, or the project manifest. One kind
-    /// rather than four, because the extension already says which and the kind's job is to say
-    /// which build step owns the file.
-    /// </summary>
-    Document,
-
-    /// <summary>
-    /// A file the pipeline carries but has no opinion about — a Wwise <c>.xml</c>, a baked
-    /// <c>.navmesh.bin</c>.
-    /// </summary>
-    /// <remarks>
-    /// It still has an identity, because it is still an asset: something references it, something
-    /// may move it, and both of those want a stable id rather than a path. "The pipeline does not
-    /// process this" and "this is not an asset" are different statements, and only the first one
-    /// is true here.
-    /// </remarks>
-    Opaque,
-}
-
-/// <summary>Per-asset texture import settings. Absent values fall back to the token defaults.</summary>
-public sealed class TextureImportSettings
-{
-    /// <summary>The encoding preset override, or <see langword="null"/> for the filename-token default.</summary>
-    public TexturePreset? Preset { get; set; }
-}
-
-/// <summary>
-/// The texture encoding presets, mirroring the pipeline's <c>TextureEncodingPreset</c> family:
-/// UASTC always, differing in transfer tagging and normal-map treatment.
-/// </summary>
-public enum TexturePreset
-{
-    /// <summary>sRGB-encoded color (albedo). The default for plain images.</summary>
-    Color,
-
-    /// <summary>Linear color — masks, ORM-style packed maps.</summary>
-    ColorLinear,
-
-    /// <summary>Tangent-space normal map: linear, normal-mode encoding.</summary>
-    Normal,
-
-    /// <summary>Non-color data.</summary>
-    Data,
 }
 
 /// <summary>A sidecar meta document could not be read, parsed, or validated.</summary>

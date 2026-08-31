@@ -129,7 +129,7 @@ public sealed class ArtifactCache
     /// A copy failure is reported and treated as a miss: the caller then does the real work,
     /// which is slow but correct.
     /// </remarks>
-    /// <param name="kind">The artifact family, e.g. <c>ktx2</c>. See <see cref="Store"/> for the extension rule.</param>
+    /// <param name="kind">The artifact family, e.g. <c>ktx2</c>. See <see cref="Store(string, string, IFileSystem, UPath)"/> for the extension rule.</param>
     /// <param name="key">The digest from <see cref="ArtifactDigest.Compute"/>.</param>
     /// <param name="destinationFileSystem">Where the artifact is wanted; may differ from the cache's own filesystem.</param>
     /// <param name="destination">The path to write, whose extension selects the entry.</param>

@@ -114,8 +114,11 @@ public sealed class SidecarMaintainer
     /// </remarks>
     public SidecarAction Ensure(UPath asset)
     {
-        var kind = AssetClassifier.RequiredKind(AssetClassifier.Classify(_layout.Assets, asset), asset);
-        if (kind is null || !_fileSystem.FileExists(asset)) return SidecarAction.None;
+        if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset))
+            || !_fileSystem.FileExists(asset))
+        {
+            return SidecarAction.None;
+        }
 
         var sidecar = SidecarMeta.PathFor(asset);
         var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
@@ -148,18 +151,15 @@ public sealed class SidecarMaintainer
         // reported no rename. Take the identity back rather than minting a stranger.
         if (_quarantine.Remove(hash, out var held))
         {
-            var restored = new SidecarMeta(held.Meta.Guid, held.Meta.Kind)
-            {
-                Hash = hash,
-                Texture = held.Meta.Texture,
-            };
+            var restored = new SidecarMeta(held.Meta.Guid) { Hash = hash };
+            foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
             _log($"relinked: {Display(held.Asset)} -> {Display(asset)} (guid kept)");
             return SidecarAction.Relinked;
         }
 
-        var minted = new SidecarMeta(Guid.NewGuid(), kind.Value) { Hash = hash };
+        var minted = new SidecarMeta(Guid.NewGuid()) { Hash = hash };
         Save(minted, sidecar);
         _log($"minted: {Display(sidecar)}");
         return SidecarAction.Minted;

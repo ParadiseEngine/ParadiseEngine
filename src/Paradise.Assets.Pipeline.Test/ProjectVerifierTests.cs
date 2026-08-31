@@ -11,7 +11,7 @@ public class ProjectVerifierTests
     public async Task a_consistent_project_has_no_findings()
     {
         using var fileSystem = CreateProject();
-        AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
@@ -46,7 +46,7 @@ public class ProjectVerifierTests
     public async Task an_orphaned_sidecar_is_an_error()
     {
         using var fileSystem = CreateProject();
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/gone.glb.meta");
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/gone.glb.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -58,7 +58,7 @@ public class ProjectVerifierTests
     public async Task duplicate_sidecar_guids_are_an_error_naming_both_files()
     {
         using var fileSystem = CreateProject();
-        var meta = SidecarMeta.Mint(SidecarAssetKind.Mesh);
+        var meta = SidecarMeta.Mint();
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/b.glb", [2]);
         meta.Save(fileSystem, "/game/assets/models/a.glb.meta");
@@ -72,16 +72,37 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_sidecar_kind_contradicting_the_extension_is_an_error()
+    public async Task settings_under_a_domain_no_step_reads_are_a_warning()
     {
+        // The format carries settings opaquely, so THIS is where a misspelled domain surfaces —
+        // a warning, not an error, because it may equally be a sidecar from a newer pipeline.
         using var fileSystem = CreateProject();
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/textures/fire.png.meta");
+        var meta = SidecarMeta.Mint();
+        meta.SetSetting("texure", new CanonicalTomlTable { { "preset", "normal" } });
+        meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].Message).Contains("Texture");
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("[texure]");
+    }
+
+    [Test]
+    public async Task malformed_settings_in_a_known_domain_are_an_error()
+    {
+        using var fileSystem = CreateProject();
+        fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
+        var meta = SidecarMeta.Mint();
+        meta.SetSetting("texture", new CanonicalTomlTable { { "preset", "shiny" } });
+        meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("\"shiny\"");
     }
 
     [Test]
@@ -160,7 +181,7 @@ public class ProjectVerifierTests
         using var fileSystem = CreateProject();
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
-        new SidecarMeta(Guid.NewGuid(), SidecarAssetKind.Mesh) { Hash = new string('a', 64) }
+        new SidecarMeta(Guid.NewGuid()) { Hash = new string('a', 64) }
             .Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
@@ -176,7 +197,7 @@ public class ProjectVerifierTests
         using var fileSystem = CreateProject();
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
-        new SidecarMeta(Guid.NewGuid(), SidecarAssetKind.Mesh)
+        new SidecarMeta(Guid.NewGuid())
         {
             Hash = SidecarMeta.ComputeHash(new byte[] { 1, 2, 3 }),
         }.Save(fileSystem, "/game/assets/models/crate.glb.meta");
@@ -234,11 +255,11 @@ public class ProjectVerifierTests
         return fileSystem;
     }
 
-    internal static void AddAssetWithSidecar(MemoryFileSystem fileSystem, UPath asset, SidecarAssetKind kind)
+    internal static void AddAssetWithSidecar(MemoryFileSystem fileSystem, UPath asset)
     {
         fileSystem.CreateDirectory(asset.GetDirectory());
         fileSystem.WriteAllBytes(asset, [1, 2, 3]);
-        SidecarMeta.Mint(kind).Save(fileSystem, SidecarMeta.PathFor(asset));
+        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(asset));
     }
 
     internal static void WriteCanonicalDocument(MemoryFileSystem fileSystem, UPath path)
@@ -266,7 +287,7 @@ public class ProjectVerifierTests
     }
 
     internal static void MintDocumentSidecar(MemoryFileSystem fileSystem, UPath path)
-        => SidecarMeta.Mint(SidecarAssetKind.Document).Save(fileSystem, SidecarMeta.PathFor(path));
+        => SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
 
     /// <summary>
     /// Writes a file the pipeline has no opinion about, plus its sidecar.
@@ -280,6 +301,6 @@ public class ProjectVerifierTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllText(path, text);
-        SidecarMeta.Mint(SidecarAssetKind.Opaque).Save(fileSystem, SidecarMeta.PathFor(path));
+        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
     }
 }

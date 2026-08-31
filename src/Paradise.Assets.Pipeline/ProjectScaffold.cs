@@ -74,7 +74,7 @@ public static class ProjectScaffold
 
         WriteDocument(fileSystem, assets, AssetProjectLayout.ManifestFileName, Manifest(name), written, "project manifest");
         WriteDocument(fileSystem, assets, MaterialPath, Material(), written, "a flat-colour material");
-        WriteBinary(fileSystem, assets, MeshPath, UnitCubeGlb(), SidecarAssetKind.Mesh, written, "a unit cube");
+        WriteBinary(fileSystem, assets, MeshPath, UnitCubeGlb(), written, "a unit cube");
 
         var mesh = Reference(fileSystem, assets, MeshPath);
         var material = Reference(fileSystem, assets, MaterialPath);
@@ -299,17 +299,17 @@ public static class ProjectScaffold
     {
         var path = assets / relative;
         Write(fileSystem, path, text, written, description);
-        Sidecar(fileSystem, path, SidecarAssetKind.Document, written);
+        Sidecar(fileSystem, path, written);
     }
 
     private static void WriteBinary(
-        IFileSystem fileSystem, UPath assets, string relative, byte[] bytes, SidecarAssetKind kind, List<ScaffoldedFile> written, string description)
+        IFileSystem fileSystem, UPath assets, string relative, byte[] bytes, List<ScaffoldedFile> written, string description)
     {
         var path = assets / relative;
         CreateParent(fileSystem, path);
         fileSystem.WriteAllBytes(path, bytes);
         written.Add(new ScaffoldedFile(path, description));
-        Sidecar(fileSystem, path, kind, written);
+        Sidecar(fileSystem, path, written);
     }
 
     private static void Write(IFileSystem fileSystem, UPath path, string text, List<ScaffoldedFile> written, string description)
@@ -321,9 +321,9 @@ public static class ProjectScaffold
     }
 
     /// <summary>Mints the sidecar every asset must have, with the hash of what was just written.</summary>
-    private static void Sidecar(IFileSystem fileSystem, UPath asset, SidecarAssetKind kind, List<ScaffoldedFile> written)
+    private static void Sidecar(IFileSystem fileSystem, UPath asset, List<ScaffoldedFile> written)
     {
-        var meta = SidecarMeta.Mint(kind);
+        var meta = SidecarMeta.Mint();
         meta.Hash = SidecarMeta.ComputeHash(fileSystem, asset);
 
         var path = SidecarMeta.PathFor(asset);

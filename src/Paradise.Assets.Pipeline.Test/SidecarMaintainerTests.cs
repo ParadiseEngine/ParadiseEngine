@@ -30,7 +30,6 @@ public class SidecarMaintainerTests
 
         await Assert.That(action).IsEqualTo(SidecarAction.Minted);
         var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        await Assert.That(meta.Kind).IsEqualTo(SidecarAssetKind.Mesh);
         await Assert.That(meta.Hash).IsEqualTo(SidecarMeta.ComputeHash([1, 2, 3]));
     }
 
@@ -48,7 +47,6 @@ public class SidecarMaintainerTests
         await Assert.That(action).IsEqualTo(SidecarAction.Refreshed);
         var after = SidecarMeta.Load(fileSystem, "/game/assets/textures/fire.png.meta");
         await Assert.That(after.Guid).IsEqualTo(before.Guid);
-        await Assert.That(after.Kind).IsEqualTo(before.Kind);
         await Assert.That(after.Hash).IsEqualTo(SidecarMeta.ComputeHash([4, 5, 6]));
     }
 
@@ -174,7 +172,7 @@ public class SidecarMaintainerTests
     public async Task reconcile_brings_a_whole_drifted_tree_into_line()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         WriteAsset(fileSystem, "/game/assets/models/barrel.glb", [9, 9]);   // no sidecar at all
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]); // sidecar now stale
 

@@ -38,7 +38,7 @@ public class BuildRunnerTests
     public async Task a_texture_project_builds_and_records_a_manifest()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
         var encoder = new FakeEncoder();
 
         var result = new BuildRunner(fileSystem, s_layout, encoder).Run("dev");
@@ -56,7 +56,7 @@ public class BuildRunnerTests
     public async Task the_second_build_serves_textures_from_the_cache()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
         var encoder = new FakeEncoder();
         var runner = new BuildRunner(fileSystem, s_layout, encoder);
 
@@ -77,8 +77,8 @@ public class BuildRunnerTests
             "/game/assets/project.toml",
             "name = \"x\"\nschema_version = 1\n\n[build.profiles.fastdev]\ntexture_quality = \"fast\"\n");
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
-        var meta = SidecarMeta.Mint(SidecarAssetKind.Texture);
-        meta.Texture = new TextureImportSettings { Preset = TexturePreset.Normal };
+        var meta = SidecarMeta.Mint();
+        meta.SetSetting(TextureImportSettings.Domain, new CanonicalTomlTable { { "preset", "normal" } });
         meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
         var encoder = new FakeEncoder();
 
@@ -95,7 +95,7 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.CreateDirectory("/game/assets/audio");
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", SidecarAssetKind.Audio);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -108,7 +108,7 @@ public class BuildRunnerTests
     public async Task a_glb_without_embedded_images_copies_through()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -122,7 +122,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var glb = MakeGlb("{\"images\":[{\"mimeType\":\"image/png\",\"bufferView\":0}]}");
         fileSystem.WriteAllBytes("/game/assets/models/bad.glb", glb);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/bad.glb.meta");
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/bad.glb.meta");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -134,10 +134,10 @@ public class BuildRunnerTests
     public async Task a_mesh_texture_reference_is_repointed_at_the_built_ktx2()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
         var glb = MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}""");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -157,7 +157,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var glb = MakeGlb("""{"images":[{"uri":"../textures/gone.png","mimeType":"image/png"}]}""");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
@@ -247,11 +247,11 @@ public class BuildRunnerTests
     public async Task a_missing_encoder_fails_only_when_textures_exist()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", SidecarAssetKind.Audio);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
 
         await Assert.That(new BuildRunner(fileSystem, s_layout, encoder: null).Run("dev").Succeeded).IsTrue();
 
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
         var result = new BuildRunner(fileSystem, s_layout, encoder: null).Run("dev");
 
         await Assert.That(result.Succeeded).IsFalse();
@@ -262,7 +262,7 @@ public class BuildRunnerTests
     public async Task an_encode_failure_names_the_texture()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run("dev");
 
@@ -286,7 +286,7 @@ public class BuildRunnerTests
     public async Task the_play_target_writes_the_editor_tree_in_the_same_shape()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
 
@@ -300,7 +300,7 @@ public class BuildRunnerTests
     public async Task no_manifest_is_written_on_a_failed_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
 
         // A failing encode, because a document no longer fails a TOML build -- it builds one.
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run("dev");
@@ -315,7 +315,7 @@ public class BuildRunnerTests
     public async Task an_editor_build_carries_the_sidecars_and_a_shipped_build_does_not()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Build);
@@ -332,7 +332,7 @@ public class BuildRunnerTests
     public async Task an_unchanged_source_is_not_rebuilt()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
 
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
         fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
@@ -351,7 +351,7 @@ public class BuildRunnerTests
     public async Task a_changed_source_is_rebuilt()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
 
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]);
@@ -364,14 +364,14 @@ public class BuildRunnerTests
     public async Task a_changed_sidecar_rebuilds_the_asset_it_describes()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
         fileSystem.WriteAllBytes("/game/.editor/play/models/crate.glb", [9, 9, 9]);
 
         // A new sidecar means a new GUID, which lands in the manifest -- so the asset's output
         // changed even though not one of its own bytes did. A key blind to this would keep
         // serving the old identity.
-        SidecarMeta.Mint(SidecarAssetKind.Mesh).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
 
         await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 1, 2, 3 });
@@ -381,7 +381,7 @@ public class BuildRunnerTests
     public async Task a_deleted_output_is_rebuilt_even_though_the_source_is_unchanged()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
 
         fileSystem.DeleteFile("/game/.editor/play/models/crate.glb");
@@ -394,7 +394,7 @@ public class BuildRunnerTests
     public async Task an_index_from_another_target_is_not_trusted()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", SidecarAssetKind.Mesh);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
 
         // Hand the BUILD tree the PLAY tree's index. One source compiles to different artifacts
