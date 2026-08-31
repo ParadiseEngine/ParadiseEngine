@@ -27,6 +27,10 @@ internal sealed class AuthoredField
     /// sprite, asset), or null when it is typed directly. Any nested fields still describe what
     /// gets BAKED out of that reference at export.</summary>
     public string? AuthoredBy;
+    /// <summary>Set when the property is TYPED as a value host kind (<c>HostLocalPosition</c>):
+    /// the fully qualified host struct the generated reader wraps the wire value back into.
+    /// <see cref="ClrKind"/>/<see cref="ClrType"/> then describe the kind's <c>Value</c>.</summary>
+    public string? HostWrapperType;
     /// <summary>Element model when this field is a list. Arrays are a repeated ROW in an editor,
     /// not a composed group, so the element lives here rather than in Nested.</summary>
     public AuthoredField? Items;
@@ -107,6 +111,18 @@ internal sealed class AuthoredType
     public Location? Declaration;
     /// <summary>The type has a public parameterless constructor the reader can call.</summary>
     public bool Constructible;
+    /// <summary>Host-binding declaration problems (PAUT010–012), collected while reading —
+    /// including from composed parts — and reported by the schema generator.</summary>
+    public List<HostBindingProblem> HostProblems = new();
+}
+
+/// <summary>One host-binding declaration problem, carried to the schema generator's reporting
+/// (the same route the identity diagnostics take), keyed by the PAUT id it maps to.</summary>
+internal sealed class HostBindingProblem
+{
+    public string Id = "";
+    public Location? Location;
+    public string[] Args = System.Array.Empty<string>();
 }
 
 
@@ -124,8 +140,8 @@ internal static class AuthoredModel
     /// would let one type carry two GUIDs and be right about neither.</summary>
     private const string GuidAttribute = "System.Runtime.InteropServices.GuidAttribute";
     private const string BoxGizmoAttribute = Namespace + ".AuthorBoxGizmoAttribute";
-    private const string NativeShapeAttribute = Namespace + ".AuthorNativeShapeAttribute";
-    private const string AuthoredByHostAttribute = Namespace + ".AuthoredByHostAttribute";
+    private const string AuthoredByHostAttribute = Namespace + ".AuthoredByHostAttribute<THost>";
+    private const string HostKindInterface = Namespace + ".IHostKind";
     private const string AssetKindsAttribute = Namespace + ".AuthorAssetKindsAttribute";
     private const string VisibleWhenAttribute = Namespace + ".AuthorVisibleWhenAttribute";
 
@@ -194,6 +210,7 @@ internal static class AuthoredModel
             }
         }
 
+        var (typeAuthoredBy, typeHost) = HostKindOf(type);
         var result = new AuthoredType
         {
             ComponentId = componentId,
@@ -201,11 +218,22 @@ internal static class AuthoredModel
             IdMissing = missing,
             IdMalformed = malformed,
             DisplayName = displayName,
-            AuthoredBy = HostKindOf(type),
+            AuthoredBy = typeAuthoredBy,
             FullTypeName = type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             Declaration = type.Locations.FirstOrDefault(),
             Constructible = HasParameterlessCtor(type),
         };
+
+        // A value kind is one concrete value of one field; a whole record cannot be "a Guid".
+        if (typeHost is not null && HostValueTypeOf(typeHost) is not null)
+        {
+            result.HostProblems.Add(new HostBindingProblem
+            {
+                Id = "PAUT011",
+                Location = type.Locations.FirstOrDefault(),
+                Args = new[] { type.Name, typeHost.Name },
+            });
+        }
 
         var gizmo = type.GetAttributes().FirstOrDefault(
             a => a.AttributeClass?.ToDisplayString() == BoxGizmoAttribute);
@@ -243,12 +271,64 @@ internal static class AuthoredModel
                 valueType = nullableLeaf.TypeArguments[0];
             }
 
+            // A property TYPED as a value host kind binds by type: the kind is the struct's own
+            // and the wire type is its Value's — the generated reader wraps the read value back
+            // into the host struct (HostWrapperType).
+            string? hostTypedKind = null;
+            string? hostWrapper = null;
+            if (IsHostKind(valueType) && HostValueTypeOf(valueType) is { } hostValue)
+            {
+                hostTypedKind = KindNameOf(valueType);
+                hostWrapper = valueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                valueType = hostValue is INamedTypeSymbol
+                    { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableValue
+                    ? nullableValue.TypeArguments[0]
+                    : hostValue;
+            }
+
             var schemaType = SchemaTypeOf(valueType);
             List<AuthoredField>? nested = null;
             List<string>? enumValues = null;
             // PROPERTY first: it is the more specific declaration, so a field that wants a
             // different kind from the one its type declares gets it. The type is the fallback.
-            string? authoredBy = HostKindOfMember(member) ?? HostKindOf(valueType);
+            var (memberKind, memberHost) = HostKindOfMember(member);
+            string? authoredBy = memberKind ?? hostTypedKind ?? HostKindOf(valueType).Kind;
+
+            // The point of the typed spelling: a value kind DECLARES the type the field must
+            // have, so a mismatch is a diagnostic instead of a schema an editor cannot fill.
+            if (memberHost is not null && hostWrapper is null
+                && HostValueTypeOf(memberHost) is { } declared)
+            {
+                var expected = declared is INamedTypeSymbol
+                    { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableExpected
+                    ? nullableExpected.TypeArguments[0]
+                    : declared;
+                if (!SymbolEqualityComparer.Default.Equals(expected, valueType))
+                {
+                    result.HostProblems.Add(new HostBindingProblem
+                    {
+                        Id = "PAUT010",
+                        Location = member.Locations.FirstOrDefault(),
+                        Args = new[]
+                        {
+                            member.Name, memberHost.Name,
+                            expected.ToDisplayString(), valueType.ToDisplayString(),
+                        },
+                    });
+                }
+            }
+
+            // Host-typed field carrying an attribute for a DIFFERENT kind: the attribute wins,
+            // but the disagreement is said out loud.
+            if (memberHost is not null && hostWrapper is not null && memberKind != hostTypedKind)
+            {
+                result.HostProblems.Add(new HostBindingProblem
+                {
+                    Id = "PAUT012",
+                    Location = member.Locations.FirstOrDefault(),
+                    Args = new[] { member.Name, memberHost.Name },
+                });
+            }
 
             if (schemaType == "enum")
             {
@@ -259,7 +339,7 @@ internal static class AuthoredModel
                 // Not a leaf - but it may be a COMPOSED type: another record whose fields are
                 // themselves authorable. Recursing is what lets a component own a BoxCollider and
                 // have it appear nested rather than flattened by hand.
-                nested = ComposedFieldsOf(valueType, depth);
+                nested = ComposedFieldsOf(valueType, depth, result);
                 if (nested is null)
                 {
                     // Genuinely unsupported: skipped rather than guessed at, because a schema that
@@ -272,11 +352,14 @@ internal static class AuthoredModel
             var value = new AuthoredField
             {
                 Name = member.Name,
+                // A host-typed field's initializer would be a host-struct expression, which is
+                // not a wire-type literal the schema could publish as a default.
+                Default = elementType is null && hostWrapper is null ? DefaultOf(member) : null,
                 SchemaType = schemaType,
-                Default = elementType is null ? DefaultOf(member) : null,
                 EnumValues = enumValues,
                 Nested = nested,
                 AuthoredBy = authoredBy,
+                HostWrapperType = hostWrapper,
                 ClrKind = nested is not null ? "object" : ClrKindOf(valueType),
                 ClrType = valueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
                 ClrNullable = valueType is { IsReferenceType: true, NullableAnnotation: NullableAnnotation.Annotated },
@@ -346,8 +429,10 @@ internal static class AuthoredModel
 
     /// <summary>The fields of a composed value type, or null when it is not one. Anything whose
     /// members are all authorable qualifies — the nested type does NOT need its own [Authored]
-    /// id, because it is a part, not a component in its own right.</summary>
-    private static List<AuthoredField>? ComposedFieldsOf(ITypeSymbol type, int depth)
+    /// id, because it is a part, not a component in its own right. Host-binding problems found
+    /// inside the part bubble up to <paramref name="into"/> so they are reported once, at the
+    /// component that reached them.</summary>
+    private static List<AuthoredField>? ComposedFieldsOf(ITypeSymbol type, int depth, AuthoredType into)
     {
         if (depth >= MaxDepth || type is not INamedTypeSymbol named ||
             named.TypeKind is not (TypeKind.Class or TypeKind.Struct) ||
@@ -357,7 +442,13 @@ internal static class AuthoredModel
         }
 
         var composed = Read(named, depth + 1);
-        return composed is { Fields.Count: > 0 } ? composed.Fields : null;
+        if (composed is null)
+        {
+            return null;
+        }
+
+        into.HostProblems.AddRange(composed.HostProblems);
+        return composed.Fields.Count > 0 ? composed.Fields : null;
     }
 
     /// <summary>The element type of a list or array, or null when the type is not one. A list is
@@ -382,36 +473,58 @@ internal static class AuthoredModel
     }
 
     /// <summary>The host-object kind a TYPE declares it is authored by referencing.</summary>
-    private static string? HostKindOf(ITypeSymbol type)
+    private static (string? Kind, ITypeSymbol? Host) HostKindOf(ITypeSymbol type)
     {
         foreach (var a in type.GetAttributes())
         {
-            var name = a.AttributeClass?.ToDisplayString();
-            if (name == NativeShapeAttribute)
+            if (HostArgumentOf(a) is { } host)
             {
-                return "shape";
-            }
-            if (name == AuthoredByHostAttribute && a.ConstructorArguments.Length == 1)
-            {
-                return a.ConstructorArguments[0].Value as string;
+                return (KindNameOf(host), host);
             }
         }
-        return null;
+        return (null, null);
     }
 
     /// <summary>The host-object kind a PROPERTY declares, which wins over its type's.</summary>
-    private static string? HostKindOfMember(IPropertySymbol member)
+    private static (string? Kind, ITypeSymbol? Host) HostKindOfMember(IPropertySymbol member)
     {
         foreach (var a in member.GetAttributes())
         {
-            if (a.AttributeClass?.ToDisplayString() == AuthoredByHostAttribute &&
-                a.ConstructorArguments.Length == 1)
+            if (HostArgumentOf(a) is { } host)
             {
-                return a.ConstructorArguments[0].Value as string;
+                return (KindNameOf(host), host);
             }
         }
-        return null;
+        return (null, null);
     }
+
+    /// <summary>The type argument of a constructed <c>[AuthoredByHost&lt;THost&gt;]</c>, or null.
+    /// The kind is a TYPE, not a string, so a kind that does not exist cannot compile and a kind
+    /// that carries a value declares what type it carries.</summary>
+    private static ITypeSymbol? HostArgumentOf(AttributeData attribute)
+    {
+        if (attribute.AttributeClass is not { IsGenericType: true } attrClass ||
+            attrClass.ConstructedFrom.ToDisplayString() != AuthoredByHostAttribute ||
+            attrClass.TypeArguments.Length != 1)
+        {
+            return null;
+        }
+        return attrClass.TypeArguments[0];
+    }
+
+    /// <summary>The <c>authoredBy</c> string a host struct publishes — its <c>Kind</c> const.</summary>
+    private static string? KindNameOf(ITypeSymbol host) =>
+        host.GetMembers("Kind").OfType<IFieldSymbol>().FirstOrDefault(f => f.IsConst)
+            ?.ConstantValue as string;
+
+    /// <summary>Whether the type is a host kind (implements <c>IHostKind</c>).</summary>
+    private static bool IsHostKind(ITypeSymbol type) =>
+        type.AllInterfaces.Any(i => i.ToDisplayString() == HostKindInterface);
+
+    /// <summary>A VALUE kind's payload type — its <c>Value</c> property — or null for a marker
+    /// kind, which names a referenced host object and carries no value of its own.</summary>
+    private static ITypeSymbol? HostValueTypeOf(ITypeSymbol host) =>
+        host.GetMembers("Value").OfType<IPropertySymbol>().FirstOrDefault()?.Type;
 
     /// <summary>An attribute argument as a JSON literal, for the visibility comparison value.</summary>
     private static string? JsonLiteralOf(TypedConstant constant)
@@ -462,6 +575,8 @@ internal static class AuthoredModel
             case "System.Numerics.Quaternion": return "quaternion";
             case "System.Numerics.Matrix4x4": return "matrix4x4";
             case "Paradise.Export.Data.Color32": return "color32";
+            // The wire form is the canonical guid STRING, like every id in the contract.
+            case "System.Guid": return "guid";
         }
         return type.SpecialType switch
         {
@@ -504,6 +619,8 @@ internal static class AuthoredModel
             case "System.Numerics.Quaternion": return "quaternion";
             case "System.Numerics.Matrix4x4": return "matrix4x4";
             case "Paradise.Export.Data.Color32": return "color";
+            // Published as a string: an id is host-supplied, so no editor draws a control for it.
+            case "System.Guid": return "string";
         }
 
         return type.SpecialType switch

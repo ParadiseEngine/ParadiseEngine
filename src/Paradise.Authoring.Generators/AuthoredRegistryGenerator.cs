@@ -349,8 +349,10 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
 
         if (field.Items is { } element)
         {
+            // A host-typed element's list holds the WRAPPER struct, not its wire value.
             source.Append("                    var items = new global::System.Collections.Generic.List<")
-                  .Append(element.ClrType).Append(element.ClrNullable ? "?" : "").AppendLine(">();");
+                  .Append(element.HostWrapperType ?? element.ClrType)
+                  .Append(element.HostWrapperType is null && element.ClrNullable ? "?" : "").AppendLine(">();");
             source.AppendLine("                    foreach (var element in property.Value.EnumerateArray())");
             source.AppendLine("                    {");
             source.Append("                        items.Add(").Append(ReadExpression(element, "element", helpers)).AppendLine(");");
@@ -374,6 +376,20 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
     /// <summary>The expression reading one value of the field's kind from a JsonElement.</summary>
     private static string ReadExpression(AuthoredField field, string element, HelperSet helpers)
     {
+        // A host-typed field reads its kind's WIRE value and wraps it back into the host struct,
+        // so the assignment matches the property's declared type.
+        if (field.HostWrapperType is { } wrapper)
+        {
+            var inner = new AuthoredField
+            {
+                Name = field.Name,
+                ClrKind = field.ClrKind,
+                ClrType = field.ClrType,
+                Nested = field.Nested,
+            };
+            return "new " + wrapper + " { Value = " + ReadExpression(inner, element, helpers) + " }";
+        }
+
         if (field.Nested is not null)
         {
             return ReaderName(field.ClrType) + "(" + element + ")";
@@ -389,6 +405,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             case "bool": return element + ".GetBoolean()";
             // GetString is null for a JSON null, which is what the addon writes for "no value".
             case "string": return element + ".GetString()!";
+            case "guid": return "global::System.Guid.Parse(" + element + ".GetString()!)";
             // The addon writes an enum's member NAME (AuthoredEntityCore.ValueOf stores enums as
             // strings, matching JsonStringEnumConverter); a bare integer underlying value is also
             // accepted for tolerance. An unknown name throws — loud beats silently wrong.

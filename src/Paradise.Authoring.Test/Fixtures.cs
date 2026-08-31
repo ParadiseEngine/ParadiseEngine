@@ -16,7 +16,9 @@ public static class FixtureIds
     public const string Minimal = "e0000000-0000-4000-8000-000000000002";
     public const string V2 = "e0000000-0000-4000-8000-000000000003";
     public const string BySprite = "e0000000-0000-4000-8000-000000000004";
+    public const string HostBound = "e0000000-0000-4000-8000-000000000005";
 
+    public static readonly Guid HostBoundId = new(HostBound);
     public static readonly Guid EverythingId = new(Everything);
     public static readonly Guid MinimalId = new(Minimal);
     public static readonly Guid V2Id = new(V2);
@@ -34,7 +36,7 @@ public enum SampleShape
 
 /// <summary>A part, not a component: no id of its own, authored by pointing at the host's own
 /// shape object rather than by typing these numbers.</summary>
-[AuthorNativeShape]
+[AuthoredByHost<HostShape>]
 public sealed record SampleColliderFixture
 {
     [Meters] public float SizeX { get; set; } = 1f;
@@ -83,7 +85,7 @@ public sealed record MinimalFixture
 
 
 /// <summary>A part authored by pointing at one shape; the fields are what gets baked out of it.</summary>
-[AuthoredByHost(AuthoredBySources.Shape)]
+[AuthoredByHost<HostShape>]
 public sealed record ShapeRefFixture
 {
     public SampleShape Kind { get; set; } = SampleShape.Box;
@@ -96,7 +98,7 @@ public sealed record ShapeRefFixture
 /// <summary>A part authored by pointing at an object and reading WHERE IT STANDS. Declares only
 /// two of the four pose fields an exporter knows how to bake, which is the point: a record takes
 /// the part of the pose it means and an exporter fills what it finds.</summary>
-[AuthoredByHost(AuthoredBySources.Transform)]
+[AuthoredByHost<HostTransform>]
 public sealed record PlacementRefFixture
 {
     public Vector3 Position { get; set; }
@@ -115,10 +117,10 @@ public sealed record V2Fixture
     /// <summary>A single host-object reference whose value is a POSE, not a shape or an asset.</summary>
     public PlacementRefFixture Destination { get; set; } = new();
 
-    [AuthoredByHost(AuthoredBySources.Mesh)]
+    [AuthoredByHost<HostMesh>]
     public string MeshNode { get; set; } = "";
 
-    [AuthoredByHost(AuthoredBySources.Asset), AuthorAssetKinds(".glb", ".gltf")]
+    [AuthoredByHost<HostAsset>, AuthorAssetKinds(".glb", ".gltf")]
     public string Model { get; set; } = "";
 
     public Vector2 QuadSize { get; set; }
@@ -147,9 +149,32 @@ public sealed record V2Fixture
 /// sprite animation has, where sheet, grid and quad size are all read off the sprite.</summary>
 [Guid(FixtureIds.BySprite)]
 [Authored(DisplayName = "By sprite")]
-[AuthoredByHost(AuthoredBySources.Sprite)]
+[AuthoredByHost<HostSprite>]
 public sealed record BySpriteFixture
 {
     public string? Sheet { get; set; }
     public Vector2 QuadSize { get; set; }
+}
+
+/// <summary>
+/// Every VALUE host kind, bound both ways: by attribute (the field keeps its wire type, which
+/// PAUT010 checks against the kind's) and by type (the field IS the kind, and the generated
+/// reader wraps the wire value back into it).
+/// </summary>
+[Guid(FixtureIds.HostBound)]
+[Authored(DisplayName = "Host bound")]
+public sealed record HostBoundFixture
+{
+    [AuthoredByHost<HostId>]
+    public Guid Ident { get; set; }
+
+    [AuthoredByHost<HostName>]
+    public string Label { get; set; } = "";
+
+    [AuthoredByHost<HostLocalRotation>]
+    public Quaternion Spin { get; set; }
+
+    public HostLocalPosition Position { get; set; }
+
+    public HostLocalScale Scale { get; set; }
 }

@@ -130,33 +130,25 @@ public sealed class AuthorBoxGizmoAttribute(
 }
 
 /// <summary>
-/// This value is authored by REFERENCING one of the host's own objects, not by typing its numbers.
+/// This value is authored BY THE HOST — referenced through the host's own picker for a marker
+/// kind, or supplied from the host object's own state for a value kind.
 ///
-/// The editor shows a picker — Godot a typed node slot, Blender an object slot — and you edit the
-/// referenced object with the host's own gizmo and handles. Nothing is mirrored and nothing syncs:
-/// the reference IS the authoring surface.
+/// For a marker kind (<see cref="HostShape"/>, <see cref="HostMesh"/>, …) the editor shows a
+/// picker — Godot a typed node slot, Blender an object slot — and you edit the referenced object
+/// with the host's own gizmo and handles; the exporter bakes what is referenced into this record's
+/// own fields, because a host's node path means nothing to the runtime. For a value kind
+/// (<see cref="HostId"/>, <see cref="HostLocalPosition"/>, …) the host writes the object's own
+/// value straight into the field, whose type must match the kind's — checked by PAUT010.
 ///
-/// The asymmetry to keep in mind: authored as a REFERENCE, exported as a VALUE. A host's node path
-/// means nothing to the runtime, so the exporter bakes whatever is referenced into this record's
-/// own fields.
-///
-/// Usable on a TYPE (the whole record is authored this way) or on a PROPERTY (just that field is).
+/// A TYPE PARAMETER, not a string, so a kind that does not exist cannot compile and a kind that
+/// carries a value declares what type it carries. Usable on a TYPE (marker kinds only — the whole
+/// record is authored this way) or on a PROPERTY. A property may equivalently be TYPED as a value
+/// kind itself, with no attribute; when both appear, the attribute wins (PAUT012).
 /// </summary>
 [AttributeUsage(
     AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Property,
     Inherited = false)]
-public sealed class AuthoredByHostAttribute(string kind) : Attribute
-{
-    /// <summary>One of <c>AuthoredBySources</c>: shape, mesh, sprite, asset.</summary>
-    public string Kind { get; } = kind;
-}
-
-/// <summary>
-/// This record is authored by referencing a collision shape. Shorthand for
-/// <c>[AuthoredByHost("shape")]</c>, and the original spelling of it.
-/// </summary>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
-public sealed class AuthorNativeShapeAttribute : Attribute;
+public sealed class AuthoredByHostAttribute<THost> : Attribute where THost : struct, IHostKind;
 
 /// <summary>
 /// The file extensions an <c>asset</c> reference accepts, e.g. <c>[AuthorAssetKinds(".glb",

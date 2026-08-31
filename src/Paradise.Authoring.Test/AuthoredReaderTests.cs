@@ -40,6 +40,9 @@ public class AuthoredReaderTests
             MetadataReference.CreateFromFile(System.Reflection.Assembly.Load("System.Collections").Location),
             MetadataReference.CreateFromFile(typeof(JsonSerializer).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(System.Numerics.Vector3).Assembly.Location),
+            // The facade the host-kind structs' signatures are compiled against; without it a
+            // snippet touching HostLocalPosition.Value fails with CS0012 on Vector3.
+            MetadataReference.CreateFromFile(System.Reflection.Assembly.Load("System.Numerics.Vectors").Location),
             MetadataReference.CreateFromFile(typeof(AuthoredAttribute).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(Paradise.Export.Data.Color32).Assembly.Location),
         };
@@ -159,16 +162,20 @@ public class AuthoredReaderTests
     /// the translation is the half that shows up as every object loading at the origin.
     /// </summary>
     [Test]
-    public async Task a_matrix_round_trips_through_the_contract_writer_and_the_generated_reader()
+    public async Task a_matrix_round_trips_through_the_wire_order_and_the_generated_reader()
     {
         var world = Paradise.Export.Geometry.ContractMatrix.Trs(
             new Vector3(1f, 2f, 3f),
             Quaternion.CreateFromYawPitchRoll(0.5f, 0.25f, 0.125f),
             new Vector3(2f, 3f, 4f));
 
-        // Serialized by the contract, so the bytes are exactly what an exporter writes.
-        var payload = Paradise.Export.Serialization.ExportJsonWriter.SerializeToString(
-            new Paradise.Export.Data.TransformComponentData { World = world });
+        // The wire order spelled out rather than produced by a writer: column-major float[16],
+        // M11 M21 M31 M41 … — the transpose of memory order. An independent restatement, so the
+        // reader agreeing with it is a fact about the format rather than about one code path.
+        var m = world;
+        var payload = $$"""
+            {"World":[{{m.M11}},{{m.M21}},{{m.M31}},{{m.M41}},{{m.M12}},{{m.M22}},{{m.M32}},{{m.M42}},{{m.M13}},{{m.M23}},{{m.M33}},{{m.M43}},{{m.M14}},{{m.M24}},{{m.M34}},{{m.M44}}]}
+            """;
 
         var (registry, diagnostics) = Run(PlacedSource);
         await Assert.That(diagnostics).IsEmpty();
@@ -659,5 +666,123 @@ public class AuthoredReaderTests
         var message = reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
         await Assert.That(message).Contains("Game.Combat.Health");
         await Assert.That(message).Contains("Game.Ui.Health");
+    }
+
+    // ---- typed host kinds ------------------------------------------------------------------
+
+    private const string HostBoundId = "d0000000-0000-4000-8000-000000000010";
+
+    /// <summary>The generated reader wraps a host-typed field's wire value back into the host
+    /// struct, and parses a HostId binding's guid from the canonical string.</summary>
+    [Test]
+    public async Task host_bound_fields_read_back_through_the_generated_reader()
+    {
+        var (registry, _) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredByHost<HostId>] public Guid Ident { get; set; }
+                public HostLocalPosition Position { get; set; }
+                public HostLocalScale Scale { get; set; }
+            }
+            """);
+
+        var component = ReadComponent(registry!, HostBoundId, """
+            {
+              "Ident": "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8",
+              "Position": [1.5, 2.0, -0.5],
+              "Scale": [2.0, 2.0, 2.0]
+            }
+            """);
+
+        await Assert.That(Prop(component, "Ident"))
+            .IsEqualTo(new Guid("3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8"));
+        var position = (HostLocalPosition)Prop(component, "Position")!;
+        await Assert.That(position.Value).IsEqualTo(new System.Numerics.Vector3(1.5f, 2.0f, -0.5f));
+        var scale = (HostLocalScale)Prop(component, "Scale")!;
+        await Assert.That(scale.Value).IsEqualTo(new System.Numerics.Vector3(2.0f, 2.0f, 2.0f));
+    }
+
+    /// <summary>The whole point of the typed spelling: a value kind declares the type the host
+    /// writes, so a field of another type is PAUT010 rather than a schema no host can fill.</summary>
+    [Test]
+    public async Task a_field_type_disagreeing_with_its_value_kind_fails_the_build()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredByHost<HostLocalPosition>] public float Height { get; set; }
+            }
+            """);
+
+        var reported = diagnostics.Single(d => d.Id == "PAUT010");
+        var message = reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture);
+        await Assert.That(message).Contains("Height");
+        await Assert.That(message).Contains("HostLocalPosition");
+    }
+
+    /// <summary>A value kind is one concrete value of one field; a whole record cannot be one.</summary>
+    [Test]
+    public async Task a_value_kind_on_a_type_fails_the_build()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            [AuthoredByHost<HostId>]
+            public sealed record Placed
+            {
+                public float Height { get; set; }
+            }
+            """);
+
+        await Assert.That(diagnostics.Single(d => d.Id == "PAUT011").GetMessage(
+            System.Globalization.CultureInfo.InvariantCulture)).Contains("HostId");
+    }
+
+    /// <summary>Typed as one kind, attributed as another: the attribute wins, and PAUT012 says
+    /// the disagreement out loud.</summary>
+    [Test]
+    public async Task a_host_typed_field_with_a_disagreeing_attribute_warns()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredByHost<HostLocalScale>] public HostLocalPosition Position { get; set; }
+            }
+            """);
+
+        await Assert.That(diagnostics.Single(d => d.Id == "PAUT012").Severity)
+            .IsEqualTo(DiagnosticSeverity.Warning);
     }
 }
