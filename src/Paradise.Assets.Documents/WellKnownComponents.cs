@@ -97,4 +97,87 @@ public static class WellKnownComponents
 
     /// <summary>Local scale.</summary>
     public const string Scale = "Scale";
+
+    // ---- shape ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The first shape problem in a well-known component's payload, phrased to follow a source
+    /// name — or <see langword="null"/> when there is none, including for a component that is
+    /// not well-known at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A game component's payload is deliberately opaque here — its shape is a schema question
+    /// the game answers. These two are the components whose schema the FORMAT owns, so the
+    /// format checks them; without this, <c>Position = [0.0, 1.5]</c> baked silently as the
+    /// origin, which is data loss dressed as a default.
+    /// </para>
+    /// <para>
+    /// <c>meta</c> stays OPEN — the resolver carries unknown meta fields through — so only the
+    /// fields it defines are checked. <c>transform</c> is CLOSED: nothing reads an unknown field
+    /// on it and the bake replaces it wholesale, so an unknown name there is a typo, not an
+    /// extension.
+    /// </para>
+    /// </remarks>
+    public static string? PayloadProblem(PrefabComponent component)
+    {
+        if (component.Id == MetaId) return MetaProblem(component.Data);
+        if (component.Id == TransformId) return TransformProblem(component.Data);
+        return null;
+    }
+
+    private static string? MetaProblem(CanonicalTomlTable data)
+    {
+        foreach (var (key, value) in data)
+        {
+            switch (key)
+            {
+                case Guid or Parent or Target when !IsGuidText(value):
+                    return $"needs '{MetaType}.{key}' to be a UUID string";
+                case Name when value is not string:
+                    return $"needs '{MetaType}.{Name}' to be a string";
+                case Dropped when value is not bool:
+                    return $"needs '{MetaType}.{Dropped}' to be a boolean";
+            }
+        }
+
+        if (data.ContainsKey(Dropped) && !data.ContainsKey(Target))
+        {
+            return $"marks '{MetaType}.{Dropped}' without a '{Target}' — only an override carrier can drop a prefab child";
+        }
+
+        return null;
+    }
+
+    private static string? TransformProblem(CanonicalTomlTable data)
+    {
+        foreach (var (key, value) in data)
+        {
+            switch (key)
+            {
+                case Position or Scale when !IsNumberArray(value, 3):
+                    return $"needs '{TransformType}.{key}' to be an array of 3 numbers";
+                case Rotation when !IsNumberArray(value, 4):
+                    return $"needs '{TransformType}.{Rotation}' to be an array of 4 numbers";
+                case not (Position or Rotation or Scale):
+                    return $"holds '{key}', which '{TransformType}' does not define — a misspelled field would otherwise bake as the identity, silently";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsGuidText(object value)
+        => value is string text && DocumentGuid.TryParse(text, out var guid) && guid != System.Guid.Empty;
+
+    private static bool IsNumberArray(object value, int length)
+    {
+        if (value is not IReadOnlyList<object> items || items.Count != length) return false;
+        foreach (var item in items)
+        {
+            if (item is not (long or double)) return false;
+        }
+
+        return true;
+    }
 }

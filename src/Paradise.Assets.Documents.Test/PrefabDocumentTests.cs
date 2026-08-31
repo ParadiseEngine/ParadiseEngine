@@ -287,4 +287,80 @@ public class PrefabDocumentTests
         await Assert.That(PrefabDocumentSerializer.Write(PrefabDocumentSerializer.Parse(text, "x.scene")))
             .IsEqualTo(text);
     }
+
+    [Test]
+    public async Task a_malformed_meta_parent_is_refused()
+    {
+        // Before the shape check a non-UUID Parent read as "no parent" — an object silently
+        // promoted to a root is exactly the misread the strict reader exists to prevent.
+        var text = $"schema_version = 1\n{Object(CrateGuid)}{Object(LidGuid, "lid", "Parent = \"not-a-guid\"\n")}";
+
+        await Assert.That(Rejects(text).Message).Contains("meta.Parent");
+    }
+
+    [Test]
+    public async Task a_dropped_marker_without_a_target_is_refused()
+    {
+        // Dropping addresses a prefab child; on a plain object it is ignored, and on an instance
+        // it deletes the whole subtree — neither is ever what the author meant.
+        var text = $"schema_version = 1\n{Object(CrateGuid, "x", "Dropped = true\n")}";
+
+        await Assert.That(Rejects(text).Message).Contains("Dropped");
+    }
+
+    [Test]
+    public async Task a_short_transform_position_is_refused()
+    {
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{Transform}\"\ntype = \"transform\"\nPosition = [0.0, 1.5]\n";
+
+        await Assert.That(Rejects(text).Message).Contains("array of 3 numbers");
+    }
+
+    [Test]
+    public async Task a_three_element_rotation_is_refused()
+    {
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{Transform}\"\ntype = \"transform\"\nRotation = [0.0, 0.0, 0.0]\n";
+
+        await Assert.That(Rejects(text).Message).Contains("array of 4 numbers");
+    }
+
+    [Test]
+    public async Task a_misspelled_transform_field_is_refused()
+    {
+        // 'Postion' used to bake silently as the origin. transform is a closed set precisely so
+        // a typo is an error and not a teleport.
+        var text = $"schema_version = 1\n{Object(CrateGuid)}" +
+                   $"\n[[objects.components]]\nid = \"{Transform}\"\ntype = \"transform\"\nPostion = [0.0, 1.5, 0.0]\n";
+
+        await Assert.That(Rejects(text).Message).Contains("Postion");
+    }
+
+    [Test]
+    public async Task a_game_extended_meta_field_rides_along()
+    {
+        // meta's payload stays open — only the fields the format defines are shape-checked.
+        var text = $"schema_version = 1\n{Object(CrateGuid, "x", "Zone = \"hub\"\n")}";
+
+        await Assert.That(PrefabDocumentSerializer.Write(PrefabDocumentSerializer.Parse(text, "x.scene")))
+            .IsEqualTo(text);
+    }
+
+    [Test]
+    public async Task a_payload_using_a_reserved_key_is_refused_at_construction()
+    {
+        // The named error ReservedKeys promises: built with a payload 'id', the component would
+        // collide with its own structure on write, as a duplicate key nobody could diagnose.
+        var data = new CanonicalTomlTable { { PrefabComponent.IdKey, "collides" } };
+        try
+        {
+            _ = new PrefabComponent(Guid.Parse(RenderableId), data: data);
+            throw new Exception("expected the component to be refused");
+        }
+        catch (ArgumentException error)
+        {
+            await Assert.That(error.Message).Contains("reserved");
+        }
+    }
 }

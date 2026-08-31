@@ -189,9 +189,10 @@ public sealed class PrefabObject
 /// </summary>
 /// <remarks>
 /// Flattening the payload costs three reserved names — <c>id</c>, <c>type</c> and
-/// <c>removed</c> — and buys about a quarter of the lines in a document this shape. <c>verify</c>
-/// refuses a payload field using one, so the collision is a named error rather than a confusing
-/// one.
+/// <c>removed</c> — and buys about a quarter of the lines in a document this shape. The
+/// constructor refuses a payload using one, so the collision is a named error at the code that
+/// built it rather than a confusing duplicate key on write. (Parsed text cannot collide: TOML
+/// itself rejects a duplicate key.)
 /// </remarks>
 public sealed class PrefabComponent
 {
@@ -207,17 +208,31 @@ public sealed class PrefabComponent
     /// <summary>The three keys a payload may not use.</summary>
     public static readonly string[] ReservedKeys = [IdKey, TypeKey, RemovedKey];
 
+    /// <summary>Whether <paramref name="key"/> is one of <see cref="ReservedKeys"/>.</summary>
+    public static bool IsReserved(string key) => key is IdKey or TypeKey or RemovedKey;
+
     /// <summary>Creates a component entry.</summary>
     /// <param name="id">The component's identity — the primary key, and what an override matches on.</param>
     /// <param name="type">Its readable name; a fallback key for humans, optional on the wire.</param>
     /// <param name="data">The payload, an open table owned by the game's schema.</param>
     /// <param name="removed">Whether this entry drops the prefab's component rather than overriding it.</param>
+    /// <exception cref="ArgumentException">The payload uses a reserved key.</exception>
     public PrefabComponent(Guid id, string? type = null, CanonicalTomlTable? data = null, bool removed = false)
     {
         Id = id;
         Type = type;
         Data = data ?? new CanonicalTomlTable();
         Removed = removed;
+
+        foreach (var (key, _) in Data)
+        {
+            if (IsReserved(key))
+            {
+                throw new ArgumentException(
+                    $"A component payload may not use the reserved key '{key}'; on the wire it would collide with the component's own structure.",
+                    nameof(data));
+            }
+        }
     }
 
     /// <summary>The component's identity.</summary>

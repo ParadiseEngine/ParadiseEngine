@@ -12,7 +12,8 @@ namespace Paradise.Assets.Documents;
 /// <remarks>
 /// <para>
 /// Reading is <b>strict</b>: unknown structural keys, malformed GUIDs, duplicate identities,
-/// reserved payload names, dangling or cyclic parents are all errors naming the object. The
+/// reserved payload names, dangling or cyclic parents, and malformed well-known payloads
+/// (<see cref="WellKnownComponents.PayloadProblem"/>) are all errors naming the object. The
 /// document is committed source of truth, and a reader that guessed would turn an authoring typo
 /// into a build that succeeds and renders the wrong thing.
 /// </para>
@@ -189,7 +190,7 @@ public static class PrefabDocumentSerializer
         var data = new CanonicalTomlTable();
         foreach (var (key, value) in table)
         {
-            if (key is PrefabComponent.IdKey or PrefabComponent.TypeKey or PrefabComponent.RemovedKey) continue;
+            if (PrefabComponent.IsReserved(key)) continue;
             data.Add(key, TomlDocumentReader.ToCanonicalValue(value, $"'{key}' {context}", fail));
         }
 
@@ -201,7 +202,13 @@ public static class PrefabDocumentSerializer
             throw fail($"marks a component '{PrefabComponent.RemovedKey}' but also gives it fields {context}");
         }
 
-        return new PrefabComponent(id, type, data, removed);
+        var component = new PrefabComponent(id, type, data, removed);
+        if (WellKnownComponents.PayloadProblem(component) is { } problem)
+        {
+            throw fail($"{problem} {context}");
+        }
+
+        return component;
     }
 
     private static CanonicalTomlTable ToCanonical(PrefabDocument document)
@@ -229,6 +236,13 @@ public static class PrefabDocumentSerializer
 
     private static CanonicalTomlTable ToCanonical(PrefabComponent component)
     {
+        // The same shape gate the reader applies, pointed the other way: a tool that builds a
+        // malformed well-known payload fails here, not as a document the next read refuses.
+        if (WellKnownComponents.PayloadProblem(component) is { } problem)
+        {
+            throw new InvalidOperationException($"This document {problem}, so it cannot be written.");
+        }
+
         var table = new CanonicalTomlTable { { PrefabComponent.IdKey, DocumentGuid.Format(component.Id) } };
         if (component.Type is { } type) table.Add(PrefabComponent.TypeKey, type);
         if (component.Removed) table.Add(PrefabComponent.RemovedKey, true);
