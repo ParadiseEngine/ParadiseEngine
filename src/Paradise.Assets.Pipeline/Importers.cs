@@ -27,13 +27,15 @@ public sealed class TextureImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
+    public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(Extensions)) return false;
+
         var settings = context.Meta!.Setting(TextureImportSettings.Domain);
         if (settings is not null && TextureImportSettings.Instance.Problem(settings) is { } problem)
         {
             errors.Add($"{context.Source}: sidecar {problem}");
-            return;
+            return true;
         }
 
         var preset = TextureImportSettings.Instance.PresetOf(settings) ?? DefaultPresetFor(context.Asset);
@@ -46,25 +48,26 @@ public sealed class TextureImporter : IAssetImporter
         var argvToken = KtxCreate.BuildCreateArguments(KtxTextureEncoder.ToKtxPreset(preset), "out.ktx2", "in" + context.Asset.GetExtensionWithDot(), fast);
         var key = ArtifactDigest.Compute(bytes, argvToken, context.Encoder?.Identity ?? "");
 
-        if (context.Encoder is not null && context.Cache.TryFetch("ktx2", key, context.Output, destination)) return;
+        if (context.Encoder is not null && context.Cache.TryFetch("ktx2", key, context.Output, destination)) return true;
 
         if (context.Encoder is null)
         {
             errors.Add(
                 $"{context.Source}: no ktx CLI available to encode textures — run tools/ktx/KtxBootstrap, " +
                 $"install KTX-Software, or set {KtxCreate.KtxPathEnvironmentVariable}");
-            return;
+            return true;
         }
 
         if (!context.Encoder.TryEncode(bytes, context.Asset.GetExtensionWithDot()!, preset, fast, out var ktx2, out var error))
         {
             errors.Add($"{context.Source}: texture encode failed: {error}");
-            return;
+            return true;
         }
 
         context.Output.WriteAllBytes(destination, ktx2);
         context.Cache.Store("ktx2", key, context.Output, destination);
         context.Log?.Invoke($"ktx2: {context.Source} ({ktx2.Length} bytes)");
+        return true;
     }
 
     /// <summary>
@@ -105,13 +108,15 @@ public sealed class MeshImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
+    public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(Extensions)) return false;
+
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         if (HasEmbeddedEncodedImages(bytes, out var mimeType))
         {
             errors.Add($"{context.Source}: has embedded {mimeType} textures; the mesh externalization step is not implemented yet");
-            return;
+            return true;
         }
 
         // The mesh names its textures as the author has them (../textures/rust.png); the build
@@ -133,6 +138,7 @@ public sealed class MeshImporter : IAssetImporter
         }
 
         context.Output.WriteAllBytes("/" + context.Source, rewrite.Glb);
+        return true;
     }
 
     /// <summary>
@@ -181,8 +187,13 @@ public sealed class AudioImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
-        => context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+    public bool Import(ImportContext context, List<string> errors)
+    {
+        if (!context.HasExtension(Extensions)) return false;
+
+        context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+        return true;
+    }
 }
 
 /// <summary>
@@ -209,9 +220,10 @@ public sealed class PrefabImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
+    public bool Import(ImportContext context, List<string> errors)
     {
-        if (DocumentOutput.Unsupported(context, errors)) return;
+        if (!context.HasExtension(Extensions)) return false;
+        if (DocumentOutput.Unsupported(context, errors)) return true;
 
         PrefabDocument document;
         try
@@ -221,7 +233,7 @@ public sealed class PrefabImporter : IAssetImporter
         catch (PrefabDocumentException error)
         {
             errors.Add(error.Message);
-            return;
+            return true;
         }
 
         var failures = new List<string>();
@@ -229,7 +241,7 @@ public sealed class PrefabImporter : IAssetImporter
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");
-            return;
+            return true;
         }
 
         // Both writers serialize the SAME baked LevelData through the same type model, so the
@@ -241,6 +253,7 @@ public sealed class PrefabImporter : IAssetImporter
         context.Output.WriteAllBytes(
             "/" + Path.ChangeExtension(context.Source, DocumentOutput.Extension(context.Profile)),
             DocumentOutput.Utf8NoBom.GetBytes(text));
+        return true;
 
         PrefabDocument? Referenced(Paradise.Authoring.AssetReference reference)
         {
@@ -272,14 +285,18 @@ public sealed class ConfigImporter : IAssetImporter
     public bool RecordsIdentity => false;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
+    public bool Import(ImportContext context, List<string> errors)
     {
-        if (DocumentOutput.Unsupported(context, errors)) return;
+        // The manifest is the one `.toml` this importer must NOT claim: it configures the build
+        // rather than being built by it, and compiling it into the output tree would ship the
+        // source project's profiles as if they were game data.
+        if (!context.HasExtension(Extensions) || context.IsManifest) return false;
+        if (DocumentOutput.Unsupported(context, errors)) return true;
 
         if (!ConfigDocument.TryCanonicalize(context.FileSystem.ReadAllText(context.Asset), out var canonical, out var error))
         {
             errors.Add($"{context.Source}: {error}");
-            return;
+            return true;
         }
 
         // Canonicalized first either way: the TOML reader is the one strict parser, so a document
@@ -291,20 +308,29 @@ public sealed class ConfigImporter : IAssetImporter
         context.Output.WriteAllBytes(
             "/" + Path.ChangeExtension(context.Source, DocumentOutput.Extension(context.Profile)),
             DocumentOutput.Utf8NoBom.GetBytes(text));
+        return true;
     }
 }
 
 /// <summary>
-/// Copies sidecars verbatim — in the PLAY set only. The editor playmode traces a built asset
-/// back to its authoring identity, while a player install has no use for source-tree
-/// bookkeeping; a target that must not ship sidecars builds with a set lacking this importer,
-/// and nothing here branches on the target.
+/// Copies sidecars verbatim — into the PLAY tree only. The editor playmode traces a built asset
+/// back to its authoring identity, while a player's install has no use for source-tree
+/// bookkeeping and must not ship it.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>The target rule lives here, in the importer it is about.</b> This is the only step that
+/// exists for one tree and not the other, and it says so itself by declining
+/// (<see cref="ImportContext.Target"/>) — rather than the caller assembling a different chain
+/// per flavour, which put the knowledge of what a sidecar is for in the one place that has no
+/// business knowing it.
+/// </para>
+/// <para>
 /// The one importer with a null <see cref="ImportContext.Meta"/>: a sidecar has no sidecar of
 /// its own. Its manifest entry carries a null guid for the same reason the file exists -- a
 /// sidecar DESCRIBES an identity rather than having one, and recording the guid it names would
 /// give two manifest entries the same value and break any guid-to-asset lookup.
+/// </para>
 /// </remarks>
 public sealed class SidecarImporter : IAssetImporter
 {
@@ -321,8 +347,13 @@ public sealed class SidecarImporter : IAssetImporter
     public bool RecordsIdentity => false;
 
     /// <inheritdoc />
-    public void Import(ImportContext context, List<string> errors)
-        => context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+    public bool Import(ImportContext context, List<string> errors)
+    {
+        if (context.Target != ProjectOutputTarget.Play || !context.HasExtension(Extensions)) return false;
+
+        context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+        return true;
+    }
 }
 
 /// <summary>What the document importers share: the profile's output format, spelled once.</summary>

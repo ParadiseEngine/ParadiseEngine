@@ -15,6 +15,10 @@ namespace Paradise.Assets.Pipeline;
 /// has no sidecar of its own. Every other asset has one; verify refused the build otherwise.
 /// </param>
 /// <param name="Profile">The build profile being compiled.</param>
+/// <param name="Target">
+/// Which tree is being built. An importer that exists for one target only decides that HERE, in
+/// its own <see cref="IAssetImporter.Import"/>, by declining — see <see cref="SidecarImporter"/>.
+/// </param>
 /// <param name="Output">
 /// The tree being built, mounted at its root: <c>/</c> here IS the output directory, so an
 /// importer cannot write outside it — the mount is the capability, not a convention. Writes are
@@ -31,30 +35,57 @@ public sealed record ImportContext(
     string Source,
     SidecarMeta? Meta,
     BuildProfile Profile,
+    ProjectOutputTarget Target,
     IFileSystem Output,
     ArtifactCache Cache,
     ITextureEncoder? Encoder,
-    Action<string>? Log);
+    Action<string>? Log)
+{
+    /// <summary>Whether <see cref="Asset"/> carries one of <paramref name="extensions"/> (with dot, case-insensitive).</summary>
+    /// <remarks>
+    /// The first line of nearly every importer, because the extension is nearly always the first
+    /// half of "is this mine". The other half — target, profile, where the file sits — is the
+    /// importer's own business, and it is spelled out beside this call rather than declared.
+    /// </remarks>
+    public bool HasExtension(IReadOnlyList<string> extensions)
+    {
+        ArgumentNullException.ThrowIfNull(extensions);
+
+        var extension = Asset.GetExtensionWithDot() ?? string.Empty;
+        foreach (var claimed in extensions)
+        {
+            if (string.Equals(claimed, extension, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether this asset is the project manifest, which configures the build rather than being built by it.</summary>
+    public bool IsManifest => Source == AssetProjectLayout.ManifestFileName;
+}
 
 /// <summary>
-/// One import step: claims extensions, turns a source asset into the file(s) it writes to
-/// <see cref="ImportContext.Output"/>.
+/// One link in the import chain: given an asset, either handle it — turning it into the file(s)
+/// it writes to <see cref="ImportContext.Output"/> — or decline, and let the next link try.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the whole contract the runner sees. It does not know what an asset IS — it finds the
-/// importer that claims the extension in the target's set (<see cref="AssetImporters.For"/>) and
-/// hands it the <see cref="ImportContext"/>. Everything kind-specific — settings domains,
-/// encoders, output formats — is internal to an importer, so a pipeline flavor is a CHOICE OF
-/// SET: the same asset meets a different importer and becomes different files.
+/// <b>The runner does not choose an importer; the importers choose.</b> Every asset is offered to
+/// the whole chain, LAST link first, until one answers <see langword="true"/>. There is no lookup
+/// table, so an importer's claim is not a static fact the runner has to be taught — it is
+/// whatever its own <see cref="Import"/> decides, on the extension, the target, the profile, the
+/// asset's place in the tree, or its bytes. That is what lets a project append an importer that
+/// shadows a built-in: appended means later means asked first.
 /// </para>
 /// <para>
 /// Importers write <see cref="ImportContext.Output"/> directly; the runner records what was
 /// actually written, so there is no reported file list to drift from reality. The discipline
-/// this asks of an importer: <b>validate first, write last</b> — an error reported through
-/// <c>errors</c> after a write leaves that file in a tree the failed build has already declared
-/// suspect (the index is not saved, and <c>clean</c> is the remedy), but there is no reason to
-/// create that situation when checking first is possible. All current importers do.
+/// this asks of an importer: <b>decline first, validate next, write last</b>. Declining after a
+/// write would hand the next link a tree it did not make — the chain shares one output mount, so
+/// such a write lands in the manifest under whoever ends up handling the asset — and an error
+/// reported through <c>errors</c> after a write leaves that file in a tree the failed build has
+/// already declared suspect (the index is not saved, and <c>clean</c> is the remedy). All
+/// current importers decline on their first line and write on their last.
 /// </para>
 /// </remarks>
 public interface IAssetImporter
@@ -62,7 +93,16 @@ public interface IAssetImporter
     /// <summary>A short name for logs and diagnostics.</summary>
     string Name { get; }
 
-    /// <summary>The extensions (with dot) this importer claims. Case-insensitive.</summary>
+    /// <summary>The extensions (with dot) this importer can be interested in. Case-insensitive.</summary>
+    /// <remarks>
+    /// <b>Declaration, not dispatch.</b> Nothing routes on this — <see cref="Import"/> is the
+    /// only thing that decides. It exists so <c>verify</c>, which builds nothing and can
+    /// therefore run no chain, can still tell a texture it recognises from a stray
+    /// <c>notes.txt</c> (<see cref="AssetImporters.Recognises"/>). An importer may list an
+    /// extension it then declines — <see cref="SidecarImporter"/> does, outside the play target
+    /// — but it must not handle one it never listed, or verify will warn about a file the build
+    /// goes on to compile.
+    /// </remarks>
     IReadOnlyList<string> Extensions { get; }
 
     /// <summary>
@@ -81,56 +121,65 @@ public interface IAssetImporter
     bool RecordsIdentity { get; }
 
     /// <summary>
-    /// Processes one asset, writing its output file(s) to <see cref="ImportContext.Output"/>.
+    /// Handles one asset, writing its output file(s) to <see cref="ImportContext.Output"/>.
     /// A failure is reported through <paramref name="errors"/> — named for the author, prefixed
     /// with <see cref="ImportContext.Source"/> — and writes nothing.
     /// </summary>
-    void Import(ImportContext context, List<string> errors);
+    /// <returns>
+    /// <see langword="true"/> when this importer handled the asset: the chain stops here, and
+    /// this importer's <see cref="DeterministicCopy"/> and <see cref="RecordsIdentity"/> answer
+    /// for the writes. <see langword="false"/> to pass the asset to the next link, having
+    /// written nothing and reported nothing. A handled asset that FAILED still returns
+    /// <see langword="true"/> — the failure is this importer's, and offering the asset onward
+    /// would let a second one quietly build it anyway.
+    /// </returns>
+    bool Import(ImportContext context, List<string> errors);
 }
 
-/// <summary>The import steps, the per-target sets of them, and which one claims a path.</summary>
+/// <summary>The import chain: every step there is, in precedence order.</summary>
 public static class AssetImporters
 {
-    private static readonly TextureImporter s_texture = new();
-    private static readonly MeshImporter s_mesh = new();
-    private static readonly AudioImporter s_audio = new();
-    private static readonly PrefabImporter s_prefab = new();
-    private static readonly ConfigImporter s_config = new();
-    private static readonly SidecarImporter s_sidecar = new();
-
     /// <summary>
-    /// Every import step any target uses — the union the classifier and verify reason over.
-    /// Adding an asset type is adding a row here and to the sets that build it.
+    /// Every import step, <b>lowest precedence first</b> — the chain is walked backwards, so a
+    /// later row is offered an asset before an earlier one, and an appended importer shadows the
+    /// built-in it replaces.
     /// </summary>
+    /// <remarks>
+    /// There are no per-target sets any more. One chain serves every target, and an importer
+    /// that belongs to one of them declines in the others (<see cref="ImportContext.Target"/>) —
+    /// so "which tree is this" is answered where the answer matters, instead of by the caller
+    /// assembling a list per flavour.
+    /// </remarks>
     public static IReadOnlyList<IAssetImporter> All { get; } =
-        [s_texture, s_mesh, s_audio, s_prefab, s_config, s_sidecar];
+    [
+        new SidecarImporter(),
+        new ConfigImporter(),
+        new PrefabImporter(),
+        new AudioImporter(),
+        new MeshImporter(),
+        new TextureImporter(),
+    ];
 
     /// <summary>
-    /// The set of importers a target builds with. A pipeline flavor is exactly a set: the PLAY
-    /// tree carries sidecars (the editor traces built assets back to their authoring identity)
-    /// and a player's install does not, so the Build set simply lacks that importer — no
-    /// importer ever branches on the target.
+    /// Whether any importer lists <paramref name="path"/>'s extension — "is this a kind of file
+    /// the pipeline knows", which is <c>verify</c>'s question and not the build's.
     /// </summary>
-    public static IReadOnlyList<IAssetImporter> For(ProjectOutputTarget target) =>
-        target == ProjectOutputTarget.Play
-            ? [s_texture, s_mesh, s_audio, s_prefab, s_config, s_sidecar]
-            : [s_texture, s_mesh, s_audio, s_prefab, s_config];
-
-    /// <summary>The importer in <paramref name="importers"/> claiming <paramref name="path"/>'s extension, or <see langword="null"/>.</summary>
-    public static IAssetImporter? Find(IReadOnlyList<IAssetImporter> importers, UPath path)
+    /// <remarks>
+    /// Answered from <see cref="IAssetImporter.Extensions"/> rather than by running the chain,
+    /// because verify has no build to run one in. It is therefore the target-independent
+    /// answer: a sidecar is recognised whether or not the build being planned would carry it.
+    /// </remarks>
+    public static bool Recognises(UPath path)
     {
         var extension = path.GetExtensionWithDot() ?? string.Empty;
-        foreach (var importer in importers)
+        foreach (var importer in All)
         {
             foreach (var claimed in importer.Extensions)
             {
-                if (string.Equals(claimed, extension, StringComparison.OrdinalIgnoreCase)) return importer;
+                if (string.Equals(claimed, extension, StringComparison.OrdinalIgnoreCase)) return true;
             }
         }
 
-        return null;
+        return false;
     }
-
-    /// <summary>The importer ANY target would route <paramref name="path"/> to, or <see langword="null"/> — the classifier's question.</summary>
-    public static IAssetImporter? Find(UPath path) => Find(All, path);
 }

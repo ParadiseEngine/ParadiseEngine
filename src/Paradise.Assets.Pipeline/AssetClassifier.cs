@@ -37,11 +37,13 @@ public enum AssetClass
 /// Classifies paths under <c>assets/</c> by extension.
 /// </summary>
 /// <remarks>
-/// A path is <see cref="AssetClass.Foreign"/> exactly when an importer claims its extension
-/// (<see cref="AssetImporters.Find(Zio.UPath)"/>) — the extension list lives with the importers, so adding
-/// an asset type never edits this file. Deliberately closed — an unknown binary lands in
-/// <see cref="AssetClass.Other"/> and is a <c>verify</c> warning rather than silently acquiring
-/// pipeline semantics.
+/// A path is <see cref="AssetClass.Foreign"/> exactly when some importer lists its extension
+/// (<see cref="AssetImporters.Recognises"/>) — the extension list lives with the importers, so
+/// adding an asset type never edits this file. This is a target-independent answer, and
+/// deliberately so: <c>verify</c> runs no build, and whether a file is a kind the pipeline knows
+/// must not depend on which tree somebody is about to compile. Deliberately closed — an unknown
+/// binary lands in <see cref="AssetClass.Other"/> and is a <c>verify</c> warning rather than
+/// silently acquiring pipeline semantics.
 /// </remarks>
 public static class AssetClassifier
 {
@@ -58,7 +60,7 @@ public static class AssetClassifier
         if (path == assetsRoot / Paradise.Assets.Project.AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
         if (name.EndsWith(PrefabSuffix, StringComparison.Ordinal)) return AssetClass.Prefab;
         if (name.EndsWith(".toml", StringComparison.Ordinal)) return AssetClass.Config;
-        if (AssetImporters.Find(path) is not null) return AssetClass.Foreign;
+        if (AssetImporters.Recognises(path)) return AssetClass.Foreign;
         return AssetClass.Other;
     }
 

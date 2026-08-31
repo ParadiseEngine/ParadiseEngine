@@ -20,11 +20,13 @@ public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, i
 /// <remarks>
 /// <para>
 /// <b>Pure orchestration.</b> The runner walks the tree, consults the reuse index, and runs the
-/// one process every asset gets: find the <see cref="IAssetImporter"/> claiming the path in the
-/// target's set, hand it the <see cref="ImportContext"/> — whose output is the build tree
-/// mounted and observed (<see cref="RecordingFileSystem"/>) — and record what was actually
-/// written. What an asset IS lives entirely inside the importers, and a pipeline FLAVOR is a
-/// choice of set (<see cref="AssetImporters.For"/>); nothing here changes when either grows.
+/// one process every asset gets: offer it to the import chain — LAST importer first, until one
+/// answers <see langword="true"/> — with an <see cref="ImportContext"/> whose output is the
+/// build tree mounted and observed (<see cref="RecordingFileSystem"/>), then record what was
+/// actually written. There is no lookup table and no per-target set: what an asset IS, and
+/// whether this tree is the one it belongs in, live entirely inside the importers. Nothing here
+/// changes when the chain grows, and a project that appends an importer shadows the built-in it
+/// replaces without touching this file.
 /// </para>
 /// <para>
 /// A build begins with <see cref="ProjectVerifier"/> and refuses on any error — the manifest
@@ -40,6 +42,7 @@ public sealed class BuildRunner
     private readonly ITextureEncoder? _encoder;
     private readonly Action<string>? _log;
     private readonly Action<string>? _warn;
+    private readonly IReadOnlyList<IAssetImporter> _importers;
 
     /// <summary>Creates a runner for one project.</summary>
     /// <param name="fileSystem">The filesystem holding the project.</param>
@@ -50,7 +53,18 @@ public sealed class BuildRunner
     /// </param>
     /// <param name="log">Progress lines.</param>
     /// <param name="warn">Non-fatal trouble (also handed to the artifact cache).</param>
-    public BuildRunner(IFileSystem fileSystem, AssetProjectLayout layout, ITextureEncoder? encoder, Action<string>? log = null, Action<string>? warn = null)
+    /// <param name="importers">
+    /// The import chain, lowest precedence first; <see cref="AssetImporters.All"/> when omitted.
+    /// A project extends the pipeline by APPENDING to that list — appended means later means
+    /// offered the asset first, so its own importer shadows the built-in it replaces.
+    /// </param>
+    public BuildRunner(
+        IFileSystem fileSystem,
+        AssetProjectLayout layout,
+        ITextureEncoder? encoder,
+        Action<string>? log = null,
+        Action<string>? warn = null,
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -60,6 +74,7 @@ public sealed class BuildRunner
         _encoder = encoder;
         _log = log;
         _warn = warn;
+        _importers = importers ?? AssetImporters.All;
     }
 
     /// <summary>Builds the named profile into <paramref name="target"/>'s tree.</summary>
@@ -112,16 +127,15 @@ public sealed class BuildRunner
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
         var index = BuildIndex.Load(_fileSystem, output, profileName, target);
-        var importers = AssetImporters.For(target);
 
         foreach (var path in _fileSystem.EnumerateFiles(_layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
-            var classification = AssetClassifier.Classify(_layout.Assets, path);
-
-            // Only what the index may legitimately answer for -- see BuildIndex's remarks for why
-            // textures and documents are excluded, and why excluding them is the point.
-            if (Reusable(importers, classification, path)
-                && index.TryReuse(_fileSystem, path, Relative(path), output, out var already))
+            // Asked of everything, with no gate in front of it. The index only ever holds what a
+            // previous run RECORDED, and recording is gated below on the handling importer's
+            // DeterministicCopy -- so a texture, a document, an unclaimed file or the manifest
+            // simply misses, and the one rule about what may be reused lives in one place
+            // instead of being asserted twice from opposite ends of the loop.
+            if (index.TryReuse(_fileSystem, path, Relative(path), output, out var already))
             {
                 manifest.Assets.AddRange(already);
                 continue;
@@ -131,18 +145,12 @@ public sealed class BuildRunner
             // here rather than inside any importer, so none of them knows an index exists.
             var produced = manifest.Assets.Count;
 
-            // ONE process for every asset. The runner does not know what anything IS — the
-            // TARGET'S importer set decides, and the importer claiming the extension writes the
-            // output mount itself. The manifest is the single exception: it configures the build
-            // rather than being built by it, and Other is by definition unclaimed (and already a
-            // verify warning).
-            if (classification is not (AssetClass.Manifest or AssetClass.Other)
-                && AssetImporters.Find(importers, path) is { } importer)
-            {
-                RunImporter(importer, path, profile!, cache, output, manifest, errors);
-            }
+            // ONE process for every asset: offer it to the chain and let an importer claim it.
+            // The runner does not know what anything IS, which tree wants it, or that the
+            // manifest is special -- an asset nobody claims is simply built by nobody.
+            var handler = Offer(path, profile!, target, cache, output, manifest, errors);
 
-            if (Reusable(importers, classification, path) && errors.Count == 0)
+            if (handler is { DeterministicCopy: true } && errors.Count == 0)
             {
                 index.Record(_fileSystem, path, Relative(path), manifest.Assets[produced..]);
             }
@@ -159,10 +167,19 @@ public sealed class BuildRunner
     }
 
     /// <summary>
-    /// Runs one importer over one asset. The importer writes the output mount directly; what it
-    /// ACTUALLY wrote — observed, not reported — becomes the manifest entries.
+    /// Offers one asset to the chain, last importer first, and stops at the one that claims it.
+    /// The importer writes the output mount directly; what it ACTUALLY wrote — observed, not
+    /// reported — becomes the manifest entries.
     /// </summary>
-    private void RunImporter(IAssetImporter importer, UPath path, BuildProfile profile, ArtifactCache cache, UPath output, BuildManifest manifest, List<string> errors)
+    /// <returns>The importer that handled the asset, or <see langword="null"/> when none did.</returns>
+    /// <remarks>
+    /// Backwards, because a chain is extended by APPENDING: the last row is the most specific
+    /// claim anyone has made, so it is asked first and a project's own importer beats the
+    /// built-in it shadows. One <see cref="ImportContext"/> serves every attempt — declining is
+    /// each importer's first act, so nothing is written before the claim is settled, and a
+    /// decline that wrote anyway surfaces in the manifest rather than vanishing.
+    /// </remarks>
+    private IAssetImporter? Offer(UPath path, BuildProfile profile, ProjectOutputTarget target, ArtifactCache cache, UPath output, BuildManifest manifest, List<string> errors)
     {
         // A sidecar has no sidecar of its own — that lookup would chase x.meta.meta and throw.
         // Everything else has one, or verify refused the build before this ran.
@@ -171,9 +188,15 @@ public sealed class BuildRunner
         using var observed = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
             _fileSystem, _layout.Assets, path, Relative(path), meta,
-            profile, observed, cache, _encoder, _log);
+            profile, target, observed, cache, _encoder, _log);
 
-        importer.Import(context, errors);
+        IAssetImporter? handler = null;
+        for (var i = _importers.Count - 1; i >= 0 && handler is null; i--)
+        {
+            if (_importers[i].Import(context, errors)) handler = _importers[i];
+        }
+
+        if (handler is null) return null;
 
         foreach (var written in observed.Written)
         {
@@ -182,26 +205,14 @@ public sealed class BuildRunner
             {
                 Path = written.FullName[1..],
                 Source = context.Source,
-                Guid = importer.RecordsIdentity && meta is { } identified ? DocumentGuid.Format(identified.Guid) : null,
+                Guid = handler.RecordsIdentity && meta is { } identified ? DocumentGuid.Format(identified.Guid) : null,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)),
                 Size = bytes.Length,
             });
         }
-    }
 
-    /// <summary>
-    /// Whether <see cref="BuildIndex"/> may answer for this asset — true only when the source
-    /// bytes (plus its sidecar, which the index also keys on) are the step's COMPLETE input.
-    /// </summary>
-    /// <remarks>
-    /// The importer answers (<see cref="IAssetImporter.DeterministicCopy"/>): only the step
-    /// knows whether tool versions, profile flags or referenced files are part of its input.
-    /// The manifest, unclaimed files, and anything the target's set does not build find no
-    /// importer and are never reused.
-    /// </remarks>
-    private static bool Reusable(IReadOnlyList<IAssetImporter> importers, AssetClass classification, UPath path)
-        => classification is not (AssetClass.Manifest or AssetClass.Other)
-            && AssetImporters.Find(importers, path) is { DeterministicCopy: true };
+        return handler;
+    }
 
     private string Relative(UPath path) => path.FullName[(_layout.Assets.FullName.Length + 1)..];
 }

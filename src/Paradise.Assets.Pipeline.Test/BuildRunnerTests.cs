@@ -312,6 +312,96 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
     }
 
+    // ---- the import chain ---------------------------------------------------------------
+
+    /// <summary>An importer that answers whatever it is told, so a chain can be arranged.</summary>
+    private sealed class StubImporter(string name, string extension, bool handles) : IAssetImporter
+    {
+        public int Offers;
+
+        public string Name => name;
+
+        public IReadOnlyList<string> Extensions { get; } = [extension];
+
+        public bool DeterministicCopy => true;
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(Extensions)) return false;
+
+            Offers++;
+            if (!handles) return false;
+
+            context.Output.WriteAllBytes("/" + context.Source + $".{name}", [7]);
+            return true;
+        }
+    }
+
+    [Test]
+    public async Task an_appended_importer_shadows_the_built_in_it_replaces()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var mine = new StubImporter("mine", ".glb", handles: true);
+
+        // The whole reason the chain is walked backwards: a project extends the pipeline by
+        // APPENDING, and what it appends has to win against the built-in it is replacing.
+        var result = new BuildRunner(
+            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, mine]).Run("dev");
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.mine")).IsTrue();
+        // MeshImporter never got the offer -- the chain stopped at the first claim, so the
+        // built-in's copy is simply absent rather than written alongside.
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
+    }
+
+    [Test]
+    public async Task an_importer_that_declines_passes_the_asset_down_the_chain()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var passive = new StubImporter("passive", ".glb", handles: false);
+
+        var result = new BuildRunner(
+            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, passive]).Run("dev");
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(passive.Offers).IsEqualTo(1);
+        // Declining is not handling: MeshImporter, further down, still built the asset.
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.passive")).IsFalse();
+    }
+
+    [Test]
+    public async Task an_asset_nobody_claims_is_built_by_nobody()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/notes.txt");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        // Unclaimed is not an error -- verify already warned about it, and the build simply has
+        // nothing to do. There is no classification gate saying so; the chain running out IS it.
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/notes.txt")).IsFalse();
+    }
+
+    [Test]
+    public async Task the_manifest_configures_the_build_rather_than_being_built_by_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        // project.toml is a `.toml` the config importer must decline: compiling it would ship
+        // the source project's profiles into the tree as if they were game data.
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/project.toml")).IsFalse();
+    }
+
     // ---- sidecars in the editor tree ----------------------------------------------------
 
     [Test]

@@ -34,11 +34,34 @@ public class AssetClassifierTests
     }
 
     [Test]
-    public async Task the_importer_claiming_a_path_follows_the_extension()
+    public async Task what_the_pipeline_recognises_is_the_union_of_the_importers_extensions()
     {
-        await Assert.That(AssetImporters.Find("/a/x.glb")).IsTypeOf<MeshImporter>();
-        await Assert.That(AssetImporters.Find("/a/x.jpeg")).IsTypeOf<TextureImporter>();
-        await Assert.That(AssetImporters.Find("/a/x.bnk")).IsTypeOf<AudioImporter>();
-        await Assert.That(AssetImporters.Find("/a/x.txt")).IsNull();
+        await Assert.That(AssetImporters.Recognises("/a/x.glb")).IsTrue();
+        await Assert.That(AssetImporters.Recognises("/a/x.jpeg")).IsTrue();
+        await Assert.That(AssetImporters.Recognises("/a/x.bnk")).IsTrue();
+        await Assert.That(AssetImporters.Recognises("/a/x.txt")).IsFalse();
+    }
+
+    /// <summary>
+    /// Recognition is target-independent, and a sidecar is the case that proves it: only the
+    /// play tree carries one, but <c>verify</c> — which builds nothing — must still call it a
+    /// file the pipeline knows rather than warn about it.
+    /// </summary>
+    [Test]
+    public async Task a_sidecars_extension_is_recognised_whatever_tree_is_being_built()
+    {
+        await Assert.That(AssetImporters.Recognises("/a/x" + SidecarMeta.Suffix)).IsTrue();
+    }
+
+    /// <summary>
+    /// The chain is walked backwards, so <see cref="AssetImporters.All"/> reads lowest
+    /// precedence first. Pinned because the ORDER is the extension mechanism: an importer
+    /// appended by a project has to end up ahead of the built-ins, not behind them.
+    /// </summary>
+    [Test]
+    public async Task the_chain_is_declared_lowest_precedence_first()
+    {
+        await Assert.That(AssetImporters.All[0]).IsTypeOf<SidecarImporter>();
+        await Assert.That(AssetImporters.All[^1]).IsTypeOf<TextureImporter>();
     }
 }
