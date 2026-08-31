@@ -1,4 +1,3 @@
-using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -13,29 +12,31 @@ namespace Paradise.Assets.Pipeline;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>This is a document transform, not a translation.</b> Contract v5 reduced a level to its
-/// entities and an entity to its authored components, which is the same shape the authoring
-/// document already has — so almost every component crosses over untouched, carrying the id and
-/// type it was authored with. Only the two the authoring side treats as structure need mapping.
+/// <b>Since contract v6, a passthrough — not a flatten.</b> Every component crosses over
+/// untouched, carrying the id and type it was authored with, INCLUDING the well-known
+/// <c>meta</c> and <c>transform</c> payloads: identity, the parent link and the local TRS
+/// survive into the contract, and the loader composes world matrices itself. The bake that used
+/// to privilege two engine components (a baked name, a flattened world matrix) is gone with
+/// the engine's authored components.
 /// </para>
 /// <para>
-/// What the bake actually destroys is what the authoring document exists to keep:
+/// What the bake still destroys:
 /// </para>
 /// <list type="bullet">
 ///   <item>instances become plain objects — resolved, recursively, so nothing downstream knows
-///     prefabs exist;</item>
-///   <item>local transforms and the parent chain become one world matrix per object, because
-///     nothing reads a hierarchy at load;</item>
+///     prefabs exist (override carriers are consumed with them: resolved output never carries
+///     <c>meta.Target</c> or <c>meta.Dropped</c>);</item>
 ///   <item>references become values — an <see cref="AssetReference"/>'s guid is an authoring
 ///     concern, and the runtime resolves a path.</item>
 /// </list>
+/// <para>
+/// One rule the bake enforces on the way through: hierarchy ships now, so <b>a parented object
+/// must carry a transform component</b>. Its absence is an error naming the object here,
+/// rather than a silent identity placement decided by whichever loader meets it.
+/// </para>
 /// </remarks>
 public static class PrefabBake
 {
-    /// <summary>The engine components the authoring side keeps as <c>meta</c> and <c>transform</c>.</summary>
-    private static readonly Guid s_nameId = typeof(NameComponentData).GUID;
-    private static readonly Guid s_transformId = typeof(TransformComponentData).GUID;
-
     /// <summary>Bakes <paramref name="document"/>, appending anything that went wrong to <paramref name="errors"/>.</summary>
     /// <param name="document">The authoring document, instances and all.</param>
     /// <param name="prefabs">Resolves a prefab reference to its document, or returns null.</param>
@@ -53,36 +54,19 @@ public static class PrefabBake
         var resolved = PrefabResolver.Resolve(document, prefabs);
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 
-        var world = WorldMatrices(resolved.Document);
         var level = new LevelData();
-
         foreach (var entry in resolved.Document.Objects)
         {
-            var components = new List<AuthoredComponentData>();
-            var placed = false;
+            if (entry.Parent is not null && entry.Component(WellKnownComponents.TransformId) is null)
+            {
+                errors.Add(
+                    $"object '{entry.Name ?? DocumentGuid.Format(entry.Guid ?? Guid.Empty)}' has a " +
+                    "parent but no transform component; a parented object must carry one");
+            }
 
+            var components = new List<AuthoredComponentData>();
             foreach (var component in entry.Components)
             {
-                if (component.Id == WellKnownComponents.MetaId)
-                {
-                    // Identity and the parent link are authoring concerns and simply stop
-                    // existing; the name survives because something has to appear in a message.
-                    if (entry.Name is { } name)
-                    {
-                        components.Add(Entry(s_nameId, typeof(NameComponentData).FullName,
-                            new JsonObject { ["Value"] = name }));
-                    }
-
-                    continue;
-                }
-
-                if (component.Id == WellKnownComponents.TransformId)
-                {
-                    components.Add(Placement(entry, world));
-                    placed = true;
-                    continue;
-                }
-
                 components.Add(new AuthoredComponentData
                 {
                     Id = component.Id,
@@ -91,93 +75,11 @@ public static class PrefabBake
                 });
             }
 
-            // "Anything that exists is somewhere" — LevelDocument calls the transform the one
-            // component an exporter writes for EVERY object it emits, and says a runtime is
-            // entitled to expect it. An authoring document may legitimately omit it (an object
-            // that never moves from its parent's origin), so it is supplied here rather than left
-            // to whatever a reader does with an entity that has no placement.
-            if (!placed) components.Insert(components.Count > 0 ? 1 : 0, Placement(entry, world));
-
             level.Entities.Add(components);
         }
 
         return level;
     }
-
-    /// <summary>An object's placement, as the contract's transform component.</summary>
-    private static AuthoredComponentData Placement(PrefabObject entry, Dictionary<Guid, Matrix4x4> world)
-        => Entry(s_transformId, typeof(TransformComponentData).FullName,
-            new JsonObject { ["World"] = Wire(world.GetValueOrDefault(entry.Guid ?? Guid.Empty, Matrix4x4.Identity)) });
-
-    /// <summary>
-    /// Each object's world matrix, composed down the parent chain.
-    /// </summary>
-    /// <remarks>
-    /// Memoised and computed on demand rather than in one forward pass: document order puts a
-    /// parent before its children today, but nothing in the format REQUIRES it, and a forward pass
-    /// that met a child first would silently place it in its parent's old position.
-    /// </remarks>
-    private static Dictionary<Guid, Matrix4x4> WorldMatrices(PrefabDocument document)
-    {
-        var byGuid = document.ByGuid();
-        var world = new Dictionary<Guid, Matrix4x4>();
-
-        Matrix4x4 Of(Guid guid, int depth)
-        {
-            if (world.TryGetValue(guid, out var known)) return known;
-            if (depth > 256 || !byGuid.TryGetValue(guid, out var entry)) return Matrix4x4.Identity;
-
-            var local = Local(entry);
-            var matrix = entry.Parent is { } parent ? local * Of(parent, depth + 1) : local;
-
-            world[guid] = matrix;
-            return matrix;
-        }
-
-        foreach (var entry in document.Objects)
-        {
-            if (entry.Guid is { } guid) Of(guid, 0);
-        }
-
-        return world;
-    }
-
-    /// <summary>An object's local TRS as a matrix, in System.Numerics' row-vector convention.</summary>
-    private static Matrix4x4 Local(PrefabObject entry)
-    {
-        if (entry.Component(WellKnownComponents.TransformId) is not { } component) return Matrix4x4.Identity;
-
-        var transform = LocalTransformCodec.Read(component.Data);
-        return Matrix4x4.CreateScale(transform.Scale)
-             * Matrix4x4.CreateFromQuaternion(transform.Rotation)
-             * Matrix4x4.CreateTranslation(transform.Position);
-    }
-
-    /// <summary>
-    /// A world matrix as the contract's sixteen numbers.
-    /// </summary>
-    /// <remarks>
-    /// <b>Transposed, and this is load-bearing.</b> The contract's matrices are COLUMN-VECTOR
-    /// (<c>LevelDocument</c> says so), and <c>Matrix4x4Converter</c> writes
-    /// <c>M11, M21, M31, M41, …</c> — the transpose of memory order. Composing in System.Numerics
-    /// gives a row-vector matrix, so it is transposed here to land the translation at wire indices
-    /// 12..14, which is where every <c>World</c> in ShiningPie's committed <c>data/</c> has it.
-    /// Skip this and every object in the game moves to the origin with its rotation transposed.
-    /// </remarks>
-    private static JsonArray Wire(Matrix4x4 world)
-    {
-        var m = Matrix4x4.Transpose(world);
-        return
-        [
-            m.M11, m.M21, m.M31, m.M41,
-            m.M12, m.M22, m.M32, m.M42,
-            m.M13, m.M23, m.M33, m.M43,
-            m.M14, m.M24, m.M34, m.M44,
-        ];
-    }
-
-    private static AuthoredComponentData Entry(Guid id, string? type, JsonObject data)
-        => new() { Id = id, Type = type, Data = ToElement(data) };
 
     /// <summary>
     /// A node as a detached <see cref="JsonElement"/>.

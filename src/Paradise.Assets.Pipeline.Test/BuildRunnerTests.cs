@@ -192,9 +192,12 @@ public class BuildRunnerTests
         await Assert.That(result.Succeeded).IsTrue();
 
         // The extension changes because the built form is the contract, not the authoring source.
+        // Since v6 the well-known payloads cross over untouched — the meta component, its type
+        // string, and the authored identity all survive into the contract.
         var baked = fileSystem.ReadAllText("/game/build/levels/district.json");
         await Assert.That(baked).Contains("\"Entities\"");
-        await Assert.That(baked).Contains("Paradise.Export.Data.TransformComponentData");
+        await Assert.That(baked).Contains("\"meta\"");
+        await Assert.That(baked).Contains("\"SchemaVersion\": 6");
     }
 
     [Test]

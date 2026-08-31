@@ -39,13 +39,13 @@ public class AuthoringSchemaMergeTests
     {
         var engine = Doc(new AuthoredComponentSchema
         {
-            Id = typeof(Paradise.Export.Data.RigidbodyComponentData).GUID,
-            Type = "Paradise.Export.Data.RigidbodyComponentData",
+            Id = new Guid("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"),
+            Type = "Engine.Rigidbody",
             DisplayName = "Engine",
         });
         var game = Doc(new AuthoredComponentSchema
         {
-            Id = typeof(Paradise.Export.Data.RigidbodyComponentData).GUID,
+            Id = new Guid("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"),
             Type = "MyGame.Rigidbody",
             DisplayName = "Game",
         });
@@ -72,21 +72,15 @@ public class AuthoringSchemaMergeTests
         await Assert.That(AuthoringSchemaReader.Merge().Components).IsEmpty();
     }
 
-    /// <summary>The engine's own components are published too, so a data-driven editor can build a
-    /// UI for them from the same document a game's come through.</summary>
+    /// <summary>Since contract v6 the engine declares NO authored components, so Paradise.Export
+    /// publishes no authoring schema at all — every component in a game's dump is the game's own
+    /// declaration. Pinned by absence, because an engine schema quietly reappearing would win
+    /// every id collision against the game (references merge first).</summary>
     [Test]
-    public async Task the_engines_own_schema_is_readable_and_carries_the_rigidbody()
+    public async Task the_engine_publishes_no_authoring_schema()
     {
-        var engineJson = global::Paradise.Export.AuthoringSchema.Json;
-        var engine = AuthoringSchemaReader.Read(engineJson);
-        var rigidbody = engine.Components.Single(
-            c => c.Id == typeof(Paradise.Export.Data.RigidbodyComponentData).GUID);
-        await Assert.That(rigidbody.Type).IsEqualTo("Paradise.Export.Data.RigidbodyComponentData");
-        await Assert.That(rigidbody.Fields.Select(f => f.Name)).Contains("Mass");
-        await Assert.That(rigidbody.Fields.Single(f => f.Name == "Mass").Unit)
-            .IsEqualTo(AuthoredUnits.Kilograms);
-        await Assert.That(rigidbody.Fields.Single(f => f.Name == "BodyType").Values)
-            .Contains("Dynamic");
+        var export = typeof(Paradise.Export.Data.LevelData).Assembly;
+        await Assert.That(export.GetType("Paradise.Export.AuthoringSchema")).IsNull();
     }
 
     /// <summary>A future reader must refuse a document it cannot understand, rather than silently

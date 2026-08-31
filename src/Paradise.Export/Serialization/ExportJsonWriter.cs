@@ -51,7 +51,6 @@ namespace Paradise.Export.Serialization
                     // otherwise STJ silently writes it as an integer.
                     new JsonStringEnumConverter<PhysicsBodyType>(),
                     new JsonStringEnumConverter<PhysicsShapeType>(),
-                    new JsonStringEnumConverter<ParticleRenderKind>(),
                 },
             };
             options.TypeInfoResolverChain.Add(ParadiseJsonContext.Default);

@@ -1,12 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Paradise.Export.Data;
-using Paradise.Export.Geometry;
 using Paradise.Export.Serialization;
+using Paradise.Export.Tests;
 
 namespace Paradise.Export.Test;
 
@@ -29,34 +27,8 @@ namespace Paradise.Export.Test;
 /// </remarks>
 public class TomlContractParityTests
 {
-    private static readonly Vector3 Position = new(1f, 0f, 2f);
-
-    private static LevelData BuildLevel()
-    {
-        var components = new List<AuthoredComponentData>();
-        components.Set(new NameComponentData { Value = "Crate" });
-        components.Set(new TransformComponentData
-        {
-            World = ContractMatrix.Trs(Position, Quaternion.Identity, Vector3.One),
-        });
-        components.Set(new RenderableComponentData());
-        components.Set(new ColliderComponentData
-        {
-            Colliders = new List<ColliderShapeData>
-            {
-                new()
-                {
-                    Id = "Box",
-                    Path = "",
-                    ShapeType = PhysicsShapeType.Box,
-                    Size = ColliderScaleFold.BoxSize(new Vector3(2f, 4f, 6f), Vector3.One),
-                },
-            },
-        });
-        components.Set(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static, Mass = 0f });
-
-        return new LevelData { Entities = { components } };
-    }
+    private static LevelData BuildLevel() =>
+        new() { Entities = { EntityDocumentShapeTests.BuildBoxEntity() } };
 
     [Test]
     public async Task a_level_written_as_toml_reads_back_the_same_as_json()
@@ -77,14 +49,9 @@ public class TomlContractParityTests
     public async Task a_null_payload_member_becomes_an_absent_key()
     {
         // THE difference between the two formats, stated rather than hidden. TOML has no null, so
-        // a null-valued key is omitted -- and for a TYPED member that is lossless, because an
-        // absent key deserializes to the member's default, which is what the null was.
-        //
-        // A component payload is NOT typed here: AuthoredComponentData.Data is a raw JsonElement,
-        // so `{"Mesh": null}` and `{}` are genuinely different elements. They stop differing one
-        // step later, at AuthoredComponentRouter, which deserializes the payload into its record
-        // and gives absent and null the same default -- so no consumer can tell them apart. This
-        // test exists so that stops being an argument and starts being a checked fact.
+        // a null-valued key is omitted -- and the payloads stop differing one step later, at the
+        // game's registry reader, which gives absent and null the same default. This test exists
+        // so that stops being an argument and starts being a checked fact.
         var document = BuildLevel();
 
         var fromJson = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
@@ -93,24 +60,29 @@ public class TomlContractParityTests
         var json = ExportJsonWriter.SerializeToString(fromJson);
         var toml = ExportJsonWriter.SerializeToString(fromToml);
 
-        await Assert.That(json).Contains("\"Mesh\": null");
-        await Assert.That(toml).DoesNotContain("\"Mesh\": null");
+        await Assert.That(json).Contains("\"Clip\": null");
+        await Assert.That(toml).DoesNotContain("\"Clip\": null");
 
-        // The entity is otherwise identical: same components, same ids, same order. The absent
-        // key is the ONLY difference, which is what makes it safe to normalize away above.
+        // The entity is otherwise identical: same components, same ids, same order.
         await Assert.That(fromToml.Entities[0].Count).IsEqualTo(fromJson.Entities[0].Count);
         await Assert.That(fromToml.Entities[0].Select(component => component.Id))
             .IsEquivalentTo(fromJson.Entities[0].Select(component => component.Id));
     }
 
-    /// <summary>Re-serializes with null-valued properties removed, at any depth.</summary>
+    /// <summary>
+    /// Re-serializes with null-valued properties removed and every number rendered from its
+    /// VALUE, at any depth. The number half matters since v6: payloads are raw elements, so the
+    /// JSON side keeps an author's <c>1.0</c> lexeme while the TOML round trip re-renders the
+    /// value as <c>1</c> — the same number, differently spelled, which is exactly the
+    /// difference a value-based contract tells us to ignore.
+    /// </summary>
     private static string WithoutNulls(string json)
     {
         var node = JsonNode.Parse(json)!;
-        Strip(node);
+        node = Strip(node)!;
         return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
-        static void Strip(JsonNode? node)
+        static JsonNode? Strip(JsonNode? node)
         {
             switch (node)
             {
@@ -120,18 +92,32 @@ public class TomlContractParityTests
                         obj.Remove(key);
                     }
 
-                    foreach (var (_, value) in obj) Strip(value);
-                    break;
+                    foreach (var key in obj.Select(pair => pair.Key).ToList())
+                    {
+                        var replaced = Strip(obj[key]);
+                        if (!ReferenceEquals(replaced, obj[key])) obj[key] = replaced;
+                    }
+                    return obj;
 
                 case JsonArray array:
-                    foreach (var item in array) Strip(item);
-                    break;
+                    for (var i = 0; i < array.Count; i++)
+                    {
+                        var replaced = Strip(array[i]);
+                        if (!ReferenceEquals(replaced, array[i])) array[i] = replaced;
+                    }
+                    return array;
+
+                case JsonValue value when value.GetValueKind() == JsonValueKind.Number:
+                    return JsonValue.Create(value.GetValue<double>());
+
+                default:
+                    return node;
             }
         }
     }
 
     [Test]
-    public async Task the_values_that_have_converters_survive_the_round_trip()
+    public async Task payload_values_survive_the_round_trip()
     {
         var document = BuildLevel();
 
@@ -139,21 +125,20 @@ public class TomlContractParityTests
         var json = JsonNode.Parse(ExportJsonWriter.SerializeToString(restored))!;
         var entity = json["Entities"]![0]!;
 
-        // One value per converter, because a converter is exactly what a hand-written second
-        // serializer would have failed to apply: a matrix (float[16], column-major), an enum by
-        // name, and a vector.
-        var world = (JsonArray)Payload(entity, typeof(TransformComponentData))["World"]!;
-        await Assert.That((float)world[12]!).IsEqualTo(1f);
-        await Assert.That((float)world[14]!).IsEqualTo(2f);
+        // One value per payload shape a hand-written second serializer would have broken: a
+        // number array, an enum-by-name string, a nested list of objects, a guid string.
+        var position = (JsonArray)Payload(entity, WellKnownEntityComponents.TransformId)["Position"]!;
+        await Assert.That((float)position[0]!).IsEqualTo(1f);
+        await Assert.That((float)position[2]!).IsEqualTo(2f);
 
-        var collider = Payload(entity, typeof(ColliderComponentData))["Colliders"]![0]!;
+        var collider = Payload(entity, TestComponentIds.CrateId)["Colliders"]![0]!;
         await Assert.That((string?)collider["ShapeType"]).IsEqualTo("Box");
         await Assert.That((float)collider["Size"]![1]!).IsEqualTo(4f);
 
-        await Assert.That((string?)Payload(entity, typeof(RigidbodyComponentData))["BodyType"])
+        await Assert.That((string?)Payload(entity, TestComponentIds.MoverId)["Kind"])
             .IsEqualTo("Static");
 
-        await Assert.That((string?)Payload(entity, typeof(NameComponentData))["Value"])
+        await Assert.That((string?)Payload(entity, WellKnownEntityComponents.MetaId)["Name"])
             .IsEqualTo("Crate");
     }
 
@@ -175,12 +160,11 @@ public class TomlContractParityTests
             .Throws<System.IO.InvalidDataException>();
     }
 
-    private static JsonNode Payload(JsonNode entity, Type type)
+    private static JsonNode Payload(JsonNode entity, Guid id)
     {
-        var id = type.GUID.ToString("D");
         foreach (var component in (JsonArray)entity)
         {
-            if (string.Equals((string?)component!["Id"], id, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals((string?)component!["Id"], id.ToString("D"), StringComparison.OrdinalIgnoreCase))
             {
                 return component["Data"]!;
             }
