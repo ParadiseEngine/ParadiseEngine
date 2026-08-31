@@ -85,7 +85,7 @@ public class BuildRunnerTests
         var result = new BuildRunner(fileSystem, s_layout, encoder).Run("fastdev");
 
         await Assert.That(result.Succeeded).IsTrue();
-        await Assert.That(encoder.LastFast).IsEqualTo(true);
+        await Assert.That(encoder.LastFast).IsTrue();
         var built = Encoding.UTF8.GetString(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2"));
         await Assert.That(built).Contains(":Normal:");
     }

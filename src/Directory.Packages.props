@@ -1,31 +1,32 @@
 <Project>
   <ItemGroup>
     <!-- Roslyn / Source Generators -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.3" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
     <!-- Runtime helpers -->
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
     <!-- Rendering -->
-    <PackageVersion Include="WebGPUSharp" Version="0.5.2" />
+    <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
     <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
-    <PackageVersion Include="ppy.SDL3-CS" Version="2026.320.0" />
+    <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem
          abstraction every asset path goes through (MemoryFileSystem in tests); Tomlyn is the
          TOML reader, used only through its in-package source generator so the AOT story holds. -->
-    <PackageVersion Include="Zio" Version="0.22.2" />
-    <PackageVersion Include="Tomlyn" Version="2.3.2" />
-    <!-- Export pipeline (match the DotRecast version ParadiseUnityEditor vendored — navmesh
-         binary format must stay identical to what the runtime expects) -->
-    <PackageVersion Include="DotRecast.Core" Version="2026.1.3" />
-    <PackageVersion Include="DotRecast.Detour" Version="2026.1.3" />
-    <PackageVersion Include="DotRecast.Recast" Version="2026.1.3" />
+    <PackageVersion Include="Zio" Version="0.24.0" />
+    <PackageVersion Include="Tomlyn" Version="2.10.1" />
+    <!-- Export pipeline. The navmesh BINARY FORMAT is the contract, not the package version:
+         NavMeshBinaryWriterTests pins the bytes, so a bump that passes them is compatible — and
+         an editor vendoring DotRecast must produce those same bytes, whatever version it holds. -->
+    <PackageVersion Include="DotRecast.Core" Version="2026.3.1" />
+    <PackageVersion Include="DotRecast.Detour" Version="2026.3.1" />
+    <PackageVersion Include="DotRecast.Recast" Version="2026.3.1" />
     <!-- Testing (TUnit with Native AOT support) -->
-    <PackageVersion Include="TUnit" Version="1.11.16" />
+    <PackageVersion Include="TUnit" Version="1.65.68" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
     <!-- Benchmarking -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
