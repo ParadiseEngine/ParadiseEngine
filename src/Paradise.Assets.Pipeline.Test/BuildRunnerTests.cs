@@ -198,15 +198,37 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task a_document_refuses_a_toml_build_because_the_contract_is_json()
+    public async Task a_document_builds_to_toml_and_reads_back_as_the_contract()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
 
+        // No document_format declared, so BuildProfile.Default applies -- and its default is TOML,
+        // which used to be a promise the pipeline could not keep.
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
 
-        await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors[0]).Contains("cannot express the export contract");
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/district.toml")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/district.json")).IsFalse();
+
+        // Written as the contract, not as the authoring document: a baked level, readable by the
+        // runtime's own reader.
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+            fileSystem.ReadAllText("/game/build/levels/district.toml"));
+        await Assert.That(level.Entities.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task the_profile_chooses_the_document_format()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject("json");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/district.json")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/district.toml")).IsFalse();
     }
 
     [Test]
@@ -278,9 +300,10 @@ public class BuildRunnerTests
     public async Task no_manifest_is_written_on_a_failed_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", SidecarAssetKind.Texture);
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+        // A failing encode, because a document no longer fails a TOML build -- it builds one.
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run("dev");
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();

@@ -313,11 +313,9 @@ public sealed class BuildRunner
     private void BuildPrefab(UPath path, BuildProfile profile, UPath output, BuildManifest manifest, List<string> errors)
     {
         var source = Relative(path);
-        if (profile.DocumentFormat != DocumentFormat.Json)
+        if (profile.DocumentFormat is not (DocumentFormat.Toml or DocumentFormat.Json))
         {
-            errors.Add(
-                $"{source}: document_format \"{profile.DocumentFormat}\" cannot express the export contract — " +
-                "set the profile to json (the format the runtime's reader takes)");
+            errors.Add($"{source}: document_format \"{profile.DocumentFormat}\" output is not implemented yet (toml and json are)");
             return;
         }
 
@@ -340,9 +338,15 @@ public sealed class BuildRunner
             return;
         }
 
-        var destination = output / Path.ChangeExtension(source, ".json");
+        // Both writers serialize the SAME baked LevelData through the same type model, so the
+        // format is a choice about who reads the output rather than about what it says.
+        var destination = output / Path.ChangeExtension(source, DocumentExtension(profile));
         CreateParent(destination);
-        _fileSystem.WriteAllText(destination, ExportJsonWriter.SerializeToString(level));
+        _fileSystem.WriteAllText(
+            destination,
+            profile.DocumentFormat == DocumentFormat.Json
+                ? ExportJsonWriter.SerializeToString(level)
+                : ExportTomlWriter.SerializeToString(level));
 
         var meta = SidecarMeta.Load(_fileSystem, SidecarMeta.PathFor(path));
         Record(manifest, destination, output, source, meta.Guid);
