@@ -60,39 +60,27 @@ public class PrefabBakeTests
             .IsEqualTo(3);
     }
 
-    /// <summary>Hierarchy ships now, so a parented object without a transform is a build error
-    /// naming the object — not a silent identity placement decided by the loader.</summary>
+    /// <summary>The bake makes no presence judgement: ANY object may omit its transform —
+    /// parented or not — and nothing is synthesized. What an absent transform means (identity
+    /// local, unplaced camera, an error) is the loader's rule, because since v6 the engine is
+    /// never the party that gives a payload meaning.</summary>
     [Test]
-    public async Task a_parented_object_without_a_transform_is_an_error()
+    public async Task any_object_may_omit_its_transform_and_nothing_is_synthesized()
     {
         var document = new PrefabDocument();
-        var root = PrefabObject.WithMeta(RootGuid, "district");
-        root.Components.Add(LocalTransformCodec.Write(LocalTransform.Identity));
+        var root = PrefabObject.WithMeta(RootGuid, "viewpoint");
         document.Objects.Add(root);
-        document.Objects.Add(PrefabObject.WithMeta(ChildGuid, "floating", RootGuid));
-
-        var errors = new List<string>();
-        Bake(document, errors);
-
-        await Assert.That(errors.Single()).Contains("floating");
-        await Assert.That(errors.Single()).Contains("transform");
-    }
-
-    /// <summary>An unparented root may omit its transform — cameras and directional lights keep
-    /// their unplaced semantics, and nothing is synthesized for them any more.</summary>
-    [Test]
-    public async Task an_unparented_object_may_omit_its_transform()
-    {
-        var document = new PrefabDocument();
-        document.Objects.Add(PrefabObject.WithMeta(RootGuid, "viewpoint"));
+        document.Objects.Add(PrefabObject.WithMeta(ChildGuid, "attachment", RootGuid));
 
         var errors = new List<string>();
         var level = Bake(document, errors);
 
         await Assert.That(errors).IsEmpty();
-        await Assert.That(level.Entities.Single()
-                .Any(component => component.Id == WellKnownEntityComponents.TransformId))
-            .IsFalse();
+        foreach (var entity in level.Entities)
+        {
+            await Assert.That(entity.Any(component => component.Id == WellKnownEntityComponents.TransformId))
+                .IsFalse();
+        }
     }
 
     /// <summary>The bake consumes prefab structure: resolved output never carries the

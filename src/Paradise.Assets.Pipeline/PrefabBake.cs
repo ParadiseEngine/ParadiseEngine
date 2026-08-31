@@ -30,9 +30,9 @@ namespace Paradise.Assets.Pipeline;
 ///     concern, and the runtime resolves a path.</item>
 /// </list>
 /// <para>
-/// One rule the bake enforces on the way through: hierarchy ships now, so <b>a parented object
-/// must carry a transform component</b>. Its absence is an error naming the object here,
-/// rather than a silent identity placement decided by whichever loader meets it.
+/// The bake makes no judgement about which components an object should carry — an absent
+/// transform, like an absent anything, is the loader's to interpret. Presence rules belong to
+/// whoever gives a payload meaning, and since v6 that is never the engine.
 /// </para>
 /// </remarks>
 public static class PrefabBake
@@ -57,13 +57,6 @@ public static class PrefabBake
         var level = new LevelData();
         foreach (var entry in resolved.Document.Objects)
         {
-            if (entry.Parent is not null && entry.Component(WellKnownComponents.TransformId) is null)
-            {
-                errors.Add(
-                    $"object '{entry.Name ?? DocumentGuid.Format(entry.Guid ?? Guid.Empty)}' has a " +
-                    "parent but no transform component; a parented object must carry one");
-            }
-
             var components = new List<AuthoredComponentData>();
             foreach (var component in entry.Components)
             {
