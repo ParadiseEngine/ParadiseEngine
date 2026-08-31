@@ -50,6 +50,73 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
+    /// <summary>
+    /// Keeps sidecars in step with the assets while you work, and rebuilds after each settled
+    /// change. Runs until interrupted.
+    /// </summary>
+    /// <remarks>
+    /// Reconciles once at startup, because a project whose sidecars drifted before anyone was
+    /// watching is the normal starting state — and it is what makes <c>--dry-run</c> useful as a
+    /// "what is wrong right now" report.
+    /// </remarks>
+    public static int Watch(
+        IFileSystem fileSystem,
+        AssetProjectLayout layout,
+        string profile,
+        bool editor,
+        bool dryRun,
+        bool build)
+    {
+        var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun);
+        var settled = maintainer.Reconcile();
+        Console.WriteLine(dryRun
+            ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"
+            : $"watch: {settled} sidecar(s) brought up to date");
+
+        if (dryRun) return 0;
+
+        KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
+        var target = editor ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
+
+        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine);
+        using var stopping = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            // Handled, so the loop can put the watcher down rather than the process being shot
+            // mid-write. A second Ctrl+C is the OS's to act on.
+            e.Cancel = true;
+            stopping.Cancel();
+        };
+
+        watcher.Start();
+        Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");
+
+        while (!stopping.IsCancellationRequested)
+        {
+            try
+            {
+                Task.Delay(AssetWatcher.Debounce, stopping.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (watcher.Drain() == 0) continue;
+
+            if (!build) continue;
+
+            var result = watcher.Rebuild(profile, target, encoder);
+            foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+            Console.WriteLine(result.Succeeded
+                ? $"watch: rebuilt {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
+                : $"watch: build FAILED with {result.Errors.Count} error(s)");
+        }
+
+        Console.WriteLine("watch: stopped");
+        return 0;
+    }
+
     public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool editor)
     {
         // A vendored third_party/tools/KTX-Software under the project root wins; PATH and

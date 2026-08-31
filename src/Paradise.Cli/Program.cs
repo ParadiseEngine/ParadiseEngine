@@ -66,6 +66,8 @@ int Assets(string? assetVerb, string[] arguments)
     var editor = false;
     var fix = false;
     var keepEditor = false;
+    var dryRun = false;
+    var noBuild = false;
 
     for (var i = 0; i < arguments.Length; i++)
     {
@@ -76,6 +78,8 @@ int Assets(string? assetVerb, string[] arguments)
             case "--editor": editor = true; break;
             case "--fix": fix = true; break;
             case "--keep-editor": keepEditor = true; break;
+            case "--dry-run": dryRun = true; break;
+            case "--no-build": noBuild = true; break;
             default: return Unknown($"unknown argument '{arguments[i]}'");
         }
     }
@@ -101,7 +105,8 @@ int Assets(string? assetVerb, string[] arguments)
         "clean" => Verbs.Clean(physical, layout, keepEditor),
         "build" => Verbs.Build(physical, layout, profile, editor),
         "catalogue" => Verbs.Catalogue(physical, layout),
-        "watch" or "mv" or "pack" => NotImplemented(assetVerb),
+        "watch" => Verbs.Watch(physical, layout, profile, editor, dryRun, !noBuild),
+        "mv" or "pack" => NotImplemented(assetVerb),
         _ => Unknown($"unknown assets verb '{assetVerb}'"),
     };
 }
@@ -159,6 +164,8 @@ static int Usage()
         assets prefab-check [--fix]   police (or restore) canonical form of *.prefab documents
         assets build [--profile p]    compile assets/ into build/ (or .editor/play with --editor)
         assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
+        assets watch [--editor]       keep *.meta in step with assets/, rebuilding as you go
+                                        --dry-run reports without writing; --no-build skips the rebuild
         assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
 
         tools doctor                  report every build tool: found, version, and how to fix
