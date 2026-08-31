@@ -31,8 +31,9 @@ public class MaterialDataShapeTests
         await Assert.That((float)json["RoughnessFactor"]!).IsEqualTo(0.3f);
         await Assert.That((string?)json["AlphaMode"]).IsEqualTo("Opaque");
         await Assert.That((string?)json["BaseColorTexture"]).IsEqualTo("textures/steel_albedo.png");
-        // Color32 packs to 8 bits: 0.5 → byte 128 → 128/255 (not exactly 0.5).
-        await Assert.That((float)json["BaseColorFactor"]!["r"]!).IsEqualTo(128f / 255f);
+        // Color32 packs to 8 bits: 0.5 → byte 128 → 0x80. The hex spelling makes that visible,
+        // where four floats reading 0.5019608 only hinted at it.
+        await Assert.That((string?)json["BaseColorFactor"]).IsEqualTo("#808080FF");
         // A null texture slot is included (key present) AND emitted as JSON null — not "" or {}.
         // STJ represents a JSON null as a C#-null node, so assert presence + null value.
         await Assert.That(json.AsObject().ContainsKey("NormalTexture")).IsTrue();

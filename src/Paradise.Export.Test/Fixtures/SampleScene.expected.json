@@ -16,24 +16,9 @@
           "ShadowMapSize": null,
           "ShadowBlur": null,
           "AmbientMode": "Skybox",
-          "AmbientColor": {
-            "r": 0.03529412,
-            "g": 0.043137256,
-            "b": 0.05490196,
-            "a": 1
-          },
-          "AmbientEquatorColor": {
-            "r": 0.011764706,
-            "g": 0.015686275,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "AmbientGroundColor": {
-            "r": 0.003921569,
-            "g": 0.003921569,
-            "b": 0.003921569,
-            "a": 1
-          },
+          "AmbientColor": "#090B0EFF",
+          "AmbientEquatorColor": "#030404FF",
+          "AmbientGroundColor": "#010101FF",
           "AmbientSh": null,
           "SkyReflections": false,
           "SkySunSizeCos": 2,
@@ -42,46 +27,16 @@
           "Exposure": 1,
           "AmbientEnergy": 1,
           "HasBackground": false,
-          "BackgroundColor": {
-            "r": 0.5019608,
-            "g": 0.52156866,
-            "b": 0.56078434,
-            "a": 1
-          },
+          "BackgroundColor": "#80858FFF",
           "SkyGradient": false,
-          "SkyTopColor": {
-            "r": 0.03137255,
-            "g": 0.023529412,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "SkyHorizonColor": {
-            "r": 0.2,
-            "g": 0.2,
-            "b": 0.21176471,
-            "a": 1
-          },
-          "SkyGroundBottomColor": {
-            "r": 0.03137255,
-            "g": 0.023529412,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "SkyGroundHorizonColor": {
-            "r": 0.2,
-            "g": 0.2,
-            "b": 0.21176471,
-            "a": 1
-          },
+          "SkyTopColor": "#080604FF",
+          "SkyHorizonColor": "#333336FF",
+          "SkyGroundBottomColor": "#080604FF",
+          "SkyGroundHorizonColor": "#333336FF",
           "SkySkyCurveInv": 4,
           "SkyGroundCurveInv": 30,
           "FogEnabled": false,
-          "FogColor": {
-            "r": 0.21568628,
-            "g": 0.21568628,
-            "b": 0.21568628,
-            "a": 1
-          },
+          "FogColor": "#373737FF",
           "FogDensity": 0.01,
           "SsaoEnabled": false,
           "SsaoRadius": 1,
@@ -144,12 +99,7 @@
             0.76604444,
             0.5566705
           ],
-          "Color": {
-            "r": 1,
-            "g": 0.78039217,
-            "b": 0.61960787,
-            "a": 1
-          },
+          "Color": "#FFC79EFF",
           "Enabled": true,
           "Intensity": 2,
           "UseColorTemperature": true,
