@@ -50,7 +50,7 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
-    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool play)
+    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string profile, bool editor)
     {
         // A vendored third_party/tools/KTX-Software under the project root wins; PATH and
         // PARADISE_KTX_PATH are the fallbacks — the same probe order as KtxCreate itself.
@@ -60,7 +60,7 @@ internal static class Verbs
             fileSystem, layout, encoder,
             log: Console.WriteLine,
             warn: message => Console.Error.WriteLine($"warning: {message}"));
-        var result = runner.Run(profile, play ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
+        var result = runner.Run(profile, editor ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
 
         foreach (var error in result.Errors)
         {
@@ -107,6 +107,63 @@ internal static class Verbs
         Console.WriteLine($"  cd {Display(fileSystem, root)}");
         Console.WriteLine("  paradise assets verify");
         Console.WriteLine("  paradise assets build");
+        return 0;
+    }
+
+    /// <summary>
+    /// Regenerates the Asset Browser catalogue for a project.
+    /// </summary>
+    /// <remarks>
+    /// <b>This launches Blender, because only Blender can write a <c>.blend</c>.</b> The generator
+    /// itself is Python and lives in the addon, where it has to live anyway — it needs <c>bpy</c>
+    /// to mark a datablock as an asset. So this verb is a launcher, and it fails with the reason
+    /// rather than a stack trace when Blender or the addon is missing.
+    /// </remarks>
+    public static int Catalogue(IFileSystem fileSystem, AssetProjectLayout layout)
+    {
+        var blender = ProcessTools.FindExecutable(
+            Environment.GetEnvironmentVariable("PARADISE_BLENDER_PATH"), [], "blender");
+
+        if (blender is null)
+        {
+            Console.Error.WriteLine(
+                "paradise: no blender on PATH — set PARADISE_BLENDER_PATH to its executable. " +
+                "Only Blender can write a .blend, so the catalogue needs it.");
+            return 1;
+        }
+
+        var root = fileSystem.ConvertPathToInternal(layout.Root).Replace("\\", "/");
+
+        // The addon is installed as an EXTENSION, so its module is bl_ext.<repo>.paradise_assets
+        // and the repo name is whatever the user called it. Finding it through addon_utils rather
+        // than hard-coding "user_default" is what keeps this working on someone else's machine.
+        var script =
+            "import addon_utils,importlib;" +
+            "m=next(x.__name__ for x in addon_utils.modules() if x.__name__.endswith('paradise_assets'));" +
+            "c=importlib.import_module(m+'.catalogue');" +
+            $"print('CATALOGUE', *c.build(r'{root}'))";
+
+        Console.WriteLine($"building the prefab catalogue with {blender}");
+        var result = ProcessTools.Run(
+            blender, $"--background --python-expr \"{script}\"", timeoutMilliseconds: 10 * 60 * 1000);
+
+        var reported = result.Stdout
+            .Split('\n')
+            .FirstOrDefault(line => line.StartsWith("CATALOGUE", StringComparison.Ordinal));
+
+        if (!result.Succeeded || reported is null)
+        {
+            Console.Error.WriteLine(
+                "paradise: the catalogue build failed. The most likely cause is that the " +
+                "paradise_assets addon is not installed in that Blender — it owns the generator.");
+            if (!string.IsNullOrWhiteSpace(result.Stderr)) Console.Error.WriteLine(result.Stderr.TrimEnd());
+            return 1;
+        }
+
+        Console.WriteLine(reported.Trim());
+        Console.WriteLine(
+            $"catalogue: register '{Path.Combine(root, ".editor", "asset-library")}' " +
+            "as an asset library in Blender's preferences to see it.");
         return 0;
     }
 

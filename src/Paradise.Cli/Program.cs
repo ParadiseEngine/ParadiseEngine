@@ -59,11 +59,11 @@ int New(string[] arguments)
 
 int Assets(string? assetVerb, string[] arguments)
 {
-    if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean)");
+    if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, catalogue)");
 
     string? projectDirectory = null;
     var profile = "dev";
-    var play = false;
+    var editor = false;
     var fix = false;
     var keepEditor = false;
 
@@ -73,7 +73,7 @@ int Assets(string? assetVerb, string[] arguments)
         {
             case "--project" when i + 1 < arguments.Length: projectDirectory = arguments[++i]; break;
             case "--profile" when i + 1 < arguments.Length: profile = arguments[++i]; break;
-            case "--play": play = true; break;
+            case "--editor": editor = true; break;
             case "--fix": fix = true; break;
             case "--keep-editor": keepEditor = true; break;
             default: return Unknown($"unknown argument '{arguments[i]}'");
@@ -99,7 +99,8 @@ int Assets(string? assetVerb, string[] arguments)
         "verify" => Verbs.Verify(physical, layout),
         "prefab-check" => Verbs.PrefabCheck(physical, layout, fix),
         "clean" => Verbs.Clean(physical, layout, keepEditor),
-        "build" => Verbs.Build(physical, layout, profile, play),
+        "build" => Verbs.Build(physical, layout, profile, editor),
+        "catalogue" => Verbs.Catalogue(physical, layout),
         "watch" or "mv" or "pack" => NotImplemented(assetVerb),
         _ => Unknown($"unknown assets verb '{assetVerb}'"),
     };
@@ -156,8 +157,9 @@ static int Usage()
 
         assets verify                 check the assets/ tree: sidecars, identities, validity
         assets prefab-check [--fix]   police (or restore) canonical form of *.prefab documents
-        assets build [--profile p]    compile assets/ into build/ (or .editor/play with --play)
+        assets build [--profile p]    compile assets/ into build/ (or .editor/play with --editor)
         assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
+        assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
 
         tools doctor                  report every build tool: found, version, and how to fix
         tools install <ktx|slang>     install one (may prompt for elevation on Windows)
