@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 
 using Paradise.Export.Data;
@@ -31,8 +32,29 @@ namespace Paradise.Export.Serialization
         /// <summary>Reads the project settings document.</summary>
         public static ProjectSettingsData ReadProjectSettings(string toml) => Read<ProjectSettingsData>(toml);
 
+        /// <summary>
+        /// The document as the contract's JSON text — for a reader that works in JSON and only
+        /// needs the format bridged.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Data.AuthoredDocument"/> is the case this exists for: it reads component
+        /// payloads as <c>JsonElement</c> and is shared by the schema, the config and the live
+        /// protocol. Bridging the TEXT lets one reader serve both formats, rather than a second
+        /// traversal of the same document growing beside the first.
+        /// </remarks>
+        public static string ToJsonText(string toml) => ParseTable(toml).ToJsonString();
+
         /// <summary>Reads any contract document.</summary>
         public static T Read<T>(string toml)
+        {
+            var node = ParseTable(toml);
+            var typeInfo = (JsonTypeInfo<T>)ExportJsonReader.SerializerOptions.GetTypeInfo(typeof(T));
+            return JsonSerializer.Deserialize(node, typeInfo)
+                ?? throw new InvalidDataException("the document is valid TOML but describes nothing");
+        }
+
+        /// <summary>Parses TOML into the contract's node tree.</summary>
+        private static JsonNode ParseTable(string toml)
         {
             ArgumentNullException.ThrowIfNull(toml);
 
@@ -47,10 +69,7 @@ namespace Paradise.Export.Serialization
                 throw new InvalidDataException($"the document is not valid TOML: {error.Message}", error);
             }
 
-            var node = TomlJsonBridge.ToJson(table);
-            var typeInfo = (JsonTypeInfo<T>)ExportJsonReader.SerializerOptions.GetTypeInfo(typeof(T));
-            return JsonSerializer.Deserialize(node, typeInfo)
-                ?? throw new InvalidDataException("the document is valid TOML but describes nothing");
+            return TomlJsonBridge.ToJson(table);
         }
     }
 }
