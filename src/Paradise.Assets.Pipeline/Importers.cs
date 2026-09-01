@@ -185,6 +185,50 @@ public sealed class MeshImporter : IAssetImporter
     }
 }
 
+/// <summary>
+/// Baked navmeshes: copied through byte-identical, beside the level that names them.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A <c>.navmesh.bin</c> is a DotRecast bake — geometry the runtime queries, produced by a tool
+/// rather than authored — so like an audio bank it is committed and carried, not compiled. It
+/// needs a step of its own for one reason: without one nothing claims the extension, so the file
+/// was verified (it has a sidecar, it is an asset) and then silently never written to the output
+/// tree. A level would build clean and ship with no navmesh, which surfaces as agents that cannot
+/// path rather than as anything the build could name.
+/// </para>
+/// <para>
+/// The COMPOUND extension is what is claimed, not <c>.bin</c>. A bare <c>.bin</c> is the least
+/// specific name a binary file can have — a buffer, a blob, someone's scratch export — and
+/// claiming it would make this importer the silent owner of every one of them.
+/// </para>
+/// </remarks>
+public sealed class NavMeshImporter : IAssetImporter
+{
+    /// <summary>The extension a baked navmesh carries, beside its level.</summary>
+    public const string Suffix = ".navmesh.bin";
+
+    /// <inheritdoc />
+    public string Name => "navmesh";
+
+    /// <inheritdoc />
+    public bool DeterministicCopy => true;
+
+    /// <inheritdoc />
+    public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool Import(ImportContext context, List<string> errors)
+    {
+        // Not HasExtension: that tests the LAST extension, which for this is ".bin". The name
+        // ends with the compound suffix or this step is not the one.
+        if (!context.Source.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase)) return false;
+
+        context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+        return true;
+    }
+}
+
 /// <summary>Committed audio banks: verified elsewhere, copied through byte-identical.</summary>
 public sealed class AudioImporter : IAssetImporter
 {
