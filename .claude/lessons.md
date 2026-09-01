@@ -310,3 +310,31 @@
   big` in the console AND on a frame counter that stops advancing. **Rule**: when choosing a
   frame/tick threshold for a browser smoke test, pick one past wasm tier-up (hundreds of frames, not
   tens), and assert liveness after the marker, not just the marker.
+
+## Packaging / CI
+
+- [hits: 1] **A new packable project under `src/` does not publish until it is named in
+  `.github/workflows/publish-nuget.yml`.** The `Pack all packages` step iterates a HAND-MAINTAINED
+  `projects=(…)` array — nothing globs `src/`, so a project with a `<PackageId>` and no
+  `IsPackable>false` builds, tests and merges perfectly while silently never shipping. PR #182
+  (`359c0ec`, the asset pipeline) added four — `Paradise.Assets.Project`, `.Documents`, `.Pipeline`
+  and `Paradise.Cli` — and updated nothing; the gap survived the merge because the step's own
+  `count -ne ${#projects[@]}` guard only checks the array against itself, never against the repo.
+  **Rule**: adding a packable project is a two-file change. To audit the list:
+  `for f in src/*/*.csproj; do grep -q "IsPackable>false" "$f" || basename "$f" .csproj; done | sort`
+  and diff that against the array. `Paradise.Cli` is the one entry that is not a library — it is a
+  `PackAsTool` dotnet tool, which still packs to a single `.nupkg` and pushes on the same run.
+
+## Local SDK vs. pinned Roslyn
+
+- [hits: 1] **`error CS9057: Analyzer assembly … references version '5.9.0.0' of the compiler, which
+  is newer than the currently running version '5.3.0.0'` is a LOCAL SDK shortfall, not a broken
+  branch.** `src/Directory.Packages.props` pins `Microsoft.CodeAnalysis.CSharp` 5.9.0, so every
+  source generator here (`Paradise.Authoring.Generators`, `.BT.Generators`, `.ECS.Generators`) is
+  built against a Roslyn newer than the one shipped in SDK 10.0.200 — the compiler refuses to LOAD
+  the generator, and every project consuming it fails to build. `global.json` says
+  `rollForward: latestMinor`, so CI picks up a newer 10.0.x runner SDK and is fine; a machine with
+  only 10.0.200 installed is not. Deleting the generator's `bin/`+`obj/` does NOT help — the rebuild
+  reproduces it exactly. **Rule**: when this appears, check `dotnet --list-sdks` before suspecting
+  your change; anything that transitively references `Paradise.Authoring` is blocked until a newer
+  10.0.x SDK is installed. It is not evidence about the change under test.
