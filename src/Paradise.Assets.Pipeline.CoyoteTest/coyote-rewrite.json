@@ -1,0 +1,12 @@
+{
+	"AssembliesPath": ".",
+	"Assemblies": [
+		"Paradise.Assets.Pipeline.CoyoteTest.dll",
+		"Paradise.Assets.Pipeline.dll"
+	],
+	"OutputPath": ".",
+	"IsRewritingConcurrentCollections": true,
+	"IsRewritingUnitTests": false,
+	"IsRewritingThreads": true,
+	"IsDataRaceCheckingEnabled": true
+}

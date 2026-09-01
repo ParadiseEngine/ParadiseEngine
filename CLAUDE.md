@@ -36,7 +36,15 @@ dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest/... -c Release
 dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
-Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`.
+Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
+`Paradise.Assets.Pipeline.CoyoteTest`.
+
+A fourth thing, learned from the asset watcher: **lock on an `object`, not on
+`System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
+`Monitor.Enter`/`Exit` and does not intercept `Lock.EnterScope`, so with the newer type it cannot
+control the lock — every iteration reports the wait as a potential hang, and silencing that would
+only hide the fact that the interleavings around that lock are never explored. The newer type is
+worth having where a lock is hot; it is not worth a suite that cannot see it.
 
 Three things worth knowing before writing one:
 

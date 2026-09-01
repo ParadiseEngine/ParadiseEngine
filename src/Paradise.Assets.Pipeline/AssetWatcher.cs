@@ -54,7 +54,14 @@ public sealed class AssetWatcher : IDisposable
     private readonly Action<string> _log;
     private readonly Func<DateTimeOffset> _now;
 
-    private readonly Lock _gate = new();
+    // `object` and not `System.Threading.Lock`, deliberately: Coyote (1.7.11) rewrites
+    // Monitor.Enter/Exit and does not intercept Lock.EnterScope, so with the newer type it
+    // cannot CONTROL this lock -- every iteration of Paradise.Assets.Pipeline.CoyoteTest reported
+    // the wait as a potential hang, and suppressing that would only have hidden the fact that the
+    // interleavings around this gate were never being explored. The lock is held for a few
+    // dictionary operations a few times a second, so the newer type buys nothing measurable here
+    // and costs the only systematic test this class has. Do not "modernize" it back.
+    private readonly object _gate = new();
     private readonly Dictionary<UPath, DateTimeOffset> _pending = [];
     private readonly Dictionary<UPath, (UPath From, DateTimeOffset At)> _renames = [];
     private readonly Dictionary<UPath, DateTimeOffset> _deleted = [];
