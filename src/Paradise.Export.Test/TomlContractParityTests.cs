@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -67,6 +68,31 @@ public class TomlContractParityTests
         await Assert.That(fromToml.Entities[0].Count).IsEqualTo(fromJson.Entities[0].Count);
         await Assert.That(fromToml.Entities[0].Select(component => component.Id))
             .IsEquivalentTo(fromJson.Entities[0].Select(component => component.Id));
+    }
+
+    [Test]
+    public async Task a_null_array_element_survives_as_the_empty_table()
+    {
+        // The documented material-slot shape, and the one null the omit rule may NOT apply to:
+        // position is meaning, so dropping an empty slot would move every override after it onto
+        // the wrong primitive. TOML spells it {} — what authoring already writes for "no
+        // reference" — and the reader turns it back into the null it stood for.
+        List<AuthoredComponentData> entity =
+        [
+            EntityDocumentShapeTests.Payload(
+                TestComponentIds.CrateId, "Paradise.Export.Tests.MaterialsFixture",
+                """{"Slots":[{"Path":"materials/rust.json"},null,{"Path":"materials/steel.json"}]}"""),
+        ];
+        var document = new LevelData { Entities = { entity } };
+
+        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
+        var json = JsonNode.Parse(ExportJsonWriter.SerializeToString(restored))!;
+        var slots = (JsonArray)json["Entities"]![0]![0]!["Data"]!["Slots"]!;
+
+        await Assert.That(slots.Count).IsEqualTo(3);
+        await Assert.That(slots[1] is null).IsTrue();
+        await Assert.That((string?)slots[0]!["Path"]).IsEqualTo("materials/rust.json");
+        await Assert.That((string?)slots[2]!["Path"]).IsEqualTo("materials/steel.json");
     }
 
     /// <summary>

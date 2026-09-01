@@ -34,11 +34,13 @@ namespace Paradise.Export.Serialization
     /// <para>
     /// <b>The one place the formats genuinely differ is null.</b> The contract writes with
     /// <c>DefaultIgnoreCondition = Never</c>, so its JSON carries nulls, and <b>TOML has no null
-    /// at all</b> — there is no representation to choose. A null-valued key is therefore OMITTED,
+    /// at all</b> — there is no representation to choose. A null-valued KEY is therefore OMITTED,
     /// and reading relies on System.Text.Json giving an absent key the member's default, which is
-    /// the same value the null deserialized to. That is an argument, not a proof, which is why
-    /// the parity test reads a document both ways and compares the results rather than trusting
-    /// it.
+    /// the same value the null deserialized to. A null ARRAY ELEMENT cannot be omitted — position
+    /// is meaning (an empty material slot) — so it is spelled as the empty inline table <c>{}</c>,
+    /// the same spelling authoring uses for a reference to nothing, and read back as null. That is
+    /// an argument, not a proof, which is why the parity test reads a document both ways and
+    /// compares the results rather than trusting it.
     /// </para>
     /// </remarks>
     internal static class TomlJsonBridge
@@ -181,11 +183,12 @@ namespace Paradise.Export.Serialization
                     foreach (var item in array)
                     {
                         // A null INSIDE an array cannot be omitted -- that would shorten the array
-                        // and silently move every element after it. The contract has no nullable
-                        // array elements, so this is a guard against one appearing rather than a
-                        // case to handle.
-                        values.Add(Convert(item, nested: true) ?? throw new InvalidOperationException(
-                            "a null inside an array has no TOML form, and dropping it would renumber the array"));
+                        // and silently move every element after it. Since v6, payloads are opaque
+                        // and DO carry null array elements (an empty material slot, whose position
+                        // is meaning), so the null is spelled as the empty inline table -- the same
+                        // spelling authoring uses for "a reference to nothing" -- and the read side
+                        // turns it back into the null it stood for.
+                        values.Add(Convert(item, nested: true) ?? new TomlTable(inline: true));
                     }
 
                     return values;
@@ -236,7 +239,14 @@ namespace Paradise.Export.Serialization
                 case TomlArray values:
                 {
                     var array = new JsonArray();
-                    foreach (var value in values) array.Add((JsonNode?)Convert(value));
+                    foreach (var value in values)
+                    {
+                        // The write side's spelling of a null element, undone. Only PLAIN arrays
+                        // carry it: a `[[header]]` array never holds a null (a null among objects
+                        // forces the whole array inline), so an empty table there stays an object.
+                        array.Add(value is TomlTable { Count: 0 } ? null : (JsonNode?)Convert(value));
+                    }
+
                     return array;
                 }
 
