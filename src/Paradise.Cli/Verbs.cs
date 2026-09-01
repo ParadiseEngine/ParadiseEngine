@@ -65,7 +65,8 @@ internal static class Verbs
         string? profile,
         bool editor,
         bool dryRun,
-        bool build)
+        bool build,
+        bool tray = true)
     {
         var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun);
         var settled = maintainer.Reconcile();
@@ -77,41 +78,41 @@ internal static class Verbs
 
         KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
         var target = editor ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
+        var output = fileSystem.ConvertPathToInternal(layout.OutputFor(target));
 
+        using var signals = new WatchSignals();
         using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine);
-        using var stopping = new CancellationTokenSource();
+        using var watchTray = WatchTray.Create(
+            new WatchTrayHooks(
+                Stop: signals.RequestStop,
+                Rebuild: build ? signals.RequestRebuild : null,
+                OpenOutput: () => ShellFolders.Open(output)),
+            enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
             // Handled, so the loop can put the watcher down rather than the process being shot
-            // mid-write. A second Ctrl+C is the OS's to act on.
+            // mid-write. A second Ctrl+C is the OS's to act on. The tray's Stop is the same
+            // signal, so both paths leave through the loop rather than through the OS.
             e.Cancel = true;
-            stopping.Cancel();
+            signals.RequestStop();
         };
 
         watcher.Start();
         Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");
-
-        while (!stopping.IsCancellationRequested)
+        if (watchTray.IsAvailable)
         {
-            try
-            {
-                Task.Delay(AssetWatcher.Debounce, stopping.Token).GetAwaiter().GetResult();
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
-            if (watcher.Drain() == 0) continue;
-
-            if (!build) continue;
-
-            var result = watcher.Rebuild(profile, target, encoder);
-            foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
-            Console.WriteLine(result.Succeeded
-                ? $"watch: rebuilt {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
-                : $"watch: build FAILED with {result.Errors.Count} error(s)");
+            Console.WriteLine("watch: tray icon is up (right-click to stop, rebuild, or open the build folder)");
         }
+
+        new WatchSession(
+            signals,
+            watchTray,
+            drain: watcher.Drain,
+            rebuild: build ? () => watcher.Rebuild(profile, target, encoder) : null,
+            log: Console.WriteLine,
+            error: message => Console.Error.WriteLine(message),
+            outputDisplay: Display(fileSystem, layout.OutputFor(target)),
+            quiet: AssetWatcher.Debounce).Run();
 
         Console.WriteLine("watch: stopped");
         return 0;

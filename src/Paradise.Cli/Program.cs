@@ -68,6 +68,7 @@ int Assets(string? assetVerb, string[] arguments)
     var keepEditor = false;
     var dryRun = false;
     var noBuild = false;
+    var noTray = false;
 
     for (var i = 0; i < arguments.Length; i++)
     {
@@ -80,6 +81,7 @@ int Assets(string? assetVerb, string[] arguments)
             case "--keep-editor": keepEditor = true; break;
             case "--dry-run": dryRun = true; break;
             case "--no-build": noBuild = true; break;
+            case "--no-tray": noTray = true; break;
             default: return Unknown($"unknown argument '{arguments[i]}'");
         }
     }
@@ -105,7 +107,7 @@ int Assets(string? assetVerb, string[] arguments)
         "clean" => Verbs.Clean(physical, layout, keepEditor),
         "build" => Verbs.Build(physical, layout, profile, editor),
         "catalogue" => Verbs.Catalogue(physical, layout),
-        "watch" => Verbs.Watch(physical, layout, profile, editor, dryRun, !noBuild),
+        "watch" => Verbs.Watch(physical, layout, profile, editor, dryRun, !noBuild, !noTray),
         "mv" or "pack" => NotImplemented(assetVerb),
         _ => Unknown($"unknown assets verb '{assetVerb}'"),
     };
@@ -166,6 +168,8 @@ static int Usage()
         assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
         assets watch [--editor]       keep *.meta in step with assets/, rebuilding as you go
                                         --dry-run reports without writing; --no-build skips the rebuild
+                                        a tray icon (idle/building/failed) when the OS has one
+                                        --no-tray keeps the console-only behaviour
         assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
 
         tools doctor                  report every build tool: found, version, and how to fix
