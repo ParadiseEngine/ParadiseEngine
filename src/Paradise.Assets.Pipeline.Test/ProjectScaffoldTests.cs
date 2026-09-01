@@ -52,8 +52,25 @@ public class ProjectScaffoldTests
         await Assert.That(result.Succeeded).IsTrue();
 
         // The level reaches the runtime's format, which is the point of scaffolding a project
-        // rather than an assets folder.
+        // rather than an assets folder. `dev` is named because naming no profile is a DIFFERENT
+        // request — see the test below — and it is what `paradise new` prints as the first step.
         await Assert.That(fileSystem.FileExists("/game/build/levels/main.json")).IsTrue();
+    }
+
+    [Test]
+    public async Task naming_no_profile_builds_the_defaults_rather_than_dev()
+    {
+        // `dev` is not privileged, so an absent --profile is the built-in defaults (TOML), not the
+        // scaffolded JSON profile. The scaffold must still build cleanly that way — the whole
+        // sample goes through the TOML bake — and the extension is how the two requests differ.
+        using var fileSystem = Scaffold();
+
+        var result = new BuildRunner(fileSystem, Layout(fileSystem), encoder: null).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/main.toml")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/main.json")).IsFalse();
     }
 
     [Test]

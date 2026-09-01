@@ -99,8 +99,10 @@ public static class ProjectScaffold
             {
                 "profiles", new CanonicalTomlTable
                 {
-                    // json, because that is the format the runtime's reader takes -- a toml
-                    // profile cannot express the export contract and the build refuses it.
+                    // json, because that is the format the runtime's loader reads. The build can
+                    // emit the contract as TOML too (BuildProfile.Default does), but a scaffolded
+                    // profile exists to produce a playable tree, so it names what the engine
+                    // consumes.
                     { "dev", new CanonicalTomlTable { { "document_format", "json" }, { "texture_quality", "fast" } } },
                     { "release", new CanonicalTomlTable { { "document_format", "json" }, { "texture_quality", "full" } } },
                 }

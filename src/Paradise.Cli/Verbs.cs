@@ -173,7 +173,9 @@ internal static class Verbs
         Console.WriteLine($"created '{name}' ({written.Count} files). Next:");
         Console.WriteLine($"  cd {Display(fileSystem, root)}");
         Console.WriteLine("  paradise assets verify");
-        Console.WriteLine("  paradise assets build");
+        // Named explicitly: an absent --profile means the built-in defaults (TOML), not the
+        // scaffolded dev profile, and the first-run path should build what the scaffold wrote.
+        Console.WriteLine("  paradise assets build --profile dev");
         return 0;
     }
 

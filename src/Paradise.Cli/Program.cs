@@ -173,7 +173,8 @@ static int Usage()
 
         options:
           --project <dir>             the project root (default: found from the working directory)
-          --profile <name>            the build profile (default: dev)
+          --profile <name>            a build profile declared in project.toml
+                                        (omitted: the built-in defaults — toml, full quality)
         """);
     return 2;
 }
