@@ -24,7 +24,8 @@ public class HitTestVisibilityTests
 
     /// <summary>Click the centre and report whether the inner element caught it. Null when
     /// Noesis is unavailable.</summary>
-    private static (bool Handled, int Reached)? ClickCentre(string xaml, string tag)
+    /// <param name="hasInner">Whether the XAML declares an <c>Inner</c> element to watch.</param>
+    private static (bool Handled, int Reached)? ClickCentre(string xaml, string tag, bool hasInner = true)
     {
         var dir = Directory.CreateTempSubdirectory(tag).FullName;
         var path = Path.Combine(dir, "main.xaml");
@@ -34,10 +35,13 @@ public class HitTestVisibilityTests
         try { core.Input.Tick(0.0); }
         catch (DllNotFoundException) { return null; }
 
-        var inner = (global::Noesis.FrameworkElement)
-            ((global::Noesis.FrameworkElement)core.View!.Content).FindName("Inner");
         var reached = 0;
-        inner.MouseLeftButtonDown += (_, e) => { reached++; e.Handled = true; };
+        if (hasInner)
+        {
+            var inner = (global::Noesis.FrameworkElement)
+                ((global::Noesis.FrameworkElement)core.View!.Content).FindName("Inner");
+            inner.MouseLeftButtonDown += (_, e) => { reached++; e.Handled = true; };
+        }
 
         core.TryUpdateRenderTree(out _);
         core.Input.Tick(1.0 / 60.0);
@@ -75,5 +79,28 @@ public class HitTestVisibilityTests
 
         await Assert.That(r.Reached).IsEqualTo(1);
         await Assert.That(r.Handled).IsTrue();
+    }
+
+    /// <summary>
+    /// An overlay with nothing in it swallows nothing — the whole point of the verdict.
+    /// </summary>
+    /// <remarks>
+    /// The narrowest possible statement of what the host relies on, and the case that was
+    /// silently broken: Noesis 4.0.0's <c>View.MouseButtonDown</c> returns true even here, where
+    /// the view is one empty Grid with a null background and there is nothing under the pointer
+    /// at all. Forwarded to the host as-is, that is a total mouse blackout — a HUD that draws
+    /// nothing eats every click in the game. Left-and-right, because the press is the only event
+    /// kind affected and both buttons showed it.
+    /// </remarks>
+    [Test]
+    public async Task an_empty_overlay_does_not_swallow_the_click()
+    {
+        var result = ClickCentre(
+            Header + """
+                      Background="{x:Null}"/>
+            """, "hit-empty", hasInner: false);
+        if (result is not { } r) { Skip.Test("Noesis native library not loadable"); return; }
+
+        await Assert.That(r.Handled).IsFalse();
     }
 }

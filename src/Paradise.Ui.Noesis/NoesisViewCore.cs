@@ -183,9 +183,28 @@ public sealed class NoesisViewCore
                         return view.MouseMove(TrackX(raw.X), TrackY(raw.Y));
 
                     case WindowEventKind.Button when raw.Source is EventSource.Mouse or EventSource.Touch:
-                        return raw.Pressed
-                            ? view.MouseButtonDown(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton))
-                            : view.MouseButtonUp(TrackX(raw.X), TrackY(raw.Y), ToNoesis(raw.PointerButton));
+                    {
+                        var x = TrackX(raw.X);
+                        var y = TrackY(raw.Y);
+                        if (!raw.Pressed) return view.MouseButtonUp(x, y, ToNoesis(raw.PointerButton));
+
+                        // A PRESS is the one event whose verdict Noesis cannot give us. Its
+                        // View.MouseButtonDown returns true whatever is under the pointer —
+                        // measured against an empty view with nothing hit-testable in it at all,
+                        // and true for left and right alike — because a press always does focus
+                        // and capture work that the view counts as consumption. Taken at face
+                        // value that is an input blackout: IUiInput's verdict gates game logic,
+                        // so every click in the game would be swallowed by any overlay, however
+                        // transparent. Move, release and wheel all answer honestly and are still
+                        // asked. Only the press is decided here.
+                        //
+                        // Hit-tested BEFORE forwarding, because the question is what the user
+                        // pressed ON — the press itself may open a popup or move focus, and the
+                        // tree it leaves behind is not what they aimed at.
+                        var consumed = OverSomething(view, x, y);
+                        view.MouseButtonDown(x, y, ToNoesis(raw.PointerButton));
+                        return consumed;
+                    }
 
                     case WindowEventKind.Button when raw.Source == EventSource.Keyboard:
                         // Only a mapped key may consume: an unmapped one must report "not
@@ -249,6 +268,50 @@ public sealed class NoesisViewCore
                 owner._simTick?.Invoke();
                 owner._pendingSnapshot = view.Update(simTimeSeconds);
             }
+        }
+
+        /// <summary>Whether anything the UI would route input to sits under the point.</summary>
+        /// <remarks>
+        /// <para>
+        /// <b>Filtered, because <see cref="VisualTreeHelper.HitTest(Visual, Point)"/> is a VISUAL
+        /// hit test and input hit-testing is not the same question.</b> The plain overload
+        /// happily returns an element inside an <c>IsHitTestVisible="False"</c> subtree — it is
+        /// still painted, so it is still visually there — and Noesis 4.0.0 exposes no
+        /// <c>InputHitTest</c> to ask the other question directly. The filter is how the
+        /// difference is expressed: a subtree the UI would not route input into is skipped whole,
+        /// which is exactly what <c>IsHitTestVisible="False"</c> means and why a False parent
+        /// cannot be overridden by a True child.
+        /// </para>
+        /// <para>
+        /// Disabled elements are deliberately NOT skipped: a greyed-out button still swallows the
+        /// click that lands on it, and letting that reach the game would fire a weapon through a
+        /// modal dialog.
+        /// </para>
+        /// <para>
+        /// This is a HIT, which is a coarser question than "did an element take it" — a bare
+        /// panel with a background reports consumed here though nothing would have run. The
+        /// authoring discipline closes that gap from the other side: paint carries
+        /// <c>IsHitTestVisible="False"</c> and roots carry a null background, so what stays
+        /// hit-testable is what is meant to be interactive.
+        /// </para>
+        /// </remarks>
+        private static bool OverSomething(View view, int x, int y)
+        {
+            if (view.Content is not Visual root) return false;
+
+            var hit = false;
+            VisualTreeHelper.HitTest(
+                root,
+                visual => visual is UIElement { IsHitTestVisible: false }
+                    ? HitTestFilterBehavior.ContinueSkipSelfAndChildren
+                    : HitTestFilterBehavior.Continue,
+                _ =>
+                {
+                    hit = true;
+                    return HitTestResultBehavior.Stop; // the topmost one settles it
+                },
+                new PointHitTestParameters(new Point(x, y)));
+            return hit;
         }
 
         private int TrackX(float x) => _pointerX = (int)x;
