@@ -1,11 +1,13 @@
 # Paradise Engine
 
 A modular .NET game engine monorepo: archetype ECS, behavior trees, stateless physics
-queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline,
-glTF/KTX2 asset loading, and ImGui/NoesisGUI UI integrations. Targets `net10.0`, C# 14,
-NativeAOT/trimming compatible.
+queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline
+targeting desktop and the browser, glTF/KTX2 asset loading, an asset build pipeline driven
+by the `paradise` CLI, SDL windowing, Wwise audio, and ImGui/NoesisGUI UI integrations.
+Targets `net10.0`, C# 14, NativeAOT/trimming compatible.
 
-All library packages are published to NuGet from a single version tag.
+All packages are published to NuGet from a single version tag — the libraries below plus
+`Paradise.Cli`, which ships as a dotnet tool rather than a reference.
 
 ## Packages
 
@@ -35,26 +37,59 @@ All library packages are published to NuGet from a single version tag.
 | [Paradise.BT.Builder](src/Paradise.BT.Builder) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Builder.svg)](https://www.nuget.org/packages/Paradise.BT.Builder) | Authoring DSL base classes |
 | [Paradise.BT.Nodes](src/Paradise.BT.Nodes) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Nodes.svg)](https://www.nuget.org/packages/Paradise.BT.Nodes) | Built-in node library (Sequence, Selector, Parallel, decorators, delay) |
 
-### Rendering and assets
+### Rendering
 
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.Rendering](src/Paradise.Rendering) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.svg)](https://www.nuget.org/packages/Paradise.Rendering) | Backend-agnostic rendering data contract: handles, descriptors, reflection records |
 | [Paradise.Rendering.WebGPU](src/Paradise.Rendering.WebGPU) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.WebGPU.svg)](https://www.nuget.org/packages/Paradise.Rendering.WebGPU) | WebGPU (Dawn) backend via WebGPUSharp |
+| [Paradise.Rendering.Browser](src/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | Browser (WebAssembly) WebGPU backend driving the browser's own WebGPU through a bundled JS shim — consumers write no JavaScript |
 | [Paradise.Rendering.Pbr](src/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders |
+
+### Assets
+
+Runtime readers — what a host links against to load what the pipeline built:
+
+| Package | NuGet | Description |
+| --- | --- | --- |
 | [Paradise.Assets.Gltf](src/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 reader scoped to the Paradise export contract |
 | [Paradise.Assets.Textures](src/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
+
+The build-time asset pipeline — authoring-side only; a host that merely mounts a built tree
+never references these:
+
+| Package | NuGet | Description |
+| --- | --- | --- |
+| [Paradise.Assets.Project](src/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Asset project model: the `assets/` layout, the `project.toml` manifest, the content-addressed artifact cache shared with the Blender addon, and Zio mount construction |
+| [Paradise.Assets.Documents](src/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Authored-document contracts: canonical TOML writing, `*.meta` sidecars, and the prefab/scene documents. C# reference implementation, mirrored in the Blender addon |
+| [Paradise.Assets.Pipeline](src/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | The build pipeline itself: source-tree verification, canonical-form checks, importers, and the build verbs' logic, on Zio |
+
+### Windowing and audio
+
+| Package | NuGet | Description |
+| --- | --- | --- |
+| [Paradise.Windowing](src/Paradise.Windowing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.svg)](https://www.nuget.org/packages/Paradise.Windowing) | Backend-agnostic windowing contract: window control, render surfaces, timestamped raw device input |
+| [Paradise.Windowing.Sdl](src/Paradise.Windowing.Sdl) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.Sdl.svg)](https://www.nuget.org/packages/Paradise.Windowing.Sdl) | SDL3 implementation of that contract, with WebGPU-ready surface descriptors for Win32/Cocoa/Wayland/X11 |
+| [Paradise.Audio.Wwise](src/Paradise.Audio.Wwise) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.Wwise.svg)](https://www.nuget.org/packages/Paradise.Audio.Wwise) | Audiokinetic Wwise integration; managed bindings only (requires a Wwise licence and a local SDK install, from which the native shim is built) |
 
 ### UI
 
 | Package | NuGet | Description |
 | --- | --- | --- |
+| [Paradise.Ui](src/Paradise.Ui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.svg)](https://www.nuget.org/packages/Paradise.Ui) | Engine-neutral UI input contract: the `UiEvent` stream, the sim-thread `IUiInput` half, and `CompositeUiInput` fan-out for stacking UI systems |
 | [Paradise.Ui.ImGui](src/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI on the WebGPU backend |
 | [Paradise.Ui.Noesis](src/Paradise.Ui.Noesis) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.Noesis.svg)](https://www.nuget.org/packages/Paradise.Ui.Noesis) | NoesisGUI (XAML) integration (requires a NoesisGUI license) |
 
-Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`) are not published
-standalone — they ship inside `Paradise.ECS` and `Paradise.BT` under `analyzers/dotnet/cs`,
-so referencing those packages activates the codegen automatically.
+### Tools
+
+| Package | NuGet | Description |
+| --- | --- | --- |
+| [Paradise.Cli](src/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` command: scaffold a project, verify and build its assets, and report on the build toolchain. Ships as a dotnet tool, not a library reference |
+
+Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`,
+`Paradise.Authoring.Generators`) are not published standalone — they ship inside
+`Paradise.ECS`, `Paradise.BT` and `Paradise.Authoring` under `analyzers/dotnet/cs`, so
+referencing those packages activates the codegen automatically.
 
 ## Monorepo layout
 
@@ -64,6 +99,9 @@ so referencing those packages activates the codegen automatically.
 - `src/Slang.targets` — Slang → WGSL shader toolchain (downloads a pinned `slangc` per
   `tools/slang/slang.manifest.json`, compiles and embeds shaders at build time).
 - `src/Ktx.targets` — libktx native-library staging for platforms not covered by Ktx2.NET.
+- `tools/slang/`, `tools/ktx/` — pinned external toolchains (manifest + bootstrap) for the
+  Slang shader compiler and the `ktx create` CLI the texture step shells out to.
+  `paradise tools doctor` reports both; `paradise tools install <ktx|slang>` fetches one.
 - `ParadiseEngine.slnx` — top-level solution covering all projects.
 - `CLAUDE.md` — architecture notes, custom node patterns, and the coordinate convention.
 
@@ -86,6 +124,27 @@ dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 
 Tests use TUnit on Microsoft.Testing.Platform. The first build of a shader-owning project
 downloads the pinned Slang toolchain (cached under the NuGet package root).
+
+## Asset projects
+
+An asset project is an `assets/` source tree plus a `project.toml`, compiled into `build/`
+by the `paradise` CLI. Install it globally, or pin it per repo in a tool manifest:
+
+```bash
+dotnet tool install --global Paradise.Cli
+# or, per repo:  dotnet new tool-manifest && dotnet tool install Paradise.Cli
+```
+
+```bash
+paradise new MyGame            # assets tree, a sample level, .gitignore
+paradise assets verify         # sidecars, identities, validity
+paradise assets build          # assets/ -> build/  (--editor for .editor/play)
+paradise assets watch          # keep *.meta in step, rebuilding as you go
+paradise tools doctor          # every build tool: found, version, how to fix
+```
+
+Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
+them all with the shared `--project` and `--profile` options.
 
 ## Releasing
 
