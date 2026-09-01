@@ -237,14 +237,45 @@ public static class ProjectVerifier
 
             foreach (var component in candidate.Components)
             {
-                foreach (var (key, value) in component.Data)
-                {
-                    if (value is not CanonicalInlineTable table || table.Count == 0) continue;
-                    if (AssetReferenceCodec.Read(table, "", _ => new PrefabDocumentException("", "")) is { } reference)
+                var name = component.Type ?? DocumentGuid.Format(component.Id);
+                foreach (var (key, value) in component.Data) Walk(value, $"{name}.{key}");
+            }
+        }
+
+        // The same walk PrefabBake.ToValue does, because that is the specification: a reference
+        // the bake will flatten is a reference verify must have checked, and the shape the pair
+        // exists for — material slots — is an ARRAY of references, not a value-position one.
+        void Walk(object? value, string where)
+        {
+            switch (value)
+            {
+                // Gated on the format's OWN definition of a reference rather than on the model
+                // type: inside an array the reader wraps every table as inline, so an arbitrary
+                // payload table would otherwise be read as a malformed reference and reported as
+                // one. The empty table is a reference to nothing, which is always consistent.
+                case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table.ToList()):
+                    try
                     {
-                        Check(reference, $"{component.Type ?? DocumentGuid.Format(component.Id)}.{key}");
+                        if (AssetReferenceCodec.Read(table, $"in {where}",
+                                problem => new PrefabDocumentException(path.FullName, problem)) is { } reference)
+                        {
+                            Check(reference, where);
+                        }
                     }
-                }
+                    catch (PrefabDocumentException error)
+                    {
+                        findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
+                    }
+
+                    break;
+
+                case CanonicalTomlTable nested:
+                    foreach (var (key, member) in nested) Walk(member, $"{where}.{key}");
+                    break;
+
+                case IReadOnlyList<object> list:
+                    for (var i = 0; i < list.Count; i++) Walk(list[i], $"{where}[{i}]");
+                    break;
             }
         }
 

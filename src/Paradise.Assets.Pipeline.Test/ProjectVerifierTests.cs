@@ -149,6 +149,85 @@ public class ProjectVerifierTests
         await Assert.That(findings[0].Message).Contains("canonical");
     }
 
+    [Test]
+    public async Task a_malformed_reference_is_a_finding_not_a_crash()
+    {
+        // A hand-edited or half-migrated document. The reference shape is reserved, so this
+        // parses as one and then fails to BE one — which must name the file, the component and
+        // the field rather than coming out as an unhandled exception through `verify`/`build`.
+        using var fileSystem = CreateProject();
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            { "Mesh", new CanonicalInlineTable { { "guid", "not-a-uuid" }, { "path", "models/crate.glb" } } },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("not-a-uuid");
+        await Assert.That(findings[0].Message).Contains("game.Mesh.Mesh");
+    }
+
+    [Test]
+    public async Task a_dangling_reference_inside_an_array_is_an_error()
+    {
+        // Material slots are THE shape carrying a guid and a path is for, and they live in an
+        // array — so a check that only looked at value position missed its primary use case
+        // while the bake happily emitted a path nothing wrote.
+        using var fileSystem = CreateProject();
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            {
+                "Slots", new object[]
+                {
+                    AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(Guid.NewGuid(), "materials/gone.toml")),
+                }
+            },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("materials/gone.toml");
+        await Assert.That(findings[0].Message).Contains("game.Mesh.Slots[0]");
+    }
+
+    [Test]
+    public async Task a_payload_table_inside_an_array_is_not_read_as_a_reference()
+    {
+        // Inside an array the reader wraps EVERY table as inline, so the reference check is
+        // gated on the format's own definition of the shape rather than on the model type —
+        // otherwise ordinary payload data would be reported as a malformed reference.
+        using var fileSystem = CreateProject();
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            {
+                "Colliders", new object[]
+                {
+                    new CanonicalInlineTable { { "ShapeType", "Box" }, { "Radius", 2.0 } },
+                }
+            },
+        });
+
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    /// <summary>Writes a canonical one-object document whose single component carries <paramref name="data"/>.</summary>
+    private static void WriteDocumentWith(MemoryFileSystem fileSystem, UPath path, CanonicalTomlTable data)
+    {
+        var root = PrefabObject.WithMeta(Guid.NewGuid(), "crate");
+        root.Components.Add(new PrefabComponent(Guid.NewGuid(), "game.Mesh", data));
+
+        var document = new PrefabDocument();
+        document.Objects.Add(root);
+
+        fileSystem.CreateDirectory(path.GetDirectory());
+        PrefabDocumentSerializer.Save(fileSystem, path, document);
+        MintDocumentSidecar(fileSystem, path);
+    }
+
     /// <summary>
     /// A file no build step will touch is not, by itself, a verify finding.
     /// </summary>
