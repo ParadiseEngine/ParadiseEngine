@@ -123,6 +123,13 @@ internal sealed class WindowsWatchTray : IWatchTray
         }
     }
 
+    public void Run(Action watch, Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(watch);
+        log?.Invoke("watch: tray icon is up (right-click to stop, rebuild, or open the build folder)");
+        watch();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

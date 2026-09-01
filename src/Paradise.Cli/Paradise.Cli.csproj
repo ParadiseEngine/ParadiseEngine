@@ -14,9 +14,9 @@
     Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
     every verb's real logic lives (tested) in the pipeline library.
 
-    `assets watch` may show a tray icon (Win32 Shell_NotifyIcon, behind an OS guard). There is
-    no extra package and no net10.0-windows TFM: headless, CI, and non-Windows hosts take a
-    no-op path so the console loop is unchanged. See WatchTray.
+    The watch tray lives in Paradise.Cli.Tray (Win32 notify icon, AppKit status item) so this
+    project stays a console tool. The CLI talks to it through IWatchTray; headless, CI, Linux,
+    and the no-tray flag never start it.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -33,6 +33,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+    <ProjectReference Include="..\Paradise.Cli.Tray\Paradise.Cli.Tray.csproj" />
   </ItemGroup>
 
   <ItemGroup>

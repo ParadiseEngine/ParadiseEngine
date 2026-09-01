@@ -20,6 +20,15 @@ public class WatchPresentationTests
     }
 
     [Test]
+    public async Task menu_bar_title_is_the_four_glanceable_states()
+    {
+        await Assert.That(WatchPresentation.MenuBarTitle(WatchStatus.Alive)).IsEqualTo("⚪");
+        await Assert.That(WatchPresentation.MenuBarTitle(WatchStatus.Idle)).IsEqualTo("🟢");
+        await Assert.That(WatchPresentation.MenuBarTitle(WatchStatus.Building)).IsEqualTo("🟡");
+        await Assert.That(WatchPresentation.MenuBarTitle(WatchStatus.Failed)).IsEqualTo("🔴");
+    }
+
+    [Test]
     public async Task last_build_menu_is_the_count_that_would_otherwise_scroll_past()
     {
         await Assert.That(WatchPresentation.LastBuildMenu(WatchStatus.Alive, 0)).IsEqualTo("Last build: (none yet)");

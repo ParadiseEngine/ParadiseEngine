@@ -168,7 +168,7 @@ static int Usage()
         assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
         assets watch [--editor]       keep *.meta in step with assets/, rebuilding as you go
                                         --dry-run reports without writing; --no-build skips the rebuild
-                                        a tray icon (idle/building/failed) when the OS has one
+                                        a tray icon (idle/building/failed) on Windows and macOS
                                         --no-tray keeps the console-only behaviour
         assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
 

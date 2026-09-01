@@ -1,9 +1,9 @@
 namespace Paradise.Cli;
 
 /// <summary>
-/// Tooltip and menu copy for the watch tray. Kept as pure functions so the words can be pinned
-/// without standing up a notify icon — the Windows P/Invoke is a rendering of this, not the
-/// source of it.
+/// Tooltip, menu copy, and the macOS menu-bar title for the watch tray. Kept as pure functions
+/// so the words can be pinned without standing up a notify icon — each OS rendering (Win32
+/// dots, AppKit emoji) is a view of this, not the source of it.
 /// </summary>
 internal static class WatchPresentation
 {
@@ -14,6 +14,17 @@ internal static class WatchPresentation
         WatchStatus.Building => "paradise watch — building",
         WatchStatus.Failed => FormatFailed(errorCount),
         _ => "paradise watch",
+    };
+
+    /// <summary>
+    /// Menu-bar title on macOS. An emoji is enough to glance at; the tooltip carries the words.
+    /// </summary>
+    public static string MenuBarTitle(WatchStatus status) => status switch
+    {
+        WatchStatus.Idle => "🟢",
+        WatchStatus.Building => "🟡",
+        WatchStatus.Failed => "🔴",
+        _ => "⚪",
     };
 
     /// <summary>Disabled menu line that carries the last build's error count, which otherwise

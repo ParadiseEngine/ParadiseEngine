@@ -16,6 +16,7 @@ public class WatchSessionTests
         public List<(WatchStatus Status, int Errors)> States { get; } = [];
         public bool IsAvailable => true;
         public void SetState(WatchStatus status, int errorCount) => States.Add((status, errorCount));
+        public void Run(Action watch, Action<string>? log = null) => watch();
         public void Dispose() { }
     }
 

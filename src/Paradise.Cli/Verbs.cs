@@ -99,12 +99,8 @@ internal static class Verbs
 
         watcher.Start();
         Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");
-        if (watchTray.IsAvailable)
-        {
-            Console.WriteLine("watch: tray icon is up (right-click to stop, rebuild, or open the build folder)");
-        }
 
-        new WatchSession(
+        var session = new WatchSession(
             signals,
             watchTray,
             drain: watcher.Drain,
@@ -112,7 +108,9 @@ internal static class Verbs
             log: Console.WriteLine,
             error: message => Console.Error.WriteLine(message),
             outputDisplay: Display(fileSystem, layout.OutputFor(target)),
-            quiet: AssetWatcher.Debounce).Run();
+            quiet: AssetWatcher.Debounce);
+
+        watchTray.Run(session.Run, Console.WriteLine);
 
         Console.WriteLine("watch: stopped");
         return 0;

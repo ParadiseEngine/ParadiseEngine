@@ -22,6 +22,7 @@
     <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
     <Project Path="src/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
     <Project Path="src/Paradise.Cli/Paradise.Cli.csproj" />
+    <Project Path="src/Paradise.Cli.Tray/Paradise.Cli.Tray.csproj" />
     <Project Path="src/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
     <Project Path="src/Paradise.Assets.Pipeline/Paradise.Assets.Pipeline.csproj" />
     <Project Path="src/Paradise.Assets.Project/Paradise.Assets.Project.csproj" />

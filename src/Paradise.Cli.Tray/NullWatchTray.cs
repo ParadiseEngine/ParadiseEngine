@@ -19,6 +19,12 @@ internal sealed class NullWatchTray : IWatchTray
     {
     }
 
+    public void Run(Action watch, Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(watch);
+        watch();
+    }
+
     public void Dispose()
     {
     }
