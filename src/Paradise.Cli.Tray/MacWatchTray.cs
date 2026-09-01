@@ -249,6 +249,7 @@ internal sealed class MacWatchTray : IWatchTray
             finally
             {
                 Native.objc_autoreleasePoolPop(pool);
+                if (!_bootstrapped) Teardown();
             }
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -351,31 +352,39 @@ internal sealed class MacWatchTray : IWatchTray
 
     private void Teardown()
     {
-        if (_statusBar != 0 && _statusItem != 0)
+        var pool = Native.objc_autoreleasePoolPush();
+        try
         {
-            Native.MsgSend(_statusBar, Sel("removeStatusItem:"), _statusItem);
-        }
+            if (_statusBar != 0 && _statusItem != 0)
+            {
+                Native.MsgSend(_statusBar, Sel("removeStatusItem:"), _statusItem);
+            }
 
-        if (_statusItem != 0)
+            if (_statusItem != 0)
+            {
+                Native.objc_release(_statusItem);
+                _statusItem = 0;
+            }
+
+            if (_menu != 0)
+            {
+                Native.objc_release(_menu);
+                _menu = 0;
+            }
+
+            if (_target != 0)
+            {
+                Native.objc_release(_target);
+                _target = 0;
+            }
+
+            _lastBuildItem = 0;
+            _bootstrapped = false;
+        }
+        finally
         {
-            Native.objc_release(_statusItem);
-            _statusItem = 0;
+            Native.objc_autoreleasePoolPop(pool);
         }
-
-        if (_menu != 0)
-        {
-            Native.objc_release(_menu);
-            _menu = 0;
-        }
-
-        if (_target != 0)
-        {
-            Native.objc_release(_target);
-            _target = 0;
-        }
-
-        _lastBuildItem = 0;
-        _bootstrapped = false;
     }
 
     private bool IsMainThread()
