@@ -416,6 +416,7 @@ internal sealed class WindowsWatchTray : IWatchTray
         unsafe
         {
             var maskBits = stackalloc byte[IconSize * 4];
+            new Span<byte>(maskBits, IconSize * 4).Clear();
             mask = Native.CreateBitmap(IconSize, IconSize, 1, 1, (nint)maskBits);
         }
         if (mask == 0)

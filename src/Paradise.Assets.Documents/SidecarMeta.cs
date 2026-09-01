@@ -11,8 +11,8 @@ namespace Paradise.Assets.Documents;
 /// <b>EVERY asset has one</b> — binaries whose bytes cannot carry an id, and the project's own
 /// text documents too: one lookup path for identity, one <c>verify</c> rule, nothing to
 /// remember. <b>There is no <c>kind</c></b>: what an asset is derives from its path (the build
-    /// always dispatched on the extension), so a stored kind was the same fact written twice. A
-    /// sidecar carries what the path CANNOT say — identity, and import settings.
+/// always dispatched on the extension), so a stored kind was the same fact written twice. A
+/// sidecar carries what the path CANNOT say — identity, and import settings.
 /// </para>
 /// <para>
 /// <b>Import settings are open tables, one per domain</b> (<c>[texture]</c> today): any
