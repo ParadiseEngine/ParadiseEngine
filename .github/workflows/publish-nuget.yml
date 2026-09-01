@@ -74,11 +74,15 @@ jobs:
 
           echo "value=$user" >> "$GITHUB_OUTPUT"
 
-      # Every packable library in src/. Listed in rough dependency order so incremental
+      # Every packable project in src/. Listed in rough dependency order so incremental
       # builds reuse shared ProjectReference outputs. Source generators are not published
       # standalone: Paradise.BT.Generators ships inside Paradise.BT, Paradise.ECS.Generators
       # inside Paradise.ECS, Paradise.Authoring.Generators inside Paradise.Authoring
       # (analyzers/dotnet/cs).
+      #
+      # Paradise.Cli is the one non-library here: it packs as a dotnet tool (PackAsTool), so it
+      # still produces a .nupkg and pushes on the same run, but consumers take it through a tool
+      # manifest rather than a PackageReference.
       - name: Pack all packages
         shell: bash
         run: |
@@ -100,12 +104,16 @@ jobs:
             Paradise.Windowing.Sdl
             Paradise.Rendering.WebGPU
             Paradise.Rendering.Browser
+            Paradise.Assets.Project
+            Paradise.Assets.Documents
+            Paradise.Assets.Pipeline
             Paradise.Assets.Gltf
             Paradise.Assets.Textures
             Paradise.Rendering.Pbr
             Paradise.Ui
             Paradise.Ui.ImGui
             Paradise.Ui.Noesis
+            Paradise.Cli
           )
 
           for project in "${projects[@]}"; do
