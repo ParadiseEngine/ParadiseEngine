@@ -132,10 +132,20 @@ public sealed class AssetWatcher : IDisposable
     /// sidecars it touched.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// DELETES ARE HANDLED FIRST, and the order is the whole point: a move seen as delete-then-add
     /// only re-links if the identity is already in quarantine when the add is considered. Doing
     /// adds first would mint a new GUID and then quarantine the old one, which is the failure this
     /// is built to avoid, arrived at by scheduling.
+    /// </para>
+    /// <para>
+    /// <b>ONE DRAINER.</b> <see cref="_gate"/> guards the event maps, and the observe methods are
+    /// free-threaded against it — but the maintainer is driven OUTSIDE the lock, deliberately (its
+    /// work is filesystem IO, and holding a lock across it would stall every incoming event), and
+    /// <see cref="SidecarMaintainer"/> keeps its quarantine unsynchronized. So calls to this method
+    /// must not overlap: the CLI's loop and the Coyote suite each drive a single drainer. Two
+    /// concurrent drains would race the quarantine and lose the identity a move depends on.
+    /// </para>
     /// </remarks>
     public int Drain()
     {

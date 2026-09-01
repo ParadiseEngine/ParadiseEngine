@@ -26,7 +26,18 @@ namespace Paradise.Assets.Pipeline
                 return false;
             }
 
-            return TryRead(File.OpenRead(glbPath), out gltf, out binChunk);
+            // Opening is inside the try as well: a locked or unreadable file is "cannot read this
+            // GLB", which is what the caller asked, and a Try* that throws for one cause and
+            // answers false for another is a contract nobody can use.
+            try
+            {
+                using var stream = File.OpenRead(glbPath);
+                return TryRead(stream, out gltf, out binChunk);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         /// <summary>
