@@ -36,7 +36,11 @@ internal sealed class MacWatchTray : IWatchTray
     private nint _statusItem;
     private nint _menu;
     private nint _lastBuildItem;
+    private nint _editorItem;
+    private nint _rebuildItem;
+    private nint _openItem;
     private nint _selSetTitle;
+    private nint _selSetState;
     private nint _selSetToolTip;
     private nint _selButton;
     private nint _selIsMainThread;
@@ -83,7 +87,7 @@ internal sealed class MacWatchTray : IWatchTray
             return;
         }
 
-        log?.Invoke("watch: tray icon is up (click to stop, rebuild, or open the build folder)");
+        log?.Invoke($"watch: tray icon is up (click to stop, rebuild, or {WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn).ToLowerInvariant()})");
 
         var watchThread = new Thread(() =>
         {
@@ -146,6 +150,7 @@ internal sealed class MacWatchTray : IWatchTray
             }
 
             _selSetTitle = Sel("setTitle:");
+            _selSetState = Sel("setState:");
             _selSetToolTip = Sel("setToolTip:");
             _selButton = Sel("button");
             _selIsMainThread = Sel("isMainThread");
@@ -171,6 +176,7 @@ internal sealed class MacWatchTray : IWatchTray
             var selRebuild = Sel("rebuildClicked:");
             var selOpen = Sel("openClicked:");
             var selQuit = Sel("stopClicked:");
+            var selEditor = Sel("editorClicked:");
 
             var pool = Native.objc_autoreleasePoolPush();
             try
@@ -200,11 +206,21 @@ internal sealed class MacWatchTray : IWatchTray
                         AddMethod(targetClass, selRebuild, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&RebuildImp, "v@:@");
                         AddMethod(targetClass, selOpen, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&OpenImp, "v@:@");
                         AddMethod(targetClass, selQuit, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopClickedImp, "v@:@");
+                        AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
                         AddMethod(targetClass, _selApplyPendingState, (nint)(delegate* unmanaged[Cdecl]<nint, nint, void>)&ApplyImp, "v@:");
                         AddMethod(targetClass, _selStopApp, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopAppImp, "v@:@");
                     }
 
                     Native.objc_registerClassPair(targetClass);
+                }
+                else
+                {
+                    // A later watch in the same process: the class already exists from the first
+                    // bootstrap. Add the toggle if this binary is newer than that class.
+                    unsafe
+                    {
+                        AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
+                    }
                 }
 
                 _target = Native.MsgSend(Native.MsgSend(targetClass, selAlloc), selInit);
@@ -233,12 +249,24 @@ internal sealed class MacWatchTray : IWatchTray
                 Native.MsgSend(_menu, selAddItem, _lastBuildItem);
                 Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
 
-                if (_hooks.Rebuild is not null)
+                if (_hooks.ToggleEditor is not null)
                 {
-                    AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Rebuild now", selRebuild);
+                    _editorItem = AddMenuItem(
+                        nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                        WatchPresentation.EditorToggleMenu, selEditor);
+                    Native.MsgSend(_editorItem, _selSetState, _hooks.Editor.IsOn ? 1 : 0);
                 }
 
-                AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Open the build folder", selOpen);
+                if (_hooks.Rebuild is not null)
+                {
+                    _rebuildItem = AddMenuItem(
+                        nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                        WatchPresentation.RebuildMenu(_hooks.Editor.IsOn), selRebuild);
+                }
+
+                _openItem = AddMenuItem(
+                    nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                    WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn), selOpen);
                 Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
                 AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Stop", selQuit);
                 Native.MsgSend(_statusItem, selSetMenu, _menu);
@@ -262,7 +290,7 @@ internal sealed class MacWatchTray : IWatchTray
         }
     }
 
-    private void AddMenuItem(
+    private nint AddMenuItem(
         nint nsMenuItem,
         nint selAlloc,
         nint selInitWithTitleActionKey,
@@ -279,6 +307,7 @@ internal sealed class MacWatchTray : IWatchTray
             ToNSString(""));
         Native.MsgSend(item, selSetTarget, _target);
         Native.MsgSend(_menu, selAddItem, item);
+        return item;
     }
 
     private static void AddMethod(nint cls, nint selector, nint imp, string types)
@@ -357,6 +386,22 @@ internal sealed class MacWatchTray : IWatchTray
             if (_lastBuildItem != 0)
             {
                 Native.MsgSend(_lastBuildItem, _selSetTitle, ToNSString(WatchPresentation.LastBuildMenu(status, errorCount)));
+            }
+
+            var editor = _hooks.Editor.IsOn;
+            if (_editorItem != 0)
+            {
+                Native.MsgSend(_editorItem, _selSetState, editor ? 1 : 0);
+            }
+
+            if (_rebuildItem != 0)
+            {
+                Native.MsgSend(_rebuildItem, _selSetTitle, ToNSString(WatchPresentation.RebuildMenu(editor)));
+            }
+
+            if (_openItem != 0)
+            {
+                Native.MsgSend(_openItem, _selSetTitle, ToNSString(WatchPresentation.OpenOutputMenu(editor)));
             }
         }
         finally
@@ -462,6 +507,9 @@ internal sealed class MacWatchTray : IWatchTray
             }
 
             _lastBuildItem = 0;
+            _editorItem = 0;
+            _rebuildItem = 0;
+            _openItem = 0;
             _bootstrapped = false;
         }
         finally
@@ -521,6 +569,19 @@ internal sealed class MacWatchTray : IWatchTray
         try
         {
             s_current?._hooks.Stop();
+        }
+        catch
+        {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void EditorImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.ToggleEditor?.Invoke();
+            s_current?.HopApply();
         }
         catch
         {

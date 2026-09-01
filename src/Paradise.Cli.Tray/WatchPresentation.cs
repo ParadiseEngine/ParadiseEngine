@@ -38,6 +38,18 @@ internal static class WatchPresentation
         _ => "Last build: (none yet)",
     };
 
+    /// <summary>Tray rebuild: play-mode watch rebuilds <c>.editor/play</c>, not <c>build/</c>.</summary>
+    public static string RebuildMenu(bool editor) => editor ? "Rebuild play mode" : "Rebuild now";
+
+    /// <summary>Tray open-folder: the tree this watch is actually writing.</summary>
+    public static string OpenOutputMenu(bool editor) => editor ? "Open the play folder" : "Open the build folder";
+
+    /// <summary>
+    /// Checkbox for <c>--editor</c>: on (the default) rebuilds <c>.editor/play</c> on each
+    /// settled change; off rebuilds <c>build/</c>.
+    /// </summary>
+    public static string EditorToggleMenu => "Play mode";
+
     private static string FormatFailed(int errorCount) => errorCount == 1
         ? "paradise watch — failed (1 error)"
         : $"paradise watch — failed ({errorCount} errors)";

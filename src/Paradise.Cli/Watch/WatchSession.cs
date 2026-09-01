@@ -15,7 +15,7 @@ internal sealed class WatchSession
     private readonly Func<BuildResult>? _rebuild;
     private readonly Action<string> _log;
     private readonly Action<string> _error;
-    private readonly string _outputDisplay;
+    private readonly Func<string> _outputDisplay;
     private readonly TimeSpan _quiet;
 
     public WatchSession(
@@ -25,7 +25,7 @@ internal sealed class WatchSession
         Func<BuildResult>? rebuild,
         Action<string> log,
         Action<string> error,
-        string outputDisplay,
+        Func<string> outputDisplay,
         TimeSpan quiet)
     {
         ArgumentNullException.ThrowIfNull(signals);
@@ -71,7 +71,7 @@ internal sealed class WatchSession
             LastErrorCount = result.Errors.Count;
             foreach (var error in result.Errors) _error($"error: {error}");
             _log(result.Succeeded
-                ? $"watch: rebuilt {result.AssetCount} asset(s) into {_outputDisplay}"
+                ? $"watch: rebuilt {result.AssetCount} asset(s) into {_outputDisplay()}"
                 : $"watch: build FAILED with {result.Errors.Count} error(s)");
             Set(result.Succeeded ? WatchStatus.Idle : WatchStatus.Failed, LastErrorCount);
         }

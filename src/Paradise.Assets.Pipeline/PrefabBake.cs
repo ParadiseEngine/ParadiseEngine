@@ -47,10 +47,25 @@ public static class PrefabBake
         Func<AssetReference, PrefabDocument?> prefabs,
         string documentExtension,
         List<string> errors)
+        => Bake(document, prefabs, documentExtension, documentExtension, errors);
+
+    /// <summary>
+    /// Bakes <paramref name="document"/>, remapping prefab and config references independently.
+    /// </summary>
+    /// <param name="prefabExtension">What a <c>.prefab</c> reference becomes. Play keeps
+    /// <c>.prefab</c>; a shipped build rewrites to the profile format.</param>
+    /// <param name="configExtension">What a <c>.toml</c> config reference becomes.</param>
+    public static LevelData Bake(
+        PrefabDocument document,
+        Func<AssetReference, PrefabDocument?> prefabs,
+        string prefabExtension,
+        string configExtension,
+        List<string> errors)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(errors);
 
+        var extensions = new DocumentExtensions(prefabExtension, configExtension);
         var resolved = PrefabResolver.Resolve(document, prefabs);
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 
@@ -64,7 +79,7 @@ public static class PrefabBake
                 {
                     Id = component.Id,
                     Type = component.Type,
-                    Data = ToElement(ToNode(component.Data, documentExtension)),
+                    Data = ToElement(ToNode(component.Data, extensions)),
                 });
             }
 
@@ -89,14 +104,14 @@ public static class PrefabBake
     }
 
     /// <summary>A canonical payload as JSON, with references flattened to the value the runtime resolves.</summary>
-    private static JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> table, string documentExtension)
+    private static JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions)
     {
         var result = new JsonObject();
-        foreach (var (key, value) in table) result[key] = ToValue(value, documentExtension);
+        foreach (var (key, value) in table) result[key] = ToValue(value, extensions);
         return result;
     }
 
-    private static JsonNode? ToValue(object? value, string documentExtension) => value switch
+    private static JsonNode? ToValue(object? value, DocumentExtensions extensions) => value switch
     {
         null => null,
 
@@ -114,45 +129,47 @@ public static class PrefabBake
         // there, and bakes the whole table to null. A collider list would leave the document at
         // verify intact and reach the contract empty.
         CanonicalInlineTable reference when AssetReferenceCodec.IsWrittenInline(reference.ToList()) =>
-            BuiltPath(reference.Value("path") as string, documentExtension),
+            BuiltPath(reference.Value("path") as string, extensions),
 
         // Not a reference, so it is what it looks like: a table of values.
-        CanonicalInlineTable payload => ToNode(payload, documentExtension),
+        CanonicalInlineTable payload => ToNode(payload, extensions),
 
-        CanonicalTomlTable nested => ToNode(nested, documentExtension),
+        CanonicalTomlTable nested => ToNode(nested, extensions),
         string text => JsonValue.Create(text),
         bool flag => JsonValue.Create(flag),
         long integer => JsonValue.Create(integer),
         double number => JsonValue.Create(number),
-        IReadOnlyList<object> list => new JsonArray(list.Select(item => ToValue(item, documentExtension)).ToArray()),
+        IReadOnlyList<object> list => new JsonArray(list.Select(item => ToValue(item, extensions)).ToArray()),
         _ => JsonValue.Create(value.ToString()),
     };
 
-    /// <summary>Where a referenced asset lands in the build.</summary>
+    /// <summary>Where a referenced asset lands in the output tree.</summary>
     /// <remarks>
-    /// Only authored documents move: <c>materials/x.toml</c> and <c>props/crate.prefab</c> are
-    /// compiled to whatever the profile's <c>document_format</c> produces, while a mesh or a bank
-    /// is carried through under the name it already has. <b>Both</b> authored extensions are
-    /// remapped because both importers rewrite them — a component holding a reference to another
+    /// Prefabs and configs can land under different names: a shipped build rewrites both to the
+    /// profile's <c>document_format</c>, while play keeps <c>.prefab</c> and only remaps
+    /// <c>.toml</c> configs. A mesh or a bank is carried through under the name it already has.
+    /// Both authored extensions are considered because a component holding a reference to another
     /// document (a spawner naming the prefab it instantiates at runtime, rather than an instance
-    /// the bake expands) would otherwise ship the authoring path while the build wrote the
-    /// compiled one.
+    /// the bake expands) would otherwise name a file the output tree did not write.
     /// </remarks>
-    private static JsonNode? BuiltPath(string? path, string documentExtension)
+    private static JsonNode? BuiltPath(string? path, DocumentExtensions extensions)
     {
         if (path is null) return null;
 
-        foreach (var authored in s_authoredExtensions)
+        if (path.EndsWith(AssetClassifier.PrefabSuffix, StringComparison.OrdinalIgnoreCase))
         {
-            if (path.EndsWith(authored, StringComparison.OrdinalIgnoreCase))
-            {
-                return JsonValue.Create(string.Concat(path.AsSpan(0, path.Length - authored.Length), documentExtension));
-            }
+            return JsonValue.Create(string.Concat(
+                path.AsSpan(0, path.Length - AssetClassifier.PrefabSuffix.Length),
+                extensions.Prefab));
+        }
+
+        if (path.EndsWith(".toml", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonValue.Create(string.Concat(path.AsSpan(0, path.Length - ".toml".Length), extensions.Config));
         }
 
         return JsonValue.Create(path);
     }
 
-    /// <summary>The extensions the document importers compile; everything else is carried through.</summary>
-    private static readonly string[] s_authoredExtensions = [".toml", AssetClassifier.PrefabSuffix];
+    private readonly record struct DocumentExtensions(string Prefab, string Config);
 }

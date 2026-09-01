@@ -360,6 +360,37 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task the_play_target_keeps_the_prefab_extension()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.prefab")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.toml")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.json")).IsFalse();
+
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+            fileSystem.ReadAllText("/game/.editor/play/levels/district.prefab"));
+        await Assert.That(level.Entities.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task play_keeps_prefab_even_when_the_profile_is_json()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject("json");
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/district.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev", ProjectOutputTarget.Play);
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.prefab")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.json")).IsFalse();
+    }
+
+    [Test]
     public async Task no_manifest_is_written_on_a_failed_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -460,21 +491,35 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/project.toml")).IsFalse();
     }
 
-    // ---- sidecars in the editor tree ----------------------------------------------------
+    // ---- identity in the built tree -----------------------------------------------------
 
     [Test]
-    public async Task an_editor_build_carries_the_sidecars_and_a_shipped_build_does_not()
+    public async Task neither_tree_copies_source_sidecars_the_manifest_is_the_database()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var guid = DocumentGuid.Format(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid);
 
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Build);
 
-        // The editor traces a built asset back to the document that produced it; a player's
-        // install has no use for authoring identity and must not ship it.
-        await Assert.That(fileSystem.FileExists("/game/.editor/play/models/crate.glb.meta")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/models/crate.glb.meta")).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.meta")).IsFalse();
+
+        var play = BuildManifest.Load(fileSystem, "/game/.editor/play/manifest.json");
+        var recorded = play.FindByGuid(guid);
+        await Assert.That(recorded).IsNotNull();
+        await Assert.That(recorded!.Path).IsEqualTo("models/crate.glb");
+        await Assert.That(recorded.Source).IsEqualTo("models/crate.glb");
+        await Assert.That(recorded.Sha256).IsNotEmpty();
+        await Assert.That(recorded.Size).IsEqualTo(3);
+        await Assert.That(play.FindByGuid(guid)!.Guid).IsEqualTo(guid);
+
+        await Assert.That(play.ByGuid.ContainsKey(guid)).IsTrue();
+        await Assert.That(play.ByGuid[guid].Path).IsEqualTo("models/crate.glb");
+        await Assert.That(play.ByGuid[guid].Sha256).IsEqualTo(recorded.Sha256);
+        await Assert.That(fileSystem.ReadAllText("/game/.editor/play/manifest.json"))
+            .Contains($"\"{guid}\":");
     }
 
     // ---- the build index ----------------------------------------------------------------

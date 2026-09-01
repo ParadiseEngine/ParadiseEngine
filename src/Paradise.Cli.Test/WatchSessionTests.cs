@@ -37,7 +37,7 @@ public class WatchSessionTests
             rebuild,
             log.Add,
             log.Add,
-            "/game/build",
+            static () => "/game/build",
             quiet: TimeSpan.Zero);
 
     [Test]
@@ -207,5 +207,42 @@ public class WatchSessionTests
         });
         await Assert.That(tray.States[2].Errors).IsEqualTo(1);
         await Assert.That(tray.States[^1].Errors).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task toggling_play_mode_is_visible_on_the_next_rebuild()
+    {
+        var mode = new WatchEditorMode(true);
+        var seen = new List<bool>();
+        using var signals = new WatchSignals();
+        var log = new List<string>();
+        var folder = "/game/.editor/play";
+        var session = new WatchSession(
+            signals,
+            new RecordingTray(),
+            drain: static () => 1,
+            rebuild: () =>
+            {
+                seen.Add(mode.IsOn);
+                if (seen.Count == 1)
+                {
+                    mode.Toggle();
+                    return Ok(1);
+                }
+
+                folder = "/game/build";
+                signals.RequestStop();
+                return Ok(1);
+            },
+            log: log.Add,
+            error: log.Add,
+            outputDisplay: () => folder,
+            quiet: TimeSpan.Zero);
+
+        session.Run();
+
+        await Assert.That(seen.ToArray()).IsEquivalentTo(new[] { true, false });
+        await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/.editor/play");
+        await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/build");
     }
 }

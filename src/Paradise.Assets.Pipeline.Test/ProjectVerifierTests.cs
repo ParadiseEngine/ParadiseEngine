@@ -235,9 +235,9 @@ public class ProjectVerifierTests
     /// <b>Verify cannot tell, so verify does not say.</b> An importer claims an asset inside its
     /// own <c>Import</c>, on whatever grounds it likes, so the only place the question "does
     /// anything handle this" is answerable is a running build — and even there a decline means
-    /// "not mine" OR "not for this tree" (a sidecar outside the play target is the standing
-    /// example). What still speaks for a stray file is the sidecar rule, which is the check that
-    /// was doing the work: everything under assets/ is an asset and carries an identity,
+    /// "not mine" OR "not for this tree". What still speaks for a stray file is the sidecar
+    /// rule, which is the check that was doing the work: everything under assets/ is an asset
+    /// and carries an identity,
     /// processed or not. See <see cref="a_file_nothing_builds_still_needs_its_identity"/>.
     /// </remarks>
     [Test]
@@ -277,33 +277,20 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_stale_hash_is_a_warning_not_an_error()
+    public async Task a_leftover_hash_is_not_a_finding()
     {
-        // Every legitimate edit makes the recorded hash stale. Erroring would keep the tree red
-        // and teach everybody to ignore the one signal that says "this asset moved on".
+        // Hash is read for migration and ignored. Line-ending drift after a pull must not warn.
         using var fileSystem = CreateProject();
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
-        new SidecarMeta(Guid.NewGuid()) { Hash = new string('a', 64) }
-            .Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        fileSystem.WriteAllText(
+            "/game/assets/models/crate.glb.meta",
+            """
+            schema_version = 1
+            guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
+            hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
-
-        await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
-        await Assert.That(findings[0].Message).Contains("changed since");
-    }
-
-    [Test]
-    public async Task a_matching_hash_is_silent()
-    {
-        using var fileSystem = CreateProject();
-        fileSystem.CreateDirectory("/game/assets/models");
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
-        new SidecarMeta(Guid.NewGuid())
-        {
-            Hash = SidecarMeta.ComputeHash(new byte[] { 1, 2, 3 }),
-        }.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+            """);
 
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Count).IsEqualTo(0);
     }

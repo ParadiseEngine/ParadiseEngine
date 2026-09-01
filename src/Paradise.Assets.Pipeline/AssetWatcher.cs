@@ -15,13 +15,13 @@ namespace Paradise.Assets.Pipeline;
 /// without one.
 /// </para>
 /// <para>
-/// <b>Its own writes must not wake it.</b> The watcher writes sidecars INTO the tree it is
-/// watching, so a mint fires a Created and a hash refresh fires a Changed, and each would feed
-/// itself forever. What stops that is a flat rule rather than a timed one: <b>no sidecar event is
-/// ever acted on</b> (<see cref="Ignored"/>). Every one of them is either the maintainer's own
-/// write or the author editing an identity by hand, which is theirs to do — so there is nothing
-/// a window could buy. No suppression set, nothing to expire, and no race between suppressing a
-/// path and writing it.
+    /// <b>Its own writes must not wake it.</b> The watcher writes sidecars INTO the tree it is
+    /// watching, so a mint fires a Created. If that were queued, draining it would write again
+    /// itself forever. Created, Changed, and Renamed on a sidecar are therefore ignored
+    /// (<see cref="Ignored"/>). A sidecar <em>delete</em> is the other case: the author spent the
+    /// identity, and if the asset is still there the maintainer must mint a replacement rather than
+    /// leave verify to fail the next rebuild. That delete is rewritten as an Ensure of the asset,
+    /// never as a quarantine of the <c>.meta</c> path.
 /// </para>
 /// <para>
 /// <b>An atomic write is not one event.</b> Both Blender and this CLI write temp-then-rename, and
@@ -116,7 +116,15 @@ public sealed class AssetWatcher : IDisposable
     /// <summary>Records a delete.</summary>
     public void ObserveDelete(UPath path)
     {
-        if (Ignored(path)) return;
+        // A sidecar going away is not a loop event: the maintainer does not delete the sidecar of
+        // an asset that is still there. If the asset remains, Ensure mints a new identity; if it
+        // went too, Ensure is a no-op (the asset delete is the one that quarantines).
+        if (SidecarMeta.IsSidecarPath(path))
+        {
+            Observe(SidecarMeta.AssetPathFor(path));
+            return;
+        }
+
         lock (_gate) { _deleted[path] = _now(); }
     }
 
@@ -185,10 +193,21 @@ public sealed class AssetWatcher : IDisposable
         return actions;
     }
 
-    /// <summary>Runs one build, so the mounted tree matches what was just fixed.</summary>
+    /// <summary>
+    /// Reconciles sidecars, then runs one build, so the mounted tree matches what was just fixed.
+    /// </summary>
+    /// <remarks>
+    /// Reconcile first, because Rebuild-now does not wait out the debounce of a sidecar delete,
+    /// and because a wipe of every <c>.meta</c> arrives as events the loop would otherwise ignore
+    /// until the next asset save. The one-shot <c>build</c> verb still refuses a missing sidecar:
+    /// watch is the tooling that mints.
+    /// </remarks>
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
-        => new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"))
+    {
+        _maintainer.Reconcile();
+        return new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"))
             .Run(profile, target);
+    }
 
     /// <inheritdoc/>
     public void Dispose()
@@ -199,15 +218,11 @@ public sealed class AssetWatcher : IDisposable
         _watcher = null;
     }
 
-    /// <summary>Whether an event is one to act on at all.</summary>
+    /// <summary>Whether a Created/Changed/Renamed event is one to act on at all.</summary>
     /// <remarks>
-    /// <b>A sidecar event is never one to act on, and that single line is the whole loop
-    /// guard.</b> Most of them are the maintainer's own — it just wrote the file — and the rest
-    /// are the author editing an identity by hand, which is theirs to do. There is no third
-    /// case, so there is nothing for a per-path suppression window to catch that this does not:
-    /// every path such a set could hold is a <c>*.meta</c>, and every <c>*.meta</c> is refused
-    /// here. Flat beats timed for the same reason it usually does — no window to size, and no
-    /// gap between writing a path and marking it.
+    /// Sidecar writes are the maintainer's own (a mint) or the author editing an
+    /// identity by hand. Either way, acting on them would loop. Deletes of sidecars are handled
+    /// in <see cref="ObserveDelete"/> instead of here, because those are not writes.
     /// </remarks>
     private static bool Ignored(UPath path) => SidecarMeta.IsSidecarPath(path);
 

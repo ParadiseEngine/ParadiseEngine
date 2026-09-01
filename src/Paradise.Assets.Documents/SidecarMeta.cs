@@ -11,8 +11,8 @@ namespace Paradise.Assets.Documents;
 /// <b>EVERY asset has one</b> — binaries whose bytes cannot carry an id, and the project's own
 /// text documents too: one lookup path for identity, one <c>verify</c> rule, nothing to
 /// remember. <b>There is no <c>kind</c></b>: what an asset is derives from its path (the build
-/// always dispatched on the extension), so a stored kind was the same fact written twice. A
-/// sidecar carries what the path CANNOT say — identity, the recorded hash, and import settings.
+    /// always dispatched on the extension), so a stored kind was the same fact written twice. A
+    /// sidecar carries what the path CANNOT say — identity, and import settings.
 /// </para>
 /// <para>
 /// <b>Import settings are open tables, one per domain</b> (<c>[texture]</c> today): any
@@ -50,15 +50,14 @@ public sealed class SidecarMeta
     public Guid Guid { get; }
 
     /// <summary>
-    /// SHA-256 of the asset's bytes when the sidecar was written, lowercase hex — or
-    /// <see langword="null"/> when the sidecar does not record one.
+    /// SHA-256 of the asset's bytes, lowercase hex, when an older sidecar recorded one.
     /// </summary>
     /// <remarks>
-    /// Two jobs the GUID cannot do: telling a cache the asset changed, and re-linking a LOST
-    /// sidecar (content is all that is left to recognise an asset by). A mismatch is a
-    /// <b>warning</b>, never an error — every legitimate edit makes the hash stale, and a rule
-    /// that failed the build on that would train everybody to ignore it. Optional in the format,
-    /// always written by tooling.
+    /// Read for migration, never written. A recorded hash is a byte-identity of a checkout, and
+    /// text assets do not have one: line endings, smudge filters, and UTF-8 BOM choices differ
+    /// across machines after a push/pull, so the same committed file hashes differently and the
+    /// sidecar becomes a permanent dirty file. Move re-link hashes in memory for the watch
+    /// session instead.
     /// </remarks>
     public string? Hash { get; set; }
 
@@ -226,9 +225,8 @@ public sealed class SidecarMeta
             { "guid", DocumentGuid.Format(Guid) },
         };
 
-        // Identity, then what the asset was, then how to process it -- and model order is what
-        // the writer emits, so settings keep their document order.
-        if (Hash is { } hash) root.Add("hash", hash);
+        // Identity, then how to process it. Hash is never emitted — a recorded byte-hash is a
+        // checkout, not an identity, and text assets do not survive push/pull with one.
         foreach (var (domain, settings) in _settings) root.Add(domain, settings);
 
         return root;

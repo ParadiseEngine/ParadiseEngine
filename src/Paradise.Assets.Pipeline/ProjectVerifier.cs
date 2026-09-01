@@ -165,19 +165,6 @@ public static class ProjectVerifier
                 findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
             }
         }
-
-        // A WARNING, not an error. Every legitimate edit makes the recorded hash stale, and a
-        // rule that turned "someone edited a texture" into a failing build would be red more
-        // often than green -- and would teach everybody to ignore it. What it is FOR is telling a
-        // cache the asset moved on, and telling a re-link which asset a lost sidecar belonged to.
-        if (meta.Hash is { } recorded && fileSystem.FileExists(asset)
-            && SidecarMeta.ComputeHash(fileSystem, asset) is var actual && actual != recorded)
-        {
-            findings.Add(new VerifyFinding(
-                VerifySeverity.Warning, path,
-                $"records hash {recorded[..12]}… but '{asset.GetName()}' now hashes to {actual[..12]}… " +
-                "— the asset changed since the sidecar was written"));
-        }
     }
 
     /// <summary>

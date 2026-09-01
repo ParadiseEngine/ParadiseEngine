@@ -42,6 +42,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const uint WsExToolwindow = 0x00000080;
     private const uint MfString = 0x00000000;
     private const uint MfGrayed = 0x00000001;
+    private const uint MfChecked = 0x00000008;
     private const uint MfSeparator = 0x00000800;
     private const uint TpmRightButton = 0x0002;
     private const uint TpmReturnCmd = 0x0100;
@@ -50,6 +51,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const int IdRebuild = 2;
     private const int IdOpen = 3;
     private const int IdStop = 4;
+    private const int IdEditor = 5;
     private const int IconSize = 16;
     private const uint NotifyId = 1;
 
@@ -125,7 +127,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     public void Run(Action watch, Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(watch);
-        log?.Invoke("watch: tray icon is up (right-click to stop, rebuild, or open the build folder)");
+        log?.Invoke($"watch: tray icon is up (right-click to stop, rebuild, or {WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn).ToLowerInvariant()})");
         watch();
     }
 
@@ -283,12 +285,22 @@ internal sealed class WindowsWatchTray : IWatchTray
         {
             Native.AppendMenu(menu, MfString | MfGrayed, IdLastBuild, WatchPresentation.LastBuildMenu(_status, _errorCount));
             Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
-            if (_hooks.Rebuild is not null)
+            var editor = _hooks.Editor.IsOn;
+            if (_hooks.ToggleEditor is not null)
             {
-                Native.AppendMenu(menu, MfString, IdRebuild, "Rebuild now");
+                Native.AppendMenu(
+                    menu,
+                    MfString | (editor ? MfChecked : 0),
+                    IdEditor,
+                    WatchPresentation.EditorToggleMenu);
             }
 
-            Native.AppendMenu(menu, MfString, IdOpen, "Open the build folder");
+            if (_hooks.Rebuild is not null)
+            {
+                Native.AppendMenu(menu, MfString, IdRebuild, WatchPresentation.RebuildMenu(editor));
+            }
+
+            Native.AppendMenu(menu, MfString, IdOpen, WatchPresentation.OpenOutputMenu(editor));
             Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
             Native.AppendMenu(menu, MfString, IdStop, "Stop");
 
@@ -299,6 +311,9 @@ internal sealed class WindowsWatchTray : IWatchTray
 
             switch (chosen)
             {
+                case IdEditor:
+                    _hooks.ToggleEditor?.Invoke();
+                    break;
                 case IdRebuild:
                     _hooks.Rebuild?.Invoke();
                     break;

@@ -11,4 +11,16 @@ namespace Paradise.Cli;
 /// a command that cannot do anything is noise.
 /// </param>
 /// <param name="OpenOutput">Open the build (or play) folder in the OS file manager.</param>
-internal sealed record WatchTrayHooks(Action Stop, Action? Rebuild, Action OpenOutput);
+/// <param name="Editor">
+/// Live play-mode flag. The checkbox reads and flips this; rebuild labels follow so a click
+/// cannot look like it ships <c>build/</c> while writing <c>.editor/play</c>.
+/// </param>
+/// <param name="ToggleEditor">
+/// Flip <see cref="Editor"/>. <see langword="null"/> hides the checkbox (tests, the no-op tray).
+/// </param>
+internal sealed record WatchTrayHooks(
+    Action Stop,
+    Action? Rebuild,
+    Action OpenOutput,
+    WatchEditorMode Editor,
+    Action? ToggleEditor = null);

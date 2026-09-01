@@ -37,4 +37,14 @@ public class WatchPresentationTests
         await Assert.That(WatchPresentation.LastBuildMenu(WatchStatus.Failed, 1)).IsEqualTo("Last build: 1 error");
         await Assert.That(WatchPresentation.LastBuildMenu(WatchStatus.Failed, 4)).IsEqualTo("Last build: 4 errors");
     }
+
+    [Test]
+    public async Task editor_watch_names_play_mode_rebuild()
+    {
+        await Assert.That(WatchPresentation.RebuildMenu(editor: false)).IsEqualTo("Rebuild now");
+        await Assert.That(WatchPresentation.RebuildMenu(editor: true)).IsEqualTo("Rebuild play mode");
+        await Assert.That(WatchPresentation.OpenOutputMenu(editor: false)).IsEqualTo("Open the build folder");
+        await Assert.That(WatchPresentation.OpenOutputMenu(editor: true)).IsEqualTo("Open the play folder");
+        await Assert.That(WatchPresentation.EditorToggleMenu).IsEqualTo("Play mode");
+    }
 }

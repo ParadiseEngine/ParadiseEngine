@@ -17,8 +17,8 @@ namespace Paradise.Assets.Pipeline;
 /// <para>
 /// <b>The output must pass <see cref="ProjectVerifier"/> and <see cref="BuildRunner"/> with zero
 /// errors.</b> That is the whole specification, and it is what separates a scaffold from a
-/// directory of plausible-looking files: every asset carries a sidecar with the right kind and a
-/// correct hash, every reference resolves, every document is byte-canonical, and the level bakes.
+/// directory of plausible-looking files: every asset carries a sidecar with a GUID, every
+/// reference resolves, every document is byte-canonical, and the level bakes.
 /// </para>
 /// <para>
 /// It writes through <see cref="IFileSystem"/> rather than <c>System.IO</c> so the whole thing
@@ -317,14 +317,11 @@ public static class ProjectScaffold
         written.Add(new ScaffoldedFile(path, description));
     }
 
-    /// <summary>Mints the sidecar every asset must have, with the hash of what was just written.</summary>
+    /// <summary>Mints the sidecar every asset must have.</summary>
     private static void Sidecar(IFileSystem fileSystem, UPath asset, List<ScaffoldedFile> written)
     {
-        var meta = SidecarMeta.Mint();
-        meta.Hash = SidecarMeta.ComputeHash(fileSystem, asset);
-
         var path = SidecarMeta.PathFor(asset);
-        meta.Save(fileSystem, path);
+        SidecarMeta.Mint().Save(fileSystem, path);
         written.Add(new ScaffoldedFile(path, "identity"));
     }
 

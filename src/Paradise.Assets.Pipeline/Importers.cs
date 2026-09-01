@@ -245,7 +245,9 @@ public sealed class PrefabImporter : IAssetImporter
         }
 
         var failures = new List<string>();
-        var level = PrefabBake.Bake(document, Referenced, DocumentOutput.Extension(context.Profile), failures);
+        var prefabExtension = DocumentOutput.PrefabExtension(context.Profile, context.Target);
+        var configExtension = DocumentOutput.Extension(context.Profile);
+        var level = PrefabBake.Bake(document, Referenced, prefabExtension, configExtension, failures);
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");
@@ -253,13 +255,15 @@ public sealed class PrefabImporter : IAssetImporter
         }
 
         // Both writers serialize the SAME baked LevelData through the same type model, so the
-        // format is a choice about who reads the output rather than about what it says.
-        var text = context.Profile.DocumentFormat == DocumentFormat.Json
+        // format is a choice about who reads the output rather than about what it says. Play
+        // always writes TOML into `.prefab`: the filename is the authoring one, and the runtime
+        // dispatches on the extension.
+        var text = DocumentOutput.PrefabAsJson(context.Profile, context.Target)
             ? ExportJsonWriter.SerializeToString(level)
             : ExportTomlWriter.SerializeToString(level);
 
         context.Output.WriteAllBytes(
-            "/" + Path.ChangeExtension(context.Source, DocumentOutput.Extension(context.Profile)),
+            "/" + Path.ChangeExtension(context.Source, prefabExtension),
             DocumentOutput.Utf8NoBom.GetBytes(text));
         return true;
 
@@ -317,47 +321,6 @@ public sealed class ConfigImporter : IAssetImporter
     }
 }
 
-/// <summary>
-/// Copies sidecars verbatim — into the PLAY tree only. The editor playmode traces a built asset
-/// back to its authoring identity, while a player's install has no use for source-tree
-/// bookkeeping and must not ship it.
-/// </summary>
-/// <remarks>
-/// <para>
-/// <b>The target rule lives here, in the importer it is about.</b> This is the only step that
-/// exists for one tree and not the other, and it says so itself by declining
-/// (<see cref="ImportContext.Target"/>) — rather than the caller assembling a different chain
-/// per flavour, which put the knowledge of what a sidecar is for in the one place that has no
-/// business knowing it.
-/// </para>
-/// <para>
-/// The one importer with a null <see cref="ImportContext.Meta"/>: a sidecar has no sidecar of
-/// its own. Its manifest entry carries a null guid for the same reason the file exists -- a
-/// sidecar DESCRIBES an identity rather than having one, and recording the guid it names would
-/// give two manifest entries the same value and break any guid-to-asset lookup.
-/// </para>
-/// </remarks>
-public sealed class SidecarImporter : IAssetImporter
-{
-    /// <inheritdoc />
-    public string Name => "sidecar";
-
-    /// <inheritdoc />
-    public bool DeterministicCopy => true;
-
-    /// <inheritdoc />
-    public bool RecordsIdentity => false;
-
-    /// <inheritdoc />
-    public bool Import(ImportContext context, List<string> errors)
-    {
-        if (context.Target != ProjectOutputTarget.Play || !context.HasExtension(SidecarMeta.Suffix)) return false;
-
-        context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
-        return true;
-    }
-}
-
 /// <summary>What the document importers share: the profile's output format, spelled once.</summary>
 internal static class DocumentOutput
 {
@@ -367,6 +330,20 @@ internal static class DocumentOutput
     /// <summary>The extension an authored document gets in the build, per the profile.</summary>
     public static string Extension(BuildProfile profile)
         => profile.DocumentFormat == DocumentFormat.Json ? ".json" : ".toml";
+
+    /// <summary>
+    /// The extension a baked prefab keeps. Play leaves <c>.prefab</c> so spawners and the editor
+    /// Play button still name a file that exists; a shipped build rewrites to the profile format.
+    /// </summary>
+    public static string PrefabExtension(BuildProfile profile, ProjectOutputTarget target)
+        => target == ProjectOutputTarget.Play ? AssetClassifier.PrefabSuffix : Extension(profile);
+
+    /// <summary>
+    /// Whether a baked prefab is written as JSON. Play always writes TOML — the <c>.prefab</c>
+    /// name is the authoring format, and the runtime dispatches on the extension.
+    /// </summary>
+    public static bool PrefabAsJson(BuildProfile profile, ProjectOutputTarget target)
+        => target != ProjectOutputTarget.Play && profile.DocumentFormat == DocumentFormat.Json;
 
     /// <summary>Reports an unimplemented document format; <see langword="true"/> when the importer must stop.</summary>
     public static bool Unsupported(ImportContext context, List<string> errors)

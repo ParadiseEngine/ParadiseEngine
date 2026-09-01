@@ -77,8 +77,9 @@ internal static class Verbs
         if (dryRun) return 0;
 
         KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
-        var target = editor ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
-        var output = fileSystem.ConvertPathToInternal(layout.OutputFor(target));
+        var editorMode = new WatchEditorMode(editor);
+        ProjectOutputTarget Target() => editorMode.IsOn ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
+        string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
         using var signals = new WatchSignals();
         using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine);
@@ -86,7 +87,15 @@ internal static class Verbs
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
                 Rebuild: build ? signals.RequestRebuild : null,
-                OpenOutput: () => ShellFolders.Open(output)),
+                OpenOutput: () => ShellFolders.Open(OutputPath()),
+                Editor: editorMode,
+                ToggleEditor: () =>
+                {
+                    var on = editorMode.Toggle();
+                    Console.WriteLine(on
+                        ? "watch: play mode on — asset changes rebuild .editor/play"
+                        : "watch: play mode off — asset changes rebuild build/");
+                }),
             enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
@@ -99,15 +108,18 @@ internal static class Verbs
 
         watcher.Start();
         Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");
+        Console.WriteLine(editorMode.IsOn
+            ? "watch: play mode on — asset changes rebuild .editor/play"
+            : "watch: play mode off — asset changes rebuild build/");
 
         var session = new WatchSession(
             signals,
             watchTray,
             drain: watcher.Drain,
-            rebuild: build ? () => watcher.Rebuild(profile, target, encoder) : null,
+            rebuild: build ? () => watcher.Rebuild(profile, Target(), encoder) : null,
             log: Console.WriteLine,
             error: message => Console.Error.WriteLine(message),
-            outputDisplay: Display(fileSystem, layout.OutputFor(target)),
+            outputDisplay: () => Display(fileSystem, layout.OutputFor(Target())),
             quiet: AssetWatcher.Debounce);
 
         watchTray.Run(session.Run, Console.WriteLine);

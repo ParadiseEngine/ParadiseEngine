@@ -10,7 +10,8 @@ public class WatchTrayTests
     private static WatchTrayHooks Hooks() => new(
         Stop: static () => { },
         Rebuild: static () => { },
-        OpenOutput: static () => { });
+        OpenOutput: static () => { },
+        Editor: new WatchEditorMode(true));
 
     [Test]
     public async Task disabled_tray_is_the_no_op()

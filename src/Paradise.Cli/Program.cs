@@ -64,6 +64,7 @@ int Assets(string? assetVerb, string[] arguments)
     string? projectDirectory = null;
     string? profile = null;
     var editor = false;
+    var editorSpecified = false;
     var fix = false;
     var keepEditor = false;
     var dryRun = false;
@@ -76,7 +77,8 @@ int Assets(string? assetVerb, string[] arguments)
         {
             case "--project" when i + 1 < arguments.Length: projectDirectory = arguments[++i]; break;
             case "--profile" when i + 1 < arguments.Length: profile = arguments[++i]; break;
-            case "--editor": editor = true; break;
+            case "--editor": editor = true; editorSpecified = true; break;
+            case "--no-editor": editor = false; editorSpecified = true; break;
             case "--fix": fix = true; break;
             case "--keep-editor": keepEditor = true; break;
             case "--dry-run": dryRun = true; break;
@@ -107,7 +109,7 @@ int Assets(string? assetVerb, string[] arguments)
         "clean" => Verbs.Clean(physical, layout, keepEditor),
         "build" => Verbs.Build(physical, layout, profile, editor),
         "catalogue" => Verbs.Catalogue(physical, layout),
-        "watch" => Verbs.Watch(physical, layout, profile, editor, dryRun, !noBuild, !noTray),
+        "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray),
         "mv" or "pack" => NotImplemented(assetVerb),
         _ => Unknown($"unknown assets verb '{assetVerb}'"),
     };
@@ -166,7 +168,8 @@ static int Usage()
         assets prefab-check [--fix]   police (or restore) canonical form of *.prefab documents
         assets build [--profile p]    compile assets/ into build/ (or .editor/play with --editor)
         assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
-        assets watch [--editor]       keep *.meta in step with assets/, rebuilding as you go
+        assets watch                  keep *.meta in step, rebuilding .editor/play (play mode on)
+                                        --no-editor rebuilds build/ instead; the tray toggles this
                                         --dry-run reports without writing; --no-build skips the rebuild
                                         a tray icon (idle/building/failed) on Windows and macOS
                                         --no-tray keeps the console-only behaviour

@@ -166,6 +166,34 @@ public class PrefabBakeTests
     }
 
     /// <summary>
+    /// Play keeps the <c>.prefab</c> name, so a spawner must keep pointing at one. Configs still
+    /// follow the profile format — otherwise they would name a file the config importer did not
+    /// write.
+    /// </summary>
+    [Test]
+    public async Task play_keeps_prefab_references_and_rewrites_configs()
+    {
+        var document = new PrefabDocument();
+        var root = PrefabObject.WithMeta(RootGuid, "spawner");
+        root.Components.Add(new PrefabComponent(
+            new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"), "game.Spawner", new CanonicalTomlTable
+            {
+                { "Spawns", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "prefabs/crate.prefab")) },
+                { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "materials/rust.toml")) },
+                { "Mesh", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "models/crate.glb")) },
+            }));
+        document.Objects.Add(root);
+
+        var payload = Payload(
+            PrefabBake.Bake(document, _ => null, ".prefab", ".toml", new List<string>()).Entities[0],
+            new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"));
+
+        await Assert.That(payload.GetProperty("Spawns").GetString()).IsEqualTo("prefabs/crate.prefab");
+        await Assert.That(payload.GetProperty("Material").GetString()).IsEqualTo("materials/rust.toml");
+        await Assert.That(payload.GetProperty("Mesh").GetString()).IsEqualTo("models/crate.glb");
+    }
+
+    /// <summary>
     /// A payload table inside an array is data, not a reference, and reaches the contract whole.
     /// </summary>
     /// <remarks>
