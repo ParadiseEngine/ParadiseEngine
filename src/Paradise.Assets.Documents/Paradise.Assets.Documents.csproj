@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The authored-document contracts of the asset project: the canonical TOML writing spec, the
+    sidecar meta document, and the authoring scene document. This is the C# reference
+    implementation; the Blender addon carries a pure-Python mirror, and the two are policed
+    against each other by the pipeline's check verbs.
+
+    Referenced by tooling (the pipeline, the CLI) — never by a runtime host, which only ever
+    mounts build-shaped trees and reads whatever format the build profile compiled.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Assets.Documents</AssemblyName>
+    <RootNamespace>Paradise.Assets.Documents</RootNamespace>
+    <PackageId>Paradise.Assets.Documents</PackageId>
+    <Title>Paradise.Assets.Documents</Title>
+    <Description>Authored-document contracts for Paradise asset projects: canonical TOML writing, sidecar meta files, and the authoring scene document. C# reference implementation, mirrored in the Blender addon.</Description>
+    <PackageTags>assets;toml;authoring;scene;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
+    <!--
+      For AssetReference. It lives in Paradise.Authoring rather than here because the GAME's
+      [Authored] records declare fields of that type, and a game already references Authoring for
+      the attributes; putting it here would make every game depend on the asset tooling. The
+      dependency runs one way only — Authoring knows nothing about documents.
+    -->
+    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Assets.Documents.Test" />
+  </ItemGroup>
+
+</Project>

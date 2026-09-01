@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The `paradise` command — the engine's one CLI, a thin shell over Paradise.Assets.Pipeline.
+    Ships as a dotnet tool (the repo's first; the recommended option of #179's packaging
+    decision), so a game repo takes it as a tool-manifest entry and CI as `dotnet tool restore`.
+
+    Verbs are GROUPED (`paradise assets build`, `paradise tools doctor`) rather than flat. It was
+    `paradise-assets` with flat verbs while it only knew about assets; scaffolding a project and
+    reporting on the shader/texture toolchain are not asset operations, and a tool named for one
+    of the things it does misdescribes itself the moment it does another. Groups also leave room
+    for `paradise shaders` / `paradise pack` without a second rename.
+
+    Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
+    every verb's real logic lives (tested) in the pipeline library.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>paradise</AssemblyName>
+    <RootNamespace>Paradise.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>paradise</ToolCommandName>
+    <PackageId>Paradise.Cli</PackageId>
+    <Title>paradise</Title>
+    <Description>The Paradise engine CLI: create a project, verify and build its assets, and report on the build toolchain.</Description>
+    <PackageTags>assets;pipeline;cli;dotnet-tool;game-dev</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+  </ItemGroup>
+
+</Project>

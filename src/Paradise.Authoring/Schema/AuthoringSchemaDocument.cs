@@ -268,6 +268,21 @@ public static class AuthoredBySources
     /// never learns what any particular record MEANS by a pose.
     /// </summary>
     public const string Transform = "transform";
+
+    /// <summary>The host object's own durable identity (<see cref="HostId"/>).</summary>
+    public const string Id = "id";
+
+    /// <summary>The host object's display name (<see cref="HostName"/>).</summary>
+    public const string Name = "name";
+
+    /// <summary>The host object's local translation (<see cref="HostLocalPosition"/>).</summary>
+    public const string LocalPosition = "local-position";
+
+    /// <summary>The host object's local rotation, canonical quaternion (<see cref="HostLocalRotation"/>).</summary>
+    public const string LocalRotation = "local-rotation";
+
+    /// <summary>The host object's local scale (<see cref="HostLocalScale"/>).</summary>
+    public const string LocalScale = "local-scale";
 }
 
 /// <summary>

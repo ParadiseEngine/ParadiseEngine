@@ -1,175 +1,97 @@
 {
-  "SchemaVersion": 5,
+  "SchemaVersion": 6,
   "Entities": [
     [
       {
-        "Id": "f83f51f4-093a-42c9-aa7a-f50f48c3b5f9",
-        "Type": "Paradise.Export.Data.NameComponentData",
+        "Id": "0f1d4b3a-8c27-4a55-9b6e-2f7c1d40a913",
+        "Type": "meta",
         "Data": {
-          "Value": "Environment"
+          "Guid": "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8",
+          "Name": "Ground"
         }
       },
       {
-        "Id": "f5f4a867-fe27-426a-82f2-1a2de5aceb2f",
-        "Type": "Paradise.Export.Data.EnvironmentData",
+        "Id": "7e55c210-3d41-4b8a-8f26-9c0a5e71b4d2",
+        "Type": "transform",
         "Data": {
-          "ShadowMapSize": null,
-          "ShadowBlur": null,
-          "AmbientMode": "Skybox",
-          "AmbientColor": {
-            "r": 0.03529412,
-            "g": 0.043137256,
-            "b": 0.05490196,
-            "a": 1
-          },
-          "AmbientEquatorColor": {
-            "r": 0.011764706,
-            "g": 0.015686275,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "AmbientGroundColor": {
-            "r": 0.003921569,
-            "g": 0.003921569,
-            "b": 0.003921569,
-            "a": 1
-          },
-          "AmbientSh": null,
-          "SkyReflections": false,
-          "SkySunSizeCos": 2,
-          "SkySunAngleMaxCos": 2,
-          "SkySunInvCurve": 24,
-          "Exposure": 1,
-          "AmbientEnergy": 1,
-          "HasBackground": false,
-          "BackgroundColor": {
-            "r": 0.5019608,
-            "g": 0.52156866,
-            "b": 0.56078434,
-            "a": 1
-          },
-          "SkyGradient": false,
-          "SkyTopColor": {
-            "r": 0.03137255,
-            "g": 0.023529412,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "SkyHorizonColor": {
-            "r": 0.2,
-            "g": 0.2,
-            "b": 0.21176471,
-            "a": 1
-          },
-          "SkyGroundBottomColor": {
-            "r": 0.03137255,
-            "g": 0.023529412,
-            "b": 0.015686275,
-            "a": 1
-          },
-          "SkyGroundHorizonColor": {
-            "r": 0.2,
-            "g": 0.2,
-            "b": 0.21176471,
-            "a": 1
-          },
-          "SkySkyCurveInv": 4,
-          "SkyGroundCurveInv": 30,
-          "FogEnabled": false,
-          "FogColor": {
-            "r": 0.21568628,
-            "g": 0.21568628,
-            "b": 0.21568628,
-            "a": 1
-          },
-          "FogDensity": 0.01,
-          "SsaoEnabled": false,
-          "SsaoRadius": 1,
-          "SsaoIntensity": 2,
-          "SsaoPower": 1.5,
-          "TonemapMode": "Linear",
-          "TonemapExposure": 1,
-          "TonemapWhite": 1,
-          "GlowEnabled": false,
-          "GlowIntensity": 0.6,
-          "GlowThreshold": 1
+          "Position": [
+            0.0,
+            -0.5,
+            0.0
+          ],
+          "Rotation": [
+            0.0,
+            0.766044438,
+            0.0,
+            0.642787635
+          ],
+          "Scale": [
+            20.0,
+            1.0,
+            20.0
+          ]
+        }
+      },
+      {
+        "Id": "a0000000-0000-4000-8000-000000000003",
+        "Type": "Paradise.Export.Tests.CrateFixture",
+        "Data": {
+          "Colliders": [
+            {
+              "Id": "Ground",
+              "IsStatic": true,
+              "ShapeType": "Box",
+              "Size": [
+                20.0,
+                1.0,
+                20.0
+              ],
+              "LayerMask": -1
+            }
+          ]
         }
       }
     ],
     [
       {
-        "Id": "f83f51f4-093a-42c9-aa7a-f50f48c3b5f9",
-        "Type": "Paradise.Export.Data.NameComponentData",
+        "Id": "0f1d4b3a-8c27-4a55-9b6e-2f7c1d40a913",
+        "Type": "meta",
         "Data": {
-          "Value": "Directional Light"
+          "Guid": "9a8b7c6d-5e4f-4031-8213-4c5d6e7f8091",
+          "Name": "Ball",
+          "Parent": "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8"
         }
       },
       {
-        "Id": "5b1a2ea9-a4bb-4ba2-be15-b645ccf50004",
-        "Type": "Paradise.Export.Data.TransformComponentData",
+        "Id": "7e55c210-3d41-4b8a-8f26-9c0a5e71b4d2",
+        "Type": "transform",
         "Data": {
-          "World": [
-            1,
-            0,
-            0,
-            0,
-            0,
-            1,
-            0,
-            0,
-            0,
-            0,
-            1,
-            0,
-            0,
-            3,
-            0,
-            1
+          "Position": [
+            1.0,
+            0.85,
+            2.0
+          ],
+          "Rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "Scale": [
+            2.0,
+            2.0,
+            2.0
           ]
         }
       },
       {
-        "Id": "fc886b84-c48c-4415-afd9-b03d6faf5ab7",
-        "Type": "Paradise.Export.Data.SceneLightData",
+        "Id": "a0000000-0000-4000-8000-000000000001",
+        "Type": "Paradise.Export.Tests.MoverFixture",
         "Data": {
-          "Id": "Directional Light",
-          "Type": "Directional",
-          "Position": [
-            0,
-            3,
-            0
-          ],
-          "Direction": [
-            0.3213938,
-            0.76604444,
-            0.5566705
-          ],
-          "Color": {
-            "r": 1,
-            "g": 0.78039217,
-            "b": 0.61960787,
-            "a": 1
-          },
-          "Enabled": true,
-          "Intensity": 2,
-          "UseColorTemperature": true,
-          "ColorTemperature": 5000,
-          "Range": 10,
-          "AttenuationExponent": 1,
-          "SpotAngle": 30,
-          "InnerSpotAngle": 21.80208,
-          "AreaSize": [
-            0,
-            0
-          ],
-          "ShadowsEnabled": true,
-          "ShadowType": "Soft",
-          "ShadowStrength": 1,
-          "Specular": 0.5,
-          "Size": 0,
-          "LayerMask": -1,
-          "RenderingLayerMask": 1,
-          "Group": "Default"
+          "Kind": "Dynamic",
+          "Mass": 2.5,
+          "MoveSpeed": 0.003921569,
+          "Clip": null
         }
       }
     ]

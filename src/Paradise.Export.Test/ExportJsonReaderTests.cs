@@ -1,101 +1,85 @@
 using System.Collections.Generic;
-using System.Numerics;
+using System.Text.Json;
 using Paradise.Export.Data;
 using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
 /// <summary>Round-trip guarantee for the read half: writer output must deserialize back to equal
-/// values through every converter (vectors, quaternions, matrices, Color32, enums).</summary>
+/// values, payloads carried verbatim — including the well-known meta/transform ones a v6
+/// document ships for every entity.</summary>
 public class ExportJsonReaderTests
 {
+    private static AuthoredComponentData Payload(Guid id, string? type, string json) =>
+        new() { Id = id, Type = type, Data = JsonDocument.Parse(json).RootElement.Clone() };
+
     [Test]
     public async Task level_document_round_trips_through_write_and_read()
     {
         var document = new LevelData();
         document.Entities.Add(new List<AuthoredComponentData>
         {
-            AuthoredComponentList.Entry(new NameComponentData { Value = "Ground" }),
-            AuthoredComponentList.Entry(new TransformComponentData { World = Matrix4x4.Identity }),
-            AuthoredComponentList.Entry(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static }),
-            AuthoredComponentList.Entry(new ColliderComponentData
-            {
-                Colliders =
-                [
-                    new ColliderShapeData
-                    {
-                        Id = "Ground",
-                        IsStatic = true,
-                        Layer = 0,
-                        ShapeType = PhysicsShapeType.Box,
-                        LocalCenter = new Vector3(0f, -0.5f, 0f),
-                        LocalRotation = Quaternion.Identity,
-                        Size = new Vector3(20f, 1f, 20f),
-                    },
-                ],
-            }),
+            Payload(WellKnownEntityComponents.MetaId, WellKnownEntityComponents.MetaType,
+                """{"Guid":"3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8","Name":"Ground"}"""),
+            Payload(WellKnownEntityComponents.TransformId, WellKnownEntityComponents.TransformType,
+                """{"Position":[0.0,-0.5,0.0],"Rotation":[0.0,0.0,0.0,1.0],"Scale":[20.0,1.0,20.0]}"""),
+            Payload(TestComponentIds.CrateId, "Paradise.Export.Tests.CrateFixture",
+                """{"Colliders":[{"Id":"Ground","IsStatic":true,"ShapeType":"Box","Size":[20,1,20]}]}"""),
         });
         document.Entities.Add(new List<AuthoredComponentData>
         {
-            AuthoredComponentList.Entry(new NameComponentData { Value = "Ball1" }),
-            AuthoredComponentList.Entry(new TransformComponentData
-            {
-                World = Matrix4x4.CreateTranslation(1f, 0.85f, 2f),
-            }),
-            AuthoredComponentList.Entry(new RenderableComponentData
-            {
-                Mesh = "meshes/abc.glb",
-            }),
-            AuthoredComponentList.Entry(new MaterialsComponentData
-            {
-                Slots = ["materials/mat_ball1.json"],
-            }),
-            AuthoredComponentList.Entry(new RigidbodyComponentData
-            {
-                BodyType = PhysicsBodyType.Dynamic,
-                Mass = 2f,
-            }),
-            AuthoredComponentList.Entry(new ColliderComponentData
-            {
-                Colliders = [new ColliderShapeData { ShapeType = PhysicsShapeType.Sphere, Radius = 0.35f }],
-            }),
+            Payload(WellKnownEntityComponents.MetaId, WellKnownEntityComponents.MetaType,
+                """{"Guid":"9a8b7c6d-5e4f-4031-8213-4c5d6e7f8091","Name":"Ball1","Parent":"3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8"}"""),
+            Payload(WellKnownEntityComponents.TransformId, WellKnownEntityComponents.TransformType,
+                """{"Position":[1.0,0.85,2.0],"Rotation":[0.0,0.0,0.0,1.0],"Scale":[1.0,1.0,1.0]}"""),
+            Payload(TestComponentIds.MoverId, "Paradise.Export.Tests.MoverFixture",
+                """{"Kind":"Dynamic","Mass":2.0}"""),
         });
 
         var parsed = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(parsed.SchemaVersion).IsEqualTo(LevelData.CurrentSchemaVersion);
+        await Assert.That(parsed.Entities.Count).IsEqualTo(2);
 
-        var ground = parsed.Entities[0];
-        await Assert.That(ground.Get<NameComponentData>()!.Value).IsEqualTo("Ground");
-        await Assert.That(ground.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Static);
-        await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].Size).IsEqualTo(new Vector3(20f, 1f, 20f));
-        await Assert.That(ground.Get<ColliderComponentData>()!.Colliders[0].ShapeType).IsEqualTo(PhysicsShapeType.Box);
+        // The well-known payloads cross over untouched: identity and hierarchy SURVIVE.
+        var ballMeta = parsed.Entities[1]
+            .Single(c => c.Id == WellKnownEntityComponents.MetaId).Data;
+        await Assert.That(ballMeta.GetProperty(WellKnownEntityComponents.Name).GetString())
+            .IsEqualTo("Ball1");
+        await Assert.That(ballMeta.GetProperty(WellKnownEntityComponents.Parent).GetString())
+            .IsEqualTo("3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8");
 
-        var entity = parsed.Entities[1];
-        await Assert.That(entity.Get<TransformComponentData>()!.World.Translation)
-            .IsEqualTo(new Vector3(1f, 0.85f, 2f));
-        await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("meshes/abc.glb");
-        await Assert.That(entity.Get<MaterialsComponentData>()!.Slots)
-            .IsEquivalentTo(new List<string?> { "materials/mat_ball1.json" });
-        await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
-        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders[0].Radius).IsEqualTo(0.35f);
+        var ballTransform = parsed.Entities[1]
+            .Single(c => c.Id == WellKnownEntityComponents.TransformId).Data;
+        await Assert.That(ballTransform.GetProperty(WellKnownEntityComponents.Position)[1].GetSingle())
+            .IsEqualTo(0.85f);
+
+        // A game payload materializes through the game's registry, values intact.
+        var mover = AuthoredComponentRouter.Materialize(parsed.Entities[1], TestRegistry.Default)
+            .OfType<MoverFixture>().Single();
+        await Assert.That(mover.Kind).IsEqualTo(MoverKind.Dynamic);
+        await Assert.That(mover.Mass).IsEqualTo(2f);
+
+        var crate = AuthoredComponentRouter.Materialize(parsed.Entities[0], TestRegistry.Default)
+            .OfType<CrateFixture>().Single();
+        await Assert.That(crate.Colliders.Single().Size)
+            .IsEqualTo(new System.Numerics.Vector3(20f, 1f, 20f));
+        await Assert.That(crate.Colliders.Single().ShapeType).IsEqualTo(PhysicsShapeType.Box);
     }
 
     /// <summary>
-    /// A v4 document is REFUSED, and this is the test that earns the version gate.
-    ///
-    /// Without it a v4 document is not an error: its entities are JSON OBJECTS where this build
-    /// expects arrays, so <c>Entities</c> deserializes to nothing and the scene loads as an empty
-    /// world with no diagnostic anywhere.
+    /// A v5 document is REFUSED, and this is the test that earns the version gate: its entities
+    /// carry baked world matrices this build has no reader for, so letting it parse would load a
+    /// scene whose placement silently means nothing.
     /// </summary>
     [Test]
-    public async Task a_v4_document_is_refused_by_name()
+    public async Task a_v5_document_is_refused_by_name()
     {
-        const string v4 = """
-            {"SchemaVersion":4,"Entities":[{"Id":"Ground","Components":[]}]}
+        const string v5 = """
+            {"SchemaVersion":5,"Entities":[[]]}
             """;
 
-        await Assert.That(() => ExportJsonReader.ReadLevel(v4))
+        await Assert.That(() => ExportJsonReader.ReadLevel(v5))
             .Throws<System.Text.Json.JsonException>();
     }
 }

@@ -28,13 +28,13 @@ public class AuthoredDocumentTests
         var document = Parse($$"""
             {
               "Components": [
-                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"BodyType":"Dynamic","Mass":2.5} },
+                { "Id": "{{TestComponentIds.MoverId}}", "Data": {"BodyType":"Dynamic","Mass":2.5} },
                 { "Id": "{{LedgeId}}", "Data": {"Friction":0.35,"Label":"north"} }
               ]
             }
             """);
 
-        await Assert.That(document.Get<RigidbodyComponentData>().Mass).IsEqualTo(2.5f);
+        await Assert.That(document.Get<MoverFixture>().Mass).IsEqualTo(2.5f);
         await Assert.That(document.Get<LedgeFixture>().Label).IsEqualTo("north");
     }
 
@@ -285,13 +285,13 @@ public class AuthoredDocumentTests
             {
               "Components": [
                 { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
-                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"Mass":1} }
+                { "Id": "{{TestComponentIds.MoverId}}", "Data": {"Mass":1} }
               ]
             }
             """);
 
         await Assert.That(document.Components.Select(c => c.GetType().Name).ToArray())
-            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(RigidbodyComponentData) });
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) });
     }
 
     [Test]
@@ -337,7 +337,7 @@ public class AuthoredDocumentTests
             {
               "Components": [
                 { "Id": "{{LedgeId}}", "Data": {"Label":"first"} },
-                { "Id": "{{typeof(RigidbodyComponentData).GUID}}", "Data": {"Mass":1} }
+                { "Id": "{{TestComponentIds.MoverId}}", "Data": {"Mass":1} }
               ]
             }
             """);
@@ -345,7 +345,7 @@ public class AuthoredDocumentTests
         var amended = document.With(new LedgeFixture { Label = "replaced" });
 
         await Assert.That(amended.Components.Select(c => c.GetType().Name).ToArray())
-            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(RigidbodyComponentData) });
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) });
         await Assert.That(amended.Components.Count).IsEqualTo(2);
     }
 
@@ -360,7 +360,7 @@ public class AuthoredDocumentTests
             component = id == LedgeId
                 ? data.Deserialize(LedgeFixtureJsonContext.Default.LedgeFixture)
                 : null;
-            return component is not null;
+            return component is not null || TestRegistry.Default.TryRead(id, data, out component);
         }
 
         public bool TryReadByType(string fullTypeName, JsonElement data, out object? component)

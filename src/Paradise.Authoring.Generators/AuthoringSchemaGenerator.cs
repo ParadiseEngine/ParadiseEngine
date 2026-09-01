@@ -139,6 +139,58 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             + "document this generator produced never contains one; a hand-written AuthoringSchema "
             + "constant can. Give the component an id or remove it.");
 
+    /// <summary>
+    /// PAUT010: a property bound to a VALUE host kind whose type does not match the kind's.
+    ///
+    /// The typed spelling of <c>[AuthoredByHost&lt;T&gt;]</c> exists for exactly this check: a
+    /// value kind declares what the host supplies, and a field of another type would publish a
+    /// schema the host cannot fill.
+    /// </summary>
+    public static readonly DiagnosticDescriptor HostValueTypeMismatch = new(
+        id: "PAUT010",
+        title: "Authored field type does not match its host kind",
+        messageFormat: "'{0}' is bound to {1}, whose value is a {2}, but the property is a {3}",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A value host kind (HostId, HostLocalPosition, ...) declares the type the "
+            + "host writes into the field. Change the property's type to the kind's value type, "
+            + "or type the property as the kind itself.");
+
+    /// <summary>
+    /// PAUT011: a VALUE host kind applied to a whole type.
+    ///
+    /// A value kind is one concrete value of one field; a whole record cannot be "a Guid". The
+    /// marker kinds (HostShape, HostMesh, …) are the ones that describe a whole record.
+    /// </summary>
+    public static readonly DiagnosticDescriptor HostValueKindOnType = new(
+        id: "PAUT011",
+        title: "Value host kind on a type",
+        messageFormat: "'{0}' is [AuthoredByHost<{1}>], but {1} is a value kind — bind it to a property instead",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Value host kinds bind a single property, by attribute or by typing the "
+            + "property as the kind. Only marker kinds (HostShape, HostMesh, HostSprite, "
+            + "HostLight, HostTransform) describe a whole record.");
+
+    /// <summary>
+    /// PAUT012: a property TYPED as one host kind but ATTRIBUTED with another.
+    ///
+    /// The attribute wins (it is the more specific declaration), but two spellings that disagree
+    /// on one field is a maintenance trap said out loud.
+    /// </summary>
+    public static readonly DiagnosticDescriptor HostKindDisagreement = new(
+        id: "PAUT012",
+        title: "Host-typed field attributed with a different kind",
+        messageFormat: "'{0}' is typed as one host kind but attributed [AuthoredByHost<{1}>]; the attribute wins — drop one spelling",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "A property may declare its host kind by type or by attribute. When both "
+            + "appear and disagree, the attribute is honoured; remove one so the declaration has "
+            + "one spelling.");
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var authored = context.SyntaxProvider
@@ -231,6 +283,21 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         var claimed = new Dictionary<string, AuthoredType>(System.StringComparer.Ordinal);
         foreach (var type in candidates)
         {
+            // Host-binding problems don't stop emission: the field is still published (or, for
+            // PAUT010, published with the kind's declared shape a host will fail to fill), and
+            // the error is what tells the author which side to fix.
+            foreach (var problem in type.HostProblems)
+            {
+                var descriptor = problem.Id switch
+                {
+                    "PAUT010" => HostValueTypeMismatch,
+                    "PAUT011" => HostValueKindOnType,
+                    _ => HostKindDisagreement,
+                };
+                context.ReportDiagnostic(Diagnostic.Create(
+                    descriptor, problem.Location, problem.Args.Cast<object?>().ToArray()));
+            }
+
             if (type.IdUnusable)
             {
                 context.ReportDiagnostic(Diagnostic.Create(

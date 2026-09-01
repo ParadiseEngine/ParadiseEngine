@@ -30,7 +30,45 @@ public class AuthoringSchemaTests
         await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
         {
             FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
+            FixtureIds.HostBoundId,
         });
+    }
+
+    // ---- typed host kinds ------------------------------------------------------------------
+
+    private static AuthoredComponentSchema HostBound() =>
+        Schema().Components.Single(c => c.Id == FixtureIds.HostBoundId);
+
+    /// <summary>The generic attribute publishes the kind's own string — the schema JSON the
+    /// (pure Python) addon reads does not change shape for the typed spelling.</summary>
+    [Test]
+    public async Task a_value_kind_bound_by_attribute_publishes_its_kind_string()
+    {
+        await Assert.That(Field(HostBound(), "Ident").AuthoredBy).IsEqualTo(AuthoredBySources.Id);
+        await Assert.That(Field(HostBound(), "Label").AuthoredBy).IsEqualTo(AuthoredBySources.Name);
+        await Assert.That(Field(HostBound(), "Spin").AuthoredBy).IsEqualTo(AuthoredBySources.LocalRotation);
+    }
+
+    /// <summary>A property TYPED as a value kind binds with no attribute at all, and the schema
+    /// describes it at the kind's VALUE type — the wire type, not the wrapper struct.</summary>
+    [Test]
+    public async Task a_value_kind_bound_by_type_publishes_kind_and_wire_type()
+    {
+        var position = Field(HostBound(), "Position");
+        await Assert.That(position.AuthoredBy).IsEqualTo(AuthoredBySources.LocalPosition);
+        await Assert.That(position.Type).IsEqualTo("vector3");
+
+        var scale = Field(HostBound(), "Scale");
+        await Assert.That(scale.AuthoredBy).IsEqualTo(AuthoredBySources.LocalScale);
+        await Assert.That(scale.Type).IsEqualTo("vector3");
+    }
+
+    /// <summary>An identity travels as the canonical guid STRING, like every id in the contract —
+    /// and it is host-supplied, so no editor draws a control for it.</summary>
+    [Test]
+    public async Task a_host_id_publishes_as_a_string_field()
+    {
+        await Assert.That(Field(HostBound(), "Ident").Type).IsEqualTo("string");
     }
 
     /// <summary>The fallback key, and the only thing in the document that says which component a

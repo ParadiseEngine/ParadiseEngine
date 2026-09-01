@@ -22,6 +22,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
+    <!-- The test assembly declares its own [Authored] fixtures (the engine declares none since
+         contract v6), so it needs the generator the same way a game does. -->
+    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

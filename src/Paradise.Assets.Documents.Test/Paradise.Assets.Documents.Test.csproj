@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Assets.Documents.Test</AssemblyName>
+    <RootNamespace>Paradise.Assets.Documents.Test</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <!-- Same guard as Paradise.Assets.Project.Test: reflection off so a model that lost its
+         source-generated registration fails here, not at AOT publish time. -->
+    <TomlynIsReflectionEnabledByDefault>false</TomlynIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Documents\Paradise.Assets.Documents.csproj" />
+  </ItemGroup>
+</Project>

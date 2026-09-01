@@ -1,19 +1,19 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Paradise.Export.Data;
-using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
 /// <summary>
-/// The router is what lets the engine's components be DECLARED without the exported document
-/// changing shape. An editor knows only ids and JSON; these tests pin that each id still comes back
-/// as the record the runtime reads, and that a game's own component is left alone.
+/// The router over an id-and-payload document. Since contract v6 there is no engine tier: the
+/// caller's registry — here the test assembly's own generated one, the exact mechanism a game
+/// uses — is the only lookup, and these tests pin that each id comes back as the record the
+/// registry declares while everything unknown is reported rather than dropped.
 /// </summary>
 public class AuthoredComponentRouterTests
 {
-    /// <summary>A game's own component: an id the engine does not know, plus the type name that
-    /// makes the payload identifiable when the id resolves to nothing.</summary>
+    /// <summary>A component read through a HAND-WRITTEN registry, standing in for a game that
+    /// implements <c>IAuthoredComponentRegistry</c> itself rather than generating it.</summary>
     private static readonly Guid LedgeId = new("f0000000-0000-4000-8000-000000000001");
 
     private const string LedgeType = "Paradise.Export.Tests.LedgeFixture";
@@ -21,48 +21,31 @@ public class AuthoredComponentRouterTests
     private static AuthoredComponentData Payload(Guid id, string json, string? type = null) =>
         new() { Id = id, Type = type, Data = JsonDocument.Parse(json).RootElement.Clone() };
 
-    /// <summary>An object, which since schema v5 is nothing but its components. It reads as a
-    /// no-op because it IS one — the routing tier this used to stand for is gone, and these tests
-    /// keep the spelling so what they assert stays comparable to what they asserted before.</summary>
+    /// <summary>An object, which since schema v5 is nothing but its components.</summary>
     private static List<AuthoredComponentData> Object(params AuthoredComponentData[] components) =>
         [.. components];
 
     [Test]
-    public async Task every_engine_component_reaches_its_typed_slot()
+    public async Task every_fixture_component_materializes_as_its_record()
     {
         var entity = Object(
-            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
-            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
-            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3.5,"IdleClip":"Idle"}"""),
-            Payload(typeof(EntityInteractableComponentData).GUID, """{"DisplayName":"Lever"}"""),
-            Payload(typeof(SpriteAnimationComponentData).GUID, """{"Sheet":"sprites/torch.ktx2","Columns":4}"""),
-            Payload(typeof(ParticleEmitterComponentData).GUID, """{"Kind":"Voxel","EmitRate":12}"""),
-            Payload(typeof(AudioEmitterComponentData).GUID, """{"StartEvent":"Play_Torch","Is3D":true}"""),
-            Payload(typeof(ColliderComponentData).GUID,
+            Payload(TestComponentIds.MoverId, """{"Kind":"Dynamic","Mass":2.5,"MoveSpeed":3.5}"""),
+            Payload(TestComponentIds.GlowId, """{"ShadowMapSize":4096}"""),
+            Payload(TestComponentIds.CrateId,
                 """{"Colliders":[{"ShapeType":"Box","Size":[1,2,3],"IsTrigger":true}]}"""));
 
-        await Assert.That(entity.Get<RenderableComponentData>()!.Mesh).IsEqualTo("Models/knight.glb");
-        await Assert.That(entity.Get<RigidbodyComponentData>()!.BodyType).IsEqualTo(PhysicsBodyType.Dynamic);
-        await Assert.That(entity.Get<RigidbodyComponentData>()!.Mass).IsEqualTo(2.5f);
-        await Assert.That(entity.Get<AgentComponentData>()!.MoveSpeed).IsEqualTo(3.5f);
-        await Assert.That(entity.Get<EntityInteractableComponentData>()!.DisplayName).IsEqualTo("Lever");
-        await Assert.That(entity.Get<SpriteAnimationComponentData>()!.Columns).IsEqualTo(4);
-        await Assert.That(entity.Get<ParticleEmitterComponentData>()!.Kind).IsEqualTo(ParticleRenderKind.Voxel);
-        await Assert.That(entity.Get<AudioEmitterComponentData>()!.StartEvent).IsEqualTo("Play_Torch");
-        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders.Single().ShapeType)
-            .IsEqualTo(PhysicsShapeType.Box);
-        await Assert.That(entity.Get<ColliderComponentData>()!.Colliders.Single().IsTrigger).IsTrue();
+        var instances = AuthoredComponentRouter.Materialize(entity, TestRegistry.Default);
 
-        // Eight payloads in, eight readable back. Nothing is unpacked on the way in any more, so
-        // what this pins is that Get<T> finds each one by the id its own [Guid] declares — the
-        // property the typed slots used to provide and the reason they could be deleted.
-        await Assert.That(entity.Count).IsEqualTo(8);
+        // Three payloads in, three records out, each found by the id its own [Guid] declares.
+        await Assert.That(instances.OfType<MoverFixture>().Single().MoveSpeed).IsEqualTo(3.5f);
+        await Assert.That(instances.OfType<GlowFixture>().Single().ShadowMapSize).IsEqualTo(4096);
+        await Assert.That(instances.OfType<CrateFixture>().Single().Colliders.Single().IsTrigger).IsTrue();
     }
 
-    /// <summary>The reason Custom exists. A game's component is carried verbatim, because the
-    /// engine cannot name its type and does not try.</summary>
+    /// <summary>The reason Custom exists. A component whose id nothing claims is carried
+    /// verbatim, because the reader cannot name its type and does not try.</summary>
     [Test]
-    public async Task an_unknown_id_is_carried_verbatim_in_custom()
+    public async Task an_unknown_id_is_carried_verbatim()
     {
         var entity = Object(Payload(LedgeId, """{"Friction":0.35,"IsTrigger":false}""", LedgeType));
 
@@ -73,65 +56,61 @@ public class AuthoredComponentRouterTests
         await Assert.That(custom.Data.GetProperty("IsTrigger").ValueKind).IsEqualTo(JsonValueKind.False);
     }
 
-    /// <summary>
-    /// The loading half. Engine components arrive already typed; a game's come back through its
-    /// registry — and the caller gets ONE list of records rather than typed properties mixed with
-    /// raw JSON it has to remember to deserialize.
-    /// </summary>
+    /// <summary>The loading half: one registry, one list of records back.</summary>
     [Test]
-    public async Task materialize_returns_engine_and_game_components_as_instances()
+    public async Task materialize_returns_registry_components_as_instances()
     {
         var entity = Object(
-            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
-            Payload(typeof(RenderableComponentData).GUID, """{"Mesh":"Models/knight.glb"}"""),
-            Payload(LedgeId, """{"Friction":0.35,"IsTrigger":true,"Label":"north"}"""));
+            Payload(TestComponentIds.MoverId, """{"Kind":"Dynamic","Mass":2.5}"""),
+            Payload(TestComponentIds.CrateId,
+                """{"Colliders":[{"ShapeType":"Sphere","IsTrigger":true}]}"""));
 
-        var instances = AuthoredComponentRouter.Materialize(entity, new LedgeRegistry());
+        var instances = AuthoredComponentRouter.Materialize(entity, TestRegistry.Default);
 
-        await Assert.That(instances.OfType<RigidbodyComponentData>().Single().Mass).IsEqualTo(2.5f);
-        await Assert.That(instances.OfType<RenderableComponentData>().Single().Mesh)
-            .IsEqualTo("Models/knight.glb");
-        await Assert.That(instances.OfType<LedgeFixture>().Single().Friction).IsEqualTo(0.35f);
+        var mover = instances.OfType<MoverFixture>().Single();
+        await Assert.That(mover.Kind).IsEqualTo(MoverKind.Dynamic);
+        await Assert.That(mover.Mass).IsEqualTo(2.5f);
+        var crate = instances.OfType<CrateFixture>().Single();
+        await Assert.That(crate.Colliders.Single().ShapeType).IsEqualTo(PhysicsShapeType.Sphere);
+        await Assert.That(crate.Colliders.Single().IsTrigger).IsTrue();
     }
 
-    /// <summary>Without a registry the engine components still materialize — it cannot name a
-    /// game's types and does not pretend to.</summary>
+    /// <summary>Since v6 there is no engine tier: with no registry, NOTHING materializes and
+    /// every payload is reported — the honest answer for a reader with no declarations.</summary>
     [Test]
-    public async Task materialize_without_a_registry_still_yields_the_engine_components()
+    public async Task materialize_without_a_registry_reports_everything()
     {
         var entity = Object(
-            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3}"""),
+            Payload(TestComponentIds.MoverId, """{"MoveSpeed":3}"""),
             Payload(LedgeId, """{"Friction":0.1}"""));
 
         var unresolved = new List<AuthoredComponentData>();
         var instances = AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
 
-        await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
-        await Assert.That(unresolved.Select(c => c.Id)).IsEquivalentTo(new[] { LedgeId });
+        await Assert.That(instances).IsEmpty();
+        await Assert.That(unresolved.Select(c => c.Id))
+            .IsEquivalentTo(new[] { TestComponentIds.MoverId, LedgeId });
     }
 
     /// <summary>
     /// Nullable value-type fields (<c>int?</c>, <c>float?</c>) round-trip through the generated
     /// reader like any other leaf. Pinned because the generator once had no <c>Nullable&lt;T&gt;</c>
-    /// case and SILENTLY skipped these fields — the scene authored a 4096 shadow map, the record
-    /// materialized null, and the renderer quietly ran at its 1024 default. The absent half
-    /// matters equally: no payload property (or an explicit JSON null) must keep the record's own
-    /// null, which is the contract's "unset leaves the renderer's default".
+    /// case and SILENTLY skipped these fields. The absent half matters equally: no payload
+    /// property (or an explicit JSON null) must keep the record's own null.
     /// </summary>
     [Test]
     public async Task nullable_value_fields_materialize_when_present_and_stay_null_when_absent()
     {
         var authored = Object(Payload(
-            typeof(EnvironmentData).GUID, """{"ShadowMapSize":4096,"ShadowBlur":2.8}"""));
-        var environment = AuthoredComponentRouter.Materialize(authored)
-            .OfType<EnvironmentData>().Single();
-        await Assert.That(environment.ShadowMapSize).IsEqualTo(4096);
-        await Assert.That(environment.ShadowBlur).IsEqualTo(2.8f);
+            TestComponentIds.GlowId, """{"ShadowMapSize":4096,"ShadowBlur":2.8}"""));
+        var glow = AuthoredComponentRouter.Materialize(authored, TestRegistry.Default)
+            .OfType<GlowFixture>().Single();
+        await Assert.That(glow.ShadowMapSize).IsEqualTo(4096);
+        await Assert.That(glow.ShadowBlur).IsEqualTo(2.8f);
 
-        var unset = Object(Payload(
-            typeof(EnvironmentData).GUID, """{"ShadowMapSize":null,"AmbientMode":"Color"}"""));
-        var defaults = AuthoredComponentRouter.Materialize(unset)
-            .OfType<EnvironmentData>().Single();
+        var unset = Object(Payload(TestComponentIds.GlowId, """{"ShadowMapSize":null}"""));
+        var defaults = AuthoredComponentRouter.Materialize(unset, TestRegistry.Default)
+            .OfType<GlowFixture>().Single();
         await Assert.That(defaults.ShadowMapSize).IsNull();
         await Assert.That(defaults.ShadowBlur).IsNull();
     }
@@ -156,9 +135,6 @@ public class AuthoredComponentRouterTests
     /// <summary>
     /// And a payload with NO id at all repairs the same way, which is the case the type name was
     /// really added for: a document written before its component had an id.
-    ///
-    /// Worth pinning because the routing half is what makes or breaks it — dropping an id-less
-    /// payload on the way in would leave the fallback below correct and unreachable.
     /// </summary>
     [Test]
     public async Task a_payload_with_no_id_at_all_still_repairs_by_type_name()
@@ -173,9 +149,7 @@ public class AuthoredComponentRouterTests
     }
 
     /// <summary>A payload with neither an id nor a type name cannot be read: there is nothing to
-    /// identify it by. It is REPORTED rather than silently skipped — the document still carries
-    /// it, and a reader that quietly ignored an entry would hide the export bug that wrote it.
-    /// </summary>
+    /// identify it by. It is REPORTED rather than silently skipped.</summary>
     [Test]
     public async Task a_payload_with_neither_an_id_nor_a_type_is_reported()
     {
@@ -198,8 +172,6 @@ public class AuthoredComponentRouterTests
 
         await Assert.That(AuthoredComponentRouter.Materialize(entity, new LedgeRegistry(), unresolved))
             .IsEmpty();
-        // Reported as the whole component, so the caller's message can name the type as well as
-        // the id — "could not read <guid>" is not something anyone can act on.
         var reported = unresolved.Single();
         await Assert.That(reported.Id).IsEqualTo(stranger);
         await Assert.That(reported.Type).IsEqualTo("Someone.Else");
@@ -217,20 +189,18 @@ public class AuthoredComponentRouterTests
     {
         AuthoredComponentData[] document =
         [
-            Payload(typeof(RigidbodyComponentData).GUID, """{"BodyType":"Dynamic","Mass":2.5}"""),
-            Payload(LedgeId, """{"Friction":0.35,"Label":"north"}"""),
+            Payload(TestComponentIds.MoverId, """{"Kind":"Dynamic","Mass":2.5}"""),
+            Payload(LedgeId, """{"Friction":0.35,"Label":"north"}""", LedgeType),
         ];
 
-        var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry());
+        var instances = AuthoredComponentRouter.Materialize(document, new CombinedRegistry());
 
-        await Assert.That(instances.OfType<RigidbodyComponentData>().Single().Mass).IsEqualTo(2.5f);
+        await Assert.That(instances.OfType<MoverFixture>().Single().Mass).IsEqualTo(2.5f);
         await Assert.That(instances.OfType<LedgeFixture>().Single().Label).IsEqualTo("north");
     }
 
-    /// <summary>The gain over a hand-rolled loop, and the reason to share this reader at all: a
-    /// payload whose id no registry knows still loads by TYPE NAME. A config document that
-    /// hand-rolled its own reading did not get this, so regenerating a [Guid] made the file
-    /// unreadable where the identical payload on an entity survived.</summary>
+    /// <summary>A payload whose id no registry knows still loads by TYPE NAME — regenerating a
+    /// [Guid] must not make a config file unreadable.</summary>
     [Test]
     public async Task a_list_payload_with_an_unknown_id_still_loads_by_type_name()
     {
@@ -245,9 +215,8 @@ public class AuthoredComponentRouterTests
         await Assert.That(unresolved).IsEmpty();
     }
 
-    /// <summary>It materializes and REPORTS; it does not enforce. A document that requires a
-    /// payload to be present, unique, or of a kind that document may carry checks that itself —
-    /// the router cannot know which of those any given document requires.</summary>
+    /// <summary>It materializes and REPORTS; it does not enforce. Which payloads a document may
+    /// carry is that document's rule, not the router's.</summary>
     [Test]
     public async Task a_list_reports_what_it_could_not_read_rather_than_throwing()
     {
@@ -265,8 +234,8 @@ public class AuthoredComponentRouterTests
         await Assert.That(unresolved.Single().Id).IsEqualTo(stranger);
     }
 
-    /// <summary>Duplicates are the caller's problem, and stating it here is the point: a config
-    /// document rejects them, a scene may not, and the router must not decide that for either.</summary>
+    /// <summary>Duplicates are the caller's problem: a config document rejects them, a scene may
+    /// not, and the router must not decide that for either.</summary>
     [Test]
     public async Task a_list_materializes_duplicates_rather_than_deciding_about_them()
     {
@@ -279,15 +248,32 @@ public class AuthoredComponentRouterTests
             .IsEquivalentTo(new[] { "first", "second" });
     }
 
-    /// <summary>An empty document is empty, not an error — a config file may legitimately declare
-    /// no components and lean entirely on the records' own defaults.</summary>
+    /// <summary>An empty document is empty, not an error.</summary>
     [Test]
     public async Task an_empty_list_materializes_to_nothing()
     {
         await Assert.That(AuthoredComponentRouter.Materialize([], new LedgeRegistry())).IsEmpty();
     }
 
-    /// <summary>Stands in for the registry a game's [Authored] records generate.</summary>
+    /// <summary>An unreadable payload is REPORTED, not silently dropped — and one bad component
+    /// does not cost the object the rest.</summary>
+    [Test]
+    public async Task an_unreadable_payload_is_reported()
+    {
+        var entity = Object(
+            Payload(TestComponentIds.MoverId, """{"Mass":"not a number"}"""),
+            Payload(TestComponentIds.GlowId, """{"ShadowMapSize":512}"""));
+
+        var unresolved = new List<AuthoredComponentData>();
+        IReadOnlyList<object> instances =
+            AuthoredComponentRouter.Materialize(entity, TestRegistry.Default, unresolved);
+
+        await Assert.That(unresolved.Select(c => c.Id))
+            .IsEquivalentTo(new[] { TestComponentIds.MoverId });
+        await Assert.That(instances.OfType<GlowFixture>().Single().ShadowMapSize).IsEqualTo(512);
+    }
+
+    /// <summary>Stands in for a game that hand-implements the registry interface.</summary>
     private sealed class LedgeRegistry : Paradise.Authoring.IAuthoredComponentRegistry
     {
         public IReadOnlyCollection<Guid> ComponentIds { get; } = new[] { LedgeId };
@@ -315,74 +301,34 @@ public class AuthoredComponentRouterTests
         }
     }
 
-    /// <summary>
-    /// The engine's component ids, pinned to their literal values.
-    ///
-    /// These are WIRE CONTRACT. Every committed scene in every game repo stores them as the
-    /// <c>Id</c> of each authored payload, so changing one does not fail a build — it makes every
-    /// document that carries the old value route nowhere, which surfaces as a component that
-    /// silently stopped being read. Nothing else in the engine would notice: the generator, the
-    /// registry and the router all read the same <c>[Guid]</c>, so they agree with each other
-    /// about a value that is now wrong everywhere else.
-    ///
-    /// This replaced a test asserting the router's constant matched the record's attribute. That
-    /// pairing was real while <c>ParadiseComponentIds</c> held a second copy; once the attribute
-    /// became the only source, the assertion reduced to "Type.GUID reads GuidAttribute" — a test
-    /// of the BCL. The risk it was aimed at (an id drifting unnoticed) is the one pinned here.
-    ///
-    /// A NEW component adds a line. A CHANGED line is the thing to stop and think about.
-    /// </summary>
-    [Test]
-    public async Task the_engine_component_ids_are_what_every_exported_document_already_says()
+    /// <summary>The generated registry plus the hand-written one — what a game composing several
+    /// sources looks like to the router: one interface, whoever answers first.</summary>
+    private sealed class CombinedRegistry : Paradise.Authoring.IAuthoredComponentRegistry
     {
-        (Type Record, string Id)[] contract =
-        [
-            (typeof(NameComponentData), "f83f51f4-093a-42c9-aa7a-f50f48c3b5f9"),
-            (typeof(TransformComponentData), "5b1a2ea9-a4bb-4ba2-be15-b645ccf50004"),
-            (typeof(RenderableComponentData), "f2c0357e-94dd-4a5a-9803-518066cb54b2"),
-            (typeof(ColliderComponentData), "e1cd1bc8-86f2-4225-adc9-4a324c70ebf9"),
-            (typeof(RigidbodyComponentData), "b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"),
-            (typeof(AgentComponentData), "5801915b-3d0c-4940-8970-7d1487b991cf"),
-            (typeof(EntityInteractableComponentData), "0283ee5f-775b-412b-a91c-03ecd9b61165"),
-            (typeof(SpriteAnimationComponentData), "d3e53cd4-89c6-4ca8-851e-7596da889c68"),
-            (typeof(ParticleEmitterComponentData), "1b4d1bdd-dea1-4b86-9b6a-879c46346b9e"),
-            (typeof(AudioEmitterComponentData), "e6ec7f42-df09-4ec9-af06-128ddf3eda8e"),
-            (typeof(SceneLightData), "fc886b84-c48c-4415-afd9-b03d6faf5ab7"),
-            (typeof(EnvironmentData), "f5f4a867-fe27-426a-82f2-1a2de5aceb2f"),
-        ];
+        private static readonly Paradise.Authoring.IAuthoredComponentRegistry[] Sources =
+            [TestRegistry.Default, new LedgeRegistry()];
 
-        foreach ((Type record, string id) in contract)
+        public IReadOnlyCollection<Guid> ComponentIds { get; } =
+            Sources.SelectMany(s => s.ComponentIds).ToArray();
+
+        public bool TryRead(Guid id, JsonElement data, out object? component)
         {
-            await Assert.That(record.GUID).IsEqualTo(Guid.Parse(id))
-                .Because($"{record.Name}'s id is stored in every exported document");
+            foreach (var source in Sources)
+            {
+                if (source.TryRead(id, data, out component)) return true;
+            }
+            component = null;
+            return false;
         }
 
-        // Distinct, because two records sharing an id makes whichever the registry reaches first
-        // answer for both. The generator raises PAUT006 for that inside one assembly; this covers
-        // the list above being edited by copy-paste, which is how a duplicate gets written.
-        await Assert.That(contract.Select(c => c.Id).Distinct().Count()).IsEqualTo(contract.Length);
-    }
-
-    /// <summary>A payload that cannot be read as the component it claims to be is REPORTED, not
-    /// silently dropped — losing authored data without a word is the worst outcome here.
-    ///
-    /// Materialize is where it surfaces, because Materialize is the only thing that reads. Nothing
-    /// deserializes a payload on the way INTO a document any more: an object is its component list
-    /// and the list is carried verbatim.</summary>
-    [Test]
-    public async Task an_unreadable_engine_payload_is_reported()
-    {
-        var entity = Object(
-            Payload(typeof(RigidbodyComponentData).GUID, """{"Mass":"not a number"}"""),
-            Payload(typeof(AgentComponentData).GUID, """{"MoveSpeed":3}"""));
-
-        var unresolved = new List<AuthoredComponentData>();
-        IReadOnlyList<object> instances =
-            AuthoredComponentRouter.Materialize(entity, registry: null, unresolved);
-
-        await Assert.That(unresolved.Select(c => c.Id))
-            .IsEquivalentTo(new[] { typeof(RigidbodyComponentData).GUID });
-        // The good one still materialized: one bad component does not cost the object the rest.
-        await Assert.That(instances.OfType<AgentComponentData>().Single().MoveSpeed).IsEqualTo(3f);
+        public bool TryReadByType(string fullTypeName, JsonElement data, out object? component)
+        {
+            foreach (var source in Sources)
+            {
+                if (source.TryReadByType(fullTypeName, data, out component)) return true;
+            }
+            component = null;
+            return false;
+        }
     }
 }

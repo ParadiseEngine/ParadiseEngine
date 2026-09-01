@@ -16,7 +16,10 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.1.1</Version>
+    <!-- The version every Paradise.* package ships as. They are versioned TOGETHER: a consumer
+         pins one number (ShiningPie's ParadiseVersion) and gets a set that was built and tested
+         against itself, so a partial bump is not a thing anyone can express by accident. -->
+    <Version>0.32.0</Version>
   </PropertyGroup>
 
   <!-- Shared NuGet package metadata. Per-project csproj supplies Description and

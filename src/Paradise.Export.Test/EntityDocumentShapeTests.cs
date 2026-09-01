@@ -1,52 +1,36 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Paradise.Export.Data;
-using Paradise.Export.Geometry;
 using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
-// Validates the exported entity *shape* — the DTO→JSON path for a realistic object (name +
-// transform + collider + rigidbody). It builds the DTOs directly, so it pins the serialized
-// structure the runtime consumes without depending on any editor.
+// Validates the exported entity *shape* for a realistic object (meta + transform + collider +
+// mover). It builds the payloads directly, so it pins the serialized structure the runtime
+// consumes without depending on any editor.
 //
-// Since schema v5 an entity IS its component list, so what this asserts is a shape with no
-// privileged tier in it: the name and the placement are entries in the same array as the collider,
-// found the same way, and nothing is a key at entity level because there are no keys at entity
-// level.
+// Since schema v5 an entity IS its component list, and since v6 there is no privileged tier at
+// all: identity and placement are entries in the same array as the collider, found the same way,
+// carrying the authoring format's own field spellings.
 public class EntityDocumentShapeTests
 {
-    private static readonly Vector3 Position = new(1f, 0f, 2f);
+    internal static AuthoredComponentData Payload(Guid id, string? type, string json) =>
+        new() { Id = id, Type = type, Data = JsonDocument.Parse(json).RootElement.Clone() };
 
-    private static List<AuthoredComponentData> BuildBoxEntity()
-    {
+    internal static List<AuthoredComponentData> BuildBoxEntity() =>
+    [
+        Payload(WellKnownEntityComponents.MetaId, WellKnownEntityComponents.MetaType,
+            """{"Guid":"3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8","Name":"Crate"}"""),
         // Right-handed contract = Godot-native; values are written verbatim.
-        var components = new List<AuthoredComponentData>();
-        components.Set(new NameComponentData { Value = "Crate" });
-        components.Set(new TransformComponentData
-        {
-            World = ContractMatrix.Trs(Position, Quaternion.Identity, Vector3.One),
-        });
-        components.Set(new RenderableComponentData());
-        components.Set(new ColliderComponentData
-        {
-            Colliders = new List<ColliderShapeData>
-            {
-                new()
-                {
-                    Id = "Box",
-                    Path = "",
-                    ShapeType = PhysicsShapeType.Box,
-                    Size = ColliderScaleFold.BoxSize(new Vector3(2f, 4f, 6f), Vector3.One),
-                },
-            },
-        });
-        components.Set(new RigidbodyComponentData { BodyType = PhysicsBodyType.Static, Mass = 0f });
-        return components;
-    }
+        Payload(WellKnownEntityComponents.TransformId, WellKnownEntityComponents.TransformType,
+            """{"Position":[1.0,0.0,2.0],"Rotation":[0.0,0.0,0.0,1.0],"Scale":[1.0,1.0,1.0]}"""),
+        Payload(TestComponentIds.CrateId, "Paradise.Export.Tests.CrateFixture",
+            """{"Colliders":[{"Id":"Box","Path":"","ShapeType":"Box","Size":[2.0,4.0,6.0]}]}"""),
+        Payload(TestComponentIds.MoverId, "Paradise.Export.Tests.MoverFixture",
+            """{"Kind":"Static","Mass":0.0,"Clip":null}"""),
+    ];
 
     [Test]
     public async Task entity_serializes_as_a_bare_component_array()
@@ -58,36 +42,15 @@ public class EntityDocumentShapeTests
         // The whole assertion of v5: an entity has no shape of its own to get wrong.
         await Assert.That(entity.GetValueKind()).IsEqualTo(JsonValueKind.Array);
 
-        await Assert.That((string?)Payload(entity, typeof(NameComponentData))["Value"])
+        await Assert.That((string?)PayloadOf(entity, WellKnownEntityComponents.MetaId)["Name"])
             .IsEqualTo("Crate");
 
-        JsonNode collider = Payload(entity, typeof(ColliderComponentData))["Colliders"]![0]!;
+        JsonNode collider = PayloadOf(entity, TestComponentIds.CrateId)["Colliders"]![0]!;
         await Assert.That((string?)collider["ShapeType"]).IsEqualTo("Box");
         await Assert.That((float)collider["Size"]![1]!).IsEqualTo(4f);
 
-        await Assert.That((string?)Payload(entity, typeof(RigidbodyComponentData))["BodyType"])
+        await Assert.That((string?)PayloadOf(entity, TestComponentIds.MoverId)["Kind"])
             .IsEqualTo("Static");
-
-        // Renderable is a present (empty) payload, since the object has a model. Its ENTRY's
-        // absence is what "no mesh" means — the same statement made once instead of by a null in
-        // a fixed slot.
-        await Assert.That(Payload(entity, typeof(RenderableComponentData)).GetValueKind())
-            .IsEqualTo(JsonValueKind.Object);
-    }
-
-    /// <summary>One component's Data, found by the CLR name the entry carries. The list has no
-    /// fixed positions, so a test that indexed it would pin the editor's emission order rather
-    /// than the shape it means to assert.</summary>
-    private static JsonNode Payload(JsonNode entity, Type type)
-    {
-        foreach (JsonNode? component in entity.AsArray())
-        {
-            if ((string?)component!["Type"] == type.FullName)
-            {
-                return component["Data"]!;
-            }
-        }
-        throw new InvalidOperationException($"no {type.Name} entry on this entity");
     }
 
     [Test]
@@ -95,12 +58,13 @@ public class EntityDocumentShapeTests
     {
         var document = new LevelData { Entities = { BuildBoxEntity() } };
         JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(document))!;
-        var world = (JsonArray)Payload(json["Entities"]![0]!, typeof(TransformComponentData))["World"]!;
+        var position = (JsonArray)PayloadOf(
+            json["Entities"]![0]!, WellKnownEntityComponents.TransformId)["Position"]!;
 
-        // Column-major float[16]: the translation is the last column, elements 12..14. Right-handed
-        // contract, so Godot's (1,0,2) is written verbatim rather than flipped.
-        await Assert.That((float)world[12]!).IsEqualTo(1f);
-        await Assert.That((float)world[14]!).IsEqualTo(2f);
+        // Local TRS since v6 — no matrix, no flatten. Right-handed contract, so Godot's (1,0,2)
+        // is written verbatim rather than flipped.
+        await Assert.That((float)position[0]!).IsEqualTo(1f);
+        await Assert.That((float)position[2]!).IsEqualTo(2f);
     }
 
     [Test]
@@ -110,11 +74,22 @@ public class EntityDocumentShapeTests
         LevelData read = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(read.Entities.Count).IsEqualTo(1);
-        await Assert.That(read.Entities[0].Get<NameComponentData>()?.Value).IsEqualTo("Crate");
-        // TRANSPOSED to read the translation: the contract's matrices are column-vector, and
-        // System.Numerics' Translation reads the row-vector slot. Getting this backwards reads
-        // <0,0,0> for every object, which is exactly the bug the wire assertion above pins.
-        System.Numerics.Matrix4x4 world = read.Entities[0].Get<TransformComponentData>()!.World;
-        await Assert.That(Matrix4x4.Transpose(world).Translation).IsEqualTo(Position);
+        var meta = read.Entities[0].Single(c => c.Id == WellKnownEntityComponents.MetaId).Data;
+        await Assert.That(meta.GetProperty(WellKnownEntityComponents.Name).GetString())
+            .IsEqualTo("Crate");
+    }
+
+    /// <summary>One component's Data, found by id. The list has no fixed positions, so a test
+    /// that indexed it would pin an emission order rather than the shape it means to assert.</summary>
+    private static JsonNode PayloadOf(JsonNode entity, Guid id)
+    {
+        foreach (JsonNode? component in entity.AsArray())
+        {
+            if (string.Equals((string?)component!["Id"], id.ToString("D"), StringComparison.OrdinalIgnoreCase))
+            {
+                return component["Data"]!;
+            }
+        }
+        throw new InvalidOperationException($"no component with id {id} on this entity");
     }
 }

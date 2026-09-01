@@ -88,9 +88,23 @@ namespace Paradise.Export.Data
         public IReadOnlyList<object> Components { get; }
 
         /// <summary>Read a document from disk. <paramref name="path"/> names it in any error.</summary>
+        /// <remarks>
+        /// Dispatches on the EXTENSION, because a build writes its documents in whichever form its
+        /// profile names and the file is the thing that knows which. A TOML document is bridged to
+        /// the contract's JSON text and read by the same parser below — one reader for both forms,
+        /// rather than a second traversal growing beside the first and drifting from it.
+        /// </remarks>
         public static AuthoredDocument Load(
-            string path, IAuthoredComponentRegistry? registry = null) =>
-            Parse(File.ReadAllText(path), registry, path);
+            string path, IAuthoredComponentRegistry? registry = null)
+        {
+            string text = File.ReadAllText(path);
+            if (Path.GetExtension(path).Equals(".toml", StringComparison.OrdinalIgnoreCase))
+            {
+                text = Serialization.ExportTomlReader.ToJsonText(text);
+            }
+
+            return Parse(text, registry, path);
+        }
 
         /// <summary>
         /// Read a document from text.

@@ -36,7 +36,15 @@ dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest/... -c Release
 dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
-Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`.
+Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
+`Paradise.Assets.Pipeline.CoyoteTest`.
+
+A fourth thing, learned from the asset watcher: **lock on an `object`, not on
+`System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
+`Monitor.Enter`/`Exit` and does not intercept `Lock.EnterScope`, so with the newer type it cannot
+control the lock — every iteration reports the wait as a potential hang, and silencing that would
+only hide the fact that the interleavings around that lock are never explored. The newer type is
+worth having where a lock is hot; it is not worth a suite that cannot see it.
 
 Three things worth knowing before writing one:
 
@@ -129,4 +137,8 @@ Enforced via `.editorconfig` with warnings-as-errors:
 
 ## SDK
 
-Requires .NET SDK 10.0.200+ (specified in `global.json` with `rollForward: latestMinor`).
+Requires .NET SDK 10.0.400+ (specified in `global.json` with `rollForward: latestMinor`). The
+floor is the compiler, not a preference: the Roslyn analyzers this repo builds against are
+compiled for 5.9.0.0, and an older SDK's `csc` refuses to load them with CS9057. `latestMinor`
+rolls forward, never back, so an older SDK does not satisfy this and the build stops with a
+version message rather than an analyzer one.

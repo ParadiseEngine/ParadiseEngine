@@ -21,19 +21,6 @@ namespace Paradise.Export.Serialization
     [JsonSerializable(typeof(AuthoredComponentData))]
     // Every authored ENGINE component, so AuthoredComponentRouter can deserialize a payload into
     // its typed record without reflection.
-    [JsonSerializable(typeof(NameComponentData))]
-    [JsonSerializable(typeof(TransformComponentData))]
-    [JsonSerializable(typeof(MaterialsComponentData))]
-    [JsonSerializable(typeof(RenderableComponentData))]
-    [JsonSerializable(typeof(ColliderComponentData))]
-    [JsonSerializable(typeof(RigidbodyComponentData))]
-    [JsonSerializable(typeof(AgentComponentData))]
-    [JsonSerializable(typeof(EntityInteractableComponentData))]
-    [JsonSerializable(typeof(SpriteAnimationComponentData))]
-    [JsonSerializable(typeof(ParticleEmitterComponentData))]
-    [JsonSerializable(typeof(AudioEmitterComponentData))]
-    [JsonSerializable(typeof(SceneLightData))]
-    [JsonSerializable(typeof(EnvironmentData))]
     internal sealed partial class ParadiseJsonContext : JsonSerializerContext
     {
     }

@@ -23,13 +23,23 @@ namespace Paradise.Ui;
 /// handled out of band hit-tests the next click against the old geometry.</summary>
 public interface IUiInput
 {
-    /// <summary>Process one input event. Returns true when the UI consumed it (e.g. the pointer
-    /// hit something that handles input) — consumed presses do not reach game logic.
+    /// <summary>Process one input event. Returns true when the UI consumed it — consumed presses
+    /// do not reach game logic.
     ///
-    /// Read the verdict as HANDLED, not HIT: an implementation over a retained-mode toolkit
-    /// reports what an element actually took, and a hit-testable element that handles nothing
-    /// (a bare panel, a rectangle) returns false. A host blocking input on this must put
-    /// something that handles input under the pointer.</summary>
+    /// <b>A PRESS answers HIT: was anything the UI routes input to under the pointer.</b> Not
+    /// "did an element run a handler" — a bare panel with a background consumes a press even
+    /// though nothing would have run. That is the honest contract rather than the preferred one:
+    /// Noesis 4.0.0's <c>View.MouseButtonDown</c> returns true whatever is beneath the pointer,
+    /// including over an empty view, so an implementation cannot report what an element actually
+    /// took and one that claimed to would be lying. A UI that wants clicks to fall through
+    /// therefore has to be AUTHORED to: null backgrounds on roots, and
+    /// <c>IsHitTestVisible="False"</c> on paint. Hit-testability is the switch, not handler
+    /// presence.
+    ///
+    /// Every other kind still answers HANDLED, from the toolkit's own verdict: a move, a
+    /// release or a wheel over a panel nothing listens to returns false. The split is not a
+    /// design — it is where one toolkit stopped being able to tell us, and it is written down
+    /// here so a host is not surprised by it.</summary>
     bool Handle(in WindowEvent input);
 
     /// <summary>Advance UI time (fires animations, bindings, layout). Called once per fixed

@@ -24,6 +24,14 @@ namespace Paradise.Export.Serialization
     {
         private static readonly JsonSerializerOptions Options = CreateOptions();
 
+        /// <summary>The contract's own options, shared with the TOML path.</summary>
+        /// <remarks>
+        /// Exposed so <see cref="ExportTomlWriter"/> and <see cref="ExportTomlReader"/> serialize
+        /// through the SAME converters and source-generated resolver. A second set of options would
+        /// be a second contract, and nothing would notice the day they disagreed.
+        /// </remarks>
+        internal static JsonSerializerOptions SerializerOptions => Options;
+
         private static JsonSerializerOptions CreateOptions()
         {
             var options = new JsonSerializerOptions
@@ -43,7 +51,6 @@ namespace Paradise.Export.Serialization
                     // otherwise STJ silently writes it as an integer.
                     new JsonStringEnumConverter<PhysicsBodyType>(),
                     new JsonStringEnumConverter<PhysicsShapeType>(),
-                    new JsonStringEnumConverter<ParticleRenderKind>(),
                 },
             };
             options.TypeInfoResolverChain.Add(ParadiseJsonContext.Default);

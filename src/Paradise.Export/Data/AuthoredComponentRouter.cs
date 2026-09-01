@@ -49,8 +49,9 @@ namespace Paradise.Export.Data
         /// cannot know which of those a given document requires.
         /// </summary>
         /// <param name="components">The payloads, read in order.</param>
-        /// <param name="registry">The game's generated registry. The engine's own is always
-        /// consulted first, so a caller that passes none still gets the engine's components.</param>
+        /// <param name="registry">The game's generated registry — the only lookup there is,
+        /// since v6 the engine declares no authored components of its own. Null routes every
+        /// payload to <paramref name="unresolved"/>.</param>
         /// <param name="unresolved">Collects payloads no registry could read. Null discards
         /// them, which is what a caller that has already validated its document wants.</param>
         public static IReadOnlyList<object> Materialize(
@@ -87,12 +88,11 @@ namespace Paradise.Export.Data
         private static object? Resolve(
             IAuthoredComponentRegistry? registry, AuthoredComponentData component)
         {
-            // This assembly's own registry first, so a caller that passed none still gets the
-            // engine's components back — a host reading a scene it does not itself add components
-            // to. It is the SAME generated registry a game gets, consulted the same way: there is
-            // no engine tier left, only registries, and the one that knows the id wins.
-            return ReadFrom(AuthoredComponents.Default, component)
-                ?? (registry is null ? null : ReadFrom(registry, component));
+            // The CALLER'S registry is the only lookup. The engine declares no authored
+            // components (v6), so there is no engine tier to consult first — a caller that
+            // passes none gets every payload back through `unresolved`, which is the honest
+            // answer for a reader with no declarations of its own.
+            return registry is null ? null : ReadFrom(registry, component);
         }
 
         /// <summary>One payload out of one registry: by id, else by type name, else null.
