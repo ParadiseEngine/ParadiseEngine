@@ -43,7 +43,7 @@ public class AssetClassifierTests
     [Test]
     public async Task the_chain_is_declared_lowest_precedence_first()
     {
-        await Assert.That(AssetImporters.All[0]).IsTypeOf<SidecarImporter>();
+        await Assert.That(AssetImporters.All[0]).IsTypeOf<ConfigImporter>();
         await Assert.That(AssetImporters.All[^1]).IsTypeOf<TextureImporter>();
     }
 }

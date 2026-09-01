@@ -74,7 +74,7 @@ public class ProjectScaffoldTests
     }
 
     [Test]
-    public async Task every_asset_has_a_sidecar_recording_its_hash()
+    public async Task every_asset_has_a_sidecar_without_a_hash()
     {
         using var fileSystem = Scaffold();
         var layout = Layout(fileSystem);
@@ -86,10 +86,8 @@ public class ProjectScaffoldTests
             var sidecar = SidecarMeta.PathFor(path);
             await Assert.That(fileSystem.FileExists(sidecar)).IsTrue();
 
-            // A stale hash is only a warning at verify time, so a scaffold that wrote one would
-            // hand every new project a warning on its first run.
             var meta = SidecarMeta.Load(fileSystem, sidecar);
-            await Assert.That(meta.Hash).IsEqualTo(SidecarMeta.ComputeHash(fileSystem, path));
+            await Assert.That(meta.Hash).IsNull();
         }
     }
 

@@ -13,6 +13,9 @@
 
     Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
     every verb's real logic lives (tested) in the pipeline library.
+
+    Native tray icons (Win32 notify icon, AppKit status item) live in Tray/. The watch loop talks
+    to them through IWatchTray; headless, CI, Linux, and the no-tray flag never start one.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -29,6 +32,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Cli.Test" />
+    <InternalsVisibleTo Include="Paradise.Cli.CoyoteTest" />
   </ItemGroup>
 
 </Project>

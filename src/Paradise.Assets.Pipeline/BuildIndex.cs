@@ -27,7 +27,7 @@ namespace Paradise.Assets.Pipeline;
 /// </para>
 /// <list type="bullet">
 /// <item>
-/// <b>Copies — meshes, audio, sidecars — are eligible.</b> The output is the input, so the source
+/// <b>Copies — meshes, audio — are eligible.</b> The output is the input, so the source
 /// bytes are the whole story.
 /// </item>
 /// <item>

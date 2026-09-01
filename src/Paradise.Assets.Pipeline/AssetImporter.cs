@@ -15,10 +15,7 @@ namespace Paradise.Assets.Pipeline;
 /// has no sidecar of its own. Every other asset has one; verify refused the build otherwise.
 /// </param>
 /// <param name="Profile">The build profile being compiled.</param>
-/// <param name="Target">
-/// Which tree is being built. An importer that exists for one target only decides that HERE, in
-/// its own <see cref="IAssetImporter.Import"/>, by declining — see <see cref="SidecarImporter"/>.
-/// </param>
+/// <param name="Target">Which tree is being built.</param>
 /// <param name="Output">
 /// The tree being built, mounted at its root: <c>/</c> here IS the output directory, so an
 /// importer cannot write outside it — the mount is the capability, not a convention. Writes are
@@ -103,8 +100,7 @@ public interface IAssetImporter
 
     /// <summary>
     /// Whether the files this importer writes are recorded under the source asset's identity.
-    /// False for outputs that DESCRIBE identity rather than having one (a copied sidecar), or
-    /// that are addressed by path alone (a config).
+    /// False for outputs addressed by path alone (a config).
     /// </summary>
     bool RecordsIdentity { get; }
 
@@ -133,14 +129,10 @@ public static class AssetImporters
     /// built-in it replaces.
     /// </summary>
     /// <remarks>
-    /// There are no per-target sets any more. One chain serves every target, and an importer
-    /// that belongs to one of them declines in the others (<see cref="ImportContext.Target"/>) —
-    /// so "which tree is this" is answered where the answer matters, instead of by the caller
-    /// assembling a list per flavour.
+    /// There are no per-target sets any more. One chain serves every target.
     /// </remarks>
     public static IReadOnlyList<IAssetImporter> All { get; } =
     [
-        new SidecarImporter(),
         new ConfigImporter(),
         new PrefabImporter(),
         new AudioImporter(),

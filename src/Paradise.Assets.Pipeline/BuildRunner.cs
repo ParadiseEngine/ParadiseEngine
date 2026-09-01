@@ -136,7 +136,12 @@ public sealed class BuildRunner
 
         foreach (var path in _fileSystem.EnumerateFiles(_layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
-            // Asked of everything, with no gate in front of it. The index only ever holds what a
+            // Source sidecars stay in assets/. The built tree's identity database is the
+            // manifest — copying them next to play artifacts was a second copy of the same
+            // facts, and a checkout cannot make this one dirty.
+            if (SidecarMeta.IsSidecarPath(path)) continue;
+
+            // Asked of everything else, with no further gate. The index only ever holds what a
             // previous run RECORDED, and recording is gated below on the handling importer's
             // DeterministicCopy -- so a texture, a document, an unclaimed file or the manifest
             // simply misses, and the one rule about what may be reused lives in one place

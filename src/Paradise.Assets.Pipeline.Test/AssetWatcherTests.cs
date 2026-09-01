@@ -37,23 +37,20 @@ public class AssetWatcherTests
     }
 
     /// <summary>
-    /// The loop guard, and the only thing standing between the watcher and itself.
+    /// The loop guard: the maintainer's own sidecar writes must not come back as work.
     /// </summary>
     /// <remarks>
-    /// The maintainer writes sidecars INTO the watched tree, so a mint fires a Created and a hash
-    /// refresh fires a Changed. If either were queued, draining it would write again and the
-    /// watcher would run forever on one edit. This is pinned across all three event shapes
-    /// because a per-path suppression window used to back it up and no longer does — the rule is
-    /// now carried by one line.
+    /// A mint fires a Created and a hash refresh fires a Changed. If either were queued, draining
+    /// it would write again and the watcher would run forever on one edit. Sidecar deletes are
+    /// the other case — see <see cref="deleting_a_sidecar_remints_it"/>.
     /// </remarks>
     [Test]
-    public async Task no_sidecar_event_is_ever_queued()
+    public async Task a_sidecar_write_is_never_queued()
     {
         var (watcher, _, _) = Watching();
         using var _guard = watcher;
 
         watcher.Observe("/game/assets/models/crate.glb.meta");
-        watcher.ObserveDelete("/game/assets/models/gone.glb.meta");
         watcher.ObserveRename("/game/assets/models/a.glb.meta", "/game/assets/models/b.glb.meta");
 
         await Assert.That(watcher.HasPending).IsFalse();
@@ -116,8 +113,8 @@ public class AssetWatcherTests
         var (watcher, fileSystem, clock) = Watching();
         using var _guard = watcher;
 
-        // Minted through the watcher, not by hand: only Ensure records the content hash, and the
-        // hash is the sole thing that can recognise the asset at its new path later.
+        // Minted through the watcher, not by hand: Ensure remembers the content hash in memory,
+        // which is what recognises the asset at its new path later.
         WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
         watcher.Observe("/game/assets/models/crate.glb");
         clock.Now += AssetWatcher.Debounce;
@@ -137,5 +134,45 @@ public class AssetWatcherTests
 
         var carried = SidecarMeta.Load(fileSystem, "/game/assets/props/crate.glb.meta");
         await Assert.That(carried.Guid).IsEqualTo(original.Guid);
+    }
+
+    /// <summary>
+    /// Wiping a sidecar while the asset stays is an identity spent, not a loop event. Drain
+    /// mints a replacement so the next rebuild is not a verify failure.
+    /// </summary>
+    [Test]
+    public async Task deleting_a_sidecar_remints_it()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.meta")).IsTrue();
+
+        fileSystem.DeleteFile("/game/assets/models/crate.glb.meta");
+        watcher.ObserveDelete("/game/assets/models/crate.glb.meta");
+        clock.Now += AssetWatcher.Debounce;
+
+        await Assert.That(watcher.Drain()).IsEqualTo(1);
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.meta")).IsTrue();
+    }
+
+    /// <summary>
+    /// Rebuild-now does not wait out the sidecar-delete debounce, so it must mint first or
+    /// verify refuses the tree the author just asked to rebuild.
+    /// </summary>
+    [Test]
+    public async Task a_rebuild_mints_missing_sidecars_before_verifying()
+    {
+        var (watcher, fileSystem, _) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/audio/init.bnk", [1, 2, 3]);
+
+        var result = watcher.Rebuild(null, ProjectOutputTarget.Build, encoder: null);
+
+        await Assert.That(fileSystem.FileExists("/game/assets/audio/init.bnk.meta")).IsTrue();
+        await Assert.That(result.Succeeded).IsTrue();
     }
 }

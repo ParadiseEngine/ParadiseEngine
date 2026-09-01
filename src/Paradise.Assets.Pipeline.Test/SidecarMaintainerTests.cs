@@ -30,11 +30,12 @@ public class SidecarMaintainerTests
 
         await Assert.That(action).IsEqualTo(SidecarAction.Minted);
         var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        await Assert.That(meta.Hash).IsEqualTo(SidecarMeta.ComputeHash([1, 2, 3]));
+        await Assert.That(meta.Hash).IsNull();
+        await Assert.That(meta.Write()).DoesNotContain("hash");
     }
 
     [Test]
-    public async Task a_changed_asset_keeps_its_identity_and_only_the_hash_moves()
+    public async Task a_changed_asset_keeps_its_identity_and_the_sidecar_is_left_alone()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         WriteAsset(fileSystem, "/game/assets/textures/fire.png", [1, 2, 3]);
@@ -44,10 +45,35 @@ public class SidecarMaintainerTests
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [4, 5, 6]);
         var action = Maintainer(fileSystem).Ensure("/game/assets/textures/fire.png");
 
-        await Assert.That(action).IsEqualTo(SidecarAction.Refreshed);
+        await Assert.That(action).IsEqualTo(SidecarAction.None);
         var after = SidecarMeta.Load(fileSystem, "/game/assets/textures/fire.png.meta");
         await Assert.That(after.Guid).IsEqualTo(before.Guid);
-        await Assert.That(after.Hash).IsEqualTo(SidecarMeta.ComputeHash([4, 5, 6]));
+        await Assert.That(after.Hash).IsNull();
+    }
+
+    [Test]
+    public async Task a_leftover_recorded_hash_is_dropped()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        new SidecarMeta(Guid.NewGuid()) { Hash = new string('a', 64) }
+            .Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        // Save no longer emits hash, so write the old shape by hand.
+        fileSystem.WriteAllText(
+            "/game/assets/models/crate.glb.meta",
+            """
+            schema_version = 1
+            guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
+            hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+            """);
+
+        var action = Maintainer(fileSystem).Ensure("/game/assets/models/crate.glb");
+
+        await Assert.That(action).IsEqualTo(SidecarAction.Refreshed);
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        await Assert.That(meta.Hash).IsNull();
+        await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.glb.meta")).DoesNotContain("hash");
     }
 
     [Test]
@@ -178,12 +204,10 @@ public class SidecarMaintainerTests
 
         var touched = Maintainer(fileSystem).Reconcile();
 
-        // Three: the stale sidecar, the missing one, and the project manifest's — which the
-        // fixture mints with no hash at all. Filling that in is the job, not an accident: the
-        // field is "optional in the format, always written by tooling", and this is the tooling.
-        await Assert.That(touched).IsEqualTo(3);
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Hash)
-            .IsEqualTo(SidecarMeta.ComputeHash([4, 5, 6]));
+        // The missing sidecar is minted. A changed asset whose sidecar already has a GUID is
+        // left alone — content is not recorded in the sidecar.
+        await Assert.That(touched).IsEqualTo(1);
         await Assert.That(fileSystem.FileExists("/game/assets/models/barrel.glb.meta")).IsTrue();
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Hash).IsNull();
     }
 }

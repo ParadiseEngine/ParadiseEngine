@@ -1,0 +1,696 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+
+namespace Paradise.Cli;
+
+// DllImport rather than LibraryImport: objc_msgSend is a family of signatures the source
+// generator cannot emit as one entry point. SYSLIB1054 would otherwise fail the build
+// (warnings-as-errors) for every overload.
+#pragma warning disable SYSLIB1054
+
+/// <summary>
+/// An <c>NSStatusItem</c> in the macOS menu bar. AppKit owns the thread that calls
+/// <see cref="Run"/>: the watch loop runs on a worker, then <c>[NSApp run]</c> blocks until
+/// stop. Failure to load AppKit falls back to the console loop on this thread.
+/// </summary>
+[SupportedOSPlatform("macos")]
+internal sealed class MacWatchTray : IWatchTray
+{
+    private const string TargetClassName = "ParadiseWatchTrayTarget";
+    private const int NsApplicationActivationPolicyAccessory = 1;
+    private const nuint NsEventTypeApplicationDefined = 15;
+    private const int RtldNow = 2;
+
+    private static readonly NFloat VariableStatusItemLength = -1;
+    private static MacWatchTray? s_current;
+
+    private readonly WatchTrayHooks _hooks;
+    private readonly object _gate = new();
+
+    private nint _nsApp;
+    private nint _nsThreadClass;
+    private nint _nsStringClass;
+    private nint _target;
+    private nint _statusBar;
+    private nint _statusItem;
+    private nint _menu;
+    private nint _lastBuildItem;
+    private nint _editorItem;
+    private nint _rebuildItem;
+    private nint _openItem;
+    private nint _selSetTitle;
+    private nint _selSetState;
+    private nint _selSetToolTip;
+    private nint _selButton;
+    private nint _selIsMainThread;
+    private nint _selPerformSelectorOnMainThread;
+    private nint _selApplyPendingState;
+    private nint _selStopApp;
+    private nint _selRun;
+    private nint _selStop;
+    private nint _selStringWithUTF8String;
+
+    private WatchStatus _status = WatchStatus.Alive;
+    private int _errorCount;
+    private bool _bootstrapped;
+    private bool _disposed;
+
+    public MacWatchTray(WatchTrayHooks hooks)
+    {
+        ArgumentNullException.ThrowIfNull(hooks);
+        _hooks = hooks;
+        s_current = this;
+    }
+
+    public bool IsAvailable => _bootstrapped;
+
+    public void SetState(WatchStatus status, int errorCount)
+    {
+        lock (_gate)
+        {
+            _status = status;
+            _errorCount = errorCount;
+        }
+
+        HopApply();
+    }
+
+    public void Run(Action watch, Action<string>? log = null)
+    {
+        ArgumentNullException.ThrowIfNull(watch);
+
+        if (!TryBootstrap(out var error))
+        {
+            log?.Invoke($"watch: {error}; continuing in the console");
+            watch();
+            return;
+        }
+
+        log?.Invoke($"watch: tray icon is up (click to stop, rebuild, or {WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn).ToLowerInvariant()})");
+
+        var watchThread = new Thread(() =>
+        {
+            try
+            {
+                watch();
+            }
+            finally
+            {
+                StopNsApp();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "paradise-watch",
+        };
+        watchThread.Start();
+
+        Native.MsgSend(_nsApp, _selRun);
+        watchThread.Join();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (_bootstrapped)
+        {
+            StopNsApp();
+            Teardown();
+        }
+
+        if (ReferenceEquals(s_current, this)) s_current = null;
+    }
+
+    private bool TryBootstrap(out string error)
+    {
+        error = "could not start the menu-bar icon";
+        try
+        {
+            if (Native.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", RtldNow) == 0
+                && Native.dlopen("/System/Library/Frameworks/AppKit.framework/Versions/Current/AppKit", RtldNow) == 0)
+            {
+                error = "could not load AppKit";
+                return false;
+            }
+
+            var nsApplication = Native.objc_getClass("NSApplication");
+            _nsStringClass = Native.objc_getClass("NSString");
+            _nsThreadClass = Native.objc_getClass("NSThread");
+            var nsStatusBar = Native.objc_getClass("NSStatusBar");
+            var nsMenu = Native.objc_getClass("NSMenu");
+            var nsMenuItem = Native.objc_getClass("NSMenuItem");
+            if (nsApplication == 0 || _nsStringClass == 0 || _nsThreadClass == 0
+                || nsStatusBar == 0 || nsMenu == 0 || nsMenuItem == 0)
+            {
+                error = "AppKit classes are missing";
+                return false;
+            }
+
+            _selSetTitle = Sel("setTitle:");
+            _selSetState = Sel("setState:");
+            _selSetToolTip = Sel("setToolTip:");
+            _selButton = Sel("button");
+            _selIsMainThread = Sel("isMainThread");
+            _selPerformSelectorOnMainThread = Sel("performSelectorOnMainThread:withObject:waitUntilDone:");
+            _selApplyPendingState = Sel("applyPendingState");
+            _selStopApp = Sel("stopApp:");
+            _selRun = Sel("run");
+            _selStop = Sel("stop:");
+            _selStringWithUTF8String = Sel("stringWithUTF8String:");
+            var selAlloc = Sel("alloc");
+            var selInit = Sel("init");
+            var selInitWithTitle = Sel("initWithTitle:");
+            var selInitWithTitleActionKey = Sel("initWithTitle:action:keyEquivalent:");
+            var selAddItem = Sel("addItem:");
+            var selSetEnabled = Sel("setEnabled:");
+            var selSetTarget = Sel("setTarget:");
+            var selSetMenu = Sel("setMenu:");
+            var selSharedApplication = Sel("sharedApplication");
+            var selSetActivationPolicy = Sel("setActivationPolicy:");
+            var selSystemStatusBar = Sel("systemStatusBar");
+            var selStatusItemWithLength = Sel("statusItemWithLength:");
+            var selSeparatorItem = Sel("separatorItem");
+            var selRebuild = Sel("rebuildClicked:");
+            var selOpen = Sel("openClicked:");
+            var selQuit = Sel("stopClicked:");
+            var selEditor = Sel("editorClicked:");
+
+            var pool = Native.objc_autoreleasePoolPush();
+            try
+            {
+                _nsApp = Native.MsgSend(nsApplication, selSharedApplication);
+                if (_nsApp == 0)
+                {
+                    error = "NSApplication is missing";
+                    return false;
+                }
+
+                Native.MsgSend(_nsApp, selSetActivationPolicy, NsApplicationActivationPolicyAccessory);
+
+                var targetClass = Native.objc_lookUpClass(TargetClassName);
+                if (targetClass == 0)
+                {
+                    var nsObject = Native.objc_getClass("NSObject");
+                    targetClass = Native.objc_allocateClassPair(nsObject, TargetClassName, 0);
+                    if (targetClass == 0)
+                    {
+                        error = "could not create the menu target class";
+                        return false;
+                    }
+
+                    unsafe
+                    {
+                        AddMethod(targetClass, selRebuild, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&RebuildImp, "v@:@");
+                        AddMethod(targetClass, selOpen, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&OpenImp, "v@:@");
+                        AddMethod(targetClass, selQuit, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopClickedImp, "v@:@");
+                        AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
+                        AddMethod(targetClass, _selApplyPendingState, (nint)(delegate* unmanaged[Cdecl]<nint, nint, void>)&ApplyImp, "v@:");
+                        AddMethod(targetClass, _selStopApp, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopAppImp, "v@:@");
+                    }
+
+                    Native.objc_registerClassPair(targetClass);
+                }
+                else
+                {
+                    // A later watch in the same process: the class already exists from the first
+                    // bootstrap. Add the toggle if this binary is newer than that class.
+                    unsafe
+                    {
+                        AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
+                    }
+                }
+
+                _target = Native.MsgSend(Native.MsgSend(targetClass, selAlloc), selInit);
+                if (_target == 0)
+                {
+                    error = "could not allocate the menu target";
+                    return false;
+                }
+
+                _statusBar = Native.MsgSend(nsStatusBar, selSystemStatusBar);
+                _statusItem = Native.objc_retain(CallStatusItemWithLength(nsStatusBar, _statusBar, selStatusItemWithLength));
+                if (_statusItem == 0)
+                {
+                    error = "could not create an NSStatusItem";
+                    return false;
+                }
+
+                _menu = Native.MsgSend(Native.MsgSend(nsMenu, selAlloc), selInitWithTitle, ToNSString("paradise watch"));
+                _lastBuildItem = Native.MsgSend3(
+                    Native.MsgSend(nsMenuItem, selAlloc),
+                    selInitWithTitleActionKey,
+                    ToNSString(WatchPresentation.LastBuildMenu(_status, _errorCount)),
+                    0,
+                    ToNSString(""));
+                Native.MsgSendByte(_lastBuildItem, selSetEnabled, 0);
+                Native.MsgSend(_menu, selAddItem, _lastBuildItem);
+                Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
+
+                if (_hooks.ToggleEditor is not null)
+                {
+                    _editorItem = AddMenuItem(
+                        nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                        WatchPresentation.EditorToggleMenu, selEditor);
+                    Native.MsgSend(_editorItem, _selSetState, _hooks.Editor.IsOn ? 1 : 0);
+                }
+
+                if (_hooks.Rebuild is not null)
+                {
+                    _rebuildItem = AddMenuItem(
+                        nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                        WatchPresentation.RebuildMenu(_hooks.Editor.IsOn), selRebuild);
+                }
+
+                _openItem = AddMenuItem(
+                    nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                    WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn), selOpen);
+                Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
+                AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Stop", selQuit);
+                Native.MsgSend(_statusItem, selSetMenu, _menu);
+
+                _bootstrapped = true;
+                ApplyOnMainThread();
+                return true;
+            }
+            finally
+            {
+                Native.objc_autoreleasePoolPop(pool);
+                if (!_bootstrapped) Teardown();
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex is DllNotFoundException or EntryPointNotFoundException
+                ? "AppKit entry points are missing"
+                : $"could not start the menu-bar icon ({ex.GetType().Name})";
+            return false;
+        }
+    }
+
+    private nint AddMenuItem(
+        nint nsMenuItem,
+        nint selAlloc,
+        nint selInitWithTitleActionKey,
+        nint selSetTarget,
+        nint selAddItem,
+        string title,
+        nint action)
+    {
+        var item = Native.MsgSend3(
+            Native.MsgSend(nsMenuItem, selAlloc),
+            selInitWithTitleActionKey,
+            ToNSString(title),
+            action,
+            ToNSString(""));
+        Native.MsgSend(item, selSetTarget, _target);
+        Native.MsgSend(_menu, selAddItem, item);
+        return item;
+    }
+
+    private static void AddMethod(nint cls, nint selector, nint imp, string types)
+        => Native.class_addMethod(cls, selector, imp, types);
+
+    /// <summary>
+    /// <c>statusItemWithLength:</c> takes a <c>CGFloat</c>. arm64 <c>objc_msgSend</c> is
+    /// variadic, so a <see cref="NFloat"/> would land in a GPR instead of a SIMD register.
+    /// The method IMP is a fixed (non-variadic) signature and puts the length where AppKit
+    /// actually reads it.
+    /// </summary>
+    private static nint CallStatusItemWithLength(nint statusBarClass, nint statusBar, nint selector)
+    {
+        var imp = InstanceImp(statusBarClass, selector);
+        if (imp == 0 || statusBar == 0) return 0;
+        unsafe
+        {
+            var fn = (delegate* unmanaged[Cdecl]<nint, nint, NFloat, nint>)imp;
+            return fn(statusBar, selector, VariableStatusItemLength);
+        }
+    }
+
+    private static nint InstanceImp(nint cls, nint selector)
+    {
+        var method = Native.class_getInstanceMethod(cls, selector);
+        return method == 0 ? 0 : Native.method_getImplementation(method);
+    }
+
+    private static nint ClassImp(nint cls, nint selector)
+    {
+        var method = Native.class_getClassMethod(cls, selector);
+        return method == 0 ? 0 : Native.method_getImplementation(method);
+    }
+
+    private void HopApply()
+    {
+        if (!_bootstrapped || _target == 0) return;
+        if (IsMainThread())
+        {
+            ApplyOnMainThread();
+            return;
+        }
+
+        Native.MsgSendSelObjByte(_target, _selPerformSelectorOnMainThread, _selApplyPendingState, 0, 0);
+    }
+
+    private void ApplyOnMainThread()
+    {
+        if (!_bootstrapped || _statusItem == 0) return;
+
+        WatchStatus status;
+        int errorCount;
+        lock (_gate)
+        {
+            status = _status;
+            errorCount = _errorCount;
+        }
+
+        var pool = Native.objc_autoreleasePoolPush();
+        try
+        {
+            var title = ToNSString(WatchPresentation.MenuBarTitle(status));
+            var tip = ToNSString(WatchPresentation.Tooltip(status, errorCount));
+            var button = Native.MsgSend(_statusItem, _selButton);
+            if (button != 0)
+            {
+                Native.MsgSend(button, _selSetTitle, title);
+                Native.MsgSend(button, _selSetToolTip, tip);
+            }
+            else
+            {
+                Native.MsgSend(_statusItem, _selSetTitle, title);
+                Native.MsgSend(_statusItem, _selSetToolTip, tip);
+            }
+
+            if (_lastBuildItem != 0)
+            {
+                Native.MsgSend(_lastBuildItem, _selSetTitle, ToNSString(WatchPresentation.LastBuildMenu(status, errorCount)));
+            }
+
+            var editor = _hooks.Editor.IsOn;
+            if (_editorItem != 0)
+            {
+                Native.MsgSend(_editorItem, _selSetState, editor ? 1 : 0);
+            }
+
+            if (_rebuildItem != 0)
+            {
+                Native.MsgSend(_rebuildItem, _selSetTitle, ToNSString(WatchPresentation.RebuildMenu(editor)));
+            }
+
+            if (_openItem != 0)
+            {
+                Native.MsgSend(_openItem, _selSetTitle, ToNSString(WatchPresentation.OpenOutputMenu(editor)));
+            }
+        }
+        finally
+        {
+            Native.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    private void StopNsApp()
+    {
+        Native.CFRunLoopStop(Native.CFRunLoopGetMain());
+        Native.CFRunLoopWakeUp(Native.CFRunLoopGetMain());
+        if (_nsApp == 0) return;
+        if (_bootstrapped && IsMainThread())
+        {
+            RequestRunLoopExit();
+            return;
+        }
+
+        if (_target != 0)
+        {
+            Native.MsgSendSelObjByte(_target, _selPerformSelectorOnMainThread, _selStopApp, 0, 0);
+        }
+    }
+
+    /// <summary>
+    /// <c>[NSApp run]</c> is a loop around <c>nextEvent:</c>. <c>stop:</c> only finishes that
+    /// loop after the next event, and <c>CFRunLoopStop</c> only returns one iteration. Posting
+    /// an <c>NSEventTypeApplicationDefined</c> event is what actually lets <c>run</c> return.
+    /// </summary>
+    private void RequestRunLoopExit()
+    {
+        var app = _nsApp;
+        if (app == 0) return;
+        Native.MsgSend(app, _selStop, 0);
+        PostWakeEvent(app);
+        Native.CFRunLoopStop(Native.CFRunLoopGetMain());
+        Native.CFRunLoopWakeUp(Native.CFRunLoopGetMain());
+    }
+
+    private static void PostWakeEvent(nint app)
+    {
+        var nsEvent = Native.objc_getClass("NSEvent");
+        if (nsEvent == 0) return;
+
+        var sel = Sel("otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:");
+        var imp = ClassImp(nsEvent, sel);
+        if (imp == 0) return;
+
+        var pool = Native.objc_autoreleasePoolPush();
+        try
+        {
+            nint evt;
+            unsafe
+            {
+                // Class method IMP: fixed signature, so NSPoint's CGFloats go in SIMD regs.
+                var fn = (delegate* unmanaged[Cdecl]<nint, nint, nuint, CGPoint, nuint, double, nint, nint, short, nint, nint, nint>)imp;
+                evt = fn(nsEvent, sel, NsEventTypeApplicationDefined, default, 0, 0, 0, 0, 0, 0, 0);
+            }
+
+            if (evt == 0) return;
+            Native.MsgSendPtrByte(app, Sel("postEvent:atStart:"), evt, 1);
+        }
+        finally
+        {
+            Native.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CGPoint
+    {
+        public NFloat X;
+        public NFloat Y;
+    }
+
+    private void Teardown()
+    {
+        var pool = Native.objc_autoreleasePoolPush();
+        try
+        {
+            if (_statusBar != 0 && _statusItem != 0)
+            {
+                Native.MsgSend(_statusBar, Sel("removeStatusItem:"), _statusItem);
+            }
+
+            if (_statusItem != 0)
+            {
+                Native.objc_release(_statusItem);
+                _statusItem = 0;
+            }
+
+            if (_menu != 0)
+            {
+                Native.objc_release(_menu);
+                _menu = 0;
+            }
+
+            if (_target != 0)
+            {
+                Native.objc_release(_target);
+                _target = 0;
+            }
+
+            _lastBuildItem = 0;
+            _editorItem = 0;
+            _rebuildItem = 0;
+            _openItem = 0;
+            _bootstrapped = false;
+        }
+        finally
+        {
+            Native.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    private bool IsMainThread()
+        => _nsThreadClass != 0 && Native.MsgSendRetByte(_nsThreadClass, _selIsMainThread) != 0;
+
+    private nint ToNSString(string value)
+    {
+        var utf8 = Marshal.StringToCoTaskMemUTF8(value);
+        try
+        {
+            return Native.MsgSend(_nsStringClass, _selStringWithUTF8String, utf8);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(utf8);
+        }
+    }
+
+    private static nint Sel(string name) => Native.sel_registerName(name);
+
+#pragma warning disable IDE0060 // objc IMPs must match (id, SEL[, sender]) even when the arguments are unused
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void RebuildImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Rebuild?.Invoke();
+        }
+        catch
+        {
+            // Menu IMPs must not throw back into AppKit.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OpenImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.OpenOutput();
+        }
+        catch
+        {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void StopClickedImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Stop();
+        }
+        catch
+        {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void EditorImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.ToggleEditor?.Invoke();
+            s_current?.HopApply();
+        }
+        catch
+        {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void ApplyImp(nint self, nint cmd)
+    {
+        try
+        {
+            s_current?.ApplyOnMainThread();
+        }
+        catch
+        {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void StopAppImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            var tray = s_current;
+            tray?.RequestRunLoopExit();
+        }
+        catch
+        {
+        }
+    }
+
+#pragma warning restore IDE0060
+
+    private static class Native
+    {
+        private const string ObjC = "/usr/lib/libobjc.A.dylib";
+        private const string LibSystem = "/usr/lib/libSystem.B.dylib";
+        private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+
+        [DllImport(LibSystem, CharSet = CharSet.Ansi)]
+        public static extern nint dlopen(string path, int mode);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        public static extern nint sel_registerName(string name);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        public static extern nint objc_getClass(string name);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        public static extern nint objc_lookUpClass(string name);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        public static extern nint objc_allocateClassPair(nint superclass, string name, nuint extraBytes);
+
+        [DllImport(ObjC)]
+        public static extern void objc_registerClassPair(nint cls);
+
+        [DllImport(ObjC, CharSet = CharSet.Ansi)]
+        public static extern byte class_addMethod(nint cls, nint selector, nint imp, string types);
+
+        [DllImport(ObjC)]
+        public static extern nint class_getInstanceMethod(nint cls, nint selector);
+
+        [DllImport(ObjC)]
+        public static extern nint class_getClassMethod(nint cls, nint selector);
+
+        [DllImport(ObjC)]
+        public static extern nint method_getImplementation(nint method);
+
+        [DllImport(ObjC)]
+        public static extern nint objc_retain(nint value);
+
+        [DllImport(ObjC)]
+        public static extern void objc_release(nint value);
+
+        [DllImport(ObjC)]
+        public static extern nint objc_autoreleasePoolPush();
+
+        [DllImport(ObjC)]
+        public static extern void objc_autoreleasePoolPop(nint pool);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern nint MsgSend(nint receiver, nint selector);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern nint MsgSend(nint receiver, nint selector, nint arg);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern nint MsgSend3(nint receiver, nint selector, nint a, nint b, nint c);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern void MsgSendByte(nint receiver, nint selector, byte arg);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern void MsgSendSelObjByte(nint receiver, nint selector, nint a, nint b, byte c);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern byte MsgSendRetByte(nint receiver, nint selector);
+
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern void MsgSendPtrByte(nint receiver, nint selector, nint arg, byte flag);
+
+        [DllImport(CoreFoundation)]
+        public static extern nint CFRunLoopGetMain();
+
+        [DllImport(CoreFoundation)]
+        public static extern void CFRunLoopStop(nint runLoop);
+
+        [DllImport(CoreFoundation)]
+        public static extern void CFRunLoopWakeUp(nint runLoop);
+    }
+}

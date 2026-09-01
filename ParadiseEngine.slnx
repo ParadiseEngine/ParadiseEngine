@@ -47,6 +47,8 @@
     <Project Path="src/Paradise.Assets.Gltf.Test/Paradise.Assets.Gltf.Test.csproj" />
     <Project Path="src/Paradise.Assets.Documents.Test/Paradise.Assets.Documents.Test.csproj" />
     <Project Path="src/Paradise.Assets.Pipeline.Test/Paradise.Assets.Pipeline.Test.csproj" />
+    <Project Path="src/Paradise.Cli.Test/Paradise.Cli.Test.csproj" />
+    <Project Path="src/Paradise.Cli.CoyoteTest/Paradise.Cli.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
     <Project Path="src/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />

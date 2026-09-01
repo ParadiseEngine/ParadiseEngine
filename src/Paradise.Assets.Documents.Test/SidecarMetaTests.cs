@@ -4,9 +4,10 @@ using Zio.FileSystems;
 namespace Paradise.Assets.Documents.Test;
 
 /// <summary>
-/// The sidecar: identity, the recorded hash, and import settings as OPEN domain tables. There is
+/// The sidecar: identity and import settings as OPEN domain tables. There is
 /// no kind — what an asset is, is derived from its path, and what a domain's settings mean is the
-/// owning build step's question, not the format's.
+/// owning build step's question, not the format's. There is no recorded hash: a checkout is not
+/// an identity.
 /// </summary>
 public class SidecarMetaTests
 {
@@ -100,6 +101,18 @@ public class SidecarMetaTests
             .Throws<ArgumentException>();
 
         await Assert.That(error!.Message).Contains("sidecar field");
+    }
+
+    [Test]
+    public async Task a_recorded_hash_is_read_and_never_written()
+    {
+        var digest = new string('a', 64);
+        var text = $"schema_version = 1\nguid = \"{AssetGuid}\"\nhash = \"{digest}\"\n";
+
+        var meta = SidecarMeta.Parse(text, "fire.png.meta");
+
+        await Assert.That(meta.Hash).IsEqualTo(digest);
+        await Assert.That(meta.Write()).IsEqualTo($"schema_version = 1\nguid = \"{AssetGuid}\"\n");
     }
 
     [Test]

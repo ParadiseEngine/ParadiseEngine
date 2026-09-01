@@ -14,7 +14,7 @@ public enum SidecarAction
     /// <summary>An asset with no sidecar got a fresh identity.</summary>
     Minted,
 
-    /// <summary>An asset's sidecar hash caught up with its bytes.</summary>
+    /// <summary>An older sidecar still recorded a hash; it was dropped.</summary>
     Refreshed,
 
     /// <summary>A sidecar followed its asset to a new path, identity intact.</summary>
@@ -28,8 +28,8 @@ public enum SidecarAction
 }
 
 /// <summary>
-/// Keeps <c>*.meta</c> in step with the assets beside them: mints what is missing, refreshes what
-/// has changed, carries one that moved, and never destroys an identity.
+/// Keeps <c>*.meta</c> in step with the assets beside them: mints what is missing, carries one
+/// that moved, and never destroys an identity.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,11 +48,12 @@ public enum SidecarAction
 /// has already written the same identity at the asset's new path — a move, not a destruction.
 /// </para>
 /// <para>
-/// Re-linking matches on the sidecar's recorded <c>hash</c>, which is exactly the job that field
-/// was given: "what lets a LOST sidecar be re-linked, because content is the only thing left to
-/// recognise an asset by once its id is gone". It follows that a STALE hash costs a move its
-/// identity — and equally that a maintainer left running keeps hashes fresh, which is what makes
-/// the next move safe. The two halves are the same loop.
+/// Re-linking matches on a content hash held in memory for this session, not on a field in the
+/// sidecar. A recorded hash is a checkout: text assets change bytes across machines (line
+/// endings, smudge filters) after a push/pull, and writing that into a committed <c>.meta</c>
+/// makes every clone a dirty tree. <see cref="Ensure"/> remembers what it saw; a delete that was
+/// half of a move still re-links for the quarantine window. A sidecar that still has a leftover
+/// <c>hash</c> is rewritten without it.
 /// </para>
 /// </remarks>
 public sealed class SidecarMaintainer
@@ -62,8 +63,14 @@ public sealed class SidecarMaintainer
     private readonly Action<string> _log;
     private readonly bool _dryRun;
 
-    /// <summary>Identities of deleted assets, by the content hash their sidecar recorded.</summary>
+    /// <summary>Identities of deleted assets, keyed by the content hash remembered this session.</summary>
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
+
+    /// <summary>
+    /// Last content hash <see cref="Ensure"/> saw for a path. Quarantine uses this instead of a
+    /// field in the sidecar, so a delete-then-add still re-links for the watch session.
+    /// </summary>
+    private readonly Dictionary<UPath, string> _seenHash = [];
 
     /// <summary>Creates a maintainer over one project.</summary>
     /// <param name="dryRun">Report what would happen and write nothing.</param>
@@ -122,6 +129,7 @@ public sealed class SidecarMaintainer
 
         var sidecar = SidecarMeta.PathFor(asset);
         var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
+        _seenHash[asset] = hash;
 
         if (_fileSystem.FileExists(sidecar))
         {
@@ -139,11 +147,11 @@ public sealed class SidecarMaintainer
                 return SidecarAction.None;
             }
 
-            if (existing.Hash == hash) return SidecarAction.None;
+            if (existing.Hash is null) return SidecarAction.None;
 
-            existing.Hash = hash;
+            existing.Hash = null;
             Save(existing, sidecar);
-            _log($"refreshed: {Display(sidecar)}");
+            _log($"refreshed: {Display(sidecar)} (dropped recorded hash)");
             return SidecarAction.Refreshed;
         }
 
@@ -151,15 +159,16 @@ public sealed class SidecarMaintainer
         // reported no rename. Take the identity back rather than minting a stranger.
         if (_quarantine.Remove(hash, out var held))
         {
-            var restored = new SidecarMeta(held.Meta.Guid) { Hash = hash };
+            var restored = new SidecarMeta(held.Meta.Guid);
             foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
+            _seenHash.Remove(held.Asset);
             _log($"relinked: {Display(held.Asset)} -> {Display(asset)} (guid kept)");
             return SidecarAction.Relinked;
         }
 
-        var minted = new SidecarMeta(Guid.NewGuid()) { Hash = hash };
+        var minted = new SidecarMeta(Guid.NewGuid());
         Save(minted, sidecar);
         _log($"minted: {Display(sidecar)}");
         return SidecarAction.Minted;
@@ -181,9 +190,9 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        // The hash goes with it unexamined. A rename does not change content, and re-reading the
-        // bytes of a file that may still be settling is how a move ends up recording a half-written
-        // hash -- Ensure will correct it on the change event if anything really did move.
+        if (_seenHash.Remove(from, out var remembered)) _seenHash[to] = remembered;
+
+        meta.Hash = null;
         Save(meta, SidecarMeta.PathFor(to));
         Remove(source);
         _log($"carried: {Display(source)} -> {Display(SidecarMeta.PathFor(to))}");
@@ -206,9 +215,11 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        // No recorded hash, nothing to recognise it by later. The sidecar still stays put -- the
-        // orphan is `verify`'s to report, and an identity is not ours to spend.
-        if (meta.Hash is not { } hash) return SidecarAction.None;
+        // Prefer what this session saw; fall back to a leftover recorded hash on an old sidecar.
+        // Neither is written back. No hash at all means we cannot re-link — the sidecar stays put
+        // and the orphan is `verify`'s to report.
+        if (!_seenHash.Remove(asset, out var hash)) hash = meta.Hash;
+        if (hash is null) return SidecarAction.None;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
         _log($"quarantined: {Display(sidecar)} (identity held in case this is a move)");
