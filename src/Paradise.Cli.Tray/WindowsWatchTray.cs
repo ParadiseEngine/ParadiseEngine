@@ -73,6 +73,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private int _errorCount;
     private bool _added;
     private bool _disposed;
+    private volatile bool _abandoned;
 
     private WindowsWatchTray(WatchTrayHooks hooks)
     {
@@ -114,8 +115,6 @@ internal sealed class WindowsWatchTray : IWatchTray
 
     public void SetState(WatchStatus status, int errorCount)
     {
-        _status = status;
-        _errorCount = errorCount;
         var hwnd = _hwnd;
         if (hwnd != 0)
         {
@@ -134,6 +133,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     {
         if (_disposed) return;
         _disposed = true;
+        _abandoned = true;
 
         var hwnd = _hwnd;
         if (hwnd != 0)
@@ -201,6 +201,14 @@ internal sealed class WindowsWatchTray : IWatchTray
                 return;
             }
 
+            if (_abandoned)
+            {
+                Notify(NimDelete);
+                Native.DestroyWindow(hwnd);
+                _ready.TrySetResult(false);
+                return;
+            }
+
             _added = true;
             _ready.TrySetResult(true);
 
@@ -222,39 +230,48 @@ internal sealed class WindowsWatchTray : IWatchTray
 
     private nint WindowProc(nint hWnd, uint msg, nuint wParam, nint lParam)
     {
-        switch (msg)
+        try
         {
-            case MsgNotify:
-                var eventMsg = (uint)lParam;
-                if (eventMsg is WmRButtonUp or WmLButtonUp or WmContextMenu)
-                {
-                    ShowMenu(hWnd);
-                }
+            switch (msg)
+            {
+                case MsgNotify:
+                    var eventMsg = (uint)lParam;
+                    if (eventMsg is WmRButtonUp or WmLButtonUp or WmContextMenu)
+                    {
+                        ShowMenu(hWnd);
+                    }
 
-                return 0;
+                    return 0;
 
-            case MsgSetState:
-                _status = (WatchStatus)(int)wParam;
-                _errorCount = (int)lParam;
-                if (_added) Notify(NimModify);
-                return 0;
+                case MsgSetState:
+                    _status = (WatchStatus)(int)wParam;
+                    _errorCount = (int)lParam;
+                    if (_added) Notify(NimModify);
+                    return 0;
 
-            case WmClose:
-                Native.DestroyWindow(hWnd);
-                return 0;
+                case WmClose:
+                    Native.DestroyWindow(hWnd);
+                    return 0;
 
-            case WmDestroy:
-                if (_added)
-                {
-                    Notify(NimDelete);
-                    _added = false;
-                }
+                case WmDestroy:
+                    if (_added)
+                    {
+                        Notify(NimDelete);
+                        _added = false;
+                    }
 
-                Native.PostQuitMessage(0);
-                return 0;
+                    Native.PostQuitMessage(0);
+                    return 0;
+            }
+
+            return Native.DefWindowProc(hWnd, msg, wParam, lParam);
         }
-
-        return Native.DefWindowProc(hWnd, msg, wParam, lParam);
+        catch
+        {
+            // Reverse P/Invoke: a managed exception through user32 can FailFast or tear the
+            // tray thread down. The watch loop is the feature; the icon is a satellite.
+            return 0;
+        }
     }
 
     private void ShowMenu(nint hWnd)
@@ -380,7 +397,12 @@ internal sealed class WindowsWatchTray : IWatchTray
             }
         }
 
-        var mask = Native.CreateBitmap(IconSize, IconSize, 1, 1, nint.Zero);
+        nint mask;
+        unsafe
+        {
+            var maskBits = stackalloc byte[IconSize * 4];
+            mask = Native.CreateBitmap(IconSize, IconSize, 1, 1, (nint)maskBits);
+        }
         if (mask == 0)
         {
             Native.DeleteObject(color);
