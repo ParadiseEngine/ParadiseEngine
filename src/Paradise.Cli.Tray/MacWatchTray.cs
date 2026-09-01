@@ -19,6 +19,7 @@ internal sealed class MacWatchTray : IWatchTray
 {
     private const string TargetClassName = "ParadiseWatchTrayTarget";
     private const int NsApplicationActivationPolicyAccessory = 1;
+    private const nuint NsEventTypeApplicationDefined = 15;
     private const int RtldNow = 2;
 
     private static readonly NFloat VariableStatusItemLength = -1;
@@ -214,7 +215,7 @@ internal sealed class MacWatchTray : IWatchTray
                 }
 
                 _statusBar = Native.MsgSend(nsStatusBar, selSystemStatusBar);
-                _statusItem = Native.objc_retain(Native.MsgSendNFloat(_statusBar, selStatusItemWithLength, VariableStatusItemLength));
+                _statusItem = Native.objc_retain(CallStatusItemWithLength(nsStatusBar, _statusBar, selStatusItemWithLength));
                 if (_statusItem == 0)
                 {
                     error = "could not create an NSStatusItem";
@@ -252,9 +253,11 @@ internal sealed class MacWatchTray : IWatchTray
                 if (!_bootstrapped) Teardown();
             }
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        catch (Exception ex)
         {
-            error = "AppKit entry points are missing";
+            error = ex is DllNotFoundException or EntryPointNotFoundException
+                ? "AppKit entry points are missing"
+                : $"could not start the menu-bar icon ({ex.GetType().Name})";
             return false;
         }
     }
@@ -280,6 +283,35 @@ internal sealed class MacWatchTray : IWatchTray
 
     private static void AddMethod(nint cls, nint selector, nint imp, string types)
         => Native.class_addMethod(cls, selector, imp, types);
+
+    /// <summary>
+    /// <c>statusItemWithLength:</c> takes a <c>CGFloat</c>. arm64 <c>objc_msgSend</c> is
+    /// variadic, so a <see cref="NFloat"/> would land in a GPR instead of a SIMD register.
+    /// The method IMP is a fixed (non-variadic) signature and puts the length where AppKit
+    /// actually reads it.
+    /// </summary>
+    private static nint CallStatusItemWithLength(nint statusBarClass, nint statusBar, nint selector)
+    {
+        var imp = InstanceImp(statusBarClass, selector);
+        if (imp == 0 || statusBar == 0) return 0;
+        unsafe
+        {
+            var fn = (delegate* unmanaged[Cdecl]<nint, nint, NFloat, nint>)imp;
+            return fn(statusBar, selector, VariableStatusItemLength);
+        }
+    }
+
+    private static nint InstanceImp(nint cls, nint selector)
+    {
+        var method = Native.class_getInstanceMethod(cls, selector);
+        return method == 0 ? 0 : Native.method_getImplementation(method);
+    }
+
+    private static nint ClassImp(nint cls, nint selector)
+    {
+        var method = Native.class_getClassMethod(cls, selector);
+        return method == 0 ? 0 : Native.method_getImplementation(method);
+    }
 
     private void HopApply()
     {
@@ -336,11 +368,11 @@ internal sealed class MacWatchTray : IWatchTray
     private void StopNsApp()
     {
         Native.CFRunLoopStop(Native.CFRunLoopGetMain());
-        var app = _nsApp;
-        if (app == 0) return;
+        Native.CFRunLoopWakeUp(Native.CFRunLoopGetMain());
+        if (_nsApp == 0) return;
         if (_bootstrapped && IsMainThread())
         {
-            Native.MsgSend(app, _selStop, 0);
+            RequestRunLoopExit();
             return;
         }
 
@@ -348,6 +380,57 @@ internal sealed class MacWatchTray : IWatchTray
         {
             Native.MsgSendSelObjByte(_target, _selPerformSelectorOnMainThread, _selStopApp, 0, 0);
         }
+    }
+
+    /// <summary>
+    /// <c>[NSApp run]</c> is a loop around <c>nextEvent:</c>. <c>stop:</c> only finishes that
+    /// loop after the next event, and <c>CFRunLoopStop</c> only returns one iteration. Posting
+    /// an <c>NSEventTypeApplicationDefined</c> event is what actually lets <c>run</c> return.
+    /// </summary>
+    private void RequestRunLoopExit()
+    {
+        var app = _nsApp;
+        if (app == 0) return;
+        Native.MsgSend(app, _selStop, 0);
+        PostWakeEvent(app);
+        Native.CFRunLoopStop(Native.CFRunLoopGetMain());
+        Native.CFRunLoopWakeUp(Native.CFRunLoopGetMain());
+    }
+
+    private static void PostWakeEvent(nint app)
+    {
+        var nsEvent = Native.objc_getClass("NSEvent");
+        if (nsEvent == 0) return;
+
+        var sel = Sel("otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:");
+        var imp = ClassImp(nsEvent, sel);
+        if (imp == 0) return;
+
+        var pool = Native.objc_autoreleasePoolPush();
+        try
+        {
+            nint evt;
+            unsafe
+            {
+                // Class method IMP: fixed signature, so NSPoint's CGFloats go in SIMD regs.
+                var fn = (delegate* unmanaged[Cdecl]<nint, nint, nuint, CGPoint, nuint, double, nint, nint, short, nint, nint, nint>)imp;
+                evt = fn(nsEvent, sel, NsEventTypeApplicationDefined, default, 0, 0, 0, 0, 0, 0, 0);
+            }
+
+            if (evt == 0) return;
+            Native.MsgSendPtrByte(app, Sel("postEvent:atStart:"), evt, 1);
+        }
+        finally
+        {
+            Native.objc_autoreleasePoolPop(pool);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CGPoint
+    {
+        public NFloat X;
+        public NFloat Y;
     }
 
     private void Teardown()
@@ -462,8 +545,7 @@ internal sealed class MacWatchTray : IWatchTray
         try
         {
             var tray = s_current;
-            if (tray is null || tray._nsApp == 0) return;
-            Native.MsgSend(tray._nsApp, tray._selStop, 0);
+            tray?.RequestRunLoopExit();
         }
         catch
         {
@@ -500,6 +582,15 @@ internal sealed class MacWatchTray : IWatchTray
         public static extern byte class_addMethod(nint cls, nint selector, nint imp, string types);
 
         [DllImport(ObjC)]
+        public static extern nint class_getInstanceMethod(nint cls, nint selector);
+
+        [DllImport(ObjC)]
+        public static extern nint class_getClassMethod(nint cls, nint selector);
+
+        [DllImport(ObjC)]
+        public static extern nint method_getImplementation(nint method);
+
+        [DllImport(ObjC)]
         public static extern nint objc_retain(nint value);
 
         [DllImport(ObjC)]
@@ -521,9 +612,6 @@ internal sealed class MacWatchTray : IWatchTray
         public static extern nint MsgSend3(nint receiver, nint selector, nint a, nint b, nint c);
 
         [DllImport(ObjC, EntryPoint = "objc_msgSend")]
-        public static extern nint MsgSendNFloat(nint receiver, nint selector, NFloat arg);
-
-        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
         public static extern void MsgSendByte(nint receiver, nint selector, byte arg);
 
         [DllImport(ObjC, EntryPoint = "objc_msgSend")]
@@ -532,10 +620,16 @@ internal sealed class MacWatchTray : IWatchTray
         [DllImport(ObjC, EntryPoint = "objc_msgSend")]
         public static extern byte MsgSendRetByte(nint receiver, nint selector);
 
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")]
+        public static extern void MsgSendPtrByte(nint receiver, nint selector, nint arg, byte flag);
+
         [DllImport(CoreFoundation)]
         public static extern nint CFRunLoopGetMain();
 
         [DllImport(CoreFoundation)]
         public static extern void CFRunLoopStop(nint runLoop);
+
+        [DllImport(CoreFoundation)]
+        public static extern void CFRunLoopWakeUp(nint runLoop);
     }
 }
