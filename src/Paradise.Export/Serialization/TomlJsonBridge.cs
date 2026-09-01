@@ -42,6 +42,16 @@ namespace Paradise.Export.Serialization
     /// an argument, not a proof, which is why the parity test reads a document both ways and
     /// compares the results rather than trusting it.
     /// </para>
+    /// <para>
+    /// <b>That last rule is one-way, and the reader cannot tell the difference.</b> An empty
+    /// object and a null in an array are both written <c>{}</c>, so both come back as null.
+    /// Nothing the contract emits can hit it — <c>PrefabBake</c> has already turned an empty
+    /// inline table into null before serialization, and an array element is never a header table
+    /// — but this reader also serves <c>AuthoredDocument</c>, where a hand-written
+    /// <c>things = [{}, { a = 1 }]</c> loads as <c>[null, {…}]</c>. If a document ever needs to
+    /// mean "an empty object, in an array, distinctly from nothing", that is the assumption to
+    /// revisit; giving null its own spelling is what TOML does not offer.
+    /// </para>
     /// </remarks>
     internal static class TomlJsonBridge
     {

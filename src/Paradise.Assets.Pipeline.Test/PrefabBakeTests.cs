@@ -166,6 +166,40 @@ public class PrefabBakeTests
     }
 
     /// <summary>
+    /// A payload table inside an array is data, not a reference, and reaches the contract whole.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the rule <c>ProjectVerifier.Walk</c> applies, and the two must be pinned
+    /// together: the reader wraps every table inside an array as inline, so a bake matching on the
+    /// model type reads a <c>path</c> that is not there and nulls the element. Verify calls this
+    /// document clean — <c>a_payload_table_inside_an_array_is_not_read_as_a_reference</c> — so a
+    /// bake that dropped it would lose a collider with nothing anywhere reporting it.
+    /// </remarks>
+    [Test]
+    public async Task a_payload_table_inside_an_array_survives_the_bake()
+    {
+        var componentId = new Guid("2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091");
+        var document = new PrefabDocument();
+        var root = PrefabObject.WithMeta(RootGuid, "crate");
+        root.Components.Add(new PrefabComponent(componentId, "game.Body", new CanonicalTomlTable
+        {
+            {
+                "Colliders", new object[]
+                {
+                    new CanonicalInlineTable { { "ShapeType", "Box" }, { "Radius", 2.0 } },
+                }
+            },
+        }));
+        document.Objects.Add(root);
+
+        var colliders = Payload(Bake(document).Entities[0], componentId).GetProperty("Colliders");
+
+        await Assert.That(colliders.GetArrayLength()).IsEqualTo(1);
+        await Assert.That(colliders[0].GetProperty("ShapeType").GetString()).IsEqualTo("Box");
+        await Assert.That(colliders[0].GetProperty("Radius").GetDouble()).IsEqualTo(2.0);
+    }
+
+    /// <summary>
     /// The contract's copy of the well-known ids cannot drift from the authoring format's —
     /// Paradise.Export cannot reference Paradise.Assets.Documents, so the equality lives here,
     /// in the one test project that sees both.

@@ -100,12 +100,24 @@ public static class PrefabBake
     {
         null => null,
 
+        // The empty table is a deliberate null slot -- dropping it would shift every material
+        // override after it onto the wrong primitive.
+        CanonicalInlineTable { Count: 0 } => null,
+
         // An AssetReference becomes its PATH: the guid is how authoring survives a move, and the
-        // runtime has a loader keyed on paths. An empty one is a deliberate null slot -- dropping
-        // it would shift every material override after it onto the wrong primitive.
-        CanonicalInlineTable reference => reference.Count == 0
-            ? null
-            : BuiltPath(reference.Value("path") as string, documentExtension),
+        // runtime has a loader keyed on paths.
+        //
+        // Gated on the format's OWN definition of a reference, exactly as ProjectVerifier.Walk is,
+        // and the two must not drift: TomlDocumentReader.ToCanonicalElement wraps EVERY table
+        // inside an array as inline (it is the only form TOML allows there), so matching on the
+        // model type alone treats ordinary payload data as a reference, reads a 'path' that is not
+        // there, and bakes the whole table to null. A collider list would leave the document at
+        // verify intact and reach the contract empty.
+        CanonicalInlineTable reference when AssetReferenceCodec.IsWrittenInline(reference.ToList()) =>
+            BuiltPath(reference.Value("path") as string, documentExtension),
+
+        // Not a reference, so it is what it looks like: a table of values.
+        CanonicalInlineTable payload => ToNode(payload, documentExtension),
 
         CanonicalTomlTable nested => ToNode(nested, documentExtension),
         string text => JsonValue.Create(text),

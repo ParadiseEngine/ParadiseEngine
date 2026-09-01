@@ -137,4 +137,8 @@ Enforced via `.editorconfig` with warnings-as-errors:
 
 ## SDK
 
-Requires .NET SDK 10.0.200+ (specified in `global.json` with `rollForward: latestMinor`).
+Requires .NET SDK 10.0.400+ (specified in `global.json` with `rollForward: latestMinor`). The
+floor is the compiler, not a preference: the Roslyn analyzers this repo builds against are
+compiled for 5.9.0.0, and an older SDK's `csc` refuses to load them with CS9057. `latestMinor`
+rolls forward, never back, so an older SDK does not satisfy this and the build stops with a
+version message rather than an analyzer one.
