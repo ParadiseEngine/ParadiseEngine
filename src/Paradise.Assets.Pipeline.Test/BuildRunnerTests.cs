@@ -164,6 +164,26 @@ public class BuildRunnerTests
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("../textures/gone.png");
         await Assert.That(result.Errors[0]).Contains("models/crate.glb");
+
+        // A failure writes nothing: the rewritten GLB must not be sitting in the output tree
+        // pointing at a KTX2 the build never produced, which is the failure mode this guards.
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_json_gltf_is_refused_rather_than_copied_through_unrepointed()
+    {
+        // The importer claims .gltf but reads only the GLB container, so a JSON glTF reached
+        // neither the rewrite nor the missing-texture check — it was copied through still naming
+        // its .png, which is precisely the shipped-broken-mesh failure repointing exists to stop.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.gltf");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("JSON glTF");
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.gltf")).IsFalse();
     }
 
     [Test]

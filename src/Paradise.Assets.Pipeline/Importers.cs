@@ -106,6 +106,19 @@ public sealed class MeshImporter : IAssetImporter
     {
         if (!context.HasExtension(".glb", ".gltf")) return false;
 
+        // CLAIMED and refused, rather than declined: both the rewrite and the missing-texture
+        // check read the GLB container, so a JSON .gltf reaches neither — it would be copied
+        // through with its .png URIs intact, shipping a mesh naming files the build never wrote,
+        // which is the exact failure repointing exists to prevent. Declining would be worse
+        // still: no importer below claims it either, so the mesh would vanish silently.
+        if (context.HasExtension(".gltf"))
+        {
+            errors.Add(
+                $"{context.Source}: is JSON glTF, which this step cannot repoint (it keeps textures and " +
+                "buffers as separate files); export it as .glb");
+            return true;
+        }
+
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         if (HasEmbeddedEncodedImages(bytes, out var mimeType))
         {
@@ -122,14 +135,21 @@ public sealed class MeshImporter : IAssetImporter
         // that a source exists to compile at all — a reference naming nothing is a broken mesh
         // however the steps are ordered.
         var directory = context.Asset.GetDirectory();
+        var missing = false;
         foreach (var reference in rewrite.Sources)
         {
             if (context.FileSystem.FileExists(Resolve(directory, reference))) continue;
 
+            missing = true;
             errors.Add(
                 $"{context.Source}: references texture '{reference}', which does not exist under assets/ " +
                 "(a moved or renamed texture; the mesh and the reference move together)");
         }
+
+        // A failure writes nothing (IAssetImporter's contract): the build already refuses to save
+        // its index and manifest, and a rewritten GLB left behind anyway would be exactly the
+        // half-built tree those refusals exist to prevent.
+        if (missing) return true;
 
         context.Output.WriteAllBytes("/" + context.Source, rewrite.Glb);
         return true;
