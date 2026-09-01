@@ -15,6 +15,5 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Cli\Paradise.Cli.csproj" />
-    <ProjectReference Include="..\Paradise.Cli.Tray\Paradise.Cli.Tray.csproj" />
   </ItemGroup>
 </Project>
