@@ -161,7 +161,8 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     /// PAUT011: a VALUE host kind applied to a whole type.
     ///
     /// A value kind is one concrete value of one field; a whole record cannot be "a Guid". The
-    /// marker kinds (HostShape, HostMesh, …) are the ones that describe a whole record.
+    /// marker and composed kinds (HostTransform, HostShape, HostLight, HostCamera) are the ones
+    /// that describe a whole record.
     /// </summary>
     public static readonly DiagnosticDescriptor HostValueKindOnType = new(
         id: "PAUT011",
@@ -171,8 +172,8 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Value host kinds bind a single property, by attribute or by typing the "
-            + "property as the kind. Only marker kinds (HostShape, HostMesh, HostSprite, "
-            + "HostLight, HostTransform) describe a whole record.");
+            + "property as the kind. Only marker and composed kinds (HostTransform, HostShape, "
+            + "HostLight, HostCamera) describe a whole record.");
 
     /// <summary>
     /// PAUT012: a property TYPED as one host kind but ATTRIBUTED with another.

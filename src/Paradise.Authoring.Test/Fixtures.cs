@@ -17,12 +17,16 @@ public static class FixtureIds
     public const string V2 = "e0000000-0000-4000-8000-000000000003";
     public const string BySprite = "e0000000-0000-4000-8000-000000000004";
     public const string HostBound = "e0000000-0000-4000-8000-000000000005";
+    public const string ByLight = "e0000000-0000-4000-8000-000000000006";
+    public const string ByCamera = "e0000000-0000-4000-8000-000000000007";
 
     public static readonly Guid HostBoundId = new(HostBound);
     public static readonly Guid EverythingId = new(Everything);
     public static readonly Guid MinimalId = new(Minimal);
     public static readonly Guid V2Id = new(V2);
     public static readonly Guid BySpriteId = new(BySprite);
+    public static readonly Guid ByLightId = new(ByLight);
+    public static readonly Guid ByCameraId = new(ByCamera);
 }
 
 /// <summary>An enum the schema has to describe by NAME, matching how the export contract
@@ -118,10 +122,10 @@ public sealed record V2Fixture
     public PlacementRefFixture Destination { get; set; } = new();
 
     [AuthoredByHost<HostMesh>]
-    public string MeshNode { get; set; } = "";
+    public Guid MeshNode { get; set; }
 
     [AuthoredByHost<HostAsset>, AuthorAssetKinds(".glb", ".gltf")]
-    public string Model { get; set; } = "";
+    public Guid Model { get; set; }
 
     public Vector2 QuadSize { get; set; }
     public Vector3 Offset { get; set; }
@@ -145,15 +149,38 @@ public sealed record V2Fixture
 }
 
 
-/// <summary>A whole component authored by pointing at ONE host object — the shape the engine's
-/// sprite animation has, where sheet, grid and quad size are all read off the sprite.</summary>
+/// <summary>A sprite referenced by the sprite asset's GUID — sheet and quad size stay ordinary
+/// fields, because a GUID is one value and cannot carry the rest.</summary>
 [Guid(FixtureIds.BySprite)]
 [Authored(DisplayName = "By sprite")]
-[AuthoredByHost<HostSprite>]
 public sealed record BySpriteFixture
 {
-    public string? Sheet { get; set; }
+    [AuthoredByHost<HostSprite>]
+    public Guid Sheet { get; set; }
+
     public Vector2 QuadSize { get; set; }
+}
+
+/// <summary>A whole component authored by pointing at ONE host light — the shape a directional
+/// or lamp uses, where colour and energy are read off the light.</summary>
+[Guid(FixtureIds.ByLight)]
+[Authored(DisplayName = "By light")]
+[AuthoredByHost<HostLight>]
+public sealed record ByLightFixture
+{
+    public Vector3 Direction { get; set; }
+    public float Intensity { get; set; } = 1f;
+}
+
+/// <summary>A whole component authored by pointing at ONE host camera — the shape a shot uses,
+/// where the lens and aim are read off the camera object.</summary>
+[Guid(FixtureIds.ByCamera)]
+[Authored(DisplayName = "By camera")]
+[AuthoredByHost<HostCamera>]
+public sealed record ByCameraFixture
+{
+    public float Fov { get; set; } = 50f;
+    public Vector3 Position { get; set; }
 }
 
 /// <summary>
@@ -174,7 +201,28 @@ public sealed record HostBoundFixture
     [AuthoredByHost<HostLocalRotation>]
     public Quaternion Spin { get; set; }
 
+    [AuthoredByHost<HostParent>]
+    public Guid Parent { get; set; }
+
+    [AuthoredByHost<HostEntity>]
+    public Guid Target { get; set; }
+
+    [AuthoredByHost<HostAsset>]
+    public Guid File { get; set; }
+
+    [AuthoredByHost<HostMesh>]
+    public Guid Mesh { get; set; }
+
+    [AuthoredByHost<HostSprite>]
+    public Guid Sprite { get; set; }
+
     public HostLocalPosition Position { get; set; }
 
     public HostLocalScale Scale { get; set; }
+
+    public HostShape Collider { get; set; }
+
+    public HostLight Lamp { get; set; }
+
+    public HostCamera Eye { get; set; }
 }

@@ -274,6 +274,10 @@ internal static class AuthoredModel
             // A property TYPED as a value host kind binds by type: the kind is the struct's own
             // and the wire type is its Value's — the generated reader wraps the read value back
             // into the host struct (HostWrapperType).
+            //
+            // A property TYPED as a composed host kind (HostShape, HostLight, HostCamera) does
+            // not unwrap: the kind IS the payload, nested as an object, and authoredBy comes from
+            // its Kind const (it carries no [AuthoredByHost] of its own).
             string? hostTypedKind = null;
             string? hostWrapper = null;
             if (IsHostKind(valueType) && HostValueTypeOf(valueType) is { } hostValue)
@@ -284,6 +288,10 @@ internal static class AuthoredModel
                     { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableValue
                     ? nullableValue.TypeArguments[0]
                     : hostValue;
+            }
+            else if (IsHostKind(valueType))
+            {
+                hostTypedKind = KindNameOf(valueType);
             }
 
             var schemaType = SchemaTypeOf(valueType);
@@ -303,7 +311,8 @@ internal static class AuthoredModel
                     { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableExpected
                     ? nullableExpected.TypeArguments[0]
                     : declared;
-                if (!SymbolEqualityComparer.Default.Equals(expected, valueType))
+                if (!SymbolEqualityComparer.Default.Equals(expected, valueType)
+                    && !AllowsBakedPath(memberHost, expected, valueType))
                 {
                     result.HostProblems.Add(new HostBindingProblem
                     {
@@ -522,9 +531,25 @@ internal static class AuthoredModel
         type.AllInterfaces.Any(i => i.ToDisplayString() == HostKindInterface);
 
     /// <summary>A VALUE kind's payload type — its <c>Value</c> property — or null for a marker
-    /// kind, which names a referenced host object and carries no value of its own.</summary>
+    /// or composed kind, which names a referenced host object and carries no single Value.</summary>
     private static ITypeSymbol? HostValueTypeOf(ITypeSymbol host) =>
         host.GetMembers("Value").OfType<IPropertySymbol>().FirstOrDefault()?.Type;
+
+    /// <summary>
+    /// Mesh, sprite and asset kinds declare a GUID, but a baked document still carries the
+    /// runtime PATH the loader is keyed on. A string field is therefore a legal wire type for
+    /// those three until bake emits the guid and the loader resolves it.
+    /// </summary>
+    private static bool AllowsBakedPath(ITypeSymbol host, ITypeSymbol expected, ITypeSymbol actual)
+    {
+        if (expected.ToDisplayString() != "System.Guid"
+            || actual.SpecialType != SpecialType.System_String)
+        {
+            return false;
+        }
+
+        return KindNameOf(host) is "mesh" or "sprite" or "asset";
+    }
 
     /// <summary>An attribute argument as a JSON literal, for the visibility comparison value.</summary>
     private static string? JsonLiteralOf(TypedConstant constant)

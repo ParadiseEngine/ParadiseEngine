@@ -91,6 +91,16 @@ public class SchemaV2Tests
         await Assert.That(Field("Model").AuthoredBy).IsEqualTo(AuthoredBySources.Asset);
     }
 
+    [Test]
+    public async Task a_sprite_is_a_guid_on_the_field()
+    {
+        var schema = AuthoringSchemaReader.Read(AuthoringSchema.Json);
+        var sheet = schema.Components.Single(c => c.Id == FixtureIds.BySpriteId)
+            .Fields.Single(f => f.Name == "Sheet");
+        await Assert.That(sheet.AuthoredBy).IsEqualTo(AuthoredBySources.Sprite);
+        await Assert.That(sheet.Type).IsEqualTo(AuthoredFieldTypes.String);
+    }
+
     /// <summary>Accepted file kinds are what the file IS. A Godot filter string ("*.glb,*.gltf") in
     /// the document would make every other editor speak Godot.</summary>
     [Test]
@@ -122,15 +132,17 @@ public class SchemaV2Tests
         await Assert.That(guard.EqualTo.GetString()).IsEqualTo("Sphere");
     }
 
-    /// <summary>A component can be authored by ONE host object rather than as a form — the engine's
-    /// sprite animation reads its sheet, grid and quad size off the sprite. That has to live on the
-    /// component, since there is no field to hang it on.</summary>
+    /// <summary>A component can be authored by ONE host object rather than as a form — a light's
+    /// colour and energy are read off the host light. That has to live on the component, since
+    /// there is no single field to hang a composed kind on.</summary>
     [Test]
     public async Task a_whole_component_can_be_authored_by_a_host_object()
     {
         var schema = AuthoringSchemaReader.Read(AuthoringSchema.Json);
-        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.BySpriteId).AuthoredBy)
-            .IsEqualTo(AuthoredBySources.Sprite);
+        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.ByLightId).AuthoredBy)
+            .IsEqualTo(AuthoredBySources.Light);
+        await Assert.That(schema.Components.Single(c => c.Id == FixtureIds.ByCameraId).AuthoredBy)
+            .IsEqualTo(AuthoredBySources.Camera);
 
         // A component authored as a form says so by omission.
         await Assert.That(V2().AuthoredBy).IsNull();
