@@ -134,6 +134,38 @@ public class PrefabBakeTests
     }
 
     /// <summary>
+    /// A reference the bake flattens must name where the build actually PUT the asset — for both
+    /// authored extensions, not just <c>.toml</c>.
+    /// </summary>
+    /// <remarks>
+    /// A <c>.prefab</c> in payload position is not an instance: it is a component holding a
+    /// document to load later (a spawner naming what it spawns), so the bake never expands it and
+    /// the path is all the runtime gets. The document importer compiles that file to the profile's
+    /// format, so a path left saying <c>.prefab</c> names a file no build wrote.
+    /// </remarks>
+    [Test]
+    public async Task a_referenced_document_is_repointed_at_its_built_form()
+    {
+        var document = new PrefabDocument();
+        var root = PrefabObject.WithMeta(RootGuid, "spawner");
+        root.Components.Add(new PrefabComponent(
+            new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"), "game.Spawner", new CanonicalTomlTable
+            {
+                { "Spawns", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "prefabs/crate.prefab")) },
+                { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "materials/rust.toml")) },
+                { "Mesh", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "models/crate.glb")) },
+            }));
+        document.Objects.Add(root);
+
+        var payload = Payload(Bake(document).Entities[0], new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"));
+
+        // Both authored extensions become the profile's; a carried-through mesh keeps its own.
+        await Assert.That(payload.GetProperty("Spawns").GetString()).IsEqualTo("prefabs/crate.json");
+        await Assert.That(payload.GetProperty("Material").GetString()).IsEqualTo("materials/rust.json");
+        await Assert.That(payload.GetProperty("Mesh").GetString()).IsEqualTo("models/crate.glb");
+    }
+
+    /// <summary>
     /// The contract's copy of the well-known ids cannot drift from the authoring format's —
     /// Paradise.Export cannot reference Paradise.Assets.Documents, so the equality lives here,
     /// in the one test project that sees both.

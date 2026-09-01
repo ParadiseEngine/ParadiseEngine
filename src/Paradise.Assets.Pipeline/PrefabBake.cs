@@ -118,15 +118,29 @@ public static class PrefabBake
 
     /// <summary>Where a referenced asset lands in the build.</summary>
     /// <remarks>
-    /// Only authored documents move: <c>materials/x.toml</c> is compiled to whatever the profile's
-    /// <c>document_format</c> produces, while a mesh or a bank is carried through under the name it
-    /// already has.
+    /// Only authored documents move: <c>materials/x.toml</c> and <c>props/crate.prefab</c> are
+    /// compiled to whatever the profile's <c>document_format</c> produces, while a mesh or a bank
+    /// is carried through under the name it already has. <b>Both</b> authored extensions are
+    /// remapped because both importers rewrite them — a component holding a reference to another
+    /// document (a spawner naming the prefab it instantiates at runtime, rather than an instance
+    /// the bake expands) would otherwise ship the authoring path while the build wrote the
+    /// compiled one.
     /// </remarks>
     private static JsonNode? BuiltPath(string? path, string documentExtension)
     {
         if (path is null) return null;
-        return JsonValue.Create(path.EndsWith(".toml", StringComparison.OrdinalIgnoreCase)
-            ? string.Concat(path.AsSpan(0, path.Length - ".toml".Length), documentExtension)
-            : path);
+
+        foreach (var authored in s_authoredExtensions)
+        {
+            if (path.EndsWith(authored, StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonValue.Create(string.Concat(path.AsSpan(0, path.Length - authored.Length), documentExtension));
+            }
+        }
+
+        return JsonValue.Create(path);
     }
+
+    /// <summary>The extensions the document importers compile; everything else is carried through.</summary>
+    private static readonly string[] s_authoredExtensions = [".toml", AssetClassifier.PrefabSuffix];
 }
