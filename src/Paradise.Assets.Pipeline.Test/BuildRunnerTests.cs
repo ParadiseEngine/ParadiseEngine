@@ -1000,9 +1000,9 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task junk_under_assets_is_neither_verified_nor_built()
+    public async Task an_ignored_file_under_assets_is_neither_verified_nor_built()
     {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
+        using var fileSystem = ProjectVerifierTests.CreateProject(ignore: [".DS_Store", "*.tmp"]);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
         fileSystem.WriteAllBytes("/game/assets/audio/.DS_Store", [0]);
         fileSystem.WriteAllBytes("/game/assets/audio/init.bnk.tmp", [0]);

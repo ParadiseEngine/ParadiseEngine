@@ -1,4 +1,5 @@
 using Paradise.Assets.Documents;
+using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline.Test;
 
@@ -21,32 +22,38 @@ public class AssetClassifierTests
     // so it cannot tell this from the mesh above -- and does not pretend to.
     [Arguments("/game/assets/notes.txt", AssetClass.Foreign)]
     [Arguments("/game/assets/other/project.toml", AssetClass.Config)]
-    [Arguments("/game/assets/.DS_Store", AssetClass.Junk)]
-    [Arguments("/game/assets/models/Thumbs.db", AssetClass.Junk)]
-    [Arguments("/game/assets/models/desktop.ini", AssetClass.Junk)]
-    [Arguments("/game/assets/models/crate.glb~", AssetClass.Junk)]
-    [Arguments("/game/assets/models/crate.glb.tmp", AssetClass.Junk)]
-    [Arguments("/game/assets/models/crate.glb.TMP", AssetClass.Junk)]
-    [Arguments("/game/assets/models/.#crate.glb", AssetClass.Junk)]
-    [Arguments("/game/assets/props/crate.blend1", AssetClass.Junk)]
-    [Arguments("/game/assets/props/crate.blend32", AssetClass.Junk)]
-    [Arguments("/game/assets/props/crate.blend", AssetClass.Foreign)]
-    [Arguments("/game/assets/props/tmp.png", AssetClass.Foreign)]
-    // The sidecar check wins over the junk check so that verify can see a sidecar minted for junk.
-    [Arguments("/game/assets/.DS_Store.meta", AssetClass.Sidecar)]
+    // Nothing is ignored unless the project says so: the engine has no list of its own.
+    [Arguments("/game/assets/.DS_Store", AssetClass.Foreign)]
+    [Arguments("/game/assets/models/crate.glb.tmp", AssetClass.Foreign)]
     public async Task files_classify_by_extension_and_place(string path, AssetClass expected)
     {
-        await Assert.That(AssetClassifier.Classify(s_assets, path)).IsEqualTo(expected);
+        await Assert.That(AssetClassifier.Classify(s_assets, path, AssetIgnoreRules.None)).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("/game/assets/.DS_Store", AssetClass.Ignored)]
+    [Arguments("/game/assets/models/crate.glb.tmp", AssetClass.Ignored)]
+    [Arguments("/game/assets/props/crate.blend1", AssetClass.Ignored)]
+    [Arguments("/game/assets/scratch/anything.prefab", AssetClass.Ignored)]
+    [Arguments("/game/assets/props/crate.blend", AssetClass.Foreign)]
+    [Arguments("/game/assets/levels/scratch.prefab", AssetClass.Prefab)]
+    // The sidecar check wins over the ignore check so that verify can see a sidecar minted for an ignored file.
+    [Arguments("/game/assets/.DS_Store.meta", AssetClass.Sidecar)]
+    public async Task the_projects_ignore_list_decides_what_is_ignored(string path, AssetClass expected)
+    {
+        var ignore = AssetIgnoreRules.Parse([".DS_Store", "*.tmp", "*.blend1", "scratch/**"]);
+
+        await Assert.That(AssetClassifier.Classify(s_assets, path, ignore)).IsEqualTo(expected);
     }
 
     [Test]
     [Arguments(AssetClass.Sidecar, false)]
-    [Arguments(AssetClass.Junk, false)]
+    [Arguments(AssetClass.Ignored, false)]
     [Arguments(AssetClass.Foreign, true)]
     [Arguments(AssetClass.Prefab, true)]
     [Arguments(AssetClass.Config, true)]
     [Arguments(AssetClass.Manifest, true)]
-    public async Task only_sidecars_and_junk_go_without_a_sidecar(AssetClass assetClass, bool expected)
+    public async Task only_sidecars_and_ignored_files_go_without_a_sidecar(AssetClass assetClass, bool expected)
     {
         await Assert.That(AssetClassifier.NeedsSidecar(assetClass)).IsEqualTo(expected);
     }
@@ -57,7 +64,7 @@ public class AssetClassifierTests
         // Every asset has a sidecar, prefabs included, so this path is normal. Pinned because
         // the suffix check must win over the prefab check: classified as a prefab, the sidecar
         // would be parsed as a document and refused, and verify could never see it as an orphan.
-        await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta"))
+        await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta", AssetIgnoreRules.None))
             .IsEqualTo(AssetClass.Sidecar);
     }
 

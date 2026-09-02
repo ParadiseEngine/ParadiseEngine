@@ -134,4 +134,17 @@ public class ProjectScaffoldTests
 
         await Assert.That(error!.Message).Contains("not empty");
     }
+
+    /// <summary>The engine ships no ignore list; the scaffold seeds one the project then owns.</summary>
+    [Test]
+    public async Task the_manifest_seeds_an_ignore_list_the_project_owns()
+    {
+        using var fileSystem = Scaffold();
+
+        var manifest = ProjectManifest.Load(fileSystem, s_root / "assets" / "project.toml");
+
+        await Assert.That(manifest.Ignore.Patterns).Contains(".DS_Store");
+        await Assert.That(manifest.Ignore.Patterns).Contains("*.blend1");
+        await Assert.That(manifest.Ignore.Matches(s_root / "assets", s_root / "assets" / "props" / "crate.blend1")).IsTrue();
+    }
 }

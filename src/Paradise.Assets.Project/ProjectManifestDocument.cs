@@ -19,10 +19,22 @@ internal sealed class ProjectManifestDocument
     [JsonPropertyName("schema_version")]
     public int? SchemaVersion { get; set; }
 
+    [JsonPropertyName("assets")]
+    public AssetsSectionDocument? Assets { get; set; }
+
     [JsonPropertyName("build")]
     public BuildSectionDocument? Build { get; set; }
 
     /// <summary>Anything Tomlyn could not map. Non-empty is an error: a typo'd key that a lenient read ignored is a setting that never applied.</summary>
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
+}
+
+internal sealed class AssetsSectionDocument
+{
+    [JsonPropertyName("ignore")]
+    public List<string>? Ignore { get; set; }
+
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
 }

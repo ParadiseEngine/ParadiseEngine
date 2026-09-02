@@ -111,7 +111,7 @@ public sealed class BuildRunner
         {
             // The manifest is the built tree's identity database; copying sidecars was a second
             // copy of the same facts.
-            if (SidecarMeta.IsSidecarPath(path) || AssetClassifier.IsJunk(path)) continue;
+            if (SidecarMeta.IsSidecarPath(path) || projectManifest.Ignore.Matches(_layout.Assets, path)) continue;
 
             var relative = sources.Relative(path);
             try

@@ -21,7 +21,7 @@ public enum SidecarAction
 
     Relinked,
 
-    /// <summary>A sidecar found beside junk was deleted: minted before junk was ignored, it would be committed while the file it describes is gitignored.</summary>
+    /// <summary>A sidecar found beside an ignored file was deleted: minted before the file was ignored, it would be committed while the file it describes is gitignored.</summary>
     Removed,
 
     /// <summary>A rename landed on a path that already had a sidecar; that identity was kept and the arriving one dropped.</summary>
@@ -42,6 +42,7 @@ public sealed class SidecarMaintainer
     private readonly AssetProjectLayout _layout;
     private readonly Action<string> _log;
     private readonly bool _dryRun;
+    private readonly AssetIgnoreRules _ignore;
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
@@ -49,11 +50,13 @@ public sealed class SidecarMaintainer
     // whole tree each time was most of what a rebuild cost (#203).
     private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
+    /// <param name="ignore">The project's <c>[assets] ignore</c>; taken once, so a change to it needs the watch restarted.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         Action<string>? log = null,
-        bool dryRun = false)
+        bool dryRun = false,
+        AssetIgnoreRules? ignore = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -62,7 +65,10 @@ public sealed class SidecarMaintainer
         _layout = layout;
         _log = log ?? (static _ => { });
         _dryRun = dryRun;
+        _ignore = ignore ?? AssetIgnoreRules.None;
     }
+
+    public AssetIgnoreRules Ignore => _ignore;
 
     public IReadOnlyCollection<string> Quarantined => _quarantine.Keys;
 
@@ -86,9 +92,9 @@ public sealed class SidecarMaintainer
     /// <summary>Gives an asset a sidecar, or brings the one it has up to date; add and change are one method because a temp-then-rename save arrives as either.</summary>
     public SidecarAction Ensure(UPath asset)
     {
-        if (AssetClassifier.IsJunk(asset)) return RemoveJunkSidecar(asset);
+        if (_ignore.Matches(_layout.Assets, asset)) return RemoveIgnoredSidecar(asset);
 
-        if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset))
+        if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset, _ignore))
             || !_fileSystem.FileExists(asset))
         {
             return SidecarAction.None;
@@ -221,13 +227,13 @@ public sealed class SidecarMaintainer
     }
 
     /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
-    private SidecarAction RemoveJunkSidecar(UPath asset)
+    private SidecarAction RemoveIgnoredSidecar(UPath asset)
     {
         var sidecar = SidecarMeta.PathFor(asset);
         if (!_fileSystem.FileExists(sidecar)) return SidecarAction.None;
 
         Remove(sidecar);
-        _log($"removed: {Display(sidecar)} (a sidecar for junk the pipeline ignores)");
+        _log($"removed: {Display(sidecar)} (its asset is in [assets] ignore)");
         return SidecarAction.Removed;
     }
 

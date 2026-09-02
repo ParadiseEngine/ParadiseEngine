@@ -17,16 +17,20 @@ public sealed class ProjectManifest
 
     private readonly Dictionary<string, BuildProfile> _profiles;
 
-    private ProjectManifest(string name, int schemaVersion, Dictionary<string, BuildProfile> profiles)
+    private ProjectManifest(string name, int schemaVersion, AssetIgnoreRules ignore, Dictionary<string, BuildProfile> profiles)
     {
         Name = name;
         SchemaVersion = schemaVersion;
+        Ignore = ignore;
         _profiles = profiles;
     }
 
     public string Name { get; }
 
     public int SchemaVersion { get; }
+
+    /// <summary><c>[assets] ignore</c>: files under <c>assets/</c> no verb looks at.</summary>
+    public AssetIgnoreRules Ignore { get; }
 
     /// <summary>Case-sensitive, as TOML keys are.</summary>
     public IReadOnlyDictionary<string, BuildProfile> Profiles => _profiles;
@@ -72,6 +76,7 @@ public sealed class ProjectManifest
 
         if (document is null) throw new ProjectManifestException(sourceName, "is empty");
         RejectUnknown(sourceName, document.Unknown, "at the document root");
+        RejectUnknown(sourceName, document.Assets?.Unknown, "in [assets]");
         RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
@@ -92,6 +97,16 @@ public sealed class ProjectManifest
                 $"(supported: {SupportedSchemaVersion})");
         }
 
+        AssetIgnoreRules ignore;
+        try
+        {
+            ignore = AssetIgnoreRules.Parse(document.Assets?.Ignore ?? []);
+        }
+        catch (ArgumentException error)
+        {
+            throw new ProjectManifestException(sourceName, $"has an invalid [assets] ignore list: {error.Message}", error);
+        }
+
         var profiles = new Dictionary<string, BuildProfile>(StringComparer.Ordinal);
         if (document.Build?.Profiles is { } declared)
         {
@@ -107,7 +122,7 @@ public sealed class ProjectManifest
             }
         }
 
-        return new ProjectManifest(document.Name, schemaVersion, profiles);
+        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles);
     }
 
     private static BuildProfile ReadProfile(string sourceName, string profileName, BuildProfileDocument? document)

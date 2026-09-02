@@ -60,7 +60,7 @@ internal static class Verbs
         bool build,
         bool tray = true)
     {
-        var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun);
+        var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun, IgnoreRules(fileSystem, layout));
         var settled = maintainer.Reconcile();
         Console.WriteLine(dryRun
             ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"
@@ -121,6 +121,20 @@ internal static class Verbs
 
         Console.WriteLine("watch: stopped");
         return 0;
+    }
+
+    /// <summary>A manifest the watch cannot read is reported by the first rebuild; until then nothing is ignored, which mints nothing wrong because verify refuses the tree anyway.</summary>
+    private static AssetIgnoreRules IgnoreRules(IFileSystem fileSystem, AssetProjectLayout layout)
+    {
+        try
+        {
+            return ProjectManifest.Load(fileSystem, layout.Manifest).Ignore;
+        }
+        catch (ProjectManifestException error)
+        {
+            Console.Error.WriteLine($"warning: {error.Message}");
+            return AssetIgnoreRules.None;
+        }
     }
 
     public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor)

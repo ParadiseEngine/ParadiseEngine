@@ -30,9 +30,10 @@ public static class PrefabCheck
         var results = new List<PrefabCheckResult>();
         if (!fileSystem.DirectoryExists(layout.Assets)) return results;
 
+        var ignore = IgnoreRules(fileSystem, layout);
         foreach (var path in fileSystem
             .EnumerateFiles(layout.Assets, "*", SearchOption.AllDirectories)
-            .Where(path => AssetClassifier.Classify(layout.Assets, path) == AssetClass.Prefab)
+            .Where(path => AssetClassifier.Classify(layout.Assets, path, ignore) == AssetClass.Prefab)
             .OrderBy(path => path.FullName, StringComparer.Ordinal))
         {
             PrefabDocument document;
@@ -63,5 +64,18 @@ public static class PrefabCheck
         }
 
         return results;
+    }
+
+    /// <summary>An unreadable manifest is verify's finding, not this verb's; nothing is ignored until it reads.</summary>
+    private static AssetIgnoreRules IgnoreRules(IFileSystem fileSystem, AssetProjectLayout layout)
+    {
+        try
+        {
+            return ProjectManifest.Load(fileSystem, layout.Manifest).Ignore;
+        }
+        catch (ProjectManifestException)
+        {
+            return AssetIgnoreRules.None;
+        }
     }
 }

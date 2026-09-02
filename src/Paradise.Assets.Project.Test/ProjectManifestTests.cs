@@ -205,4 +205,54 @@ public class ProjectManifestTests
 
         throw new InvalidOperationException("Expected the manifest to be rejected, but it loaded.");
     }
+
+    [Test]
+    public async Task the_ignore_list_is_the_projects_and_defaults_to_nothing()
+    {
+        var bare = ProjectManifest.Parse(Minimal, "project.toml");
+        await Assert.That(bare.Ignore.Patterns).IsEmpty();
+        await Assert.That(bare.Ignore.Matches("/game/assets", "/game/assets/.DS_Store")).IsFalse();
+
+        var manifest = ProjectManifest.Parse("""
+            name = "shiningpie"
+            schema_version = 1
+
+            [assets]
+            ignore = [".DS_Store", "*.tmp", "scratch/**"]
+            """, "project.toml");
+
+        await Assert.That(manifest.Ignore.Patterns).IsEquivalentTo(new[] { ".DS_Store", "*.tmp", "scratch/**" });
+        await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/models/.DS_Store")).IsTrue();
+        await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/scratch/a/b.prefab")).IsTrue();
+        await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/models/crate.glb")).IsFalse();
+    }
+
+    [Test]
+    public async Task an_unknown_key_in_assets_is_refused()
+    {
+        var error = await Assert.That(() => ProjectManifest.Parse("""
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignored = [".DS_Store"]
+            """, "project.toml")).Throws<ProjectManifestException>();
+
+        await Assert.That(error!.Message).Contains("'ignored'");
+        await Assert.That(error.Message).Contains("in [assets]");
+    }
+
+    [Test]
+    public async Task an_empty_or_rooted_ignore_pattern_is_refused()
+    {
+        var error = await Assert.That(() => ProjectManifest.Parse("""
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["/models/*.tmp"]
+            """, "project.toml")).Throws<ProjectManifestException>();
+
+        await Assert.That(error!.Message).Contains("relative to assets/");
+    }
 }

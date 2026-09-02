@@ -75,10 +75,18 @@ public static class ProjectScaffold
             },
         };
 
+        // A starter list, the project's to edit: what an editor or the OS leaves beside the
+        // assets is not the engine's to know.
+        var assets = new CanonicalTomlTable
+        {
+            { "ignore", new object[] { ".DS_Store", "Thumbs.db", "desktop.ini", "*~", "*.tmp", ".#*", "*.blend1", "*.blend2" } },
+        };
+
         return CanonicalTomlWriter.WriteString(new CanonicalTomlTable
         {
             { "name", name },
             { "schema_version", (long)1 },
+            { "assets", assets },
             { "build", profiles },
         });
     }

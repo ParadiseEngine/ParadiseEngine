@@ -14,6 +14,11 @@ public class SidecarMaintainerTests
     private static SidecarMaintainer Maintainer(MemoryFileSystem fileSystem, bool dryRun = false)
         => new(fileSystem, s_layout, dryRun: dryRun);
 
+    private static readonly AssetIgnoreRules s_ignore = AssetIgnoreRules.Parse([".DS_Store", "Thumbs.db", "*.tmp", "*~", ".#*", "*.blend1"]);
+
+    private static SidecarMaintainer IgnoringMaintainer(MemoryFileSystem fileSystem)
+        => new(fileSystem, s_layout, ignore: s_ignore);
+
     private static void WriteAsset(MemoryFileSystem fileSystem, UPath path, byte[] bytes)
     {
         fileSystem.CreateDirectory(path.GetDirectory());
@@ -133,7 +138,7 @@ public class SidecarMaintainerTests
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.saving.meta")).IsFalse();
     }
 
-    /// <summary>An editor's or the OS's scratch gets no sidecar: minted, it would be committed while the file it describes is gitignored, and every other checkout would see an orphan (issue #203).</summary>
+    /// <summary>A file the project ignores gets no sidecar: minted, it would be committed while the file it describes is gitignored, and every other checkout would see an orphan (issue #203).</summary>
     [Test]
     [Arguments("/game/assets/models/.DS_Store")]
     [Arguments("/game/assets/models/Thumbs.db")]
@@ -141,10 +146,10 @@ public class SidecarMaintainerTests
     [Arguments("/game/assets/models/crate.glb~")]
     [Arguments("/game/assets/models/.#crate.glb")]
     [Arguments("/game/assets/props/crate.blend1")]
-    public async Task junk_is_never_given_a_sidecar(string path)
+    public async Task an_ignored_file_is_never_given_a_sidecar(string path)
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        var maintainer = Maintainer(fileSystem);
+        var maintainer = IgnoringMaintainer(fileSystem);
         WriteAsset(fileSystem, path, [1]);
 
         await Assert.That(maintainer.Ensure(path)).IsEqualTo(SidecarAction.None);
@@ -152,12 +157,12 @@ public class SidecarMaintainerTests
         await Assert.That(fileSystem.FileExists(SidecarMeta.PathFor(path))).IsFalse();
     }
 
-    /// <summary>A checkout that minted <c>.DS_Store.meta</c> before junk was ignored heals on the next watch, instead of blocking verify until a human deletes it.</summary>
+    /// <summary>A checkout that minted <c>.DS_Store.meta</c> before the file was ignored heals on the next watch, instead of blocking verify until a human deletes it.</summary>
     [Test]
-    public async Task a_sidecar_already_minted_for_junk_is_removed()
+    public async Task a_sidecar_already_minted_for_an_ignored_file_is_removed()
     {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        var maintainer = Maintainer(fileSystem);
+        using var fileSystem = ProjectVerifierTests.CreateProject(ignore: [".DS_Store"]);
+        var maintainer = IgnoringMaintainer(fileSystem);
         WriteAsset(fileSystem, "/game/assets/models/.DS_Store", [1]);
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/.DS_Store.meta");
 
@@ -165,6 +170,16 @@ public class SidecarMaintainerTests
 
         await Assert.That(fileSystem.FileExists("/game/assets/models/.DS_Store.meta")).IsFalse();
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task without_an_ignore_list_every_file_gets_a_sidecar()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var maintainer = Maintainer(fileSystem);
+        WriteAsset(fileSystem, "/game/assets/models/.DS_Store", [1]);
+
+        await Assert.That(maintainer.Ensure("/game/assets/models/.DS_Store")).IsEqualTo(SidecarAction.Minted);
     }
 
     /// <summary>Reconcile runs before every watch rebuild; a second pass over an unchanged tree must not read the assets again (issue #203).</summary>

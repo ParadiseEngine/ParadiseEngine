@@ -46,13 +46,13 @@ public static class ProjectVerifier
             return findings;
         }
 
-        VerifyManifest(fileSystem, layout, findings);
+        var ignore = VerifyManifest(fileSystem, layout, findings)?.Ignore ?? AssetIgnoreRules.None;
 
         var guids = new Dictionary<Guid, UPath>();
         foreach (var path in sources.Files)
         {
-            var assetClass = AssetClassifier.Classify(layout.Assets, path);
-            if (assetClass == AssetClass.Junk) continue;
+            var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
+            if (assetClass == AssetClass.Ignored) continue;
 
             if (AssetClassifier.NeedsSidecar(assetClass)
                 && !fileSystem.FileExists(SidecarMeta.PathFor(path)))
@@ -65,7 +65,7 @@ public static class ProjectVerifier
             switch (assetClass)
             {
                 case AssetClass.Sidecar:
-                    VerifySidecar(fileSystem, layout.Assets, path, guids, findings);
+                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings);
                     break;
 
                 case AssetClass.Prefab:
@@ -83,28 +83,29 @@ public static class ProjectVerifier
             .ToList();
     }
 
-    private static void VerifyManifest(IFileSystem fileSystem, AssetProjectLayout layout, List<VerifyFinding> findings)
+    private static ProjectManifest? VerifyManifest(IFileSystem fileSystem, AssetProjectLayout layout, List<VerifyFinding> findings)
     {
         try
         {
-            ProjectManifest.Load(fileSystem, layout.Manifest);
+            return ProjectManifest.Load(fileSystem, layout.Manifest);
         }
         catch (ProjectManifestException error)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, layout.Manifest, error.Message));
+            return null;
         }
     }
 
-    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
+    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, AssetIgnoreRules ignore, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
     {
         var asset = SidecarMeta.AssetPathFor(path);
-        if (AssetClassifier.IsJunk(asset))
+        if (ignore.Matches(assetsRoot, asset))
         {
-            // Minted before junk was ignored, and committed while the file it describes is
-            // gitignored: every other checkout sees an orphan (#203).
+            // Minted before the file was ignored, and committed while the file it describes is
+            // gitignored: every other checkout sees an orphan (#203). `watch` removes it.
             findings.Add(new VerifyFinding(
                 VerifySeverity.Error, path,
-                $"describes '{asset.GetName()}', which the pipeline ignores as editor or OS scratch; delete the sidecar"));
+                $"describes '{asset.GetName()}', which [assets] ignore in project.toml excludes; delete the sidecar or run `paradise assets watch`"));
             return;
         }
 
