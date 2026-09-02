@@ -29,6 +29,16 @@ public static class ProjectVerifier
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
+        return Verify(fileSystem, layout, AssetPaths.Scan(fileSystem, layout.Assets));
+    }
+
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(sources);
+
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
         {
@@ -39,7 +49,6 @@ public static class ProjectVerifier
         VerifyManifest(fileSystem, layout, findings);
 
         var guids = new Dictionary<Guid, UPath>();
-        var sources = AssetPaths.Scan(fileSystem, layout.Assets);
         foreach (var path in sources.Files)
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path);

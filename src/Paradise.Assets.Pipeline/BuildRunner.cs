@@ -85,7 +85,8 @@ public sealed class BuildRunner
                 0, output);
         }
 
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout);
+        var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -104,7 +105,6 @@ public sealed class BuildRunner
         if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
         var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment());
-        var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var path in sources.Files)

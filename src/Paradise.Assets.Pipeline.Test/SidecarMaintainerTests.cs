@@ -152,6 +152,21 @@ public class SidecarMaintainerTests
         await Assert.That(fileSystem.FileExists(SidecarMeta.PathFor(path))).IsFalse();
     }
 
+    /// <summary>A checkout that minted <c>.DS_Store.meta</c> before junk was ignored heals on the next watch, instead of blocking verify until a human deletes it.</summary>
+    [Test]
+    public async Task a_sidecar_already_minted_for_junk_is_removed()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var maintainer = Maintainer(fileSystem);
+        WriteAsset(fileSystem, "/game/assets/models/.DS_Store", [1]);
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/.DS_Store.meta");
+
+        await Assert.That(maintainer.Reconcile()).IsEqualTo(1);
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/.DS_Store.meta")).IsFalse();
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
     /// <summary>Reconcile runs before every watch rebuild; a second pass over an unchanged tree must not read the assets again (issue #203).</summary>
     [Test]
     public async Task an_unchanged_asset_is_not_hashed_twice()

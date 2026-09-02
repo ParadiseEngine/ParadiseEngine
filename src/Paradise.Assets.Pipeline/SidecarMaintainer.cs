@@ -21,6 +21,9 @@ public enum SidecarAction
 
     Relinked,
 
+    /// <summary>A sidecar found beside junk was deleted: minted before junk was ignored, it would be committed while the file it describes is gitignored.</summary>
+    Removed,
+
     /// <summary>A rename landed on a path that already had a sidecar; that identity was kept and the arriving one dropped.</summary>
     Conflicted,
 }
@@ -83,6 +86,8 @@ public sealed class SidecarMaintainer
     /// <summary>Gives an asset a sidecar, or brings the one it has up to date; add and change are one method because a temp-then-rename save arrives as either.</summary>
     public SidecarAction Ensure(UPath asset)
     {
+        if (AssetClassifier.IsJunk(asset)) return RemoveJunkSidecar(asset);
+
         if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset))
             || !_fileSystem.FileExists(asset))
         {
@@ -213,6 +218,17 @@ public sealed class SidecarMaintainer
             _quarantine.Remove(hash);
             _log($"orphaned: {Display(held.Sidecar)} — no asset reappeared with its content");
         }
+    }
+
+    /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
+    private SidecarAction RemoveJunkSidecar(UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!_fileSystem.FileExists(sidecar)) return SidecarAction.None;
+
+        Remove(sidecar);
+        _log($"removed: {Display(sidecar)} (a sidecar for junk the pipeline ignores)");
+        return SidecarAction.Removed;
     }
 
     private string HashOf(UPath asset)

@@ -50,9 +50,22 @@ internal sealed class ObservedSources : ComposeFileSystem
     protected override bool FileExistsImpl(UPath path)
     {
         var exists = _sources.IsUnderRoot(path) ? _sources.Contains(path) : base.FileExistsImpl(path);
-        var key = BuildInput.KeyFor(_sources.Root, path);
-        if (!_records.ContainsKey(key)) _records[key] = BuildInput.Presence(key, exists);
+        NotePresence(path, exists);
         return exists;
+    }
+
+    /// <inheritdoc />
+    protected override long GetFileLengthImpl(UPath path)
+    {
+        NotePresence(path, exists: true);
+        return base.GetFileLengthImpl(path);
+    }
+
+    /// <inheritdoc />
+    protected override DateTime GetLastWriteTimeImpl(UPath path)
+    {
+        NotePresence(path, exists: true);
+        return base.GetLastWriteTimeImpl(path);
     }
 
     /// <inheritdoc />
@@ -63,23 +76,38 @@ internal sealed class ObservedSources : ComposeFileSystem
             throw new UnauthorizedAccessException($"'{path}': assets/ is read-only during a build; an importer that writes sources has made the tree unreproducible.");
         }
 
+        // A miss is an input too: an importer that treats a companion file as optional must be
+        // rebuilt when it appears.
         if (_sources.IsUnderRoot(path) && !_sources.Contains(path))
         {
+            NotePresence(path, exists: false);
             throw new FileNotFoundException($"'{path}' does not exist under assets/ (references are case-exact).", path.FullName);
         }
 
         var stamp = FileStamp.Of(Fallback!, path);
         byte[] bytes;
-        using (var stream = base.OpenFileImpl(path, mode, access, share))
+        try
         {
+            using var stream = base.OpenFileImpl(path, mode, access, share);
             using var buffer = new MemoryStream();
             stream.CopyTo(buffer);
             bytes = buffer.ToArray();
+        }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            NotePresence(path, exists: false);
+            throw;
         }
 
         var key = BuildInput.KeyFor(_sources.Root, path);
         _records[key] = BuildInput.Content(key, stamp, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         return new MemoryStream(bytes, writable: false);
+    }
+
+    private void NotePresence(UPath path, bool exists)
+    {
+        var key = BuildInput.KeyFor(_sources.Root, path);
+        if (!_records.ContainsKey(key)) _records[key] = BuildInput.Presence(key, exists);
     }
 
     /// <inheritdoc />

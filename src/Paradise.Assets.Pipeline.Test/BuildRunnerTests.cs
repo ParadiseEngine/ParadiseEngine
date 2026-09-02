@@ -958,6 +958,47 @@ public class BuildRunnerTests
         }
     }
 
+    /// <summary>An importer reads a companion file that may not exist and swallows the miss; the miss is still an input.</summary>
+    private sealed class OptionalCompanionImporter : IAssetImporter
+    {
+        public string Name => "companion";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".bnk")) return false;
+
+            byte[] companion;
+            try
+            {
+                companion = context.FileSystem.ReadAllBytes(context.Asset.FullName + ".txt");
+            }
+            catch (FileNotFoundException)
+            {
+                companion = [];
+            }
+
+            context.Output.WriteAllBytes("/" + context.Source, [.. context.FileSystem.ReadAllBytes(context.Asset), .. companion]);
+            return true;
+        }
+    }
+
+    [Test]
+    public async Task a_read_that_missed_is_recorded_so_the_file_appearing_rebuilds()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+        IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, new OptionalCompanionImporter()];
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk.txt");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3, 1, 2, 3 });
+    }
+
     [Test]
     public async Task junk_under_assets_is_neither_verified_nor_built()
     {
