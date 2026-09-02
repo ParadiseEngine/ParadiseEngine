@@ -55,7 +55,7 @@ namespace Paradise.Assets.Pipeline
 
                 long totalLength = Math.Min(reader.ReadUInt32(), reader.BaseStream.Length);
                 uint jsonChunkLength = reader.ReadUInt32();
-                if (reader.ReadUInt32() != JsonChunkType)
+                if (reader.ReadUInt32() != JsonChunkType || jsonChunkLength > totalLength - 20)
                 {
                     return false;
                 }
@@ -78,7 +78,8 @@ namespace Paradise.Assets.Pipeline
                         return true;
                     }
 
-                    reader.BaseStream.Position += chunkLength;
+                    // Chunks are 4-byte aligned; length excludes padding.
+                    reader.BaseStream.Position += AlignToFour((int)chunkLength);
                 }
 
                 return true;

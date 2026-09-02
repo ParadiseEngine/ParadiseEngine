@@ -38,10 +38,13 @@ public class GlbTextureRewriterTests
         var plain = GlbBinary.Write(gltf, bin);
         using var stream = new MemoryStream();
         stream.Write(plain, 0, 12 + 8 + (int)BitConverter.ToUInt32(plain, 12));
-        byte[] vendor = [9, 9, 9, 9];
+        // Five bytes plus three of padding: the declared length excludes padding, and a reader
+        // that forgets the alignment lands inside it and reads garbage as the next header.
+        byte[] vendor = [9, 9, 9, 9, 9];
         stream.Write(BitConverter.GetBytes((uint)vendor.Length));
         stream.Write(BitConverter.GetBytes(0x5A5A5A5Au));
         stream.Write(vendor);
+        stream.Write(new byte[3]);
         stream.Write(plain, 12 + 8 + (int)BitConverter.ToUInt32(plain, 12), plain.Length - (12 + 8 + (int)BitConverter.ToUInt32(plain, 12)));
         var withVendorChunk = stream.ToArray();
         BitConverter.GetBytes((uint)withVendorChunk.Length).CopyTo(withVendorChunk, 8);
@@ -50,6 +53,36 @@ public class GlbTextureRewriterTests
         await Assert.That(read["asset"]!["version"]!.GetValue<string>()).IsEqualTo("2.0");
         await Assert.That(readBin).IsEquivalentTo(bin);
         await Assert.That(() => Paradise.Assets.Gltf.GlbContainer.Parse(withVendorChunk).Bin.Length).IsEqualTo(4);
+    }
+
+    [Test]
+    public async Task a_json_chunk_longer_than_the_file_is_refused_without_allocating_it()
+    {
+        var plain = GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } }, []);
+        BitConverter.GetBytes(0x7FFFFFF0u).CopyTo(plain, 12);
+
+        await Assert.That(GlbBinary.TryRead(plain, out _, out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task the_extension_is_required_only_when_a_texture_depends_on_it()
+    {
+        // An image no texture references gets the extension listed as used, never required:
+        // requiring it would make conformant readers reject content the file does not hold.
+        var orphan = new JsonObject
+        {
+            ["images"] = new JsonArray(new JsonObject { ["uri"] = "a.ktx2", ["mimeType"] = "image/ktx2" }),
+            ["textures"] = new JsonArray(new JsonObject { ["source"] = 5 }),
+        };
+        GlbTextureRewriter.DeclareBasisu(orphan, new HashSet<int> { 0 });
+        await Assert.That(orphan["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
+        await Assert.That(orphan["extensionsRequired"]).IsNull();
+        await Assert.That(orphan["textures"]![0]!["source"]!.GetValue<int>()).IsEqualTo(5);
+
+        var noTextures = new JsonObject { ["images"] = new JsonArray(new JsonObject { ["uri"] = "a.ktx2" }) };
+        GlbTextureRewriter.DeclareBasisu(noTextures, new HashSet<int> { 0 });
+        await Assert.That(noTextures["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
+        await Assert.That(noTextures["extensionsRequired"]).IsNull();
     }
 
     [Test]

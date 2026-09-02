@@ -86,8 +86,10 @@ public static class GlbTextureRewriter
     /// Points every embedded image at its sidecar and drops its bytes from the BIN, so the chunk
     /// holds geometry only. Every externalised image is declared through
     /// <c>KHR_texture_basisu</c>: <c>image/ktx2</c> is only valid under that extension, and the
-    /// build and the editor hosts write one contract (issue #207). Idempotent: nothing
-    /// embedded, nothing changed.
+    /// build and the editor hosts write one contract (issue #207). A pass-through KTX2 is
+    /// declared the same way, which assumes its payload is ETC1S or UASTC as the extension
+    /// demands — the same assumption the runtime's transcoder already makes of it. Idempotent:
+    /// nothing embedded, nothing changed.
     /// </summary>
     public static bool TryExternalize(
         byte[] glb,
@@ -306,15 +308,23 @@ public static class GlbTextureRewriter
         }
     }
 
-    /// <summary>Moves each texture over <paramref name="ktx2Images"/> from <c>source</c> to <c>extensions.KHR_texture_basisu.source</c> and declares the extension used and required, which is what makes an <c>image/ktx2</c> image valid glTF. No-op for a texture already declared.</summary>
+    /// <summary>
+    /// Moves each texture over <paramref name="ktx2Images"/> from <c>source</c> to
+    /// <c>extensions.KHR_texture_basisu.source</c>, which is what makes an <c>image/ktx2</c>
+    /// image valid glTF. The extension is listed as USED whenever a KTX2 image exists, and as
+    /// REQUIRED only when a texture now depends on it: requiring it for a file with no basisu
+    /// texture would make conformant readers reject content the file does not hold. A texture
+    /// already declared is left alone.
+    /// </summary>
     internal static void DeclareBasisu(JsonObject gltf, IReadOnlySet<int> ktx2Images)
     {
         ArgumentNullException.ThrowIfNull(gltf);
         ArgumentNullException.ThrowIfNull(ktx2Images);
 
-        if (ktx2Images.Count == 0 || gltf["textures"] is not JsonArray textures) return;
+        if (ktx2Images.Count == 0) return;
 
-        foreach (var texture in textures.OfType<JsonObject>())
+        var moved = 0;
+        foreach (var texture in (gltf["textures"] as JsonArray)?.OfType<JsonObject>() ?? [])
         {
             if (texture["source"] is null) continue;
 
@@ -329,10 +339,11 @@ public static class GlbTextureRewriter
 
             extensions[BasisuExtensionName] = new JsonObject { ["source"] = source };
             texture.Remove("source");
+            moved++;
         }
 
         AddExtensionName(gltf, "extensionsUsed");
-        AddExtensionName(gltf, "extensionsRequired");
+        if (moved > 0) AddExtensionName(gltf, "extensionsRequired");
     }
 
     private static void AddExtensionName(JsonObject gltf, string propertyName)
