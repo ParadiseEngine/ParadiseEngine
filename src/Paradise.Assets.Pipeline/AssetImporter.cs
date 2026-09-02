@@ -5,10 +5,19 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>Everything an importer may draw on; <paramref name="Meta"/> is null only when the asset is itself a sidecar.</summary>
+/// <summary>Everything an importer may draw on.</summary>
+/// <remarks>
+/// <paramref name="FileSystem"/> is the source tree as the build index sees it: every file read
+/// or asked about through it is recorded, and the asset is rebuilt when any of them changes. It
+/// is read-only, case-exact under <c>assets/</c>, and refuses directory listings. Anything the
+/// output depends on that is NOT read through it — a tool's version, the profile's settings — is
+/// the runner's to fold into the index environment; the built-ins have nothing else.
+/// <paramref name="Meta"/> is the asset's sidecar, which verify guarantees exists before a build
+/// runs.
+/// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
-    UPath AssetsRoot,
+    AssetPaths Sources,
     UPath Asset,
     string Source,
     SidecarMeta? Meta,
@@ -19,6 +28,8 @@ public sealed record ImportContext(
     ITextureEncoder? Encoder,
     Action<string>? Log)
 {
+    public UPath AssetsRoot => Sources.Root;
+
     /// <summary>Case-insensitive, with dot.</summary>
     public bool HasExtension(params ReadOnlySpan<string> extensions)
     {
@@ -32,6 +43,19 @@ public sealed record ImportContext(
     }
 
     public bool IsManifest => Source == AssetProjectLayout.ManifestFileName;
+
+    /// <summary>Resolves a reference the asset makes, checks it against the real tree, and records the dependency; returns the error to report, or null when it resolves.</summary>
+    public string? CheckReference(string reference, out UPath resolved)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+
+        resolved = (Asset.GetDirectory() / Uri.UnescapeDataString(reference)).ToAbsolute();
+        var problem = Sources.Problem(resolved, reference);
+        // Through the observed filesystem, so the index rebuilds this asset when the file it
+        // references appears or disappears.
+        FileSystem.FileExists(resolved);
+        return problem is null ? null : $"{Source}: {problem}";
+    }
 }
 
 /// <summary>One link in the import chain: handle the asset or decline and let the next link try.</summary>
@@ -40,14 +64,12 @@ public sealed record ImportContext(
 /// append one that shadows a built-in (library-only today — issue #208). Decline first, validate
 /// next, write last: the chain shares one output mount, so an early write lands in the manifest
 /// under whoever ends up handling the asset, or survives in a tree the failed build already
-/// declared suspect.
+/// declared suspect. Read every input through <see cref="ImportContext.FileSystem"/> and nothing
+/// else; the build index reuses the output whenever everything read there is unchanged.
 /// </remarks>
 public interface IAssetImporter
 {
     string Name { get; }
-
-    /// <summary>Whether output is a pure function of source and sidecar bytes; anything keyed on tool versions, profile or referenced files must answer false and cache on its complete input.</summary>
-    bool DeterministicCopy { get; }
 
     /// <summary>False for outputs addressed by path alone (a config).</summary>
     bool RecordsIdentity { get; }

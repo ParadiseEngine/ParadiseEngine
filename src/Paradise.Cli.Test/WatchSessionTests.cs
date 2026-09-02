@@ -128,6 +128,42 @@ public class WatchSessionTests
         });
     }
 
+    /// <summary>A rebuild that throws — a file Blender is still writing, a sidecar rewritten mid-build — is a failed build, not a dead watch (issue #203).</summary>
+    [Test]
+    public async Task a_rebuild_that_throws_is_a_failed_build_and_the_watch_goes_on()
+    {
+        var n = 0;
+        using var signals = new WatchSignals();
+        var tray = new RecordingTray();
+        var log = new List<string>();
+        var session = Session(
+            signals,
+            tray,
+            log,
+            drain: static () => 1,
+            rebuild: () =>
+            {
+                n++;
+                if (n == 1) throw new IOException("models/crate.glb is in use");
+                signals.RequestStop();
+                return Ok(3);
+            });
+
+        session.Run();
+
+        await Assert.That(session.Status).IsEqualTo(WatchStatus.Idle);
+        await Assert.That(log).Contains("error: rebuild threw IOException: models/crate.glb is in use");
+        await Assert.That(log).Contains("watch: build FAILED with 1 error(s)");
+        await Assert.That(tray.States.Select(s => s.Status).ToArray()).IsEquivalentTo(new[]
+        {
+            WatchStatus.Alive,
+            WatchStatus.Building,
+            WatchStatus.Failed,
+            WatchStatus.Building,
+            WatchStatus.Idle,
+        });
+    }
+
     [Test]
     public async Task no_build_never_rebuilds_even_when_the_tree_changed()
     {

@@ -276,6 +276,110 @@ public class ArtifactCacheTests
         await Assert.That(warnings[0]).Contains("regenerating");
     }
 
+    /// <summary><c>PARADISE_EXPORT_CACHE=.cache</c> used to throw out of <see cref="ArtifactCache.ForProject(IFileSystem, AssetProjectLayout, string?, Action{string}?)"/>; the addon resolves it against the working directory (issue #204).</summary>
+    [Test]
+    public async Task a_relative_environment_path_is_resolved_against_the_working_directory()
+    {
+        using var fileSystem = new PhysicalFileSystem();
+
+        var cache = ArtifactCache.ForProject(fileSystem, s_layout, ".cache", warn: null);
+
+        await Assert.That(cache.IsEnabled).IsTrue();
+        await Assert.That(cache.Root).IsEqualTo(fileSystem.ConvertPathFromInternal(Path.Combine(Directory.GetCurrentDirectory(), ".cache")));
+    }
+
+    [Test]
+    [Arguments("ktx2/../secrets")]
+    [Arguments("..")]
+    [Arguments("a b")]
+    [Arguments("")]
+    public async Task a_kind_that_is_not_a_plain_name_is_refused(string kind)
+    {
+        using var fileSystem = new MemoryFileSystem();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache);
+
+        await Assert.That(() => cache.TryFetch(kind, ArtifactDigest.Compute("x"), fileSystem, "/work/x.ktx2")).Throws<ArgumentException>();
+        await Assert.That(() => cache.Store(kind, ArtifactDigest.Compute("x"), fileSystem, "/work/x.ktx2")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task a_fetch_that_fails_mid_copy_leaves_no_destination()
+    {
+        using var fileSystem = new MemoryFileSystem();
+        var warnings = new List<string>();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, warnings.Add);
+        var key = ArtifactDigest.Compute("payload");
+        fileSystem.CreateDirectory("/work");
+        fileSystem.WriteAllBytes("/work/a.ktx2", [1, 2, 3, 4, 5, 6, 7, 8]);
+        cache.Store("ktx2", key, fileSystem, "/work/a.ktx2");
+
+        using var destination = new TruncatingFileSystem();
+        destination.CreateDirectory("/out");
+
+        await Assert.That(cache.TryFetch("ktx2", key, destination, "/out/a.ktx2")).IsFalse();
+        await Assert.That(destination.FileExists("/out/a.ktx2")).IsFalse();
+        await Assert.That(warnings[0]).Contains("regenerating");
+    }
+
+    /// <summary>A fetch goes through the destination's own <c>OpenFile</c>: a composed filesystem over the output (the pipeline's recording mount) must see the write, which <c>CopyFileCross</c> hides by resolving past it.</summary>
+    [Test]
+    public async Task a_fetch_is_visible_to_a_composed_destination()
+    {
+        using var fileSystem = new MemoryFileSystem();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache);
+        var key = ArtifactDigest.Compute("payload");
+        fileSystem.CreateDirectory("/work");
+        fileSystem.WriteAllBytes("/work/a.ktx2", [1]);
+        cache.Store("ktx2", key, fileSystem, "/work/a.ktx2");
+        fileSystem.CreateDirectory("/build");
+        using var mount = new CountingSubFileSystem(fileSystem, "/build");
+
+        await Assert.That(cache.TryFetch("ktx2", key, mount, "/textures/a.ktx2")).IsTrue();
+
+        await Assert.That(mount.Writes).IsEqualTo(1);
+        await Assert.That(fileSystem.FileExists("/build/textures/a.ktx2")).IsTrue();
+    }
+
+    private sealed class CountingSubFileSystem(IFileSystem fileSystem, UPath root) : SubFileSystem(fileSystem, root, owned: false)
+    {
+        public int Writes;
+
+        protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+        {
+            if ((access & FileAccess.Write) != 0) Writes++;
+            return base.OpenFileImpl(path, mode, access, share);
+        }
+    }
+
+    private sealed class TruncatingFileSystem : MemoryFileSystem
+    {
+        protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+        {
+            var stream = base.OpenFileImpl(path, mode, access, share);
+            return (access & FileAccess.Write) != 0 ? new FailingStream(stream) : stream;
+        }
+
+        private sealed class FailingStream(Stream inner) : Stream
+        {
+            public override bool CanRead => inner.CanRead;
+            public override bool CanSeek => inner.CanSeek;
+            public override bool CanWrite => inner.CanWrite;
+            public override long Length => inner.Length;
+            public override long Position { get => inner.Position; set => inner.Position = value; }
+            public override void Flush() => inner.Flush();
+            public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+            public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+            public override void SetLength(long value) => inner.SetLength(value);
+            public override void Write(byte[] buffer, int offset, int count) => throw new IOException("disk full");
+            public override void Write(ReadOnlySpan<byte> buffer) => throw new IOException("disk full");
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing) inner.Dispose();
+                base.Dispose(disposing);
+            }
+        }
+    }
+
     private sealed class WriteFailingFileSystem : MemoryFileSystem
     {
         protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)

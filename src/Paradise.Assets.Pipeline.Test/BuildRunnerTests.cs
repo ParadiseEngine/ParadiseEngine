@@ -15,7 +15,7 @@ public class BuildRunnerTests
         public bool Fail;
         public bool? LastFast;
 
-        public string Identity => "fake-ktx 1.0";
+        public string Identity { get; set; } = "fake-ktx 1.0";
 
         public bool TryEncode(byte[] source, string sourceExtension, TexturePreset preset, bool fastEncode, out byte[] ktx2, out string error)
         {
@@ -427,8 +427,6 @@ public class BuildRunnerTests
 
         public string Name => name;
 
-        public bool DeterministicCopy => true;
-
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
@@ -616,6 +614,404 @@ public class BuildRunnerTests
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Build);
 
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+    }
+
+    // ---- the index tracks every input, not a flag (#201) ---------------------------------
+
+    /// <summary>Incremental and clean builds must agree: a mesh whose texture vanished is an error either way, not a reused stale copy.</summary>
+    [Test]
+    public async Task a_mesh_is_rebuilt_when_the_texture_it_references_disappears()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        fileSystem.DeleteFile("/game/assets/textures/rust.png");
+        fileSystem.DeleteFile("/game/assets/textures/rust.png.meta");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("models/crate.glb");
+        await Assert.That(result.Errors[0]).Contains("../textures/rust.png");
+    }
+
+    [Test]
+    public async Task a_texture_appearing_rebuilds_the_mesh_that_was_waiting_for_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsFalse();
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+    }
+
+    /// <summary>A prefab bakes the prefabs it instances: an edit to the instanced one changes this one's output, though not one of its own bytes did.</summary>
+    [Test]
+    public async Task a_scene_is_rebuilt_when_a_prefab_it_instances_changes()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/prefabs/crate.prefab");
+        var crateGuid = SidecarMeta.Load(fileSystem, "/game/assets/prefabs/crate.prefab.meta").Guid;
+        var scene = new PrefabDocument();
+        var instance = PrefabObject.WithMeta(Guid.NewGuid(), "crate_01");
+        instance.Prefab = new Paradise.Authoring.AssetReference(crateGuid, "prefabs/crate.prefab");
+        scene.Objects.Add(instance);
+        PrefabDocumentSerializer.Save(fileSystem, "/game/assets/levels/scene.prefab", scene);
+        ProjectVerifierTests.MintDocumentSidecar(fileSystem, "/game/assets/levels/scene.prefab");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
+        var first = fileSystem.ReadAllText("/game/build/levels/scene.toml");
+
+        // Untouched: the scene is served from the index, and the marker proves it.
+        fileSystem.WriteAllText("/game/build/levels/scene.toml", new string('#', first.Length));
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).IsEqualTo(new string('#', first.Length));
+
+        var crate = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/prefabs/crate.prefab");
+        crate.Objects.Add(PrefabObject.WithMeta(Guid.NewGuid(), "lid", parent: crate.Objects[0].Guid));
+        PrefabDocumentSerializer.Save(fileSystem, "/game/assets/prefabs/crate.prefab", crate);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
+
+        var second = fileSystem.ReadAllText("/game/build/levels/scene.toml");
+        await Assert.That(second).IsNotEqualTo(first);
+        await Assert.That(second).Contains("lid");
+    }
+
+    /// <summary>Textures used to opt out of the index and re-fetch from the cache every run; now an unchanged texture costs nothing, not even a cache lookup.</summary>
+    [Test]
+    public async Task an_unchanged_texture_is_served_by_the_index_without_the_cache()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        var encoder = new FakeEncoder();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+
+        fileSystem.DeleteDirectory("/game/.editor/cache", isRecursive: true);
+        var built = fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2");
+        var marker = new byte[built.Length];
+        fileSystem.WriteAllBytes("/game/build/textures/fire.ktx2", marker);
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+
+        await Assert.That(encoder.Encodes).IsEqualTo(1);
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2")).IsEquivalentTo(marker);
+    }
+
+    [Test]
+    public async Task a_different_encoder_rebuilds_every_texture()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        var encoder = new FakeEncoder();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+
+        encoder.Identity = "fake-ktx 2.0";
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+
+        await Assert.That(encoder.Encodes).IsEqualTo(2);
+    }
+
+    /// <summary>The profile reaches importers as settings, not as a file they read, so the manifest is folded into the index environment.</summary>
+    [Test]
+    public async Task a_changed_profile_setting_rebuilds_what_depends_on_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.WriteAllText("/game/assets/project.toml", "name = \"x\"\nschema_version = 1\n\n[build.profiles.dev]\ntexture_quality = \"full\"\n");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        var encoder = new FakeEncoder();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run("dev").Succeeded).IsTrue();
+        await Assert.That(encoder.LastFast).IsFalse();
+
+        fileSystem.WriteAllText("/game/assets/project.toml", "name = \"x\"\nschema_version = 1\n\n[build.profiles.dev]\ntexture_quality = \"fast\"\n");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run("dev").Succeeded).IsTrue();
+
+        await Assert.That(encoder.Encodes).IsEqualTo(2);
+        await Assert.That(encoder.LastFast).IsTrue();
+    }
+
+    [Test]
+    public async Task a_texture_served_from_the_cache_is_in_the_manifest()
+    {
+        // CopyFileCross unwraps a composed destination, so a cache hit used to land in the tree
+        // without passing the recording mount — and the manifest lost the texture.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        var encoder = new FakeEncoder();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+        fileSystem.DeleteDirectory("/game/build", isRecursive: true);
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+
+        await Assert.That(encoder.Encodes).IsEqualTo(1);
+        await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).Contains("\"path\": \"textures/fire.ktx2\"");
+    }
+
+    // ---- the tree holds exactly what the build produced (#201, #202) ---------------------
+
+    [Test]
+    public async Task the_output_of_a_deleted_source_is_swept()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        fileSystem.DeleteFile("/game/assets/models/crate.glb");
+        fileSystem.DeleteFile("/game/assets/models/crate.glb.meta");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
+        await Assert.That(fileSystem.DirectoryExists("/game/build/models")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/build/audio/init.bnk")).IsTrue();
+        await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).DoesNotContain("crate.glb");
+    }
+
+    /// <summary>ShiningPie's play tree held both <c>box.prefab</c> and <c>box.toml</c> after the play-target extension policy changed; the runtime dispatches on extension.</summary>
+    [Test]
+    public async Task an_output_under_a_retired_naming_policy_is_swept()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/levels/box.prefab");
+        fileSystem.CreateDirectory("/game/.editor/play/levels");
+        fileSystem.CreateDirectory("/game/.editor/play/models");
+        fileSystem.WriteAllText("/game/.editor/play/levels/box.toml", "stale");
+        fileSystem.WriteAllBytes("/game/.editor/play/models/x.glb.0123.partial", [1]);
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play).Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/box.prefab")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/box.toml")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/.editor/play/models/x.glb.0123.partial")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_failed_build_does_not_sweep()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+        fileSystem.WriteAllText("/game/build/stray.txt", "left by an older policy");
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run().Succeeded).IsFalse();
+
+        // Nothing is decided about a tree the build did not finish.
+        await Assert.That(fileSystem.FileExists("/game/build/stray.txt")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_truncated_output_is_rebuilt()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        fileSystem.WriteAllBytes("/game/build/models/crate.glb", [1]);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/models/crate.glb")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+    }
+
+    [Test]
+    public async Task a_failed_build_leaves_no_manifest_from_the_previous_one()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsTrue();
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder { Fail = true }).Run().Succeeded).IsFalse();
+
+        // The tree now holds outputs the old manifest never described; no manifest is the
+        // honest state, and the next successful build writes a true one.
+        await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+    }
+
+    [Test]
+    public async Task two_sources_landing_on_one_output_fail_naming_both()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.jpg");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Count).IsEqualTo(1);
+        await Assert.That(result.Errors[0]).Contains("textures/fire.jpg");
+        await Assert.That(result.Errors[0]).Contains("textures/fire.png");
+        await Assert.That(result.Errors[0]).Contains("textures/fire.ktx2");
+    }
+
+    [Test]
+    public async Task a_collision_with_a_reused_output_is_still_a_collision()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.jpg");
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("textures/fire.ktx2");
+    }
+
+    // ---- references are case-exact and stay inside assets/ (#202) ----------------------
+
+    [Test]
+    public async Task a_reference_with_the_wrong_case_is_refused_naming_the_real_file()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/Rust.png");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("'textures/Rust.png' does");
+        await Assert.That(result.Errors[0]).Contains("case-exact");
+    }
+
+    [Test]
+    public async Task a_reference_escaping_assets_is_refused()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.CreateDirectory("/game/textures");
+        fileSystem.WriteAllBytes("/game/textures/rust.png", [1]);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../../textures/rust.png","mimeType":"image/png"}]}"""));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("outside assets/");
+    }
+
+    // ---- the build survives its importers (#203) -----------------------------------------
+
+    private sealed class ThrowingImporter : IAssetImporter
+    {
+        public string Name => "throwing";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".glb")) return false;
+            throw new IOException("the file is still being written");
+        }
+    }
+
+    [Test]
+    public async Task an_importer_that_throws_costs_one_asset_not_the_build()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+
+        var result = new BuildRunner(
+            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, new ThrowingImporter()]).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Count).IsEqualTo(1);
+        await Assert.That(result.Errors[0]).Contains("models/crate.glb");
+        await Assert.That(result.Errors[0]).Contains("IOException");
+        await Assert.That(result.Errors[0]).Contains("still being written");
+        await Assert.That(fileSystem.FileExists("/game/build/audio/init.bnk")).IsTrue();
+    }
+
+    [Test]
+    public async Task an_importer_cannot_write_into_assets()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var writer = new SourceWritingImporter();
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, writer]).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("read-only");
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.side")).IsFalse();
+    }
+
+    private sealed class SourceWritingImporter : IAssetImporter
+    {
+        public string Name => "writer";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".glb")) return false;
+            context.FileSystem.WriteAllBytes(context.Asset.FullName + ".side", [1]);
+            return true;
+        }
+    }
+
+    /// <summary>An importer reads a companion file that may not exist and swallows the miss; the miss is still an input.</summary>
+    private sealed class OptionalCompanionImporter : IAssetImporter
+    {
+        public string Name => "companion";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".bnk")) return false;
+
+            byte[] companion;
+            try
+            {
+                companion = context.FileSystem.ReadAllBytes(context.Asset.FullName + ".txt");
+            }
+            catch (FileNotFoundException)
+            {
+                companion = [];
+            }
+
+            context.Output.WriteAllBytes("/" + context.Source, [.. context.FileSystem.ReadAllBytes(context.Asset), .. companion]);
+            return true;
+        }
+    }
+
+    [Test]
+    public async Task a_read_that_missed_is_recorded_so_the_file_appearing_rebuilds()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+        IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, new OptionalCompanionImporter()];
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk.txt");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3, 1, 2, 3 });
+    }
+
+    [Test]
+    public async Task an_ignored_file_under_assets_is_neither_verified_nor_built()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject(ignore: [".DS_Store", "*.tmp"]);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+        fileSystem.WriteAllBytes("/game/assets/audio/.DS_Store", [0]);
+        fileSystem.WriteAllBytes("/game/assets/audio/init.bnk.tmp", [0]);
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(result.AssetCount).IsEqualTo(1);
+        await Assert.That(fileSystem.FileExists("/game/build/audio/.DS_Store")).IsFalse();
     }
 
     private static byte[] MakeGlb(string json)

@@ -29,6 +29,16 @@ public static class ProjectVerifier
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
+        return Verify(fileSystem, layout, AssetPaths.Scan(fileSystem, layout.Assets));
+    }
+
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(sources);
+
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
         {
@@ -36,12 +46,13 @@ public static class ProjectVerifier
             return findings;
         }
 
-        VerifyManifest(fileSystem, layout, findings);
+        var ignore = VerifyManifest(fileSystem, layout, findings)?.Ignore ?? AssetIgnoreRules.None;
 
         var guids = new Dictionary<Guid, UPath>();
-        foreach (var path in fileSystem.EnumerateFiles(layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
+        foreach (var path in sources.Files)
         {
-            var assetClass = AssetClassifier.Classify(layout.Assets, path);
+            var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
+            if (assetClass == AssetClass.Ignored) continue;
 
             if (AssetClassifier.NeedsSidecar(assetClass)
                 && !fileSystem.FileExists(SidecarMeta.PathFor(path)))
@@ -54,11 +65,11 @@ public static class ProjectVerifier
             switch (assetClass)
             {
                 case AssetClass.Sidecar:
-                    VerifySidecar(fileSystem, layout.Assets, path, guids, findings);
+                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings);
                     break;
 
                 case AssetClass.Prefab:
-                    VerifyDocument(fileSystem, layout, path, findings);
+                    VerifyDocument(fileSystem, layout, sources, path, findings);
                     break;
 
                 // No "nothing handles this file" warning: only an importer, during a build, can
@@ -72,21 +83,32 @@ public static class ProjectVerifier
             .ToList();
     }
 
-    private static void VerifyManifest(IFileSystem fileSystem, AssetProjectLayout layout, List<VerifyFinding> findings)
+    private static ProjectManifest? VerifyManifest(IFileSystem fileSystem, AssetProjectLayout layout, List<VerifyFinding> findings)
     {
         try
         {
-            ProjectManifest.Load(fileSystem, layout.Manifest);
+            return ProjectManifest.Load(fileSystem, layout.Manifest);
         }
         catch (ProjectManifestException error)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, layout.Manifest, error.Message));
+            return null;
         }
     }
 
-    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
+    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, AssetIgnoreRules ignore, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
     {
         var asset = SidecarMeta.AssetPathFor(path);
+        if (ignore.Matches(assetsRoot, asset))
+        {
+            // Minted before the file was ignored, and committed while the file it describes is
+            // gitignored: every other checkout sees an orphan (#203). `watch` removes it.
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Error, path,
+                $"describes '{asset.GetName()}', which [assets] ignore in project.toml excludes; delete the sidecar or run `paradise assets watch`"));
+            return;
+        }
+
         if (!fileSystem.FileExists(asset))
         {
             findings.Add(new VerifyFinding(
@@ -135,7 +157,7 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifyDocument(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
+    private static void VerifyDocument(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, UPath path, List<VerifyFinding> findings)
     {
         PrefabDocument document;
         try
@@ -158,12 +180,12 @@ public static class ProjectVerifier
                 "is valid but not in canonical form; rewrite it (prefab-check --fix) so machine edits stay out of your diffs"));
         }
 
-        VerifyReferences(fileSystem, layout, path, document, findings);
+        VerifyReferences(fileSystem, layout, sources, path, document, findings);
         VerifyInstances(fileSystem, layout, path, document, findings);
     }
 
     private static void VerifyReferences(
-        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         foreach (var candidate in document.Objects)
         {
@@ -211,12 +233,10 @@ public static class ProjectVerifier
 
         void Check(Paradise.Authoring.AssetReference reference, string where)
         {
-            var target = layout.Assets / reference.Path;
-            if (!fileSystem.FileExists(target))
+            var target = (layout.Assets / reference.Path).ToAbsolute();
+            if (sources.Problem(target, reference.Path) is { } problem)
             {
-                findings.Add(new VerifyFinding(
-                    VerifySeverity.Error, path,
-                    $"references '{reference.Path}' in {where}, which does not exist under assets/"));
+                findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"in {where}, {problem}"));
                 return;
             }
 

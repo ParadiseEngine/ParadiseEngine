@@ -21,6 +21,9 @@ public enum SidecarAction
 
     Relinked,
 
+    /// <summary>A sidecar found beside an ignored file was deleted: minted before the file was ignored, it would be committed while the file it describes is gitignored.</summary>
+    Removed,
+
     /// <summary>A rename landed on a path that already had a sidecar; that identity was kept and the arriving one dropped.</summary>
     Conflicted,
 }
@@ -39,16 +42,21 @@ public sealed class SidecarMaintainer
     private readonly AssetProjectLayout _layout;
     private readonly Action<string> _log;
     private readonly bool _dryRun;
+    private readonly AssetIgnoreRules _ignore;
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
-    private readonly Dictionary<UPath, string> _seenHash = [];
+    // Hashed once per (mtime, size): every watch rebuild reconciles first, and hashing the
+    // whole tree each time was most of what a rebuild cost (#203).
+    private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
+    /// <param name="ignore">The project's <c>[assets] ignore</c>; taken once, so a change to it needs the watch restarted.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         Action<string>? log = null,
-        bool dryRun = false)
+        bool dryRun = false,
+        AssetIgnoreRules? ignore = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -57,7 +65,10 @@ public sealed class SidecarMaintainer
         _layout = layout;
         _log = log ?? (static _ => { });
         _dryRun = dryRun;
+        _ignore = ignore ?? AssetIgnoreRules.None;
     }
+
+    public AssetIgnoreRules Ignore => _ignore;
 
     public IReadOnlyCollection<string> Quarantined => _quarantine.Keys;
 
@@ -81,15 +92,16 @@ public sealed class SidecarMaintainer
     /// <summary>Gives an asset a sidecar, or brings the one it has up to date; add and change are one method because a temp-then-rename save arrives as either.</summary>
     public SidecarAction Ensure(UPath asset)
     {
-        if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset))
+        if (_ignore.Matches(_layout.Assets, asset)) return RemoveIgnoredSidecar(asset);
+
+        if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset, _ignore))
             || !_fileSystem.FileExists(asset))
         {
             return SidecarAction.None;
         }
 
         var sidecar = SidecarMeta.PathFor(asset);
-        var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
-        _seenHash[asset] = hash;
+        var hash = HashOf(asset);
 
         if (_fileSystem.FileExists(sidecar))
         {
@@ -119,7 +131,7 @@ public sealed class SidecarMaintainer
             foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
-            _seenHash.Remove(held.Asset);
+            _seen.Remove(held.Asset);
             _log($"relinked: {Display(held.Asset)} -> {Display(asset)} (guid kept)");
             return SidecarAction.Relinked;
         }
@@ -145,7 +157,7 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        if (_seenHash.Remove(from, out var remembered)) _seenHash[to] = remembered;
+        if (_seen.Remove(from, out var remembered)) _seen[to] = remembered;
 
         var destination = SidecarMeta.PathFor(to);
         if (_fileSystem.FileExists(destination))
@@ -195,7 +207,7 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        if (!_seenHash.Remove(asset, out var hash)) hash = meta.Hash;
+        var hash = _seen.Remove(asset, out var seen) ? seen.Hash : meta.Hash;
         if (hash is null) return SidecarAction.None;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
@@ -212,6 +224,28 @@ public sealed class SidecarMaintainer
             _quarantine.Remove(hash);
             _log($"orphaned: {Display(held.Sidecar)} — no asset reappeared with its content");
         }
+    }
+
+    /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
+    private SidecarAction RemoveIgnoredSidecar(UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!_fileSystem.FileExists(sidecar)) return SidecarAction.None;
+
+        Remove(sidecar);
+        _log($"removed: {Display(sidecar)} (its asset is in [assets] ignore)");
+        return SidecarAction.Removed;
+    }
+
+    private string HashOf(UPath asset)
+    {
+        var stamp = FileStamp.Of(_fileSystem, asset);
+        if (stamp is { } current && _seen.TryGetValue(asset, out var seen) && seen.Stamp == current) return seen.Hash;
+
+        var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
+        if (stamp is { } taken) _seen[asset] = new SeenAsset(taken, hash);
+        else _seen.Remove(asset);
+        return hash;
     }
 
     private void Save(SidecarMeta meta, UPath path)
@@ -235,3 +269,5 @@ public sealed class SidecarMaintainer
 }
 
 public readonly record struct QuarantinedIdentity(UPath Asset, UPath Sidecar, SidecarMeta Meta, DateTimeOffset At);
+
+internal readonly record struct SeenAsset((long Mtime, long Size) Stamp, string Hash);

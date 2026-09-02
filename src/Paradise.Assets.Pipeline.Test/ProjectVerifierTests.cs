@@ -228,6 +228,68 @@ public class ProjectVerifierTests
         MintDocumentSidecar(fileSystem, path);
     }
 
+    // ---- the ignore list and case (#202, #203) --------------------------------------------
+
+    [Test]
+    public async Task an_ignored_file_needs_no_sidecar()
+    {
+        using var fileSystem = CreateProject(ignore: [".DS_Store", "*.tmp", "*.blend1"]);
+        fileSystem.WriteAllBytes("/game/assets/models/.DS_Store", [0]);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb.tmp", [0]);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.blend1", [0]);
+
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task without_an_ignore_list_scratch_files_need_sidecars_like_anything_else()
+    {
+        // The engine has no opinion about .DS_Store; the project's manifest does.
+        using var fileSystem = CreateProject();
+        fileSystem.WriteAllBytes("/game/assets/models/.DS_Store", [0]);
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Message).Contains("no sidecar");
+    }
+
+    [Test]
+    public async Task a_sidecar_minted_for_an_ignored_file_is_an_error_wherever_it_is_seen()
+    {
+        // Minted on one machine while .DS_Store is gitignored: without this every OTHER checkout
+        // reports an orphan and the machine that made it reports nothing.
+        using var fileSystem = CreateProject(ignore: [".DS_Store"]);
+        fileSystem.WriteAllBytes("/game/assets/models/.DS_Store", [0]);
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/.DS_Store.meta");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Path).IsEqualTo(new UPath("/game/assets/models/.DS_Store.meta"));
+        await Assert.That(findings[0].Message).Contains("delete the sidecar");
+    }
+
+    [Test]
+    public async Task a_reference_with_the_wrong_case_is_an_error_naming_the_real_file()
+    {
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/Rust.toml", "a = 1\n");
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/materials/Rust.toml.meta").Guid;
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(guid, "materials/rust.toml")) },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("'materials/Rust.toml' does");
+        await Assert.That(findings[0].Message).Contains("case-exact");
+    }
+
     /// <summary>
     /// A file no build step will touch is not, by itself, a verify finding.
     /// </summary>
@@ -332,7 +394,7 @@ public class ProjectVerifierTests
     /// The <c>dev</c> profile's <c>document_format</c>, or null to leave profiles undeclared (which
     /// means the default, TOML).
     /// </param>
-    internal static MemoryFileSystem CreateProject(string? documentFormat = null)
+    internal static MemoryFileSystem CreateProject(string? documentFormat = null, string[]? ignore = null)
     {
         var fileSystem = new MemoryFileSystem();
         // The standard subtrees, because Zio does not create parents on write and empty
@@ -344,11 +406,14 @@ public class ProjectVerifierTests
         var profiles = documentFormat is null
             ? ""
             : $"\n[build.profiles.dev]\ndocument_format = \"{documentFormat}\"\n";
+        var assets = ignore is null
+            ? ""
+            : $"\n[assets]\nignore = [{string.Join(", ", ignore.Select(p => $"\"{p}\""))}]\n";
 
         // The manifest is an asset like everything else under assets/, so it carries an identity
         // too -- the only thing that does not is a sidecar, because one describing a sidecar is
         // an infinite regress.
-        WriteDocument(fileSystem, "/game/assets/project.toml", $"name = \"shiningpie\"\nschema_version = 1\n{profiles}");
+        WriteDocument(fileSystem, "/game/assets/project.toml", $"name = \"shiningpie\"\nschema_version = 1\n{assets}{profiles}");
         return fileSystem;
     }
 

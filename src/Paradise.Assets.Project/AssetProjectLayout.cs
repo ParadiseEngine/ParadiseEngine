@@ -37,7 +37,7 @@ public sealed class AssetProjectLayout
     /// <summary>Materialized working <c>.blend</c> files; disposable.</summary>
     public UPath EditorBlend => Editor / "blend";
 
-    /// <summary>The addon's digest scheme, so the two caches can be merged; the addon still writes <c>.paradise-cache</c> until issue #204.</summary>
+    /// <summary>The content-addressed artifact cache, shared with the Blender addon: same directory, same digest scheme, same entry layout.</summary>
     public UPath EditorCache => Editor / "cache";
 
     /// <summary>Layout-identical to <see cref="Build"/> so a playmode bug is a build bug.</summary>
