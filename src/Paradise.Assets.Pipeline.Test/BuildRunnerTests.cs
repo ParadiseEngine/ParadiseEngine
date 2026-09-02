@@ -181,8 +181,9 @@ public class BuildRunnerTests
         // Geometry only in the BIN: the image bytes are gone and the buffer says so.
         await Assert.That(bin.Length).IsLessThan(png.Length);
         await Assert.That(gltf["buffers"]![0]!["byteLength"]!.GetValue<int>()).IsEqualTo(bin.Length);
-        // Same contract as an authored texture reference (#207): no KHR_texture_basisu.
-        await Assert.That(gltf["extensionsRequired"]).IsNull();
+        // Same contract as a repointed texture reference (#207): declared through KHR_texture_basisu.
+        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(0);
+        await Assert.That(gltf["extensionsRequired"]!.AsArray().Count).IsEqualTo(1);
 
         fileSystem.DeleteDirectory("/game/build", isRecursive: true);
         await Assert.That(runner.Run().Succeeded).IsTrue();

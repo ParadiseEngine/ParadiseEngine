@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>Minimal GLB container read/write. Unknown chunk types fail rather than skip, unlike the runtime's <c>GlbContainer</c> (issue #207).</summary>
+    /// <summary>Minimal GLB container read/write. Chunks after the JSON one are walked as the runtime's <c>GlbContainer</c> walks them: the first BIN is taken, unknown types are skipped per spec.</summary>
     public static class GlbBinary
     {
         public const uint Magic = 0x46546C67;
@@ -53,28 +53,43 @@ namespace Paradise.Assets.Pipeline
                     return false;
                 }
 
-                reader.ReadUInt32(); // total length (ignored)
+                // Over-declared and the runtime's GlbContainer refuses it; agreeing here keeps a
+                // file the game cannot load out of the build.
+                long totalLength = reader.ReadUInt32();
+                if (totalLength > reader.BaseStream.Length)
+                {
+                    return false;
+                }
+
                 uint jsonChunkLength = reader.ReadUInt32();
-                if (reader.ReadUInt32() != JsonChunkType)
+                if (reader.ReadUInt32() != JsonChunkType || jsonChunkLength > totalLength - 20)
                 {
                     return false;
                 }
 
                 string json = Encoding.UTF8.GetString(reader.ReadBytes((int)jsonChunkLength)).TrimEnd(' ', '\0');
                 gltf = JsonNode.Parse(json)!.AsObject();
+                reader.BaseStream.Position = 20 + AlignToFour((int)jsonChunkLength);
 
-                if (reader.BaseStream.Position >= reader.BaseStream.Length)
+                while (reader.BaseStream.Position + 8 <= totalLength)
                 {
-                    return true;
+                    uint chunkLength = reader.ReadUInt32();
+                    uint chunkType = reader.ReadUInt32();
+                    if (chunkLength > totalLength - reader.BaseStream.Position)
+                    {
+                        return false;
+                    }
+
+                    if (chunkType == BinChunkType)
+                    {
+                        binChunk = reader.ReadBytes((int)chunkLength);
+                        return true;
+                    }
+
+                    // Chunks are 4-byte aligned; length excludes padding.
+                    reader.BaseStream.Position += AlignToFour((int)chunkLength);
                 }
 
-                uint binChunkLength = reader.ReadUInt32();
-                if (reader.ReadUInt32() != BinChunkType)
-                {
-                    return false;
-                }
-
-                binChunk = reader.ReadBytes((int)binChunkLength);
                 return true;
             }
             catch (Exception)

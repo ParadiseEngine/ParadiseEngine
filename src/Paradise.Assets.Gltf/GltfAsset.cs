@@ -151,7 +151,7 @@ public sealed record GltfMaterialData(
 }
 
 /// <summary>One embedded image. ALWAYS a KTX2 container — the contract mandates KTX2 for every
-/// texture (the toktx pass in the export pipeline), and the reader rejects anything else at
+/// texture (the asset build encodes them with `ktx create`), and the reader rejects anything else at
 /// load time. Transcode decisions (BC vs RGBA32) belong to the texture asset layer.</summary>
 public sealed record GltfImageData(
     byte[] Bytes);

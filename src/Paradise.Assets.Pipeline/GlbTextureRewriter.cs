@@ -84,22 +84,21 @@ public static class GlbTextureRewriter
 
     /// <summary>
     /// Points every embedded image at its sidecar and drops its bytes from the BIN, so the chunk
-    /// holds geometry only. <paramref name="declareBasisu"/> adds <c>KHR_texture_basisu</c> for
-    /// the images in <paramref name="transcoded"/>, which spec-conformant readers need and
-    /// Paradise's own does not (issue #207: the build writes the same uri-and-mime contract as
-    /// <see cref="MeshTextureReferences"/>). Idempotent: nothing embedded, nothing changed.
+    /// holds geometry only. Every externalised image is declared through
+    /// <c>KHR_texture_basisu</c>: <c>image/ktx2</c> is only valid under that extension, and the
+    /// build and the editor hosts write one contract (issue #207). A pass-through KTX2 is
+    /// declared the same way, which assumes its payload is ETC1S or UASTC as the extension
+    /// demands — the same assumption the runtime's transcoder already makes of it. Idempotent:
+    /// nothing embedded, nothing changed.
     /// </summary>
     public static bool TryExternalize(
         byte[] glb,
         IReadOnlyList<EmbeddedImage> images,
-        bool declareBasisu,
-        IReadOnlySet<int> transcoded,
         out byte[] rewritten,
         out string error)
     {
         ArgumentNullException.ThrowIfNull(glb);
         ArgumentNullException.ThrowIfNull(images);
-        ArgumentNullException.ThrowIfNull(transcoded);
 
         rewritten = glb;
         error = "";
@@ -124,10 +123,7 @@ public static class GlbTextureRewriter
             image["name"] = Ktx2ImageName(image, embedded.Index);
         }
 
-        if (declareBasisu && transcoded.Count > 0 && gltf["textures"] is JsonArray textures)
-        {
-            DeclareBasisu(gltf, textures, transcoded);
-        }
+        DeclareBasisu(gltf, images.Select(image => image.Index).ToHashSet());
 
         if (!TryRepackDropping(gltf, bufferViews, bin, dropped, out bin, out error)) return false;
         SetFirstBufferLength(gltf, bin.Length);
@@ -173,7 +169,7 @@ public static class GlbTextureRewriter
         }
 
         if (!TryRepackReplacing(bufferViews, bin, replacements, out bin, out error)) return false;
-        if (gltf["textures"] is JsonArray textures) DeclareBasisu(gltf, textures, ktx2ByImage.Keys.ToHashSet());
+        DeclareBasisu(gltf, ktx2ByImage.Keys.ToHashSet());
         SetFirstBufferLength(gltf, bin.Length);
         rewritten = GlbBinary.Write(gltf, bin);
         return true;
@@ -312,9 +308,23 @@ public static class GlbTextureRewriter
         }
     }
 
-    private static void DeclareBasisu(JsonObject gltf, JsonArray textures, IReadOnlySet<int> ktx2Images)
+    /// <summary>
+    /// Moves each texture over <paramref name="ktx2Images"/> from <c>source</c> to
+    /// <c>extensions.KHR_texture_basisu.source</c>, which is what makes an <c>image/ktx2</c>
+    /// image valid glTF. The extension is listed as USED whenever a KTX2 image exists, and as
+    /// REQUIRED only when a texture now depends on it: requiring it for a file with no basisu
+    /// texture would make conformant readers reject content the file does not hold. A texture
+    /// already declared is left alone.
+    /// </summary>
+    internal static void DeclareBasisu(JsonObject gltf, IReadOnlySet<int> ktx2Images)
     {
-        foreach (var texture in textures.OfType<JsonObject>())
+        ArgumentNullException.ThrowIfNull(gltf);
+        ArgumentNullException.ThrowIfNull(ktx2Images);
+
+        if (ktx2Images.Count == 0) return;
+
+        var moved = 0;
+        foreach (var texture in (gltf["textures"] as JsonArray)?.OfType<JsonObject>() ?? [])
         {
             if (texture["source"] is null) continue;
 
@@ -329,10 +339,11 @@ public static class GlbTextureRewriter
 
             extensions[BasisuExtensionName] = new JsonObject { ["source"] = source };
             texture.Remove("source");
+            moved++;
         }
 
         AddExtensionName(gltf, "extensionsUsed");
-        AddExtensionName(gltf, "extensionsRequired");
+        if (moved > 0) AddExtensionName(gltf, "extensionsRequired");
     }
 
     private static void AddExtensionName(JsonObject gltf, string propertyName)

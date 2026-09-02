@@ -106,7 +106,7 @@ public sealed class MeshImporter : IAssetImporter
         return true;
     }
 
-    /// <summary>Each embedded image becomes a sidecar under the mesh's own output directory; the mesh then references it by uri and mime like an authored texture (issue #207: one contract for the built tree).</summary>
+    /// <summary>Each embedded image becomes a sidecar under the mesh's own output directory, referenced like an authored texture: uri, mime and <c>KHR_texture_basisu</c> (issue #207: one contract for the built tree).</summary>
     private static bool TryExternalize(
         ImportContext context,
         UPath directory,
@@ -139,7 +139,7 @@ public sealed class MeshImporter : IAssetImporter
 
         if (errors.Count > before) return false;
 
-        if (GlbTextureRewriter.TryExternalize(glb, embedded, declareBasisu: false, new HashSet<int>(), out rewritten, out var problem)) return true;
+        if (GlbTextureRewriter.TryExternalize(glb, embedded, out rewritten, out var problem)) return true;
 
         errors.Add($"{context.Source}: {problem}");
         return false;

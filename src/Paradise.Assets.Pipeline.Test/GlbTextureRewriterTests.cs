@@ -29,6 +29,73 @@ public class GlbTextureRewriterTests
     }
 
     [Test]
+    public async Task an_unknown_chunk_between_json_and_bin_is_skipped_like_the_runtime_does()
+    {
+        // The spec says skip; the runtime's GlbContainer skips; a build that refused the same
+        // file the game would load was the disagreement issue #207 named.
+        var gltf = new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } };
+        byte[] bin = [1, 2, 3, 4];
+        var plain = GlbBinary.Write(gltf, bin);
+        using var stream = new MemoryStream();
+        stream.Write(plain, 0, 12 + 8 + (int)BitConverter.ToUInt32(plain, 12));
+        // Five bytes plus three of padding: the declared length excludes padding, and a reader
+        // that forgets the alignment lands inside it and reads garbage as the next header.
+        byte[] vendor = [9, 9, 9, 9, 9];
+        stream.Write(BitConverter.GetBytes((uint)vendor.Length));
+        stream.Write(BitConverter.GetBytes(0x5A5A5A5Au));
+        stream.Write(vendor);
+        stream.Write(new byte[3]);
+        stream.Write(plain, 12 + 8 + (int)BitConverter.ToUInt32(plain, 12), plain.Length - (12 + 8 + (int)BitConverter.ToUInt32(plain, 12)));
+        var withVendorChunk = stream.ToArray();
+        BitConverter.GetBytes((uint)withVendorChunk.Length).CopyTo(withVendorChunk, 8);
+
+        await Assert.That(GlbBinary.TryRead(withVendorChunk, out var read, out var readBin)).IsTrue();
+        await Assert.That(read["asset"]!["version"]!.GetValue<string>()).IsEqualTo("2.0");
+        await Assert.That(readBin).IsEquivalentTo(bin);
+        await Assert.That(() => Paradise.Assets.Gltf.GlbContainer.Parse(withVendorChunk).Bin.Length).IsEqualTo(4);
+    }
+
+    [Test]
+    public async Task a_header_over_declaring_the_length_is_refused_as_the_runtime_refuses_it()
+    {
+        var plain = GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } }, [1, 2, 3, 4]);
+        BitConverter.GetBytes((uint)plain.Length + 8).CopyTo(plain, 8);
+
+        await Assert.That(GlbBinary.TryRead(plain, out _, out _)).IsFalse();
+        await Assert.That(() => Paradise.Assets.Gltf.GlbContainer.Parse(plain)).Throws<InvalidDataException>();
+    }
+
+    [Test]
+    public async Task a_json_chunk_longer_than_the_file_is_refused_without_allocating_it()
+    {
+        var plain = GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } }, []);
+        BitConverter.GetBytes(0x7FFFFFF0u).CopyTo(plain, 12);
+
+        await Assert.That(GlbBinary.TryRead(plain, out _, out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task the_extension_is_required_only_when_a_texture_depends_on_it()
+    {
+        // An image no texture references gets the extension listed as used, never required:
+        // requiring it would make conformant readers reject content the file does not hold.
+        var orphan = new JsonObject
+        {
+            ["images"] = new JsonArray(new JsonObject { ["uri"] = "a.ktx2", ["mimeType"] = "image/ktx2" }),
+            ["textures"] = new JsonArray(new JsonObject { ["source"] = 5 }),
+        };
+        GlbTextureRewriter.DeclareBasisu(orphan, new HashSet<int> { 0 });
+        await Assert.That(orphan["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
+        await Assert.That(orphan["extensionsRequired"]).IsNull();
+        await Assert.That(orphan["textures"]![0]!["source"]!.GetValue<int>()).IsEqualTo(5);
+
+        var noTextures = new JsonObject { ["images"] = new JsonArray(new JsonObject { ["uri"] = "a.ktx2" }) };
+        GlbTextureRewriter.DeclareBasisu(noTextures, new HashSet<int> { 0 });
+        await Assert.That(noTextures["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
+        await Assert.That(noTextures["extensionsRequired"]).IsNull();
+    }
+
+    [Test]
     public async Task corrupt_glb_returns_false_instead_of_throwing()
     {
         var path = Path.Combine(Path.GetTempPath(), $"paradise_bad_{Guid.NewGuid():N}.glb");
@@ -87,7 +154,7 @@ public class GlbTextureRewriterTests
         var glb = TwoImageGlb(png, ktx2);
         GlbTextureRewriter.TryListEmbedded(glb, "crate", out var images, out _);
 
-        await Assert.That(GlbTextureRewriter.TryExternalize(glb, images, declareBasisu: true, new HashSet<int> { 0 }, out var rewritten, out _)).IsTrue();
+        await Assert.That(GlbTextureRewriter.TryExternalize(glb, images, out var rewritten, out _)).IsTrue();
 
         GlbBinary.TryRead(rewritten, out var gltf, out var bin);
         var imageNodes = (JsonArray)gltf["images"]!;
@@ -100,15 +167,17 @@ public class GlbTextureRewriterTests
         await Assert.That(gltf["accessors"]![0]!["bufferView"]!.GetValue<int>()).IsEqualTo(0);
         await Assert.That(bin.AsSpan(0, 4).ToArray()).IsEquivalentTo(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
         await Assert.That(gltf["buffers"]![0]!["byteLength"]!.GetValue<int>()).IsEqualTo(bin.Length);
-        // Basisu declared for the transcoded texture only; the pass-through KTX2 keeps `source`.
+        // Every externalised image is declared through KHR_texture_basisu, the pass-through
+        // KTX2 included: image/ktx2 is only valid under the extension (#207).
         await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(0);
-        await Assert.That(gltf["textures"]![1]!["source"]!.GetValue<int>()).IsEqualTo(1);
+        await Assert.That(gltf["textures"]![1]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(1);
+        await Assert.That(gltf["textures"]![1]!["source"]).IsNull();
         await Assert.That(gltf["extensionsRequired"]!.AsArray().Count).IsEqualTo(1);
 
         // Idempotent: nothing embedded remains.
         await Assert.That(GlbTextureRewriter.TryListEmbedded(rewritten, "crate", out var left, out _)).IsTrue();
         await Assert.That(left).IsEmpty();
-        await Assert.That(GlbTextureRewriter.TryExternalize(rewritten, left, declareBasisu: false, new HashSet<int>(), out var again, out _)).IsTrue();
+        await Assert.That(GlbTextureRewriter.TryExternalize(rewritten, left, out var again, out _)).IsTrue();
         await Assert.That(ReferenceEquals(again, rewritten)).IsTrue();
     }
 
@@ -146,7 +215,7 @@ public class GlbTextureRewriterTests
         var corrupt = GlbBinary.Write(gltf, bin);
         await Assert.That(GlbTextureRewriter.TryListEmbedded(corrupt, "crate", out var images, out _)).IsTrue();
 
-        await Assert.That(GlbTextureRewriter.TryExternalize(corrupt, images, declareBasisu: false, new HashSet<int>(), out _, out var error)).IsFalse();
+        await Assert.That(GlbTextureRewriter.TryExternalize(corrupt, images, out _, out var error)).IsFalse();
         await Assert.That(error).Contains("buffer view #0");
     }
 

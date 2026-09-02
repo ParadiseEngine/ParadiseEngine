@@ -12,15 +12,52 @@ public class MeshTextureReferencesTests
     [Test]
     public async Task an_external_png_reference_becomes_the_ktx2_beside_it()
     {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png","name":"rust"}]}""");
+        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png","name":"rust"}],"textures":[{"source":0}]}""");
 
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         // The relative path is preserved and only the extension moves: the texture step writes
         // its output at the source's own place in the tree, so the reference still resolves.
+        var gltf = Read(rewrite.Glb);
         await Assert.That(Images(rewrite.Glb)[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
         await Assert.That(Images(rewrite.Glb)[0]!["mimeType"]!.GetValue<string>()).IsEqualTo("image/ktx2");
         await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "../textures/rust.png" });
+        // image/ktx2 is only valid under KHR_texture_basisu — the one contract every KTX2 the
+        // pipeline writes follows (#207), so readers other than Paradise's accept the mesh.
+        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(0);
+        await Assert.That(gltf["textures"]![0]!["source"]).IsNull();
+        await Assert.That(gltf["extensionsUsed"]!.AsArray().Select(n => n!.GetValue<string>())).Contains("KHR_texture_basisu");
+        await Assert.That(gltf["extensionsRequired"]!.AsArray().Select(n => n!.GetValue<string>())).Contains("KHR_texture_basisu");
+    }
+
+    [Test]
+    public async Task an_authored_ktx2_reference_is_declared_like_a_repointed_one()
+    {
+        // One answer for every external KTX2 the built mesh names: an author-supplied .ktx2 is
+        // under the same extension as one the texture step wrote, or the file would carry the
+        // undeclared image/ktx2 shape #207 removed everywhere else.
+        var glb = Glb("""{"images":[{"uri":"t.png"},{"uri":"other.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0},{"source":1}]}""");
+
+        var rewrite = MeshTextureReferences.Rewrite(glb);
+
+        var gltf = Read(rewrite.Glb);
+        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
+        await Assert.That(gltf["textures"]![1]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(1);
+        await Assert.That(gltf["textures"]![1]!["source"]).IsNull();
+        // Only the PNG is a source to compile; the authored KTX2 is already what ships.
+        await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "t.png" });
+    }
+
+    [Test]
+    public async Task an_image_no_texture_uses_leaves_the_mesh_unchanged()
+    {
+        var glb = Glb("""{"images":[{"uri":"other.ktx2","mimeType":"image/ktx2"}]}""");
+
+        var rewrite = MeshTextureReferences.Rewrite(glb);
+
+        await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
+        await Assert.That(Read(rewrite.Glb)["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
+        await Assert.That(Read(rewrite.Glb)["extensionsRequired"]).IsNull();
     }
 
     [Test]
@@ -64,14 +101,15 @@ public class MeshTextureReferencesTests
     }
 
     [Test]
-    public async Task a_reference_that_is_already_ktx2_is_left_alone()
+    public async Task a_reference_that_is_already_ktx2_is_no_source_and_keeps_its_uri()
     {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.ktx2","mimeType":"image/ktx2"}]}""");
+        var glb = Glb("""{"images":[{"uri":"../textures/rust.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0}]}""");
 
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(rewrite.Glb).IsEquivalentTo(glb);
+        await Assert.That(Images(rewrite.Glb)[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
+        await Assert.That(Read(rewrite.Glb)["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
     }
 
     [Test]

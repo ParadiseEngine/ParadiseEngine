@@ -124,7 +124,6 @@ public static class GlbTextureWorkflows
 
         var directory = Path.GetDirectoryName(glbFullPath) ?? ".";
         var sidecars = new List<(string Name, byte[] Bytes)>();
-        var transcoded = new HashSet<int>();
         string? ktxPath = null;
         foreach (var image in images)
         {
@@ -152,10 +151,9 @@ public static class GlbTextureWorkflows
             }
 
             sidecars.Add((image.SidecarName, ktx2));
-            transcoded.Add(image.Index);
         }
 
-        if (!GlbTextureRewriter.TryExternalize(glb, images, declareBasisu: true, transcoded, out var rewritten, out var rewriteError))
+        if (!GlbTextureRewriter.TryExternalize(glb, images, out var rewritten, out var rewriteError))
         {
             error?.Invoke($"'{glbFullPath}' {rewriteError}.");
             return ConversionResult.Failed;
