@@ -106,7 +106,7 @@ internal static class Verbs
         var session = new WatchSession(
             signals,
             watchTray,
-            drain: watcher.Drain,
+            drain: () => watcher.Drain().Changes,
             rebuild: build ? () => watcher.Rebuild(profile, Target(), encoder) : null,
             log: Console.WriteLine,
             error: message => Console.Error.WriteLine(message),

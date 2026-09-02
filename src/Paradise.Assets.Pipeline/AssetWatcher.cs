@@ -107,13 +107,13 @@ public sealed class AssetWatcher : IDisposable
         lock (_gate) { _renames[to] = (from, _now()); }
     }
 
-    /// <summary>Acts on everything quiet for <see cref="Debounce"/>; returns how many sidecars it touched (a content edit alone counts zero — issue #195).</summary>
+    /// <summary>Acts on everything quiet for <see cref="Debounce"/>.</summary>
     /// <remarks>
     /// Deletes before adds, or a move seen as delete-then-add would mint a new GUID before the old
     /// one reached quarantine. The maintainer runs outside the lock (its work is IO) and keeps its
     /// quarantine unsynchronized, so drains must not overlap: one drainer per process.
     /// </remarks>
-    public int Drain()
+    public DrainResult Drain()
     {
         var now = _now();
         List<UPath> deletes;
@@ -146,7 +146,7 @@ public sealed class AssetWatcher : IDisposable
         }
 
         _maintainer.Expire(held => now - held.At > QuarantineWindow);
-        return actions;
+        return new DrainResult(deletes.Count + renames.Count + touched.Count, actions);
     }
 
     /// <summary>Reconciles sidecars, then builds; reconcile first because rebuild-now does not wait out the debounce, and a wipe of every <c>.meta</c> would otherwise sit unnoticed until the next asset save.</summary>
@@ -175,3 +175,11 @@ public sealed class AssetWatcher : IDisposable
         return ripe;
     }
 }
+
+/// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>
+/// <param name="Changes">Ripe events acted on: edits, adds, deletes and renames. Any of them
+/// changes what a build would produce, so this is what the watch loop rebuilds on. Sidecar work
+/// alone is not it: an asset that already has one reports zero sidecar actions on every edit, and
+/// gating on that left content edits unbuilt (issue #195).</param>
+/// <param name="SidecarActions">Sidecars minted, carried, quarantined, relinked or refreshed.</param>
+public readonly record struct DrainResult(int Changes, int SidecarActions);
