@@ -1,5 +1,3 @@
-using System.Text.Json.Nodes;
-
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Export.Serialization;
@@ -15,13 +13,14 @@ public sealed class TextureImporter : IAssetImporter
     public string Name => "texture";
 
     /// <inheritdoc />
+    public IReadOnlyList<string> Extensions { get; } = [".png", ".jpg", ".jpeg"];
+
+    /// <inheritdoc />
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(".png", ".jpg", ".jpeg")) return false;
-
         var settings = context.Meta!.Setting(TextureImportSettings.Domain);
         if (settings is not null && TextureImportSettings.Instance.Problem(settings) is { } problem)
         {
@@ -30,33 +29,14 @@ public sealed class TextureImporter : IAssetImporter
         }
 
         var preset = TextureImportSettings.Instance.PresetOf(settings) ?? DefaultPresetFor(context);
-        var fast = context.Profile.TextureQuality == TextureQuality.Fast;
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         UPath destination = "/" + Path.ChangeExtension(context.Source, ".ktx2");
 
-        // The key must cover the step's COMPLETE input, or it serves a stale encode as a hit.
-        var argvToken = KtxCreate.BuildCreateArguments(KtxTextureEncoder.ToKtxPreset(preset), "out.ktx2", "in" + context.Asset.GetExtensionWithDot(), fast);
-        var key = ArtifactDigest.Compute(bytes, argvToken, context.Encoder?.Identity ?? "");
-
-        if (context.Encoder is not null && context.Cache.TryFetch("ktx2", key, context.Output, destination)) return true;
-
-        if (context.Encoder is null)
+        if (TextureStep.Encode(context, bytes, context.Asset.GetExtensionWithDot()!, preset, destination, errors))
         {
-            errors.Add(
-                $"{context.Source}: no ktx CLI available to encode textures — run tools/ktx/KtxBootstrap, " +
-                $"install KTX-Software, or set {KtxCreate.KtxPathEnvironmentVariable}");
-            return true;
+            context.Log?.Invoke($"ktx2: {context.Source}");
         }
 
-        if (!context.Encoder.TryEncode(bytes, context.Asset.GetExtensionWithDot()!, preset, fast, out var ktx2, out var error))
-        {
-            errors.Add($"{context.Source}: texture encode failed: {error}");
-            return true;
-        }
-
-        context.Output.WriteAllBytes(destination, ktx2);
-        context.Cache.Store("ktx2", key, context.Output, destination);
-        context.Log?.Invoke($"ktx2: {context.Source} ({ktx2.Length} bytes)");
         return true;
     }
 
@@ -64,23 +44,21 @@ public sealed class TextureImporter : IAssetImporter
     // is where to pin the answer.
     private static TexturePreset DefaultPresetFor(ImportContext context)
     {
-        var preset = KtxCreate.PresetFromImageName(Path.GetFileNameWithoutExtension(context.Asset.GetName())) switch
-        {
-            KtxCreate.TextureEncodingPreset.UastcNormalLinear => TexturePreset.Normal,
-            KtxCreate.TextureEncodingPreset.UastcDataLinear => TexturePreset.Data,
-            KtxCreate.TextureEncodingPreset.UastcColorLinear => TexturePreset.ColorLinear,
-            _ => TexturePreset.Color,
-        };
+        var preset = KtxTextureEncoder.FromKtxPreset(
+            TextureEncodePolicy.PresetFromImageName(Path.GetFileNameWithoutExtension(context.Asset.GetName())));
         context.Log?.Invoke($"texture: {context.Source} has no preset in its sidecar; {preset} inferred from the name");
         return preset;
     }
 }
 
-/// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is refused here rather than failing later in the KTX2-only reader with less context.</summary>
+/// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is externalised to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> beside the mesh through the same cache the texture step uses.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "mesh";
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Extensions { get; } = [".glb", ".gltf"];
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -88,8 +66,6 @@ public sealed class MeshImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(".glb", ".gltf")) return false;
-
         // Claimed and refused, not declined: declining would let the mesh vanish silently.
         if (context.HasExtension(".gltf"))
         {
@@ -100,11 +76,13 @@ public sealed class MeshImporter : IAssetImporter
         }
 
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
-        if (HasEmbeddedEncodedImages(bytes, out var mimeType))
+        var stem = Path.GetFileNameWithoutExtension(context.Asset.GetName());
+        IReadOnlyList<EmbeddedImage> embedded = [];
+        // A file the container reader cannot open copies through unchanged, as its references
+        // do: what a mesh IS is the runtime's call, this step only follows the textures.
+        if (GlbBinary.TryRead(bytes, out _, out _) && !GlbTextureRewriter.TryListEmbedded(bytes, stem, out embedded, out var problem))
         {
-            // KtxCreate.ExternalizeTextures exists but works on System.IO paths and rewrites the
-            // GLB in place, so it cannot run against this Zio mount (issue #212).
-            errors.Add($"{context.Source}: has embedded {mimeType} textures; the build cannot externalize them yet — export with textures as separate files");
+            errors.Add($"{context.Source}: {problem}");
             return true;
         }
 
@@ -114,34 +92,85 @@ public sealed class MeshImporter : IAssetImporter
         var missing = false;
         foreach (var reference in rewrite.Sources)
         {
-            if (context.CheckReference(reference, out _) is not { } problem) continue;
+            if (context.CheckReference(reference, out _) is not { } referenceProblem) continue;
 
             missing = true;
-            errors.Add(problem);
+            errors.Add(referenceProblem);
         }
 
         if (missing) return true;
 
-        context.Output.WriteAllBytes("/" + context.Source, rewrite.Glb);
+        UPath destination = "/" + context.Source;
+        var glb = rewrite.Glb;
+        if (embedded.Count > 0 && !TryExternalize(context, destination.GetDirectory(), glb, embedded, errors, out glb)) return true;
+
+        context.Output.WriteAllBytes(destination, glb);
         return true;
     }
 
-    internal static bool HasEmbeddedEncodedImages(byte[] glb, out string mimeType)
+    /// <summary>Each embedded image becomes a sidecar under the mesh's own output directory; the mesh then references it by uri and mime like an authored texture (issue #207: one contract for the built tree).</summary>
+    private static bool TryExternalize(
+        ImportContext context,
+        UPath directory,
+        byte[] glb,
+        IReadOnlyList<EmbeddedImage> embedded,
+        List<string> errors,
+        out byte[] rewritten)
     {
-        mimeType = "";
-        if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
-        if (gltf["images"] is not JsonArray images) return false;
-        foreach (var image in images)
+        rewritten = glb;
+        var before = errors.Count;
+        foreach (var image in embedded)
         {
-            var mime = image?["mimeType"]?.GetValue<string>();
-            if (image?["bufferView"] is not null && mime is "image/png" or "image/jpeg")
+            var sidecar = directory / image.SidecarName;
+            if (image.IsKtx2)
             {
-                mimeType = mime;
-                return true;
+                Ktx2Header.ForceLinearTransfer(image.Bytes);
+                context.Output.WriteAllBytes(sidecar, image.Bytes);
+                continue;
             }
+
+            if (image.PresetNote is { } note) context.Log?.Invoke($"{context.Source}: {note}");
+            TextureStep.Encode(context, image.Bytes, image.SourceExtension!, KtxTextureEncoder.FromKtxPreset(image.Preset), sidecar, errors);
         }
 
+        if (errors.Count > before) return false;
+
+        if (GlbTextureRewriter.TryExternalize(glb, embedded, declareBasisu: false, new HashSet<int>(), out rewritten, out var problem)) return true;
+
+        errors.Add($"{context.Source}: {problem}");
         return false;
+    }
+}
+
+/// <summary>The encode-or-fetch every KTX2 output goes through, so a texture and a mesh's embedded image are cached and reported the same way.</summary>
+internal static class TextureStep
+{
+    private const string CacheKind = "ktx2";
+
+    /// <summary>True when <paramref name="destination"/> now holds the KTX2; false with the error reported.</summary>
+    public static bool Encode(ImportContext context, byte[] source, string sourceExtension, TexturePreset preset, UPath destination, List<string> errors)
+    {
+        if (context.Encoder is null)
+        {
+            errors.Add(
+                $"{context.Source}: no ktx CLI available to encode textures — run tools/ktx/KtxBootstrap, " +
+                $"install KTX-Software, or set {KtxTool.PathEnvironmentVariable}");
+            return false;
+        }
+
+        var quality = context.Profile.TextureQuality;
+        var key = context.Encoder.CacheKey(source, sourceExtension, preset, quality);
+        if (context.Cache.TryFetch(CacheKind, key, context.Output, destination)) return true;
+
+        if (!context.Encoder.TryEncode(source, sourceExtension, preset, quality, out var ktx2, out var error))
+        {
+            errors.Add($"{context.Source}: texture encode failed: {error}");
+            return false;
+        }
+
+        context.Output.WriteAllBytes(destination, ktx2);
+        context.Cache.Store(CacheKind, key, context.Output, destination);
+        return true;
     }
 }
 
@@ -152,13 +181,14 @@ public sealed class AudioImporter : IAssetImporter
     public string Name => "audio";
 
     /// <inheritdoc />
+    public IReadOnlyList<string> Extensions { get; } = [".bnk", ".wem"];
+
+    /// <inheritdoc />
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(".bnk", ".wem")) return false;
-
         context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
         return true;
     }
@@ -171,12 +201,14 @@ public sealed class PrefabImporter : IAssetImporter
     public string Name => "prefab";
 
     /// <inheritdoc />
+    public IReadOnlyList<string> Extensions { get; } = [AssetClassifier.PrefabSuffix];
+
+    /// <inheritdoc />
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(AssetClassifier.PrefabSuffix)) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         PrefabDocument document;
@@ -229,6 +261,9 @@ public sealed class ConfigImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "config";
 
+    /// <inheritdoc />
+    public IReadOnlyList<string> Extensions { get; } = [".toml"];
+
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;
 
@@ -236,7 +271,7 @@ public sealed class ConfigImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
     {
         // Compiling the manifest would ship the source project's profiles as game data.
-        if (!context.HasExtension(".toml") || context.IsManifest) return false;
+        if (context.IsManifest) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         if (!ConfigDocument.TryCanonicalize(context.FileSystem.ReadAllText(context.Asset), out var canonical, out var error))

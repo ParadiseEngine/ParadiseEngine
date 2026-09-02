@@ -13,8 +13,8 @@ public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, i
 /// <summary>The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.</summary>
 /// <remarks>
 /// No lookup table of asset kinds on purpose: what an asset IS lives in the importers, so a
-/// project can append one that shadows a built-in without this file changing (library-only
-/// today; the CLI cannot pass a chain — issue #208). A successful build's tree holds exactly what
+/// project can append one that shadows a built-in without this file changing (a game's host
+/// passes its chain through <c>BuildHost.Run</c>, issue #208). A successful build's tree holds exactly what
 /// it produced: the manifest goes first and comes back last, so a tree without one is a tree a
 /// build did not finish, and whatever the build did not write is swept before the manifest
 /// returns (issues #201, #202).
@@ -86,7 +86,7 @@ public sealed class BuildRunner
         }
 
         var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -180,9 +180,12 @@ public sealed class BuildRunner
             profile, target, written, cache, _encoder, _log);
 
         IAssetImporter? handler = null;
-        for (var i = _importers.Count - 1; i >= 0 && handler is null; i--)
+        foreach (var candidate in _importers.Candidates(path))
         {
-            if (_importers[i].Import(context, errors)) handler = _importers[i];
+            if (!candidate.Import(context, errors)) continue;
+
+            handler = candidate;
+            break;
         }
 
         if (handler is null) return (null, observed.Records);

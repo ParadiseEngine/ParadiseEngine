@@ -86,7 +86,7 @@ public static class GltfSceneReader
                 throw new NotSupportedException(
                     $"Image {i} is {DescribeImageMagic(bytes)}, but the contract requires KTX2 for every " +
                     "texture (KHR_texture_basisu). Encode this GLB's textures with `ktx create` " +
-                    "(KtxCreate.ConvertEmbeddedTextures, or the asset build) before loading it.");
+                    "(GlbTextureWorkflows.ConvertEmbeddedTextures, or the asset build) before loading it.");
             }
             images[i] = new GltfImageData(bytes);
         }

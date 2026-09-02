@@ -1,21 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The `paradise` command — the engine's one CLI, a thin shell over Paradise.Assets.Pipeline.
-    Ships as a dotnet tool (the repo's first; the recommended option of #179's packaging
-    decision), so a game repo takes it as a tool-manifest entry and CI as `dotnet tool restore`.
+    The `paradise` command — the engine's one CLI. Ships as a dotnet tool (the repo's first; the
+    recommended option of #179's packaging decision), so a game repo takes it as a tool-manifest
+    entry and CI as `dotnet tool restore`. Everything it does lives in Paradise.Cli.Host, which a
+    game's own asset tool references to run the same verbs with its importers appended (#208).
 
     Verbs are GROUPED (`paradise assets build`, `paradise tools doctor`) rather than flat. It was
     `paradise-assets` with flat verbs while it only knew about assets; scaffolding a project and
     reporting on the shader/texture toolchain are not asset operations, and a tool named for one
     of the things it does misdescribes itself the moment it does another. Groups also leave room
     for `paradise shaders` / `paradise pack` without a second rename.
-
-    Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
-    every verb's real logic lives (tested) in the pipeline library.
-
-    Native tray icons (Win32 notify icon, AppKit status item) live in Tray/. The watch loop talks
-    to them through IWatchTray; headless, CI, Linux, and the no-tray flag never start one.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -31,12 +26,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="Paradise.Cli.Test" />
-    <InternalsVisibleTo Include="Paradise.Cli.CoyoteTest" />
+    <ProjectReference Include="..\Paradise.Cli.Host\Paradise.Cli.Host.csproj" />
   </ItemGroup>
 
 </Project>

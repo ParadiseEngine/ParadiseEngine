@@ -23,21 +23,22 @@ public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path,
 /// <summary>The <c>verify</c> verb: the CI gate for the source tree. It never mutates the tree; minting sidecars is <c>watch</c>'s decision, not a side effect of checking.</summary>
 public static class ProjectVerifier
 {
-    /// <summary>Findings, errors first.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout)
+    /// <summary>Findings, errors first. <paramref name="importers"/> is the chain a build would run, so verify can say which files nothing in it handles; the built-ins when omitted.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        return Verify(fileSystem, layout, AssetPaths.Scan(fileSystem, layout.Assets));
+        return Verify(fileSystem, layout, AssetPaths.Scan(fileSystem, layout.Assets), importers ?? AssetImporters.All);
     }
 
-    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources)
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetImporter})"/> over an existing scan, so a build verifies the same tree it then walks.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, IReadOnlyList<IAssetImporter> importers)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(sources);
+        ArgumentNullException.ThrowIfNull(importers);
 
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
@@ -71,9 +72,16 @@ public static class ProjectVerifier
                 case AssetClass.Prefab:
                     VerifyDocument(fileSystem, layout, sources, path, findings);
                     break;
+            }
 
-                // No "nothing handles this file" warning: only an importer, during a build, can
-                // answer that, and a decline may mean "not for this tree" (issue #208).
+            // A warning, not an error: a .blend beside its export is a source worth committing
+            // that no importer will ever claim, and the ignore list is where to say so.
+            if (assetClass is not (AssetClass.Sidecar or AssetClass.Manifest) && !importers.Candidates(path).Any())
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Warning, path,
+                    $"is a '{path.GetExtensionWithDot() ?? "(no extension)"}' file no importer declares, so a build skips it — " +
+                    "add it to [assets] ignore in project.toml, or give the project an importer"));
             }
         }
 

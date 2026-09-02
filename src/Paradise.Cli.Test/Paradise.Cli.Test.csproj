@@ -14,6 +14,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Paradise.Cli\Paradise.Cli.csproj" />
+    <ProjectReference Include="..\Paradise.Cli.Host\Paradise.Cli.Host.csproj" />
   </ItemGroup>
 </Project>
