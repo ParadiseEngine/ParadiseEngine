@@ -12,15 +12,33 @@ public class MeshTextureReferencesTests
     [Test]
     public async Task an_external_png_reference_becomes_the_ktx2_beside_it()
     {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png","name":"rust"}]}""");
+        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png","name":"rust"}],"textures":[{"source":0}]}""");
 
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         // The relative path is preserved and only the extension moves: the texture step writes
         // its output at the source's own place in the tree, so the reference still resolves.
+        var gltf = Read(rewrite.Glb);
         await Assert.That(Images(rewrite.Glb)[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
         await Assert.That(Images(rewrite.Glb)[0]!["mimeType"]!.GetValue<string>()).IsEqualTo("image/ktx2");
         await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "../textures/rust.png" });
+        // image/ktx2 is only valid under KHR_texture_basisu — the one contract every KTX2 the
+        // pipeline writes follows (#207), so readers other than Paradise's accept the mesh.
+        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(0);
+        await Assert.That(gltf["textures"]![0]!["source"]).IsNull();
+        await Assert.That(gltf["extensionsUsed"]!.AsArray().Select(n => n!.GetValue<string>())).Contains("KHR_texture_basisu");
+        await Assert.That(gltf["extensionsRequired"]!.AsArray().Select(n => n!.GetValue<string>())).Contains("KHR_texture_basisu");
+    }
+
+    [Test]
+    public async Task a_texture_over_an_image_left_alone_keeps_its_plain_source()
+    {
+        var glb = Glb("""{"images":[{"uri":"t.png"},{"uri":"other.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0},{"source":1}]}""");
+
+        var gltf = Read(MeshTextureReferences.Rewrite(glb).Glb);
+
+        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
+        await Assert.That(gltf["textures"]![1]!["source"]!.GetValue<int>()).IsEqualTo(1);
     }
 
     [Test]

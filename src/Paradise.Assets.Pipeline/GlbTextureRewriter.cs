@@ -84,22 +84,19 @@ public static class GlbTextureRewriter
 
     /// <summary>
     /// Points every embedded image at its sidecar and drops its bytes from the BIN, so the chunk
-    /// holds geometry only. <paramref name="declareBasisu"/> adds <c>KHR_texture_basisu</c> for
-    /// the images in <paramref name="transcoded"/>, which spec-conformant readers need and
-    /// Paradise's own does not (issue #207: the build writes the same uri-and-mime contract as
-    /// <see cref="MeshTextureReferences"/>). Idempotent: nothing embedded, nothing changed.
+    /// holds geometry only. Every externalised image is declared through
+    /// <c>KHR_texture_basisu</c>: <c>image/ktx2</c> is only valid under that extension, and the
+    /// build and the editor hosts write one contract (issue #207). Idempotent: nothing
+    /// embedded, nothing changed.
     /// </summary>
     public static bool TryExternalize(
         byte[] glb,
         IReadOnlyList<EmbeddedImage> images,
-        bool declareBasisu,
-        IReadOnlySet<int> transcoded,
         out byte[] rewritten,
         out string error)
     {
         ArgumentNullException.ThrowIfNull(glb);
         ArgumentNullException.ThrowIfNull(images);
-        ArgumentNullException.ThrowIfNull(transcoded);
 
         rewritten = glb;
         error = "";
@@ -124,10 +121,7 @@ public static class GlbTextureRewriter
             image["name"] = Ktx2ImageName(image, embedded.Index);
         }
 
-        if (declareBasisu && transcoded.Count > 0 && gltf["textures"] is JsonArray textures)
-        {
-            DeclareBasisu(gltf, textures, transcoded);
-        }
+        DeclareBasisu(gltf, images.Select(image => image.Index).ToHashSet());
 
         if (!TryRepackDropping(gltf, bufferViews, bin, dropped, out bin, out error)) return false;
         SetFirstBufferLength(gltf, bin.Length);
@@ -173,7 +167,7 @@ public static class GlbTextureRewriter
         }
 
         if (!TryRepackReplacing(bufferViews, bin, replacements, out bin, out error)) return false;
-        if (gltf["textures"] is JsonArray textures) DeclareBasisu(gltf, textures, ktx2ByImage.Keys.ToHashSet());
+        DeclareBasisu(gltf, ktx2ByImage.Keys.ToHashSet());
         SetFirstBufferLength(gltf, bin.Length);
         rewritten = GlbBinary.Write(gltf, bin);
         return true;
@@ -312,8 +306,14 @@ public static class GlbTextureRewriter
         }
     }
 
-    private static void DeclareBasisu(JsonObject gltf, JsonArray textures, IReadOnlySet<int> ktx2Images)
+    /// <summary>Moves each texture over <paramref name="ktx2Images"/> from <c>source</c> to <c>extensions.KHR_texture_basisu.source</c> and declares the extension used and required, which is what makes an <c>image/ktx2</c> image valid glTF. No-op for a texture already declared.</summary>
+    internal static void DeclareBasisu(JsonObject gltf, IReadOnlySet<int> ktx2Images)
     {
+        ArgumentNullException.ThrowIfNull(gltf);
+        ArgumentNullException.ThrowIfNull(ktx2Images);
+
+        if (ktx2Images.Count == 0 || gltf["textures"] is not JsonArray textures) return;
+
         foreach (var texture in textures.OfType<JsonObject>())
         {
             if (texture["source"] is null) continue;

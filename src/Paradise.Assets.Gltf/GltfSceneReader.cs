@@ -188,8 +188,8 @@ public static class GltfSceneReader
         return materials;
     }
 
-    /// <summary>Texture index → image index, preferring the KHR_texture_basisu source (the
-    /// KTX2 payload ToktxKtx2 embeds) over the base source. −1 when absent.</summary>
+    /// <summary>Texture index → image index, preferring the KHR_texture_basisu source (where
+    /// the pipeline declares every KTX2 it writes) over the base source. −1 when absent.</summary>
     private static int ResolveImage(GltfRoot root, int? textureIndex)
     {
         if (textureIndex is not { } ti) return -1;

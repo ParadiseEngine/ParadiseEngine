@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>Minimal GLB container read/write. Unknown chunk types fail rather than skip, unlike the runtime's <c>GlbContainer</c> (issue #207).</summary>
+    /// <summary>Minimal GLB container read/write. Chunks after the JSON one are walked as the runtime's <c>GlbContainer</c> walks them: the first BIN is taken, unknown types are skipped per spec.</summary>
     public static class GlbBinary
     {
         public const uint Magic = 0x46546C67;
@@ -53,7 +53,7 @@ namespace Paradise.Assets.Pipeline
                     return false;
                 }
 
-                reader.ReadUInt32(); // total length (ignored)
+                long totalLength = Math.Min(reader.ReadUInt32(), reader.BaseStream.Length);
                 uint jsonChunkLength = reader.ReadUInt32();
                 if (reader.ReadUInt32() != JsonChunkType)
                 {
@@ -63,18 +63,24 @@ namespace Paradise.Assets.Pipeline
                 string json = Encoding.UTF8.GetString(reader.ReadBytes((int)jsonChunkLength)).TrimEnd(' ', '\0');
                 gltf = JsonNode.Parse(json)!.AsObject();
 
-                if (reader.BaseStream.Position >= reader.BaseStream.Length)
+                while (reader.BaseStream.Position + 8 <= totalLength)
                 {
-                    return true;
+                    uint chunkLength = reader.ReadUInt32();
+                    uint chunkType = reader.ReadUInt32();
+                    if (chunkLength > totalLength - reader.BaseStream.Position)
+                    {
+                        return false;
+                    }
+
+                    if (chunkType == BinChunkType)
+                    {
+                        binChunk = reader.ReadBytes((int)chunkLength);
+                        return true;
+                    }
+
+                    reader.BaseStream.Position += chunkLength;
                 }
 
-                uint binChunkLength = reader.ReadUInt32();
-                if (reader.ReadUInt32() != BinChunkType)
-                {
-                    return false;
-                }
-
-                binChunk = reader.ReadBytes((int)binChunkLength);
                 return true;
             }
             catch (Exception)

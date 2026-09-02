@@ -4,9 +4,10 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>
 /// Repoints a GLB's external PNG/JPEG references to the KTX2 the texture step writes at the same
-/// relative place. URI and MIME type only, no <c>KHR_texture_basisu</c>: Paradise's reader
-/// resolves on <c>uri</c> + <c>mimeType</c>, which makes the output spec-invalid glTF for other
-/// readers — issue #207. Policy-free: what a missing source means is the runner's call.
+/// relative place, and declares them through <c>KHR_texture_basisu</c> like every other KTX2
+/// the pipeline writes: <c>image/ktx2</c> is only valid under that extension, and a second
+/// contract for the same output was what issue #207 found. Policy-free: what a missing source
+/// means is the runner's call.
 /// </summary>
 public static class MeshTextureReferences
 {
@@ -26,21 +27,24 @@ public static class MeshTextureReferences
         if (gltf["images"] is not JsonArray images) return new MeshRewrite(glb, []);
 
         var sources = new List<string>();
-        foreach (var node in images)
+        var repointed = new HashSet<int>();
+        for (var index = 0; index < images.Count; index++)
         {
-            if (node is not JsonObject image) continue;
+            if (images[index] is not JsonObject image) continue;
             if (image["bufferView"] is not null) continue;
             if (image["uri"]?.GetValue<string>() is not { } uri) continue;
             if (!IsEncodedImage(uri)) continue;
 
             sources.Add(uri);
+            repointed.Add(index);
             image["uri"] = Path.ChangeExtension(uri, ".ktx2");
             image["mimeType"] = Ktx2MimeType;
         }
 
-        return sources.Count == 0
-            ? new MeshRewrite(glb, [])
-            : new MeshRewrite(GlbBinary.Write(gltf, binChunk), sources);
+        if (sources.Count == 0) return new MeshRewrite(glb, []);
+
+        GlbTextureRewriter.DeclareBasisu(gltf, repointed);
+        return new MeshRewrite(GlbBinary.Write(gltf, binChunk), sources);
     }
 
     private static bool IsEncodedImage(string uri)
