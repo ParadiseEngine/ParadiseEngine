@@ -7,14 +7,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>
-    /// Converts the PNG/JPEG textures embedded in a GLB to KTX2 (Basis Universal) via the Khronos
-    /// <c>ktx create</c> CLI (KTX-Software v5 — the replacement for the removed legacy toktx),
-    /// rewriting the GLB to reference them through <c>KHR_texture_basisu</c>. Engine-neutral port
-    /// of the Unity GlbKtx2TextureProcessor core. Resolves <c>ktx</c> from
-    /// <c>PARADISE_KTX_PATH</c>, a repo-local <c>third_party/tools/KTX-Software</c>, or PATH; when
-    /// unavailable the conversion fails gracefully and the GLB is left as-is.
-    /// </summary>
+    /// <summary>Texture encoding through the KTX-Software v5 <c>ktx create</c> CLI, and the GLB rewrites built on it.</summary>
     public static class KtxCreate
     {
         public const string KtxPathEnvironmentVariable = "PARADISE_KTX_PATH";
@@ -44,13 +37,7 @@ namespace Paradise.Assets.Pipeline
             Failed,
         }
 
-        /// <summary>
-        /// Encode a STANDALONE source image (PNG/JPEG — a spritesheet) to a KTX2 sidecar next to
-        /// it, for the .NET runtime; the Godot editor keeps rendering the source image. Same
-        /// colour preset as GLB base-colour textures (UASTC, linear-tagged container — see
-        /// <see cref="BuildCreateArguments(TextureEncodingPreset, string, string, bool)"/>). Idempotent by timestamp: an output at least as
-        /// new as its source returns <see cref="ConversionResult.NoConvertibleTextures"/>.
-        /// </summary>
+        /// <summary>Encodes a standalone image to a KTX2 sidecar beside it; skipped by timestamp when the output is newer.</summary>
         public static ConversionResult ConvertImageFile(
             string sourceFullPath,
             string outputKtx2Path,
@@ -112,9 +99,8 @@ namespace Paradise.Assets.Pipeline
                 return ConversionResult.NoConvertibleTextures;
             }
 
-            // Resolve the tool only once the GLB is known to embed convertible images —
-            // textureless meshes must not fail on a missing encoder (ToolMissing is now a
-            // meaningful signal: "textures exist and could not be converted").
+            // Resolved only once convertible images are known to exist, so a textureless mesh
+            // never fails on a missing encoder.
             if (!HasConvertibleImages(images))
             {
                 return ConversionResult.NoConvertibleTextures;
@@ -186,15 +172,7 @@ namespace Paradise.Assets.Pipeline
             return ConversionResult.ConvertedAllTextures;
         }
 
-        /// <summary>
-        /// Rewrites a GLB so every texture is an EXTERNAL KTX2 sidecar file (<c>&lt;stem&gt;_&lt;i&gt;.ktx2</c>
-        /// next to the GLB) referenced through <c>images[].uri</c>, and the image bytes are removed
-        /// from the BIN chunk (the GLB shrinks to geometry). Embedded KTX2 images are extracted
-        /// as-is; embedded PNG/JPEG are transcoded first (requires <c>ktx</c>). Already-external
-        /// images are left untouched, so this is idempotent (re-running yields
-        /// <see cref="ConversionResult.NoConvertibleTextures"/>). Both hosts read the sidecars:
-        /// Godot's glTF importer and the runtime's <c>GltfSceneReader</c> external-image resolver.
-        /// </summary>
+        /// <summary>Rewrites a GLB so every texture is an external <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> sidecar and the BIN chunk holds geometry only; idempotent.</summary>
         public static ConversionResult ExternalizeTextures(
             string glbFullPath,
             string? repoRoot = null,
@@ -213,8 +191,6 @@ namespace Paradise.Assets.Pipeline
                 return ConversionResult.NoConvertibleTextures;
             }
 
-            // Embedded images (bufferView present) are the ones to externalize; already-external
-            // (uri, no bufferView) images are skipped — this is what makes the pass idempotent.
             int embeddedImageCount = images.OfType<JsonObject>().Count(im => im["bufferView"] != null);
             if (embeddedImageCount == 0)
             {
@@ -247,12 +223,8 @@ namespace Paradise.Assets.Pipeline
                 byte[] ktx2Bytes;
                 if (IsKtx2Magic(sourceBytes))
                 {
-                    // Already KTX2 (pre-encoded upstream, e.g. Unity exports) — extract as-is but
-                    // enforce the project's container convention: transfer = LINEAR even for
-                    // sRGB-encoded texels, so Godot 4.x decodes exactly once (its basisu import
-                    // path double-decodes sRGB-tagged containers) and the .NET runtime keeps
-                    // choosing the GPU format by usage — the same convention --assign-tf linear
-                    // gives the transcode path below.
+                    // Pre-encoded KTX2 still gets the project's LINEAR transfer tag, for the
+                    // Godot double-decode reason in BuildCreateArguments.
                     ktx2Bytes = sourceBytes;
                     ForceLinearTransfer(ktx2Bytes);
                 }
@@ -294,8 +266,6 @@ namespace Paradise.Assets.Pipeline
                 externalized++;
             }
 
-            // A PNG source that was transcoded needs the KHR_texture_basisu extension added; images
-            // that were already embedded KTX2 already carry it.
             if (transcodedImageIndices.Count > 0)
             {
                 ApplyBasisTextureExtensions(gltf, textures, transcodedImageIndices);
@@ -308,10 +278,6 @@ namespace Paradise.Assets.Pipeline
             return ConversionResult.ConvertedAllTextures;
         }
 
-        // Repacks the BIN chunk keeping only bufferViews NOT in <paramref name="droppedViews"/>,
-        // then removes the dropped entries from the array and re-indexes every referrer (accessors,
-        // sparse accessors, remaining embedded images) through the old→new map. Buffer-1+ views are
-        // left untouched (external buffers aren't repacked into chunk 0).
         private static byte[] RebuildBinaryChunkDropping(JsonObject gltf, JsonArray bufferViews, byte[] sourceBin, ISet<int> droppedViews)
         {
             var kept = new List<int>();
@@ -335,7 +301,6 @@ namespace Paradise.Assets.Pipeline
                         continue;
                     }
 
-                    // Views on external buffers keep their offsets verbatim (not in chunk 0).
                     if ((bv["buffer"]?.GetValue<int>() ?? 0) != 0)
                     {
                         newOffset[i] = bv["byteOffset"]?.GetValue<int>() ?? 0;
@@ -410,9 +375,6 @@ namespace Paradise.Assets.Pipeline
             return bytes.Length >= magic.Length && bytes[..magic.Length].SequenceEqual(magic);
         }
 
-        /// <summary>Rewrite a KTX2 container's DFD transfer function to KHR_DF_TRANSFER_LINEAR in
-        /// place (no-op when already linear). Texel data is untouched — this only changes how
-        /// consumers are told to decode, per the project convention (see ExternalizeTextures).</summary>
         private static void ForceLinearTransfer(byte[] ktx2)
         {
             const int DfdByteOffsetField = 48; // KTX2 header: index section starts after 48-byte header
@@ -448,11 +410,7 @@ namespace Paradise.Assets.Pipeline
         public static string BuildCreateArguments(TextureEncodingPreset preset, string outputPath, string sourcePath)
             => BuildCreateArguments(preset, outputPath, sourcePath, fastEncode: false);
 
-        /// <summary>
-        /// <see cref="BuildCreateArguments(TextureEncodingPreset, string, string)"/> with the
-        /// build-profile speed knob: <paramref name="fastEncode"/> drops UASTC quality to 0 —
-        /// the iteration setting behind <c>texture_quality = "fast"</c>, never for shipping.
-        /// </summary>
+        /// <summary><paramref name="fastEncode"/> drops UASTC quality to 0: the <c>texture_quality = "fast"</c> iteration setting, never for shipping.</summary>
         public static string BuildCreateArguments(TextureEncodingPreset preset, string outputPath, string sourcePath, bool fastEncode)
         {
             var arguments = new List<string> { "create", "--generate-mipmap" };
@@ -535,11 +493,7 @@ namespace Paradise.Assets.Pipeline
             Action<string>? error)
             => TryConvertImageBytes(ktxPath, sourceBytes, sourceExtension, preset, fastEncode: false, out ktx2Bytes, error);
 
-        /// <summary>
-        /// The bytes-in/bytes-out heart of every conversion above, public because the asset
-        /// pipeline's texture step is exactly this shape: bytes from a mount, KTX2 bytes back,
-        /// caching and placement the caller's business.
-        /// </summary>
+        /// <summary>Bytes in, KTX2 bytes out; caching and placement are the caller's business.</summary>
         public static bool TryConvertImageBytes(
             string ktxPath,
             byte[] sourceBytes,
@@ -623,7 +577,6 @@ namespace Paradise.Assets.Pipeline
             return env;
         }
 
-        // ---- preset selection -------------------------------------------------------------------
 
         private static Dictionary<int, TextureEncodingPreset> GetImageEncodingPresets(JsonObject gltf, JsonArray textures, JsonArray images)
         {
@@ -724,7 +677,6 @@ namespace Paradise.Assets.Pipeline
             return false;
         }
 
-        // ---- GLB rewrite ------------------------------------------------------------------------
 
         private static bool TryGetSourceImageBytes(JsonObject image, JsonArray bufferViews, byte[] binChunk, string? externalTextureRoot, out byte[] bytes, out int sourceBufferViewIndex)
         {
@@ -890,7 +842,6 @@ namespace Paradise.Assets.Pipeline
             gltf["buffers"] = new JsonArray(new JsonObject { ["byteLength"] = byteLength });
         }
 
-        // ---- tool resolution --------------------------------------------------------------------
 
         public static string? FindKtx(string? repoRoot = null) =>
             ProcessTools.FindExecutable(

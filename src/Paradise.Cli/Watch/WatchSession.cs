@@ -2,11 +2,7 @@ using Paradise.Assets.Pipeline;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// The watch loop once sidecars are reconciled and the filesystem watcher is running: wait,
-/// drain, maybe rebuild, tell the tray. Extracted from the verb so the state machine can be
-/// driven with fake drain/rebuild and a recording tray, which a notify icon cannot be.
-/// </summary>
+/// <summary>The watch loop, extracted from the verb so it can be driven with a fake drain and a recording tray. Rebuilds only when the drain touched a sidecar — issue #195.</summary>
 internal sealed class WatchSession
 {
     private readonly WatchSignals _signals;
@@ -45,13 +41,10 @@ internal sealed class WatchSession
         _quiet = quiet;
     }
 
-    /// <summary>Last finished rebuild's error count, zero when none has failed (or none has run).</summary>
     public int LastErrorCount { get; private set; }
 
-    /// <summary>What the tray was last told. Tests pin the transitions off this.</summary>
     public WatchStatus Status { get; private set; } = WatchStatus.Alive;
 
-    /// <summary>Run until <see cref="WatchSignals.RequestStop"/>.</summary>
     public void Run()
     {
         Set(WatchStatus.Alive, 0);

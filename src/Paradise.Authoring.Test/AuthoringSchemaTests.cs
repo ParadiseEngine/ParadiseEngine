@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using Paradise.Authoring;
 
@@ -30,7 +32,7 @@ public class AuthoringSchemaTests
         await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
         {
             FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
-            FixtureIds.HostBoundId,
+            FixtureIds.HostBoundId, FixtureIds.ByLightId, FixtureIds.ByCameraId,
         });
     }
 
@@ -47,6 +49,11 @@ public class AuthoringSchemaTests
         await Assert.That(Field(HostBound(), "Ident").AuthoredBy).IsEqualTo(AuthoredBySources.Id);
         await Assert.That(Field(HostBound(), "Label").AuthoredBy).IsEqualTo(AuthoredBySources.Name);
         await Assert.That(Field(HostBound(), "Spin").AuthoredBy).IsEqualTo(AuthoredBySources.LocalRotation);
+        await Assert.That(Field(HostBound(), "Parent").AuthoredBy).IsEqualTo(AuthoredBySources.Parent);
+        await Assert.That(Field(HostBound(), "Target").AuthoredBy).IsEqualTo(AuthoredBySources.Entity);
+        await Assert.That(Field(HostBound(), "File").AuthoredBy).IsEqualTo(AuthoredBySources.Asset);
+        await Assert.That(Field(HostBound(), "Mesh").AuthoredBy).IsEqualTo(AuthoredBySources.Mesh);
+        await Assert.That(Field(HostBound(), "Sprite").AuthoredBy).IsEqualTo(AuthoredBySources.Sprite);
     }
 
     /// <summary>A property TYPED as a value kind binds with no attribute at all, and the schema
@@ -61,6 +68,63 @@ public class AuthoringSchemaTests
         var scale = Field(HostBound(), "Scale");
         await Assert.That(scale.AuthoredBy).IsEqualTo(AuthoredBySources.LocalScale);
         await Assert.That(scale.Type).IsEqualTo("vector3");
+    }
+
+    /// <summary>A composed host kind nested as a property: the group is authoredBy the kind,
+    /// and its leaves are the host-supplied geometry.</summary>
+    [Test]
+    public async Task a_composed_host_kind_nests_its_fields()
+    {
+        var collider = Field(HostBound(), "Collider");
+        await Assert.That(collider.AuthoredBy).IsEqualTo(AuthoredBySources.Shape);
+        await Assert.That(collider.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(collider.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[]
+            {
+                "ShapeType", "LocalCenter", "LocalRotation", "Size", "Radius", "Height",
+            });
+
+        var lamp = Field(HostBound(), "Lamp");
+        await Assert.That(lamp.AuthoredBy).IsEqualTo(AuthoredBySources.Light);
+        await Assert.That(lamp.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(lamp.Fields!.Any(f => f.Name == "Type")).IsTrue();
+        await Assert.That(lamp.Fields!.Any(f => f.Name == "Color")).IsTrue();
+        await Assert.That(lamp.Fields!.Any(f => f.Name == "Intensity")).IsTrue();
+
+        var eye = Field(HostBound(), "Eye");
+        await Assert.That(eye.AuthoredBy).IsEqualTo(AuthoredBySources.Camera);
+        await Assert.That(eye.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(eye.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[]
+            {
+                "Projection", "Fov", "OrthographicSize", "Near", "Far", "Position", "Rotation",
+            });
+
+        // The kinds' defaults reach the schema only as property initializers; a constructor body
+        // is invisible to the generator and the editor would see an unspecified FOV.
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Fov").Default!.Value.GetSingle()).IsEqualTo(50f);
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Far").Default!.Value.GetSingle()).IsEqualTo(1000f);
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Projection").Default!.Value.GetString()).IsEqualTo("Perspective");
+        await Assert.That(lamp.Fields!.Single(f => f.Name == "Enabled").Default!.Value.GetBoolean()).IsTrue();
+        await Assert.That(lamp.Fields!.Single(f => f.Name == "Intensity").Default!.Value.GetSingle()).IsEqualTo(1f);
+    }
+
+    /// <summary>[AuthorDefault] exists because the kinds reach a game's generator as metadata; it
+    /// is a second copy of the initializer, so this is what stops the two from drifting.</summary>
+    [Test]
+    public async Task composed_kind_attribute_defaults_match_their_initializers()
+    {
+        foreach (var kind in new[] { typeof(HostShape), typeof(HostLight), typeof(HostCamera) })
+        {
+            var fresh = Activator.CreateInstance(kind)!;
+            foreach (var property in kind.GetProperties())
+            {
+                if (property.GetCustomAttribute<AuthorDefaultAttribute>() is not { } declared) continue;
+                var actual = property.GetValue(fresh)!;
+                var expected = Convert.ChangeType(declared.Value, property.PropertyType, CultureInfo.InvariantCulture);
+                await Assert.That(actual).IsEqualTo(expected).Because($"{kind.Name}.{property.Name}");
+            }
+        }
     }
 
     /// <summary>An identity travels as the canonical guid STRING, like every id in the contract —

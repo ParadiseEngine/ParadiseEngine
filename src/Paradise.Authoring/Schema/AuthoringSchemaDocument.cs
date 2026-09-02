@@ -230,28 +230,38 @@ public static class AuthoredBySources
     /// rather than by typing a vector.</summary>
     public const string Light = "light";
 
-    /// <summary>A file on disk; see <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
+    /// <summary>A camera, whose lens and aim are read at export. Where it stands and which way it
+    /// looks come from the referenced object's pose, which is why you frame a shot by moving the
+    /// camera rather than by typing a vector.</summary>
+    public const string Camera = "camera";
+
+    /// <summary>A file on disk, baked as the asset's GUID; see
+    /// <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
 
     /// <summary>
-    /// ANOTHER OBJECT IN THE SCENE: point at it, and the exporter bakes its NAME into this field.
+    /// ANOTHER OBJECT IN THE SCENE: point at it, and the exporter bakes its durable GUID into this
+    /// field — the same identity its <c>meta</c> carries.
     ///
     /// The odd one of the set, because what it bakes is not a value read off the referenced object
-    /// — a pose, a shape, a colour — but the reference itself, reduced to the one thing every
-    /// exported object carries: its <c>NameComponentData</c>. A runtime resolves it against the
+    /// — a pose, a shape, a colour — but the reference itself. A runtime resolves it against the
     /// scene once the whole walk is done, since the target may be authored after the thing
     /// pointing at it.
     ///
-    /// <b>A name, not an index or an id.</b> An index would break the moment an exporter reordered
-    /// or dropped an object; a minted id would be a second identity that exists only to be
-    /// followed, and would have to survive a re-export unchanged. The name is what an author typed
-    /// and what they see in the outliner, so a broken reference names the thing they need to fix.
+    /// <b>A GUID, not a name or an index.</b> Names are not unique. An index would break the
+    /// moment an exporter reordered or dropped an object. The GUID is the identity the host
+    /// already minted, so a broken reference names the same thing <c>meta</c> does.
     ///
-    /// The cost, stated so nobody is surprised by it: names are not unique, and nothing here makes
-    /// them so. A scene with two objects called the same thing has an ambiguous reference, and the
-    /// runtime resolving it is the thing that must say so.
+    /// The wire type stays <c>string</c> and the schema version stays put, but the baked text is
+    /// the GUID: a host that still writes the display name fails the generated reader's
+    /// <c>Guid.Parse</c>. There is deliberately no string hatch here, unlike mesh/sprite/asset
+    /// (PAUT010's baked-path allowance), because a name was never an identity. Hosts move with the
+    /// package bump that ships this.
     /// </summary>
     public const string Entity = "entity";
+
+    /// <summary>The host object's parent in the scene tree (<see cref="HostParent"/>).</summary>
+    public const string Parent = "parent";
 
     /// <summary>
     /// An object whose WORLD POSE is the value: point at an empty (or anything else placeable) and

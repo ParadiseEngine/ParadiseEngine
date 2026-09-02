@@ -3,34 +3,17 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// The output mount an importer writes to: a sub-filesystem rooted at the build tree that
-/// OBSERVES writes.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Two jobs, both structural rather than conventional. The mount is the capability: <c>/</c>
-/// here is the output directory, so an importer cannot write outside the tree it is building —
-/// no path discipline required. And the observation is the record: <see cref="Written"/> is
-/// derived from the writes that actually happened, so the build manifest cannot drift from
-/// reality the way an importer-reported file list could.
-/// </para>
-/// <para>
-/// A write's parent directories are created on demand, so an importer's output is one
-/// <c>WriteAllBytes</c> with no ceremony.
-/// </para>
-/// </remarks>
+/// <summary>The importer's output mount: rooted at the build tree so an importer cannot write outside it, and recording writes so the manifest cannot drift from what actually happened.</summary>
 internal sealed class RecordingFileSystem : SubFileSystem
 {
     private readonly List<UPath> _written = [];
 
-    /// <summary>Mounts <paramref name="root"/> (which must exist) on <paramref name="fileSystem"/>.</summary>
     public RecordingFileSystem(IFileSystem fileSystem, UPath root)
         : base(fileSystem, root, owned: false)
     {
     }
 
-    /// <summary>The files written through this mount, mount-relative, in first-write order.</summary>
+    /// <summary>Mount-relative, in first-write order.</summary>
     public IReadOnlyList<UPath> Written => _written;
 
     /// <inheritdoc />

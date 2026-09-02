@@ -134,6 +134,7 @@ Enforced via `.editorconfig` with warnings-as-errors:
 - **Layout**: Allman braces, 4-space indent, file-scoped namespaces, LF line endings
 - **Types**: Prefer language keywords (`int` not `Int32`), avoid `this.` qualification
 - **Performance**: Struct-based nodes, `ref` parameters throughout, zero-allocation design, `System.Runtime.CompilerServices.Unsafe` for low-level ops
+- **Comments**: Code explains itself; comments explain why. Prefer a name, a type, a small method, or a guard over a comment that says what the code does, and restructure before commenting. A comment is for what code cannot say: a constraint, a decision and its rejected alternative, a failure mode someone would reintroduce, a cross-repo or cross-language contract. XML `<summary>` is one sentence; `<remarks>` only when it carries such a why. Delete comments that narrate control flow or restate the next line.
 
 ## SDK
 

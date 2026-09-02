@@ -5,48 +5,25 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>How bad a <see cref="VerifyFinding"/> is.</summary>
 public enum VerifySeverity
 {
-    /// <summary>Suspicious but buildable — reported, does not fail the verb.</summary>
+    /// <summary>Reported; does not fail the verb.</summary>
     Warning,
 
-    /// <summary>The source tree is inconsistent; <c>verify</c> fails.</summary>
     Error,
 }
 
-/// <summary>One thing <c>verify</c> found, tied to the path it is about.</summary>
-/// <param name="Severity">Whether this fails the verb.</param>
-/// <param name="Path">The file the finding is about.</param>
-/// <param name="Message">What is wrong, phrased for the person who must fix it.</param>
+/// <summary>One thing <c>verify</c> found, phrased for the person who must fix it.</summary>
 public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path, string Message)
 {
     /// <inheritdoc />
     public override string ToString() => $"{(Severity == VerifySeverity.Error ? "error" : "warning")}: {Path}: {Message}";
 }
 
-/// <summary>
-/// The <c>verify</c> verb: walks <c>assets/</c> and reports everything inconsistent about it.
-/// </summary>
-/// <remarks>
-/// <para>
-/// This is the CI gate for the source tree itself (the built tree has its own checks against
-/// the manifest). Everything here is an invariant some other part of the design relies on:
-/// sidecar GUIDs must be unique or references re-linked by GUID become ambiguous; sidecars must
-/// pair with assets or <c>mv</c> half-happened; documents must parse strictly or the build
-/// fails later with less context; documents must be canonical or the next machine rewrite
-/// produces a noise diff a human has to review.
-/// </para>
-/// <para>
-/// Verification never mutates the tree. Minting missing sidecars is a decision (<c>mv</c>/import
-/// tooling), not a side effect of checking.
-/// </para>
-/// </remarks>
+/// <summary>The <c>verify</c> verb: the CI gate for the source tree. It never mutates the tree; minting sidecars is <c>watch</c>'s decision, not a side effect of checking.</summary>
 public static class ProjectVerifier
 {
-    /// <summary>Verifies the project's source tree and returns the findings, errors first.</summary>
-    /// <param name="fileSystem">The filesystem holding the project.</param>
-    /// <param name="layout">The located project.</param>
+    /// <summary>Findings, errors first.</summary>
     public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
@@ -66,14 +43,12 @@ public static class ProjectVerifier
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path);
 
-            // Every asset carries an identity, and identity lives in ONE place -- the sidecar --
-            // whether the asset is a GLB or a scene document.
             if (AssetClassifier.NeedsSidecar(assetClass)
                 && !fileSystem.FileExists(SidecarMeta.PathFor(path)))
             {
                 findings.Add(new VerifyFinding(
                     VerifySeverity.Error, path,
-                    "has no sidecar — mint one so the asset has an identity (tooling owns sidecars; see the mv/import verbs)"));
+                    "has no sidecar — run `paradise assets watch` to mint one (tooling owns sidecars: a hand-typed guid cannot be checked against anything)"));
             }
 
             switch (assetClass)
@@ -86,13 +61,8 @@ public static class ProjectVerifier
                     VerifyDocument(fileSystem, layout, path, findings);
                     break;
 
-                // No "the pipeline does not know this file" warning: verify cannot tell. An
-                // importer claims an asset inside its own Import, on whatever grounds it likes,
-                // so the only truthful answer comes from running the chain — and a declined
-                // asset means "not mine" OR "not for this tree", which even the build cannot
-                // separate. A file nobody builds is still caught by the sidecar rule above,
-                // which is the check that actually matters: everything under assets/ is an
-                // asset, whether or not a step processes it.
+                // No "nothing handles this file" warning: only an importer, during a build, can
+                // answer that, and a decline may mean "not for this tree" (issue #208).
             }
         }
 
@@ -146,10 +116,8 @@ public static class ProjectVerifier
             guids.Add(meta.Guid, path);
         }
 
-        // Settings are opaque to the format, so this is where they meet the registry of steps
-        // that actually read them. An unknown domain is a WARNING — it may be a typo, or a
-        // sidecar written by a newer pipeline — but a malformed KNOWN domain is an error, because
-        // the build would refuse it with less context.
+        // Unknown domain: warning (a typo, or a newer pipeline's sidecar). Malformed known domain:
+        // error, because the build would refuse it with less context.
         foreach (var (name, settings) in meta.Settings)
         {
             if (ImportSettings.Find(name) is not { } domain)
@@ -167,22 +135,11 @@ public static class ProjectVerifier
         }
     }
 
-    /// <summary>
-    /// One document, whatever a game calls it.
-    /// </summary>
-    /// <remarks>
-    /// This used to be two methods that checked overlapping halves of the same file: a scene got
-    /// canonical form, references and instances but no root rule, and a prefab got the root rule
-    /// and references but neither of the other two. Nothing justified the split -- a prefab that
-    /// drifted out of canonical form was as much a diff-noise problem as a level that did, and a
-    /// prefab holding a broken instance simply went unchecked.
-    /// </remarks>
     private static void VerifyDocument(IFileSystem fileSystem, AssetProjectLayout layout, UPath path, List<VerifyFinding> findings)
     {
         PrefabDocument document;
         try
         {
-            // Load validates the single-root rule, so it is checked here for every document.
             document = PrefabDocumentSerializer.Load(fileSystem, path);
         }
         catch (PrefabDocumentException error)
@@ -191,9 +148,8 @@ public static class ProjectVerifier
             return;
         }
 
-        // The canonical-form drift guard (the prefab-check half of the parity story): a document a
-        // tool wrote is byte-canonical, so a difference means a hand edit — legal, but the next
-        // machine write will reformat it, and that diff belongs to this commit, not that one.
+        // A non-canonical document is a hand edit; the next machine write will reformat it, and
+        // that diff belongs to this commit, not that one.
         var canonical = PrefabDocumentSerializer.Write(document);
         if (fileSystem.ReadAllText(path) != canonical)
         {
@@ -206,15 +162,6 @@ public static class ProjectVerifier
         VerifyInstances(fileSystem, layout, path, document, findings);
     }
 
-    /// <summary>
-    /// Every asset reference in a document: the two halves must agree, and the asset must exist.
-    /// </summary>
-    /// <remarks>
-    /// Carrying a guid AND a path is only worth anything if something checks they still name the
-    /// same asset. Without this a half-finished move — the path updated, the guid stale, or the
-    /// reverse — resolves to whichever half the resolver happens to prefer, which is exactly the
-    /// silent wrong-asset failure the pair was introduced to prevent.
-    /// </remarks>
     private static void VerifyReferences(
         IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
@@ -229,17 +176,13 @@ public static class ProjectVerifier
             }
         }
 
-        // The same walk PrefabBake.ToValue does, because that is the specification: a reference
-        // the bake will flatten is a reference verify must have checked, and the shape the pair
-        // exists for — material slots — is an ARRAY of references, not a value-position one.
+        // Must match PrefabBake.ToValue's walk: a reference the bake flattens is one verify checked.
         void Walk(object? value, string where)
         {
             switch (value)
             {
-                // Gated on the format's OWN definition of a reference rather than on the model
-                // type: inside an array the reader wraps every table as inline, so an arbitrary
-                // payload table would otherwise be read as a malformed reference and reported as
-                // one. The empty table is a reference to nothing, which is always consistent.
+                // Gated on the reference SHAPE, not the model type: inside an array every table is
+                // inline (#187), so a payload record would otherwise be reported as a bad reference.
                 case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table.ToList()):
                     try
                     {
@@ -289,7 +232,6 @@ public static class ProjectVerifier
         }
     }
 
-    /// <summary>The asset's own identity: a sidecar for a binary, the document itself otherwise.</summary>
     private static Guid? IdentityOf(IFileSystem fileSystem, UPath target)
     {
         var sidecar = SidecarMeta.PathFor(target);
@@ -308,7 +250,6 @@ public static class ProjectVerifier
         return null;
     }
 
-    /// <summary>Every prefab instance in a scene must actually resolve.</summary>
     private static void VerifyInstances(
         IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {

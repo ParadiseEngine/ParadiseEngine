@@ -109,6 +109,23 @@ public sealed class AuthorDocAttribute(string text) : Attribute
 }
 
 /// <summary>
+/// The default an editor shows for this field, when the generator cannot read it from the
+/// property initializer. A record in the game's own compilation needs no attribute: the schema
+/// generator reads the initializer's syntax. A type from a REFERENCED assembly (the composed host
+/// kinds in this package) reaches the generator as metadata, where no syntax exists, so the
+/// initializer is invisible and the schema would publish no default at all. The value must equal
+/// the initializer; <c>Paradise.Authoring.Test</c> pins that for every host kind.
+/// </summary>
+/// <remarks>Only attribute constants can be carried (numbers, bools, strings, enum members), which
+/// is also all the schema can express; a vector or quaternion default stays initializer-only.</remarks>
+[AttributeUsage(AttributeTargets.Property, Inherited = false)]
+public sealed class AuthorDefaultAttribute(object value) : Attribute
+{
+    /// <summary>The default, as the C# constant it was written with.</summary>
+    public object Value { get; } = value;
+}
+
+/// <summary>
 /// Draw this component as a wireframe BOX in the editor, sized from three of its own fields.
 ///
 /// The point is that no editor needs a class to do it: "show me the volume I am authoring" is a
@@ -133,16 +150,17 @@ public sealed class AuthorBoxGizmoAttribute(
 /// This value is authored BY THE HOST — referenced through the host's own picker for a marker
 /// kind, or supplied from the host object's own state for a value kind.
 ///
-/// For a marker kind (<see cref="HostShape"/>, <see cref="HostMesh"/>, …) the editor shows a
-/// picker — Godot a typed node slot, Blender an object slot — and you edit the referenced object
-/// with the host's own gizmo and handles; the exporter bakes what is referenced into this record's
-/// own fields, because a host's node path means nothing to the runtime. For a value kind
-/// (<see cref="HostId"/>, <see cref="HostLocalPosition"/>, …) the host writes the object's own
-/// value straight into the field, whose type must match the kind's — checked by PAUT010.
+/// For a marker kind (<see cref="HostTransform"/>) the editor shows a picker and the exporter
+/// fills this record's own leaves by name. For a composed kind (<see cref="HostShape"/>,
+/// <see cref="HostLight"/>, <see cref="HostCamera"/>) the same picker fills the kind's own fields, nested when a property
+/// is typed as the kind, or by name when the kind sits on a type. For a value kind
+/// (<see cref="HostId"/>, <see cref="HostParent"/>, <see cref="HostMesh"/>, …) the host writes
+/// one concrete value — a GUID, a name, a local TRS leaf — whose type must match the kind's,
+/// checked by PAUT010.
 ///
 /// A TYPE PARAMETER, not a string, so a kind that does not exist cannot compile and a kind that
-/// carries a value declares what type it carries. Usable on a TYPE (marker kinds only — the whole
-/// record is authored this way) or on a PROPERTY. A property may equivalently be TYPED as a value
+/// carries a value declares what type it carries. Usable on a TYPE (marker and composed kinds — the
+/// whole record is authored this way) or on a PROPERTY. A property may equivalently be TYPED as a value
 /// kind itself, with no attribute; when both appear, the attribute wins (PAUT012).
 /// </summary>
 [AttributeUsage(

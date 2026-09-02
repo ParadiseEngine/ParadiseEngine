@@ -6,24 +6,12 @@ using Zio;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// Reads and writes <c>*.prefab</c> documents — one shape, so one reader and one writer.
-/// </summary>
-/// <remarks>
-/// Reading is <b>strict</b> — unknown keys, malformed GUIDs, duplicate identities, dangling or
-/// cyclic parents, malformed well-known payloads (<see cref="WellKnownComponents.PayloadProblem"/>)
-/// are all errors naming the object, because a reader that guessed would turn an authoring typo
-/// into a build that renders the wrong thing. Writing is canonical
-/// (<see cref="CanonicalTomlWriter"/>), so read → write is byte-identical for canonical input,
-/// in C# and in the Python mirror alike — <c>prefab-check</c> polices exactly that. The payload
-/// is flat, so <c>id</c>, <c>type</c> and <c>removed</c> are reserved names.
-/// </remarks>
+/// <summary>Reads (strictly, because a guessing reader turns a typo into a build that renders the wrong thing) and writes (canonically, so read → write is byte-identical) <c>*.prefab</c> documents.</summary>
 public static class PrefabDocumentSerializer
 {
     private static readonly string[] s_documentKeys = ["schema_version", "objects"];
     private static readonly string[] s_objectKeys = ["prefab", "components"];
 
-    /// <summary>Reads and validates the document at <paramref name="path"/>.</summary>
     /// <exception cref="PrefabDocumentException">The file is unreadable, not TOML, or not valid.</exception>
     public static PrefabDocument Load(IFileSystem fileSystem, UPath path)
     {
@@ -43,8 +31,7 @@ public static class PrefabDocumentSerializer
         return Parse(text, path.FullName);
     }
 
-    /// <summary>Validates already-read text. The filesystem-free half of <see cref="Load"/>.</summary>
-    /// <exception cref="PrefabDocumentException">The text is not TOML, or not a valid document.</exception>
+    /// <summary>The filesystem-free half of <see cref="Load"/>.</summary>
     public static PrefabDocument Parse(string toml, string sourceName)
     {
         ArgumentNullException.ThrowIfNull(toml);
@@ -71,9 +58,8 @@ public static class PrefabDocumentSerializer
             {
                 var entry = ReadObject(table, index, Fail);
 
-                // A Target carrier addresses a prefab-local object and has no identity of its
-                // own -- the resolved child's guid is always minted. So it is exempt from the
-                // uniqueness map, which is about identities the document actually declares.
+                // A carrier has no identity of its own (the child's guid is minted), so it is exempt
+                // from the uniqueness map — which also lets one carrying a Guid slip by (issue #210).
                 if (entry.Target is not null)
                 {
                     document.Objects.Add(entry);
@@ -96,21 +82,17 @@ public static class PrefabDocumentSerializer
 
         ValidateParents(parents, Fail);
 
-        // Structure first, then the document's own rule. Every read goes through here, so "exactly
-        // one root" holds for anything downstream that has a document at all -- which is what lets
-        // the resolver and the bake take a root for granted instead of each re-deriving one.
+        // Every read validates, so the resolver and the bake can take a single root for granted.
         document.Validate(sourceName);
         return document;
     }
 
-    /// <summary>Renders <paramref name="document"/> as canonical TOML text.</summary>
     public static string Write(PrefabDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
         return CanonicalTomlWriter.WriteString(ToCanonical(document));
     }
 
-    /// <summary>Writes <paramref name="document"/> to <paramref name="path"/> as UTF-8, no BOM.</summary>
     public static void Save(IFileSystem fileSystem, UPath path, PrefabDocument document)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
@@ -175,8 +157,8 @@ public static class PrefabDocumentSerializer
             removed = removedValue as bool? ?? throw fail($"holds a non-boolean '{PrefabComponent.RemovedKey}' {context}");
         }
 
-        // Everything else is payload. The reserved names are consumed above, so anything left
-        // over that matches one would be a duplicate key, which TOML itself rejects.
+        // The skip is what keeps reserved names out of the payload; Tomlyn's default does not
+        // refuse duplicate keys (issue #198).
         var data = new CanonicalTomlTable();
         foreach (var (key, value) in table)
         {
@@ -186,9 +168,7 @@ public static class PrefabDocumentSerializer
 
         if (removed && data.Count > 0)
         {
-            // A dropped component carries no payload: the two together say "remove this, and also
-            // here is what it should contain", which has no meaning and is almost certainly an
-            // edit that forgot to delete one half.
+            // "Remove this, and here is what it should contain" is an edit that forgot one half.
             throw fail($"marks a component '{PrefabComponent.RemovedKey}' but also gives it fields {context}");
         }
 
@@ -226,8 +206,7 @@ public static class PrefabDocumentSerializer
 
     private static CanonicalTomlTable ToCanonical(PrefabComponent component)
     {
-        // The same shape gate the reader applies, pointed the other way: a tool that builds a
-        // malformed well-known payload fails here, not as a document the next read refuses.
+        // A tool building a malformed well-known payload fails here, not at the next read.
         if (WellKnownComponents.PayloadProblem(component) is { } problem)
         {
             throw new InvalidOperationException($"This document {problem}, so it cannot be written.");
@@ -240,11 +219,6 @@ public static class PrefabDocumentSerializer
         return table;
     }
 
-    /// <summary>
-    /// Rejects dangling and cyclic parents. A dangling parent is an edit that deleted an object
-    /// without reparenting its children; a cycle has no world transform at all — both must fail
-    /// at read time, not as a stack overflow in the bake.
-    /// </summary>
     private static void ValidateParents(Dictionary<Guid, Guid?> parents, Func<string, Exception> fail)
     {
         foreach (var (guid, parent) in parents)

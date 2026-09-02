@@ -2,30 +2,15 @@ using System.Numerics;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// A local TRS, in engine convention: right-handed Y-up, metres, quaternion as
-/// <c>[x, y, z, w]</c>.
-/// </summary>
+/// <summary>Engine convention: right-handed Y-up, metres, quaternion as <c>[x, y, z, w]</c>.</summary>
 public readonly record struct LocalTransform(Vector3 Position, Quaternion Rotation, Vector3 Scale)
 {
-    /// <summary>No translation, no rotation, unit scale.</summary>
     public static LocalTransform Identity { get; } = new(Vector3.Zero, Quaternion.Identity, Vector3.One);
 }
 
-/// <summary>
-/// Reading and writing the well-known <c>transform</c> component as a <see cref="LocalTransform"/> —
-/// the typed form of <see cref="WellKnownComponents.TransformId"/>, so no consumer hand-parses
-/// <c>Position</c>/<c>Rotation</c>/<c>Scale</c> tables.
-/// </summary>
-/// <remarks>
-/// Reading is lenient per FIELD: an absent field is that part of the identity, because an
-/// authored transform may legitimately say only what differs from it. Malformed fields cannot
-/// arrive from disk — <see cref="WellKnownComponents.PayloadProblem"/> refuses them at parse —
-/// so a wrong shape here also reads as the identity rather than throwing on an in-memory table.
-/// </remarks>
+/// <summary>The typed form of the <c>transform</c> component. An absent field is that part of the identity; malformed shapes are refused at parse, so an in-memory one also reads as identity rather than throwing.</summary>
 public static class LocalTransformCodec
 {
-    /// <summary>The transform a component's payload declares; absent fields are the identity's.</summary>
     public static LocalTransform Read(CanonicalTomlTable data)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -35,10 +20,7 @@ public static class LocalTransformCodec
             Vector(data.Value(WellKnownComponents.Scale), Vector3.One));
     }
 
-    /// <summary>
-    /// Renders <paramref name="transform"/> as a full <c>transform</c> component — all three
-    /// fields, in canonical field order.
-    /// </summary>
+    /// <summary>All three fields, in canonical order; widens float32 bit-exactly, unlike <c>CanonicalTomlTable.Add</c> (issue #200).</summary>
     public static PrefabComponent Write(LocalTransform transform)
         => new(WellKnownComponents.TransformId, WellKnownComponents.TransformType,
             new CanonicalTomlTable

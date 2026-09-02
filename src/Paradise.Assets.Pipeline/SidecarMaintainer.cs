@@ -5,56 +5,31 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What a maintainer call did, for a caller that wants to say so.</summary>
 public enum SidecarAction
 {
-    /// <summary>Nothing needed doing.</summary>
     None,
 
-    /// <summary>An asset with no sidecar got a fresh identity.</summary>
     Minted,
 
-    /// <summary>An older sidecar still recorded a hash; it was dropped.</summary>
+    /// <summary>A legacy recorded hash was dropped.</summary>
     Refreshed,
 
-    /// <summary>A sidecar followed its asset to a new path, identity intact.</summary>
     Carried,
 
-    /// <summary>A deleted asset's identity was put aside in case the delete was half of a move.</summary>
+    /// <summary>A deleted asset's identity was held in case the delete was half of a move.</summary>
     Quarantined,
 
-    /// <summary>A quarantined identity was reattached to an asset that reappeared elsewhere.</summary>
     Relinked,
 }
 
-/// <summary>
-/// Keeps <c>*.meta</c> in step with the assets beside them: mints what is missing, carries one
-/// that moved, and never destroys an identity.
-/// </summary>
+/// <summary>Keeps <c>*.meta</c> in step with the assets beside them; holds the rules and none of the timing, so each is testable without a clock.</summary>
 /// <remarks>
-/// <para>
-/// <see cref="ProjectVerifier"/> already names every way sidecars rot — an orphan is "a move that
-/// skipped the tooling", a missing one says "tooling owns sidecars; see the mv/import verbs". This
-/// is that tooling. It holds all the RULES and none of the timing, so every one of them is
-/// testable over a <c>MemoryFileSystem</c> with no clock; <see cref="AssetWatcher"/> owns the
-/// events, the debounce and the quarantine window.
-/// </para>
-/// <para>
-/// <b>Nothing here deletes an identity.</b> A deleted <c>.meta</c> is a GUID gone for good and every
-/// reference to it broken, and a move performed by anything that emits no rename — <c>git mv</c> on
-/// Windows, most of them — arrives as a delete followed by an add. So a delete QUARANTINES: the
-/// file stays where it is, and its identity is held. An asset that reappears with matching content
-/// takes that identity back. The one time a sidecar file is removed is the re-link inside <see cref="Ensure"/>, which
-/// has already written the same identity at the asset's new path — a move, not a destruction.
-/// </para>
-/// <para>
-/// Re-linking matches on a content hash held in memory for this session, not on a field in the
-/// sidecar. A recorded hash is a checkout: text assets change bytes across machines (line
-/// endings, smudge filters) after a push/pull, and writing that into a committed <c>.meta</c>
-/// makes every clone a dirty tree. <see cref="Ensure"/> remembers what it saw; a delete that was
-/// half of a move still re-links for the quarantine window. A sidecar that still has a leftover
-/// <c>hash</c> is rewritten without it.
-/// </para>
+/// Nothing here may destroy an identity: a deleted <c>.meta</c> breaks every reference, and most
+/// moves (<c>git mv</c> on Windows, Finder) arrive as delete-then-add. So a delete quarantines,
+/// and an asset reappearing with the same content takes the identity back. The match is on a hash
+/// held in memory, never a field in the sidecar, because a recorded hash of a text asset differs
+/// per checkout (line endings, smudge filters) and would make every clone a dirty tree. The one
+/// exception is <see cref="Carry"/>, which overwrites an existing destination — issue #196.
 /// </remarks>
 public sealed class SidecarMaintainer
 {
@@ -63,17 +38,10 @@ public sealed class SidecarMaintainer
     private readonly Action<string> _log;
     private readonly bool _dryRun;
 
-    /// <summary>Identities of deleted assets, keyed by the content hash remembered this session.</summary>
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
-    /// <summary>
-    /// Last content hash <see cref="Ensure"/> saw for a path. Quarantine uses this instead of a
-    /// field in the sidecar, so a delete-then-add still re-links for the watch session.
-    /// </summary>
     private readonly Dictionary<UPath, string> _seenHash = [];
 
-    /// <summary>Creates a maintainer over one project.</summary>
-    /// <param name="dryRun">Report what would happen and write nothing.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
@@ -89,14 +57,9 @@ public sealed class SidecarMaintainer
         _dryRun = dryRun;
     }
 
-    /// <summary>Identities held from deleted assets, awaiting an asset that matches them.</summary>
     public IReadOnlyCollection<string> Quarantined => _quarantine.Keys;
 
-    /// <summary>Brings every asset under <c>assets/</c> into line. Returns how many it touched.</summary>
-    /// <remarks>
-    /// The one-shot form of the watcher, and what <c>--dry-run</c> reports from: a project whose
-    /// sidecars drifted before anyone was watching is the normal starting state.
-    /// </remarks>
+    /// <summary>Brings every asset under <c>assets/</c> into line and returns how many it touched.</summary>
     public int Reconcile()
     {
         if (!_fileSystem.DirectoryExists(_layout.Assets)) return 0;
@@ -113,12 +76,7 @@ public sealed class SidecarMaintainer
         return touched;
     }
 
-    /// <summary>Gives an asset a sidecar, or brings the one it has up to date.</summary>
-    /// <remarks>
-    /// The add and change cases are one method because they are one question — "does the sidecar
-    /// beside this asset describe it?" — and an editor's temp-then-rename save arrives as either,
-    /// unpredictably.
-    /// </remarks>
+    /// <summary>Gives an asset a sidecar, or brings the one it has up to date; add and change are one method because a temp-then-rename save arrives as either.</summary>
     public SidecarAction Ensure(UPath asset)
     {
         if (!AssetClassifier.NeedsSidecar(AssetClassifier.Classify(_layout.Assets, asset))
@@ -140,9 +98,7 @@ public sealed class SidecarMaintainer
             }
             catch (SidecarMetaException error)
             {
-                // A malformed sidecar is the author's to fix: it may hold the only copy of an
-                // identity, and overwriting it to make the warning go away would spend that
-                // identity to tidy up a message.
+                // Left alone: it may hold the only copy of an identity.
                 _log($"{Display(sidecar)}: left alone — {error.Message}");
                 return SidecarAction.None;
             }
@@ -155,8 +111,6 @@ public sealed class SidecarMaintainer
             return SidecarAction.Refreshed;
         }
 
-        // An asset appearing with content a deleted one had is that asset, moved by something that
-        // reported no rename. Take the identity back rather than minting a stranger.
         if (_quarantine.Remove(hash, out var held))
         {
             var restored = new SidecarMeta(held.Meta.Guid);
@@ -174,7 +128,6 @@ public sealed class SidecarMaintainer
         return SidecarAction.Minted;
     }
 
-    /// <summary>Carries a sidecar to follow the asset it describes.</summary>
     public SidecarAction Carry(UPath from, UPath to)
     {
         var source = SidecarMeta.PathFor(from);
@@ -199,7 +152,6 @@ public sealed class SidecarMaintainer
         return SidecarAction.Carried;
     }
 
-    /// <summary>Holds a deleted asset's identity, in case the delete was half of a move.</summary>
     public SidecarAction Quarantine(UPath asset, DateTimeOffset at)
     {
         var sidecar = SidecarMeta.PathFor(asset);
@@ -215,9 +167,6 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        // Prefer what this session saw; fall back to a leftover recorded hash on an old sidecar.
-        // Neither is written back. No hash at all means we cannot re-link — the sidecar stays put
-        // and the orphan is `verify`'s to report.
         if (!_seenHash.Remove(asset, out var hash)) hash = meta.Hash;
         if (hash is null) return SidecarAction.None;
 
@@ -226,12 +175,7 @@ public sealed class SidecarMaintainer
         return SidecarAction.Quarantined;
     }
 
-    /// <summary>Forgets identities held longer than a move plausibly takes.</summary>
-    /// <remarks>
-    /// Forgetting only drops the chance to RE-LINK. The sidecar itself is still on disk and the
-    /// GUID still in it, so a delete that was really a delete leaves an orphan for <c>verify</c> to
-    /// report — which it already does, in those words.
-    /// </remarks>
+    /// <summary>Forgets held identities; the sidecar stays on disk, so this only drops the chance to re-link.</summary>
     public void Expire(Func<QuarantinedIdentity, bool> stale)
     {
         ArgumentNullException.ThrowIfNull(stale);
@@ -262,9 +206,4 @@ public sealed class SidecarMaintainer
     }
 }
 
-/// <summary>An identity held from a deleted asset.</summary>
-/// <param name="Asset">Where the asset was.</param>
-/// <param name="Sidecar">Its sidecar, still on disk — quarantine holds, it does not remove.</param>
-/// <param name="Meta">The identity itself.</param>
-/// <param name="At">When it was quarantined — the caller's clock, so this type needs none.</param>
 public readonly record struct QuarantinedIdentity(UPath Asset, UPath Sidecar, SidecarMeta Meta, DateTimeOffset At);

@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 
@@ -274,6 +276,10 @@ internal static class AuthoredModel
             // A property TYPED as a value host kind binds by type: the kind is the struct's own
             // and the wire type is its Value's — the generated reader wraps the read value back
             // into the host struct (HostWrapperType).
+            //
+            // A property TYPED as a composed host kind (HostShape, HostLight, HostCamera) does
+            // not unwrap: the kind IS the payload, nested as an object, and authoredBy comes from
+            // its Kind const (it carries no [AuthoredByHost] of its own).
             string? hostTypedKind = null;
             string? hostWrapper = null;
             if (IsHostKind(valueType) && HostValueTypeOf(valueType) is { } hostValue)
@@ -284,6 +290,10 @@ internal static class AuthoredModel
                     { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableValue
                     ? nullableValue.TypeArguments[0]
                     : hostValue;
+            }
+            else if (IsHostKind(valueType))
+            {
+                hostTypedKind = KindNameOf(valueType);
             }
 
             var schemaType = SchemaTypeOf(valueType);
@@ -303,7 +313,8 @@ internal static class AuthoredModel
                     { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullableExpected
                     ? nullableExpected.TypeArguments[0]
                     : declared;
-                if (!SymbolEqualityComparer.Default.Equals(expected, valueType))
+                if (!SymbolEqualityComparer.Default.Equals(expected, valueType)
+                    && !AllowsBakedPath(memberHost, expected, valueType))
                 {
                     result.HostProblems.Add(new HostBindingProblem
                     {
@@ -318,9 +329,9 @@ internal static class AuthoredModel
                 }
             }
 
-            // Host-typed field carrying an attribute for a DIFFERENT kind: the attribute wins,
-            // but the disagreement is said out loud.
-            if (memberHost is not null && hostWrapper is not null && memberKind != hostTypedKind)
+            // Host-typed field (value OR composed) carrying an attribute for a DIFFERENT kind:
+            // the attribute wins, but the disagreement is said out loud.
+            if (memberHost is not null && hostTypedKind is not null && memberKind != hostTypedKind)
             {
                 result.HostProblems.Add(new HostBindingProblem
                 {
@@ -398,6 +409,10 @@ internal static class AuthoredModel
                         break;
                     case Namespace + ".AuthorDocAttribute" when a.ConstructorArguments.Length == 1:
                         field.Doc = a.ConstructorArguments[0].Value as string;
+                        break;
+                    case Namespace + ".AuthorDefaultAttribute" when a.ConstructorArguments.Length == 1:
+                        // Syntax wins when there is any; the attribute exists for metadata types.
+                        field.Default ??= DefaultLiteralOf(a.ConstructorArguments[0]);
                         break;
                     case Namespace + ".AuthorRangeAttribute" when a.ConstructorArguments.Length == 2:
                         field.Minimum = ToDouble(a.ConstructorArguments[0].Value);
@@ -522,9 +537,52 @@ internal static class AuthoredModel
         type.AllInterfaces.Any(i => i.ToDisplayString() == HostKindInterface);
 
     /// <summary>A VALUE kind's payload type — its <c>Value</c> property — or null for a marker
-    /// kind, which names a referenced host object and carries no value of its own.</summary>
+    /// or composed kind, which names a referenced host object and carries no single Value.</summary>
     private static ITypeSymbol? HostValueTypeOf(ITypeSymbol host) =>
         host.GetMembers("Value").OfType<IPropertySymbol>().FirstOrDefault()?.Type;
+
+    /// <summary>
+    /// Mesh, sprite and asset kinds declare a GUID, but a baked document still carries the
+    /// runtime PATH the loader is keyed on. A string field is therefore a legal wire type for
+    /// those three until bake emits the guid and the loader resolves it.
+    /// </summary>
+    private static bool AllowsBakedPath(ITypeSymbol host, ITypeSymbol expected, ITypeSymbol actual)
+    {
+        if (expected.ToDisplayString() != "System.Guid"
+            || actual.SpecialType != SpecialType.System_String)
+        {
+            return false;
+        }
+
+        return KindNameOf(host) is "mesh" or "sprite" or "asset";
+    }
+
+    /// <summary>An [AuthorDefault] argument as the C# literal text DefaultAsJson expects: an enum
+    /// by member NAME (metadata only has the number), otherwise the same literal the initializer
+    /// would have carried.</summary>
+    private static string? DefaultLiteralOf(TypedConstant constant)
+    {
+        if (constant.Kind == TypedConstantKind.Enum && constant.Type is { } enumType)
+        {
+            foreach (var member in enumType.GetMembers().OfType<IFieldSymbol>())
+            {
+                if (member.ConstantValue is { } value && Equals(value, constant.Value))
+                {
+                    return member.Name;
+                }
+            }
+            return null;
+        }
+
+        return constant.Value switch
+        {
+            null => null,
+            bool b => b ? "true" : "false",
+            string text => "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
+            _ => null,
+        };
+    }
 
     /// <summary>An attribute argument as a JSON literal, for the visibility comparison value.</summary>
     private static string? JsonLiteralOf(TypedConstant constant)

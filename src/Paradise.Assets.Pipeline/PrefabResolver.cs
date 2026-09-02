@@ -9,23 +9,14 @@ namespace Paradise.Assets.Pipeline;
 /// Expands prefab instances into plain objects.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Prefabs are an AUTHORING concept. Nothing downstream knows about them: the build flattens an
-/// instance into ordinary objects and the export contract, the loader and the runtime see exactly
-/// what a hand-placed object would have produced. That is deliberate — the contract carried
-/// prefab provenance once and it was deleted in schema v5 as "written by a host, read by nobody".
-/// </para>
-/// <para>
-/// <b>The instance IS the prefab's root.</b> Its components override the root's, matched by
-/// component id; the prefab's other objects resolve beneath it. Everything order- or
-/// identity-related below is specified rather than left to the implementation, because the Python
-/// mirror has to produce the same documents byte for byte.
-/// </para>
+/// Prefabs are an authoring concept only: the contract carried prefab provenance once and it was
+/// deleted in schema v5 as "written by a host, read by nobody". The instance IS the prefab's root
+/// (its components override the root's by id). Every order and identity rule below is specified
+/// rather than incidental, because the Python mirror must produce the same bytes.
 /// </remarks>
 public static class PrefabResolver
 {
-    /// <summary>A problem that stopped one instance resolving.</summary>
-    /// <param name="Message">What is wrong, phrased for the author.</param>
+    /// <summary>A problem that stopped one instance resolving, phrased for the author.</summary>
     public readonly record struct ResolveError(string Message)
     {
         /// <inheritdoc />
@@ -33,16 +24,9 @@ public static class PrefabResolver
     }
 
     /// <summary>The result of expanding a document.</summary>
-    /// <param name="Document">The flattened document; every object is plain.</param>
-    /// <param name="Errors">What could not be resolved; empty on success.</param>
-    /// <param name="Expanded">How many instances were expanded.</param>
     public readonly record struct ResolveResult(PrefabDocument Document, IReadOnlyList<ResolveError> Errors, int Expanded);
 
-    /// <summary>
-    /// Expands every instance in <paramref name="document"/>.
-    /// </summary>
-    /// <param name="document">The document, which may contain instances and override carriers.</param>
-    /// <param name="prefabs">Resolves a prefab reference to its document, or returns null.</param>
+    /// <summary>Expands every instance in <paramref name="document"/>.</summary>
     public static ResolveResult Resolve(PrefabDocument document, Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -55,25 +39,8 @@ public static class PrefabResolver
         return new ResolveResult(resolved, errors, expanded);
     }
 
-    /// <summary>
-    /// How deep instances may nest before resolution gives up.
-    /// </summary>
-    /// <remarks>
-    /// The cycle stack already catches a prefab that reaches itself. This catches the other
-    /// runaway — a chain that is acyclic but absurd, or a bug that mints a fresh reference each
-    /// level — with a number no real asset approaches.
-    /// </remarks>
     private const int MaxNestingDepth = 32;
 
-    /// <summary>
-    /// Expands the instances in one document into <paramref name="into"/>, and returns how many
-    /// of THIS document's instances were expanded.
-    /// </summary>
-    /// <remarks>
-    /// The count is deliberately not cumulative. A nested prefab is flattened once and reused by
-    /// every instance of it, so adding its internal expansions to the total would report a number
-    /// that grows with caching rather than with the document.
-    /// </remarks>
     private static int ExpandDocument(
         PrefabDocument document,
         Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
@@ -85,8 +52,6 @@ public static class PrefabResolver
     {
         var expanded = 0;
 
-        // Carriers are consumed by the instance they belong to and occupy no slot of their own,
-        // so they are collected first and looked up by (instance guid, prefab-local target).
         var carriers = new Dictionary<(Guid Instance, Guid Target), PrefabObject>();
         foreach (var candidate in document.Objects)
         {
@@ -107,7 +72,7 @@ public static class PrefabResolver
 
         foreach (var candidate in document.Objects)
         {
-            if (candidate.Target is not null) continue;   // consumed above
+            if (candidate.Target is not null) continue;
 
             if (candidate.Prefab is null)
             {
@@ -115,12 +80,10 @@ public static class PrefabResolver
                 continue;
             }
 
-            // FLATTEN THE PREFAB FIRST, then expand it. Doing it in this order is what makes
-            // nesting fall out: Expand only ever sees a prefab with no instances left in it, so
-            // it needs no notion of depth, and a prefab three levels deep is merged by exactly
-            // the code that merges one level deep.
+            // Flatten before expanding so Expand only ever sees a prefab with no instances left
+            // in it: nesting then needs no special code.
             var prefab = Flatten(candidate.Prefab, prefabs, errors, stack, cache, depth);
-            if (prefab is null) continue;   // the failure is already recorded
+            if (prefab is null) continue;
 
             if (candidate.Guid is not { } instanceGuid)
             {
@@ -135,23 +98,6 @@ public static class PrefabResolver
         return expanded;
     }
 
-    /// <summary>
-    /// A prefab with its own instances already expanded, or <see langword="null"/> if it could not
-    /// be resolved.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Cached by path.</b> A flattened prefab does not depend on who instantiates it — minting
-    /// happens at expansion time from the instance's guid — so the same file resolved twice gives
-    /// the same objects, and ShiningPie's 126 box instances flatten one prefab once.
-    /// </para>
-    /// <para>
-    /// <b>The stack is the cycle detector.</b> A prefab that reaches itself, directly or through
-    /// others, would otherwise recurse until the process died; instead the chain that closed the
-    /// loop is reported, because "box.prefab -> rail.prefab -> box.prefab" tells an author what to
-    /// go and delete, and "stack overflow" does not.
-    /// </para>
-    /// </remarks>
     private static PrefabDocument? Flatten(
         Paradise.Authoring.AssetReference reference,
         Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
@@ -204,8 +150,6 @@ public static class PrefabResolver
         PrefabDocument into,
         List<ResolveError> errors)
     {
-        // Every prefab-local identity gets its scene identity up front, so a Parent link can be
-        // remapped whichever order the objects come in.
         var minted = new Dictionary<Guid, Guid>();
         foreach (var member in prefab.Objects)
         {
@@ -213,9 +157,8 @@ public static class PrefabResolver
             minted[local] = local == prefab.RootGuid ? instanceGuid : MintChildGuid(instanceGuid, local);
         }
 
-        // ORDER: the instance first, then its children in PREFAB document order, immediately
-        // after it. Order is load-bearing -- the runtime assigns entity handles in walk order --
-        // so it is specified here rather than left to whatever the loop happens to do.
+        // Instance first, then its children in PREFAB order: the runtime assigns entity handles
+        // in walk order, so this order is part of the contract.
         foreach (var member in prefab.Objects)
         {
             if (member.Guid is not { } local) continue;
@@ -225,7 +168,7 @@ public static class PrefabResolver
 
             if (overrides is { Dropped: true })
             {
-                continue;   // and its descendants, handled below
+                continue;
             }
 
             if (!isRoot && DropsAncestor(member, prefab, instanceGuid, carriers)) continue;
@@ -242,7 +185,6 @@ public static class PrefabResolver
         }
     }
 
-    /// <summary>Whether any ancestor of <paramref name="member"/> is dropped by this instance.</summary>
     private static bool DropsAncestor(
         PrefabObject member,
         PrefabDocument prefab,
@@ -271,7 +213,7 @@ public static class PrefabResolver
     {
         var result = new PrefabObject();
 
-        // COMPONENT ORDER: prefab order first, then instance-only additions in instance order.
+        // Prefab order first, then instance-only additions: part of the byte contract.
         foreach (var component in prefabObject.Components)
         {
             var overriding = overrides?.Component(component.Id);
@@ -303,10 +245,6 @@ public static class PrefabResolver
         return result;
     }
 
-    /// <summary>
-    /// Rewrites the resolved object's meta: minted identity, remapped parent, and none of the
-    /// carrier-only fields, which describe the override rather than the object.
-    /// </summary>
     private static void RewriteMeta(
         PrefabObject result,
         PrefabObject prefabObject,
@@ -326,8 +264,6 @@ public static class PrefabResolver
             ?? prefabObject.Name;
         if (name is not null) data.Add(WellKnownComponents.Name, name);
 
-        // The ROOT's parent comes from the instance -- that is how a prefab is placed under
-        // something. A child's comes from the prefab, remapped to the minted identity.
         var parent = isRoot
             ? overrides?.Parent
             : prefabObject.Parent is { } local ? minted.GetValueOrDefault(local) : null;
@@ -336,8 +272,7 @@ public static class PrefabResolver
             data.Add(WellKnownComponents.Parent, DocumentGuid.Format(value));
         }
 
-        // Anything else the prefab's meta carried (a game does not extend meta today, but the
-        // payload is open) rides along, minus the carrier-only fields.
+        // meta is an open payload; a game's extra fields ride along.
         if (existing is not null)
         {
             foreach (var (key, member) in existing.Data)
@@ -353,7 +288,6 @@ public static class PrefabResolver
         else result.Components.Insert(0, component);
     }
 
-    /// <summary>Field-by-field override: the instance's value wins, everything else is inherited.</summary>
     private static CanonicalTomlTable MergeData(CanonicalTomlTable prefab, CanonicalTomlTable overrides)
     {
         var merged = new CanonicalTomlTable();
@@ -362,10 +296,8 @@ public static class PrefabResolver
             merged.Add(key, overrides.Value(key) ?? value);
         }
 
-        // Fields the prefab's component does not declare are ADDED, not refused. Whether a field
-        // belongs to the component at all is a SCHEMA question, and verify answers it there --
-        // refusing here would forbid an instance setting meta.Parent, since a prefab root
-        // deliberately has none, and that is the commonest edit there is.
+        // Undeclared fields are added, not refused: refusing would forbid an instance setting
+        // meta.Parent (a prefab root has none), the commonest edit there is. Schema is verify's job.
         foreach (var (key, value) in overrides)
         {
             if (!prefab.ContainsKey(key)) merged.Add(key, value);
@@ -374,19 +306,11 @@ public static class PrefabResolver
         return merged;
     }
 
-    /// <summary>
-    /// A resolved child's scene identity: <c>uuid5(instance guid, prefab-local guid as text)</c>.
-    /// </summary>
+    /// <summary>A resolved child's scene identity: <c>uuid5(instance guid, prefab-local guid as text)</c>.</summary>
     /// <remarks>
-    /// Deterministic, so the same scene resolves to the same identities on every machine and the
-    /// export is reproducible. The namespace is the INSTANCE, so twenty instances of one prefab
-    /// give twenty distinct sets of children with no bookkeeping in the document.
-    /// <para>
-    /// The name is the guid's canonical TEXT, not its bytes. .NET's <see cref="Guid.ToByteArray()"/>
-    /// is mixed-endian and Python's <c>UUID.bytes</c> is big-endian, so hashing raw bytes would
-    /// mint DIFFERENT identities in the two implementations — a divergence that would only show
-    /// up as a mismatched document long after the fact.
-    /// </para>
+    /// The name is the guid's canonical TEXT, not its bytes: .NET's <see cref="Guid.ToByteArray()"/>
+    /// is mixed-endian and Python's <c>UUID.bytes</c> is big-endian, so raw bytes would mint
+    /// different identities in the two implementations.
     /// </remarks>
     public static Guid MintChildGuid(Guid instance, Guid prefabLocal)
     {
