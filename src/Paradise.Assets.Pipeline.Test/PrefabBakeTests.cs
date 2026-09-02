@@ -35,6 +35,26 @@ public class PrefabBakeTests
     private static JsonElement Payload(IReadOnlyList<AuthoredComponentData> entity, Guid id)
         => entity.Single(component => component.Id == id).Data;
 
+    /// <summary>inf and nan are legal TOML with no JSON spelling; the bake reports them on the error list, naming the object and component, rather than throwing out of Import.</summary>
+    [Test]
+    public async Task a_non_finite_float_is_an_error_naming_the_component_not_an_exception()
+    {
+        var document = Scene();
+        document.Objects[1].Components.Add(new PrefabComponent(
+            new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"), "Game.Health",
+            new CanonicalTomlTable { { "Regen", double.PositiveInfinity } }));
+        var errors = new List<string>();
+
+        var level = Bake(document, errors);
+
+        await Assert.That(errors.Count).IsEqualTo(1);
+        await Assert.That(errors[0]).Contains("crate");
+        await Assert.That(errors[0]).Contains("Game.Health");
+        await Assert.That(errors[0]).Contains("inf");
+        await Assert.That(errors[0]).Contains("Regen");
+        await Assert.That(level.Entities.Count).IsEqualTo(2);
+    }
+
     [Test]
     public async Task meta_and_transform_pass_through_with_identity_and_hierarchy()
     {

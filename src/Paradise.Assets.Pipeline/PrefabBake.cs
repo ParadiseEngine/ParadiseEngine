@@ -36,16 +36,30 @@ public static class PrefabBake
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 
         var level = new LevelData();
-        foreach (var entry in resolved.Document.Objects)
+        foreach (var (entry, index) in resolved.Document.Objects.Select(static (entry, index) => (entry, index)))
         {
             var components = new List<AuthoredComponentData>();
             foreach (var component in entry.Components)
             {
+                JsonElement data;
+                try
+                {
+                    data = ToElement(ToNode(component.Data, extensions));
+                }
+                catch (FormatException failure)
+                {
+                    // A value TOML can spell and JSON cannot (inf, nan). The importer contract is
+                    // an error on the list, never an exception out of Import.
+                    var name = entry.Name is { Length: > 0 } named ? named : DocumentGuid.Format(entry.Guid ?? Guid.Empty);
+                    errors.Add($"object {index} ({name}), component {component.Type ?? DocumentGuid.Format(component.Id)}: {failure.Message}");
+                    continue;
+                }
+
                 components.Add(new AuthoredComponentData
                 {
                     Id = component.Id,
                     Type = component.Type,
-                    Data = ToElement(ToNode(component.Data, extensions)),
+                    Data = data,
                 });
             }
 

@@ -144,9 +144,10 @@ public sealed class ProjectManifest
     private static void RejectUnknown(string sourceName, Dictionary<string, object?>? unknown, string context)
     {
         if (unknown is not { Count: > 0 }) return;
+        var keys = string.Join("', '", unknown.Keys);
         throw new ProjectManifestException(
             sourceName,
-            $"has an unknown key '{unknown.Keys.First()}' {context}; a key this build does not read is a setting that never applies");
+            $"has unknown key(s) '{keys}' {context}; a key this build does not read is a setting that never applies");
     }
 
     private static TextureQuality ReadTextureQuality(string sourceName, string profileName, string? value) => value switch

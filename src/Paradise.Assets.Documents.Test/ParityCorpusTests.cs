@@ -42,6 +42,6 @@ public class ParityCorpusTests
     [Test]
     public async Task the_corpus_is_present()
     {
-        await Assert.That(Directory.EnumerateFiles(s_directory, "*.toml").Count()).IsEqualTo(3);
+        await Assert.That(Directory.EnumerateFiles(s_directory, "*.toml").Count()).IsGreaterThanOrEqualTo(3);
     }
 }

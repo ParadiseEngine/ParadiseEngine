@@ -176,7 +176,7 @@ public static class ProjectVerifier
             }
         }
 
-        // Must match PrefabBake.ToValue's walk: a reference the bake flattens is one verify checked.
+        // Must match CanonicalJson's reference rule (the bake's hook): a reference the bake flattens is one verify checked.
         void Walk(object? value, string where)
         {
             switch (value)
