@@ -187,6 +187,37 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task a_baked_navmesh_is_carried_into_the_build()
+    {
+        // Nothing claimed the extension, so a navmesh was verified as an asset and then never
+        // written: the level built clean and shipped with no navmesh beside it, which surfaces
+        // as agents that cannot path rather than as anything the build could name.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/levels/district.navmesh.bin");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/levels/district.navmesh.bin"))
+            .IsEquivalentTo(fileSystem.ReadAllBytes("/game/assets/levels/district.navmesh.bin"));
+    }
+
+    [Test]
+    public async Task a_bare_bin_is_not_claimed_as_a_navmesh()
+    {
+        // The compound suffix is the claim, not ".bin". A bare .bin is the least specific name a
+        // binary file can have, and claiming it would make one step the silent owner of every
+        // blob anyone drops in the tree.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/levels/scratch.bin");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/scratch.bin")).IsFalse();
+    }
+
+    [Test]
     public async Task config_documents_are_emitted_canonically_for_toml_profiles()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

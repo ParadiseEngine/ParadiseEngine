@@ -64,6 +64,7 @@ public static class AssetImporters
         new ConfigImporter(),
         new PrefabImporter(),
         new AudioImporter(),
+        new NavMeshImporter(),
         new MeshImporter(),
         new TextureImporter(),
     ];
