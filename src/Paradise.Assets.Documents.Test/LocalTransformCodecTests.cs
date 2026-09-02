@@ -31,6 +31,18 @@ public class LocalTransformCodecTests
             .IsEquivalentTo(new[] { WellKnownComponents.Position, WellKnownComponents.Rotation, WellKnownComponents.Scale });
     }
 
+    /// <summary>Transforms come from float32 vectors; the shortest decimal keeps 0.1 out of the diff as 0.10000000149011612 (issue #200).</summary>
+    [Test]
+    public async Task float32_channels_are_written_with_their_shortest_decimal()
+    {
+        var component = LocalTransformCodec.Write(new LocalTransform(new Vector3(0.1f, 1.3f, 0f), Quaternion.Identity, new Vector3(0.7f, 1f, 1f)));
+
+        var written = CanonicalTomlWriter.WriteString(new CanonicalTomlTable { { "t", component.Data } });
+        await Assert.That(written).Contains("Position = [0.1, 1.3, 0.0]");
+        await Assert.That(written).Contains("Scale = [0.7, 1.0, 1.0]");
+        await Assert.That(LocalTransformCodec.Read(component.Data).Position.X).IsEqualTo(0.1f);
+    }
+
     [Test]
     public async Task absent_fields_read_as_the_identity_parts()
     {

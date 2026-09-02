@@ -6,9 +6,10 @@ namespace Paradise.Assets.Project;
 
 /// <summary>A validated <c>assets/project.toml</c>.</summary>
 /// <remarks>
-/// Unknown values are refused rather than defaulted, because a <c>document_format</c> typo that
-/// quietly built TOML into a release tree is found on ship day. Unknown KEYS are still ignored
-/// by Tomlyn's default — issue #198. Unknown profile names are the game's to invent.
+/// Unknown keys and values are refused rather than defaulted, because a <c>document_format</c>
+/// typo that quietly built TOML into a release tree is found on ship day. Unknown profile names
+/// are the game's to invent. <c>blob</c> and <c>pack</c> are refused until a writer exists: a
+/// strict loader that accepts a value nothing implements only moves the failure to the build.
 /// </remarks>
 public sealed class ProjectManifest
 {
@@ -70,6 +71,8 @@ public sealed class ProjectManifest
         }
 
         if (document is null) throw new ProjectManifestException(sourceName, "is empty");
+        RejectUnknown(sourceName, document.Unknown, "at the document root");
+        RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
         {
@@ -99,6 +102,7 @@ public sealed class ProjectManifest
                     throw new ProjectManifestException(sourceName, "declares a build profile with an empty name");
                 }
 
+                RejectUnknown(sourceName, profileDocument?.Unknown, $"on build profile '{profileName}'");
                 profiles.Add(profileName, ReadProfile(sourceName, profileName, profileDocument));
             }
         }
@@ -111,6 +115,13 @@ public sealed class ProjectManifest
         // "[build.profiles.dev]" with no keys deserializes as null and means all defaults.
         if (document is null) return BuildProfile.Default;
 
+        if (document.Pack == true)
+        {
+            throw new ProjectManifestException(
+                sourceName,
+                $"sets pack = true on build profile '{profileName}', which is reserved: no packer exists yet");
+        }
+
         return new BuildProfile(
             ReadDocumentFormat(sourceName, profileName, document.DocumentFormat),
             ReadTextureQuality(sourceName, profileName, document.TextureQuality),
@@ -122,11 +133,22 @@ public sealed class ProjectManifest
         null => BuildProfile.Default.DocumentFormat,
         "toml" => DocumentFormat.Toml,
         "json" => DocumentFormat.Json,
-        "blob" => DocumentFormat.Blob,
+        "blob" => throw new ProjectManifestException(
+            sourceName,
+            $"sets document_format = \"blob\" on build profile '{profileName}', which is reserved: no writer exists yet"),
         _ => throw new ProjectManifestException(
             sourceName,
-            $"sets document_format = \"{value}\" on build profile '{profileName}'; expected \"toml\", \"json\" or \"blob\""),
+            $"sets document_format = \"{value}\" on build profile '{profileName}'; expected \"toml\" or \"json\""),
     };
+
+    private static void RejectUnknown(string sourceName, Dictionary<string, object?>? unknown, string context)
+    {
+        if (unknown is not { Count: > 0 }) return;
+        var keys = string.Join("', '", unknown.Keys);
+        throw new ProjectManifestException(
+            sourceName,
+            $"has unknown key(s) '{keys}' {context}; a key this build does not read is a setting that never applies");
+    }
 
     private static TextureQuality ReadTextureQuality(string sourceName, string profileName, string? value) => value switch
     {

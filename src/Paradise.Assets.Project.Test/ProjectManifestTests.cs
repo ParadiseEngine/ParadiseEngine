@@ -30,7 +30,6 @@ public class ProjectManifestTests
 
             [build.profiles.release]
             document_format = "json"
-            pack = true
             """, "project.toml");
 
         await Assert.That(manifest.Profiles.Count).IsEqualTo(2);
@@ -43,7 +42,7 @@ public class ProjectManifestTests
         var release = manifest.Profiles["release"];
         await Assert.That(release.DocumentFormat).IsEqualTo(DocumentFormat.Json);
         await Assert.That(release.TextureQuality).IsEqualTo(TextureQuality.Full);
-        await Assert.That(release.Pack).IsTrue();
+        await Assert.That(release.Pack).IsFalse();
     }
 
     [Test]
@@ -62,10 +61,10 @@ public class ProjectManifestTests
     {
         // Deliberately not one of dev/debug/release: the manifest does not enumerate names, so a
         // game adding a profile never has to patch this package.
-        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[build.profiles.demo-kiosk]\npack = true\n", "project.toml");
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[build.profiles.demo-kiosk]\ntexture_quality = \"fast\"\n", "project.toml");
 
         await Assert.That(manifest.TryGetProfile("demo-kiosk", out var profile)).IsTrue();
-        await Assert.That(profile!.Pack).IsTrue();
+        await Assert.That(profile!.TextureQuality).IsEqualTo(TextureQuality.Fast);
         await Assert.That(manifest.TryGetProfile("nope", out _)).IsFalse();
     }
 
@@ -79,6 +78,54 @@ public class ProjectManifestTests
         await Assert.That(error.Message).Contains("release");
         await Assert.That(error.Message).Contains("yaml");
         await Assert.That(error.SourceName).IsEqualTo("project.toml");
+    }
+
+    /// <summary>The failure the strict loader exists to prevent: a typo'd key that a lenient read ignored is a setting that never applied.</summary>
+    [Test]
+    public async Task a_typoed_profile_key_is_refused_rather_than_ignored()
+    {
+        var error = Rejects($"{Minimal}\n\n[build.profiles.release]\ndocument_fromat = \"json\"\n");
+
+        await Assert.That(error.Message).Contains("document_fromat");
+        await Assert.That(error.Message).Contains("release");
+    }
+
+    [Test]
+    public async Task an_unknown_root_key_is_refused()
+    {
+        var error = Rejects($"{Minimal}\nnmae = \"y\"\n");
+
+        await Assert.That(error.Message).Contains("nmae");
+    }
+
+    [Test]
+    public async Task an_unknown_build_key_is_refused()
+    {
+        var error = Rejects($"{Minimal}\n\n[build]\nprofile = \"dev\"\n");
+
+        await Assert.That(error.Message).Contains("profile");
+        await Assert.That(error.Message).Contains("[build]");
+    }
+
+    [Test]
+    public async Task a_duplicate_key_is_refused_rather_than_last_wins()
+    {
+        var error = Rejects("name = \"a\"\nname = \"b\"\nschema_version = 1\n");
+
+        await Assert.That(error.Message).Contains("name");
+    }
+
+    /// <summary>Reserved values are refused at load, not at the first asset: a strict loader that accepts a value nothing implements only moves the failure.</summary>
+    [Test]
+    public async Task blob_and_pack_are_refused_until_a_writer_exists()
+    {
+        var blob = Rejects($"{Minimal}\n\n[build.profiles.release]\ndocument_format = \"blob\"\n");
+        await Assert.That(blob.Message).Contains("blob");
+        await Assert.That(blob.Message).Contains("release");
+
+        var pack = Rejects($"{Minimal}\n\n[build.profiles.release]\npack = true\n");
+        await Assert.That(pack.Message).Contains("pack");
+        await Assert.That(pack.Message).Contains("release");
     }
 
     [Test]

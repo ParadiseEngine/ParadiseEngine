@@ -264,9 +264,20 @@ public sealed class ConfigImporter : IAssetImporter
         }
 
         // Canonicalized even for JSON output, so a document refused as source is refused here too.
-        var text = context.Profile.DocumentFormat == DocumentFormat.Json
-            ? ConfigDocument.ToJson(canonical, context.Source)
-            : canonical;
+        var text = canonical;
+        if (context.Profile.DocumentFormat == DocumentFormat.Json)
+        {
+            try
+            {
+                text = ConfigDocument.ToJson(canonical, context.Source);
+            }
+            catch (FormatException failure)
+            {
+                // inf/nan are legal TOML and have no JSON spelling; the error names source and key.
+                errors.Add(failure.Message);
+                return true;
+            }
+        }
 
         context.Output.WriteAllBytes(
             "/" + Path.ChangeExtension(context.Source, DocumentOutput.Extension(context.Profile)),

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 
+using Tomlyn;
 using Tomlyn.Serialization;
 
 namespace Paradise.Assets.Project;
@@ -20,12 +21,19 @@ internal sealed class ProjectManifestDocument
 
     [JsonPropertyName("build")]
     public BuildSectionDocument? Build { get; set; }
+
+    /// <summary>Anything Tomlyn could not map. Non-empty is an error: a typo'd key that a lenient read ignored is a setting that never applied.</summary>
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
 }
 
 internal sealed class BuildSectionDocument
 {
     [JsonPropertyName("profiles")]
     public Dictionary<string, BuildProfileDocument>? Profiles { get; set; }
+
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
 }
 
 internal sealed class BuildProfileDocument
@@ -38,8 +46,12 @@ internal sealed class BuildProfileDocument
 
     [JsonPropertyName("pack")]
     public bool? Pack { get; set; }
+
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
 }
 
 /// <summary>Every read goes through this; Tomlyn's reflection overloads would fail a NativeAOT host at the first manifest read, not at build time.</summary>
+[TomlSourceGenerationOptions(DuplicateKeyHandling = TomlDuplicateKeyHandling.Error)]
 [TomlSerializable(typeof(ProjectManifestDocument))]
 internal sealed partial class ProjectManifestSerializerContext : TomlSerializerContext;

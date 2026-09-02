@@ -20,22 +20,22 @@ public static class LocalTransformCodec
             Vector(data.Value(WellKnownComponents.Scale), Vector3.One));
     }
 
-    /// <summary>All three fields, in canonical order; widens float32 bit-exactly, unlike <c>CanonicalTomlTable.Add</c> (issue #200).</summary>
+    /// <summary>All three fields, in canonical order. The floats are handed to the table as float32 so its widening (<see cref="CanonicalFloat"/>) spells them.</summary>
     public static PrefabComponent Write(LocalTransform transform)
         => new(WellKnownComponents.TransformId, WellKnownComponents.TransformType,
             new CanonicalTomlTable
             {
                 {
                     WellKnownComponents.Position,
-                    new object[] { (double)transform.Position.X, (double)transform.Position.Y, (double)transform.Position.Z }
+                    new object[] { transform.Position.X, transform.Position.Y, transform.Position.Z }
                 },
                 {
                     WellKnownComponents.Rotation,
-                    new object[] { (double)transform.Rotation.X, (double)transform.Rotation.Y, (double)transform.Rotation.Z, (double)transform.Rotation.W }
+                    new object[] { transform.Rotation.X, transform.Rotation.Y, transform.Rotation.Z, transform.Rotation.W }
                 },
                 {
                     WellKnownComponents.Scale,
-                    new object[] { (double)transform.Scale.X, (double)transform.Scale.Y, (double)transform.Scale.Z }
+                    new object[] { transform.Scale.X, transform.Scale.Y, transform.Scale.Z }
                 },
             });
 

@@ -200,6 +200,21 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.ReadAllText("/game/build/config/game.toml")).IsEqualTo("b = 2\na = 1\n");
     }
 
+    /// <summary>inf is legal TOML with no JSON spelling: a json-profile build reports it against the file, not as an unhandled exception (issue #211).</summary>
+    [Test]
+    public async Task a_config_holding_inf_fails_a_json_build_with_a_named_error()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject(documentFormat: "json");
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/config/game.toml", "[limits]\nmax = inf\n");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run("dev");
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("config/game.toml");
+        await Assert.That(result.Errors[0]).Contains("limits.max");
+        await Assert.That(fileSystem.FileExists("/game/build/config/game.json")).IsFalse();
+    }
+
     [Test]
     public async Task a_document_bakes_to_the_export_contract()
     {

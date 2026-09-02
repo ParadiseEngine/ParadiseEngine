@@ -14,7 +14,7 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
 
     public int Count => _pairs.Count;
 
-    /// <summary><see cref="int"/> widens to <see cref="long"/>, <see cref="float"/> to <see cref="double"/> via shortest decimal (issue #200).</summary>
+    /// <summary><see cref="int"/> widens to <see cref="long"/>, <see cref="float"/> to <see cref="double"/> via <see cref="CanonicalFloat"/>.</summary>
     /// <exception cref="ArgumentException">The key is duplicated, or the value is outside the vocabulary.</exception>
     public void Add(string key, object value)
     {
@@ -47,7 +47,7 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
     {
         bool or long or double or string or CanonicalTomlTable or CanonicalInlineTable => value,
         int widened => (long)widened,
-        float widened => WidenFloat(widened),
+        float widened => CanonicalFloat.Widen(widened),
         IReadOnlyList<CanonicalTomlTable> => value,
         IEnumerable<object> array => NormalizeArray(array, key),
         _ => throw new ArgumentException(
@@ -55,14 +55,6 @@ public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object
             "double, string, arrays of those, tables, arrays of tables and inline tables.",
             nameof(value)),
     };
-
-    private static double WidenFloat(float value)
-    {
-        if (!float.IsFinite(value)) return value;
-        return double.Parse(
-            value.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
-            System.Globalization.CultureInfo.InvariantCulture);
-    }
 
     private static object NormalizeArray(IEnumerable<object> array, string key)
     {

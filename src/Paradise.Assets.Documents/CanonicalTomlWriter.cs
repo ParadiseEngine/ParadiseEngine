@@ -42,9 +42,11 @@ namespace Paradise.Assets.Documents;
 /// <item>Every nested <see cref="CanonicalTomlTable"/> is a <c>[dotted.path]</c> header; every
 /// array of tables is one <c>[[dotted.path]]</c> header per element, in element order.
 /// Dotted-path segments are formatted as keys (item 4). One blank line precedes every header
-/// except at the start of the document. Never dotted keys. An empty generic table is written
-/// under its header today, but the READER restores any empty table as <c>{}</c> (item 11), so
-/// that round trip is not identity — issue #199 settles which side moves.</item>
+/// except at the start of the document. Never dotted keys. An EMPTY generic table is written
+/// <c>key = {}</c> and an empty array of tables <c>key = []</c>, at value position: a header with
+/// nothing under it has no content for the reader to restore the form from, so the only empty
+/// table these documents can hold is the inline one (a reference to nothing), and the writer
+/// says so (issue #199).</item>
 /// <item>A <see cref="CanonicalInlineTable"/> is written on one line as
 /// <c>{ key = value, … }</c> — <c>", "</c> between pairs, in model order, keys by item 4 and
 /// values by items 5–9. An empty one is <c>{}</c>, which is how a null element inside an array
@@ -75,9 +77,15 @@ public static class CanonicalTomlWriter
     {
         foreach (var (key, value) in table)
         {
-            if (value is CanonicalTomlTable or IReadOnlyList<CanonicalTomlTable>) continue;
+            if (value is CanonicalTomlTable { Count: > 0 } or IReadOnlyList<CanonicalTomlTable> { Count: > 0 }) continue;
             builder.Append(FormatKey(key)).Append(" = ");
-            WriteValue(builder, value);
+            switch (value)
+            {
+                case CanonicalTomlTable: builder.Append("{}"); break;
+                case IReadOnlyList<CanonicalTomlTable>: builder.Append("[]"); break;
+                default: WriteValue(builder, value); break;
+            }
+
             builder.Append('\n');
         }
 
@@ -86,12 +94,12 @@ public static class CanonicalTomlWriter
             var childPath = pathPrefix is null ? FormatKey(key) : $"{pathPrefix}.{FormatKey(key)}";
             switch (value)
             {
-                case CanonicalTomlTable child:
+                case CanonicalTomlTable { Count: > 0 } child:
                     WriteHeader(builder, $"[{childPath}]");
                     WriteBody(builder, child, childPath);
                     break;
 
-                case IReadOnlyList<CanonicalTomlTable> elements:
+                case IReadOnlyList<CanonicalTomlTable> { Count: > 0 } elements:
                     foreach (var element in elements)
                     {
                         WriteHeader(builder, $"[[{childPath}]]");

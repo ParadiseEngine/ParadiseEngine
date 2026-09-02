@@ -128,8 +128,13 @@ public class CanonicalTomlWriterTests
             "[import]\npreset = \"color\"\n");
     }
 
+    /// <summary>
+    /// A header with nothing under it has no content for the reader to restore the form from, so
+    /// it came back as <c>{}</c> and the second write differed from the first (issue #199). The
+    /// writer now says <c>{}</c> itself, and the round trip is identity.
+    /// </summary>
     [Test]
-    public async Task an_empty_table_still_gets_its_header()
+    public async Task an_empty_table_is_written_inline_and_round_trips()
     {
         var document = new CanonicalTomlTable
         {
@@ -137,8 +142,29 @@ public class CanonicalTomlWriterTests
             { "import", new CanonicalTomlTable() },
         };
 
-        await Assert.That(CanonicalTomlWriter.WriteString(document)).IsEqualTo(
-            "name = \"x\"\n\n[import]\n");
+        var written = CanonicalTomlWriter.WriteString(document);
+        await Assert.That(written).IsEqualTo("name = \"x\"\nimport = {}\n");
+
+        var reread = TomlDocumentReader.ToCanonical(
+            TomlDocumentReader.Parse(written, static m => new FormatException(m)), "", static m => new FormatException(m));
+        await Assert.That(CanonicalTomlWriter.WriteString(reread)).IsEqualTo(written);
+    }
+
+    [Test]
+    public async Task an_empty_array_of_tables_is_written_as_an_empty_array()
+    {
+        var document = new CanonicalTomlTable
+        {
+            { "name", "x" },
+            { "items", Array.Empty<CanonicalTomlTable>() },
+        };
+
+        var written = CanonicalTomlWriter.WriteString(document);
+        await Assert.That(written).IsEqualTo("name = \"x\"\nitems = []\n");
+
+        var reread = TomlDocumentReader.ToCanonical(
+            TomlDocumentReader.Parse(written, static m => new FormatException(m)), "", static m => new FormatException(m));
+        await Assert.That(CanonicalTomlWriter.WriteString(reread)).IsEqualTo(written);
     }
 
     [Test]

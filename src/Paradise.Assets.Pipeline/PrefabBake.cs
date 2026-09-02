@@ -36,16 +36,30 @@ public static class PrefabBake
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 
         var level = new LevelData();
-        foreach (var entry in resolved.Document.Objects)
+        foreach (var (entry, index) in resolved.Document.Objects.Select(static (entry, index) => (entry, index)))
         {
             var components = new List<AuthoredComponentData>();
             foreach (var component in entry.Components)
             {
+                JsonElement data;
+                try
+                {
+                    data = ToElement(ToNode(component.Data, extensions));
+                }
+                catch (FormatException failure)
+                {
+                    // A value TOML can spell and JSON cannot (inf, nan). The importer contract is
+                    // an error on the list, never an exception out of Import.
+                    var name = entry.Name is { Length: > 0 } named ? named : DocumentGuid.Format(entry.Guid ?? Guid.Empty);
+                    errors.Add($"object {index} ({name}), component {component.Type ?? DocumentGuid.Format(component.Id)}: {failure.Message}");
+                    continue;
+                }
+
                 components.Add(new AuthoredComponentData
                 {
                     Id = component.Id,
                     Type = component.Type,
-                    Data = ToElement(ToNode(component.Data, extensions)),
+                    Data = data,
                 });
             }
 
@@ -61,35 +75,10 @@ public static class PrefabBake
         return parsed.RootElement.Clone();
     }
 
+    // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
+    // shift every material after it onto the wrong primitive.
     private static JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions)
-    {
-        var result = new JsonObject();
-        foreach (var (key, value) in table) result[key] = ToValue(value, extensions);
-        return result;
-    }
-
-    private static JsonNode? ToValue(object? value, DocumentExtensions extensions) => value switch
-    {
-        null => null,
-
-        // A null slot; dropping it would shift every material after it onto the wrong primitive.
-        CanonicalInlineTable { Count: 0 } => null,
-
-        // Gated on the reference SHAPE, matching ProjectVerifier.Walk: inside an array every table
-        // is inline (#187), so matching on the model type would bake a collider list to null.
-        CanonicalInlineTable reference when AssetReferenceCodec.IsWrittenInline(reference.ToList()) =>
-            BuiltPath(reference.Value("path") as string, extensions),
-
-        CanonicalInlineTable payload => ToNode(payload, extensions),
-
-        CanonicalTomlTable nested => ToNode(nested, extensions),
-        string text => JsonValue.Create(text),
-        bool flag => JsonValue.Create(flag),
-        long integer => JsonValue.Create(integer),
-        double number => JsonValue.Create(number),
-        IReadOnlyList<object> list => new JsonArray(list.Select(item => ToValue(item, extensions)).ToArray()),
-        _ => JsonValue.Create(value.ToString()),
-    };
+        => CanonicalJson.ToNode(table, reference => BuiltPath(reference.Value("path") as string, extensions));
 
     private static JsonNode? BuiltPath(string? path, DocumentExtensions extensions)
     {
