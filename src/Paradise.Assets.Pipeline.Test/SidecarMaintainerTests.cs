@@ -109,7 +109,8 @@ public class SidecarMaintainerTests
     /// <summary>
     /// A temp-then-rename save whose temp file outlives the debounce: the temp gets a mint, then
     /// the rename would carry that fresh guid over the asset's real one and break every reference
-    /// to it (issue #196). The destination wins; the stray sidecar goes.
+    /// to it (issue #196). The destination wins; the stray sidecar goes. The temp name here is one
+    /// the junk rule does not know, because a known one never gets a sidecar in the first place.
     /// </summary>
     [Test]
     public async Task a_rename_onto_an_existing_sidecar_keeps_the_destination_identity()
@@ -120,16 +121,66 @@ public class SidecarMaintainerTests
         maintainer.Ensure("/game/assets/models/crate.glb");
         var real = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid;
 
-        WriteAsset(fileSystem, "/game/assets/models/crate.glb.tmp", [4, 5, 6]);
-        maintainer.Ensure("/game/assets/models/crate.glb.tmp");
-        fileSystem.DeleteFile("/game/assets/models/crate.glb.tmp");
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb.saving", [4, 5, 6]);
+        maintainer.Ensure("/game/assets/models/crate.glb.saving");
+        fileSystem.DeleteFile("/game/assets/models/crate.glb.saving");
         WriteAsset(fileSystem, "/game/assets/models/crate.glb", [4, 5, 6]);
 
-        var action = maintainer.Carry("/game/assets/models/crate.glb.tmp", "/game/assets/models/crate.glb");
+        var action = maintainer.Carry("/game/assets/models/crate.glb.saving", "/game/assets/models/crate.glb");
 
         await Assert.That(action).IsEqualTo(SidecarAction.Conflicted);
         await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid).IsEqualTo(real);
-        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.tmp.meta")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.saving.meta")).IsFalse();
+    }
+
+    /// <summary>An editor's or the OS's scratch gets no sidecar: minted, it would be committed while the file it describes is gitignored, and every other checkout would see an orphan (issue #203).</summary>
+    [Test]
+    [Arguments("/game/assets/models/.DS_Store")]
+    [Arguments("/game/assets/models/Thumbs.db")]
+    [Arguments("/game/assets/models/crate.glb.tmp")]
+    [Arguments("/game/assets/models/crate.glb~")]
+    [Arguments("/game/assets/models/.#crate.glb")]
+    [Arguments("/game/assets/props/crate.blend1")]
+    public async Task junk_is_never_given_a_sidecar(string path)
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var maintainer = Maintainer(fileSystem);
+        WriteAsset(fileSystem, path, [1]);
+
+        await Assert.That(maintainer.Ensure(path)).IsEqualTo(SidecarAction.None);
+        await Assert.That(maintainer.Reconcile()).IsEqualTo(0);
+        await Assert.That(fileSystem.FileExists(SidecarMeta.PathFor(path))).IsFalse();
+    }
+
+    /// <summary>Reconcile runs before every watch rebuild; a second pass over an unchanged tree must not read the assets again (issue #203).</summary>
+    [Test]
+    public async Task an_unchanged_asset_is_not_hashed_twice()
+    {
+        using var fileSystem = new CountingFileSystem();
+        fileSystem.CreateDirectory("/game/assets/models");
+        fileSystem.WriteAllText("/game/assets/project.toml", "name = \"x\"\nschema_version = 1\n");
+        var maintainer = new SidecarMaintainer(fileSystem, s_layout);
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        maintainer.Reconcile();
+
+        fileSystem.AssetReads = 0;
+        maintainer.Reconcile();
+        await Assert.That(fileSystem.AssetReads).IsEqualTo(0);
+
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [4, 5, 6, 7]);
+        maintainer.Reconcile();
+        await Assert.That(fileSystem.AssetReads).IsEqualTo(1);
+    }
+
+    private sealed class CountingFileSystem : MemoryFileSystem
+    {
+        public int AssetReads;
+
+        protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+        {
+            if ((access & FileAccess.Write) == 0 && !SidecarMeta.IsSidecarPath(path) && path.GetName() != "project.toml") AssetReads++;
+            return base.OpenFileImpl(path, mode, access, share);
+        }
     }
 
     [Test]

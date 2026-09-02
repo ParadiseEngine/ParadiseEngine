@@ -14,9 +14,6 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "texture";
 
-    /// <summary>The encode depends on the argv and the encoder's version, which <see cref="ArtifactCache"/> keys on and the index does not.</summary>
-    public bool DeterministicCopy => false;
-
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
@@ -86,9 +83,6 @@ public sealed class MeshImporter : IAssetImporter
     public string Name => "mesh";
 
     /// <inheritdoc />
-    public bool DeterministicCopy => true;
-
-    /// <inheritdoc />
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
@@ -117,16 +111,13 @@ public sealed class MeshImporter : IAssetImporter
         var rewrite = MeshTextureReferences.Rewrite(bytes);
 
         // Against the SOURCE tree: Models/ builds before textures/, so the KTX2 does not exist yet.
-        var directory = context.Asset.GetDirectory();
         var missing = false;
         foreach (var reference in rewrite.Sources)
         {
-            if (context.FileSystem.FileExists(Resolve(directory, reference))) continue;
+            if (context.CheckReference(reference, out _) is not { } problem) continue;
 
             missing = true;
-            errors.Add(
-                $"{context.Source}: references texture '{reference}', which does not exist under assets/ " +
-                "(a moved or renamed texture; the mesh and the reference move together)");
+            errors.Add(problem);
         }
 
         if (missing) return true;
@@ -134,9 +125,6 @@ public sealed class MeshImporter : IAssetImporter
         context.Output.WriteAllBytes("/" + context.Source, rewrite.Glb);
         return true;
     }
-
-    private static UPath Resolve(UPath directory, string uri)
-        => (directory / Uri.UnescapeDataString(uri)).ToAbsolute();
 
     internal static bool HasEmbeddedEncodedImages(byte[] glb, out string mimeType)
     {
@@ -164,9 +152,6 @@ public sealed class AudioImporter : IAssetImporter
     public string Name => "audio";
 
     /// <inheritdoc />
-    public bool DeterministicCopy => true;
-
-    /// <inheritdoc />
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
@@ -184,9 +169,6 @@ public sealed class PrefabImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "prefab";
-
-    /// <summary>A prefab bakes the prefabs it instances, so its output changes when a file it merely REFERENCES does — nothing about its own bytes says so.</summary>
-    public bool DeterministicCopy => false;
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -246,9 +228,6 @@ public sealed class ConfigImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "config";
-
-    /// <summary>The output depends on the profile's document format, which the index does not key on.</summary>
-    public bool DeterministicCopy => false;
 
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;

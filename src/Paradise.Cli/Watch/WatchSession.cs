@@ -60,13 +60,26 @@ internal sealed class WatchSession
             if (!rebuildNow && drained == 0) continue;
 
             Set(WatchStatus.Building, LastErrorCount);
-            var result = _rebuild();
+            var result = Rebuild();
             LastErrorCount = result.Errors.Count;
             foreach (var error in result.Errors) _error($"error: {error}");
             _log(result.Succeeded
                 ? $"watch: rebuilt {result.AssetCount} asset(s) into {_outputDisplay()}"
                 : $"watch: build FAILED with {result.Errors.Count} error(s)");
             Set(result.Succeeded ? WatchStatus.Idle : WatchStatus.Failed, LastErrorCount);
+        }
+    }
+
+    /// <summary>The runner catches what it can; this catches the rest, because a watch that dies mid-edit reports nothing and rebuilds nothing (#203).</summary>
+    private BuildResult Rebuild()
+    {
+        try
+        {
+            return _rebuild!();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            return new BuildResult(false, [$"rebuild threw {error.GetType().Name}: {error.Message}"], 0, default);
         }
     }
 

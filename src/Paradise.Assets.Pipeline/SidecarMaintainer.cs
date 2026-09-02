@@ -42,7 +42,9 @@ public sealed class SidecarMaintainer
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
-    private readonly Dictionary<UPath, string> _seenHash = [];
+    // Hashed once per (mtime, size): every watch rebuild reconciles first, and hashing the
+    // whole tree each time was most of what a rebuild cost (#203).
+    private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
     public SidecarMaintainer(
         IFileSystem fileSystem,
@@ -88,8 +90,7 @@ public sealed class SidecarMaintainer
         }
 
         var sidecar = SidecarMeta.PathFor(asset);
-        var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
-        _seenHash[asset] = hash;
+        var hash = HashOf(asset);
 
         if (_fileSystem.FileExists(sidecar))
         {
@@ -119,7 +120,7 @@ public sealed class SidecarMaintainer
             foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
-            _seenHash.Remove(held.Asset);
+            _seen.Remove(held.Asset);
             _log($"relinked: {Display(held.Asset)} -> {Display(asset)} (guid kept)");
             return SidecarAction.Relinked;
         }
@@ -145,7 +146,7 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        if (_seenHash.Remove(from, out var remembered)) _seenHash[to] = remembered;
+        if (_seen.Remove(from, out var remembered)) _seen[to] = remembered;
 
         var destination = SidecarMeta.PathFor(to);
         if (_fileSystem.FileExists(destination))
@@ -195,7 +196,7 @@ public sealed class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        if (!_seenHash.Remove(asset, out var hash)) hash = meta.Hash;
+        var hash = _seen.Remove(asset, out var seen) ? seen.Hash : meta.Hash;
         if (hash is null) return SidecarAction.None;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
@@ -212,6 +213,17 @@ public sealed class SidecarMaintainer
             _quarantine.Remove(hash);
             _log($"orphaned: {Display(held.Sidecar)} — no asset reappeared with its content");
         }
+    }
+
+    private string HashOf(UPath asset)
+    {
+        var stamp = FileStamp.Of(_fileSystem, asset);
+        if (stamp is { } current && _seen.TryGetValue(asset, out var seen) && seen.Stamp == current) return seen.Hash;
+
+        var hash = SidecarMeta.ComputeHash(_fileSystem, asset);
+        if (stamp is { } taken) _seen[asset] = new SeenAsset(taken, hash);
+        else _seen.Remove(asset);
+        return hash;
     }
 
     private void Save(SidecarMeta meta, UPath path)
@@ -235,3 +247,5 @@ public sealed class SidecarMaintainer
 }
 
 public readonly record struct QuarantinedIdentity(UPath Asset, UPath Sidecar, SidecarMeta Meta, DateTimeOffset At);
+
+internal readonly record struct SeenAsset((long Mtime, long Size) Stamp, string Hash);

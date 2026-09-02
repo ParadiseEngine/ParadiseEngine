@@ -14,8 +14,10 @@ public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, i
 /// <remarks>
 /// No lookup table of asset kinds on purpose: what an asset IS lives in the importers, so a
 /// project can append one that shadows a built-in without this file changing (library-only
-/// today; the CLI cannot pass a chain — issue #208). Stale outputs from deleted sources are not
-/// swept (issue #201); <c>clean</c> is the answer.
+/// today; the CLI cannot pass a chain — issue #208). A successful build's tree holds exactly what
+/// it produced: the manifest goes first and comes back last, so a tree without one is a tree a
+/// build did not finish, and whatever the build did not write is swept before the manifest
+/// returns (issues #201, #202).
 /// </remarks>
 public sealed class BuildRunner
 {
@@ -46,9 +48,22 @@ public sealed class BuildRunner
     }
 
     /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
+    /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
     public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build)
     {
         var output = _layout.OutputFor(target);
+        try
+        {
+            return RunCore(profileName, target, output);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or SidecarMetaException)
+        {
+            return new BuildResult(false, [$"build aborted: {error.Message}"], 0, output);
+        }
+    }
+
+    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output)
+    {
         var errors = new List<string>();
 
         ProjectManifest projectManifest;
@@ -84,32 +99,52 @@ public sealed class BuildRunner
         var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName ?? "" };
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
-        var index = BuildIndex.Load(_fileSystem, output, profileName, target);
+        // From here until Save the tree is in flux, and a manifest describing the previous one
+        // would be believed by whoever reads it (#202).
+        if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
-        foreach (var path in _fileSystem.EnumerateFiles(_layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
+        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment());
+        var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var path in sources.Files)
         {
             // The manifest is the built tree's identity database; copying sidecars was a second
             // copy of the same facts.
-            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (SidecarMeta.IsSidecarPath(path) || AssetClassifier.IsJunk(path)) continue;
 
-            // No gate here: recording is gated on DeterministicCopy, so the rule lives once.
-            if (index.TryReuse(_fileSystem, path, Relative(path), output, out var already))
+            var relative = sources.Relative(path);
+            try
             {
-                manifest.Assets.AddRange(already);
-                continue;
+                if (index.TryReuse(_fileSystem, sources, relative, output, out var already))
+                {
+                    Claim(owners, already, errors);
+                    manifest.Assets.AddRange(already);
+                    continue;
+                }
+
+                var produced = manifest.Assets.Count;
+                var before = errors.Count;
+                var (handler, inputs) = Offer(path, relative, profile!, target, cache, output, manifest, sources, errors);
+                var written = manifest.Assets[produced..];
+                Claim(owners, written, errors);
+
+                if (handler is not null && errors.Count == before)
+                {
+                    index.Record(relative, inputs, written);
+                }
             }
-
-            var produced = manifest.Assets.Count;
-
-            var handler = Offer(path, profile!, target, cache, output, manifest, errors);
-
-            if (handler is { DeterministicCopy: true } && errors.Count == 0)
+            catch (Exception error) when (error is not OutOfMemoryException)
             {
-                index.Record(_fileSystem, path, Relative(path), manifest.Assets[produced..]);
+                // Watch runs this loop unattended; an importer that throws must cost one asset,
+                // not the process — and must say which asset (#203).
+                errors.Add($"{relative}: {error.GetType().Name}: {error.Message}");
             }
         }
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
+
+        Sweep(output, owners.Keys);
 
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
@@ -118,14 +153,31 @@ public sealed class BuildRunner
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 
-    private IAssetImporter? Offer(UPath path, BuildProfile profile, ProjectOutputTarget target, ArtifactCache cache, UPath output, BuildManifest manifest, List<string> errors)
+    /// <summary>What shapes output without being read from <c>assets/</c> by an importer: the encoder and the manifest (its profile table reaches every importer as <see cref="BuildProfile"/>).</summary>
+    private string Environment()
     {
-        var meta = SidecarMeta.IsSidecarPath(path) ? null : SidecarMeta.Load(_fileSystem, SidecarMeta.PathFor(path));
+        var manifest = Convert.ToHexStringLower(SHA256.HashData(_fileSystem.ReadAllBytes(_layout.Manifest)));
+        return $"encoder={_encoder?.Identity ?? ""};manifest={manifest}";
+    }
 
-        using var observed = new RecordingFileSystem(_fileSystem, output);
+    private (IAssetImporter? Handler, IReadOnlyList<BuildInput> Inputs) Offer(
+        UPath path,
+        string relative,
+        BuildProfile profile,
+        ProjectOutputTarget target,
+        ArtifactCache cache,
+        UPath output,
+        BuildManifest manifest,
+        AssetPaths sources,
+        List<string> errors)
+    {
+        using var observed = new ObservedSources(_fileSystem, sources);
+        var meta = SidecarMeta.Load(observed, SidecarMeta.PathFor(path));
+
+        using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
-            _fileSystem, _layout.Assets, path, Relative(path), meta,
-            profile, target, observed, cache, _encoder, _log);
+            observed, sources, path, relative, meta,
+            profile, target, written, cache, _encoder, _log);
 
         IAssetImporter? handler = null;
         for (var i = _importers.Count - 1; i >= 0 && handler is null; i--)
@@ -133,14 +185,14 @@ public sealed class BuildRunner
             if (_importers[i].Import(context, errors)) handler = _importers[i];
         }
 
-        if (handler is null) return null;
+        if (handler is null) return (null, observed.Records);
 
-        foreach (var written in observed.Written)
+        foreach (var file in written.Written)
         {
-            var bytes = observed.ReadAllBytes(written);
+            var bytes = written.ReadAllBytes(file);
             manifest.Assets.Add(new BuiltAsset
             {
-                Path = written.FullName[1..],
+                Path = file.FullName[1..],
                 Source = context.Source,
                 Guid = handler.RecordsIdentity && meta is { } identified ? DocumentGuid.Format(identified.Guid) : null,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)),
@@ -148,8 +200,56 @@ public sealed class BuildRunner
             });
         }
 
-        return handler;
+        return (handler, observed.Records);
     }
 
-    private string Relative(UPath path) => path.FullName[(_layout.Assets.FullName.Length + 1)..];
+    /// <summary>Two sources landing on one output path is last-writer-wins and a manifest with two entries for one file (#202).</summary>
+    private static void Claim(Dictionary<string, string> owners, IReadOnlyList<BuiltAsset> assets, List<string> errors)
+    {
+        foreach (var asset in assets)
+        {
+            if (owners.TryGetValue(asset.Path, out var other) && other != asset.Source)
+            {
+                errors.Add($"{asset.Source}: builds to '{asset.Path}', which '{other}' also builds to; one of them must be renamed");
+                continue;
+            }
+
+            owners[asset.Path] = asset.Source;
+        }
+    }
+
+    /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
+    private void Sweep(UPath output, IEnumerable<string> produced)
+    {
+        var keep = new HashSet<string>(produced, StringComparer.Ordinal) { BuildIndex.FileName, BuildManifest.FileName };
+
+        foreach (var file in _fileSystem.EnumerateFiles(output, "*", SearchOption.AllDirectories).ToList())
+        {
+            var relative = file.FullName[(output.FullName.Length + 1)..];
+            if (keep.Contains(relative)) continue;
+
+            try
+            {
+                _fileSystem.DeleteFile(file);
+                _log?.Invoke($"swept: {relative}");
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                _warn?.Invoke($"could not sweep stale output '{relative}' ({error.Message})");
+            }
+        }
+
+        foreach (var directory in _fileSystem.EnumerateDirectories(output, "*", SearchOption.AllDirectories)
+            .OrderByDescending(d => d.FullName.Length)
+            .ToList())
+        {
+            try
+            {
+                if (!_fileSystem.EnumeratePaths(directory).Any()) _fileSystem.DeleteDirectory(directory, isRecursive: false);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
 }

@@ -338,3 +338,26 @@
   reproduces it exactly. **Rule**: when this appears, check `dotnet --list-sdks` before suspecting
   your change; anything that transitively references `Paradise.Authoring` is blocked until a newer
   10.0.x SDK is installed. It is not evidence about the change under test.
+
+## Zio / Paradise.Assets.Pipeline
+
+- [hits: 1] **`CopyFileCross` never reaches an override on a composed filesystem** — it resolves
+  both ends through `ComposeFileSystem.ResolvePath` down to the physical/memory filesystem, so a
+  `SubFileSystem` subclass that overrides `OpenFileImpl` to record or make writes atomic sees
+  nothing. Found 2026-09-02: `ArtifactCache.TryFetch` copied cache hits with `CopyFileCross`
+  into the pipeline's `RecordingFileSystem`, and every cache-served texture was silently missing
+  from `manifest.json`. **Rule**: when the destination may be a wrapper, open the destination's
+  own `OpenFile(Create, Write)` and `CopyTo` — never `CopyFileCross`. Same for `CopyFile`/
+  `MoveFile` helpers that take two filesystems. Guarded by
+  `ArtifactCacheTests.a_fetch_is_visible_to_a_composed_destination`.
+
+- [hits: 1] **A Coyote spec on `MemoryFileSystem` can pass against a missing lock, because
+  MemoryFileSystem tolerates what the OS refuses.** `ArtifactCache.Prepare` without its lock
+  passed 300 iterations of "still enabled, one .gitignore line" — two racing preparers both wrote
+  the same line and nothing observable broke. What made the test bite was (a) an
+  `ExclusiveMarkerFileSystem` that throws `IOException` on a second concurrent writer (Windows'
+  sharing rule) and (b) asserting the COUNT of prepares, not the end state. **Rule**: for a
+  "happens once" claim, assert the count; for an IO race, inject the filesystem behaviour the
+  real OS has. Prove it fails with the guard removed (`-p:TreatWarningsAsErrors=false` to get
+  past CA1823 on the now-unused lock field, and check the rewrite actually ran — a failed build
+  silently reruns the OLD Coyote binary).

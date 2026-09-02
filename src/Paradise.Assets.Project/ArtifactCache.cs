@@ -6,12 +6,15 @@ namespace Paradise.Assets.Project;
 /// A directory of derived artifacts addressed by the digest of their inputs.
 /// </summary>
 /// <remarks>
-/// The digest is <see cref="ArtifactDigest"/>, the Blender addon's scheme, so the two caches can
-/// one day be one directory (they are not yet: <c>.editor/cache</c> here, <c>.paradise-cache</c>
-/// there — issue #204). On ShiningPie that cache took an unchanged re-export from 44 s to 3.6 s.
+/// One directory shared with the Blender addon (<c>.editor/cache</c>, <see cref="ArtifactDigest"/>
+/// keys, <c>&lt;kind&gt;/&lt;key&gt;&lt;ext&gt;</c> entries), so an artifact either tool made
+/// serves the other. On ShiningPie that cache took an unchanged re-export from 44 s to 3.6 s.
 /// Every failure is non-fatal because the cache is derived data: a miss is slow, never wrong.
-/// Stores are atomic (temp sibling, then rename) so a kill or a race cannot leave a wrong-bytes
-/// entry; fetches are not, so the output tree can hold a truncated file after a kill (#204).
+/// Stores land whole (temp sibling, then rename), so a kill or a race cannot leave a wrong-bytes
+/// entry. A fetch streams into the destination through whatever filesystem the caller hands in
+/// and deletes it on failure; landing it whole is that filesystem's job (the pipeline's output
+/// mount does), because the cache cannot rename inside a mount it does not own. Callers on one
+/// instance may run concurrently; <c>Paradise.Assets.Project.CoyoteTest</c> explores that.
 /// </remarks>
 public sealed class ArtifactCache
 {
@@ -24,7 +27,11 @@ public sealed class ArtifactCache
 
     private readonly IFileSystem? _fileSystem;
     private readonly Action<string>? _warn;
-    private readonly Lock _gate = new();
+
+    // `object`, not `System.Threading.Lock`: Coyote (1.7.11) rewrites Monitor.Enter/Exit but not
+    // Lock.EnterScope, so with the newer type the Coyote suite cannot control this lock and
+    // reports every wait as a hang. Do not "modernize" it back.
+    private readonly object _gate = new();
     private volatile bool _enabled;
     private volatile bool _prepared;
 
@@ -73,14 +80,15 @@ public sealed class ArtifactCache
         if (s_disabledValues.Contains(configured)) return Disabled;
         if (configured.Length == 0) return new ArtifactCache(fileSystem, layout.EditorCache, warn);
 
-        return new ArtifactCache(fileSystem, fileSystem.ConvertPathFromInternal(ExpandUser(configured)), warn);
+        // Against the working directory, as the addon resolves it; UPath refuses a relative root.
+        var location = ExpandUser(configured);
+        if (!Path.IsPathRooted(location)) location = Path.GetFullPath(location);
+        return new ArtifactCache(fileSystem, fileSystem.ConvertPathFromInternal(location), warn);
     }
 
-    /// <summary>Copies the cached entry to <paramref name="destination"/>, whose extension selects it; a copy failure is a miss.</summary>
+    /// <summary>Copies the cached entry to <paramref name="destination"/>, whose extension selects it; a copy failure is a miss and leaves no destination.</summary>
     public bool TryFetch(string kind, string key, IFileSystem destinationFileSystem, UPath destination)
     {
-        ArgumentException.ThrowIfNullOrEmpty(kind);
-        ArgumentException.ThrowIfNullOrEmpty(key);
         ArgumentNullException.ThrowIfNull(destinationFileSystem);
         destination.AssertNotNull(nameof(destination));
 
@@ -90,10 +98,17 @@ public sealed class ArtifactCache
         try
         {
             CreateParentDirectory(destinationFileSystem, destination);
-            _fileSystem.CopyFileCross(entry, destinationFileSystem, destination, overwrite: true);
+
+            // Opened on the destination filesystem itself, not CopyFileCross: that resolves a
+            // composed filesystem down to what it wraps, so a recording or atomic mount over the
+            // output never sees the write — and a fetched texture went missing from the manifest.
+            using var source = _fileSystem.OpenFile(entry, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var target = destinationFileSystem.OpenFile(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+            source.CopyTo(target);
         }
         catch (Exception error) when (IsRecoverable(error))
         {
+            TryDelete(destinationFileSystem, destination);
             Warn($"could not reuse '{entry}' ({error.Message}); regenerating");
             return false;
         }
@@ -109,8 +124,6 @@ public sealed class ArtifactCache
     /// </remarks>
     public void Store(string kind, string key, IFileSystem sourceFileSystem, UPath source)
     {
-        ArgumentException.ThrowIfNullOrEmpty(kind);
-        ArgumentException.ThrowIfNullOrEmpty(key);
         ArgumentNullException.ThrowIfNull(sourceFileSystem);
         source.AssertNotNull(nameof(source));
 
@@ -153,6 +166,9 @@ public sealed class ArtifactCache
 
     private bool TryGetEntryPath(string kind, string key, UPath like, out UPath entry)
     {
+        RequireName(kind, nameof(kind));
+        RequireName(key, nameof(key));
+
         entry = default;
         if (!_enabled) return false;
         Prepare();
@@ -189,14 +205,32 @@ public sealed class ArtifactCache
         }
     }
 
-    private void TryDeleteTemporary(UPath temporary)
+    private void TryDeleteTemporary(UPath temporary) => TryDelete(_fileSystem!, temporary);
+
+    private static void TryDelete(IFileSystem fileSystem, UPath path)
     {
         try
         {
-            if (_fileSystem!.FileExists(temporary)) _fileSystem.DeleteFile(temporary);
+            if (fileSystem.FileExists(path)) fileSystem.DeleteFile(path);
         }
         catch (Exception error) when (IsRecoverable(error))
         {
+        }
+    }
+
+    /// <summary>Kind and key are joined into a path: a separator or a dot-name would address something outside the entry's directory.</summary>
+    private static void RequireName(string value, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(value, parameterName);
+        if (value is "." or "..")
+        {
+            throw new ArgumentException($"'{value}' is not a cache name.", parameterName);
+        }
+
+        foreach (var c in value)
+        {
+            if (char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.') continue;
+            throw new ArgumentException($"'{value}' is not a cache name: only letters, digits, '_', '-' and '.' are allowed.", parameterName);
         }
     }
 

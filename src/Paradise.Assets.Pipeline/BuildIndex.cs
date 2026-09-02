@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -10,18 +9,18 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>What the last build into a tree produced, so the next can skip it; derived, never truth.</summary>
 /// <remarks>
-/// Two tiers because hashing every source is most of the cost being removed; SHA-256 runs only
-/// when (mtime, size) fails, so a checkout or re-save still skips. An asset is eligible only when
-/// its COMPLETE input is the bytes hashed here (plus its sidecar, whose GUID lands in the
-/// manifest): a key that misses an input serves last week's artifact and reports success. So
-/// textures (argv + encoder version; <see cref="ArtifactCache"/> keys on those) and prefabs
-/// (they bake the prefabs they instance) opt out. Meshes claim eligibility but also depend on
-/// their referenced textures existing — issue #201. Anything unrecognised rebuilds.
+/// An entry records every file the importer touched (<see cref="ObservedSources"/>), each with
+/// the stamp it had, and reuse means every one of them is unchanged today and every output is
+/// still there at its recorded size. Two tiers per input because hashing every source is most of
+/// the cost being removed: SHA-256 runs only when (mtime, size) fails, so a checkout or a re-save
+/// still skips. Anything the importer does not read through its filesystem — the encoder's
+/// version, the manifest's profile table — is folded into the document-wide
+/// <see cref="BuildIndexDocument.Environment"/>, and a change there drops the whole index.
 /// </remarks>
 public sealed class BuildIndex
 {
     /// <summary>The index format version. A bump invalidates every entry.</summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     /// <summary>The index's file name inside a build tree.</summary>
     public const string FileName = ".build-index.json";
@@ -30,18 +29,22 @@ public sealed class BuildIndex
     private readonly Dictionary<string, BuildIndexEntry> _next = [];
     private readonly string _profile;
     private readonly string _target;
+    private readonly string _environment;
 
-    private BuildIndex(Dictionary<string, BuildIndexEntry> previous, string profile, string target)
+    private BuildIndex(Dictionary<string, BuildIndexEntry> previous, string profile, string target, string environment)
     {
         _previous = previous;
         _profile = profile;
         _target = target;
+        _environment = environment;
     }
 
     /// <summary>Reads the index for a tree, or an empty one when it cannot be trusted; a null profile is keyed as <c>""</c>, which no declared profile can be.</summary>
-    public static BuildIndex Load(IFileSystem fileSystem, UPath output, string? profile, ProjectOutputTarget target)
+    /// <param name="environment">Everything an output depends on that no importer reads from disk; the index is dropped when it differs.</param>
+    public static BuildIndex Load(IFileSystem fileSystem, UPath output, string? profile, ProjectOutputTarget target, string environment)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(environment);
 
         profile ??= "";
         var targetName = target.ToString();
@@ -56,9 +59,10 @@ public sealed class BuildIndex
 
                 if (document is { Version: CurrentVersion }
                     && document.Profile == profile
-                    && document.Target == targetName)
+                    && document.Target == targetName
+                    && document.Environment == environment)
                 {
-                    return new BuildIndex(document.Entries, profile, targetName);
+                    return new BuildIndex(document.Entries, profile, targetName, environment);
                 }
             }
         }
@@ -66,61 +70,49 @@ public sealed class BuildIndex
         {
         }
 
-        return new BuildIndex([], profile, targetName);
+        return new BuildIndex([], profile, targetName, environment);
     }
 
-    /// <summary>Whether <paramref name="source"/> can be left alone, and what the last build made from it.</summary>
+    /// <summary>Whether <paramref name="relative"/> can be left alone, and what the last build made from it.</summary>
     public bool TryReuse(
         IFileSystem fileSystem,
-        UPath source,
+        AssetPaths sources,
         string relative,
         UPath output,
         out IReadOnlyList<BuiltAsset> produced)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(sources);
         produced = [];
 
         if (!_previous.TryGetValue(relative, out var entry)) return false;
+        if (entry.Inputs.Count == 0) return false;
 
-        var stamp = Stamp(fileSystem, source);
-        if (stamp is null) return false;
-
-        var (mtime, size) = stamp.Value;
-        var sidecar = SidecarStamp(fileSystem, source);
-        if (sidecar != entry.Sidecar) return false;
-
-        if (mtime != entry.Mtime || size != entry.Size)
+        var refreshed = new List<BuildInput>(entry.Inputs.Count);
+        foreach (var input in entry.Inputs)
         {
-            if (size != entry.Size || Hash(fileSystem, source) != entry.Sha256) return false;
+            if (Unchanged(fileSystem, sources, input) is not { } current) return false;
+            refreshed.Add(current);
         }
 
-        // Existence only; a truncated output from a killed build passes — issue #202.
         foreach (var asset in entry.Assets)
         {
-            if (!fileSystem.FileExists(output / asset.Path)) return false;
+            // Size as well as existence: a build killed mid-copy leaves a truncated output that
+            // would otherwise be reused forever (issue #202).
+            if (FileStamp.Of(fileSystem, output / asset.Path) is not { } stamp || stamp.Size != asset.Size) return false;
         }
 
-        _next[relative] = entry;
+        _next[relative] = new BuildIndexEntry { Inputs = refreshed, Assets = entry.Assets };
         produced = entry.Assets;
         return true;
     }
 
-    public void Record(IFileSystem fileSystem, UPath source, string relative, IReadOnlyList<BuiltAsset> produced)
+    public void Record(string relative, IReadOnlyList<BuildInput> inputs, IReadOnlyList<BuiltAsset> produced)
     {
-        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentNullException.ThrowIfNull(produced);
 
-        var stamp = Stamp(fileSystem, source);
-        if (stamp is null) return;
-
-        var (mtime, size) = stamp.Value;
-        _next[relative] = new BuildIndexEntry
-        {
-            Mtime = mtime,
-            Size = size,
-            Sha256 = Hash(fileSystem, source),
-            Sidecar = SidecarStamp(fileSystem, source),
-            Assets = [.. produced],
-        };
+        _next[relative] = new BuildIndexEntry { Inputs = [.. inputs], Assets = [.. produced] };
     }
 
     public void Save(IFileSystem fileSystem, UPath output)
@@ -132,6 +124,7 @@ public sealed class BuildIndex
             Version = CurrentVersion,
             Profile = _profile,
             Target = _target,
+            Environment = _environment,
             Entries = _next,
         };
 
@@ -147,28 +140,32 @@ public sealed class BuildIndex
         }
     }
 
-    private static (long Mtime, long Size)? Stamp(IFileSystem fileSystem, UPath path)
+    /// <summary>The input as it should be recorded now, or null when the importer would see something different.</summary>
+    private static BuildInput? Unchanged(IFileSystem fileSystem, AssetPaths sources, BuildInput input)
     {
+        var path = BuildInput.PathOf(sources.Root, input.Path);
+        var exists = sources.IsUnderRoot(path) ? sources.Contains(path) : fileSystem.FileExists(path);
+
+        if (input.Kind == BuildInputKind.Presence) return exists == input.Exists ? input : null;
+
+        if (!exists) return null;
+        if (FileStamp.Of(fileSystem, path) is not { } stamp) return null;
+        if (stamp.Mtime == input.Mtime && stamp.Size == input.Size) return input;
+        if (stamp.Size != input.Size) return null;
+
         try
         {
-            if (!fileSystem.FileExists(path)) return null;
-            return (fileSystem.GetLastWriteTime(path).ToUniversalTime().Ticks, fileSystem.GetFileLength(path));
+            if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(fileSystem.ReadAllBytes(path))) != input.Sha256) return null;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             return null;
         }
-    }
 
-    private static string SidecarStamp(IFileSystem fileSystem, UPath path)
-    {
-        var sidecar = Documents.SidecarMeta.PathFor(path);
-        var stamp = Stamp(fileSystem, sidecar);
-        return stamp is { } value ? $"{value.Mtime}:{value.Size}" : "";
+        // Same bytes under a new stamp (a checkout, a re-save): carry the new stamp so the next
+        // build takes the cheap tier.
+        return BuildInput.Content(input.Path, stamp, input.Sha256!);
     }
-
-    private static string Hash(IFileSystem fileSystem, UPath path)
-        => Convert.ToHexStringLower(SHA256.HashData(fileSystem.ReadAllBytes(path)));
 }
 
 /// <summary>The on-disk shape of <see cref="BuildIndex"/>.</summary>
@@ -183,28 +180,67 @@ public sealed class BuildIndexDocument
     [JsonPropertyName("target")]
     public string Target { get; set; } = "";
 
+    /// <summary>Encoder identity, profile settings, and whatever else shapes output without being read from <c>assets/</c>.</summary>
+    [JsonPropertyName("environment")]
+    public string Environment { get; set; } = "";
+
     [JsonPropertyName("entries")]
     public Dictionary<string, BuildIndexEntry> Entries { get; set; } = [];
 }
 
-/// <summary>One source file, and what the last build made from it.</summary>
+/// <summary>One source file: everything its importer read, and what it made.</summary>
 public sealed class BuildIndexEntry
 {
-    [JsonPropertyName("mtime")]
-    public long Mtime { get; set; }
-
-    [JsonPropertyName("size")]
-    public long Size { get; set; }
-
-    [JsonPropertyName("sha256")]
-    public string Sha256 { get; set; } = "";
-
-    /// <summary>The asset's <c>*.meta</c> as <c>mtime:size</c>, or <c>""</c> when it has none.</summary>
-    [JsonPropertyName("sidecar")]
-    public string Sidecar { get; set; } = "";
+    [JsonPropertyName("inputs")]
+    public List<BuildInput> Inputs { get; set; } = [];
 
     [JsonPropertyName("assets")]
     public List<BuiltAsset> Assets { get; set; } = [];
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<BuildInputKind>))]
+public enum BuildInputKind
+{
+    /// <summary>The bytes were read; stamp and hash are recorded.</summary>
+    Content,
+
+    /// <summary>Only whether the file existed was asked.</summary>
+    Presence,
+}
+
+/// <summary>One file an importer consulted, with what it saw.</summary>
+public sealed class BuildInput
+{
+    /// <summary>Relative to <c>assets/</c> when under it, else absolute.</summary>
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = "";
+
+    [JsonPropertyName("kind")]
+    public BuildInputKind Kind { get; set; }
+
+    [JsonPropertyName("exists")]
+    public bool? Exists { get; set; }
+
+    [JsonPropertyName("mtime")]
+    public long? Mtime { get; set; }
+
+    [JsonPropertyName("size")]
+    public long? Size { get; set; }
+
+    [JsonPropertyName("sha256")]
+    public string? Sha256 { get; set; }
+
+    public static BuildInput Presence(string key, bool exists)
+        => new() { Path = key, Kind = BuildInputKind.Presence, Exists = exists };
+
+    public static BuildInput Content(string key, (long Mtime, long Size)? stamp, string sha256)
+        => new() { Path = key, Kind = BuildInputKind.Content, Mtime = stamp?.Mtime, Size = stamp?.Size, Sha256 = sha256 };
+
+    internal static string KeyFor(UPath assetsRoot, UPath path)
+        => path.IsInDirectory(assetsRoot, recursive: true) ? path.FullName[(assetsRoot.FullName.Length + 1)..] : path.FullName;
+
+    internal static UPath PathOf(UPath assetsRoot, string key)
+        => key.StartsWith('/') ? new UPath(key) : assetsRoot / key;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, NewLine = "\n")]

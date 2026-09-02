@@ -97,6 +97,8 @@ public sealed class AssetWatcher : IDisposable
             return;
         }
 
+        if (AssetClassifier.IsJunk(path)) return;
+
         lock (_gate) { _deleted[path] = _now(); }
     }
 
@@ -166,7 +168,7 @@ public sealed class AssetWatcher : IDisposable
         _watcher = null;
     }
 
-    private static bool Ignored(UPath path) => SidecarMeta.IsSidecarPath(path);
+    private static bool Ignored(UPath path) => SidecarMeta.IsSidecarPath(path) || AssetClassifier.IsJunk(path);
 
     private static List<UPath> Ripe(Dictionary<UPath, DateTimeOffset> queue, DateTimeOffset now)
     {
