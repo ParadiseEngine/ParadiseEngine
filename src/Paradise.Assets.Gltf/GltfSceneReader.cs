@@ -80,13 +80,13 @@ public static class GltfSceneReader
             var bytes = bin.Slice(offset, view.ByteLength).ToArray();
             if (!IsKtx2(bytes))
             {
-                // Magic sniff beats mimeType: ToktxKtx2 rewrites images in place and the magic
-                // is what the decoder would actually face. The contract is KTX2-only — PNG/JPEG
-                // GLBs mean the toktx pass didn't run on this asset.
+                // Magic sniff beats mimeType: the encode pass rewrites images in place and can
+                // leave a stale mimeType, and the magic is what the decoder actually faces. The
+                // contract is KTX2-only — PNG/JPEG here means the asset never went through it.
                 throw new NotSupportedException(
                     $"Image {i} is {DescribeImageMagic(bytes)}, but the contract requires KTX2 for every " +
-                    "texture (KHR_texture_basisu). Run the toktx pass (ToktxKtx2.ConvertEmbeddedTextures) " +
-                    "on this GLB before loading it.");
+                    "texture (KHR_texture_basisu). Encode this GLB's textures with `ktx create` " +
+                    "(KtxCreate.ConvertEmbeddedTextures, or the asset build) before loading it.");
             }
             images[i] = new GltfImageData(bytes);
         }

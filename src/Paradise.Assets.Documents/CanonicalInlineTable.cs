@@ -5,29 +5,19 @@ using Paradise.Authoring;
 namespace Paradise.Assets.Documents;
 
 /// <summary>
-/// A table written on ONE line — <c>{ key = value, … }</c> — rather than under a
-/// <c>[header]</c>. Spec item 11 of <see cref="CanonicalTomlWriter"/>.
+/// A table written on one line (spec item 11). A distinct TYPE so the model, not the data, decides
+/// the written form in both writers. Exists because an <see cref="AssetReference"/> must sit inside
+/// an array, where <c>[[header]]</c> form has no spelling for a null slot. Never nests a table: an
+/// arbitrarily deep one-line table is neither readable nor diffable.
 /// </summary>
-/// <remarks>
-/// A distinct TYPE, so the model — not the data — decides the written form and both writers obey
-/// it (a content-based "inline when scalar-ish" rule would drift between the C# and Python
-/// implementations). It exists because an <see cref="AssetReference"/> must sit inside an array
-/// — <c>Slots = [{ … }, {}]</c> — where <c>[[header]]</c> form has no spelling for the null
-/// slot; the empty inline table is that null. Holds scalars and arrays only, never a nested
-/// table: an arbitrarily deep one-line table is neither readable nor diffable.
-/// </remarks>
 public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, object>>
 {
     private readonly List<KeyValuePair<string, object>> _pairs = [];
     private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
 
-    /// <summary>Number of keys in this table.</summary>
     public int Count => _pairs.Count;
 
-    /// <summary>
-    /// Adds a value under <paramref name="key"/>. Accepts the scalar vocabulary and arrays of it —
-    /// never a table of either kind.
-    /// </summary>
+    /// <summary>Widens float32 bit-exactly, unlike <see cref="CanonicalTomlTable.Add"/> (issue #200).</summary>
     /// <exception cref="ArgumentException">The key is duplicated, or the value is not writable inline.</exception>
     public void Add(string key, object value)
     {
@@ -54,10 +44,8 @@ public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, obje
         _pairs.Add(new KeyValuePair<string, object>(key, normalized));
     }
 
-    /// <summary>Whether <paramref name="key"/> exists in this table.</summary>
     public bool ContainsKey(string key) => _keys.Contains(key);
 
-    /// <summary>The value under <paramref name="key"/>, or <see langword="null"/> when absent.</summary>
     public object? Value(string key)
     {
         foreach (var (candidate, value) in _pairs)

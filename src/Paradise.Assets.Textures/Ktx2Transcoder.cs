@@ -180,7 +180,7 @@ public static class Ktx2Transcoder
                 (Ktx2.TranscodeFormat.BC7Rgba, TextureFormat.Bc7RgbaUnorm, 16),
         };
 
-    /// <summary>The pipeline encodes normal maps with toktx <c>--normal_mode</c> — a
+    /// <summary>The pipeline encodes normal maps with <c>ktx create --normal-mode</c> — a
     /// two-channel layout storing X in RGB and Y in ALPHA ("RRRG"). The BC5 transcode target
     /// maps that to R=X, G=Y natively; the raw RGBA32 transcode does not (it yields X,X,X,Y).
     /// Swizzle to (X, Y, 255, 255) so shaders sample R/G and reconstruct Z identically on

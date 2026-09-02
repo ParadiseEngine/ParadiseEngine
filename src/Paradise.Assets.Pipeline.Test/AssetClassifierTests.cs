@@ -29,8 +29,9 @@ public class AssetClassifierTests
     [Test]
     public async Task a_scene_sidecar_would_be_a_sidecar_not_a_scene()
     {
-        // ".prefab.meta" should never exist (scenes carry ids in-file), but if one
-        // appears the sidecar rules see it — and verify reports it as orphan or mismatch.
+        // Every asset has a sidecar, prefabs included, so this path is normal. Pinned because
+        // the suffix check must win over the prefab check: classified as a prefab, the sidecar
+        // would be parsed as a document and refused, and verify could never see it as an orphan.
         await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta"))
             .IsEqualTo(AssetClass.Sidecar);
     }

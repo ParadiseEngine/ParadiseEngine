@@ -50,15 +50,7 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
-    /// <summary>
-    /// Keeps sidecars in step with the assets while you work, and rebuilds after each settled
-    /// change. Runs until interrupted.
-    /// </summary>
-    /// <remarks>
-    /// Reconciles once at startup, because a project whose sidecars drifted before anyone was
-    /// watching is the normal starting state — and it is what makes <c>--dry-run</c> useful as a
-    /// "what is wrong right now" report.
-    /// </remarks>
+    /// <summary>Reconciles once at startup (drifted sidecars are the normal starting state, and that is what <c>--dry-run</c> reports), then watches until interrupted.</summary>
     public static int Watch(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
@@ -99,9 +91,8 @@ internal static class Verbs
             enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
-            // Handled, so the loop can put the watcher down rather than the process being shot
-            // mid-write. A second Ctrl+C is the OS's to act on. The tray's Stop is the same
-            // signal, so both paths leave through the loop rather than through the OS.
+            // Handled so the watcher is put down rather than shot mid-write; a second Ctrl+C is
+            // the OS's.
             e.Cancel = true;
             signals.RequestStop();
         };
@@ -130,8 +121,8 @@ internal static class Verbs
 
     public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor)
     {
-        // A vendored third_party/tools/KTX-Software under the project root wins; PATH and
-        // PARADISE_KTX_PATH are the fallbacks — the same probe order as KtxCreate itself.
+        // Same probe as KtxCreate.FindKtx, in its order: PARADISE_KTX_PATH, then a vendored
+        // third_party/tools/KTX-Software under the project root, then PATH.
         KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
 
         var runner = new BuildRunner(
@@ -161,7 +152,6 @@ internal static class Verbs
         return 0;
     }
 
-    /// <summary>Creates a project and tells the user what to run next.</summary>
     public static int New(IFileSystem fileSystem, UPath root, string name)
     {
         IReadOnlyList<ProjectScaffold.ScaffoldedFile> written;
@@ -184,21 +174,12 @@ internal static class Verbs
         Console.WriteLine($"created '{name}' ({written.Count} files). Next:");
         Console.WriteLine($"  cd {Display(fileSystem, root)}");
         Console.WriteLine("  paradise assets verify");
-        // Named explicitly: an absent --profile means the built-in defaults (TOML), not the
-        // scaffolded dev profile, and the first-run path should build what the scaffold wrote.
+        // An absent --profile means the built-in defaults (TOML), not the scaffolded dev profile.
         Console.WriteLine("  paradise assets build --profile dev");
         return 0;
     }
 
-    /// <summary>
-    /// Regenerates the Asset Browser catalogue for a project.
-    /// </summary>
-    /// <remarks>
-    /// <b>This launches Blender, because only Blender can write a <c>.blend</c>.</b> The generator
-    /// itself is Python and lives in the addon, where it has to live anyway — it needs <c>bpy</c>
-    /// to mark a datablock as an asset. So this verb is a launcher, and it fails with the reason
-    /// rather than a stack trace when Blender or the addon is missing.
-    /// </remarks>
+    /// <summary>Launches Blender to regenerate the Asset Browser catalogue; only <c>bpy</c> can write a <c>.blend</c>, so the generator lives in the addon.</summary>
     public static int Catalogue(IFileSystem fileSystem, AssetProjectLayout layout)
     {
         var blender = ProcessTools.FindExecutable(
@@ -214,9 +195,8 @@ internal static class Verbs
 
         var root = fileSystem.ConvertPathToInternal(layout.Root).Replace("\\", "/");
 
-        // The addon is installed as an EXTENSION, so its module is bl_ext.<repo>.paradise_assets
-        // and the repo name is whatever the user called it. Finding it through addon_utils rather
-        // than hard-coding "user_default" is what keeps this working on someone else's machine.
+        // The extension module is bl_ext.<repo>.paradise_assets and <repo> is the user's choice;
+        // hard-coding "user_default" breaks on another machine.
         var script =
             "import addon_utils,importlib;" +
             "m=next(x.__name__ for x in addon_utils.modules() if x.__name__.endswith('paradise_assets'));" +
@@ -247,7 +227,6 @@ internal static class Verbs
         return 0;
     }
 
-    /// <summary>Reports every build tool: what was found, and what to do about what was not.</summary>
     public static int ToolsDoctor(string repoRoot)
     {
         var findings = ToolReport.Collect(repoRoot);
@@ -271,18 +250,12 @@ internal static class Verbs
             ? $"tools: {findings.Count} tool(s), all present"
             : $"tools: {missing} of {findings.Count} missing");
 
-        // Zero even when something is missing: `doctor` REPORTS, and a report that fails the shell
-        // cannot be run casually or in a prompt. `build` is what refuses to proceed.
+        // Zero even when something is missing: a report that fails the shell cannot be run
+        // casually or in a prompt. `build` is what refuses.
         return 0;
     }
 
-    /// <summary>Installs one tool through its vendored bootstrap.</summary>
-    /// <remarks>
-    /// Elevation is passed through here and NOWHERE else. Khronos ships Windows KTX as an NSIS
-    /// installer that requires admin, so the bootstrap refuses that format unless asked — a build
-    /// must never raise a UAC prompt, while a person typing <c>tools install</c> has asked for
-    /// exactly this.
-    /// </remarks>
+    /// <summary>Elevation is passed through here and NOWHERE else: a build must never raise a UAC prompt, while a person typing <c>tools install</c> has asked for exactly that.</summary>
     public static int ToolsInstall(string repoRoot, string tool)
     {
         var name = tool.ToLowerInvariant();
@@ -355,9 +328,5 @@ internal static class Verbs
         return $"{os}-{architecture}";
     }
 
-    /// <summary>
-    /// A path as the user's shell knows it. Findings print OS paths (<c>C:\…</c>, not Zio's
-    /// internal form) because they exist to be opened, copied, and pasted.
-    /// </summary>
     private static string Display(IFileSystem fileSystem, UPath path) => fileSystem.ConvertPathToInternal(path);
 }

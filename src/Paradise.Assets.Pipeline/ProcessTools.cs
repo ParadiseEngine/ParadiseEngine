@@ -10,11 +10,7 @@ using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>
-    /// Engine-neutral subprocess + executable-resolution helpers shared by the Blender and toktx
-    /// converters. Ported from the Unity pipeline tools (was duplicated); Unity's
-    /// <c>Application.platform</c> is replaced with <see cref="OperatingSystem"/>.
-    /// </summary>
+    /// <summary>Subprocess and executable-resolution helpers. A <c>Win32Exception</c> from a non-runnable file escapes <c>Run</c> today (issue #206).</summary>
     public static class ProcessTools
     {
         public readonly record struct ProcessResult(bool Started, bool TimedOut, int ExitCode, string Stdout, string Stderr)
@@ -59,26 +55,23 @@ namespace Paradise.Assets.Pipeline
             {
                 Kill(process);
                 process.WaitForExit(5_000);
-                // Best-effort drain so the timeout message still captures whatever the process
-                // buffered before it was killed.
                 try
                 {
                     Task.WhenAll(stdoutTask, stderrTask).Wait(1_000);
                 }
                 catch
                 {
-                    // Faulted/cancelled reads are surfaced as empty output by CompletedOutput below.
                 }
 
                 return new ProcessResult(true, true, -1, CompletedOutput(stdoutTask), CompletedOutput(stderrTask));
             }
 
-            // The timed overload doesn't guarantee the async streams are drained; block once more.
+            // WaitForExit(timeout) does not guarantee the async streams are drained.
             process.WaitForExit();
             return new ProcessResult(true, false, process.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
         }
 
-        /// <summary>Resolve an executable from an env var, then candidate paths, then PATH.</summary>
+        /// <summary>Env var, then candidate paths, then PATH; existence only, not executability (issue #206).</summary>
         public static string? FindExecutable(string? environmentVariableValue, IEnumerable<string> candidatePaths, string executableName)
         {
             if (!string.IsNullOrWhiteSpace(environmentVariableValue) && File.Exists(environmentVariableValue))
@@ -140,9 +133,8 @@ namespace Paradise.Assets.Pipeline
             return builder.ToString();
         }
 
-        // Windows-safe argument quoting (CommandLineToArgvW rules): escape embedded quotes and
-        // double any run of backslashes that precedes a quote or the closing quote, so a trailing
-        // backslash (e.g. "C:\dir\") does not escape the closing quote.
+        // CommandLineToArgvW rules: a run of backslashes before a quote must be doubled, or a
+        // trailing backslash ("C:\dir\") escapes the closing quote.
         public static string QuoteArgument(string argument)
         {
             var builder = new StringBuilder();

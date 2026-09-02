@@ -3,20 +3,13 @@ using System.Text;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// Writes a <see cref="CanonicalTomlTable"/> as canonical TOML — the writing spec itself,
-/// executable.
-/// </summary>
+/// <summary>Writes a <see cref="CanonicalTomlTable"/> as canonical TOML — the writing spec itself, executable.</summary>
 /// <remarks>
 /// <para>
-/// <b>This is a cross-language contract.</b> The Blender addon's pure-Python writer implements
-/// the same spec, and the two must produce identical bytes for equivalent documents: machine
-/// writes happen on both sides of the fence (the addon syncs scene documents back, the CLI's
-/// <c>mv</c> and build verbs rewrite documents), and only byte-identical output keeps a
-/// round-trip out of the diff. The check verbs (<c>prefab-check</c>, <c>config-check</c>) police
-/// exactly this property.
+/// A cross-language contract: the Blender addon's Python writer must produce identical bytes,
+/// because both sides write documents and only byte identity keeps a round-trip out of the diff.
+/// <c>prefab-check</c> polices it. The spec, normative:
 /// </para>
-/// <para>The spec, normative:</para>
 /// <list type="number">
 /// <item>Encoding: UTF-8, no byte-order mark. Newline: LF. A non-empty document ends with one
 /// LF; an empty document is zero bytes.</item>
@@ -42,30 +35,31 @@ namespace Paradise.Assets.Documents;
 /// <item>Booleans: <c>true</c> / <c>false</c>.</item>
 /// <item>Arrays are one line: <c>[1, 2, 3]</c> — <c>", "</c> between elements, no trailing
 /// comma, empty is <c>[]</c>. Arrays hold scalars, nested arrays, or <b>inline tables</b>
-/// (item 11). A generic <see cref="CanonicalTomlTable"/> in an array is an array-of-tables,
-/// item 9.</item>
+/// (item 11): a table that is an array ELEMENT is inline by rule (issue #187), which is what
+/// keeps a null slot <c>{}</c> expressible. A generic <see cref="CanonicalTomlTable"/> list in
+/// the model is a different thing — an array-of-tables, item 9 — and the two never mix in one
+/// value.</item>
 /// <item>Every nested <see cref="CanonicalTomlTable"/> is a <c>[dotted.path]</c> header; every
 /// array of tables is one <c>[[dotted.path]]</c> header per element, in element order.
 /// Dotted-path segments are formatted as keys (item 4). One blank line precedes every header
-/// except at the start of the document. Empty tables still get their header — presence is
-/// meaning. Never dotted keys.</item>
+/// except at the start of the document. Never dotted keys. An empty generic table is written
+/// under its header today, but the READER restores any empty table as <c>{}</c> (item 11), so
+/// that round trip is not identity — issue #199 settles which side moves.</item>
 /// <item>A <see cref="CanonicalInlineTable"/> is written on one line as
 /// <c>{ key = value, … }</c> — <c>", "</c> between pairs, in model order, keys by item 4 and
 /// values by items 5–9. An empty one is <c>{}</c>, which is how a null element inside an array
 /// is spelled. Inline tables never nest another table.
-/// <para>Writing chooses the form by TYPE; reading restores it by CONTENT — <b>a table is
-/// inline iff it is empty or has exactly the two string keys <c>guid</c> and <c>path</c></b>
-/// (<see cref="AssetReferenceCodec.IsWrittenInline"/>), a shape therefore RESERVED for asset
-/// references. Content, because the Python mirror's parser cannot see the source form and both
-/// readers must rebuild the same model from the same bytes (issue #187). It follows for item 10
-/// that an empty table is written <c>{}</c>, never under a header: the only empty table these
-/// documents hold is a reference to nothing.</para></item>
+/// <para>Writing chooses the form by TYPE; reading restores it by CONTENT — <b>a table at value
+/// position is inline iff it is empty or has exactly the two string keys <c>guid</c> and
+/// <c>path</c></b> (<see cref="AssetReferenceCodec.IsWrittenInline"/>), a shape therefore
+/// RESERVED for asset references; a table inside an array is inline regardless (item 8).
+/// Content, because the Python mirror's parser cannot see the source form and both readers
+/// must rebuild the same model from the same bytes (issue #187; the mirror's array rule is being
+/// brought in line in ParadiseBlenderEditor#29).</para></item>
 /// </list>
 /// </remarks>
 public static class CanonicalTomlWriter
 {
-    /// <summary>Renders <paramref name="document"/> as a canonical TOML string (LF newlines).</summary>
-    /// <param name="document">The root table.</param>
     public static string WriteString(CanonicalTomlTable document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -75,19 +69,10 @@ public static class CanonicalTomlWriter
         return builder.ToString();
     }
 
-    /// <summary>Renders <paramref name="document"/> as canonical TOML bytes (UTF-8, no BOM).</summary>
-    /// <param name="document">The root table.</param>
     public static byte[] WriteBytes(CanonicalTomlTable document) => Encoding.UTF8.GetBytes(WriteString(document));
 
-    /// <summary>
-    /// Writes a table's scalar lines, then its sub-tables under dotted headers.
-    /// <paramref name="pathPrefix"/> is the table's own dotted path (<see langword="null"/> for
-    /// the root); the table's own header, when it has one, is the caller's to write, which is
-    /// what lets <c>[header]</c> and <c>[[element]]</c> share this body.
-    /// </summary>
     private static void WriteBody(StringBuilder builder, CanonicalTomlTable table, string? pathPrefix)
     {
-        // Scalars and arrays first, sub-tables after — each group in model order (spec item 3).
         foreach (var (key, value) in table)
         {
             if (value is CanonicalTomlTable or IReadOnlyList<CanonicalTomlTable>) continue;
@@ -165,7 +150,6 @@ public static class CanonicalTomlWriter
         }
     }
 
-    /// <summary>Spec item 11: <c>{ key = value, … }</c>, one line, model order, <c>{}</c> when empty.</summary>
     private static void WriteInlineTable(StringBuilder builder, CanonicalInlineTable table)
     {
         if (table.Count == 0)
@@ -230,11 +214,7 @@ public static class CanonicalTomlWriter
         builder.Append('"');
     }
 
-    /// <summary>
-    /// CPython's <c>repr(float)</c>, reimplemented deterministically (spec item 7): shortest
-    /// round-trip digits, positional iff the leading digit's decimal exponent is in [-4, 16),
-    /// else scientific with lowercase <c>e</c>, explicit sign, two-digit-minimum exponent.
-    /// </summary>
+    /// <summary>CPython's <c>repr(float)</c>, reimplemented (spec item 7).</summary>
     internal static string FormatFloat(double value)
     {
         if (double.IsNaN(value)) return "nan";
@@ -244,12 +224,10 @@ public static class CanonicalTomlWriter
         var negative = double.IsNegative(value);
         if (value == 0d) return negative ? "-0.0" : "0.0";
 
-        // .NET's shortest-round-trip formatting supplies the DIGITS; the layout is ours.
         var shortest = Math.Abs(value).ToString("R", CultureInfo.InvariantCulture);
         var (digits, pointExponent) = SplitDigits(shortest);
         var sign = negative ? "-" : "";
 
-        // pointExponent = decimal exponent of the leading digit ("1.5" → 0, "0.015" → -2).
         if (pointExponent is >= -4 and < 16)
         {
             return sign + Positional(digits, pointExponent);
@@ -260,10 +238,6 @@ public static class CanonicalTomlWriter
         return $"{sign}{mantissa}e{exponentSign}{Math.Abs(pointExponent):D2}";
     }
 
-    /// <summary>
-    /// Decomposes .NET "R" output (e.g. <c>1.5</c>, <c>0.015</c>, <c>1.5E-07</c>) into its
-    /// significant digits and the decimal exponent of the leading digit.
-    /// </summary>
     private static (string Digits, int PointExponent) SplitDigits(string shortest)
     {
         var mantissa = shortest;
@@ -284,7 +258,6 @@ public static class CanonicalTomlWriter
         digits = digits[leadingZeros..].TrimEnd('0');
         if (digits.Length == 0) digits = "0";
 
-        // Exponent of the leading digit: one left of the point, minus stripped zeros, plus E.
         return (digits, integerLength - 1 - leadingZeros + exponent);
     }
 
@@ -292,13 +265,11 @@ public static class CanonicalTomlWriter
     {
         if (pointExponent < 0)
         {
-            // 0.00ddd — leading zeros between the point and the digits.
             return "0." + new string('0', -pointExponent - 1) + digits;
         }
 
         if (pointExponent >= digits.Length - 1)
         {
-            // ddd000.0 — all digits are integral; trailing zeros restore the magnitude.
             return digits + new string('0', pointExponent - (digits.Length - 1)) + ".0";
         }
 

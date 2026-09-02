@@ -3,18 +3,9 @@ using Tomlyn.Model;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// The shared plumbing of the strict document readers: parse untyped TOML, then take typed
-/// values out of it with errors that name the source, the key and what was expected.
-/// </summary>
-/// <remarks>
-/// Untyped (<see cref="TomlTable"/>) on purpose — documents carry open payloads no static model
-/// can enumerate — and strict about unknown keys: a typo a lenient reader ignored would be
-/// silently dropped by the next machine rewrite, which is data loss with no error anywhere.
-/// </remarks>
+/// <summary>Shared plumbing of the strict readers. Untyped because payloads are open; strict about unknown keys because a typo a lenient reader ignored is dropped by the next machine rewrite, silently.</summary>
 internal static class TomlDocumentReader
 {
-    /// <summary>Parses TOML text, converting Tomlyn's failure into <paramref name="fail"/>'s exception.</summary>
     public static TomlTable Parse(string toml, Func<string, Exception> fail)
     {
         TomlTable? table;
@@ -30,7 +21,6 @@ internal static class TomlDocumentReader
         return table ?? new TomlTable();
     }
 
-    /// <summary>Throws via <paramref name="fail"/> when <paramref name="table"/> holds keys outside <paramref name="known"/>.</summary>
     public static void RejectUnknownKeys(TomlTable table, string context, IReadOnlyList<string> known, Func<string, Exception> fail)
     {
         foreach (var key in table.Keys)
@@ -72,7 +62,6 @@ internal static class TomlDocumentReader
         return value as TomlTableArray ?? throw fail($"holds a {DescribeType(value)} where '{key}' {context} must be an array of tables");
     }
 
-    /// <summary>Reads a fixed-length numeric array (integers accepted and widened).</summary>
     public static float[] RequireFloatArray(TomlTable table, string key, int length, string context, Func<string, Exception> fail)
     {
         if (!table.TryGetValue(key, out var value)) throw fail($"is missing '{key}' {context}");
@@ -95,10 +84,7 @@ internal static class TomlDocumentReader
         return result;
     }
 
-    /// <summary>
-    /// Converts a parsed payload table into the canonical model, preserving document order —
-    /// which Tomlyn's model keeps, and which the export contract makes load-bearing.
-    /// </summary>
+    /// <summary>Document order is preserved (Tomlyn keeps it) because the contract makes it load-bearing.</summary>
     public static CanonicalTomlTable ToCanonical(TomlTable table, string context, Func<string, Exception> fail)
     {
         var result = new CanonicalTomlTable();
@@ -110,18 +96,6 @@ internal static class TomlDocumentReader
         return result;
     }
 
-    /// <summary>
-    /// A parsed table as the model type it was WRITTEN as: inline when it is asset-reference
-    /// shaped, a generic table otherwise.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately decided from the CONTENT, not the parse. Tomlyn does remember the source form
-    /// (<c>TomlTable.Kind</c>), but the Python mirror's <c>tomllib</c> does not, and both readers
-    /// must rebuild the same model from the same bytes — so the shared rule is the shape. See
-    /// <see cref="AssetReferenceCodec.IsWrittenInline"/> for why the predicate is exact rather
-    /// than a judgement about how table-ish the contents look, and issue #187 for the decision
-    /// record.
-    /// </remarks>
     private static object ToCanonicalTable(TomlTable table, string context, Func<string, Exception> fail)
     {
         var pairs = new List<KeyValuePair<string, object>>();
@@ -129,8 +103,6 @@ internal static class TomlDocumentReader
         {
             if (member is TomlTable or TomlTableArray)
             {
-                // A nested table means this is structural, never a reference -- and an inline
-                // table may not nest one, so the generic form is the only possibility.
                 return ToCanonical(table, context, fail);
             }
 
@@ -144,8 +116,6 @@ internal static class TomlDocumentReader
         return inline;
     }
 
-    /// <summary>One document value as its model form. Public because the structural readers
-    /// (scene, prefab) need it for the payload fields they carry through opaquely.</summary>
     public static object ToCanonicalValue(object? value, string context, Func<string, Exception> fail) => value switch
     {
         bool or long or double or string => value,
@@ -156,11 +126,6 @@ internal static class TomlDocumentReader
         _ => throw fail($"holds a {DescribeType(value)} at {context}, which authored documents do not use"),
     };
 
-    /// <summary>
-    /// One element of an array. A table here is always a <see cref="CanonicalInlineTable"/> —
-    /// inline is the only form TOML allows inside an array (an array-of-tables arrives as a
-    /// <see cref="TomlTableArray"/>, a different type entirely).
-    /// </summary>
     private static object ToCanonicalElement(object? value, string context, Func<string, Exception> fail)
     {
         if (value is not TomlTable table) return ToCanonicalValue(value, context, fail);
@@ -193,10 +158,6 @@ internal static class TomlDocumentReader
     };
 }
 
-/// <summary>
-/// The source-generated context for the untyped model, which is how parsing to
-/// <see cref="TomlTable"/> stays off Tomlyn's reflection path — the same discipline as every
-/// typed context in these packages, applied to the one deliberately untyped read.
-/// </summary>
+/// <summary>Keeps even the untyped read off Tomlyn's reflection path (AOT).</summary>
 [Tomlyn.Serialization.TomlSerializable(typeof(TomlTable))]
 internal sealed partial class UntypedTomlSerializerContext : Tomlyn.Serialization.TomlSerializerContext;

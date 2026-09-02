@@ -8,13 +8,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>
-    /// Converts an FBX to GLB using headless Blender. Engine-neutral port of the Unity
-    /// FbxGlbExportPostprocessor core: same Blender invocation and embedded Python, same
-    /// skip-when-unchanged behavior (a SHA-256 of the FBX is stored in the GLB's
-    /// <c>asset.extras</c>). Blender is resolved from <c>PARADISE_BLENDER_PATH</c>, common install
-    /// locations, or PATH; when unavailable the call returns false and the GLB is left as-is.
-    /// </summary>
+    /// <summary>FBX to GLB through headless Blender, skipped when the FBX hash stamped in the GLB's <c>asset.extras</c> matches. A Python failure exits 0 and a stale GLB then gets the new stamp — issue #205.</summary>
     public static class BlenderFbxGlb
     {
         public const string BlenderPathEnvironmentVariable = "PARADISE_BLENDER_PATH";
@@ -29,8 +23,6 @@ namespace Paradise.Assets.Pipeline
             Failed,
         }
 
-        /// <summary>Convert <paramref name="fbxFullPath"/> to <paramref name="glbFullPath"/>. Skips
-        /// when the GLB already matches the FBX hash (unless <paramref name="force"/>).</summary>
         public static Result Convert(
             string fbxFullPath,
             string glbFullPath,
@@ -106,7 +98,6 @@ namespace Paradise.Assets.Pipeline
             }
         }
 
-        // Imports the FBX and exports a Y-up GLB. Runs under `blender --background --factory-startup`.
         private const string BlenderFbxToGlbScript = @"
 import bpy
 import sys
@@ -189,8 +180,7 @@ bpy.ops.export_scene.gltf(
         {
             if (!GlbBinary.TryRead(glbFullPath, out JsonObject gltf, out byte[] binChunk))
             {
-                // The GLB is valid on disk but we couldn't re-read it to stamp the hash; without the
-                // stamp every future run re-converts this asset, so surface the broken skip-cache.
+                // Without the stamp every future run re-converts this asset; say so.
                 error?.Invoke($"Could not re-read '{glbFullPath}' to write the source-FBX hash; it will be re-converted next run.");
                 return;
             }

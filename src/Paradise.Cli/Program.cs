@@ -5,13 +5,10 @@ using Paradise.Assets.Project;
 using Zio;
 using Zio.FileSystems;
 
-// Exit codes: 0 clean, 1 findings or failure, 2 usage error. The pattern every CI step
-// understands, and the same trio the bridge's contract-check settled on.
+// Exit codes: 0 clean, 1 findings or failure, 2 usage error — the same trio as contract-check.
 if (args.Length == 0) return Usage();
 
-// GROUP then verb. The group is required -- `paradise build` is a usage error naming
-// `paradise assets build` -- because one unambiguous surface is worth more than four saved
-// keystrokes, and because `build` would otherwise have to mean "build assets" forever.
+// The group is required: `build` would otherwise have to mean "build assets" forever.
 var group = args[0];
 var verb = args.Length > 1 ? args[1] : null;
 var rest = args.Skip(2).ToArray();
@@ -27,7 +24,6 @@ return group switch
     _ => Unknown($"unknown command '{group}'"),
 };
 
-// ---- new ----------------------------------------------------------------------------------
 
 int New(string[] arguments)
 {
@@ -55,7 +51,6 @@ int New(string[] arguments)
     return Verbs.New(physical, physical.ConvertPathFromInternal(root), name);
 }
 
-// ---- assets -------------------------------------------------------------------------------
 
 int Assets(string? assetVerb, string[] arguments)
 {
@@ -88,8 +83,7 @@ int Assets(string? assetVerb, string[] arguments)
         }
     }
 
-    // Located HERE rather than up front: `new` creates a project and `tools` is about the
-    // machine, so neither has one to find, and locating before dispatch made both impossible.
+    // Located here, not up front: `new` and `tools` have no project to find.
     var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
     AssetProjectLayout layout;
     try
@@ -115,7 +109,6 @@ int Assets(string? assetVerb, string[] arguments)
     };
 }
 
-// ---- tools --------------------------------------------------------------------------------
 
 int Tools(string? toolVerb, string[] arguments)
 {
@@ -130,10 +123,8 @@ int Tools(string? toolVerb, string[] arguments)
     };
 }
 
-// Where the vendored tool manifests live: the engine checkout when the CLI is run from one
-// (walking up for tools/ktx), and the working directory otherwise — a game repo consuming the
-// packaged tool has no engine tree, and `doctor` must still report what it found on PATH and in
-// the environment.
+// A game repo consuming the packaged tool has no engine tree, and `doctor` must still report
+// what it found on PATH. This root differs from the build's (issue #206).
 static string RepoRoot()
 {
     for (var directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory is not null; directory = directory.Parent)

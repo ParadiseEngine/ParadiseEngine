@@ -8,10 +8,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// PNG/JPEG → KTX2 through the content-addressed cache; preset from the sidecar's
-/// <c>[texture]</c> settings, filename tokens as the fallback.
-/// </summary>
+/// <summary>PNG/JPEG → KTX2 through the content-addressed cache.</summary>
 public sealed class TextureImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -40,8 +37,7 @@ public sealed class TextureImporter : IAssetImporter
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         UPath destination = "/" + Path.ChangeExtension(context.Source, ".ktx2");
 
-        // The COMPLETE input of the step this key skips: source bytes, the exact argv shape
-        // (which encodes preset and quality), and the tool itself.
+        // The key must cover the step's COMPLETE input, or it serves a stale encode as a hit.
         var argvToken = KtxCreate.BuildCreateArguments(KtxTextureEncoder.ToKtxPreset(preset), "out.ktx2", "in" + context.Asset.GetExtensionWithDot(), fast);
         var key = ArtifactDigest.Compute(bytes, argvToken, context.Encoder?.Identity ?? "");
 
@@ -67,11 +63,6 @@ public sealed class TextureImporter : IAssetImporter
         return true;
     }
 
-    /// <summary>
-    /// The filename-token defaults the sidecar's <c>preset</c> overrides — the same heuristics
-    /// <see cref="KtxCreate.PresetFromImageName"/> applies to GLB-internal images, applied to
-    /// the file's stem.
-    /// </summary>
     private static TexturePreset DefaultPresetFor(UPath path)
     {
         var image = new JsonObject { ["name"] = Path.GetFileNameWithoutExtension(path.GetName()) };
@@ -85,11 +76,7 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>
-/// GLB copy-through with texture references repointed to KTX2 — <b>refusing</b> GLBs with
-/// embedded PNG/JPEG until the externalization step lands, because a silently copied one would
-/// fail in the runtime's KTX2-only reader with far less context.
-/// </summary>
+/// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is refused here rather than failing later in the KTX2-only reader with less context.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -106,11 +93,7 @@ public sealed class MeshImporter : IAssetImporter
     {
         if (!context.HasExtension(".glb", ".gltf")) return false;
 
-        // CLAIMED and refused, rather than declined: both the rewrite and the missing-texture
-        // check read the GLB container, so a JSON .gltf reaches neither — it would be copied
-        // through with its .png URIs intact, shipping a mesh naming files the build never wrote,
-        // which is the exact failure repointing exists to prevent. Declining would be worse
-        // still: no importer below claims it either, so the mesh would vanish silently.
+        // Claimed and refused, not declined: declining would let the mesh vanish silently.
         if (context.HasExtension(".gltf"))
         {
             errors.Add(
@@ -122,18 +105,15 @@ public sealed class MeshImporter : IAssetImporter
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         if (HasEmbeddedEncodedImages(bytes, out var mimeType))
         {
-            errors.Add($"{context.Source}: has embedded {mimeType} textures; the mesh externalization step is not implemented yet");
+            // KtxCreate.ExternalizeTextures exists but works on System.IO paths and rewrites the
+            // GLB in place, so it cannot run against this Zio mount (issue #212).
+            errors.Add($"{context.Source}: has embedded {mimeType} textures; the build cannot externalize them yet — export with textures as separate files");
             return true;
         }
 
-        // The mesh names its textures as the author has them (../textures/rust.png); the build
-        // writes them as KTX2 at the same relative place, so the copy has to be repointed.
         var rewrite = MeshTextureReferences.Rewrite(bytes);
 
-        // Checked against the SOURCE tree, not the output: build order is alphabetical, so
-        // Models/ is compiled before textures/ and the KTX2 does not exist yet. What matters is
-        // that a source exists to compile at all — a reference naming nothing is a broken mesh
-        // however the steps are ordered.
+        // Against the SOURCE tree: Models/ builds before textures/, so the KTX2 does not exist yet.
         var directory = context.Asset.GetDirectory();
         var missing = false;
         foreach (var reference in rewrite.Sources)
@@ -146,26 +126,15 @@ public sealed class MeshImporter : IAssetImporter
                 "(a moved or renamed texture; the mesh and the reference move together)");
         }
 
-        // A failure writes nothing (IAssetImporter's contract): the build already refuses to save
-        // its index and manifest, and a rewritten GLB left behind anyway would be exactly the
-        // half-built tree those refusals exist to prevent.
         if (missing) return true;
 
         context.Output.WriteAllBytes("/" + context.Source, rewrite.Glb);
         return true;
     }
 
-    /// <summary>
-    /// A glTF URI as a path in the assets tree. glTF URIs are '/'-separated and percent-encoded
-    /// per the spec, and they are relative to the referencing document — never to the project
-    /// root — which is what makes <c>../textures/x.png</c> mean what an author expects.
-    /// </summary>
     private static UPath Resolve(UPath directory, string uri)
         => (directory / Uri.UnescapeDataString(uri)).ToAbsolute();
 
-    /// <summary>
-    /// Whether a GLB carries embedded (buffer-view-backed) PNG/JPEG images.
-    /// </summary>
     internal static bool HasEmbeddedEncodedImages(byte[] glb, out string mimeType)
     {
         mimeType = "";
@@ -207,15 +176,7 @@ public sealed class AudioImporter : IAssetImporter
     }
 }
 
-/// <summary>
-/// Compiles one authoring document into the export contract the runtime loads.
-/// </summary>
-/// <remarks>
-/// <b>Every document is baked, not just the ones a game calls levels.</b> There is one kind of
-/// document, so a prop compiles to a one-entity level and can be played on its own — which is
-/// the whole point of having one kind. A prefab referenced by another is ALSO flattened into
-/// it, so the same objects appear in both outputs; that is what an instance means.
-/// </remarks>
+/// <summary>Compiles one authoring document into the export contract; every document is baked, so a prop can be played on its own.</summary>
 public sealed class PrefabImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -254,10 +215,6 @@ public sealed class PrefabImporter : IAssetImporter
             return true;
         }
 
-        // Both writers serialize the SAME baked LevelData through the same type model, so the
-        // format is a choice about who reads the output rather than about what it says. Play
-        // always writes TOML into `.prefab`: the filename is the authoring one, and the runtime
-        // dispatches on the extension.
         var text = DocumentOutput.PrefabAsJson(context.Profile, context.Target)
             ? ExportJsonWriter.SerializeToString(level)
             : ExportTomlWriter.SerializeToString(level);
@@ -296,9 +253,7 @@ public sealed class ConfigImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        // The manifest is the one `.toml` this importer must NOT claim: it configures the build
-        // rather than being built by it, and compiling it into the output tree would ship the
-        // source project's profiles as if they were game data.
+        // Compiling the manifest would ship the source project's profiles as game data.
         if (!context.HasExtension(".toml") || context.IsManifest) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
@@ -308,8 +263,7 @@ public sealed class ConfigImporter : IAssetImporter
             return true;
         }
 
-        // Canonicalized first either way: the TOML reader is the one strict parser, so a document
-        // that would be refused as source is refused whichever format it is compiled into.
+        // Canonicalized even for JSON output, so a document refused as source is refused here too.
         var text = context.Profile.DocumentFormat == DocumentFormat.Json
             ? ConfigDocument.ToJson(canonical, context.Source)
             : canonical;
@@ -321,31 +275,21 @@ public sealed class ConfigImporter : IAssetImporter
     }
 }
 
-/// <summary>What the document importers share: the profile's output format, spelled once.</summary>
 internal static class DocumentOutput
 {
-    /// <summary>UTF-8 with no BOM, matching every other writer in the pipeline.</summary>
     public static readonly System.Text.UTF8Encoding Utf8NoBom = new(false);
 
-    /// <summary>The extension an authored document gets in the build, per the profile.</summary>
     public static string Extension(BuildProfile profile)
         => profile.DocumentFormat == DocumentFormat.Json ? ".json" : ".toml";
 
-    /// <summary>
-    /// The extension a baked prefab keeps. Play leaves <c>.prefab</c> so spawners and the editor
-    /// Play button still name a file that exists; a shipped build rewrites to the profile format.
-    /// </summary>
+    /// <summary>Play keeps <c>.prefab</c> (TOML inside) so spawners and the editor's Play button still name a file that exists; the runtime dispatches on extension.</summary>
     public static string PrefabExtension(BuildProfile profile, ProjectOutputTarget target)
         => target == ProjectOutputTarget.Play ? AssetClassifier.PrefabSuffix : Extension(profile);
 
-    /// <summary>
-    /// Whether a baked prefab is written as JSON. Play always writes TOML — the <c>.prefab</c>
-    /// name is the authoring format, and the runtime dispatches on the extension.
-    /// </summary>
     public static bool PrefabAsJson(BuildProfile profile, ProjectOutputTarget target)
         => target != ProjectOutputTarget.Play && profile.DocumentFormat == DocumentFormat.Json;
 
-    /// <summary>Reports an unimplemented document format; <see langword="true"/> when the importer must stop.</summary>
+    /// <summary><see langword="true"/> when the importer must stop.</summary>
     public static bool Unsupported(ImportContext context, List<string> errors)
     {
         if (context.Profile.DocumentFormat is DocumentFormat.Toml or DocumentFormat.Json) return false;

@@ -6,10 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>
-    /// Minimal binary glTF (GLB) container read/write — the JSON chunk plus an optional BIN chunk.
-    /// Ported verbatim from the Unity pipeline tools (it was duplicated across both); engine-neutral.
-    /// </summary>
+    /// <summary>Minimal GLB container read/write. Unknown chunk types fail rather than skip, unlike the runtime's <c>GlbContainer</c> (issue #207).</summary>
     public static class GlbBinary
     {
         public const uint Magic = 0x46546C67;
@@ -26,9 +23,8 @@ namespace Paradise.Assets.Pipeline
                 return false;
             }
 
-            // Opening is inside the try as well: a locked or unreadable file is "cannot read this
-            // GLB", which is what the caller asked, and a Try* that throws for one cause and
-            // answers false for another is a contract nobody can use.
+            // Opening is inside the try: a Try* that throws for one cause and answers false for
+            // another is a contract nobody can use.
             try
             {
                 using var stream = File.OpenRead(glbPath);
@@ -40,12 +36,7 @@ namespace Paradise.Assets.Pipeline
             }
         }
 
-        /// <summary>
-        /// The container from BYTES rather than a path — what a caller working over an
-        /// <c>IFileSystem</c> needs, since the build reads and writes GLBs through Zio (a
-        /// MemoryFileSystem in tests) and never touches <see cref="File"/>. Same parse as the
-        /// path overload, which now delegates here: one container implementation, not two.
-        /// </summary>
+        /// <summary>The bytes overload is what the Zio-based build uses; the path overload delegates here.</summary>
         public static bool TryRead(byte[] glb, out JsonObject gltf, out byte[] binChunk)
             => TryRead(new MemoryStream(glb, writable: false), out gltf, out binChunk);
 
@@ -54,8 +45,6 @@ namespace Paradise.Assets.Pipeline
             gltf = new JsonObject();
             binChunk = Array.Empty<byte>();
 
-            // A truncated stream (EndOfStreamException) or malformed JSON (JsonReaderException) means
-            // a corrupt GLB; treat it as "not readable" and skip rather than unwinding the batch.
             try
             {
                 using var reader = new BinaryReader(stream);
@@ -99,10 +88,6 @@ namespace Paradise.Assets.Pipeline
         public static void Write(string glbPath, JsonObject gltf, byte[] binChunk)
             => File.WriteAllBytes(glbPath, Write(gltf, binChunk));
 
-        /// <summary>
-        /// The container as BYTES — the write half of the byte-based pair, for the same callers
-        /// that need <see cref="TryRead(byte[], out JsonObject, out byte[])"/>.
-        /// </summary>
         public static byte[] Write(JsonObject gltf, byte[] binChunk)
         {
             string json = gltf.ToJsonString();

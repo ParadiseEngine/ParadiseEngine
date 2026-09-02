@@ -8,32 +8,14 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>The outcome of one build.</summary>
-/// <param name="Succeeded">Whether the tree at <paramref name="Output"/> is complete and consistent.</param>
-/// <param name="Errors">What stopped or degraded the build; empty on success.</param>
-/// <param name="AssetCount">How many assets the manifest records.</param>
-/// <param name="Output">The build tree that was written.</param>
 public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, int AssetCount, UPath Output);
 
-/// <summary>
-/// The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.
-/// </summary>
+/// <summary>The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.</summary>
 /// <remarks>
-/// <para>
-/// <b>Pure orchestration.</b> The runner walks the tree, consults the reuse index, and runs the
-/// one process every asset gets: offer it to the import chain — LAST importer first, until one
-/// answers <see langword="true"/> — with an <see cref="ImportContext"/> whose output is the
-/// build tree mounted and observed (<see cref="RecordingFileSystem"/>), then record what was
-/// actually written. There is no lookup table and no per-target set: what an asset IS, and
-/// whether this tree is the one it belongs in, live entirely inside the importers. Nothing here
-/// changes when the chain grows, and a project that appends an importer shadows the built-in it
-/// replaces without touching this file.
-/// </para>
-/// <para>
-/// A build begins with <see cref="ProjectVerifier"/> and refuses on any error — the manifest
-/// records each asset's GUID, so an inconsistent source tree cannot produce a consistent
-/// manifest anyway. Stale outputs from deleted sources are not swept; <c>clean</c> is the
-/// wholesale answer and costs only time.
-/// </para>
+/// No lookup table of asset kinds on purpose: what an asset IS lives in the importers, so a
+/// project can append one that shadows a built-in without this file changing (library-only
+/// today; the CLI cannot pass a chain — issue #208). Stale outputs from deleted sources are not
+/// swept (issue #201); <c>clean</c> is the answer.
 /// </remarks>
 public sealed class BuildRunner
 {
@@ -44,20 +26,6 @@ public sealed class BuildRunner
     private readonly Action<string>? _warn;
     private readonly IReadOnlyList<IAssetImporter> _importers;
 
-    /// <summary>Creates a runner for one project.</summary>
-    /// <param name="fileSystem">The filesystem holding the project.</param>
-    /// <param name="layout">The located project.</param>
-    /// <param name="encoder">
-    /// The texture encoder, or <see langword="null"/> when no <c>ktx</c> is available — the
-    /// build then fails if (and only if) there are textures to encode.
-    /// </param>
-    /// <param name="log">Progress lines.</param>
-    /// <param name="warn">Non-fatal trouble (also handed to the artifact cache).</param>
-    /// <param name="importers">
-    /// The import chain, lowest precedence first; <see cref="AssetImporters.All"/> when omitted.
-    /// A project extends the pipeline by APPENDING to that list — appended means later means
-    /// offered the asset first, so its own importer shadows the built-in it replaces.
-    /// </param>
     public BuildRunner(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
@@ -77,21 +45,7 @@ public sealed class BuildRunner
         _importers = importers ?? AssetImporters.All;
     }
 
-    /// <summary>Builds the named profile into <paramref name="target"/>'s tree.</summary>
-    /// <param name="profileName">
-    /// A profile declared in <c>project.toml</c>, or <see langword="null"/> for
-    /// <see cref="BuildProfile.Default"/>.
-    /// </param>
-    /// <param name="target">Which build-shaped tree to write.</param>
-    /// <remarks>
-    /// <b>Naming a profile and not naming one are different requests, and null is how the
-    /// difference is said.</b> A name the manifest does not declare is an error however
-    /// plausible it sounds — the caller asked for something that does not exist. Null asks for
-    /// nothing in particular and gets the defaults, so a manifest that declares no profiles at
-    /// all is still buildable. What this must NOT do is bless a particular name: deciding what
-    /// an absent <c>--profile</c> means belongs to whoever left it absent, and a library that
-    /// guesses at one English word is a library the CLI can silently fall out of step with.
-    /// </remarks>
+    /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
     public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build)
     {
         var output = _layout.OutputFor(target);
@@ -127,8 +81,6 @@ public sealed class BuildRunner
         }
 
         var cache = ArtifactCache.ForProject(_fileSystem, _layout, _warn);
-        // "" for an unnamed build, which is also BuildManifest's own default for the field. It
-        // cannot be mistaken for a declared profile: the manifest reader refuses an empty name.
         var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName ?? "" };
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
@@ -136,29 +88,19 @@ public sealed class BuildRunner
 
         foreach (var path in _fileSystem.EnumerateFiles(_layout.Assets, "*", SearchOption.AllDirectories).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
-            // Source sidecars stay in assets/. The built tree's identity database is the
-            // manifest — copying them next to play artifacts was a second copy of the same
-            // facts, and a checkout cannot make this one dirty.
+            // The manifest is the built tree's identity database; copying sidecars was a second
+            // copy of the same facts.
             if (SidecarMeta.IsSidecarPath(path)) continue;
 
-            // Asked of everything else, with no further gate. The index only ever holds what a
-            // previous run RECORDED, and recording is gated below on the handling importer's
-            // DeterministicCopy -- so a texture, a document, an unclaimed file or the manifest
-            // simply misses, and the one rule about what may be reused lives in one place
-            // instead of being asserted twice from opposite ends of the loop.
+            // No gate here: recording is gated on DeterministicCopy, so the rule lives once.
             if (index.TryReuse(_fileSystem, path, Relative(path), output, out var already))
             {
                 manifest.Assets.AddRange(already);
                 continue;
             }
 
-            // What this source produced, taken as the entries the importer's writes append. Done
-            // here rather than inside any importer, so none of them knows an index exists.
             var produced = manifest.Assets.Count;
 
-            // ONE process for every asset: offer it to the chain and let an importer claim it.
-            // The runner does not know what anything IS, which tree wants it, or that the
-            // manifest is special -- an asset nobody claims is simply built by nobody.
             var handler = Offer(path, profile!, target, cache, output, manifest, errors);
 
             if (handler is { DeterministicCopy: true } && errors.Count == 0)
@@ -169,31 +111,15 @@ public sealed class BuildRunner
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
-        // Only after a clean build. An index written beside a tree that failed halfway would claim
-        // outputs that were never produced, and the next run would trust it.
+        // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
 
         manifest.Save(_fileSystem, output / BuildManifest.FileName);
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 
-    /// <summary>
-    /// Offers one asset to the chain, last importer first, and stops at the one that claims it.
-    /// The importer writes the output mount directly; what it ACTUALLY wrote — observed, not
-    /// reported — becomes the manifest entries.
-    /// </summary>
-    /// <returns>The importer that handled the asset, or <see langword="null"/> when none did.</returns>
-    /// <remarks>
-    /// Backwards, because a chain is extended by APPENDING: the last row is the most specific
-    /// claim anyone has made, so it is asked first and a project's own importer beats the
-    /// built-in it shadows. One <see cref="ImportContext"/> serves every attempt — declining is
-    /// each importer's first act, so nothing is written before the claim is settled, and a
-    /// decline that wrote anyway surfaces in the manifest rather than vanishing.
-    /// </remarks>
     private IAssetImporter? Offer(UPath path, BuildProfile profile, ProjectOutputTarget target, ArtifactCache cache, UPath output, BuildManifest manifest, List<string> errors)
     {
-        // A sidecar has no sidecar of its own — that lookup would chase x.meta.meta and throw.
-        // Everything else has one, or verify refused the build before this ran.
         var meta = SidecarMeta.IsSidecarPath(path) ? null : SidecarMeta.Load(_fileSystem, SidecarMeta.PathFor(path));
 
         using var observed = new RecordingFileSystem(_fileSystem, output);

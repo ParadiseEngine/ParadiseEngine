@@ -7,10 +7,9 @@ namespace Paradise.Assets.Documents;
 /// calls it a level, a prop, or a piece of one.
 /// </summary>
 /// <remarks>
-/// Deliberately NOT the export contract — that is a bake (world matrices, resolved references,
-/// no identities); this keeps exactly what baking destroys. <b>An object has no privileged
-/// members</b>: identity, name, parent and placement are components
-/// (<see cref="WellKnownComponents"/>), which is why one override mechanism covers everything.
+/// Not the export contract: that is a bake, and this keeps exactly what baking destroys. Identity,
+/// name, parent and placement are components (<see cref="WellKnownComponents"/>) so that one
+/// override mechanism covers everything.
 /// </remarks>
 public sealed class PrefabDocument
 {
@@ -20,7 +19,10 @@ public sealed class PrefabDocument
     /// <summary>The document's objects, in document order. Order is load-bearing.</summary>
     public List<PrefabObject> Objects { get; } = [];
 
-    /// <summary>Objects by their <c>meta.Guid</c>. Throws on a document with duplicates.</summary>
+    /// <summary>
+    /// Objects by their <c>meta.Guid</c>. Last wins on a duplicate — this is a lookup, not a
+    /// validator; callers wanting duplicates refused go through <c>Validate</c> first (issue #210).
+    /// </summary>
     public Dictionary<Guid, PrefabObject> ByGuid()
     {
         var map = new Dictionary<Guid, PrefabObject>();
@@ -32,10 +34,7 @@ public sealed class PrefabDocument
         return map;
     }
 
-    /// <summary>
-    /// The single object with no parent, or <see langword="null"/> when there is not exactly one.
-    /// Inferred rather than declared, so nothing can disagree with the hierarchy.
-    /// </summary>
+    /// <summary>The single parentless object, or <see langword="null"/>; inferred so nothing can disagree with the hierarchy.</summary>
     public PrefabObject? SingleRoot()
     {
         PrefabObject? root = null;
@@ -57,14 +56,7 @@ public sealed class PrefabDocument
     /// <summary>The root's identity.</summary>
     public Guid RootGuid => Root.Guid!.Value;
 
-    /// <summary>
-    /// Applies the one rule a document adds to its object list: <b>exactly one root</b>.
-    /// </summary>
-    /// <remarks>
-    /// Exactly one, because an instance places exactly one thing — the rule every comparable
-    /// system lands on, and what lets any document be instantiated into any other. Instances and
-    /// override carriers are fine here; there is one kind of document.
-    /// </remarks>
+    /// <summary>Requires exactly one root, because an instance places exactly one thing; that is what lets any document be instantiated into any other.</summary>
     /// <exception cref="PrefabDocumentException">No objects, no root, or several roots.</exception>
     public void Validate(string sourceName)
     {
@@ -75,9 +67,6 @@ public sealed class PrefabDocument
 
         if (roots.Count == 0)
         {
-            // Every object has a parent, which for a valid document means they form a cycle --
-            // and the reader already refuses those, so this is the "someone deleted the root"
-            // case rather than anything exotic.
             throw new PrefabDocumentException(sourceName, "has no root object (every object declares a parent)");
         }
 
@@ -92,26 +81,13 @@ public sealed class PrefabDocument
 /// <summary>One authored object: a prefab reference, if any, and its components.</summary>
 public sealed class PrefabObject
 {
-    /// <summary>
-    /// The prefab this object instantiates, or <see langword="null"/> for a plain object.
-    /// </summary>
-    /// <remarks>
-    /// An instance IS the prefab's root: its transform places the whole tree and its components
-    /// override the root's. The prefab's other objects resolve beneath it.
-    /// </remarks>
+    /// <summary>The prefab this object instantiates, or <see langword="null"/>; an instance IS the prefab's root.</summary>
     public AssetReference? Prefab { get; set; }
 
     /// <summary>Component entries in document order. Order is data — the bake preserves it.</summary>
     public List<PrefabComponent> Components { get; } = [];
 
-    /// <summary>
-    /// An object carrying just a <c>meta</c> component — identity, name, and optionally a parent.
-    /// </summary>
-    /// <remarks>
-    /// A factory because hand-building meta is easy to get subtly wrong (an unformatted guid, a
-    /// parent set to <see cref="System.Guid.Empty"/> instead of omitted). <c>meta</c> goes first:
-    /// order is preserved, and identity reads best at the top.
-    /// </remarks>
+    /// <summary>An object carrying just a <c>meta</c> component; hand-built meta is easy to get subtly wrong (unformatted guid, empty parent instead of none).</summary>
     public static PrefabObject WithMeta(Guid guid, string? name = null, Guid? parent = null)
     {
         var data = new CanonicalTomlTable { { WellKnownComponents.Guid, DocumentGuid.Format(guid) } };
@@ -160,14 +136,12 @@ public sealed class PrefabObject
     }
 }
 
-/// <summary>
-/// One component entry: its identity, its readable name, and its payload — which sits directly
-/// beside them rather than under a nested table.
-/// </summary>
+/// <summary>One component entry, its payload flattened beside <c>id</c> and <c>type</c> rather than nested.</summary>
 /// <remarks>
-/// Flattening costs three reserved names and buys about a quarter of a document's lines. The
-/// constructor refuses a payload using one — a named error at the code that built it, not a
-/// duplicate key on write. (Parsed text cannot collide; TOML rejects duplicate keys.)
+/// Flattening costs three reserved names and buys about a quarter of a document's lines; the
+/// constructor refuses a payload using one so the error names the code that built it. (Parsed
+/// text relies on the serializer consuming reserved keys first, not on the parser refusing
+/// duplicates — Tomlyn's default is last-wins, issue #198.)
 /// </remarks>
 public sealed class PrefabComponent
 {
@@ -186,11 +160,7 @@ public sealed class PrefabComponent
     /// <summary>Whether <paramref name="key"/> is one of <see cref="ReservedKeys"/>.</summary>
     public static bool IsReserved(string key) => key is IdKey or TypeKey or RemovedKey;
 
-    /// <summary>Creates a component entry.</summary>
-    /// <param name="id">The component's identity — the primary key, and what an override matches on.</param>
-    /// <param name="type">Its readable name; a fallback key for humans, optional on the wire.</param>
-    /// <param name="data">The payload, an open table owned by the game's schema.</param>
-    /// <param name="removed">Whether this entry drops the prefab's component rather than overriding it.</param>
+    /// <summary>Creates a component entry; <paramref name="id"/> is what an override matches on, <paramref name="type"/> is for humans only.</summary>
     /// <exception cref="ArgumentException">The payload uses a reserved key.</exception>
     public PrefabComponent(Guid id, string? type = null, CanonicalTomlTable? data = null, bool removed = false)
     {
@@ -219,20 +189,14 @@ public sealed class PrefabComponent
     /// <summary>The authored payload.</summary>
     public CanonicalTomlTable Data { get; }
 
-    /// <summary>
-    /// On an instance: drop the prefab's component of this id rather than overriding it. Always
-    /// false on a plain object, where there is nothing to drop.
-    /// </summary>
+    /// <summary>On an instance: drop the prefab's component of this id rather than overriding it.</summary>
     public bool Removed { get; }
 }
 
 /// <summary>A prefab document could not be read, parsed, or validated.</summary>
 public sealed class PrefabDocumentException : Exception
 {
-    /// <summary>Creates an exception describing a problem with <paramref name="sourceName"/>.</summary>
-    /// <param name="sourceName">The document path, or another name for the source text.</param>
-    /// <param name="problem">The problem, phrased to follow the source name.</param>
-    /// <param name="innerException">The underlying failure, when there was one.</param>
+    /// <summary>Creates an exception; <paramref name="problem"/> is phrased to follow the source name.</summary>
     public PrefabDocumentException(string sourceName, string problem, Exception? innerException = null)
         : base($"Prefab document '{sourceName}' {problem}.", innerException)
     {
