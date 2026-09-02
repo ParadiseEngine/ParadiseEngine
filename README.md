@@ -84,6 +84,7 @@ never references these:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
+| [Paradise.Cli.Host](src/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | The `paradise` command as a library: `BuildHost.Run(args, importers)`. What the tool runs, and what a game's own asset tool runs with its importers appended |
 | [Paradise.Cli](src/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` command: scaffold a project, verify and build its assets, and report on the build toolchain. Ships as a dotnet tool, not a library reference |
 
 Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`,
@@ -140,11 +141,23 @@ paradise new MyGame            # assets tree, a sample level, .gitignore
 paradise assets verify         # sidecars, identities, validity
 paradise assets build          # assets/ -> build/  (--editor for .editor/play)
 paradise assets watch          # keep *.meta in step, rebuilding as you go
+paradise assets mv <from> <to> # move a file or directory; sidecars and prefab references follow
 paradise tools doctor          # every build tool: found, version, how to fix
 ```
 
 Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
 them all with the shared `--project` and `--profile` options.
+
+A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
+`Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —
+the tool cannot be handed code, and NativeAOT rules out scanning for it:
+
+```csharp
+// tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
+return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
+```
+
+The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
 
 ## Releasing
 

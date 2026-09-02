@@ -58,7 +58,8 @@ internal static class Verbs
         bool editor,
         bool dryRun,
         bool build,
-        bool tray = true)
+        bool tray,
+        IReadOnlyList<IAssetImporter> importers)
     {
         var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun, IgnoreRules(fileSystem, layout));
         var settled = maintainer.Reconcile();
@@ -78,7 +79,7 @@ internal static class Verbs
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
         using var signals = new WatchSignals();
-        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine);
+        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine, importers: importers);
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
@@ -137,7 +138,7 @@ internal static class Verbs
         }
     }
 
-    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor)
+    public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor, IReadOnlyList<IAssetImporter> importers)
     {
         // Same probe as `tools doctor`, in its order: PARADISE_KTX_PATH, a vendored
         // third_party/tools/KTX-Software under the project root, the tools-install cache, PATH.
@@ -149,7 +150,8 @@ internal static class Verbs
         var runner = new BuildRunner(
             fileSystem, layout, encoder,
             log: Console.WriteLine,
-            warn: message => Console.Error.WriteLine($"warning: {message}"));
+            warn: message => Console.Error.WriteLine($"warning: {message}"),
+            importers: importers);
         var result = runner.Run(profile, editor ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
 
         foreach (var error in result.Errors)
@@ -160,6 +162,20 @@ internal static class Verbs
         Console.WriteLine(result.Succeeded
             ? $"build: {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
             : $"build: FAILED with {result.Errors.Count} error(s)");
+        return result.Succeeded ? 0 : 1;
+    }
+
+    public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to)
+    {
+        var result = AssetMover.Move(fileSystem, layout, from, to, Console.WriteLine);
+
+        foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+        foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
+
+        // The counts print either way: a failure after the files moved is exactly when the
+        // author must know the tree changed.
+        var summary = $"{result.Moved.Count} file(s) moved, {result.Rewritten.Count} document(s) rewritten, {result.Warnings.Count} warning(s)";
+        Console.WriteLine(result.Succeeded ? $"mv: {summary}" : $"mv: FAILED with {result.Errors.Count} error(s) — {summary}");
         return result.Succeeded ? 0 : 1;
     }
 

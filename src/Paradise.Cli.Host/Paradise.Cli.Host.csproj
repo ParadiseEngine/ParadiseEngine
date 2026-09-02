@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Everything the `paradise` command does, as a library: argument parsing, the verbs' console
+    rendering, the watch loop and its native tray icons. Paradise.Cli is a one-line Program over
+    BuildHost.Run, and so is a game's own tools/assets project — which is the point (issue #208):
+    a dotnet tool cannot be handed an importer chain, and NativeAOT rules out scanning for one, so
+    a game that extends the pipeline references THIS package and passes its importers in code.
+    A tool package (PackAsTool) cannot be a PackageReference, hence two packages.
+
+    Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
+    every verb's real logic lives (tested) in the pipeline library.
+
+    Native tray icons (Win32 notify icon, AppKit status item) live in Tray/. The watch loop talks
+    to them through IWatchTray; headless, CI, Linux, and the no-tray flag never start one.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Cli.Host</AssemblyName>
+    <RootNamespace>Paradise.Cli</RootNamespace>
+    <PackageId>Paradise.Cli.Host</PackageId>
+    <Title>Paradise.Cli.Host</Title>
+    <Description>The paradise command as a library: BuildHost.Run(args, importers) is what the dotnet tool runs, and what a game's own asset tool runs with its importers appended.</Description>
+    <PackageTags>assets;pipeline;cli;game-dev</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Cli.Test" />
+    <InternalsVisibleTo Include="Paradise.Cli.CoyoteTest" />
+  </ItemGroup>
+
+</Project>

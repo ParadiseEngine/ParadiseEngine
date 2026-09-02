@@ -2,7 +2,7 @@
 	"AssembliesPath": ".",
 	"Assemblies": [
 		"Paradise.Cli.CoyoteTest.dll",
-		"paradise.dll"
+		"Paradise.Cli.Host.dll"
 	],
 	"OutputPath": ".",
 	"IsRewritingConcurrentCollections": true,

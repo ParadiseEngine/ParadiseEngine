@@ -3,7 +3,7 @@
 // cross-process lock; see that file for the history behind each of those decisions). Resolves a
 // `ktx` CLI archive from tools/ktx/ktx.manifest.json for a given RID and installs it under the
 // cache directory the caller names — typically third_party/tools/KTX-Software, which
-// KtxCreate.FindKtx already probes.
+// KtxTool.Find already probes.
 //
 // The manifest carries every RID Khronos publishes a usable asset for. Linux is a tarball and
 // extracts unattended, which is what CI runs. WINDOWS is an NSIS installer that REQUIRES

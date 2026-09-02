@@ -11,7 +11,7 @@ public interface IImportSettingsDomain
     string? Problem(CanonicalTomlTable settings);
 }
 
-/// <summary>Mirrors <c>KtxCreate.TextureEncodingPreset</c>; lives in the pipeline, not the format, so a new setting never grows the format layer.</summary>
+/// <summary>Mirrors <see cref="TextureEncodingPreset"/>; lives in the pipeline, not the format, so a new setting never grows the format layer.</summary>
 public enum TexturePreset
 {
     /// <summary>sRGB colour; the default for plain images.</summary>

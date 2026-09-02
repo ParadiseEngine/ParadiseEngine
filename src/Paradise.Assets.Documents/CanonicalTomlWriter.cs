@@ -37,7 +37,7 @@ namespace Paradise.Assets.Documents;
 /// comma, empty is <c>[]</c>. Arrays hold scalars, nested arrays, or <b>inline tables</b>
 /// (item 11): a table that is an array ELEMENT is inline by rule (issue #187), which is what
 /// keeps a null slot <c>{}</c> expressible. A generic <see cref="CanonicalTomlTable"/> list in
-/// the model is a different thing — an array-of-tables, item 9 — and the two never mix in one
+/// the model is a different thing — an array of tables, item 10 — and the two never mix in one
 /// value.</item>
 /// <item>Every nested <see cref="CanonicalTomlTable"/> is a <c>[dotted.path]</c> header; every
 /// array of tables is one <c>[[dotted.path]]</c> header per element, in element order.
@@ -51,13 +51,18 @@ namespace Paradise.Assets.Documents;
 /// <c>{ key = value, … }</c> — <c>", "</c> between pairs, in model order, keys by item 4 and
 /// values by items 5–9. An empty one is <c>{}</c>, which is how a null element inside an array
 /// is spelled. Inline tables never nest another table.
-/// <para>Writing chooses the form by TYPE; reading restores it by CONTENT — <b>a table at value
-/// position is inline iff it is empty or has exactly the two string keys <c>guid</c> and
-/// <c>path</c></b> (<see cref="AssetReferenceCodec.IsWrittenInline"/>), a shape therefore
-/// RESERVED for asset references; a table inside an array is inline regardless (item 8).
-/// Content, because the Python mirror's parser cannot see the source form and both readers
-/// must rebuild the same model from the same bytes (issue #187; the mirror's array rule is being
-/// brought in line in ParadiseBlenderEditor#29).</para></item>
+/// <para>Writing chooses the form by TYPE; reading restores it so that both readers rebuild
+/// the same model from the same bytes (issue #187), which <c>TomlDocumentReader</c> and the
+/// mirror's <c>restore_inline_tables</c> both implement: <b>a table at value position is inline
+/// iff it is empty or has exactly the two string keys <c>guid</c> and <c>path</c></b>
+/// (<see cref="AssetReferenceCodec.IsWrittenInline"/>), a shape therefore RESERVED for asset
+/// references — content, because the Python mirror's parser cannot see the source form; and
+/// <b>a table inside an array is inline regardless of content</b> (item 9), unless the array
+/// was spelled as <c>[[header]]</c> blocks, which stay an array of tables (item 10) — a fact
+/// Tomlyn reports as <c>TomlTableArray</c> and the mirror reads off the text, since a
+/// <c>[[</c> header can only stand at the start of a line. The parity corpus in
+/// <c>Paradise.Assets.Documents.Test/Fixtures/parity</c> pins every rule for both writers
+/// (issue #209).</para></item>
 /// </list>
 /// </remarks>
 public static class CanonicalTomlWriter

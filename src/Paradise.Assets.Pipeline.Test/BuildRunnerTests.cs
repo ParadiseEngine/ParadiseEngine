@@ -13,14 +13,17 @@ public class BuildRunnerTests
     {
         public int Encodes;
         public bool Fail;
-        public bool? LastFast;
+        public TextureQuality? LastQuality;
 
         public string Identity { get; set; } = "fake-ktx 1.0";
 
-        public bool TryEncode(byte[] source, string sourceExtension, TexturePreset preset, bool fastEncode, out byte[] ktx2, out string error)
+        public string CacheKey(byte[] source, string sourceExtension, TexturePreset preset, TextureQuality quality)
+            => ArtifactDigest.Compute(source, sourceExtension, preset.ToString(), quality.ToString(), Identity);
+
+        public bool TryEncode(byte[] source, string sourceExtension, TexturePreset preset, TextureQuality quality, out byte[] ktx2, out string error)
         {
             Encodes++;
-            LastFast = fastEncode;
+            LastQuality = quality;
             if (Fail)
             {
                 ktx2 = [];
@@ -85,9 +88,39 @@ public class BuildRunnerTests
         var result = new BuildRunner(fileSystem, s_layout, encoder).Run("fastdev");
 
         await Assert.That(result.Succeeded).IsTrue();
-        await Assert.That(encoder.LastFast).IsTrue();
+        await Assert.That(encoder.LastQuality).IsEqualTo(TextureQuality.Fast);
         var built = Encoding.UTF8.GetString(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2"));
         await Assert.That(built).Contains(":Normal:");
+    }
+
+    [Test]
+    public async Task two_primary_outputs_under_one_identity_fail_the_build_by_name()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [new TwinOutputImporter()]).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("audio/init.bnk");
+        await Assert.That(result.Errors[0]).Contains("audio/init.bank");
+        await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
+    }
+
+    /// <summary>Writes the source at two extensions, both "primary" by stem, so one guid would name two files.</summary>
+    private sealed class TwinOutputImporter : IAssetImporter
+    {
+        public string Name => "twin";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".bnk")) return false;
+            context.Output.WriteAllBytes("/" + context.Source, [1]);
+            context.Output.WriteAllBytes("/" + Path.ChangeExtension(context.Source, ".bank"), [1]);
+            return true;
+        }
     }
 
     [Test]
@@ -117,17 +150,58 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task a_glb_with_embedded_png_refuses_the_build()
+    public async Task a_glb_with_embedded_png_is_externalized_beside_the_mesh_through_the_cache()
+    {
+        // The rewriter is bytes-in/bytes-out, so the build can run it over the Zio mount (#212);
+        // the encode goes through the same cache as an authored texture.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4];
+        fileSystem.WriteAllBytes("/game/assets/models/lamp.glb", EmbeddedImageGlb(png, "Lamp_Albedo"));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/lamp.glb.meta");
+        var encoder = new FakeEncoder();
+        var runner = new BuildRunner(fileSystem, s_layout, encoder);
+
+        var result = runner.Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/build/models/lamp_0.ktx2")).IsTrue();
+        var manifest = BuildManifest.Load(fileSystem, "/game/build/manifest.json");
+        await Assert.That(manifest.Assets.Select(a => a.Path)).IsEquivalentTo(new[] { "models/lamp.glb", "models/lamp_0.ktx2" });
+        // The mesh's identity names the mesh; its externalised texture is a companion with none,
+        // or byGuid would resolve the mesh reference to a texture.
+        var guid = DocumentGuid.Format(SidecarMeta.Load(fileSystem, "/game/assets/models/lamp.glb.meta").Guid);
+        await Assert.That(manifest.ByGuid[guid].Path).IsEqualTo("models/lamp.glb");
+        await Assert.That(manifest.Assets.Single(a => a.Path == "models/lamp_0.ktx2").Guid).IsNull();
+
+        GlbBinary.TryRead(fileSystem.ReadAllBytes("/game/build/models/lamp.glb"), out var gltf, out var bin);
+        var image = gltf["images"]![0]!;
+        await Assert.That(image["uri"]!.GetValue<string>()).IsEqualTo("lamp_0.ktx2");
+        await Assert.That(image["mimeType"]!.GetValue<string>()).IsEqualTo("image/ktx2");
+        await Assert.That(image["bufferView"]).IsNull();
+        // Geometry only in the BIN: the image bytes are gone and the buffer says so.
+        await Assert.That(bin.Length).IsLessThan(png.Length);
+        await Assert.That(gltf["buffers"]![0]!["byteLength"]!.GetValue<int>()).IsEqualTo(bin.Length);
+        // Same contract as an authored texture reference (#207): no KHR_texture_basisu.
+        await Assert.That(gltf["extensionsRequired"]).IsNull();
+
+        fileSystem.DeleteDirectory("/game/build", isRecursive: true);
+        await Assert.That(runner.Run().Succeeded).IsTrue();
+        await Assert.That(encoder.Encodes).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task an_embedded_png_without_an_encoder_names_the_mesh()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        var glb = MakeGlb("{\"images\":[{\"mimeType\":\"image/png\",\"bufferView\":0}]}");
-        fileSystem.WriteAllBytes("/game/assets/models/bad.glb", glb);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/bad.glb.meta");
+        fileSystem.WriteAllBytes("/game/assets/models/lamp.glb", EmbeddedImageGlb([1, 2, 3, 4], "Lamp_Albedo"));
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/lamp.glb.meta");
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+        var result = new BuildRunner(fileSystem, s_layout, encoder: null).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors[0]).Contains("embedded image/png");
+        await Assert.That(result.Errors[0]).Contains("models/lamp.glb");
+        await Assert.That(result.Errors[0]).Contains("no ktx CLI");
+        await Assert.That(fileSystem.FileExists("/game/build/models/lamp.glb")).IsFalse();
     }
 
     [Test]
@@ -726,13 +800,13 @@ public class BuildRunnerTests
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
         var encoder = new FakeEncoder();
         await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run("dev").Succeeded).IsTrue();
-        await Assert.That(encoder.LastFast).IsFalse();
+        await Assert.That(encoder.LastQuality).IsEqualTo(TextureQuality.Full);
 
         fileSystem.WriteAllText("/game/assets/project.toml", "name = \"x\"\nschema_version = 1\n\n[build.profiles.dev]\ntexture_quality = \"fast\"\n");
         await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run("dev").Succeeded).IsTrue();
 
         await Assert.That(encoder.Encodes).IsEqualTo(2);
-        await Assert.That(encoder.LastFast).IsTrue();
+        await Assert.That(encoder.LastQuality).IsEqualTo(TextureQuality.Fast);
     }
 
     [Test]
@@ -1012,6 +1086,19 @@ public class BuildRunnerTests
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(result.AssetCount).IsEqualTo(1);
         await Assert.That(fileSystem.FileExists("/game/build/audio/.DS_Store")).IsFalse();
+    }
+
+    internal static byte[] EmbeddedImageGlb(byte[] image, string name)
+    {
+        var gltf = new System.Text.Json.Nodes.JsonObject
+        {
+            ["asset"] = new System.Text.Json.Nodes.JsonObject { ["version"] = "2.0" },
+            ["images"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["name"] = name, ["mimeType"] = "image/png", ["bufferView"] = 0 }),
+            ["textures"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["source"] = 0 }),
+            ["bufferViews"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["buffer"] = 0, ["byteOffset"] = 0, ["byteLength"] = image.Length }),
+            ["buffers"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["byteLength"] = image.Length }),
+        };
+        return GlbBinary.Write(gltf, image);
     }
 
     private static byte[] MakeGlb(string json)

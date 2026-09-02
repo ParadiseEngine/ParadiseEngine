@@ -61,11 +61,12 @@ public sealed record ImportContext(
 /// <summary>One link in the import chain: handle the asset or decline and let the next link try.</summary>
 /// <remarks>
 /// Importers claim inside <see cref="Import"/> rather than declaring extensions, so a project can
-/// append one that shadows a built-in (library-only today — issue #208). Decline first, validate
-/// next, write last: the chain shares one output mount, so an early write lands in the manifest
-/// under whoever ends up handling the asset, or survives in a tree the failed build already
-/// declared suspect. Read every input through <see cref="ImportContext.FileSystem"/> and nothing
-/// else; the build index reuses the output whenever everything read there is unchanged.
+/// append one that shadows a built-in on whatever grounds it likes; the chain is a plain list a
+/// game's own host passes to <c>BuildHost.Run</c> (issue #208). Decline first, validate next,
+/// write last: the chain shares one output mount, so an early write lands in the manifest under
+/// whoever ends up handling the asset, or survives in a tree the failed build already declared
+/// suspect. Read every input through <see cref="ImportContext.FileSystem"/> and nothing else;
+/// the build index reuses the output whenever everything read there is unchanged.
 /// </remarks>
 public interface IAssetImporter
 {

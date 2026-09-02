@@ -14,7 +14,7 @@ public readonly record struct ToolFinding(string Name, ToolStatus Status, string
 /// <summary>
 /// <c>tools doctor</c>. Exists because two tool failures were undiagnosable from what the build
 /// said (a <c>slangc</c> quoting bug read as an absent compiler; a missing <c>ktx</c> on Windows
-/// where the bootstrap cannot help). Uses the build's own probe (<see cref="KtxCreate.FindKtx"/>)
+/// where the bootstrap cannot help). Uses the build's own probe (<see cref="KtxTool.Find"/>)
 /// so the two cannot drift.
 /// </summary>
 public static class ToolReport
@@ -27,10 +27,10 @@ public static class ToolReport
 
     private static ToolFinding Ktx(string repoRoot)
     {
-        var path = KtxCreate.FindKtx(repoRoot);
+        var path = KtxTool.Find(repoRoot);
         if (path is not null)
         {
-            var probe = KtxCreate.ProbeKtx(path);
+            var probe = KtxTool.Probe(path);
             return probe.Usable
                 ? new ToolFinding("ktx", ToolStatus.Ok, probe.VersionText?.Split(':', 2) is { Length: 2 } halves ? halves[1].Trim() : probe.VersionText, path, null)
                 : new ToolFinding("ktx", ToolStatus.Missing, probe.VersionText, path, probe.Problem);

@@ -31,6 +31,7 @@ public sealed class AssetWatcher : IDisposable
     private readonly SidecarMaintainer _maintainer;
     private readonly Action<string> _log;
     private readonly Func<DateTimeOffset> _now;
+    private readonly IReadOnlyList<IAssetImporter> _importers;
 
     // `object`, not `System.Threading.Lock`: Coyote (1.7.11) rewrites Monitor.Enter/Exit but not
     // Lock.EnterScope, so with the newer type Paradise.Assets.Pipeline.CoyoteTest cannot control
@@ -42,13 +43,14 @@ public sealed class AssetWatcher : IDisposable
 
     private IFileSystemWatcher? _watcher;
 
-    /// <summary>Creates a watcher over one project.</summary>
+    /// <summary>Creates a watcher over one project; <paramref name="importers"/> is the chain every rebuild runs (the built-ins when omitted).</summary>
     public AssetWatcher(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         SidecarMaintainer maintainer,
         Action<string>? log = null,
-        Func<DateTimeOffset>? now = null)
+        Func<DateTimeOffset>? now = null,
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -59,6 +61,7 @@ public sealed class AssetWatcher : IDisposable
         _maintainer = maintainer;
         _log = log ?? (static _ => { });
         _now = now ?? (static () => DateTimeOffset.UtcNow);
+        _importers = importers ?? AssetImporters.All;
     }
 
     /// <summary>Whether anything is waiting out its debounce.</summary>
@@ -155,7 +158,7 @@ public sealed class AssetWatcher : IDisposable
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
     {
         _maintainer.Reconcile();
-        return new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"))
+        return new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"), _importers)
             .Run(profile, target);
     }
 

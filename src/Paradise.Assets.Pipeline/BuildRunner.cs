@@ -13,8 +13,8 @@ public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, i
 /// <summary>The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.</summary>
 /// <remarks>
 /// No lookup table of asset kinds on purpose: what an asset IS lives in the importers, so a
-/// project can append one that shadows a built-in without this file changing (library-only
-/// today; the CLI cannot pass a chain — issue #208). A successful build's tree holds exactly what
+/// project can append one that shadows a built-in without this file changing (a game's host
+/// passes its chain through <c>BuildHost.Run</c>, issue #208). A successful build's tree holds exactly what
 /// it produced: the manifest goes first and comes back last, so a tree without one is a tree a
 /// build did not finish, and whatever the build did not write is swept before the manifest
 /// returns (issues #201, #202).
@@ -149,7 +149,17 @@ public sealed class BuildRunner
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
 
-        manifest.Save(_fileSystem, output / BuildManifest.FileName);
+        try
+        {
+            manifest.Save(_fileSystem, output / BuildManifest.FileName);
+        }
+        catch (InvalidOperationException error)
+        {
+            // Two primary outputs under one identity: a project importer's doing, since verify
+            // keeps sidecar guids unique. A build error, not a crash of the verb.
+            return new BuildResult(false, [$"manifest: {error.Message}"], manifest.Assets.Count, output);
+        }
+
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 
@@ -194,7 +204,9 @@ public sealed class BuildRunner
             {
                 Path = file.FullName[1..],
                 Source = context.Source,
-                Guid = handler.RecordsIdentity && meta is { } identified ? DocumentGuid.Format(identified.Guid) : null,
+                Guid = handler.RecordsIdentity && meta is { } identified && IsPrimaryOutput(file.FullName[1..], context.Source)
+                    ? DocumentGuid.Format(identified.Guid)
+                    : null,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)),
                 Size = bytes.Length,
             });
@@ -202,6 +214,10 @@ public sealed class BuildRunner
 
         return (handler, observed.Records);
     }
+
+    /// <summary>The source's identity goes on the output that IS the source in built form — same place, same stem, whatever the extension became — and on nothing else it wrote: a mesh's externalised textures under the mesh's guid would make <c>byGuid</c> resolve the mesh to a texture.</summary>
+    private static bool IsPrimaryOutput(string output, string source)
+        => string.Equals(Path.ChangeExtension(output, null), Path.ChangeExtension(source, null), StringComparison.Ordinal);
 
     /// <summary>Two sources landing on one output path is last-writer-wins and a manifest with two entries for one file (#202).</summary>
     private static void Claim(Dictionary<string, string> owners, IReadOnlyList<BuiltAsset> assets, List<string> errors)

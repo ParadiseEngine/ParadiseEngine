@@ -24,7 +24,7 @@ public enum AssetClass
     Foreign,
 }
 
-/// <summary>Classifies paths under <c>assets/</c> by suffix and the project's ignore list; it asks importers nothing because a declined asset may mean "not mine" or "not for this tree".</summary>
+/// <summary>Classifies paths under <c>assets/</c> by suffix and the project's ignore list; it asks importers nothing because a declined asset may mean "not mine" or "not for this tree". Suffixes compare ignoring case, as the importers' own checks do, so <c>Foo.PREFAB</c> is a prefab to verify and to the build alike (issue #208).</summary>
 public static class AssetClassifier
 {
     public const string PrefabSuffix = ".prefab";
@@ -38,8 +38,8 @@ public static class AssetClassifier
         if (SidecarMeta.IsSidecarPath(path)) return AssetClass.Sidecar;
         if (ignore.Matches(assetsRoot, path)) return AssetClass.Ignored;
         if (path == assetsRoot / AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
-        if (name.EndsWith(PrefabSuffix, StringComparison.Ordinal)) return AssetClass.Prefab;
-        if (name.EndsWith(".toml", StringComparison.Ordinal)) return AssetClass.Config;
+        if (name.EndsWith(PrefabSuffix, StringComparison.OrdinalIgnoreCase)) return AssetClass.Prefab;
+        if (name.EndsWith(".toml", StringComparison.OrdinalIgnoreCase)) return AssetClass.Config;
         return AssetClass.Foreign;
     }
 

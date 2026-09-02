@@ -15,6 +15,9 @@ public class AssetClassifierTests
     [Arguments("/game/assets/models/crate.glb", AssetClass.Foreign)]
     [Arguments("/game/assets/models/crate.gltf", AssetClass.Foreign)]
     [Arguments("/game/assets/textures/fire.PNG", AssetClass.Foreign)]
+    // Case-insensitive like the importers' own checks, so verify and the build agree on it (#208).
+    [Arguments("/game/assets/levels/Shouty.PREFAB", AssetClass.Prefab)]
+    [Arguments("/game/assets/config/Game.TOML", AssetClass.Config)]
     [Arguments("/game/assets/textures/fire.jpg", AssetClass.Foreign)]
     [Arguments("/game/assets/audio/init.bnk", AssetClass.Foreign)]
     [Arguments("/game/assets/audio/music.wem", AssetClass.Foreign)]

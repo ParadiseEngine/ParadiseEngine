@@ -69,7 +69,7 @@ public sealed class AssetPaths
                 "references are case-exact because a build that passes on this machine ships a path Linux cannot open";
         }
 
-        return $"references '{reference}', which does not exist under assets/ (a moved or renamed file; the reference moves with it)";
+        return $"references '{reference}', which does not exist under assets/ (a file moved or renamed outside `paradise assets mv`, which carries references with the file)";
     }
 
     public string Relative(UPath path) => path.FullName[(Root.FullName.Length + 1)..];

@@ -40,7 +40,7 @@ jobs:
           restore-keys: |
             slang-${{ runner.os }}-${{ runner.arch }}-
 
-      # Same location and layout `paradise tools install ktx` uses, so KtxCreate.FindKtx finds it
+      # Same location and layout `paradise tools install ktx` uses, so KtxTool.Find finds it
       # and the texture encode tests run instead of skipping. Keyed on the manifest SHA like slangc.
       - name: Cache ktx
         uses: actions/cache@v4

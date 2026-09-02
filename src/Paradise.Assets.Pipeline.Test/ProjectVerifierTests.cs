@@ -290,21 +290,12 @@ public class ProjectVerifierTests
         await Assert.That(findings[0].Message).Contains("case-exact");
     }
 
-    /// <summary>
-    /// A file no build step will touch is not, by itself, a verify finding.
-    /// </summary>
-    /// <remarks>
-    /// <b>Verify cannot tell, so verify does not say.</b> An importer claims an asset inside its
-    /// own <c>Import</c>, on whatever grounds it likes, so the only place the question "does
-    /// anything handle this" is answerable is a running build — and even there a decline means
-    /// "not mine" OR "not for this tree". What still speaks for a stray file is the sidecar
-    /// rule, which is the check that was doing the work: everything under assets/ is an asset
-    /// and carries an identity,
-    /// processed or not. See <see cref="a_file_nothing_builds_still_needs_its_identity"/>.
-    /// </remarks>
     [Test]
     public async Task a_file_no_step_will_build_is_not_a_finding_on_its_own()
     {
+        // Verify cannot tell, so verify does not say: an importer claims an asset inside its own
+        // Import, on whatever grounds it likes, so only a running build can answer "does
+        // anything handle this" — and even there a decline may mean "not for this tree".
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/notes.txt", "todo");
 
@@ -388,6 +379,19 @@ public class ProjectVerifierTests
         await Assert.That(findings.Count).IsEqualTo(2);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
         await Assert.That(findings[1].Severity).IsEqualTo(VerifySeverity.Warning);
+    }
+
+    [Test]
+    public async Task an_upper_case_prefab_suffix_is_still_a_document_to_verify()
+    {
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/levels/Shouty.PREFAB", "not toml at all [[[");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("not valid TOML");
     }
 
     /// <param name="documentFormat">
