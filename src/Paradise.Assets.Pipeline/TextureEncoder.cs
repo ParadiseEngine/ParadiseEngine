@@ -24,17 +24,25 @@ public sealed class KtxTextureEncoder : ITextureEncoder
     /// <inheritdoc />
     public string Identity { get; }
 
-    public static bool TryCreate(string? repoRoot, out KtxTextureEncoder? encoder)
+    /// <summary>
+    /// <paramref name="problem"/> is null when no ktx was found at all (the texture step says so per
+    /// asset) and names the fault when one was found but cannot serve: not runnable, or too old.
+    /// </summary>
+    public static bool TryCreate(string? repoRoot, out KtxTextureEncoder? encoder, out string? problem)
     {
         encoder = null;
+        problem = null;
         var ktxPath = KtxCreate.FindKtx(repoRoot);
         if (string.IsNullOrWhiteSpace(ktxPath)) return false;
 
-        // Falls back to the path: a worse identity than a version, but one that changes when the
-        // install does. Nothing gates the version itself (issue #206).
-        var probe = ProcessTools.Run(ktxPath, "--version", timeoutMilliseconds: 30_000);
-        var identity = probe.Succeeded && probe.Stdout.Trim().Length > 0 ? probe.Stdout.Trim() : $"ktx@{ktxPath}";
-        encoder = new KtxTextureEncoder(ktxPath, identity);
+        var probe = KtxCreate.ProbeKtx(ktxPath);
+        if (!probe.Usable)
+        {
+            problem = probe.Problem;
+            return false;
+        }
+
+        encoder = new KtxTextureEncoder(ktxPath, probe.VersionText!);
         return true;
     }
 

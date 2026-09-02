@@ -68,7 +68,11 @@ internal static class Verbs
 
         if (dryRun) return 0;
 
-        KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
+        if (!KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder, out var ktxProblem) && ktxProblem is not null)
+        {
+            Console.Error.WriteLine($"warning: {ktxProblem}");
+        }
+
         var editorMode = new WatchEditorMode(editor);
         ProjectOutputTarget Target() => editorMode.IsOn ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
@@ -121,9 +125,12 @@ internal static class Verbs
 
     public static int Build(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, bool editor)
     {
-        // Same probe as KtxCreate.FindKtx, in its order: PARADISE_KTX_PATH, then a vendored
-        // third_party/tools/KTX-Software under the project root, then PATH.
-        KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder);
+        // Same probe as `tools doctor`, in its order: PARADISE_KTX_PATH, a vendored
+        // third_party/tools/KTX-Software under the project root, the tools-install cache, PATH.
+        if (!KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder, out var ktxProblem) && ktxProblem is not null)
+        {
+            Console.Error.WriteLine($"warning: {ktxProblem}");
+        }
 
         var runner = new BuildRunner(
             fileSystem, layout, encoder,
@@ -282,10 +289,8 @@ internal static class Verbs
             return 1;
         }
 
-        var rid = HostRid();
-        var packages = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
-        var output = Path.Combine(packages, $"_{name}", version, rid);
+        var rid = ToolLocations.HostRid();
+        var output = ToolLocations.InstallRoot(name, version);
 
         Console.WriteLine($"installing {name} {version} ({rid}) into {output}");
 
@@ -318,14 +323,6 @@ internal static class Verbs
         {
             return null;
         }
-    }
-
-    private static string HostRid()
-    {
-        var os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
-        var architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
-            .ToString().ToLowerInvariant();
-        return $"{os}-{architecture}";
     }
 
     private static string Display(IFileSystem fileSystem, UPath path) => fileSystem.ConvertPathToInternal(path);

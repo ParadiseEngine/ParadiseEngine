@@ -10,12 +10,18 @@ using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>Subprocess and executable-resolution helpers. A <c>Win32Exception</c> from a non-runnable file escapes <c>Run</c> today (issue #206).</summary>
+    /// <summary>Subprocess and executable-resolution helpers.</summary>
     public static class ProcessTools
     {
         public readonly record struct ProcessResult(bool Started, bool TimedOut, int ExitCode, string Stdout, string Stderr)
         {
             public bool Succeeded => Started && !TimedOut && ExitCode == 0;
+
+            /// <summary>One line naming which of the three ways a run can fail, with the tool's own output after it.</summary>
+            public string Describe(string what, int timeoutMilliseconds) =>
+                !Started ? $"{what} could not be started: {Stderr.Trim()}"
+                : TimedOut ? $"{what} timed out after {(timeoutMilliseconds >= 60_000 ? $"{timeoutMilliseconds / 60_000} minute(s)" : $"{timeoutMilliseconds / 1_000} second(s)")}.\n{Stdout}{Stderr}"
+                : $"{what} failed (code {ExitCode}).\n{Stdout}{Stderr}";
         }
 
         public static ProcessResult Run(
@@ -42,11 +48,24 @@ namespace Paradise.Assets.Pipeline
                 }
             }
 
-            using Process? process = Process.Start(startInfo);
+            // A file that exists but is not executable, or is the wrong architecture, throws
+            // here rather than failing the child; that is a tool problem to report, not a crash.
+            Process? process;
+            try
+            {
+                process = Process.Start(startInfo);
+            }
+            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+            {
+                return new ProcessResult(false, false, -1, string.Empty, $"{fileName}: {exception.Message}");
+            }
+
             if (process == null)
             {
-                return new ProcessResult(false, false, -1, string.Empty, string.Empty);
+                return new ProcessResult(false, false, -1, string.Empty, $"{fileName}: the process did not start");
             }
+
+            using Process owned = process;
 
             Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
             Task<string> stderrTask = process.StandardError.ReadToEndAsync();
@@ -71,17 +90,17 @@ namespace Paradise.Assets.Pipeline
             return new ProcessResult(true, false, process.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
         }
 
-        /// <summary>Env var, then candidate paths, then PATH; existence only, not executability (issue #206).</summary>
+        /// <summary>Env var, then candidate paths, then PATH; the first file that is runnable, not merely present.</summary>
         public static string? FindExecutable(string? environmentVariableValue, IEnumerable<string> candidatePaths, string executableName)
         {
-            if (!string.IsNullOrWhiteSpace(environmentVariableValue) && File.Exists(environmentVariableValue))
+            if (!string.IsNullOrWhiteSpace(environmentVariableValue) && IsRunnable(environmentVariableValue))
             {
                 return environmentVariableValue;
             }
 
             foreach (string candidate in candidatePaths)
             {
-                if (File.Exists(candidate))
+                if (IsRunnable(candidate))
                 {
                     return candidate;
                 }
@@ -89,13 +108,37 @@ namespace Paradise.Assets.Pipeline
 
             foreach (string candidate in ExecutableSearchPaths(executableName))
             {
-                if (File.Exists(candidate))
+                if (IsRunnable(candidate))
                 {
                     return candidate;
                 }
             }
 
             return null;
+        }
+
+        /// <summary>Exists and, off Windows, carries an execute bit. An unpacked archive without one would otherwise be found and then fail to start.</summary>
+        public static bool IsRunnable(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                return true;
+            }
+
+            const UnixFileMode anyExecute = UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            try
+            {
+                return (File.GetUnixFileMode(path) & anyExecute) != 0;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         public static IEnumerable<string> ExecutableSearchPaths(string executableName)
@@ -176,7 +219,8 @@ namespace Paradise.Assets.Pipeline
             {
                 if (!process.HasExited)
                 {
-                    process.Kill();
+                    // The whole tree: `dotnet run` wrappers would otherwise leave the real tool running.
+                    process.Kill(entireProcessTree: true);
                 }
             }
             catch (InvalidOperationException)

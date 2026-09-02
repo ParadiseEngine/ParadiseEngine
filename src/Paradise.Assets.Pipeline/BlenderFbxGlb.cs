@@ -2,18 +2,21 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json.Nodes;
-
-
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>FBX to GLB through headless Blender, skipped when the FBX hash stamped in the GLB's <c>asset.extras</c> matches. A Python failure exits 0 and a stale GLB then gets the new stamp — issue #205.</summary>
+    /// <summary>FBX to GLB through headless Blender, skipped when the stamp in the GLB's <c>asset.extras</c> (FBX hash and Blender version) matches.</summary>
     public static class BlenderFbxGlb
     {
         public const string BlenderPathEnvironmentVariable = "PARADISE_BLENDER_PATH";
         private const string SourceFbxSha256ExtraName = "paradiseSourceFbxSha256";
+        private const string BlenderVersionExtraName = "paradiseBlenderVersion";
         private const int BlenderTimeoutMilliseconds = 30 * 60 * 1000;
+
+        /// <summary>What the GLB was made from. The Blender version is part of it because the exporter's output changes between releases.</summary>
+        internal readonly record struct SourceStamp(string FbxSha256, string BlenderVersion);
 
         public enum Result
         {
@@ -44,8 +47,15 @@ namespace Paradise.Assets.Pipeline
                 return Result.Failed;
             }
 
-            string sourceHash = ProcessTools.ComputeFileSha256(fbxFullPath);
-            if (!force && GeneratedGlbMatchesHash(glbFullPath, sourceHash))
+            string? blenderVersion = BlenderVersion(blenderPath);
+            if (blenderVersion is null)
+            {
+                error?.Invoke($"Blender at '{blenderPath}' did not answer '--version'; is it runnable?");
+                return Result.ToolMissing;
+            }
+
+            var stamp = new SourceStamp(ProcessTools.ComputeFileSha256(fbxFullPath), blenderVersion);
+            if (!force && GeneratedGlbMatchesStamp(glbFullPath, stamp))
             {
                 log?.Invoke($"GLB '{glbFullPath}' is current for '{fbxFullPath}'; skipping.");
                 return Result.UpToDate;
@@ -55,6 +65,9 @@ namespace Paradise.Assets.Pipeline
             string tempDirectory = Path.Combine(Path.GetTempPath(), "ParadiseFbx2Glb", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempDirectory);
             string scriptPath = Path.Combine(tempDirectory, "fbx_to_glb.py");
+            // Exported here and moved on success: a failed run must leave the previous GLB
+            // alone, and must never see a leftover pass the existence check.
+            string stagedGlbPath = Path.Combine(tempDirectory, "staged.glb");
 
             try
             {
@@ -63,26 +76,33 @@ namespace Paradise.Assets.Pipeline
                     " ",
                     "--background",
                     "--factory-startup",
+                    // Without this a Python exception in the script exits 0.
+                    "--python-exit-code", "1",
                     "--python",
                     ProcessTools.QuoteArgument(scriptPath),
                     "--",
                     ProcessTools.QuoteArgument(fbxFullPath),
-                    ProcessTools.QuoteArgument(glbFullPath));
+                    ProcessTools.QuoteArgument(stagedGlbPath));
 
                 ProcessTools.ProcessResult run = ProcessTools.Run(blenderPath, arguments, BlenderTimeoutMilliseconds);
-                if (run.TimedOut)
+                if (!run.Succeeded)
                 {
-                    error?.Invoke($"Blender timed out converting '{fbxFullPath}'.\n{run.Stdout}{run.Stderr}");
+                    error?.Invoke(run.Describe($"Blender converting '{fbxFullPath}'", BlenderTimeoutMilliseconds));
                     return Result.Failed;
                 }
 
-                if (!run.Succeeded || !File.Exists(glbFullPath))
+                if (!File.Exists(stagedGlbPath))
                 {
-                    error?.Invoke($"Blender failed (code {run.ExitCode}) converting '{fbxFullPath}'.\n{run.Stdout}{run.Stderr}");
+                    error?.Invoke($"Blender exited 0 but exported no GLB for '{fbxFullPath}'.\n{run.Stdout}{run.Stderr}");
                     return Result.Failed;
                 }
 
-                WriteGeneratedSourceHash(glbFullPath, sourceHash, error);
+                if (!WriteSourceStamp(stagedGlbPath, stamp, error))
+                {
+                    return Result.Failed;
+                }
+
+                File.Move(stagedGlbPath, glbFullPath, overwrite: true);
                 log?.Invoke($"Converted '{fbxFullPath}' → '{glbFullPath}'.");
                 return Result.Converted;
             }
@@ -92,10 +112,22 @@ namespace Paradise.Assets.Pipeline
                 {
                     Directory.Delete(tempDirectory, recursive: true);
                 }
-                catch (IOException)
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                 }
             }
+        }
+
+        private static string? BlenderVersion(string blenderPath)
+        {
+            ProcessTools.ProcessResult run = ProcessTools.Run(blenderPath, "--version", timeoutMilliseconds: 60_000);
+            if (!run.Succeeded)
+            {
+                return null;
+            }
+
+            string? first = run.Stdout.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0);
+            return string.IsNullOrWhiteSpace(first) ? null : first;
         }
 
         private const string BlenderFbxToGlbScript = @"
@@ -115,6 +147,8 @@ bpy.ops.export_scene.gltf(
     export_yup=True,
     export_apply=True,
     export_animations=True,
+    # Off by default; without them the runtime fills a constant tangent and normal maps shade wrong.
+    export_tangents=True,
 )
 ";
 
@@ -164,25 +198,27 @@ bpy.ops.export_scene.gltf(
             }
         }
 
-        private static bool GeneratedGlbMatchesHash(string glbFullPath, string sourceHash)
+        internal static bool GeneratedGlbMatchesStamp(string glbFullPath, SourceStamp stamp)
         {
-            if (!GlbBinary.TryRead(glbFullPath, out JsonObject gltf, out _))
+            if (!File.Exists(glbFullPath) || !GlbBinary.TryRead(glbFullPath, out JsonObject gltf, out _))
             {
                 return false;
             }
 
-            string? storedHash = ((gltf["asset"] as JsonObject)?["extras"] as JsonObject)?[SourceFbxSha256ExtraName]?.GetValue<string>();
+            var extras = (gltf["asset"] as JsonObject)?["extras"] as JsonObject;
+            string? storedHash = extras?[SourceFbxSha256ExtraName]?.GetValue<string>();
+            string? storedVersion = extras?[BlenderVersionExtraName]?.GetValue<string>();
             return !string.IsNullOrWhiteSpace(storedHash) &&
-                string.Equals(storedHash, sourceHash, StringComparison.OrdinalIgnoreCase);
+                string.Equals(storedHash, stamp.FbxSha256, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(storedVersion, stamp.BlenderVersion, StringComparison.Ordinal);
         }
 
-        private static void WriteGeneratedSourceHash(string glbFullPath, string sourceHash, Action<string>? error)
+        internal static bool WriteSourceStamp(string glbFullPath, SourceStamp stamp, Action<string>? error)
         {
             if (!GlbBinary.TryRead(glbFullPath, out JsonObject gltf, out byte[] binChunk))
             {
-                // Without the stamp every future run re-converts this asset; say so.
-                error?.Invoke($"Could not re-read '{glbFullPath}' to write the source-FBX hash; it will be re-converted next run.");
-                return;
+                error?.Invoke($"Blender's export '{glbFullPath}' is not a readable GLB.");
+                return false;
             }
 
             if (gltf["asset"] is not JsonObject asset)
@@ -197,8 +233,10 @@ bpy.ops.export_scene.gltf(
                 asset["extras"] = extras;
             }
 
-            extras[SourceFbxSha256ExtraName] = sourceHash;
+            extras[SourceFbxSha256ExtraName] = stamp.FbxSha256;
+            extras[BlenderVersionExtraName] = stamp.BlenderVersion;
             GlbBinary.Write(glbFullPath, gltf, binChunk);
+            return true;
         }
     }
 }

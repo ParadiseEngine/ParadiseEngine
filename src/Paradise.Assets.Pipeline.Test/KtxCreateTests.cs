@@ -66,6 +66,114 @@ public class KtxCreateTests
             .IsEqualTo(KtxCreate.TextureEncodingPreset.UastcColorSrgb);
     }
 
+    [Test]
+    [Arguments("Wall_NormalMap", KtxCreate.TextureEncodingPreset.UastcNormalLinear)]
+    [Arguments("wall-normal", KtxCreate.TextureEncodingPreset.UastcNormalLinear)]
+    [Arguments("WallNormal", KtxCreate.TextureEncodingPreset.UastcNormalLinear)]
+    [Arguments("Rock_AO", KtxCreate.TextureEncodingPreset.UastcDataLinear)]
+    [Arguments("Rock_ao_2k", KtxCreate.TextureEncodingPreset.UastcDataLinear)]
+    [Arguments("Cloth_Mask", KtxCreate.TextureEncodingPreset.UastcColorLinear)]
+    [Arguments("Chaos_Albedo", KtxCreate.TextureEncodingPreset.UastcColorSrgb)]
+    [Arguments("Damask", KtxCreate.TextureEncodingPreset.UastcColorSrgb)]
+    [Arguments("Abnormal", KtxCreate.TextureEncodingPreset.UastcColorSrgb)]
+    [Arguments("Aorta", KtxCreate.TextureEncodingPreset.UastcColorSrgb)]
+    [Arguments("", KtxCreate.TextureEncodingPreset.UastcColorSrgb)]
+    public async Task preset_matches_whole_name_tokens_not_substrings(string name, KtxCreate.TextureEncodingPreset expected)
+    {
+        await Assert.That(KtxCreate.PresetFromImageName(name)).IsEqualTo(expected);
+    }
+
+    [Test]
+    [Arguments("ktx version: v5.0.0-rc1~5", "5.0.0")]
+    [Arguments("v4.3.2", "4.3.2")]
+    [Arguments("KTX-Software 4.4.0", "4.4.0")]
+    [Arguments("5", "5.0")]
+    public async Task ktx_version_line_parses_to_its_numeric_core(string line, string expected)
+    {
+        await Assert.That(KtxCreate.TryParseVersion(line, out var version)).IsTrue();
+        await Assert.That(version!.ToString()).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task ktx_version_line_without_digits_does_not_parse()
+    {
+        await Assert.That(KtxCreate.TryParseVersion("unknown option --version", out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task probe_refuses_a_ktx_older_than_the_minimum()
+    {
+        if (OperatingSystem.IsWindows()) { Skip.Test("the fake tool is a shell script"); return; }
+
+        string fake = FakeTool("#!/bin/sh\necho 'ktx version: v4.3.0'\n");
+        try
+        {
+            var probe = KtxCreate.ProbeKtx(fake);
+            await Assert.That(probe.Usable).IsFalse();
+            await Assert.That(probe.Version).IsEqualTo(new Version(4, 3, 0));
+            await Assert.That(probe.Problem!).Contains("v4.4");
+        }
+        finally
+        {
+            File.Delete(fake);
+        }
+    }
+
+    [Test]
+    public async Task probe_accepts_a_current_ktx_and_reports_its_version()
+    {
+        if (OperatingSystem.IsWindows()) { Skip.Test("the fake tool is a shell script"); return; }
+
+        string fake = FakeTool("#!/bin/sh\necho 'ktx version: v5.0.0-rc2'\n");
+        try
+        {
+            var probe = KtxCreate.ProbeKtx(fake);
+            await Assert.That(probe.Usable).IsTrue();
+            await Assert.That(probe.Version).IsEqualTo(new Version(5, 0, 0));
+            await Assert.That(probe.VersionText).IsEqualTo("ktx version: v5.0.0-rc2");
+        }
+        finally
+        {
+            File.Delete(fake);
+        }
+    }
+
+    [Test]
+    public async Task a_present_but_unrunnable_tool_is_reported_not_thrown()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("execute bits are a Unix notion");
+
+        string notExecutable = Path.Combine(Path.GetTempPath(), $"paradise_noexec_{Guid.NewGuid():N}");
+        File.WriteAllText(notExecutable, "not a program");
+        try
+        {
+            await Assert.That(ProcessTools.IsRunnable(notExecutable)).IsFalse();
+            await Assert.That(ProcessTools.FindExecutable(notExecutable, [], "definitely-not-a-real-binary-xyz")).IsNull();
+
+            var run = ProcessTools.Run(notExecutable, "", timeoutMilliseconds: 5_000);
+            await Assert.That(run.Started).IsFalse();
+            await Assert.That(run.Succeeded).IsFalse();
+            await Assert.That(run.Stderr).Contains(notExecutable);
+            await Assert.That(run.Describe("tool", 5_000)).Contains("could not be started");
+
+            var probe = KtxCreate.ProbeKtx(notExecutable);
+            await Assert.That(probe.Usable).IsFalse();
+        }
+        finally
+        {
+            File.Delete(notExecutable);
+        }
+    }
+
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    private static string FakeTool(string script)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"paradise_fake_ktx_{Guid.NewGuid():N}");
+        File.WriteAllText(path, script);
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return path;
+    }
+
     // 8x8 transparent RGBA PNG (stdlib-generated once); enough for a real encode.
     private const string TinyPngBase64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAADUlEQVR4nGNgGAUgAAABCAABgukLHQAAAABJRU5ErkJggg==";
@@ -86,6 +194,12 @@ public class KtxCreateTests
         string? repoRoot = FindRepoRoot();
         if (repoRoot is null || KtxCreate.FindKtx(repoRoot) is null)
         {
+            // CI installs ktx on purpose; there a skip would hide a broken install step.
+            if (Environment.GetEnvironmentVariable("PARADISE_REQUIRE_KTX") is not null)
+            {
+                Assert.Fail("PARADISE_REQUIRE_KTX is set but KtxCreate.FindKtx found no ktx.");
+            }
+
             Skip.Test("ktx (KTX-Software v5) not available — vendored tool missing on this platform.");
         }
 
@@ -182,6 +296,7 @@ public class KtxCreateTests
     {
         string fake = Path.Combine(Path.GetTempPath(), $"paradise_tool_{Guid.NewGuid():N}");
         File.WriteAllText(fake, "");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
             await Assert.That(ProcessTools.FindExecutable(fake, Array.Empty<string>(), "does-not-exist-xyz"))

@@ -11,6 +11,10 @@ namespace Paradise.Assets.Pipeline
     public static class KtxCreate
     {
         public const string KtxPathEnvironmentVariable = "PARADISE_KTX_PATH";
+
+        /// <summary>4.3 spelled <c>--assign-tf</c> as <c>--assign-oetf</c>; an older tool fails every texture with "unknown option", so it is refused up front.</summary>
+        public static readonly Version MinimumVersion = new(4, 4);
+
         private const string Ktx2MimeType = "image/ktx2";
         private const string Ktx2ExtensionName = "KHR_texture_basisu";
         private const int KtxTimeoutMilliseconds = 30 * 60 * 1000;
@@ -138,7 +142,7 @@ namespace Paradise.Assets.Pipeline
                 string sourceExtension = string.Equals(mimeType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ? ".jpg" : ".png";
                 TextureEncodingPreset preset = presets.TryGetValue(sourceImageIndex, out TextureEncodingPreset matched)
                     ? matched
-                    : PresetFromImageName(image);
+                    : InferPreset(image, sourceImageIndex, log);
 
                 if (!TryConvertImageBytes(ktxPath, sourceBytes, sourceExtension, preset, out byte[] ktx2Bytes, error))
                 {
@@ -246,7 +250,9 @@ namespace Paradise.Assets.Pipeline
                     }
 
                     string sourceExtension = string.Equals(mimeType, "image/jpeg", StringComparison.OrdinalIgnoreCase) ? ".jpg" : ".png";
-                    TextureEncodingPreset preset = presets.TryGetValue(imageIndex, out TextureEncodingPreset matched) ? matched : PresetFromImageName(image);
+                    TextureEncodingPreset preset = presets.TryGetValue(imageIndex, out TextureEncodingPreset matched)
+                        ? matched
+                        : InferPreset(image, imageIndex, log);
                     if (!TryConvertImageBytes(ktxPath, sourceBytes, sourceExtension, preset, out ktx2Bytes, error))
                     {
                         return ConversionResult.Failed;
@@ -519,9 +525,15 @@ namespace Paradise.Assets.Pipeline
                     KtxTimeoutMilliseconds,
                     KtxEnvironment(ktxPath));
 
-                if (!run.Succeeded || !File.Exists(outputPath))
+                if (!run.Succeeded)
                 {
-                    error?.Invoke($"ktx create failed (code {run.ExitCode}).\n{run.Stdout}{run.Stderr}");
+                    error?.Invoke(run.Describe("ktx create", KtxTimeoutMilliseconds));
+                    return false;
+                }
+
+                if (!File.Exists(outputPath))
+                {
+                    error?.Invoke($"ktx create exited 0 but wrote no '{outputPath}'.\n{run.Stdout}{run.Stderr}");
                     return false;
                 }
 
@@ -547,10 +559,11 @@ namespace Paradise.Assets.Pipeline
             }
         }
 
-        // On macOS, point the dynamic loader at the vendored libktx next to the ktx binary.
-        private static IReadOnlyDictionary<string, string>? KtxEnvironment(string ktxPath)
+        // Point the dynamic loader at the libktx shipped next to the ktx binary (the release
+        // archives and the vendored macOS build both lay out bin/ktx beside lib/libktx.*).
+        internal static IReadOnlyDictionary<string, string>? KtxEnvironment(string ktxPath)
         {
-            if (!OperatingSystem.IsMacOS())
+            if (OperatingSystem.IsWindows())
             {
                 return null;
             }
@@ -568,7 +581,10 @@ namespace Paradise.Assets.Pipeline
             }
 
             var env = new Dictionary<string, string>();
-            foreach (string variable in new[] { "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH" })
+            string[] variables = OperatingSystem.IsMacOS()
+                ? new[] { "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH" }
+                : new[] { "LD_LIBRARY_PATH" };
+            foreach (string variable in variables)
             {
                 string? existing = Environment.GetEnvironmentVariable(variable);
                 env[variable] = string.IsNullOrWhiteSpace(existing) ? libDirectory : libDirectory + Path.PathSeparator + existing;
@@ -577,6 +593,14 @@ namespace Paradise.Assets.Pipeline
             return env;
         }
 
+
+        // Said out loud because a wrong guess here is a colour-space bug with no other symptom.
+        private static TextureEncodingPreset InferPreset(JsonObject image, int imageIndex, Action<string>? log)
+        {
+            TextureEncodingPreset preset = PresetFromImageName(image);
+            log?.Invoke($"texture #{imageIndex} '{image["name"]?.GetValue<string>()}' is bound to no material slot; preset {preset} inferred from its name.");
+            return preset;
+        }
 
         private static Dictionary<int, TextureEncodingPreset> GetImageEncodingPresets(JsonObject gltf, JsonArray textures, JsonArray images)
         {
@@ -643,20 +667,27 @@ namespace Paradise.Assets.Pipeline
             return TextureEncodingPreset.UastcColorSrgb;
         }
 
-        public static TextureEncodingPreset PresetFromImageName(JsonObject image)
+        public static TextureEncodingPreset PresetFromImageName(JsonObject image) =>
+            PresetFromImageName(image["name"]?.GetValue<string>() ?? "");
+
+        /// <summary>
+        /// Matches whole name tokens only: a substring rule made <c>Damask</c> a mask and
+        /// <c>Chaos_Albedo</c> an AO map, encoding colour as linear data with no error.
+        /// </summary>
+        public static TextureEncodingPreset PresetFromImageName(string imageName)
         {
-            string imageName = image["name"]?.GetValue<string>() ?? "";
-            if (ContainsAny(imageName, "Normal", "NormalMap", "Bump"))
+            var tokens = new HashSet<string>(NameTokens(imageName), StringComparer.OrdinalIgnoreCase);
+            if (tokens.Overlaps(new[] { "Normal", "NormalMap", "Bump" }))
             {
                 return TextureEncodingPreset.UastcNormalLinear;
             }
 
-            if (ContainsAny(imageName, "Metallic", "Metalness", "Roughness", "Gloss", "Occlusion", "AO"))
+            if (tokens.Overlaps(new[] { "Metallic", "Metalness", "Roughness", "Gloss", "Occlusion", "AO" }))
             {
                 return TextureEncodingPreset.UastcDataLinear;
             }
 
-            if (ContainsAny(imageName, "Mask", "Height", "Displacement"))
+            if (tokens.Overlaps(new[] { "Mask", "Height", "Displacement" }))
             {
                 return TextureEncodingPreset.UastcColorLinear;
             }
@@ -664,17 +695,36 @@ namespace Paradise.Assets.Pipeline
             return TextureEncodingPreset.UastcColorSrgb;
         }
 
-        private static bool ContainsAny(string value, params string[] needles)
+        /// <summary>Splits on separators and on lower→upper case boundaries: <c>Wall_NormalMap</c> → Wall, NormalMap, Normal, Map.</summary>
+        internal static IEnumerable<string> NameTokens(string imageName)
         {
-            foreach (string needle in needles)
+            foreach (string segment in imageName.Split(new[] { '_', '-', ' ', '.', '/' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (value.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                yield return segment;
+
+                int start = 0;
+                for (int i = 1; i < segment.Length; i++)
                 {
-                    return true;
+                    bool boundary = char.IsUpper(segment[i]) && !char.IsUpper(segment[i - 1])
+                        || char.IsDigit(segment[i]) != char.IsDigit(segment[i - 1]);
+                    if (!boundary)
+                    {
+                        continue;
+                    }
+
+                    if (i > start)
+                    {
+                        yield return segment.Substring(start, i - start);
+                    }
+
+                    start = i;
+                }
+
+                if (start > 0 && start < segment.Length)
+                {
+                    yield return segment.Substring(start);
                 }
             }
-
-            return false;
         }
 
 
@@ -843,41 +893,108 @@ namespace Paradise.Assets.Pipeline
         }
 
 
+        /// <summary>
+        /// <c>PARADISE_KTX_PATH</c>, then a vendored <c>third_party/tools/KTX-Software</c> under the
+        /// root, then what <c>paradise tools install ktx</c> put under the packages root, then PATH.
+        /// The same order as <c>tools doctor</c> reports, because it is the same call.
+        /// </summary>
         public static string? FindKtx(string? repoRoot = null) =>
             ProcessTools.FindExecutable(
                 Environment.GetEnvironmentVariable(KtxPathEnvironmentVariable),
-                RepositoryKtxPaths(repoRoot),
+                RepositoryKtxPaths(repoRoot).Concat(InstalledKtxPaths()),
                 "ktx");
 
+        public readonly record struct Probe(string Path, string? VersionText, Version? Version, string? Problem)
+        {
+            public bool Usable => Problem is null;
+        }
+
+        /// <summary>Runs <c>ktx --version</c> once: a tool that is present but cannot run, or is older than <see cref="MinimumVersion"/>, is reported rather than failing per texture.</summary>
+        public static Probe ProbeKtx(string ktxPath)
+        {
+            ProcessTools.ProcessResult run = ProcessTools.Run(ktxPath, "--version", timeoutMilliseconds: 30_000, KtxEnvironment(ktxPath));
+            if (!run.Started || run.TimedOut)
+            {
+                return new Probe(ktxPath, null, null, run.Describe($"ktx at '{ktxPath}'", 30_000).Trim());
+            }
+
+            // ktx answers --version on stdout or stderr depending on the build, and its exit code is not dependable.
+            string text = (string.IsNullOrWhiteSpace(run.Stdout) ? run.Stderr : run.Stdout).Trim();
+            if (!TryParseVersion(text, out Version? version))
+            {
+                return new Probe(ktxPath, text, null, $"ktx at '{ktxPath}' answered '--version' with '{text}', which names no version; KTX-Software v{MinimumVersion}+ is required.");
+            }
+
+            return version < MinimumVersion
+                ? new Probe(ktxPath, text, version, $"ktx at '{ktxPath}' is v{version}; KTX-Software v{MinimumVersion}+ is required (older builds spell the encode options differently). Install a newer one and set {KtxPathEnvironmentVariable}, or run 'paradise tools install ktx'.")
+                : new Probe(ktxPath, text, version, null);
+        }
+
+        /// <summary>Reads the leading numeric run of a version line such as <c>ktx version: v5.0.0-rc1~5</c>.</summary>
+        public static bool TryParseVersion(string versionText, out Version? version)
+        {
+            version = null;
+            int digits = -1;
+            for (int i = 0; i + 1 < versionText.Length; i++)
+            {
+                if ((versionText[i] == 'v' || versionText[i] == 'V') && char.IsDigit(versionText[i + 1]))
+                {
+                    digits = i + 1;
+                    break;
+                }
+            }
+
+            if (digits < 0)
+            {
+                digits = versionText.AsSpan().IndexOfAnyInRange('0', '9');
+                if (digits < 0)
+                {
+                    return false;
+                }
+            }
+
+            int end = digits;
+            while (end < versionText.Length && (char.IsDigit(versionText[end]) || versionText[end] == '.'))
+            {
+                end++;
+            }
+
+            string numeric = versionText[digits..end].TrimEnd('.');
+            if (!numeric.Contains('.'))
+            {
+                numeric += ".0";
+            }
+
+            return Version.TryParse(numeric, out version);
+        }
+
+        private static string KtxFileName => OperatingSystem.IsWindows() ? "ktx.exe" : "ktx";
+
+        // The vendored tree is keyed by the platform the archive was built for (Darwin-arm64,
+        // Linux-x86_64, Windows-x64), so only this host's family is offered: enumerating every
+        // ktx returned the macOS binary on Linux CI.
         private static IEnumerable<string> RepositoryKtxPaths(string? repoRoot)
         {
             string root = Path.GetFullPath(Path.Combine(repoRoot ?? Directory.GetCurrentDirectory(), "third_party", "tools", "KTX-Software"));
-            if (OperatingSystem.IsMacOS())
-            {
-                yield return Path.Combine(root, "Darwin-arm64", "bin", "ktx");
-            }
-
             if (!Directory.Exists(root))
             {
                 yield break;
             }
 
-            string[] fileNames = OperatingSystem.IsWindows()
-                ? new[] { "ktx.exe" }
-                : OperatingSystem.IsMacOS()
-                    ? new[] { "ktx" }
-                    : new[] { "ktx", "ktx.exe" };
+            yield return Path.Combine(root, "bin", KtxFileName);
 
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (string fileName in fileNames)
+            string platform = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "Darwin" : "Linux";
+            foreach (string directory in Directory.EnumerateDirectories(root, platform + "-*").Order(StringComparer.OrdinalIgnoreCase))
             {
-                foreach (string candidate in Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories))
-                {
-                    if (seen.Add(candidate))
-                    {
-                        yield return candidate;
-                    }
-                }
+                yield return Path.Combine(directory, "bin", KtxFileName);
+            }
+        }
+
+        private static IEnumerable<string> InstalledKtxPaths()
+        {
+            foreach (string root in ToolLocations.InstalledRoots("ktx"))
+            {
+                yield return Path.Combine(root, "bin", KtxFileName);
             }
         }
 

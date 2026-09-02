@@ -1,5 +1,8 @@
 # Build outputs
 [Bb]in/
+# Not build output: the vendored macOS ktx (its dylibs beside it were never ignored). Without
+# this a fresh clone has the libraries and no executable.
+!/third_party/tools/KTX-Software/*/bin/
 [Oo]bj/
 [Oo]ut/
 [Pp]ublish/

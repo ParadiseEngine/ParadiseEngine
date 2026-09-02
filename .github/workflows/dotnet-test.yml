@@ -40,6 +40,21 @@ jobs:
           restore-keys: |
             slang-${{ runner.os }}-${{ runner.arch }}-
 
+      # Same location and layout `paradise tools install ktx` uses, so KtxCreate.FindKtx finds it
+      # and the texture encode tests run instead of skipping. Keyed on the manifest SHA like slangc.
+      - name: Cache ktx
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_ktx
+          key: ktx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ktx/ktx.manifest.json') }}
+
+      - name: Install ktx (KTX-Software)
+        run: |
+          version=$(jq -r .version tools/ktx/ktx.manifest.json)
+          dotnet run --project tools/ktx/KtxBootstrap.csproj -- \
+            --manifest tools/ktx/ktx.manifest.json --rid linux-x64 \
+            --out ~/.nuget/packages/_ktx/$version/linux-x64
+
       - name: Prepare CI solution
         run: |
           cp ParadiseEngine.slnx ParadiseEngine.ci.slnx
@@ -56,6 +71,8 @@ jobs:
       - name: Test
         run: dotnet test --solution ParadiseEngine.ci.slnx --no-build --output normal
         env:
+          # The encode tests must run here, not skip: a missing ktx is a CI fault.
+          PARADISE_REQUIRE_KTX: "1"
           # NoesisGUI license for Paradise.Ui.Noesis[.Host] tests; without these the tests
           # still run (unlicensed Noesis renders for 10 minutes per session).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
