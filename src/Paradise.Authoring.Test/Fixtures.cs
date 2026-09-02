@@ -220,9 +220,9 @@ public sealed record HostBoundFixture
 
     public HostLocalScale Scale { get; set; }
 
-    public HostShape Collider { get; set; }
+    public HostShape Collider { get; set; } = new();
 
-    public HostLight Lamp { get; set; }
+    public HostLight Lamp { get; set; } = new();
 
-    public HostCamera Eye { get; set; }
+    public HostCamera Eye { get; set; } = new();
 }

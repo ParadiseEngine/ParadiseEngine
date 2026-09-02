@@ -109,6 +109,23 @@ public sealed class AuthorDocAttribute(string text) : Attribute
 }
 
 /// <summary>
+/// The default an editor shows for this field, when the generator cannot read it from the
+/// property initializer. A record in the game's own compilation needs no attribute: the schema
+/// generator reads the initializer's syntax. A type from a REFERENCED assembly (the composed host
+/// kinds in this package) reaches the generator as metadata, where no syntax exists, so the
+/// initializer is invisible and the schema would publish no default at all. The value must equal
+/// the initializer; <c>Paradise.Authoring.Test</c> pins that for every host kind.
+/// </summary>
+/// <remarks>Only attribute constants can be carried (numbers, bools, strings, enum members), which
+/// is also all the schema can express; a vector or quaternion default stays initializer-only.</remarks>
+[AttributeUsage(AttributeTargets.Property, Inherited = false)]
+public sealed class AuthorDefaultAttribute(object value) : Attribute
+{
+    /// <summary>The default, as the C# constant it was written with.</summary>
+    public object Value { get; } = value;
+}
+
+/// <summary>
 /// Draw this component as a wireframe BOX in the editor, sized from three of its own fields.
 ///
 /// The point is that no editor needs a class to do it: "show me the volume I am authoring" is a
@@ -142,8 +159,8 @@ public sealed class AuthorBoxGizmoAttribute(
 /// checked by PAUT010.
 ///
 /// A TYPE PARAMETER, not a string, so a kind that does not exist cannot compile and a kind that
-/// carries a value declares what type it carries. Usable on a TYPE (marker kinds only — the whole
-/// record is authored this way) or on a PROPERTY. A property may equivalently be TYPED as a value
+/// carries a value declares what type it carries. Usable on a TYPE (marker and composed kinds — the
+/// whole record is authored this way) or on a PROPERTY. A property may equivalently be TYPED as a value
 /// kind itself, with no attribute; when both appear, the attribute wins (PAUT012).
 /// </summary>
 [AttributeUsage(

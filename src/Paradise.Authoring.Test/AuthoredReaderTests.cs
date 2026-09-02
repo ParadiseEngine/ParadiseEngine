@@ -785,4 +785,89 @@ public class AuthoredReaderTests
         await Assert.That(diagnostics.Single(d => d.Id == "PAUT012").Severity)
             .IsEqualTo(DiagnosticSeverity.Warning);
     }
+
+    /// <summary>Same disagreement on a COMPOSED-typed property: PAUT012 must not be gated on the
+    /// value-kind wrapper, or the schema silently publishes one kind over another's fields.</summary>
+    [Test]
+    public async Task a_composed_typed_field_with_a_disagreeing_attribute_warns()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredByHost<HostLight>] public HostShape Collider { get; set; } = new();
+            }
+            """);
+
+        await Assert.That(diagnostics.Single(d => d.Id == "PAUT012").Severity)
+            .IsEqualTo(DiagnosticSeverity.Warning);
+    }
+
+    /// <summary>Mesh, sprite and asset keep a string hatch until bake emits the guid; entity and
+    /// parent do not, because a name was never an identity.</summary>
+    [Test]
+    public async Task a_string_field_is_a_baked_path_for_mesh_but_not_for_parent()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredByHost<HostMesh>] public string Mesh { get; set; } = "";
+                [AuthoredByHost<HostParent>] public string Parent { get; set; } = "";
+            }
+            """);
+
+        var mismatches = diagnostics.Where(d => d.Id == "PAUT010").ToList();
+        await Assert.That(mismatches.Count).IsEqualTo(1);
+        await Assert.That(mismatches[0].GetMessage(System.Globalization.CultureInfo.InvariantCulture)).Contains("Parent");
+    }
+
+    /// <summary>A composed object absent from the payload keeps the kind's defaults, which is
+    /// only true when the record initializes the property with <c>new()</c> — struct
+    /// <c>default</c> never runs the initializers.</summary>
+    [Test]
+    public async Task an_omitted_composed_object_keeps_the_kind_defaults()
+    {
+        var (registry, _) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            [assembly: AuthoredRegistry]
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                public HostCamera Eye { get; set; } = new();
+                public HostLight Lamp { get; set; } = new();
+            }
+            """);
+
+        var component = ReadComponent(registry!, HostBoundId, "{ }");
+
+        var eye = (HostCamera)Prop(component, "Eye")!;
+        await Assert.That(eye.Fov).IsEqualTo(50f);
+        await Assert.That(eye.Far).IsEqualTo(1000f);
+        await Assert.That(eye.Rotation).IsEqualTo(System.Numerics.Quaternion.Identity);
+        var lamp = (HostLight)Prop(component, "Lamp")!;
+        await Assert.That(lamp.Enabled).IsTrue();
+        await Assert.That(lamp.Intensity).IsEqualTo(1f);
+    }
 }

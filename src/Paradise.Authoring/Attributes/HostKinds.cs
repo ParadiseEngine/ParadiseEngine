@@ -162,8 +162,10 @@ public readonly record struct HostLocalScale : IHostKind
 
 // ---- composed kinds ------------------------------------------------------------------------
 
-/// <summary>Collision primitive kinds a host shape can bake. Names match the physics contract.</summary>
-public enum PhysicsShapeType
+/// <summary>Collision primitive kinds a host shape can bake. Member names match
+/// <c>Paradise.Export.Data.PhysicsShapeType</c>; a separate type so Authoring never references
+/// Export, and a distinct name so a file that imports both namespaces does not hit CS0104.</summary>
+public enum HostShapeType
 {
     Box,
     Sphere,
@@ -186,13 +188,13 @@ public record struct HostShape : IHostKind
     public const string Kind = AuthoredBySources.Shape;
 
     /// <summary>Which primitive this is.</summary>
-    public PhysicsShapeType ShapeType { get; set; }
+    public HostShapeType ShapeType { get; set; }
 
     /// <summary>The shape's origin relative to the object it is drawn on.</summary>
     public Vector3 LocalCenter { get; set; }
 
     /// <summary>The shape's orientation relative to the object it is drawn on.</summary>
-    public Quaternion LocalRotation { get; set; }
+    public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
 
     /// <summary>Full size of a box. Unused for sphere and capsule.</summary>
     public Vector3 Size { get; set; }
@@ -203,9 +205,11 @@ public record struct HostShape : IHostKind
     /// <summary>Total height of a capsule, including hemispheres. Unused for box and sphere.</summary>
     public float Height { get; set; }
 
-    /// <summary>Identity rotation, unscaled extents — a host that omits a leaf means "at the
-    /// object's own origin, unrotated".</summary>
-    public HostShape() => LocalRotation = Quaternion.Identity;
+    /// <summary>Explicit so the initializers run for <c>new HostShape()</c>. <c>default(HostShape)</c>
+    /// skips them, so a record property typed as this kind must be initialized <c>= new()</c> or an
+    /// omitted object reads as all zeros. Publishable defaults also carry [AuthorDefault], because
+    /// this type reaches a game's schema generator as metadata, where initializers are invisible.</summary>
+    public HostShape() { }
 }
 
 /// <summary>How a host light shines.</summary>
@@ -236,19 +240,22 @@ public record struct HostLight : IHostKind
     public Vector3 Direction { get; set; }
 
     /// <summary>The light's colour, authored as a colour (Vector4 / {r,g,b,a}).</summary>
-    public Vector4 Color { get; set; }
+    public Vector4 Color { get; set; } = new(1f, 1f, 1f, 1f);
 
     /// <summary>Whether this light contributes.</summary>
-    public bool Enabled { get; set; }
+    [AuthorDefault(true)]
+    public bool Enabled { get; set; } = true;
 
     /// <summary>Energy. A directional's irradiance in W/m²; a point or spot's luminous intensity.</summary>
-    public float Intensity { get; set; }
+    [AuthorDefault(1f)]
+    public float Intensity { get; set; } = 1f;
 
     /// <summary>Whether this light casts a shadow.</summary>
     public bool ShadowsEnabled { get; set; }
 
     /// <summary>How dark what it casts is; 1 is fully occluded.</summary>
-    public float ShadowStrength { get; set; }
+    [AuthorDefault(1f)]
+    public float ShadowStrength { get; set; } = 1f;
 
     /// <summary>Specular scale the host's light carries.</summary>
     public float Specular { get; set; }
@@ -265,14 +272,10 @@ public record struct HostLight : IHostKind
     /// <summary>Distance-falloff exponent of a point or spot. Unused for a directional.</summary>
     public float AttenuationExponent { get; set; }
 
-    /// <summary>A white, enabled light of unit intensity that does not yet cast.</summary>
-    public HostLight()
-    {
-        Color = new(1f, 1f, 1f, 1f);
-        Enabled = true;
-        Intensity = 1f;
-        ShadowStrength = 1f;
-    }
+    /// <summary>A white, enabled light of unit intensity that does not yet cast. Explicit so the
+    /// initializers run for <c>new HostLight()</c>; <c>default(HostLight)</c> skips them, so a record
+    /// property typed as this kind must be initialized <c>= new()</c>.</summary>
+    public HostLight() { }
 }
 
 /// <summary>How a host camera projects.</summary>
@@ -293,34 +296,33 @@ public record struct HostCamera : IHostKind
     public const string Kind = AuthoredBySources.Camera;
 
     /// <summary>Perspective or orthographic.</summary>
-    public HostCameraProjection Projection { get; set; }
+    [AuthorDefault(HostCameraProjection.Perspective)]
+    public HostCameraProjection Projection { get; set; } = HostCameraProjection.Perspective;
 
     /// <summary>Vertical field of view, in degrees. Unused for orthographic.</summary>
-    public float Fov { get; set; }
+    [AuthorDefault(50f)]
+    public float Fov { get; set; } = 50f;
 
     /// <summary>Vertical size of an orthographic view, in metres. Unused for perspective.</summary>
     public float OrthographicSize { get; set; }
 
     /// <summary>Near clip plane, in metres.</summary>
-    public float Near { get; set; }
+    [AuthorDefault(0.1f)]
+    public float Near { get; set; } = 0.1f;
 
     /// <summary>Far clip plane, in metres.</summary>
-    public float Far { get; set; }
+    [AuthorDefault(1000f)]
+    public float Far { get; set; } = 1000f;
 
     /// <summary>World position of the camera object.</summary>
     public Vector3 Position { get; set; }
 
     /// <summary>World orientation of the camera object.</summary>
-    public Quaternion Rotation { get; set; }
+    public Quaternion Rotation { get; set; } = Quaternion.Identity;
 
     /// <summary>A 50° perspective, identity pose, clip 0.1–1000 — a host that omits a leaf
-    /// means the common game camera, not a zero FOV that cannot frame anything.</summary>
-    public HostCamera()
-    {
-        Projection = HostCameraProjection.Perspective;
-        Fov = 50f;
-        Near = 0.1f;
-        Far = 1000f;
-        Rotation = Quaternion.Identity;
-    }
+    /// means the common game camera, not a zero FOV that cannot frame anything. Explicit so the
+    /// initializers run for <c>new HostCamera()</c>; <c>default(HostCamera)</c> skips them, so a
+    /// record property typed as this kind must be initialized <c>= new()</c>.</summary>
+    public HostCamera() { }
 }

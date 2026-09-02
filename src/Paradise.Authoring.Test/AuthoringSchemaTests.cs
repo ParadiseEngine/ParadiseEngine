@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Reflection;
 using System.Text.Json;
 using Paradise.Authoring;
 
@@ -97,6 +99,32 @@ public class AuthoringSchemaTests
             {
                 "Projection", "Fov", "OrthographicSize", "Near", "Far", "Position", "Rotation",
             });
+
+        // The kinds' defaults reach the schema only as property initializers; a constructor body
+        // is invisible to the generator and the editor would see an unspecified FOV.
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Fov").Default!.Value.GetSingle()).IsEqualTo(50f);
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Far").Default!.Value.GetSingle()).IsEqualTo(1000f);
+        await Assert.That(eye.Fields!.Single(f => f.Name == "Projection").Default!.Value.GetString()).IsEqualTo("Perspective");
+        await Assert.That(lamp.Fields!.Single(f => f.Name == "Enabled").Default!.Value.GetBoolean()).IsTrue();
+        await Assert.That(lamp.Fields!.Single(f => f.Name == "Intensity").Default!.Value.GetSingle()).IsEqualTo(1f);
+    }
+
+    /// <summary>[AuthorDefault] exists because the kinds reach a game's generator as metadata; it
+    /// is a second copy of the initializer, so this is what stops the two from drifting.</summary>
+    [Test]
+    public async Task composed_kind_attribute_defaults_match_their_initializers()
+    {
+        foreach (var kind in new[] { typeof(HostShape), typeof(HostLight), typeof(HostCamera) })
+        {
+            var fresh = Activator.CreateInstance(kind)!;
+            foreach (var property in kind.GetProperties())
+            {
+                if (property.GetCustomAttribute<AuthorDefaultAttribute>() is not { } declared) continue;
+                var actual = property.GetValue(fresh)!;
+                var expected = Convert.ChangeType(declared.Value, property.PropertyType, CultureInfo.InvariantCulture);
+                await Assert.That(actual).IsEqualTo(expected).Because($"{kind.Name}.{property.Name}");
+            }
+        }
     }
 
     /// <summary>An identity travels as the canonical guid STRING, like every id in the contract —

@@ -251,6 +251,12 @@ public static class AuthoredBySources
     /// <b>A GUID, not a name or an index.</b> Names are not unique. An index would break the
     /// moment an exporter reordered or dropped an object. The GUID is the identity the host
     /// already minted, so a broken reference names the same thing <c>meta</c> does.
+    ///
+    /// The wire type stays <c>string</c> and the schema version stays put, but the baked text is
+    /// the GUID: a host that still writes the display name fails the generated reader's
+    /// <c>Guid.Parse</c>. There is deliberately no string hatch here, unlike mesh/sprite/asset
+    /// (PAUT010's baked-path allowance), because a name was never an identity. Hosts move with the
+    /// package bump that ships this.
     /// </summary>
     public const string Entity = "entity";
 
