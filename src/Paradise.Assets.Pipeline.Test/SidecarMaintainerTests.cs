@@ -106,6 +106,32 @@ public class SidecarMaintainerTests
 
     // ---- the one that matters -----------------------------------------------------------
 
+    /// <summary>
+    /// A temp-then-rename save whose temp file outlives the debounce: the temp gets a mint, then
+    /// the rename would carry that fresh guid over the asset's real one and break every reference
+    /// to it (issue #196). The destination wins; the stray sidecar goes.
+    /// </summary>
+    [Test]
+    public async Task a_rename_onto_an_existing_sidecar_keeps_the_destination_identity()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var maintainer = Maintainer(fileSystem);
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        maintainer.Ensure("/game/assets/models/crate.glb");
+        var real = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid;
+
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb.tmp", [4, 5, 6]);
+        maintainer.Ensure("/game/assets/models/crate.glb.tmp");
+        fileSystem.DeleteFile("/game/assets/models/crate.glb.tmp");
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [4, 5, 6]);
+
+        var action = maintainer.Carry("/game/assets/models/crate.glb.tmp", "/game/assets/models/crate.glb");
+
+        await Assert.That(action).IsEqualTo(SidecarAction.Conflicted);
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid).IsEqualTo(real);
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.tmp.meta")).IsFalse();
+    }
+
     [Test]
     public async Task a_delete_then_add_elsewhere_keeps_the_same_guid()
     {

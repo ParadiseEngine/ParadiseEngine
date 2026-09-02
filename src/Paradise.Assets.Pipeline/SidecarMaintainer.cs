@@ -20,6 +20,9 @@ public enum SidecarAction
     Quarantined,
 
     Relinked,
+
+    /// <summary>A rename landed on a path that already had a sidecar; that identity was kept and the arriving one dropped.</summary>
+    Conflicted,
 }
 
 /// <summary>Keeps <c>*.meta</c> in step with the assets beside them; holds the rules and none of the timing, so each is testable without a clock.</summary>
@@ -28,8 +31,7 @@ public enum SidecarAction
 /// moves (<c>git mv</c> on Windows, Finder) arrive as delete-then-add. So a delete quarantines,
 /// and an asset reappearing with the same content takes the identity back. The match is on a hash
 /// held in memory, never a field in the sidecar, because a recorded hash of a text asset differs
-/// per checkout (line endings, smudge filters) and would make every clone a dirty tree. The one
-/// exception is <see cref="Carry"/>, which overwrites an existing destination — issue #196.
+/// per checkout (line endings, smudge filters) and would make every clone a dirty tree.
 /// </remarks>
 public sealed class SidecarMaintainer
 {
@@ -145,11 +147,37 @@ public sealed class SidecarMaintainer
 
         if (_seenHash.Remove(from, out var remembered)) _seenHash[to] = remembered;
 
+        var destination = SidecarMeta.PathFor(to);
+        if (_fileSystem.FileExists(destination))
+        {
+            // The destination's identity is the one every reference to this path already names.
+            // The arriving one is almost always a temp file's mint that outlived the debounce;
+            // overwriting would break every reference at once (issue #196). Both guids go to the
+            // log so an author can settle the rare case where the arriving one was the real one.
+            Remove(source);
+            _log(
+                $"kept: {Display(destination)} already holds {DocumentGuid.Format(Existing(destination) ?? Guid.Empty)}; " +
+                $"dropped {Display(source)} ({DocumentGuid.Format(meta.Guid)}) arriving by rename");
+            return SidecarAction.Conflicted;
+        }
+
         meta.Hash = null;
-        Save(meta, SidecarMeta.PathFor(to));
+        Save(meta, destination);
         Remove(source);
-        _log($"carried: {Display(source)} -> {Display(SidecarMeta.PathFor(to))}");
+        _log($"carried: {Display(source)} -> {Display(destination)}");
         return SidecarAction.Carried;
+    }
+
+    private Guid? Existing(UPath sidecar)
+    {
+        try
+        {
+            return SidecarMeta.Load(_fileSystem, sidecar).Guid;
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
+        }
     }
 
     public SidecarAction Quarantine(UPath asset, DateTimeOffset at)
