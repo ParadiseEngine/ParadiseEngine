@@ -8,9 +8,9 @@ namespace Paradise.Cli;
 /// <summary>The verbs' console rendering. Logic lives in the pipeline library; this prints.</summary>
 internal static class Verbs
 {
-    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetImporter> importers)
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout)
     {
-        var findings = ProjectVerifier.Verify(fileSystem, layout, importers);
+        var findings = ProjectVerifier.Verify(fileSystem, layout);
         foreach (var finding in findings)
         {
             var severity = finding.Severity == VerifySeverity.Error ? "error" : "warning";

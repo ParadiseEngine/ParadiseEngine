@@ -148,8 +148,8 @@ paradise tools doctor          # every build tool: found, version, how to fix
 Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
 them all with the shared `--project` and `--profile` options.
 
-A game that needs its own asset kind writes an `IAssetImporter` declaring the extensions it
-handles and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —
+A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
+`Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —
 the tool cannot be handed code, and NativeAOT rules out scanning for it:
 
 ```csharp
@@ -157,8 +157,7 @@ the tool cannot be handed code, and NativeAOT rules out scanning for it:
 return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
 ```
 
-The chain is lowest precedence first, so an appended importer shadows the built-in it replaces;
-`verify` warns about any file no importer in the chain declares.
+The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
 
 ## Releasing
 

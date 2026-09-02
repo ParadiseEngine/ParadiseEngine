@@ -86,7 +86,7 @@ public sealed class BuildRunner
         }
 
         var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -180,12 +180,9 @@ public sealed class BuildRunner
             profile, target, written, cache, _encoder, _log);
 
         IAssetImporter? handler = null;
-        foreach (var candidate in _importers.Candidates(path))
+        for (var i = _importers.Count - 1; i >= 0 && handler is null; i--)
         {
-            if (!candidate.Import(context, errors)) continue;
-
-            handler = candidate;
-            break;
+            if (_importers[i].Import(context, errors)) handler = _importers[i];
         }
 
         if (handler is null) return (null, observed.Records);

@@ -10,7 +10,7 @@ namespace Paradise.Cli;
 /// The <c>paradise</c> command's entry point, callable from any console project. The dotnet
 /// tool is <c>return BuildHost.Run(args);</c>; a game that extends the pipeline is
 /// <c>return BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()]);</c> in its own
-/// <c>tools/assets</c> project, and every verb — verify, build, watch — runs that chain. That
+/// <c>tools/assets</c> project, and build and watch run that chain. That
 /// is the extension path (issue #208): a chain is code, so it is passed as code.
 /// </summary>
 public static class BuildHost
@@ -117,7 +117,7 @@ public static class BuildHost
 
         return assetVerb switch
         {
-            "verify" => Verbs.Verify(physical, layout, importers),
+            "verify" => Verbs.Verify(physical, layout),
             "prefab-check" => Verbs.PrefabCheck(physical, layout, fix),
             "clean" => Verbs.Clean(physical, layout, keepEditor),
             "build" => Verbs.Build(physical, layout, profile, editor, importers),

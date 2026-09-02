@@ -250,9 +250,8 @@ public class ProjectVerifierTests
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
-        await Assert.That(findings.Count).IsEqualTo(2);
+        await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Message).Contains("no sidecar");
-        await Assert.That(findings[1].Severity).IsEqualTo(VerifySeverity.Warning);
     }
 
     [Test]
@@ -292,19 +291,30 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task a_file_no_step_will_build_is_not_a_finding_on_its_own()
+    {
+        // Verify cannot tell, so verify does not say: an importer claims an asset inside its own
+        // Import, on whatever grounds it likes, so only a running build can answer "does
+        // anything handle this" — and even there a decline may mean "not for this tree".
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/notes.txt", "todo");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings).IsEmpty();
+    }
+
+    [Test]
     public async Task a_file_nothing_builds_still_needs_its_identity()
     {
-        // "The pipeline does not process this" and "this is not an asset" are different
-        // statements: the missing identity is the error, the unhandled extension the warning.
         using var fileSystem = CreateProject();
         fileSystem.WriteAllText("/game/assets/notes.txt", "todo");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
-        await Assert.That(findings.Count).IsEqualTo(2);
+        await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
         await Assert.That(findings[0].Message).Contains("no sidecar");
-        await Assert.That(findings[1].Severity).IsEqualTo(VerifySeverity.Warning);
     }
 
     [Test]
@@ -372,32 +382,6 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_file_no_importer_declares_is_a_warning_naming_the_extension()
-    {
-        using var fileSystem = CreateProject();
-        WriteCarried(fileSystem, "/game/assets/models/notes.txt", "hi");
-
-        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
-
-        await Assert.That(findings.Count).IsEqualTo(1);
-        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
-        await Assert.That(findings[0].Path).IsEqualTo(new UPath("/game/assets/models/notes.txt"));
-        await Assert.That(findings[0].Message).Contains("'.txt'");
-        await Assert.That(findings[0].Message).Contains("[assets] ignore");
-    }
-
-    [Test]
-    public async Task a_project_importer_declaring_the_extension_silences_the_warning()
-    {
-        using var fileSystem = CreateProject();
-        WriteCarried(fileSystem, "/game/assets/models/notes.txt", "hi");
-
-        var findings = ProjectVerifier.Verify(fileSystem, s_layout, [.. AssetImporters.All, new NotesImporter()]);
-
-        await Assert.That(findings).IsEmpty();
-    }
-
-    [Test]
     public async Task an_upper_case_prefab_suffix_is_still_a_document_to_verify()
     {
         using var fileSystem = CreateProject();
@@ -408,21 +392,6 @@ public class ProjectVerifierTests
         await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
         await Assert.That(findings[0].Message).Contains("not valid TOML");
-    }
-
-    internal sealed class NotesImporter : IAssetImporter
-    {
-        public string Name => "notes";
-
-        public IReadOnlyList<string> Extensions { get; } = [".txt"];
-
-        public bool RecordsIdentity => true;
-
-        public bool Import(ImportContext context, List<string> errors)
-        {
-            context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
-            return true;
-        }
     }
 
     /// <param name="documentFormat">

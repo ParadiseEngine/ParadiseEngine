@@ -12,8 +12,6 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "texture";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".png", ".jpg", ".jpeg"];
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -21,6 +19,8 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(".png", ".jpg", ".jpeg")) return false;
+
         var settings = context.Meta!.Setting(TextureImportSettings.Domain);
         if (settings is not null && TextureImportSettings.Instance.Problem(settings) is { } problem)
         {
@@ -57,8 +57,6 @@ public sealed class MeshImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "mesh";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".glb", ".gltf"];
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -66,6 +64,8 @@ public sealed class MeshImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(".glb", ".gltf")) return false;
+
         // Claimed and refused, not declined: declining would let the mesh vanish silently.
         if (context.HasExtension(".gltf"))
         {
@@ -188,8 +188,6 @@ public sealed class AudioImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "audio";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".bnk", ".wem"];
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -197,6 +195,8 @@ public sealed class AudioImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(".bnk", ".wem")) return false;
+
         context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
         return true;
     }
@@ -208,8 +208,6 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "prefab";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [AssetClassifier.PrefabSuffix];
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -217,6 +215,7 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
+        if (!context.HasExtension(AssetClassifier.PrefabSuffix)) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         PrefabDocument document;
@@ -269,8 +268,6 @@ public sealed class ConfigImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "config";
 
-    /// <inheritdoc />
-    public IReadOnlyList<string> Extensions { get; } = [".toml"];
 
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;
@@ -279,7 +276,7 @@ public sealed class ConfigImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
     {
         // Compiling the manifest would ship the source project's profiles as game data.
-        if (context.IsManifest) return false;
+        if (!context.HasExtension(".toml") || context.IsManifest) return false;
         if (DocumentOutput.Unsupported(context, errors)) return true;
 
         if (!ConfigDocument.TryCanonicalize(context.FileSystem.ReadAllText(context.Asset), out var canonical, out var error))

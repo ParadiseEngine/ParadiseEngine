@@ -94,44 +94,6 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task an_appended_importer_is_offered_only_its_extensions_and_shadows_the_built_in()
-    {
-        // The extension path of #208: a game's host passes [.. All, its own], and the last link
-        // wins for the files it declares while every other file still reaches the built-ins.
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
-        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/models/notes.txt", "hi");
-        var shadow = new ShadowingImporter();
-
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, shadow]).Run();
-
-        await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(shadow.Offered).IsEquivalentTo(new[] { "audio/init.bnk", "models/notes.txt" });
-        await Assert.That(fileSystem.ReadAllText("/game/build/audio/init.bnk")).IsEqualTo("shadowed");
-        await Assert.That(fileSystem.ReadAllText("/game/build/models/notes.txt")).IsEqualTo("shadowed");
-        await Assert.That(fileSystem.FileExists("/game/build/textures/fire.ktx2")).IsTrue();
-    }
-
-    private sealed class ShadowingImporter : IAssetImporter
-    {
-        public List<string> Offered { get; } = [];
-
-        public string Name => "shadow";
-
-        public IReadOnlyList<string> Extensions { get; } = [".BNK", ".txt"];
-
-        public bool RecordsIdentity => true;
-
-        public bool Import(ImportContext context, List<string> errors)
-        {
-            Offered.Add(context.Source);
-            context.Output.WriteAllText("/" + context.Source, "shadowed");
-            return true;
-        }
-    }
-
-    [Test]
     public async Task audio_copies_through_byte_identical()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -509,12 +471,13 @@ public class BuildRunnerTests
 
         public string Name => name;
 
-        public IReadOnlyList<string> Extensions { get; } = [extension];
 
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
         {
+            if (!context.HasExtension(extension)) return false;
+
             Offers++;
             if (!handles) return false;
 
@@ -985,12 +948,12 @@ public class BuildRunnerTests
     {
         public string Name => "throwing";
 
-        public IReadOnlyList<string> Extensions { get; } = [".glb"];
 
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
         {
+            if (!context.HasExtension(".glb")) return false;
             throw new IOException("the file is still being written");
         }
     }
@@ -1031,7 +994,6 @@ public class BuildRunnerTests
     {
         public string Name => "writer";
 
-        public IReadOnlyList<string> Extensions { get; } = [".glb"];
 
         public bool RecordsIdentity => true;
 
@@ -1047,7 +1009,6 @@ public class BuildRunnerTests
     {
         public string Name => "companion";
 
-        public IReadOnlyList<string> Extensions { get; } = [".bnk"];
 
         public bool RecordsIdentity => true;
 

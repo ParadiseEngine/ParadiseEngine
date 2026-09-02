@@ -24,7 +24,7 @@ public enum AssetClass
     Foreign,
 }
 
-/// <summary>Classifies paths under <c>assets/</c> by suffix and the project's ignore list. Suffixes compare ignoring case, as importers declare theirs, so <c>Foo.PREFAB</c> is a prefab to verify and to the build alike (issue #208).</summary>
+/// <summary>Classifies paths under <c>assets/</c> by suffix and the project's ignore list; it asks importers nothing because a declined asset may mean "not mine" or "not for this tree". Suffixes compare ignoring case, as the importers' own checks do, so <c>Foo.PREFAB</c> is a prefab to verify and to the build alike (issue #208).</summary>
 public static class AssetClassifier
 {
     public const string PrefabSuffix = ".prefab";

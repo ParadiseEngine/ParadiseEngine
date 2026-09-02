@@ -15,7 +15,7 @@ public class AssetClassifierTests
     [Arguments("/game/assets/models/crate.glb", AssetClass.Foreign)]
     [Arguments("/game/assets/models/crate.gltf", AssetClass.Foreign)]
     [Arguments("/game/assets/textures/fire.PNG", AssetClass.Foreign)]
-    // Case-insensitive like the importers' declarations, so verify and the build agree on it (#208).
+    // Case-insensitive like the importers' own checks, so verify and the build agree on it (#208).
     [Arguments("/game/assets/levels/Shouty.PREFAB", AssetClass.Prefab)]
     [Arguments("/game/assets/config/Game.TOML", AssetClass.Config)]
     [Arguments("/game/assets/textures/fire.jpg", AssetClass.Foreign)]
@@ -69,19 +69,6 @@ public class AssetClassifierTests
         // would be parsed as a document and refused, and verify could never see it as an orphan.
         await Assert.That(AssetClassifier.Classify(s_assets, "/game/assets/levels/a.prefab.meta", AssetIgnoreRules.None))
             .IsEqualTo(AssetClass.Sidecar);
-    }
-
-    [Test]
-    public async Task every_built_in_declares_its_extensions_and_candidates_come_highest_precedence_first()
-    {
-        foreach (var importer in AssetImporters.All)
-        {
-            await Assert.That(importer.Extensions).IsNotEmpty().Because(importer.Name);
-        }
-
-        await Assert.That(AssetImporters.All.Candidates("/game/assets/x/Foo.PREFAB").Select(i => i.Name)).IsEquivalentTo(new[] { "prefab" });
-        await Assert.That(AssetImporters.All.Candidates("/game/assets/x/notes.txt")).IsEmpty();
-        await Assert.That(AssetImporters.All.Candidates("/game/assets/x/README")).IsEmpty();
     }
 
     /// <summary>
