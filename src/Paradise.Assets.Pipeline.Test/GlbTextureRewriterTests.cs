@@ -56,6 +56,16 @@ public class GlbTextureRewriterTests
     }
 
     [Test]
+    public async Task a_header_over_declaring_the_length_is_refused_as_the_runtime_refuses_it()
+    {
+        var plain = GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } }, [1, 2, 3, 4]);
+        BitConverter.GetBytes((uint)plain.Length + 8).CopyTo(plain, 8);
+
+        await Assert.That(GlbBinary.TryRead(plain, out _, out _)).IsFalse();
+        await Assert.That(() => Paradise.Assets.Gltf.GlbContainer.Parse(plain)).Throws<InvalidDataException>();
+    }
+
+    [Test]
     public async Task a_json_chunk_longer_than_the_file_is_refused_without_allocating_it()
     {
         var plain = GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } }, []);

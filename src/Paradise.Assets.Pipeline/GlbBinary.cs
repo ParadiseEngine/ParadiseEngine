@@ -53,7 +53,14 @@ namespace Paradise.Assets.Pipeline
                     return false;
                 }
 
-                long totalLength = Math.Min(reader.ReadUInt32(), reader.BaseStream.Length);
+                // Over-declared and the runtime's GlbContainer refuses it; agreeing here keeps a
+                // file the game cannot load out of the build.
+                long totalLength = reader.ReadUInt32();
+                if (totalLength > reader.BaseStream.Length)
+                {
+                    return false;
+                }
+
                 uint jsonChunkLength = reader.ReadUInt32();
                 if (reader.ReadUInt32() != JsonChunkType || jsonChunkLength > totalLength - 20)
                 {
@@ -62,6 +69,7 @@ namespace Paradise.Assets.Pipeline
 
                 string json = Encoding.UTF8.GetString(reader.ReadBytes((int)jsonChunkLength)).TrimEnd(' ', '\0');
                 gltf = JsonNode.Parse(json)!.AsObject();
+                reader.BaseStream.Position = 20 + AlignToFour((int)jsonChunkLength);
 
                 while (reader.BaseStream.Position + 8 <= totalLength)
                 {
