@@ -114,18 +114,37 @@ int Tools(string? toolVerb, string[] arguments)
 {
     if (toolVerb is null) return Unknown("'tools' needs a verb (doctor, install)");
 
+    string? projectDirectory = null;
+    var rest = new List<string>();
+    for (var i = 0; i < arguments.Length; i++)
+    {
+        if (arguments[i] == "--project" && i + 1 < arguments.Length) projectDirectory = arguments[++i];
+        else rest.Add(arguments[i]);
+    }
+
     return toolVerb switch
     {
-        "doctor" => Verbs.ToolsDoctor(RepoRoot()),
-        "install" when arguments.Length == 1 => Verbs.ToolsInstall(RepoRoot(), arguments[0]),
+        "doctor" => Verbs.ToolsDoctor(ProbeRoot(projectDirectory)),
+        "install" when rest.Count == 1 => Verbs.ToolsInstall(EngineRoot(), rest[0]),
         "install" => Unknown("'tools install' needs exactly one tool name (ktx, slang)"),
         _ => Unknown($"unknown tools verb '{toolVerb}'"),
     };
 }
 
-// A game repo consuming the packaged tool has no engine tree, and `doctor` must still report
-// what it found on PATH. This root differs from the build's (issue #206).
-static string RepoRoot()
+// `doctor` must answer for the same root `assets build` probes, or the two disagree about
+// whether ktx exists. That is the asset project's root when there is one; from an engine
+// checkout (no asset project) it is the checkout, so the vendored tree is seen.
+string ProbeRoot(string? projectDirectory)
+{
+    var start = Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory());
+    return AssetProjectLayout.TryLocate(physical, physical.ConvertPathFromInternal(start), out var layout)
+        ? physical.ConvertPathToInternal(layout!.Root)
+        : EngineRoot();
+}
+
+// Only `install` needs an engine checkout (the bootstraps live in tools/); a game repo
+// consuming the packaged CLI has none, and then the working directory is as good as any.
+static string EngineRoot()
 {
     for (var directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory is not null; directory = directory.Parent)
     {
@@ -167,6 +186,7 @@ static int Usage()
         assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
 
         tools doctor                  report every build tool: found, version, and how to fix
+                                        probes the same root `assets build` does (--project applies)
         tools install <ktx|slang>     install one (may prompt for elevation on Windows)
 
         options:

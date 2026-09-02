@@ -15,7 +15,7 @@ public readonly record struct ToolFinding(string Name, ToolStatus Status, string
 /// <c>tools doctor</c>. Exists because two tool failures were undiagnosable from what the build
 /// said (a <c>slangc</c> quoting bug read as an absent compiler; a missing <c>ktx</c> on Windows
 /// where the bootstrap cannot help). Uses the build's own probe (<see cref="KtxCreate.FindKtx"/>)
-/// so the two cannot drift, though they still disagree on the repo root — issue #206.
+/// so the two cannot drift.
 /// </summary>
 public static class ToolReport
 {
@@ -30,7 +30,10 @@ public static class ToolReport
         var path = KtxCreate.FindKtx(repoRoot);
         if (path is not null)
         {
-            return new ToolFinding("ktx", ToolStatus.Ok, Version(path, "--version"), path, null);
+            var probe = KtxCreate.ProbeKtx(path);
+            return probe.Usable
+                ? new ToolFinding("ktx", ToolStatus.Ok, probe.VersionText?.Split(':', 2) is { Length: 2 } halves ? halves[1].Trim() : probe.VersionText, path, null)
+                : new ToolFinding("ktx", ToolStatus.Missing, probe.VersionText, path, probe.Problem);
         }
 
         // On Windows the bootstrap cannot help: Khronos ships an NSIS installer needing elevation,
@@ -40,7 +43,7 @@ public static class ToolReport
               + "or install KTX-Software v5 yourself and set PARADISE_KTX_PATH to its bin/ktx.exe"
             : OperatingSystem.IsMacOS()
                 ? "install KTX-Software v5 (Khronos ships macOS as a .pkg, which cannot be unpacked to a chosen directory) "
-                  + "and set PARADISE_KTX_PATH to its bin/ktx"
+                  + "and set PARADISE_KTX_PATH to its bin/ktx; an engine checkout also vendors one under third_party/tools/KTX-Software"
                 : "run 'paradise tools install ktx'";
 
         return new ToolFinding("ktx", ToolStatus.Missing, null, null, fix);
@@ -68,23 +71,13 @@ public static class ToolReport
         }
 
         // Must match Slang.targets: $(NuGetPackageRoot)_slang/<version>/<rid>.
-        var packages = Environment.GetEnvironmentVariable("NUGET_PACKAGES")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
         var executable = OperatingSystem.IsWindows() ? "slangc.exe" : "slangc";
-        var path = Path.Combine(packages, "_slang", version, Rid(), "bin", executable);
+        var path = Path.Combine(ToolLocations.InstallRoot("slang", version), "bin", executable);
 
         return File.Exists(path)
             ? new ToolFinding("slangc", ToolStatus.Ok, Version(path, "-v") ?? version, path, null)
             : new ToolFinding("slangc", ToolStatus.Missing, null, null,
                 "run 'paradise tools install slang', or just build the engine — the RestoreSlang target downloads it");
-    }
-
-    private static string Rid()
-    {
-        var os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
-        var architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
-            .ToString().ToLowerInvariant();
-        return $"{os}-{architecture}";
     }
 
     private static string? Version(string path, string flag)

@@ -32,7 +32,7 @@ public sealed class TextureImporter : IAssetImporter
             return true;
         }
 
-        var preset = TextureImportSettings.Instance.PresetOf(settings) ?? DefaultPresetFor(context.Asset);
+        var preset = TextureImportSettings.Instance.PresetOf(settings) ?? DefaultPresetFor(context);
         var fast = context.Profile.TextureQuality == TextureQuality.Fast;
         var bytes = context.FileSystem.ReadAllBytes(context.Asset);
         UPath destination = "/" + Path.ChangeExtension(context.Source, ".ktx2");
@@ -63,16 +63,19 @@ public sealed class TextureImporter : IAssetImporter
         return true;
     }
 
-    private static TexturePreset DefaultPresetFor(UPath path)
+    // Said out loud: a wrong guess is a colour-space bug with no other symptom, and the sidecar
+    // is where to pin the answer.
+    private static TexturePreset DefaultPresetFor(ImportContext context)
     {
-        var image = new JsonObject { ["name"] = Path.GetFileNameWithoutExtension(path.GetName()) };
-        return KtxCreate.PresetFromImageName(image) switch
+        var preset = KtxCreate.PresetFromImageName(Path.GetFileNameWithoutExtension(context.Asset.GetName())) switch
         {
             KtxCreate.TextureEncodingPreset.UastcNormalLinear => TexturePreset.Normal,
             KtxCreate.TextureEncodingPreset.UastcDataLinear => TexturePreset.Data,
             KtxCreate.TextureEncodingPreset.UastcColorLinear => TexturePreset.ColorLinear,
             _ => TexturePreset.Color,
         };
+        context.Log?.Invoke($"texture: {context.Source} has no preset in its sidecar; {preset} inferred from the name");
+        return preset;
     }
 }
 
