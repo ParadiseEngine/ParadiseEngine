@@ -12,7 +12,6 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "texture";
 
-
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
@@ -56,7 +55,6 @@ public sealed class MeshImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "mesh";
-
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -188,7 +186,6 @@ public sealed class AudioImporter : IAssetImporter
     /// <inheritdoc />
     public string Name => "audio";
 
-
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
@@ -207,7 +204,6 @@ public sealed class PrefabImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "prefab";
-
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -267,7 +263,6 @@ public sealed class ConfigImporter : IAssetImporter
 {
     /// <inheritdoc />
     public string Name => "config";
-
 
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;

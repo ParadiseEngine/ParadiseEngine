@@ -172,9 +172,10 @@ internal static class Verbs
         foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
         foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
 
-        Console.WriteLine(result.Succeeded
-            ? $"mv: {result.Moved.Count} file(s) moved, {result.Rewritten.Count} document(s) rewritten, {result.Warnings.Count} warning(s)"
-            : "mv: nothing moved");
+        // The counts print either way: a failure after the files moved is exactly when the
+        // author must know the tree changed.
+        var summary = $"{result.Moved.Count} file(s) moved, {result.Rewritten.Count} document(s) rewritten, {result.Warnings.Count} warning(s)";
+        Console.WriteLine(result.Succeeded ? $"mv: {summary}" : $"mv: FAILED with {result.Errors.Count} error(s) — {summary}");
         return result.Succeeded ? 0 : 1;
     }
 

@@ -172,7 +172,7 @@ public static class GlbTextureRewriter
             image.Remove("uri");
         }
 
-        bin = RepackReplacing(bufferViews, bin, replacements);
+        if (!TryRepackReplacing(bufferViews, bin, replacements, out bin, out error)) return false;
         if (gltf["textures"] is JsonArray textures) DeclareBasisu(gltf, textures, ktx2ByImage.Keys.ToHashSet());
         SetFirstBufferLength(gltf, bin.Length);
         rewritten = GlbBinary.Write(gltf, bin);
@@ -193,8 +193,10 @@ public static class GlbTextureRewriter
         return true;
     }
 
-    private static byte[] RepackReplacing(JsonArray bufferViews, byte[] sourceBin, IReadOnlyDictionary<int, byte[]> replacements)
+    private static bool TryRepackReplacing(JsonArray bufferViews, byte[] sourceBin, IReadOnlyDictionary<int, byte[]> replacements, out byte[] newBin, out string error)
     {
+        error = "";
+        newBin = [];
         using var rebuilt = new MemoryStream();
         for (var i = 0; i < bufferViews.Count; i++)
         {
@@ -202,7 +204,11 @@ public static class GlbTextureRewriter
 
             var sourceOffset = bufferView["byteOffset"]?.GetValue<int>() ?? 0;
             var sourceLength = bufferView["byteLength"]?.GetValue<int>() ?? 0;
-            if (sourceOffset < 0 || sourceLength <= 0 || sourceOffset + sourceLength > sourceBin.Length) continue;
+            if (sourceOffset < 0 || sourceLength < 0 || sourceOffset + sourceLength > sourceBin.Length)
+            {
+                error = $"buffer view #{i} spans bytes {sourceOffset}..{sourceOffset + sourceLength} of a {sourceBin.Length}-byte BIN chunk";
+                return false;
+            }
 
             GlbBinary.WritePadding(rebuilt, 0x00);
             var bytes = replacements.TryGetValue(i, out var replacement)
@@ -215,7 +221,8 @@ public static class GlbTextureRewriter
         }
 
         GlbBinary.WritePadding(rebuilt, 0x00);
-        return rebuilt.ToArray();
+        newBin = rebuilt.ToArray();
+        return true;
     }
 
     /// <summary>False, naming the view, when a kept buffer-0 view points outside the BIN: emitting it would ship a view claiming bytes nothing wrote.</summary>

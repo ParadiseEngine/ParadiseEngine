@@ -149,7 +149,17 @@ public sealed class BuildRunner
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
 
-        manifest.Save(_fileSystem, output / BuildManifest.FileName);
+        try
+        {
+            manifest.Save(_fileSystem, output / BuildManifest.FileName);
+        }
+        catch (InvalidOperationException error)
+        {
+            // Two primary outputs under one identity: a project importer's doing, since verify
+            // keeps sidecar guids unique. A build error, not a crash of the verb.
+            return new BuildResult(false, [$"manifest: {error.Message}"], manifest.Assets.Count, output);
+        }
+
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 

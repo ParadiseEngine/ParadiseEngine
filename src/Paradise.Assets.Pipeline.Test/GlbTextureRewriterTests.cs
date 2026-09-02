@@ -150,6 +150,17 @@ public class GlbTextureRewriterTests
         await Assert.That(error).Contains("buffer view #0");
     }
 
+    [Test]
+    public async Task a_view_pointing_outside_the_bin_fails_the_embed_too()
+    {
+        var glb = TwoImageGlb([1, 2, 3], [4, 5, 6]);
+        GlbBinary.TryRead(glb, out var gltf, out var bin);
+        gltf["bufferViews"]![0]!["byteLength"] = 4096;
+
+        await Assert.That(GlbTextureRewriter.TryEmbedKtx2(GlbBinary.Write(gltf, bin), new Dictionary<int, byte[]> { [0] = [7] }, out _, out var error)).IsFalse();
+        await Assert.That(error).Contains("buffer view #0");
+    }
+
     /// <summary>Geometry view 0, image 0 (PNG, bound as a normal map) in view 1, image 1 (bound to nothing) in view 2.</summary>
     private static byte[] TwoImageGlb(byte[] first, byte[] second)
     {

@@ -94,6 +94,36 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task two_primary_outputs_under_one_identity_fail_the_build_by_name()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [new TwinOutputImporter()]).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("audio/init.bnk");
+        await Assert.That(result.Errors[0]).Contains("audio/init.bank");
+        await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
+    }
+
+    /// <summary>Writes the source at two extensions, both "primary" by stem, so one guid would name two files.</summary>
+    private sealed class TwinOutputImporter : IAssetImporter
+    {
+        public string Name => "twin";
+
+        public bool RecordsIdentity => true;
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".bnk")) return false;
+            context.Output.WriteAllBytes("/" + context.Source, [1]);
+            context.Output.WriteAllBytes("/" + Path.ChangeExtension(context.Source, ".bank"), [1]);
+            return true;
+        }
+    }
+
+    [Test]
     public async Task audio_copies_through_byte_identical()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -470,7 +500,6 @@ public class BuildRunnerTests
         public int Offers;
 
         public string Name => name;
-
 
         public bool RecordsIdentity => true;
 
@@ -948,7 +977,6 @@ public class BuildRunnerTests
     {
         public string Name => "throwing";
 
-
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
@@ -994,11 +1022,11 @@ public class BuildRunnerTests
     {
         public string Name => "writer";
 
-
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
         {
+            if (!context.HasExtension(".glb")) return false;
             context.FileSystem.WriteAllBytes(context.Asset.FullName + ".side", [1]);
             return true;
         }
@@ -1009,11 +1037,12 @@ public class BuildRunnerTests
     {
         public string Name => "companion";
 
-
         public bool RecordsIdentity => true;
 
         public bool Import(ImportContext context, List<string> errors)
         {
+            if (!context.HasExtension(".bnk")) return false;
+
             byte[] companion;
             try
             {
