@@ -136,6 +136,14 @@ Enforced via `.editorconfig` with warnings-as-errors:
 - **Performance**: Struct-based nodes, `ref` parameters throughout, zero-allocation design, `System.Runtime.CompilerServices.Unsafe` for low-level ops
 - **Comments**: Code explains itself; comments explain why. Prefer a name, a type, a small method, or a guard over a comment that says what the code does, and restructure before commenting. A comment is for what code cannot say: a constraint, a decision and its rejected alternative, a failure mode someone would reintroduce, a cross-repo or cross-language contract. XML `<summary>` is one sentence; `<remarks>` only when it carries such a why. Delete comments that narrate control flow or restate the next line.
 
+## Git conventions
+
+- Feature branches off `main`; PRs assigned to quabug; squash-merge, matching the history style.
+- A PR that fixes an issue carries `Closes #NNN` (one line per issue) at the top of its body,
+  and the commit message says it too, so merging closes the issue. Use `Towards #NNN` only for
+  deliberately partial work, and when a second fix joins an existing PR, add its `Closes` line.
+- Never commit or push without being asked.
+
 ## SDK
 
 Requires .NET SDK 10.0.400+ (specified in `global.json` with `rollForward: latestMinor`). The

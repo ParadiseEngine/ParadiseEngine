@@ -69,7 +69,7 @@ public class AssetWatcherTests
 
         watcher.Observe("/game/assets/models/crate.glb");
         clock.Now += AssetWatcher.Debounce;
-        var minted = watcher.Drain();
+        var minted = watcher.Drain().SidecarActions;
 
         // The mint happened, and the sidecar it produced is on disk -- so the Created event a
         // real filesystem would now raise is the one the guard has to swallow.
@@ -80,7 +80,7 @@ public class AssetWatcherTests
         clock.Now += AssetWatcher.Debounce;
 
         await Assert.That(watcher.HasPending).IsFalse();
-        await Assert.That(watcher.Drain()).IsEqualTo(0);
+        await Assert.That(watcher.Drain().Changes).IsEqualTo(0);
     }
 
     [Test]
@@ -94,13 +94,55 @@ public class AssetWatcherTests
 
         // Still warm: an atomic write arrives as several events, so acting on the first one would
         // act on a half-written file.
-        await Assert.That(watcher.Drain()).IsEqualTo(0);
+        await Assert.That(watcher.Drain().Changes).IsEqualTo(0);
         await Assert.That(watcher.HasPending).IsTrue();
 
         clock.Now += AssetWatcher.Debounce;
 
-        await Assert.That(watcher.Drain()).IsEqualTo(1);
+        await Assert.That(watcher.Drain().Changes).IsEqualTo(1);
         await Assert.That(watcher.HasPending).IsFalse();
+    }
+
+    /// <summary>
+    /// The case every real project is in: the asset already has a sidecar, so an edit needs no
+    /// sidecar work at all — and it still has to reach the build. The watch loop rebuilds on
+    /// Changes, never on SidecarActions (issue #195).
+    /// </summary>
+    [Test]
+    public async Task editing_an_identified_asset_is_a_change_even_though_it_touches_no_sidecar()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [4, 5, 6]);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        var drained = watcher.Drain();
+
+        await Assert.That(drained.SidecarActions).IsEqualTo(0);
+        await Assert.That(drained.Changes).IsEqualTo(1);
+    }
+
+    /// <summary>A delete is a change too: the manifest must stop listing what is gone.</summary>
+    [Test]
+    public async Task deleting_an_asset_is_a_change()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        fileSystem.DeleteFile("/game/assets/models/crate.glb");
+        watcher.ObserveDelete("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+
+        await Assert.That(watcher.Drain().Changes).IsEqualTo(1);
     }
 
     /// <summary>
@@ -155,7 +197,7 @@ public class AssetWatcherTests
         watcher.ObserveDelete("/game/assets/models/crate.glb.meta");
         clock.Now += AssetWatcher.Debounce;
 
-        await Assert.That(watcher.Drain()).IsEqualTo(1);
+        await Assert.That(watcher.Drain().SidecarActions).IsEqualTo(1);
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.meta")).IsTrue();
     }
 
