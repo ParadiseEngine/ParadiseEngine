@@ -129,7 +129,7 @@ public static class GlbTextureRewriter
             DeclareBasisu(gltf, textures, transcoded);
         }
 
-        bin = RepackDropping(gltf, bufferViews, bin, dropped);
+        if (!TryRepackDropping(gltf, bufferViews, bin, dropped, out bin, out error)) return false;
         SetFirstBufferLength(gltf, bin.Length);
         rewritten = GlbBinary.Write(gltf, bin);
         return true;
@@ -218,12 +218,14 @@ public static class GlbTextureRewriter
         return rebuilt.ToArray();
     }
 
-    private static byte[] RepackDropping(JsonObject gltf, JsonArray bufferViews, byte[] sourceBin, ISet<int> droppedViews)
+    /// <summary>False, naming the view, when a kept buffer-0 view points outside the BIN: emitting it would ship a view claiming bytes nothing wrote.</summary>
+    private static bool TryRepackDropping(JsonObject gltf, JsonArray bufferViews, byte[] sourceBin, ISet<int> droppedViews, out byte[] newBin, out string error)
     {
+        error = "";
+        newBin = [];
         var kept = Enumerable.Range(0, bufferViews.Count).Where(i => !droppedViews.Contains(i)).ToList();
         var newOffset = new Dictionary<int, int>();
         var newLength = new Dictionary<int, int>();
-        byte[] newBin;
         using (var rebuilt = new MemoryStream())
         {
             foreach (var i in kept)
@@ -239,10 +241,16 @@ public static class GlbTextureRewriter
 
                 var offset = bufferView["byteOffset"]?.GetValue<int>() ?? 0;
                 var length = bufferView["byteLength"]?.GetValue<int>() ?? 0;
+                if (length < 0 || offset < 0 || offset + length > sourceBin.Length)
+                {
+                    error = $"buffer view #{i} spans bytes {offset}..{offset + length} of a {sourceBin.Length}-byte BIN chunk";
+                    return false;
+                }
+
                 GlbBinary.WritePadding(rebuilt, 0x00);
                 newOffset[i] = (int)rebuilt.Position;
                 newLength[i] = length;
-                if (length > 0 && offset >= 0 && offset + length <= sourceBin.Length) rebuilt.Write(sourceBin, offset, length);
+                rebuilt.Write(sourceBin, offset, length);
             }
 
             GlbBinary.WritePadding(rebuilt, 0x00);
@@ -286,7 +294,7 @@ public static class GlbTextureRewriter
             if (image["bufferView"] is not null) Remap(image, remap);
         }
 
-        return newBin;
+        return true;
     }
 
     private static void Remap(JsonObject node, IReadOnlyDictionary<int, int> remap)

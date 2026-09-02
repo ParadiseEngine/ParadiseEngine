@@ -46,6 +46,13 @@ public sealed class BuildManifest
         foreach (var asset in Assets)
         {
             if (string.IsNullOrEmpty(asset.Guid)) continue;
+            if (map.TryGetValue(asset.Guid, out var taken))
+            {
+                // Last-wins here would hand a host whichever file sorts later under a shared guid.
+                throw new InvalidOperationException(
+                    $"Guid '{asset.Guid}' is recorded for both '{taken.Path}' and '{asset.Path}'; an identity names one built file.");
+            }
+
             map[asset.Guid] = new BuiltAssetIdentity
             {
                 Path = asset.Path,

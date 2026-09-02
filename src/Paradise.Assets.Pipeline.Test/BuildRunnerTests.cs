@@ -173,9 +173,13 @@ public class BuildRunnerTests
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(fileSystem.FileExists("/game/build/models/lamp_0.ktx2")).IsTrue();
-        var manifest = fileSystem.ReadAllText("/game/build/manifest.json");
-        await Assert.That(manifest).Contains("\"path\": \"models/lamp_0.ktx2\"");
-        await Assert.That(manifest).Contains("\"path\": \"models/lamp.glb\"");
+        var manifest = BuildManifest.Load(fileSystem, "/game/build/manifest.json");
+        await Assert.That(manifest.Assets.Select(a => a.Path)).IsEquivalentTo(new[] { "models/lamp.glb", "models/lamp_0.ktx2" });
+        // The mesh's identity names the mesh; its externalised texture is a companion with none,
+        // or byGuid would resolve the mesh reference to a texture.
+        var guid = DocumentGuid.Format(SidecarMeta.Load(fileSystem, "/game/assets/models/lamp.glb.meta").Guid);
+        await Assert.That(manifest.ByGuid[guid].Path).IsEqualTo("models/lamp.glb");
+        await Assert.That(manifest.Assets.Single(a => a.Path == "models/lamp_0.ktx2").Guid).IsNull();
 
         GlbBinary.TryRead(fileSystem.ReadAllBytes("/game/build/models/lamp.glb"), out var gltf, out var bin);
         var image = gltf["images"]![0]!;

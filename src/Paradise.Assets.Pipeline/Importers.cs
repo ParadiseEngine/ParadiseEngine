@@ -119,6 +119,12 @@ public sealed class MeshImporter : IAssetImporter
     {
         rewritten = glb;
         var before = errors.Count;
+        if (context.Encoder is null && embedded.Any(image => !image.IsKtx2))
+        {
+            errors.Add(TextureStep.NoEncoder(context));
+            return false;
+        }
+
         foreach (var image in embedded)
         {
             var sidecar = directory / image.SidecarName;
@@ -147,14 +153,16 @@ internal static class TextureStep
 {
     private const string CacheKind = "ktx2";
 
+    public static string NoEncoder(ImportContext context) =>
+        $"{context.Source}: no ktx CLI available to encode textures — run tools/ktx/KtxBootstrap, " +
+        $"install KTX-Software, or set {KtxTool.PathEnvironmentVariable}";
+
     /// <summary>True when <paramref name="destination"/> now holds the KTX2; false with the error reported.</summary>
     public static bool Encode(ImportContext context, byte[] source, string sourceExtension, TexturePreset preset, UPath destination, List<string> errors)
     {
         if (context.Encoder is null)
         {
-            errors.Add(
-                $"{context.Source}: no ktx CLI available to encode textures — run tools/ktx/KtxBootstrap, " +
-                $"install KTX-Software, or set {KtxTool.PathEnvironmentVariable}");
+            errors.Add(NoEncoder(context));
             return false;
         }
 

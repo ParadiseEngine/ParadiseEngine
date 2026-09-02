@@ -136,6 +136,20 @@ public class GlbTextureRewriterTests
         await Assert.That(error).Contains("#5");
     }
 
+    [Test]
+    public async Task a_kept_view_pointing_outside_the_bin_fails_the_externalize_instead_of_shipping()
+    {
+        var glb = TwoImageGlb([1, 2, 3], [.. Ktx2Header.Identifier.ToArray(), 9]);
+        GlbBinary.TryRead(glb, out var gltf, out var bin);
+        // The geometry view, which listing does not validate, claims more than the BIN holds.
+        gltf["bufferViews"]![0]!["byteLength"] = 4096;
+        var corrupt = GlbBinary.Write(gltf, bin);
+        await Assert.That(GlbTextureRewriter.TryListEmbedded(corrupt, "crate", out var images, out _)).IsTrue();
+
+        await Assert.That(GlbTextureRewriter.TryExternalize(corrupt, images, declareBasisu: false, new HashSet<int>(), out _, out var error)).IsFalse();
+        await Assert.That(error).Contains("buffer view #0");
+    }
+
     /// <summary>Geometry view 0, image 0 (PNG, bound as a normal map) in view 1, image 1 (bound to nothing) in view 2.</summary>
     private static byte[] TwoImageGlb(byte[] first, byte[] second)
     {

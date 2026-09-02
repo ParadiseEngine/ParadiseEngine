@@ -9,7 +9,7 @@ public interface ITextureEncoder
     /// <summary>Tool plus version, part of every cache key: a tool upgrade must miss the cache.</summary>
     string Identity { get; }
 
-    /// <summary>The COMPLETE input of one encode, so the artifact cache can serve it; anything that would change the bytes out must change this. Only the encoder knows what its inputs are, which is why the step cannot compute it (issue #212).</summary>
+    /// <summary>The COMPLETE input of one encode, so the artifact cache can serve it; anything that would change the bytes out must change this. Only the encoder knows what its inputs are, which is why the step cannot compute it (issue #212). It is a cache entry name: return an <see cref="ArtifactDigest"/> (lowercase hex), not a raw string — <see cref="ArtifactCache"/> refuses anything else.</summary>
     string CacheKey(byte[] source, string sourceExtension, TexturePreset preset, TextureQuality quality);
 
     bool TryEncode(byte[] source, string sourceExtension, TexturePreset preset, TextureQuality quality, out byte[] ktx2, out string error);

@@ -54,6 +54,7 @@ public static class AssetMover
         }
 
         var moved = new List<string>();
+        var errors = new List<string>();
         try
         {
             var parent = to.GetDirectory();
@@ -62,42 +63,50 @@ public static class AssetMover
             if (isDirectory)
             {
                 Rename(fileSystem, from, to, fileSystem.MoveDirectory);
+                moved.AddRange(mapping.Values);
             }
             else
             {
                 Rename(fileSystem, from, to, fileSystem.MoveFile);
+                moved.AddRange(mapping.Values);
                 var sidecar = SidecarMeta.PathFor(from);
                 if (fileSystem.FileExists(sidecar)) Rename(fileSystem, sidecar, SidecarMeta.PathFor(to), fileSystem.MoveFile);
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            return new MoveResult(false, [$"could not move '{before.Relative(from)}' to '{before.Relative(to)}': {error.Message}"], [], [], []);
+            // What did move is reported as moved: the caller must know the tree changed.
+            errors.Add($"could not move '{before.Relative(from)}' to '{before.Relative(to)}': {error.Message}");
+            return new MoveResult(false, errors, moved, [], []);
         }
 
-        foreach (var (source, destination) in mapping)
-        {
-            moved.Add(destination);
-            log?.Invoke($"moved: {source} -> {destination}");
-        }
+        foreach (var (source, destination) in mapping) log?.Invoke($"moved: {source} -> {destination}");
 
         var after = AssetPaths.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
-        var errors = new List<string>();
         var rewritten = new List<string>();
         var warnings = new List<string>();
 
         foreach (var path in after.Files)
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
-            if (assetClass == AssetClass.Prefab)
+            try
             {
-                RewriteDocument(fileSystem, after, path, mapping, rewritten, warnings, log);
+                if (assetClass == AssetClass.Prefab)
+                {
+                    RewriteDocument(fileSystem, after, path, mapping, rewritten, warnings, log);
+                }
+                else if (assetClass == AssetClass.Foreign && path.GetExtensionWithDot() is { } extension
+                    && string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase))
+                {
+                    WarnAboutMeshUris(fileSystem, after, path, mapping, warnings);
+                }
             }
-            else if (assetClass == AssetClass.Foreign && path.GetExtensionWithDot() is { } extension
-                && string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase))
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
-                WarnAboutMeshUris(fileSystem, after, path, warnings);
+                // The files have moved; a document this could not follow is an error the author
+                // fixes by hand, not a reason to leave the rest unrewritten.
+                errors.Add($"{after.Relative(path)}: could not be rewritten to follow the move ({error.Message}); its references still name the old path");
             }
         }
 
@@ -267,22 +276,16 @@ public static class AssetMover
         return followed;
     }
 
-    private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetPaths sources, UPath glb, List<string> warnings)
+    /// <summary>Only uris THIS move broke — the texture moved away, or the mesh moved away from it; a uri that was already broken belongs to verify.</summary>
+    private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetPaths sources, UPath glb, IReadOnlyDictionary<string, string> mapping, List<string> warnings)
     {
-        byte[] bytes;
-        try
-        {
-            bytes = fileSystem.ReadAllBytes(glb);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-            return;
-        }
-
+        var meshMoved = mapping.Values.Contains(sources.Relative(glb), StringComparer.Ordinal);
+        var bytes = fileSystem.ReadAllBytes(glb);
         foreach (var uri in MeshTextureReferences.Rewrite(bytes).Sources)
         {
             var resolved = (glb.GetDirectory() / Uri.UnescapeDataString(uri)).ToAbsolute();
             if (sources.Contains(resolved)) continue;
+            if (!meshMoved && !(sources.IsUnderRoot(resolved) && mapping.ContainsKey(sources.Relative(resolved)))) continue;
 
             warnings.Add(
                 $"{sources.Relative(glb)}: references '{uri}' inside the GLB, which no longer resolves; " +

@@ -149,6 +149,66 @@ public class AssetMoverTests
     }
 
     [Test]
+    public async Task a_mesh_uri_that_was_already_broken_is_not_blamed_on_the_move()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
+        var glb = GlbBinary.Write(new System.Text.Json.Nodes.JsonObject
+        {
+            ["images"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["uri"] = "../textures/gone.png", ["mimeType"] = "image/png" }),
+        }, []);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
+        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var unrelated = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
+        var meshItself = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/crate.glb");
+
+        await Assert.That(unrelated.Warnings).IsEmpty();
+        // Moving the mesh changes where every relative uri points, so that one IS this move's.
+        await Assert.That(meshItself.Warnings.Count).IsEqualTo(1);
+        await Assert.That(meshItself.Warnings[0]).Contains("props/crate.glb");
+    }
+
+    [Test]
+    public async Task a_document_that_cannot_be_rewritten_is_an_error_after_the_files_moved()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("read-only bits are a Unix notion here");
+
+        var root = Path.Combine(Path.GetTempPath(), $"paradise_mv_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(root, "assets", "models"));
+        Directory.CreateDirectory(Path.Combine(root, "assets", "levels"));
+        File.WriteAllText(Path.Combine(root, "assets", "project.toml"), "name = \"x\"\nschema_version = 1\n");
+        var locked = Path.Combine(root, "assets", "levels", "district.prefab");
+        try
+        {
+            using var physical = new Zio.FileSystems.PhysicalFileSystem();
+            var layout = new AssetProjectLayout(physical.ConvertPathFromInternal(root));
+            physical.WriteAllBytes(layout.Assets / "models/crate.glb", [1]);
+            new SidecarMeta(s_crate).Save(physical, layout.Assets / "models/crate.glb.meta");
+            var level = new PrefabDocument();
+            var top = PrefabObject.WithMeta(s_root, "crate_01");
+            top.Components.Add(new PrefabComponent(new Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc"), "Renderable",
+                new CanonicalTomlTable { { "Mesh", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(s_crate, "models/crate.glb")) } }));
+            level.Objects.Add(top);
+            PrefabDocumentSerializer.Save(physical, layout.Assets / "levels/district.prefab", level);
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(locked, UnixFileMode.UserRead);
+
+            var result = AssetMover.Move(physical, layout, layout.Assets / "models/crate.glb", layout.Assets / "models/box.glb");
+
+            await Assert.That(result.Succeeded).IsFalse();
+            await Assert.That(result.Moved).IsEquivalentTo(new[] { "models/box.glb" });
+            await Assert.That(result.Errors.Count).IsEqualTo(1);
+            await Assert.That(result.Errors[0]).Contains("levels/district.prefab");
+            await Assert.That(result.Errors[0]).Contains("still name the old path");
+        }
+        finally
+        {
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Test]
     public async Task a_case_only_rename_lands_on_a_real_disk()
     {
         // MemoryFileSystem is case-sensitive, so this runs on the disk, where macOS and Windows
