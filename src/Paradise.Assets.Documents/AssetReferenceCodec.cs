@@ -37,10 +37,17 @@ public static class AssetReferenceCodec
         return hasGuid && hasPath;
     }
 
+    /// <exception cref="ArgumentException">The reference has one half only; the reader refuses that, and a path without a guid is exactly what the guid exists to prevent.</exception>
     public static CanonicalInlineTable Write(AssetReference? reference)
     {
         var table = new CanonicalInlineTable();
         if (reference is null || reference.IsEmpty) return table;
+        if (reference.Guid == Guid.Empty || reference.Path.Length == 0)
+        {
+            throw new ArgumentException(
+                $"An asset reference needs both a guid and a path; got guid '{DocumentGuid.Format(reference.Guid)}' and path '{reference.Path}'.",
+                nameof(reference));
+        }
 
         table.Add(GuidKey, DocumentGuid.Format(reference.Guid));
         table.Add(PathKey, reference.Path);

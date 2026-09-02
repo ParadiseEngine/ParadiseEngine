@@ -23,12 +23,8 @@ public static class ConfigDocument
         }
     }
 
-    /// <summary>
-    /// Renders a config as JSON. Not byte-exact: an integral float becomes an integer
-    /// (<c>1.0</c> → <c>1</c>), and <c>inf</c>/<c>nan</c> currently throw
-    /// <see cref="ArgumentException"/> rather than the documented one (issue #211).
-    /// </summary>
-    /// <exception cref="FormatException">The text is not a readable config document.</exception>
+    /// <summary>Renders a config as JSON through <see cref="CanonicalJson"/> (integral floats become integers; <c>inf</c>/<c>nan</c> are refused).</summary>
+    /// <exception cref="FormatException">The text is not a readable config document, or holds a float JSON cannot carry.</exception>
     public static string ToJson(string toml, string sourceName)
     {
         ArgumentNullException.ThrowIfNull(toml);
@@ -36,28 +32,15 @@ public static class ConfigDocument
         var table = TomlDocumentReader.Parse(toml, problem => new FormatException($"{sourceName}: {problem}"));
         var model = TomlDocumentReader.ToCanonical(table, "in the document", problem => new FormatException($"{sourceName}: {problem}"));
 
-        // JsonNode.ToJsonString, not JsonSerializer.Serialize: no reflection, so AOT-safe.
-        return ToNode(model)!.ToJsonString(s_jsonOptions);
-
-        static System.Text.Json.Nodes.JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> pairs)
+        try
         {
-            var result = new System.Text.Json.Nodes.JsonObject();
-            foreach (var (key, value) in pairs) result[key] = ToValue(value);
-            return result;
+            // JsonNode.ToJsonString, not JsonSerializer.Serialize: no reflection, so AOT-safe.
+            return CanonicalJson.ToNode(model).ToJsonString(s_jsonOptions);
         }
-
-        static System.Text.Json.Nodes.JsonNode? ToValue(object? value) => value switch
+        catch (FormatException failure)
         {
-            null => null,
-            CanonicalInlineTable inline => ToNode(inline),
-            CanonicalTomlTable nested => ToNode(nested),
-            string text => System.Text.Json.Nodes.JsonValue.Create(text),
-            bool flag => System.Text.Json.Nodes.JsonValue.Create(flag),
-            long integer => System.Text.Json.Nodes.JsonValue.Create(integer),
-            double number => System.Text.Json.Nodes.JsonValue.Create(number),
-            IReadOnlyList<object> list => new System.Text.Json.Nodes.JsonArray(list.Select(ToValue).ToArray()),
-            _ => System.Text.Json.Nodes.JsonValue.Create(value.ToString()),
-        };
+            throw new FormatException($"{sourceName}: {failure.Message}", failure);
+        }
     }
 
     private static readonly System.Text.Json.JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };

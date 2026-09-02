@@ -52,16 +52,28 @@ public static class PrefabDocumentSerializer
 
         var document = new PrefabDocument();
         var parents = new Dictionary<Guid, Guid?>();
+        var carrierParents = new List<(Guid Target, Guid Parent)>();
         if (TomlDocumentReader.OptionalTableArray(root, "objects", "at the document root", Fail) is { } objects)
         {
             foreach (var (table, index) in objects.Select(static (table, index) => (table, index)))
             {
                 var entry = ReadObject(table, index, Fail);
 
-                // A carrier has no identity of its own (the child's guid is minted), so it is exempt
-                // from the uniqueness map — which also lets one carrying a Guid slip by (issue #210).
-                if (entry.Target is not null)
+                // A carrier addresses a prefab child; the resolved child's guid is minted, so a
+                // carrier declaring one would be an identity nothing else can ever refer to.
+                if (entry.Target is { } target)
                 {
+                    if (entry.Guid is not null)
+                    {
+                        throw Fail($"has an override carrier targeting '{DocumentGuid.Format(target)}' at index {index} that also declares a '{WellKnownComponents.Guid}'; a carrier has no identity of its own");
+                    }
+
+                    if (entry.Parent is not { } carrierParent)
+                    {
+                        throw Fail($"has an override carrier targeting '{DocumentGuid.Format(target)}' at index {index} with no '{WellKnownComponents.Parent}' naming the instance it sits under");
+                    }
+
+                    carrierParents.Add((target, carrierParent));
                     document.Objects.Add(entry);
                     continue;
                 }
@@ -81,6 +93,13 @@ public static class PrefabDocumentSerializer
         }
 
         ValidateParents(parents, Fail);
+        foreach (var (target, parent) in carrierParents)
+        {
+            if (!parents.ContainsKey(parent))
+            {
+                throw Fail($"parents an override carrier targeting '{DocumentGuid.Format(target)}' to '{DocumentGuid.Format(parent)}', which does not exist");
+            }
+        }
 
         // Every read validates, so the resolver and the bake can take a single root for granted.
         document.Validate(sourceName);

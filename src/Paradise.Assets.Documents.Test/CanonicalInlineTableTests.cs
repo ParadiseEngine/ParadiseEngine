@@ -34,6 +34,29 @@ public class CanonicalInlineTableTests
         await Assert.That(CanonicalTomlWriter.WriteString(document)).IsEqualTo("Slot = {}\n");
     }
 
+    /// <summary>One widening for every path (issue #200): 0.1f is <c>0.1</c> here as in a table, never the bit-exact 17 digits.</summary>
+    [Test]
+    public async Task a_float32_widens_to_its_shortest_decimal()
+    {
+        var document = new CanonicalTomlTable
+        {
+            { "Slot", new CanonicalInlineTable { { "weight", 0.1f }, { "spread", new object[] { 0.1f, 0.3f } } } },
+        };
+
+        await Assert.That(CanonicalTomlWriter.WriteString(document))
+            .IsEqualTo("Slot = { weight = 0.1, spread = [0.1, 0.3] }\n");
+    }
+
+    /// <summary>The reader refuses a one-half reference, so the writer must not produce one (issue #210).</summary>
+    [Test]
+    public async Task a_reference_with_one_half_missing_cannot_be_written()
+    {
+        await Assert.That(() => AssetReferenceCodec.Write(new AssetReference(Guid.Empty, "Models/x.glb")))
+            .Throws<ArgumentException>();
+        await Assert.That(() => AssetReferenceCodec.Write(new AssetReference(Guid.NewGuid(), "")))
+            .Throws<ArgumentException>();
+    }
+
     [Test]
     public async Task inline_tables_nest_inside_arrays()
     {

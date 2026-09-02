@@ -61,35 +61,10 @@ public static class PrefabBake
         return parsed.RootElement.Clone();
     }
 
+    // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
+    // shift every material after it onto the wrong primitive.
     private static JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions)
-    {
-        var result = new JsonObject();
-        foreach (var (key, value) in table) result[key] = ToValue(value, extensions);
-        return result;
-    }
-
-    private static JsonNode? ToValue(object? value, DocumentExtensions extensions) => value switch
-    {
-        null => null,
-
-        // A null slot; dropping it would shift every material after it onto the wrong primitive.
-        CanonicalInlineTable { Count: 0 } => null,
-
-        // Gated on the reference SHAPE, matching ProjectVerifier.Walk: inside an array every table
-        // is inline (#187), so matching on the model type would bake a collider list to null.
-        CanonicalInlineTable reference when AssetReferenceCodec.IsWrittenInline(reference.ToList()) =>
-            BuiltPath(reference.Value("path") as string, extensions),
-
-        CanonicalInlineTable payload => ToNode(payload, extensions),
-
-        CanonicalTomlTable nested => ToNode(nested, extensions),
-        string text => JsonValue.Create(text),
-        bool flag => JsonValue.Create(flag),
-        long integer => JsonValue.Create(integer),
-        double number => JsonValue.Create(number),
-        IReadOnlyList<object> list => new JsonArray(list.Select(item => ToValue(item, extensions)).ToArray()),
-        _ => JsonValue.Create(value.ToString()),
-    };
+        => CanonicalJson.ToNode(table, reference => BuiltPath(reference.Value("path") as string, extensions));
 
     private static JsonNode? BuiltPath(string? path, DocumentExtensions extensions)
     {

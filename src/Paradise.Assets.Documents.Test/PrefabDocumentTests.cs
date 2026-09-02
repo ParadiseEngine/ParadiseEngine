@@ -244,6 +244,46 @@ public class PrefabDocumentTests
         await Assert.That(document.Objects[0].Guid).IsNull();
     }
 
+    /// <summary>The resolved child's guid is minted, so a guid on a carrier is an identity nothing can refer to, and it slipped past the uniqueness map (issue #210).</summary>
+    [Test]
+    public async Task a_carrier_declaring_a_guid_is_refused()
+    {
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\n" +
+                   $"id = \"{Meta}\"\ntype = \"meta\"\nGuid = \"{LidGuid}\"\nParent = \"{CrateGuid}\"\nTarget = \"{LidGuid}\"\n" +
+                   Object(CrateGuid);
+
+        await Assert.That(Rejects(text).Message).Contains("carrier");
+    }
+
+    [Test]
+    public async Task a_carrier_without_a_parent_is_refused()
+    {
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\n" +
+                   $"id = \"{Meta}\"\ntype = \"meta\"\nTarget = \"{LidGuid}\"\n" +
+                   Object(CrateGuid);
+
+        await Assert.That(Rejects(text).Message).Contains("Parent");
+    }
+
+    [Test]
+    public async Task a_carrier_with_a_dangling_parent_is_refused()
+    {
+        var text = "schema_version = 1\n\n[[objects]]\n\n[[objects.components]]\n" +
+                   $"id = \"{Meta}\"\ntype = \"meta\"\nParent = \"{LidGuid}\"\nTarget = \"{LidGuid}\"\n" +
+                   Object(CrateGuid);
+
+        await Assert.That(Rejects(text).Message).Contains("does not exist");
+    }
+
+    /// <summary>TOML forbids duplicate keys and the Python mirror's tomllib refuses them; Tomlyn's default was last-wins, which dropped the first value silently (issue #198).</summary>
+    [Test]
+    public async Task a_duplicate_key_is_refused_rather_than_last_wins()
+    {
+        var error = Rejects("schema_version = 1\nschema_version = 2\n" + Object(CrateGuid));
+
+        await Assert.That(error.Message).Contains("not valid TOML");
+    }
+
     [Test]
     public async Task the_single_root_is_inferred_from_the_absence_of_a_parent()
     {

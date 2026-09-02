@@ -21,4 +21,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Assets.Documents\Paradise.Assets.Documents.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

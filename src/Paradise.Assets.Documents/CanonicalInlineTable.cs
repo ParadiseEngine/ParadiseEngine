@@ -17,7 +17,7 @@ public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, obje
 
     public int Count => _pairs.Count;
 
-    /// <summary>Widens float32 bit-exactly, unlike <see cref="CanonicalTomlTable.Add"/> (issue #200).</summary>
+    /// <summary>Same widening as <see cref="CanonicalTomlTable.Add"/>, through <see cref="CanonicalFloat"/>.</summary>
     /// <exception cref="ArgumentException">The key is duplicated, or the value is not writable inline.</exception>
     public void Add(string key, object value)
     {
@@ -28,7 +28,7 @@ public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, obje
         {
             bool or long or double or string => value,
             int widened => (long)widened,
-            float widened => (double)widened,
+            float widened => CanonicalFloat.Widen(widened),
             CanonicalInlineTable or CanonicalTomlTable or IReadOnlyList<CanonicalTomlTable> =>
                 throw new ArgumentException(
                     $"Value for '{key}' is a table. An inline table holds scalars and arrays of " +
@@ -71,7 +71,7 @@ public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, obje
             {
                 bool or long or double or string => element,
                 int widened => (long)widened,
-                float widened => (double)widened,
+                float widened => CanonicalFloat.Widen(widened),
                 _ => throw new ArgumentException(
                     $"Array '{key}' inside an inline table holds scalars only.", nameof(array)),
             });

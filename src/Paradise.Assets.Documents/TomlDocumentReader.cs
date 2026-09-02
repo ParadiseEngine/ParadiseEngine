@@ -6,8 +6,20 @@ namespace Paradise.Assets.Documents;
 /// <summary>Shared plumbing of the strict readers. Untyped because payloads are open; strict about unknown keys because a typo a lenient reader ignored is dropped by the next machine rewrite, silently.</summary>
 internal static class TomlDocumentReader
 {
+    private static readonly TomlSerializerOptions s_validation = new() { DuplicateKeyHandling = TomlDuplicateKeyHandling.Error };
+
     public static TomlTable Parse(string toml, Func<string, Exception> fail)
     {
+        // Validated on the SYNTAX tree first: binding into TomlTable ignores DuplicateKeyHandling
+        // and keeps the last value, which silently dropped the first (issue #198). The parser's
+        // semantic pass refuses a redefined key at every level, as TOML and the Python mirror's
+        // tomllib do.
+        var syntax = Tomlyn.Parsing.SyntaxParser.Parse(toml, s_validation, sourceName: null, validate: true);
+        if (syntax.HasErrors)
+        {
+            throw fail($"is not valid TOML ({string.Join("; ", syntax.Diagnostics.Select(static d => d.Message))})");
+        }
+
         TomlTable? table;
         try
         {
@@ -158,6 +170,6 @@ internal static class TomlDocumentReader
     };
 }
 
-/// <summary>Keeps even the untyped read off Tomlyn's reflection path (AOT).</summary>
+/// <summary>Keeps even the untyped read off Tomlyn's reflection path (AOT). Duplicate keys are refused by <see cref="TomlDocumentReader.Parse"/>'s syntax validation, not here: the TomlTable binding does not consult the option.</summary>
 [Tomlyn.Serialization.TomlSerializable(typeof(TomlTable))]
 internal sealed partial class UntypedTomlSerializerContext : Tomlyn.Serialization.TomlSerializerContext;
