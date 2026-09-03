@@ -14,7 +14,9 @@ public sealed class EditorImGuiContext : IDisposable
 {
     private ImGuiContextPtr _context;
 
-    public unsafe EditorImGuiContext(int width = 1600, int height = 1000)
+    /// <param name="addDefaultFont">False when the test supplies its own. ImGui uses the FIRST
+    /// font in the atlas, so a default added here would be the one measured.</param>
+    public unsafe EditorImGuiContext(int width = 1600, int height = 1000, bool addDefaultFont = true)
     {
         _context = ImGuiApi.CreateContext();
         ImGuiApi.SetCurrentContext(_context);
@@ -22,7 +24,7 @@ public sealed class EditorImGuiContext : IDisposable
         io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
         io.DisplaySize = new Vector2(width, height);
         io.DeltaTime = 1f / 60f;
-        io.Fonts.AddFontDefault();
+        if (addDefaultFont) io.Fonts.AddFontDefault();
         // ImGui writes imgui.ini on DestroyContext as well as on its timer, so a suite that kept
         // it would leave a file behind AND restore the previous run's layout into the next.
         io.IniFilename = null;

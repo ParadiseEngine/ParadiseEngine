@@ -27,5 +27,20 @@
 
   <ItemGroup>
     <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
+    <!-- UiFonts and the font-loading path. NOT the frame, the window or the renderer: the guard
+         in Paradise.Editor.Test checks the runtime types stay out of this assembly's references,
+         and Paradise.Ui.ImGui is not among them because a font loader is not a frame. -->
+    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded rather than files beside the executable: an editor that will not start because
+         somebody moved the binary is shipping a dependency, not a font. See Fonts/README.md for
+         the licences and for how these were instanced and subset. -->
+    <EmbeddedResource Include="Fonts/Inter-Regular.ttf" />
+    <EmbeddedResource Include="Fonts/MaterialSymbolsRounded-Editor.ttf" />
+    <!-- The name-to-codepoint map EditorIcons was generated from. Embedded so a test can check the
+         two have not drifted from anywhere, rather than only from a checkout. -->
+    <EmbeddedResource Include="Fonts/icon-map.txt" />
   </ItemGroup>
 </Project>

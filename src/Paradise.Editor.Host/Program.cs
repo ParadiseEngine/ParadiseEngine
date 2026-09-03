@@ -30,7 +30,7 @@ internal static class Program
 {
     private const uint Width = 1600;
     private const uint Height = 1000;
-    private const float FontSize = 16f;
+    private const float FontSize = EditorFonts.DefaultSizePixels;
     private static readonly ColorRgba Background = new(0.08f, 0.09f, 0.11f, 1f);
 
     private static ILoggerFactory s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions());
@@ -159,15 +159,20 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Build the core over the best CJK-capable system font in <paramref name="fonts"/>,
-    /// falling back to ImGui's ASCII-only default.</summary>
-    /// <remarks>The mount is the caller's so it can be a <c>using</c> and therefore survive an
-    /// exception — the core reads bytes out of it during construction and holds none afterwards,
-    /// but the two still have to be torn down in order.</remarks>
-    private static ImGuiUiCore CreateCore(uint width, uint height, IFileSystem fonts)
+    /// <summary>Build the core over the editor's embedded faces, merging a CJK face out of
+    /// <paramref name="systemFonts"/> when the machine has one.</summary>
+    /// <remarks>The system mount is the caller's so it can be a <c>using</c> and therefore survive
+    /// an exception. The embedded mount is not: it only has to outlive the calls that read bytes
+    /// out of it, since ImGui copies them into its own allocation.</remarks>
+    private static ImGuiUiCore CreateCore(uint width, uint height, IFileSystem systemFonts)
     {
-        var font = UiFonts.FindCjkFont(fonts, FontSize);
-        var core = new ImGuiUiCore(width, height, font);
+        // The editor's own faces, embedded. Inter goes in as the BASE font because ImGui treats
+        // the first in the atlas as the default; the icons and a system CJK face merge onto it, so
+        // one font covers text, icons and CJK and no panel ever switches fonts mid-line.
+        using var embedded = EditorFonts.Mount();
+        var core = new ImGuiUiCore(width, height, EditorFonts.Base(embedded, FontSize));
+        EditorFonts.MergeIcons(embedded, FontSize);
+        EditorFonts.MergeSystemCjk(systemFonts, FontSize);
 
         // E1 owns layout persistence through the /user mount. Until then the ini is off rather
         // than left at ImGui's default, which writes into the process's working directory — for a
