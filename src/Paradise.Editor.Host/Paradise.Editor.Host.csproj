@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The STANDALONE host: it owns the window, the GPU device, the ImGui frame and the loop, and
+    calls the editor's draw inside that frame. The in-game host owns those already and calls the
+    same draw from its own frame, which is why nothing below this project is allowed to reach for
+    a window or a device — see Paradise.Editor.ImGui's csproj.
+  -->
+  <PropertyGroup>
+    <AssemblyName>Paradise.Editor.Host</AssemblyName>
+    <RootNamespace>Paradise.Editor.Host</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
+    <ProjectReference Include="../Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
+    <ProjectReference Include="../Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+    <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
+    <!-- A host picks the sink. Engine libraries take an ILogger and name none; this is the one
+         layer entitled to decide where their diagnostics go (docs/logging.md). -->
+    <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fonts and the layout ini come out of a mount the host chooses. -->
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+</Project>

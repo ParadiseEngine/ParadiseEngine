@@ -7,7 +7,6 @@ using Paradise.Rendering.WebGPU;
 using Paradise.Rendering;
 using Paradise.Windowing;
 using Paradise.Windowing.Sdl;
-using PdTextureFormat = Paradise.Rendering.TextureFormat;
 using Zio.FileSystems;
 
 namespace Paradise.Ui.ImGui.Sample;
@@ -150,24 +149,13 @@ internal static class Program
 
         // The last frame only: the first has an atlas that is still arriving.
         var readback = capture!.GetAwaiter().GetResult();
-        WriteCapture(path, readback, renderer.ColorFormat);
+        using (var file = System.IO.File.Create(path))
+        {
+            PngWriter.Write(file, readback, renderer.ColorFormat);
+        }
         Console.WriteLine($"[sample] {frames} frames rendered; wrote {path} ({readback.Width}x{readback.Height}).");
         fonts.Dispose();
         return 0;
-    }
-
-    private static void WriteCapture(string path, ColorReadback readback, PdTextureFormat format)
-    {
-        var pixels = readback.Pixels;
-        if (format is PdTextureFormat.Bgra8Unorm or PdTextureFormat.Bgra8UnormSrgb)
-        {
-            // A headless target is BGRA; PNG wants RGBA.
-            for (var i = 0; i + 3 < pixels.Length; i += 4)
-            {
-                (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-            }
-        }
-        PngWriter.WriteRgba(path, pixels, readback.Width, readback.Height);
     }
 
     /// <summary>Stands in for the scene: one pass that clears the backbuffer, so the overlay has
