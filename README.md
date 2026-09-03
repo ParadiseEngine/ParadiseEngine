@@ -104,7 +104,8 @@ referencing those packages activates the codegen automatically.
   Slang shader compiler and the `ktx create` CLI the texture step shells out to.
   `paradise tools doctor` reports both; `paradise tools install <ktx|slang>` fetches one.
 - `ParadiseEngine.slnx` — top-level solution covering all projects.
-- `CLAUDE.md` — architecture notes, custom node patterns, and the coordinate convention.
+- `AGENTS.md` — architecture notes, custom node patterns, and the coordinate convention. The
+  canonical agent guide, shared across AI tools; `CLAUDE.md` imports it.
 
 ### Coordinate convention
 

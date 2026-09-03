@@ -42,6 +42,10 @@
     <!-- The contract's TOML form. Untyped model + source-generated context only, so the AOT
          promise the JSON path makes is unchanged. -->
     <PackageReference Include="Tomlyn" />
+    <!-- The runtime reads its documents out of an IFileSystem, not off a host path: a shipped
+         build mounts its content root, a test mounts memory. Zio is already the pipeline's
+         filesystem, so the two sides speak one vocabulary. -->
+    <PackageReference Include="Zio" />
   </ItemGroup>
 
 </Project>
