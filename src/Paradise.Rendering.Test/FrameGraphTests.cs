@@ -206,6 +206,164 @@ public class FrameGraphTests
             .Throws<ArgumentOutOfRangeException>();
     }
 
+
+    /// <summary>The rule the whole design turns on: a producer whose output nobody asks for does
+    /// not run, so a feature is switched off at its consumer rather than at every pass that feeds
+    /// it.</summary>
+    [Test]
+    public async Task a_graph_only_target_nobody_reads_culls_its_producer()
+    {
+        var graph = new FrameGraph();
+        var scratch = graph.ImportColor(new TextureViewHandle(4, 1), GraphResourceScope.GraphOnly);
+        var writer = new ArrayBufferWriter<RenderCommand>(32);
+
+        graph.AddRasterPass("producer", RenderPassEvent.Post)
+            .Color(0, scratch, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+
+        await Assert.That(passCount).IsEqualTo(1);
+        await Assert.That(graph.CulledPassCount).IsEqualTo(1);
+    }
+
+    /// <summary>...and the same graph keeps the producer once somebody declares the read. The read
+    /// is the only thing that changed.</summary>
+    [Test]
+    public async Task declaring_the_read_keeps_the_producer()
+    {
+        var graph = new FrameGraph();
+        var scratch = graph.ImportColor(new TextureViewHandle(4, 1), GraphResourceScope.GraphOnly);
+        var writer = new ArrayBufferWriter<RenderCommand>(32);
+
+        graph.AddRasterPass("producer", RenderPassEvent.Post)
+            .Color(0, scratch, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store)
+            .Reads(scratch)
+            .Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+
+        await Assert.That(passCount).IsEqualTo(2);
+        await Assert.That(graph.CulledPassCount).IsEqualTo(0);
+    }
+
+    /// <summary>Reachability is transitive: keeping the last link of a chain keeps all of it, which
+    /// is what lets the composite's single read revive a seven-pass bloom chain.</summary>
+    [Test]
+    public async Task culling_walks_a_whole_producer_chain()
+    {
+        var graph = new FrameGraph();
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+        var mips = new GraphTexture[4];
+        for (var i = 0; i < mips.Length; i++)
+            mips[i] = graph.ImportColor(new TextureViewHandle((uint)(10 + i), 1), GraphResourceScope.GraphOnly);
+
+        graph.AddRasterPass("mip0", RenderPassEvent.Post)
+            .Color(0, mips[0], LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        for (var i = 1; i < mips.Length; i++)
+        {
+            graph.AddRasterPass($"mip{i}", RenderPassEvent.Post)
+                .Color(0, mips[i], LoadOp.Clear, StoreOp.Store)
+                .Reads(mips[i - 1])
+                .Record(graph, Nothing);
+        }
+
+        // One consumer at the end of the chain.
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store)
+            .Reads(mips[^1])
+            .Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+
+        await Assert.That(passCount).IsEqualTo(5);
+        await Assert.That(graph.CulledPassCount).IsEqualTo(0);
+    }
+
+    /// <summary>Writing an External resource roots the pass, because the graph cannot know who else
+    /// reads it. This is why a renderer that imports every target culls nothing — correct, rather
+    /// than useless.</summary>
+    [Test]
+    public async Task an_external_write_is_never_culled()
+    {
+        var graph = new FrameGraph();
+        var observed = graph.ImportColor(new TextureViewHandle(4, 1)); // External by default
+        var writer = new ArrayBufferWriter<RenderCommand>(32);
+
+        graph.AddRasterPass("producer", RenderPassEvent.Post)
+            .Color(0, observed, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+
+        await Assert.That(passCount).IsEqualTo(2);
+        await Assert.That(graph.CulledPassCount).IsEqualTo(0);
+    }
+
+    /// <summary>NeverCull is the escape hatch for a pass whose effect the graph cannot see.</summary>
+    [Test]
+    public async Task never_cull_keeps_a_pass_nothing_reads()
+    {
+        var graph = new FrameGraph();
+        var scratch = graph.ImportColor(new TextureViewHandle(4, 1), GraphResourceScope.GraphOnly);
+        var writer = new ArrayBufferWriter<RenderCommand>(32);
+
+        graph.AddRasterPass("side-effect", RenderPassEvent.Post)
+            .Color(0, scratch, LoadOp.Clear, StoreOp.Store).NeverCull().Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+
+        await Assert.That(passCount).IsEqualTo(2);
+        await Assert.That(graph.CulledPassCount).IsEqualTo(0);
+    }
+
+    /// <summary>Pass indices must stay contiguous over the SURVIVING passes — a culled pass that
+    /// left a hole in the table would point every later BeginPass at the wrong attachments.</summary>
+    [Test]
+    public async Task culling_renumbers_the_surviving_passes_contiguously()
+    {
+        var graph = new FrameGraph();
+        var scratch = graph.ImportColor(new TextureViewHandle(4, 1), GraphResourceScope.GraphOnly);
+        var kept = graph.ImportColor(new TextureViewHandle(5, 1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("dead-early", RenderPassEvent.Shadows)
+            .Color(0, scratch, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("live-middle", RenderPassEvent.Opaque)
+            .Color(0, kept, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("live-last", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var stream = graph.Compile(writer);
+        var passCount = stream.Passes.Length;
+        var firstTarget = stream.Passes.Span[0][0].ColorView;
+        var beginIndices = BeginPassIndices(stream);
+
+        await Assert.That(passCount).IsEqualTo(2);
+        await Assert.That(firstTarget).IsEqualTo(new TextureViewHandle(5, 1));
+        await Assert.That(beginIndices).IsEquivalentTo(new[] { 0, 1 });
+    }
+
+    private static int[] BeginPassIndices(in RenderCommandStream stream)
+    {
+        var indices = new List<int>();
+        foreach (var cmd in stream.Commands.Span)
+            if (cmd.Kind == RenderCommandKind.BeginPass)
+                indices.Add(cmd.BeginPass.PassIndex);
+        return [.. indices];
+    }
+
     private static uint[] DrawCounts(in RenderCommandStream stream)
     {
         var counts = new List<uint>();
