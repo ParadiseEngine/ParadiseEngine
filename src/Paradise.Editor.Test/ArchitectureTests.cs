@@ -41,7 +41,7 @@ public partial class ArchitectureTests
         var sources = CoreSourceFiles();
         await Assert.That(sources).IsNotEmpty();
         var offenders = sources
-            .Where(path => FileApiCall().IsMatch(CommentLine().Replace(File.ReadAllText(path), "")))
+            .Where(path => FileApiCall().IsMatch(Comment().Replace(File.ReadAllText(path), "")))
             .Select(Path.GetFileName)
             .ToArray();
         await Assert.That(offenders).IsEmpty();
@@ -64,9 +64,12 @@ public partial class ArchitectureTests
     private static partial Regex FileApiCall();
 
     // Comments are stripped before matching so that documenting the rule does not break it: the
-    // remarks on ISceneDocumentStore have every reason to name File and Path.
-    [GeneratedRegex(@"^\s*//.*$", RegexOptions.Multiline)]
-    private static partial Regex CommentLine();
+    // remarks on ISceneDocumentStore have every reason to name File and Path. Both forms, since a
+    // csproj-style block comment explaining the mount would otherwise redden the build and name
+    // the wrong culprit. `[^\n]` rather than `.` with Singleline, which would let a line comment
+    // swallow the rest of the file.
+    [GeneratedRegex(@"^[ \t]*//[^\n]*|/\*[\s\S]*?\*/", RegexOptions.Multiline)]
+    private static partial Regex Comment();
 
     private static string[] CoreSourceFiles()
     {
