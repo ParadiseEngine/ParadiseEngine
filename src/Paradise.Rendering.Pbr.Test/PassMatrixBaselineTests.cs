@@ -84,6 +84,7 @@ public class PassMatrixBaselineTests
 
         var structureDrift = new StringBuilder();
         var pixelDrift = new StringBuilder();
+        var cullingDrift = new StringBuilder();
         var cases = 0;
 
         try
@@ -112,6 +113,7 @@ public class PassMatrixBaselineTests
 
                 CheckSignature(testCase, recorder, structureDrift);
                 CheckPixels(testCase, backend, pixelDrift);
+                CheckCulling(testCase, pbr, cullingDrift);
             }
         }
         finally
@@ -126,11 +128,28 @@ public class PassMatrixBaselineTests
             report.Append("Pass structure drifted:\n").Append(structureDrift);
         if (pixelDrift.Length > 0)
             report.Append("Pixels drifted:\n").Append(pixelDrift);
+        if (cullingDrift.Length > 0)
+            report.Append("Culling did not remove what it should:\n").Append(cullingDrift);
         if (report.Length > 0)
             report.Append("\nInspect the actual output under ").Append(GoldenStore.FailureDirectory)
                   .Append(", or re-baseline with PARADISE_UPDATE_GOLDEN=1.\n");
 
         await Assert.That(report.ToString()).IsEmpty();
+    }
+
+    /// <summary>The passes an "off" feature contributes are still DECLARED — they are removed by
+    /// reachability, not by an <c>if</c>. Nothing in the submitted stream can tell that apart from
+    /// never declaring them, so assert it directly: at 128x128 the bloom chain is 2x4-1 passes and
+    /// the SSAO pre-pass is one.</summary>
+    private static void CheckCulling(Case testCase, PbrRenderer pbr, StringBuilder drift)
+    {
+        var expected = (testCase.Bloom ? 0 : 7) + (testCase.Ssao ? 0 : 1);
+        var actual = pbr.CulledPassCountForTest;
+        if (actual != expected)
+        {
+            drift.Append("  ").Append(testCase.Name)
+                 .Append(CultureInfo.InvariantCulture, $": culled {actual} passes, expected {expected}.\n");
+        }
     }
 
     private static void CheckSignature(Case testCase, RecordingRenderer recorder, StringBuilder drift)

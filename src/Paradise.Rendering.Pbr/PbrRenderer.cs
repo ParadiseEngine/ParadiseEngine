@@ -83,6 +83,7 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
     private readonly FrameGraph _graph = new();
+    private readonly List<GraphTexture> _bloomResources = [];
 
     // Frame-local encode state: RenderFrame computes it, the pass recorders consume it. Fields
     // rather than parameters because a PassRecorder carries a context object and one int, and
@@ -920,7 +921,11 @@ public sealed partial class PbrRenderer : IDisposable
         // and shifts nothing. The rejected alternative — computing indices by hand — had to be
         // edited in two places per pass, and a mismatch between them surfaced as a silently wrong
         // frame instead of an error.
-        var hasPrepass = scene.Ssao.Enabled && _opaque.Count > 0;
+        // Whether these RUN is decided below by whether their consumer asks for the result, not
+        // here by whether their passes get declared. UploadSsaoUniforms gates on the identical
+        // condition, so the shader stops sampling positions in exactly the frames the pre-pass
+        // stops writing them.
+        var ssaoEnabled = scene.Ssao.Enabled && _opaque.Count > 0;
         var bloomEnabled = scene.Bloom.Enabled && _bloomLevels > 1;
 
         _encodeScene = scene;
@@ -929,8 +934,15 @@ public sealed partial class PbrRenderer : IDisposable
         _encodeShadowDrawIndex = 0;
 
         _graph.Reset();
-        var hdr = _graph.ImportColor(_hdrView);
+        // GraphOnly marks the targets whose only consumers are passes in this frame, which is what
+        // lets an unread producer be culled. It is a promise the declaring code has to keep: every
+        // read of these happens through a bind group built at resize, so the graph learns about it
+        // only from the Reads() calls below. _sceneColorView is NOT one of them — it is public
+        // surface (SceneColorView) that a game's blend material samples.
+        var hdr = _graph.ImportColor(_hdrView, GraphResourceScope.GraphOnly);
         var sceneDepth = _graph.ImportDepth(_depthTexture);
+        var position = _graph.ImportColor(_positionView, GraphResourceScope.GraphOnly);
+        var prepassDepth = _graph.ImportDepth(_prepassDepthAux, scope: GraphResourceScope.GraphOnly);
 
         for (var k = 0; k < _shadowViews.Count; k++)
         {
@@ -940,26 +952,28 @@ public sealed partial class PbrRenderer : IDisposable
                 .Record(this, RecordShadowLayer, k);
         }
 
-        if (hasPrepass)
-        {
-            _graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
-                .Color(0, _graph.ImportColor(_positionView), LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
-                .Depth(_graph.ImportDepth(_prepassDepthAux), LoadOp.Clear, StoreOp.Store, clear: 1f)
-                .Record(this, RecordSsaoPrepass);
-        }
+        _graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
+            .Color(0, position, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+            .Depth(prepassDepth, LoadOp.Clear, StoreOp.Store, clear: 1f)
+            .Record(this, RecordSsaoPrepass);
 
         // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
         // out: a blend material that samples what is behind it needs the opaque half resolved into
         // a sampleable texture first, which cannot happen mid-pass.
-        _graph.AddRasterPass(_sceneColorCapture ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
+        var main = _graph.AddRasterPass(_sceneColorCapture ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, StoreOp.Store, scene.ClearColor)
-            .Depth(sceneDepth, LoadOp.Clear, StoreOp.Store, clear: 1f)
-            .Record(this, RecordMain);
+            .Depth(sceneDepth, LoadOp.Clear, StoreOp.Store, clear: 1f);
+        // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
+        // produces them is unreachable.
+        if (ssaoEnabled) main.Reads(position);
+        main.Record(this, RecordMain);
 
         if (_sceneColorCapture)
         {
+            var sceneColor = _graph.ImportColor(_sceneColorView);
             _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
-                .Color(0, _graph.ImportColor(_sceneColorView), LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+                .Color(0, sceneColor, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+                .Reads(hdr)
                 .Record(this, RecordSceneColorBlit);
 
             // Load/Load back onto the same HDR + depth: blend pipelines already read-not-write
@@ -967,36 +981,50 @@ public sealed partial class PbrRenderer : IDisposable
             _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
                 .Color(0, hdr, LoadOp.Load, StoreOp.Store, scene.ClearColor)
                 .Depth(sceneDepth, LoadOp.Load, StoreOp.Store, clear: 1f)
+                .Reads(sceneColor)
                 .Record(this, RecordBlendBucket);
         }
 
+        // bright → mip 0; downsample i → mip i+1 (Clear); additive upsample j → mip L-2-j (Load, so
+        // the tent blur accumulates onto the down-mip content). Declared whether or not bloom is
+        // on: the chain is reachable only from the composite's read of mip 0, so switching bloom
+        // off there culls all 2L−1 of these.
+        _bloomResources.Clear();
+        for (var i = 0; i < _bloomLevels; i++)
+            _bloomResources.Add(_graph.ImportColor(_bloomViews[i], GraphResourceScope.GraphOnly));
+
+        var black = new ColorRgba(0f, 0f, 0f, 1f);
+        _graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
+            .Color(0, _bloomResources[0], LoadOp.Clear, StoreOp.Store, black)
+            .Reads(hdr)
+            .Record(this, RecordBloomBright);
+        for (var i = 0; i < _bloomLevels - 1; i++)
+        {
+            _graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
+                .Color(0, _bloomResources[i + 1], LoadOp.Clear, StoreOp.Store, black)
+                .Reads(_bloomResources[i])
+                .Record(this, RecordBloomDown, i);
+        }
+        for (var j = 0; j < _bloomLevels - 1; j++)
+        {
+            _graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
+                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, StoreOp.Store, black)
+                .Reads(_bloomResources[_bloomLevels - 1 - j])
+                .Record(this, RecordBloomUp, j);
+        }
         if (bloomEnabled)
         {
-            // bright → mip 0; downsample i → mip i+1 (Clear); additive upsample j → mip L-2-j
-            // (Load, so the tent blur accumulates onto the down-mip content).
-            var black = new ColorRgba(0f, 0f, 0f, 1f);
-            _graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
-                .Color(0, _graph.ImportColor(_bloomViews[0]), LoadOp.Clear, StoreOp.Store, black)
-                .Record(this, RecordBloomBright);
-            for (var i = 0; i < _bloomLevels - 1; i++)
-            {
-                _graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
-                    .Color(0, _graph.ImportColor(_bloomViews[i + 1]), LoadOp.Clear, StoreOp.Store, black)
-                    .Record(this, RecordBloomDown, i);
-            }
-            for (var j = 0; j < _bloomLevels - 1; j++)
-            {
-                _graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
-                    .Color(0, _graph.ImportColor(_bloomViews[_bloomLevels - 2 - j]), LoadOp.Load, StoreOp.Store, black)
-                    .Record(this, RecordBloomUp, j);
-            }
             var bloomUniforms = new CompositeUniformsGpu { Tone = new Vector4(scene.Bloom.Threshold, scene.Bloom.Knee, 0f, 0f) };
             _renderer.UpdateBuffer<CompositeUniformsGpu>(_bloomUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref bloomUniforms, 1));
         }
 
-        _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
+        var composite = _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
             .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f))
-            .Record(this, RecordComposite);
+            .Reads(hdr);
+        // The one place bloom is switched off. Its bind group samples mip 0 either way; with the
+        // chain culled the sample reads whatever the mip last held, scaled by an intensity of zero.
+        if (bloomEnabled) composite.Reads(_bloomResources[0]);
+        composite.Record(this, RecordComposite);
 
         var compositeUniforms = new CompositeUniformsGpu
         {
@@ -1754,6 +1782,10 @@ public sealed partial class PbrRenderer : IDisposable
     }
 
     internal int PipelineVariantCountForTest => _pipelines.Count;
+    // Culling is invisible in the submitted stream — a pass that was declared and dropped and
+    // a pass that was never declared look identical. The baseline asserts on this so that
+    // "the frame is unchanged" cannot be satisfied by culling quietly doing nothing.
+    internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _skinnedPipelines.Count;
     internal int CustomProgramCountForTest => _customPrograms.Count;
     internal bool UsesSrgbEntryPointForTest => _useSrgbEntryPoint;
