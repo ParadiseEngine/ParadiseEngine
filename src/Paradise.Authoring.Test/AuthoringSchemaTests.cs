@@ -109,12 +109,65 @@ public class AuthoringSchemaTests
         await Assert.That(lamp.Fields!.Single(f => f.Name == "Intensity").Default!.Value.GetSingle()).IsEqualTo(1f);
     }
 
+    /// <summary>The sheet's GEOMETRY nests; its clock does not, because no sprite object holds a
+    /// frame rate.</summary>
+    [Test]
+    public async Task a_sprite_sheet_kind_publishes_the_geometry_a_host_reads_off_a_sprite()
+    {
+        var flipbook = Field(HostBound(), "Flipbook");
+        await Assert.That(flipbook.AuthoredBy).IsEqualTo(AuthoredBySources.SpriteSheet);
+        await Assert.That(flipbook.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(flipbook.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Sheet", "Columns", "Rows", "QuadSize", "Billboard" });
+        await Assert.That(flipbook.Fields!.Single(f => f.Name == "Columns").Default!.Value.GetInt32()).IsEqualTo(1);
+        await Assert.That(flipbook.Fields!.Single(f => f.Name == "Billboard").Default!.Value.GetBoolean()).IsTrue();
+    }
+
+    /// <summary>What a sky IS, not one renderer's fit to it: the gradient and its two curve
+    /// exponents are here, and a shader's cosine thresholds are deliberately not — a host that
+    /// integrates its own sky publishes the result through <c>AmbientSh</c> instead.</summary>
+    [Test]
+    public async Task an_environment_kind_publishes_a_gradient_and_no_host_shader_constants()
+    {
+        var mood = Field(HostBound(), "Mood");
+        await Assert.That(mood.AuthoredBy).IsEqualTo(AuthoredBySources.Environment);
+        await Assert.That(mood.Type).IsEqualTo(AuthoredFieldTypes.Object);
+
+        var fields = mood.Fields!.Select(f => f.Name).ToList();
+        await Assert.That(fields).Contains("SkyTop");
+        await Assert.That(fields).Contains("SkyCurve");
+        await Assert.That(fields).Contains("AmbientSh");
+        await Assert.That(fields.Where(name => name.Contains("Cos", StringComparison.Ordinal))).IsEmpty();
+
+        await Assert.That(mood.Fields!.Single(f => f.Name == "AmbientMode").Default!.Value.GetString())
+            .IsEqualTo("Color");
+        await Assert.That(mood.Fields!.Single(f => f.Name == "TonemapMode").Default!.Value.GetString())
+            .IsEqualTo("Linear");
+    }
+
+    /// <summary>A nullable leaf publishes its underlying type, because "absent" is expressed by
+    /// omitting the key rather than by a distinct schema type — this is what lets a scene say
+    /// "leave the renderer's own" about a shadow map it never sized.</summary>
+    [Test]
+    public async Task an_environment_kinds_optional_leaves_publish_their_underlying_type()
+    {
+        var mood = Field(HostBound(), "Mood");
+        await Assert.That(mood.Fields!.Single(f => f.Name == "ShadowMapSize").Type)
+            .IsEqualTo(AuthoredFieldTypes.Int);
+        await Assert.That(mood.Fields!.Single(f => f.Name == "ShadowBlur").Type)
+            .IsEqualTo(AuthoredFieldTypes.Float);
+    }
+
     /// <summary>[AuthorDefault] exists because the kinds reach a game's generator as metadata; it
     /// is a second copy of the initializer, so this is what stops the two from drifting.</summary>
     [Test]
     public async Task composed_kind_attribute_defaults_match_their_initializers()
     {
-        foreach (var kind in new[] { typeof(HostShape), typeof(HostLight), typeof(HostCamera) })
+        foreach (var kind in new[]
+                 {
+                     typeof(HostShape), typeof(HostLight), typeof(HostCamera),
+                     typeof(HostSpriteSheet), typeof(HostEnvironment),
+                 })
         {
             var fresh = Activator.CreateInstance(kind)!;
             foreach (var property in kind.GetProperties())

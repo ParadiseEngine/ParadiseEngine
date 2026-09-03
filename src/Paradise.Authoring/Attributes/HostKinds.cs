@@ -326,3 +326,225 @@ public record struct HostCamera : IHostKind
     /// record property typed as this kind must be initialized <c>= new()</c>.</summary>
     public HostCamera() { }
 }
+
+/// <summary>
+/// A spritesheet animation's GEOMETRY, read off the host's own sprite object: which sheet, how it
+/// is divided, how big one frame is in the world, and whether it faces the camera.
+/// </summary>
+/// <remarks>
+/// The playback CLOCK is not here. Frame count, rate and looping are statements about how the
+/// animation runs, and no sprite object holds them — so they stay ordinary authored fields on the
+/// record that contains this, exactly as layers and triggers stay off <see cref="HostShape"/>.
+///
+/// Distinct from <see cref="HostSprite"/>, which is the value kind for "which sheet" alone. Both
+/// exist because they answer different questions: a record that only needs the asset takes the
+/// value kind and keeps its own quad size; a record that wants the host to divide the sheet for it
+/// takes this.
+/// </remarks>
+public record struct HostSpriteSheet : IHostKind
+{
+    /// <summary>The <c>authoredBy</c> string this kind publishes.</summary>
+    public const string Kind = AuthoredBySources.SpriteSheet;
+
+    /// <summary>The sheet the host resolved, as the runtime resolves it.</summary>
+    /// <remarks>A path rather than a GUID, following the same allowance
+    /// <see cref="HostMesh"/>, <see cref="HostSprite"/> and <see cref="HostAsset"/> live under
+    /// until bake emits identities and the loader resolves them. It moves with them, not before.</remarks>
+    [AuthorDefault("")]
+    public string Sheet { get; set; } = "";
+
+    /// <summary>Frame columns across the sheet.</summary>
+    [AuthorDefault(1)]
+    public int Columns { get; set; } = 1;
+
+    /// <summary>Frame rows down the sheet.</summary>
+    [AuthorDefault(1)]
+    public int Rows { get; set; } = 1;
+
+    /// <summary>World size of ONE frame's quad, in metres.</summary>
+    public Vector2 QuadSize { get; set; } = Vector2.One;
+
+    /// <summary>Whether the quad turns to face the camera.</summary>
+    [AuthorDefault(true)]
+    public bool Billboard { get; set; } = true;
+
+    /// <summary>A 1×1 unit billboard with no sheet. Explicit so the initializers run for
+    /// <c>new HostSpriteSheet()</c>; <c>default(HostSpriteSheet)</c> skips them, so a record
+    /// property typed as this kind must be initialized <c>= new()</c>.</summary>
+    public HostSpriteSheet() { }
+}
+
+/// <summary>Where a scene's ambient light comes from.</summary>
+public enum HostAmbientMode
+{
+    /// <summary>One flat colour.</summary>
+    Color,
+
+    /// <summary>The sky, integrated per zone into <see cref="HostEnvironment.AmbientSky"/>,
+    /// <see cref="HostEnvironment.AmbientEquator"/> and <see cref="HostEnvironment.AmbientGround"/>.</summary>
+    Sky,
+}
+
+/// <summary>
+/// A tone-mapping operator, by the name the OPERATOR has in the literature rather than the name any
+/// one host spells it with — a host that calls Reinhard "Reinhardt" maps to this on the way out.
+/// </summary>
+public enum HostTonemapMode
+{
+    Linear,
+    Reinhard,
+    Filmic,
+    Aces,
+    AgX,
+}
+
+/// <summary>
+/// The scene's lighting mood, read off whatever object the host keeps it on — ambient, background,
+/// fog, tone mapping, and the two screen-space effects a scene turns on rather than tunes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>What a sky IS, never one renderer's fit to it.</b> The gradient below (four colours and two
+/// curve exponents) is the procedural-sky model every host has some form of; the cosine thresholds
+/// and curve constants of a particular sky SHADER are not, and are deliberately absent. A host that
+/// integrates its own sky more accurately than a gradient can express publishes the RESULT through
+/// <see cref="AmbientSh"/> — which is why that field exists — and a runtime that wants a sun disk
+/// derives it from the directional light's own <see cref="HostLight.Size"/> rather than from
+/// constants only one editor knows how to produce.
+/// </para>
+/// <para>
+/// The alternative, rejected: carrying the host's shader constants verbatim. It would have kept one
+/// editor's sky pixel-exact and made the kind unimplementable by every other host, which is the
+/// failure mode <see cref="AuthoredByHostAttribute{THost}"/> exists to prevent.
+/// </para>
+/// </remarks>
+public record struct HostEnvironment : IHostKind
+{
+    /// <summary>The <c>authoredBy</c> string this kind publishes.</summary>
+    public const string Kind = AuthoredBySources.Environment;
+
+    /// <summary>Whether ambient is a flat colour or comes from the sky.</summary>
+    [AuthorDefault(HostAmbientMode.Color)]
+    public HostAmbientMode AmbientMode { get; set; } = HostAmbientMode.Color;
+
+    /// <summary>Ambient arriving on an up-facing surface, or the flat colour when
+    /// <see cref="AmbientMode"/> is <see cref="HostAmbientMode.Color"/>. Linear, not sRGB.</summary>
+    public Vector4 AmbientSky { get; set; } = new(0.5f, 0.52f, 0.56f, 1f);
+
+    /// <summary>Ambient arriving on a horizontal-facing surface. Linear.</summary>
+    public Vector4 AmbientEquator { get; set; } = new(0.5f, 0.52f, 0.56f, 1f);
+
+    /// <summary>Ambient arriving on a down-facing surface. Linear.</summary>
+    public Vector4 AmbientGround { get; set; } = new(0.2f, 0.19f, 0.18f, 1f);
+
+    /// <summary>Multiplier on the ambient term.</summary>
+    [AuthorDefault(1f)]
+    public float AmbientEnergy { get; set; } = 1f;
+
+    /// <summary>
+    /// Cosine-weighted sky irradiance as spherical harmonics, when the host integrated its own sky
+    /// rather than leaving a gradient to be sampled. Absent means "use the three zone colours".
+    /// </summary>
+    /// <remarks>A representation, not a host's vocabulary: any host that can integrate a sky can
+    /// project it onto SH, and any renderer that wants more than three zones can read it.</remarks>
+    public float[]? AmbientSh { get; set; }
+
+    /// <summary>Whether the sky contributes ambient SPECULAR as well as diffuse.</summary>
+    public bool SkyReflections { get; set; }
+
+    /// <summary>Whether this scene states a background at all. False leaves the renderer's own.</summary>
+    /// <remarks>The contract cannot otherwise distinguish "authored exactly these values" from
+    /// "nobody authored an environment", and a renderer with a tuned default must not have it
+    /// silently flattened by a scene that never spoke.</remarks>
+    public bool HasBackground { get; set; }
+
+    /// <summary>The clear colour, when <see cref="SkyGradient"/> is off. Linear.</summary>
+    public Vector4 BackgroundColor { get; set; } = new(0.5f, 0.52f, 0.56f, 1f);
+
+    /// <summary>Whether the background is the gradient below rather than a flat colour.</summary>
+    public bool SkyGradient { get; set; }
+
+    /// <summary>Gradient zenith. Linear.</summary>
+    public Vector4 SkyTop { get; set; } = new(0.03f, 0.024f, 0.016f, 1f);
+
+    /// <summary>Gradient sky-side horizon. Linear.</summary>
+    public Vector4 SkyHorizon { get; set; } = new(0.2f, 0.2f, 0.21f, 1f);
+
+    /// <summary>Gradient ground-side horizon. Linear.</summary>
+    public Vector4 GroundHorizon { get; set; } = new(0.2f, 0.2f, 0.21f, 1f);
+
+    /// <summary>Gradient nadir. Linear.</summary>
+    public Vector4 GroundBottom { get; set; } = new(0.03f, 0.024f, 0.016f, 1f);
+
+    /// <summary>How fast the sky half of the gradient falls from zenith to horizon; larger is
+    /// tighter to the horizon. An exponent, so a host with a differently parameterized curve
+    /// converts rather than adding a second spelling.</summary>
+    [AuthorDefault(4f)]
+    public float SkyCurve { get; set; } = 4f;
+
+    /// <summary>The same, for the ground half.</summary>
+    [AuthorDefault(30f)]
+    public float GroundCurve { get; set; } = 30f;
+
+    /// <summary>Which operator maps HDR to display.</summary>
+    [AuthorDefault(HostTonemapMode.Linear)]
+    public HostTonemapMode TonemapMode { get; set; } = HostTonemapMode.Linear;
+
+    /// <summary>Exposure applied before the operator.</summary>
+    [AuthorDefault(1f)]
+    public float TonemapExposure { get; set; } = 1f;
+
+    /// <summary>The luminance the operator maps to white.</summary>
+    [AuthorDefault(1f)]
+    public float TonemapWhite { get; set; } = 1f;
+
+    /// <summary>Whether distance fog contributes.</summary>
+    public bool FogEnabled { get; set; }
+
+    /// <summary>Fog colour. Linear.</summary>
+    public Vector4 FogColor { get; set; } = new(0.5f, 0.52f, 0.56f, 1f);
+
+    /// <summary>Fog density per metre.</summary>
+    public float FogDensity { get; set; }
+
+    /// <summary>Whether screen-space ambient occlusion contributes.</summary>
+    public bool SsaoEnabled { get; set; }
+
+    /// <summary>Occlusion sampling radius, in metres.</summary>
+    [AuthorDefault(1f)]
+    public float SsaoRadius { get; set; } = 1f;
+
+    /// <summary>Occlusion strength.</summary>
+    [AuthorDefault(2f)]
+    public float SsaoIntensity { get; set; } = 2f;
+
+    /// <summary>Exponent applied to the occlusion term.</summary>
+    [AuthorDefault(1.5f)]
+    public float SsaoPower { get; set; } = 1.5f;
+
+    /// <summary>Whether bloom contributes.</summary>
+    public bool GlowEnabled { get; set; }
+
+    /// <summary>Bloom strength.</summary>
+    [AuthorDefault(1f)]
+    public float GlowIntensity { get; set; } = 1f;
+
+    /// <summary>The HDR luminance above which a pixel blooms.</summary>
+    [AuthorDefault(1f)]
+    public float GlowThreshold { get; set; } = 1f;
+
+    /// <summary>Per-layer shadow map resolution the scene asks for, in texels. Absent leaves the
+    /// renderer's own — it sizes a GPU resource, which is why it sits beside the mood rather than
+    /// inside it.</summary>
+    public int? ShadowMapSize { get; set; }
+
+    /// <summary>Soft-shadow PCF disk radius in shadow texels — the penumbra width of every shadow
+    /// edge. Absent leaves the renderer's own.</summary>
+    public float? ShadowBlur { get; set; }
+
+    /// <summary>A neutral grey ambient with no background, no fog and no effects — a scene that
+    /// authored an environment and changed nothing. Explicit so the initializers run for
+    /// <c>new HostEnvironment()</c>; <c>default(HostEnvironment)</c> skips them, so a record
+    /// property typed as this kind must be initialized <c>= new()</c>.</summary>
+    public HostEnvironment() { }
+}

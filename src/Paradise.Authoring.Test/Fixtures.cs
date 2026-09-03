@@ -225,4 +225,8 @@ public sealed record HostBoundFixture
     public HostLight Lamp { get; set; } = new();
 
     public HostCamera Eye { get; set; } = new();
+
+    public HostSpriteSheet Flipbook { get; set; } = new();
+
+    public HostEnvironment Mood { get; set; } = new();
 }
