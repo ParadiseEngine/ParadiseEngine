@@ -1,7 +1,13 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Noesis;
 using Paradise.Windowing;
 using Zio;
 using Zio.FileSystems;
+
+// Noesis has its own LogLevel, and `using Noesis;` above makes the bare name ambiguous.
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace Paradise.Ui.Noesis;
 
@@ -32,7 +38,7 @@ namespace Paradise.Ui.Noesis;
 // Lifetime: process-scoped by design — no Dispose/GUI.Shutdown. Hosts create at most one
 // NoesisViewCore per process and native/GPU teardown happens at exit; add disposal if this
 // ever hosts multiple sessions (tests, editor).
-public sealed class NoesisViewCore
+public sealed partial class NoesisViewCore
 {
     private readonly IFileSystem _content;
     private readonly UPath _root;
@@ -45,6 +51,7 @@ public sealed class NoesisViewCore
     private readonly Action? _simTick;
     private readonly string? _licenseName;
     private readonly string? _licenseKey;
+    private readonly ILogger _log;
     private static bool s_globalInitialized; // GUI.Init/license/log are process-global, once
     private volatile View? _view; // published by the sim thread once created there
     private bool _pendingSnapshot; // an Update produced a frame the render side has not taken
@@ -88,7 +95,7 @@ public sealed class NoesisViewCore
     /// </remarks>
     public NoesisViewCore(IFileSystem content, UPath xamlPath, uint pixelWidth, uint pixelHeight,
         object? dataContext = null, Action? simTick = null,
-        string? licenseName = null, string? licenseKey = null)
+        string? licenseName = null, string? licenseKey = null, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         // Named HERE rather than left to Zio, which rejects a relative path at first USE — and
@@ -110,6 +117,7 @@ public sealed class NoesisViewCore
         _simTick = simTick;
         _licenseName = licenseName ?? Environment.GetEnvironmentVariable("NOESIS_LICENSE_NAME");
         _licenseKey = licenseKey ?? Environment.GetEnvironmentVariable("NOESIS_LICENSE_KEY");
+        _log = logger ?? NullLogger.Instance;
         Input = new UiInputHalf(this);
     }
 
@@ -146,9 +154,15 @@ public sealed class NoesisViewCore
     {
         if (!s_globalInitialized)
         {
-            Log.SetLogCallback(static (level, channel, message) =>
+            // Captures THIS core's logger, and Noesis's callback is process-global — so with two
+            // cores in one process the first one created owns Noesis's log for the whole run.
+            // That matches what the surrounding code already says about providers being global;
+            // it is a caveat rather than a bug, and there is no per-core seam in Noesis to use.
+            var log = _log;
+            Log.SetLogCallback((level, channel, message) =>
             {
-                if (level >= global::Noesis.LogLevel.Warning) Console.WriteLine($"[noesis {level}] {message}");
+                if (level < global::Noesis.LogLevel.Warning) return;
+                LogFromNoesis(log, ToLogLevel(level), channel, message);
             });
             if (!string.IsNullOrWhiteSpace(_licenseName) && !string.IsNullOrWhiteSpace(_licenseKey))
             {
@@ -182,10 +196,34 @@ public sealed class NoesisViewCore
         // host's choice (a sim-thread UI, or a render-thread one whose ViewModel reads
         // presentation state directly), and it is pinned here for the view's whole life — so
         // the log has to say which one it actually was.
-        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_origin} ({_width}x{_height}) "
-            + $"on thread '{Thread.CurrentThread.Name ?? "unnamed"}' — the view is pinned to it.");
+        LogViewLoaded(_log, _xamlFile, _origin, _width, _height, Thread.CurrentThread.Name ?? "unnamed");
         return view;
     }
+
+    /// <summary>Noesis's severity, in the vocabulary the rest of the engine logs in.</summary>
+    /// <remarks>Only Warning and above reach here; the lower Noesis levels are filtered at the
+    /// callback because Noesis is chatty enough at Trace to cost real time in a frame.</remarks>
+    private static LogLevel ToLogLevel(global::Noesis.LogLevel level) => level switch
+    {
+        global::Noesis.LogLevel.Error => LogLevel.Error,
+        global::Noesis.LogLevel.Warning => LogLevel.Warning,
+        global::Noesis.LogLevel.Info => LogLevel.Information,
+        global::Noesis.LogLevel.Debug => LogLevel.Debug,
+        _ => LogLevel.Trace,
+    };
+
+    [LoggerMessage(EventId = 80, Message = "[{Channel}] {Message}")]
+    private static partial void LogFromNoesis(ILogger logger, LogLevel level, string channel, string message);
+
+    /// <remarks>Names the OWNING thread, not "the sim thread": which thread creates the view is
+    /// the host's choice, and it is pinned for the view's whole life — so the log has to say which
+    /// one it actually was.</remarks>
+    [LoggerMessage(
+        EventId = 81,
+        Level = LogLevel.Information,
+        Message = "'{XamlFile}' loaded from {Origin} ({Width}x{Height}) on thread '{Thread}' — the view is pinned to it.")]
+    private static partial void LogViewLoaded(
+        ILogger logger, string xamlFile, UPath origin, uint width, uint height, string thread);
 
     private sealed class UiInputHalf(NoesisViewCore owner) : IUiInput
     {

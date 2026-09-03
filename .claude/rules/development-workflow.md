@@ -10,7 +10,7 @@ All dev agents follow this standard lifecycle.
 4. Rename the worktree branch to `issue-<NUMBER>-<short-description>`
 5. Implement the changes
 6. Write tests for new code
-7. Build and test: `dotnet build --solution ParadiseEngine.slnx -p:TreatWarningsAsErrors=true && dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal`
+7. Build and test: `dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true && dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal`
 8. Commit, push, and create a PR (referencing the issue)
 9. **Wait for OpenCara review** on the PR — do NOT run local multi-AI review, do NOT merge immediately
 10. Fix any valid review comments from OpenCara, push fixes, and wait for re-review
@@ -28,7 +28,7 @@ git branch -m issue-<NUMBER>-<short-description>
 # ... implement changes ...
 
 # Build and test
-dotnet build --solution ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
+dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
 dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal
 
 # Commit with issue reference
@@ -95,7 +95,7 @@ gh pr view <PR_NUMBER> --json comments \
 
 1. Read all OpenCara review comments (both PR review and inline comments)
 2. For each valid finding: fix the issue in code
-3. Run build+test: `dotnet build --solution ParadiseEngine.slnx -p:TreatWarningsAsErrors=true && dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal`
+3. Run build+test: `dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true && dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal`
 4. Commit and push fixes
 5. Wait for OpenCara to re-review (poll again as in Step 1)
 6. Repeat until no critical/major issues remain (max 3 iterations)
@@ -123,6 +123,10 @@ SendMessage to PM: "Completed issue #<NUMBER>. PR #<PR_NUMBER> merged (squash). 
 
 - Follow **SOLID**, **KISS**, **YAGNI** principles
 - All node types must be unmanaged structs for AOT/serialization compatibility
-- Maintain dual-target compatibility (netstandard2.1 + net10.0)
+- Everything targets `net10.0`. The only exceptions are the three source generators
+  (`Paradise.Authoring.Generators`, `Paradise.BT.Generators`, `Paradise.ECS.Generators`), which
+  target `netstandard2.0` because Roslyn loads analyzers from that TFM. There is no
+  `netstandard2.1` in this repo any more, and a dependency's `net10.0` footprint is often much
+  smaller than its `netstandard2.0` one — check the actual TFM group before pricing one.
 - If the issue spec is unclear, comment on the issue asking PM for clarification and shut down
 - If an issue requires work outside your scope, comment explaining what's needed and shut down

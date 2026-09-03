@@ -1,3 +1,5 @@
+using Paradise.Diagnostics;
+
 using Microsoft.Coyote.Specifications;
 using Microsoft.Coyote.SystematicTesting;
 
@@ -29,12 +31,14 @@ public static class ArtifactCacheTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");
 
-    private static (ArtifactCache Cache, ExclusiveMarkerFileSystem FileSystem, List<string> Warnings) Fresh()
+    private static (ArtifactCache Cache, ExclusiveMarkerFileSystem FileSystem, CollectingLogger Warnings) Fresh()
     {
         var fileSystem = new ExclusiveMarkerFileSystem();
         fileSystem.CreateDirectory("/work");
-        var warnings = new List<string>();
-        return (new ArtifactCache(fileSystem, s_layout.EditorCache, warnings.Add), fileSystem, warnings);
+        // CollectingLogger locks on an `object`, so Coyote can schedule around it the way it does
+        // the cache's own gate; a List<string> behind a delegate had no lock to schedule at all.
+        var warnings = new CollectingLogger();
+        return (new ArtifactCache(fileSystem, s_layout.EditorCache, warnings), fileSystem, warnings);
     }
 
     /// <summary>
@@ -101,7 +105,7 @@ public static class ArtifactCacheTests
             Task.Run(() => cache.TryFetch("ktx2", ArtifactDigest.Compute("other"), fileSystem, "/work/b.ktx2"))).ConfigureAwait(false);
 
         Specification.Assert(cache.IsEnabled, "A racing first use turned the cache off.");
-        Specification.Assert(warnings.Count == 0, $"A racing first use warned: {string.Join(" | ", warnings)}");
+        Specification.Assert(warnings.Messages.Count == 0, $"A racing first use warned: {string.Join(" | ", warnings.Messages)}");
         Specification.Assert(fileSystem.MarkerWrites == 1, $"The cache root was prepared {fileSystem.MarkerWrites} times.");
         Specification.Assert(
             fileSystem.ReadAllText(s_layout.EditorCache / ".gitignore") == "*\n",
@@ -128,7 +132,7 @@ public static class ArtifactCacheTests
         Specification.Assert(
             fileSystem.ReadAllBytes(s_layout.EditorCache / "ktx2" / $"{key}.ktx2").AsSpan().SequenceEqual(new byte[] { 1, 2, 3 }),
             "The entry does not hold the stored bytes.");
-        Specification.Assert(warnings.Count == 0, $"A store warned: {string.Join(" | ", warnings)}");
+        Specification.Assert(warnings.Messages.Count == 0, $"A store warned: {string.Join(" | ", warnings.Messages)}");
     }
 
     /// <summary>A fetch racing the store of its key sees either a miss or the whole entry, never a partial.</summary>

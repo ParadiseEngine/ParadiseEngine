@@ -1,6 +1,10 @@
 using System;
 using System.Numerics;
+
+using Microsoft.Extensions.Logging;
+
 using Paradise.Assets.Gltf;
+using Paradise.Diagnostics;
 using Paradise.Rendering.Pbr;
 
 namespace Paradise.Rendering.Browser.Sample;
@@ -27,7 +31,11 @@ internal sealed class PbrShadowScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height);
+        // Under wasm this reaches the browser's devtools console, which is where PbrRenderer's
+        // joint-palette overflow used to print from inside the renderer.
+        _pbr = new PbrRenderer(
+            renderer, _width, _height,
+            logger: ParadiseConsole.CreateLogger("PbrRenderer", new ParadiseConsoleOptions { MinLevel = LogLevel.Information }));
 
         var (vertices, indices) = Procedural.UnitCube();
         var groundMaterial = _pbr.Materials.AddDefaultMaterial(new Vector4(0.42f, 0.45f, 0.5f, 1f), metallic: 0f, roughness: 0.9f);

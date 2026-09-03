@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using System;
 using WgInstance = WebGpuSharp.Instance;
 using WgAdapter = WebGpuSharp.Adapter;
@@ -64,7 +67,7 @@ namespace Paradise.Rendering.WebGPU.Internal;
 /// that map <see cref="Paradise.Rendering"/> handles to native WebGPUSharp objects. Constructed
 /// once per <see cref="WebGpuRenderer"/>. Adapter selection takes an optional compatible
 /// <see cref="WgSurface"/> — pass <c>null</c> to drive the headless adapter path (no swapchain).</summary>
-internal sealed class WebGpuDevice : IDisposable
+internal sealed partial class WebGpuDevice : IDisposable
 {
     public WgInstance Instance { get; }
     public WgAdapter Adapter { get; }
@@ -121,7 +124,7 @@ internal sealed class WebGpuDevice : IDisposable
         Queue = queue;
     }
 
-    public static WebGpuDevice Create(WgInstance instance, WgSurface? compatibleSurface)
+    public static WebGpuDevice Create(WgInstance instance, WgSurface? compatibleSurface, ILogger? logger = null)
     {
         const ulong AdapterTimeoutNs = 10_000_000_000UL; // 10s — generous for cold first-run on CI
 
@@ -157,18 +160,25 @@ internal sealed class WebGpuDevice : IDisposable
         // KTX2→BC transcode path; when absent the asset layer falls back to RGBA32 uploads.
         var supportsBc = adapter.HasFeature(WgFeatureName.TextureCompressionBC);
 
+        // NOT `static` lambdas any more: they capture the logger, which costs one closure per
+        // device — once, at creation — and is what lets a host route Dawn's validation errors
+        // anywhere but stderr. Dawn calls both of these on threads the engine did not create, so
+        // whatever sink is behind this logger has to be thread-safe; see docs/logging.md.
+        var log = logger ?? NullLogger.Instance;
         var deviceDesc = new WgDeviceDescriptor
         {
             Label = "Paradise.Rendering.WebGPU",
-            UncapturedErrorCallback = static (type, message) =>
+            UncapturedErrorCallback = (type, message) =>
             {
+                if (!log.IsEnabled(LogLevel.Error)) return;
                 var text = message.Length == 0 ? "(no message)" : System.Text.Encoding.UTF8.GetString(message);
-                Console.Error.WriteLine($"[WebGPU] {type}: {text}");
+                LogUncapturedError(log, type, text);
             },
-            DeviceLostCallback = static (reason, message) =>
+            DeviceLostCallback = (reason, message) =>
             {
+                if (!log.IsEnabled(LogLevel.Critical)) return;
                 var text = message.Length == 0 ? "(no message)" : System.Text.Encoding.UTF8.GetString(message);
-                Console.Error.WriteLine($"[WebGPU] device lost ({reason}): {text}");
+                LogDeviceLost(log, reason, text);
             },
         };
         if (supportsBc)
@@ -810,6 +820,18 @@ internal sealed class WebGpuDevice : IDisposable
         // ordering here is mostly documentation. The instance must outlive surfaces and devices,
         // so the owning Renderer disposes those first.
     }
+
+    // Both arrive from Dawn on a foreign thread. Their callers decode the UTF-8 message only
+    // after an explicit IsEnabled check, because the decode — not the formatting — is what costs
+    // something here, and [LoggerMessage] can only guard the latter.
+
+    [LoggerMessage(EventId = 61, Level = LogLevel.Error, Message = "{ErrorType}: {Text}")]
+    private static partial void LogUncapturedError(ILogger logger, WebGpuSharp.ErrorType errorType, string text);
+
+    /// <remarks>Critical, not Error: an uncaptured error is one bad call, a lost device is the end
+    /// of rendering for this process.</remarks>
+    [LoggerMessage(EventId = 62, Level = LogLevel.Critical, Message = "device lost ({Reason}): {Text}")]
+    private static partial void LogDeviceLost(ILogger logger, WebGpuSharp.DeviceLostReason reason, string text);
 }
 
 /// <summary>A texture slot entry: the native texture plus its default full view (the M2 scope

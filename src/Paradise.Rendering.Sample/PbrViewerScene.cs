@@ -1,6 +1,9 @@
 using System;
 using System.IO;
 using System.Numerics;
+using Microsoft.Extensions.Logging;
+
+using Paradise.Diagnostics;
 using Paradise.Rendering;
 using Paradise.Rendering.Pbr;
 using Paradise.Rendering.WebGPU;
@@ -28,7 +31,9 @@ internal sealed class PbrViewerScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height);
+        _pbr = new PbrRenderer(
+            renderer, _width, _height,
+            logger: ParadiseConsole.CreateLogger("PbrRenderer", new ParadiseConsoleOptions { MinLevel = LogLevel.Information }));
 
         if (glbPath is not null)
         {

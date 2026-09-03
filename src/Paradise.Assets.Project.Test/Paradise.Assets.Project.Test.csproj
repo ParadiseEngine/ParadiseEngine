@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Paradise.Diagnostics\Paradise.Diagnostics.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
   </ItemGroup>
 </Project>

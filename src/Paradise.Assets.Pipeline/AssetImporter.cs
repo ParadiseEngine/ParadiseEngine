@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -26,7 +28,7 @@ public sealed record ImportContext(
     IFileSystem Output,
     ArtifactCache Cache,
     ITextureEncoder? Encoder,
-    Action<string>? Log)
+    ILogger Log)
 {
     public UPath AssetsRoot => Sources.Root;
 

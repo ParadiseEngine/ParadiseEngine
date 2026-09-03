@@ -1,3 +1,7 @@
+using Microsoft.Extensions.Logging;
+
+using Paradise.Diagnostics;
+
 using Paradise.Windowing;
 using System;
 using System.Runtime.InteropServices;
@@ -12,6 +16,13 @@ internal static class Program
 {
     private const int InitialWidth = 640;
     private const int InitialHeight = 480;
+
+    /// <summary>Where the engine's own diagnostics go — Dawn validation errors, device loss.</summary>
+    /// <remarks>The sample keeps printing these on stderr with a bracketed prefix, which is what
+    /// they looked like when the renderer wrote them itself. The difference is that the renderer
+    /// no longer decides: this line does, and a host that wants them elsewhere changes it.</remarks>
+    private static readonly ILogger EngineLog =
+        ParadiseConsole.CreateLogger("WebGPU", new ParadiseConsoleOptions { MinLevel = LogLevel.Information });
 
     private enum SceneKind
     {
@@ -87,7 +98,7 @@ internal static class Program
 
         try
         {
-            using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight);
+            using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight, EngineLog);
             switch (kind)
             {
                 case SceneKind.Pbr:
@@ -149,7 +160,7 @@ internal static class Program
             }
 
             var surfaceDesc = BuildSurfaceDescriptor(window, out metalView);
-            renderer = new WebGpuRenderer(in surfaceDesc);
+            renderer = new WebGpuRenderer(in surfaceDesc, logger: EngineLog);
             using var triangleScene = kind == SceneKind.Triangle ? new TriangleScene(renderer) : null;
             using var cubeScene = kind == SceneKind.Cube ? new LitCubeScene(renderer, surfaceDesc.Width, surfaceDesc.Height) : null;
             using var computeScene = kind == SceneKind.Compute ? new ComputeScene(renderer) : null;

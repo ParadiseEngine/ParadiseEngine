@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -26,9 +29,9 @@ public sealed record MoveResult(
 /// not rewritten, and any that no longer resolve after the move are reported so the mesh can
 /// be re-exported before verify says the same thing with less context.
 /// </remarks>
-public static class AssetMover
+public static partial class AssetMover
 {
-    public static MoveResult Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, Action<string>? log = null)
+    public static MoveResult Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -80,7 +83,8 @@ public static class AssetMover
             return new MoveResult(false, errors, moved, [], []);
         }
 
-        foreach (var (source, destination) in mapping) log?.Invoke($"moved: {source} -> {destination}");
+        var log = logger ?? NullLogger.Instance;
+        foreach (var (source, destination) in mapping) LogMoved(log, source, destination);
 
         var after = AssetPaths.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
@@ -178,7 +182,7 @@ public static class AssetMover
         IReadOnlyDictionary<string, string> mapping,
         List<string> rewritten,
         List<string> warnings,
-        Action<string>? log)
+        ILogger log)
     {
         PrefabDocument document;
         try
@@ -209,7 +213,7 @@ public static class AssetMover
 
         PrefabDocumentSerializer.Save(fileSystem, path, updated);
         rewritten.Add(sources.Relative(path));
-        log?.Invoke($"rewrote: {sources.Relative(path)}");
+        LogRewrote(log, sources.Relative(path));
     }
 
     private static AssetReference Follow(AssetReference reference, IReadOnlyDictionary<string, string> mapping, ref bool changed)
@@ -292,4 +296,10 @@ public static class AssetMover
                 "mv cannot rewrite a mesh — re-export it with the new path, or verify will refuse it");
         }
     }
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "moved: {Source} -> {Destination}")]
+    private static partial void LogMoved(ILogger logger, string source, string destination);
+
+    [LoggerMessage(EventId = 14, Level = LogLevel.Information, Message = "rewrote: {Relative}")]
+    private static partial void LogRewrote(ILogger logger, string relative);
 }

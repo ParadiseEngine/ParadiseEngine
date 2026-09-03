@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using System.Buffers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -12,7 +15,7 @@ namespace Paradise.Rendering.Pbr;
 /// a dynamic-offset draw-UBO ring, and the per-frame command-stream emission: opaque first,
 /// then blend back-to-front. All geometry/material upload goes through
 /// <see cref="UploadMesh"/>/<see cref="MaterialResourceCache"/>.</summary>
-public sealed class PbrRenderer : IDisposable
+public sealed partial class PbrRenderer : IDisposable
 {
     private const int MaxDrawsPerFrame = 4096;
     private const int FloatsPerVertex = 12;         // pos3/normal3/uv2/tan4 interleave
@@ -25,6 +28,7 @@ public sealed class PbrRenderer : IDisposable
     private const int MaxShadowLayers = FrameUniformsGpu.MaxSceneLights * 6; // 48
 
     private readonly IRenderer _renderer;
+    private readonly ILogger _log;
     private readonly ShaderProgramDesc _program;
     private readonly bool _useSrgbEntryPoint;
     private readonly uint _drawStride;
@@ -213,9 +217,11 @@ public sealed class PbrRenderer : IDisposable
 
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
-        ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f)
+        ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f,
+        ILogger? logger = null)
     {
         _renderer = renderer;
+        _log = logger ?? NullLogger.Instance;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
@@ -642,9 +648,7 @@ public sealed class PbrRenderer : IDisposable
             if (!_jointOverflowReported)
             {
                 _jointOverflowReported = true;
-                Console.Error.WriteLine(
-                    $"[PbrRenderer] Joint palette overflow: {offset}+{matrices.Length} exceeds " +
-                    $"MaxSkinnedJoints ({MaxSkinnedJoints}). Skinned meshes past this point render in bind pose.");
+                LogJointPaletteOverflow(_log, offset, matrices.Length, MaxSkinnedJoints);
             }
             return;
         }
@@ -1492,7 +1496,12 @@ public sealed class PbrRenderer : IDisposable
                 }
         }
         _renderer.UpdateBuffer<uint>(_clusterBuffer, 0, _clusterMasks);
-        if (Environment.GetEnvironmentVariable("PARADISE_CLUSTER_DEBUG") == "1")
+        // A LEVEL, not PARADISE_CLUSTER_DEBUG=1 as this used to be. Two things improve: the froxel
+        // dump stops being the same volume as a device-lost report (issue #232), and the per-frame
+        // Environment.GetEnvironmentVariable call is gone. IsEnabled is checked explicitly because
+        // the counting loop below is the cost here — [LoggerMessage] would guard the formatting
+        // but this walks every froxel word first.
+        if (_log.IsEnabled(LogLevel.Debug))
         {
             var empty = 0; var bits = 0L;
             foreach (var m in _clusterMasks)
@@ -1500,7 +1509,8 @@ public sealed class PbrRenderer : IDisposable
                 if (m == 0) empty++;
                 bits += System.Numerics.BitOperations.PopCount(m);
             }
-            Console.Error.WriteLine($"[CLUSTER] froxels={_clusterMasks.Length / 2} emptyWords={empty} avgBits={(double)bits/(_clusterMasks.Length / 2):F2}");
+            var froxels = _clusterMasks.Length / 2;
+            LogClusterStats(_log, froxels, empty, (double)bits / froxels);
         }
     }
 
@@ -2126,4 +2136,13 @@ public sealed class PbrRenderer : IDisposable
         _renderer.DestroyPipeline(_bloomUpPipeline);
         _renderer.DestroyBuffer(_bloomUniformBuffer);
     }
+
+    [LoggerMessage(
+        EventId = 90,
+        Level = LogLevel.Error,
+        Message = "Joint palette overflow: {Offset}+{Count} exceeds MaxSkinnedJoints ({Max}). Skinned meshes past this point render in bind pose.")]
+    private static partial void LogJointPaletteOverflow(ILogger logger, int offset, int count, int max);
+
+    [LoggerMessage(EventId = 91, Level = LogLevel.Debug, Message = "froxels={Froxels} emptyWords={EmptyWords} avgBits={AverageBits:F2}")]
+    private static partial void LogClusterStats(ILogger logger, int froxels, int emptyWords, double averageBits);
 }

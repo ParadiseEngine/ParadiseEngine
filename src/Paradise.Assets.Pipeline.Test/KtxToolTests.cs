@@ -1,3 +1,4 @@
+using Paradise.Diagnostics;
 using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -125,11 +126,11 @@ public class KtxToolTests
         try
         {
             File.WriteAllBytes(path, BuildRunnerTests.EmbeddedImageGlb(png, "Wall_Albedo"));
-            var errors = new List<string>();
+            var errors = new CollectingLogger();
 
-            var result = GlbTextureWorkflows.ConvertEmbeddedTextures(path, repoRoot, error: errors.Add);
+            var result = GlbTextureWorkflows.ConvertEmbeddedTextures(path, repoRoot, errors);
 
-            await Assert.That(string.Join("\n", errors)).IsEqualTo("");
+            await Assert.That(string.Join("\n", errors.Messages)).IsEqualTo("");
             await Assert.That(result).IsEqualTo(ConversionResult.ConvertedAllTextures);
 
             await Assert.That(GlbBinary.TryRead(path, out var converted, out var bin)).IsTrue();
@@ -165,11 +166,11 @@ public class KtxToolTests
         try
         {
             File.WriteAllBytes(path, BuildRunnerTests.EmbeddedImageGlb(png, "Wall_Albedo"));
-            var errors = new List<string>();
+            var errors = new CollectingLogger();
 
-            var result = GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, error: errors.Add);
+            var result = GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, errors);
 
-            await Assert.That(string.Join("\n", errors)).IsEqualTo("");
+            await Assert.That(string.Join("\n", errors.Messages)).IsEqualTo("");
             await Assert.That(result).IsEqualTo(ConversionResult.ConvertedAllTextures);
             var sidecar = File.ReadAllBytes(Path.Combine(directory, "wall_0.ktx2"));
             await Assert.That(Ktx2Header.IsValid(sidecar, out _)).IsTrue();
@@ -178,7 +179,7 @@ public class KtxToolTests
             await Assert.That(bin.Length).IsEqualTo(0);
 
             // Idempotent: the second run has nothing embedded left to do.
-            await Assert.That(GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, error: errors.Add)).IsEqualTo(ConversionResult.NoConvertibleTextures);
+            await Assert.That(GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, errors)).IsEqualTo(ConversionResult.NoConvertibleTextures);
         }
         finally
         {
