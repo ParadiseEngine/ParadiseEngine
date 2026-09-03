@@ -14,6 +14,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The test project stands in for a HOST: it is the layer allowed to pick a sink, which
+         is what lets these tests assert on what the editor reported. No Paradise.Editor.* project
+         may reference this. -->
+    <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
     <ProjectReference Include="../Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
   </ItemGroup>

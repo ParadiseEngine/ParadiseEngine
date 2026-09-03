@@ -7,6 +7,10 @@ public enum OperatorResult
     Finished,
     Cancelled,
     Unavailable,
+
+    /// <summary>The operator threw. Distinct from <see cref="Cancelled"/>, which is a decision the
+    /// operator made; this is one it never got to make.</summary>
+    Failed,
 }
 
 /// <summary>Named arguments for one invocation; a menu entry or a keybind passes none, a panel

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Paradise.Editor.Core.Document;
 using Paradise.Editor.Core.History;
 
@@ -25,6 +26,11 @@ public interface IOperatorContext
     IHistory History { get; }
 
     IHostCapabilities Host { get; }
+
+    /// <summary>Where an operator says what happened. Never nullable: <c>[LoggerMessage]</c> calls
+    /// <c>IsEnabled</c> unguarded, so a null one fails to compile inside generated code — a host
+    /// with nothing to say installs <c>NullLogger.Instance</c>.</summary>
+    ILogger Log { get; }
 
     /// <summary>Publish a new document version as one undoable step.</summary>
     void Commit(SceneDocument document, string description);

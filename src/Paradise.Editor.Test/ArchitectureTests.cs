@@ -4,8 +4,9 @@ using Paradise.Editor.Core.Document;
 
 namespace Paradise.Editor.Test;
 
-/// <summary>The two boundaries that keep the editor model clean, enforced by the build rather
-/// than by review: Core knows no ImGui, and Core touches no file except through a Zio mount.</summary>
+/// <summary>The three boundaries that keep the editor model clean, enforced by the build rather
+/// than by review: Core knows no ImGui, Core touches no file except through a Zio mount, and Core
+/// names no logging sink.</summary>
 public partial class ArchitectureTests
 {
     private static readonly Assembly s_core = typeof(SceneDocument).Assembly;
@@ -17,6 +18,18 @@ public partial class ArchitectureTests
         await Assert.That(referenced).DoesNotContain("ImGui.NET");
         await Assert.That(referenced).DoesNotContain("Hexa.NET.ImGui");
         await Assert.That(referenced).DoesNotContain("Paradise.Ui.ImGui");
+    }
+
+    // The rule is the engine's (AGENTS.md, docs/logging.md) and the editor is held to it for a
+    // reason of its own: in-game, the editor's diagnostics have to land in the GAME's stack, and a
+    // provider referenced here would decide that for every host at once.
+    [Test]
+    public async Task core_references_the_logging_abstraction_and_no_provider()
+    {
+        var referenced = s_core.GetReferencedAssemblies().Select(name => name.Name ?? "").ToArray();
+        await Assert.That(referenced).Contains("Microsoft.Extensions.Logging.Abstractions");
+        await Assert.That(referenced).DoesNotContain("Microsoft.Extensions.Logging");
+        await Assert.That(referenced).DoesNotContain("Paradise.Diagnostics");
     }
 
     // Source is scanned rather than IL because System.IO is in the core library every assembly

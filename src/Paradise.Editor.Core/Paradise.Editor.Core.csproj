@@ -20,6 +20,10 @@
 
   <ItemGroup>
     <PackageReference Include="Zio" />
+    <!-- Abstractions ONLY, never a provider: which sink the editor's diagnostics reach is the
+         host's decision, and in-game that host is the game's own logging stack. Enforced by
+         Paradise.Editor.Test rather than by review. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

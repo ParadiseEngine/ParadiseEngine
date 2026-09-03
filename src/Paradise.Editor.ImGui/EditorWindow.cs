@@ -1,5 +1,8 @@
-using ImGuiNET;
+using Hexa.NET.ImGui;
 using Paradise.Editor.Core.Shell;
+// The enclosing namespace ends in .ImGui, which hides the type of the same name;
+// Paradise.Ui.ImGui aliases it for exactly this reason.
+using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Editor.ImGui;
 
@@ -20,11 +23,11 @@ public abstract class EditorWindow(WindowDescriptor descriptor)
     {
         if (!IsOpen) return;
         var open = IsOpen;
-        if (global::ImGuiNET.ImGui.Begin(descriptor.Title, ref open, Flags))
+        if (ImGuiApi.Begin(descriptor.Title, ref open, Flags))
         {
             DrawContent();
         }
-        global::ImGuiNET.ImGui.End();
+        ImGuiApi.End();
         IsOpen = open;
     }
 
