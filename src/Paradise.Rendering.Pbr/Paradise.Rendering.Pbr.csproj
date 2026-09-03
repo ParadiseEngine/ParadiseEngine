@@ -36,6 +36,7 @@
          backend package (Paradise.Rendering.WebGPU for desktop/Dawn) and hand the instance in.
          Consumers upgrading past 0.6.x no longer get Paradise.Rendering.WebGPU transitively and
          must reference it themselves. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Gltf\Paradise.Assets.Gltf.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Textures\Paradise.Assets.Textures.csproj" />

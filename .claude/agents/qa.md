@@ -21,7 +21,7 @@ Verify that the main branch builds and all tests pass after code changes. Reopen
 
 ### 1. Build Verification
 ```bash
-dotnet build --solution ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
+dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
 ```
 Ensures the merged code compiles cleanly with warnings as errors.
 

@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -18,7 +21,7 @@ namespace Paradise.Assets.Pipeline;
 /// rebuild is a plain incremental <see cref="BuildRunner"/> run so there is no second notion of
 /// "stale" to keep in agreement with the index.
 /// </remarks>
-public sealed class AssetWatcher : IDisposable
+public sealed partial class AssetWatcher : IDisposable
 {
     /// <summary>How long a path must be quiet before it is acted on.</summary>
     public static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(300);
@@ -29,7 +32,7 @@ public sealed class AssetWatcher : IDisposable
     private readonly IFileSystem _fileSystem;
     private readonly AssetProjectLayout _layout;
     private readonly SidecarMaintainer _maintainer;
-    private readonly Action<string> _log;
+    private readonly ILogger _log;
     private readonly Func<DateTimeOffset> _now;
     private readonly IReadOnlyList<IAssetImporter> _importers;
 
@@ -48,7 +51,7 @@ public sealed class AssetWatcher : IDisposable
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         SidecarMaintainer maintainer,
-        Action<string>? log = null,
+        ILogger? logger = null,
         Func<DateTimeOffset>? now = null,
         IReadOnlyList<IAssetImporter>? importers = null)
     {
@@ -59,7 +62,7 @@ public sealed class AssetWatcher : IDisposable
         _fileSystem = fileSystem;
         _layout = layout;
         _maintainer = maintainer;
-        _log = log ?? (static _ => { });
+        _log = logger ?? NullLogger.Instance;
         _now = now ?? (static () => DateTimeOffset.UtcNow);
         _importers = importers ?? AssetImporters.All;
     }
@@ -79,7 +82,7 @@ public sealed class AssetWatcher : IDisposable
         _watcher.Changed += (_, e) => Observe(e.FullPath);
         _watcher.Deleted += (_, e) => ObserveDelete(e.FullPath);
         _watcher.Renamed += (_, e) => ObserveRename(e.OldFullPath, e.FullPath);
-        _watcher.Error += (_, e) => _log($"watch: the filesystem watcher faulted — {e.Exception.Message}");
+        _watcher.Error += (_, e) => LogWatcherFaulted(_log, e.Exception.Message);
         _watcher.EnableRaisingEvents = true;
     }
 
@@ -158,7 +161,9 @@ public sealed class AssetWatcher : IDisposable
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
     {
         _maintainer.Reconcile();
-        return new BuildRunner(_fileSystem, _layout, encoder, _log, message => _log($"warning: {message}"), _importers)
+        // One logger through, where this used to synthesise a second delegate that prefixed
+        // "warning: " — the severity is BuildRunner's to state as a level now.
+        return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
             .Run(profile, target);
     }
 
@@ -179,6 +184,11 @@ public sealed class AssetWatcher : IDisposable
         foreach (var path in ripe) queue.Remove(path);
         return ripe;
     }
+
+    // Warning, not Information: the watcher faulting means edits stop being noticed, which the
+    // watch loop cannot tell the author any other way.
+    [LoggerMessage(EventId = 12, Level = LogLevel.Warning, Message = "watch: the filesystem watcher faulted — {Reason}")]
+    private static partial void LogWatcherFaulted(ILogger logger, string reason);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

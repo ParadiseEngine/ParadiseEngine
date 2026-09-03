@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The HOST half of the logging seam (issue #232). Engine libraries reference
+    Microsoft.Extensions.Logging.Abstractions and nothing else — they say what happened and never
+    where it goes. This package is one answer to "where it goes", for hosts that want a console
+    and do not want to take a dependency on the full Microsoft.Extensions.Logging stack to get
+    one: Paradise.Cli.Host, the samples, and a game that has no other logging opinion.
+
+    It is deliberately NOT referenced by any engine library. A host that already has a logging
+    stack ignores this package entirely and installs ZLogger or Serilog behind the same ILogger.
+
+    Abstractions-only, so this adds no transitive dependency of its own: ILogger, ILoggerProvider
+    and ILoggerFactory all live there. The concrete LoggerFactory does not, which is why
+    ParadiseConsole.CreateFactory exists — see its remarks.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Diagnostics</AssemblyName>
+    <RootNamespace>Paradise.Diagnostics</RootNamespace>
+    <PackageId>Paradise.Diagnostics</PackageId>
+    <Title>Paradise.Diagnostics</Title>
+    <Description>A console sink for Paradise engine diagnostics: an ILogger implementation with per-level stream routing and a host-installable renderer for engine value types, so a host can route what the engine reports without pulling in the full Microsoft.Extensions.Logging stack.</Description>
+    <PackageTags>logging;diagnostics;console;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Diagnostics.Test" />
+  </ItemGroup>
+
+</Project>

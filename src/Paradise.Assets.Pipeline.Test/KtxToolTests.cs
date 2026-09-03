@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Paradise.Diagnostics;
 using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -125,11 +127,15 @@ public class KtxToolTests
         try
         {
             File.WriteAllBytes(path, BuildRunnerTests.EmbeddedImageGlb(png, "Wall_Albedo"));
-            var errors = new List<string>();
+            var log = new CollectingLogger();
 
-            var result = GlbTextureWorkflows.ConvertEmbeddedTextures(path, repoRoot, error: errors.Add);
+            var result = GlbTextureWorkflows.ConvertEmbeddedTextures(path, repoRoot, log);
 
-            await Assert.That(string.Join("\n", errors)).IsEqualTo("");
+            // Filtered to Error: the delegate this replaced was an `error:` callback, so the
+            // assertion has always meant "nothing went wrong". A CollectingLogger keeps every
+            // level, and these workflows narrate their progress at Information ("KTX2 image: …"),
+            // which would fail an unfiltered comparison for no reason.
+            await Assert.That(string.Join("\n", log.MessagesAtLeast(LogLevel.Error))).IsEqualTo("");
             await Assert.That(result).IsEqualTo(ConversionResult.ConvertedAllTextures);
 
             await Assert.That(GlbBinary.TryRead(path, out var converted, out var bin)).IsTrue();
@@ -165,11 +171,15 @@ public class KtxToolTests
         try
         {
             File.WriteAllBytes(path, BuildRunnerTests.EmbeddedImageGlb(png, "Wall_Albedo"));
-            var errors = new List<string>();
+            var log = new CollectingLogger();
 
-            var result = GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, error: errors.Add);
+            var result = GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, log);
 
-            await Assert.That(string.Join("\n", errors)).IsEqualTo("");
+            // Filtered to Error: the delegate this replaced was an `error:` callback, so the
+            // assertion has always meant "nothing went wrong". A CollectingLogger keeps every
+            // level, and these workflows narrate their progress at Information ("KTX2 image: …"),
+            // which would fail an unfiltered comparison for no reason.
+            await Assert.That(string.Join("\n", log.MessagesAtLeast(LogLevel.Error))).IsEqualTo("");
             await Assert.That(result).IsEqualTo(ConversionResult.ConvertedAllTextures);
             var sidecar = File.ReadAllBytes(Path.Combine(directory, "wall_0.ktx2"));
             await Assert.That(Ktx2Header.IsValid(sidecar, out _)).IsTrue();
@@ -178,7 +188,7 @@ public class KtxToolTests
             await Assert.That(bin.Length).IsEqualTo(0);
 
             // Idempotent: the second run has nothing embedded left to do.
-            await Assert.That(GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, error: errors.Add)).IsEqualTo(ConversionResult.NoConvertibleTextures);
+            await Assert.That(GlbTextureWorkflows.ExternalizeTextures(path, repoRoot, log)).IsEqualTo(ConversionResult.NoConvertibleTextures);
         }
         finally
         {

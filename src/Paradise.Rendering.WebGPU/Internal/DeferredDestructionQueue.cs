@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
@@ -7,9 +9,10 @@ namespace Paradise.Rendering.WebGPU.Internal;
 /// <c>frameNumber + maxFramesInFlight</c> frames in the future; <see cref="DrainCompleted"/> runs
 /// every release whose target frame has elapsed. Holding releases for a few frames lets us safely
 /// destroy resources still referenced by in-flight GPU work.</summary>
-internal sealed class DeferredDestructionQueue
+internal sealed partial class DeferredDestructionQueue
 {
     private readonly int _maxFramesInFlight;
+    private readonly ILogger _log;
     private readonly Queue<Pending> _pending = new();
     private ulong _currentFrame;
 
@@ -25,10 +28,11 @@ internal sealed class DeferredDestructionQueue
         }
     }
 
-    public DeferredDestructionQueue(int maxFramesInFlight)
+    public DeferredDestructionQueue(int maxFramesInFlight, ILogger? logger = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maxFramesInFlight, 1);
         _maxFramesInFlight = maxFramesInFlight;
+        _log = logger ?? NullLogger.Instance;
     }
 
     public ulong CurrentFrame => _currentFrame;
@@ -58,7 +62,7 @@ internal sealed class DeferredDestructionQueue
             try { pending.Release(); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[DeferredDestructionQueue] release callback threw: {ex}");
+                LogReleaseThrew(_log, ex);
             }
         }
     }
@@ -73,8 +77,13 @@ internal sealed class DeferredDestructionQueue
             try { pending.Release(); }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[DeferredDestructionQueue] release callback threw: {ex}");
+                LogReleaseThrew(_log, ex);
             }
         }
     }
+
+    // The exception goes in the exception slot rather than interpolated into the message: a sink
+    // that wants the stack gets it, and a sink that wants one line is not handed a whole trace.
+    [LoggerMessage(EventId = 60, Level = LogLevel.Error, Message = "release callback threw")]
+    private static partial void LogReleaseThrew(ILogger logger, Exception exception);
 }

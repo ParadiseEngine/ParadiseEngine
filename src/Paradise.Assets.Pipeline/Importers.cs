@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Export.Serialization;
@@ -33,7 +35,7 @@ public sealed class TextureImporter : IAssetImporter
 
         if (TextureStep.Encode(context, bytes, context.Asset.GetExtensionWithDot()!, preset, destination, errors))
         {
-            context.Log?.Invoke($"ktx2: {context.Source}");
+            ImporterLog.Encoded(context.Log, context.Source);
         }
 
         return true;
@@ -45,7 +47,7 @@ public sealed class TextureImporter : IAssetImporter
     {
         var preset = KtxTextureEncoder.FromKtxPreset(
             TextureEncodePolicy.PresetFromImageName(Path.GetFileNameWithoutExtension(context.Asset.GetName())));
-        context.Log?.Invoke($"texture: {context.Source} has no preset in its sidecar; {preset} inferred from the name");
+        ImporterLog.PresetInferred(context.Log, context.Source, preset);
         return preset;
     }
 }
@@ -133,7 +135,7 @@ public sealed class MeshImporter : IAssetImporter
                 continue;
             }
 
-            if (image.PresetNote is { } note) context.Log?.Invoke($"{context.Source}: {note}");
+            if (image.PresetNote is { } note) ImporterLog.PresetNote(context.Log, context.Source, note);
             TextureStep.Encode(context, image.Bytes, image.SourceExtension!, KtxTextureEncoder.FromKtxPreset(image.Preset), sidecar, errors);
         }
 
@@ -325,4 +327,22 @@ internal static class DocumentOutput
         errors.Add($"{context.Source}: document_format \"{context.Profile.DocumentFormat}\" output is not implemented yet (toml and json are)");
         return true;
     }
+}
+
+/// <summary>The importers' log messages, in one place because they are spread over several importer classes.</summary>
+/// <remarks><c>[LoggerMessage]</c> needs a partial class to generate into, and an importer is not
+/// one. The <see cref="ILogger"/> parameters are NOT nullable, and cannot be: the generator emits
+/// an unguarded <c>logger.IsEnabled(...)</c>, so a nullable parameter fails the build with CS8602
+/// inside generated code. A build with nothing listening carries <c>NullLogger.Instance</c>
+/// instead, which is why <see cref="ImportContext.Log"/> is non-nullable too.</remarks>
+internal static partial class ImporterLog
+{
+    [LoggerMessage(EventId = 30, Level = LogLevel.Information, Message = "ktx2: {Source}")]
+    public static partial void Encoded(ILogger logger, string source);
+
+    [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "texture: {Source} has no preset in its sidecar; {Preset} inferred from the name")]
+    public static partial void PresetInferred(ILogger logger, string source, TexturePreset preset);
+
+    [LoggerMessage(EventId = 32, Level = LogLevel.Information, Message = "{Source}: {Note}")]
+    public static partial void PresetNote(ILogger logger, string source, string note);
 }

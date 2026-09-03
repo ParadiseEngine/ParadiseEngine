@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Paradise.Diagnostics\Paradise.Diagnostics.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
     <!-- The runtime's GLB parser, so the build's container reader can be pinned to agree with it (#207). -->
     <ProjectReference Include="..\Paradise.Assets.Gltf\Paradise.Assets.Gltf.csproj" />

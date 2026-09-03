@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -36,11 +39,11 @@ public enum SidecarAction
 /// held in memory, never a field in the sidecar, because a recorded hash of a text asset differs
 /// per checkout (line endings, smudge filters) and would make every clone a dirty tree.
 /// </remarks>
-public sealed class SidecarMaintainer
+public sealed partial class SidecarMaintainer
 {
     private readonly IFileSystem _fileSystem;
     private readonly AssetProjectLayout _layout;
-    private readonly Action<string> _log;
+    private readonly ILogger _log;
     private readonly bool _dryRun;
     private readonly AssetIgnoreRules _ignore;
 
@@ -54,7 +57,7 @@ public sealed class SidecarMaintainer
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
-        Action<string>? log = null,
+        ILogger? logger = null,
         bool dryRun = false,
         AssetIgnoreRules? ignore = null)
     {
@@ -63,7 +66,7 @@ public sealed class SidecarMaintainer
 
         _fileSystem = fileSystem;
         _layout = layout;
-        _log = log ?? (static _ => { });
+        _log = logger ?? NullLogger.Instance;
         _dryRun = dryRun;
         _ignore = ignore ?? AssetIgnoreRules.None;
     }
@@ -113,7 +116,7 @@ public sealed class SidecarMaintainer
             catch (SidecarMetaException error)
             {
                 // Left alone: it may hold the only copy of an identity.
-                _log($"{Display(sidecar)}: left alone — {error.Message}");
+                LogLeftAlone(_log, sidecar, error.Message);
                 return SidecarAction.None;
             }
 
@@ -121,7 +124,7 @@ public sealed class SidecarMaintainer
 
             existing.Hash = null;
             Save(existing, sidecar);
-            _log($"refreshed: {Display(sidecar)} (dropped recorded hash)");
+            LogRefreshed(_log, sidecar);
             return SidecarAction.Refreshed;
         }
 
@@ -132,13 +135,13 @@ public sealed class SidecarMaintainer
             Save(restored, sidecar);
             Remove(held.Sidecar);
             _seen.Remove(held.Asset);
-            _log($"relinked: {Display(held.Asset)} -> {Display(asset)} (guid kept)");
+            LogRelinked(_log, held.Asset, asset);
             return SidecarAction.Relinked;
         }
 
         var minted = new SidecarMeta(Guid.NewGuid());
         Save(minted, sidecar);
-        _log($"minted: {Display(sidecar)}");
+        LogMinted(_log, sidecar);
         return SidecarAction.Minted;
     }
 
@@ -167,16 +170,19 @@ public sealed class SidecarMaintainer
             // overwriting would break every reference at once (issue #196). Both guids go to the
             // log so an author can settle the rare case where the arriving one was the real one.
             Remove(source);
-            _log(
-                $"kept: {Display(destination)} already holds {DocumentGuid.Format(Existing(destination) ?? Guid.Empty)}; " +
-                $"dropped {Display(source)} ({DocumentGuid.Format(meta.Guid)}) arriving by rename");
+            LogKept(
+                _log,
+                destination,
+                DocumentGuid.Format(Existing(destination) ?? Guid.Empty),
+                source,
+                DocumentGuid.Format(meta.Guid));
             return SidecarAction.Conflicted;
         }
 
         meta.Hash = null;
         Save(meta, destination);
         Remove(source);
-        _log($"carried: {Display(source)} -> {Display(destination)}");
+        LogCarried(_log, source, destination);
         return SidecarAction.Carried;
     }
 
@@ -211,7 +217,7 @@ public sealed class SidecarMaintainer
         if (hash is null) return SidecarAction.None;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
-        _log($"quarantined: {Display(sidecar)} (identity held in case this is a move)");
+        LogQuarantined(_log, sidecar);
         return SidecarAction.Quarantined;
     }
 
@@ -222,7 +228,7 @@ public sealed class SidecarMaintainer
         foreach (var (hash, held) in _quarantine.Where(entry => stale(entry.Value)).ToList())
         {
             _quarantine.Remove(hash);
-            _log($"orphaned: {Display(held.Sidecar)} — no asset reappeared with its content");
+            LogOrphaned(_log, held.Sidecar);
         }
     }
 
@@ -233,7 +239,7 @@ public sealed class SidecarMaintainer
         if (!_fileSystem.FileExists(sidecar)) return SidecarAction.None;
 
         Remove(sidecar);
-        _log($"removed: {Display(sidecar)} (its asset is in [assets] ignore)");
+        LogRemovedIgnored(_log, sidecar);
         return SidecarAction.Removed;
     }
 
@@ -260,12 +266,45 @@ public sealed class SidecarMaintainer
         _fileSystem.DeleteFile(path);
     }
 
-    private string Display(UPath path)
-    {
-        var full = path.FullName;
-        var root = _layout.Assets.FullName;
-        return full.StartsWith(root, StringComparison.Ordinal) ? full[(root.Length + 1)..] : full;
-    }
+    // Every path below is logged as a UPath, NOT as a pre-rendered string. This class used to
+    // hold a `Display` helper that trimmed the assets root off the front, which is one host's
+    // preference baked into the layer that cannot know it: a watch console wants
+    // `props/lamp.glb`, an editor's problem list wants something clickable, and neither is
+    // reachable from a string that has already been shortened. The value goes out intact and
+    // ParadiseConsoleOptions.RenderValue decides — see issue #232.
+    //
+    // [LoggerMessage] rather than _log.LogInformation: the generator emits the IsEnabled check
+    // before touching an argument, so a host that filters these out pays no boxing for the UPath.
+
+    [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "{Sidecar}: left alone — {Reason}")]
+    private static partial void LogLeftAlone(ILogger logger, UPath sidecar, string reason);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "refreshed: {Sidecar} (dropped recorded hash)")]
+    private static partial void LogRefreshed(ILogger logger, UPath sidecar);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Information, Message = "relinked: {From} -> {To} (guid kept)")]
+    private static partial void LogRelinked(ILogger logger, UPath from, UPath to);
+
+    [LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "minted: {Sidecar}")]
+    private static partial void LogMinted(ILogger logger, UPath sidecar);
+
+    [LoggerMessage(
+        EventId = 5,
+        Level = LogLevel.Warning,
+        Message = "kept: {Destination} already holds {KeptGuid}; dropped {Source} ({DroppedGuid}) arriving by rename")]
+    private static partial void LogKept(ILogger logger, UPath destination, string keptGuid, UPath source, string droppedGuid);
+
+    [LoggerMessage(EventId = 6, Level = LogLevel.Information, Message = "carried: {Source} -> {Destination}")]
+    private static partial void LogCarried(ILogger logger, UPath source, UPath destination);
+
+    [LoggerMessage(EventId = 7, Level = LogLevel.Information, Message = "quarantined: {Sidecar} (identity held in case this is a move)")]
+    private static partial void LogQuarantined(ILogger logger, UPath sidecar);
+
+    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "orphaned: {Sidecar} — no asset reappeared with its content")]
+    private static partial void LogOrphaned(ILogger logger, UPath sidecar);
+
+    [LoggerMessage(EventId = 9, Level = LogLevel.Information, Message = "removed: {Sidecar} (its asset is in [assets] ignore)")]
+    private static partial void LogRemovedIgnored(ILogger logger, UPath sidecar);
 }
 
 public readonly record struct QuarantinedIdentity(UPath Asset, UPath Sidecar, SidecarMeta Meta, DateTimeOffset At);

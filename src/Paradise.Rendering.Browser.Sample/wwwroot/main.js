@@ -20,7 +20,11 @@ try {
     canvas.height = Number(query.get('h')) || canvas.height;
     document.title = `Paradise browser renderer - ${scene}`;
     const hostModuleUrl = new URL('paradise-sample-host.js', document.baseURI).href;
-    await program.InitAsync(scene, hostModuleUrl, canvas.width, canvas.height, Number(query.get('boxes')) || 0);
+    // ?log=debug turns the engine's own diagnostics up — the PBR cluster dump among them. Passed
+    // as an argument because wasm has no environment to read one from.
+    await program.InitAsync(
+        scene, hostModuleUrl, canvas.width, canvas.height,
+        Number(query.get('boxes')) || 0, query.get('log') || '');
 
     const frame = () => {
         program.OnAnimationFrame();

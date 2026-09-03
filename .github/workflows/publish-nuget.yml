@@ -89,6 +89,7 @@ jobs:
           projects=(
             Paradise.Authoring
             Paradise.BLOB
+            Paradise.Diagnostics
             Paradise.BT
             Paradise.BT.Builder
             Paradise.BT.Nodes

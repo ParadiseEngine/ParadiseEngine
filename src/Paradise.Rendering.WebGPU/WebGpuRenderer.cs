@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Windowing;
 using System;
 using System.Collections.Concurrent;
@@ -53,7 +56,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// only part of this class with genuine cross-thread rules. They live in
     /// <see cref="CaptureQueue"/> rather than here so they can be tested apart from Dawn.</summary>
     private readonly CaptureQueue _captureRequests = new();
-    private readonly DeferredDestructionQueue _destructionQueue = new(DefaultFramesInFlight);
+    private readonly DeferredDestructionQueue _destructionQueue;
     private readonly PipelineCache _pipelineCache = new();
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
     // -error callback) — this side table lets Submit surface the mismatch as a synchronous,
@@ -90,8 +93,14 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// deliberately: a backbuffer that must be copyable can cost the driver optimisations on every
     /// frame, and changing it later would mean reconfiguring the swapchain mid-run — a visible
     /// hitch. Ignored for a headless target, whose texture is always copyable.</param>
-    public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false)
+    /// <param name="logger">Where Dawn's uncaptured-error and device-lost reports go, and where a
+    /// release callback that threw is reported. Omitted means nowhere. Dawn raises these on its own
+    /// threads, so a sink passed here must be thread-safe (see <c>docs/logging.md</c>).</param>
+    public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false, ILogger? logger = null)
     {
+        var log = logger ?? NullLogger.Instance;
+        _destructionQueue = new DeferredDestructionQueue(DefaultFramesInFlight, log);
+
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
 
@@ -99,13 +108,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // Everything after this line asks the target and never asks which kind it is.
         if (surface.Platform == SurfacePlatform.Headless)
         {
-            _device = WebGpuDevice.Create(instance, compatibleSurface: null);
+            _device = WebGpuDevice.Create(instance, compatibleSurface: null, log);
             _target = new OffscreenTarget(_device, surface.Width, surface.Height);
             return;
         }
 
         var nativeSurface = SurfaceFactory.Create(instance, surface);
-        _device = WebGpuDevice.Create(instance, nativeSurface);
+        _device = WebGpuDevice.Create(instance, nativeSurface, log);
         _target = new SurfaceTarget(
             new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
     }
@@ -117,8 +126,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     ///
     /// Kept as the NAME for that intent — it reads better than a descriptor at a call site that
     /// only wants an offscreen target — but it is now the same constructor underneath.</summary>
-    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1) =>
-        new(SurfaceDescriptor.Headless(width, height));
+    public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1, ILogger? logger = null) =>
+        new(SurfaceDescriptor.Headless(width, height), logger: logger);
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
     /// for an offscreen target. Pipeline color targets must match this format or the backend will
@@ -612,6 +621,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             return _device.Device;
+        }
+    }
+
+    /// <summary><see cref="ColorFormat"/> in WebGPUSharp's vocabulary — the other half of what an
+    /// <see cref="OverlayPass"/> subsystem needs, since its pipeline's color target must match the
+    /// backbuffer or the backend rejects it at draw time. Without this a host has to maintain its
+    /// own copy of the engine-to-WebGPU format table to wire up a subsystem it does not otherwise
+    /// have to understand.</summary>
+    public WebGpuSharp.TextureFormat NativeColorFormat
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return Internal.FormatConversions.ToWgpu(_target.ColorFormat);
         }
     }
 

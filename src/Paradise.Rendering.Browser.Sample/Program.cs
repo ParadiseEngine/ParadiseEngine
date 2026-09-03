@@ -4,6 +4,10 @@ using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
+using Microsoft.Extensions.Logging;
+
+using Paradise.Diagnostics;
+
 namespace Paradise.Rendering.Browser.Sample;
 
 /// <summary>Acceptance harness for <see cref="BrowserRenderer"/>: renders one of two scenes into a
@@ -55,8 +59,11 @@ public static partial class Program
 
     /// <summary>Create the renderer and the requested scene. Resolves once the first frame can be
     /// drawn; rejects (and writes SAMPLE-FAIL) if WebGPU is unavailable or setup throws.</summary>
+    /// <param name="logLevel">Engine diagnostic verbosity, from the page's <c>?log=</c>. A
+    /// PARAMETER and not an environment variable: browser wasm has none, so an env read here
+    /// would silently do nothing. <c>debug</c> shows the PBR cluster dump.</param>
     [JSExport]
-    internal static async Task InitAsync(string scene, string hostModuleUrl, int width, int height, int extraBoxes)
+    internal static async Task InitAsync(string scene, string hostModuleUrl, int width, int height, int extraBoxes, string logLevel)
     {
         try
         {
@@ -75,7 +82,9 @@ public static partial class Program
                     s_cubeScene = new LitCubeScene(s_renderer, (uint)width, (uint)height);
                     break;
                 case "pbr":
-                    s_pbrScene = new PbrShadowScene(s_renderer, (uint)width, (uint)height, extraBoxes);
+                    s_pbrScene = new PbrShadowScene(
+                        s_renderer, (uint)width, (uint)height, extraBoxes,
+                        ParadiseConsole.CreateLogger("PbrRenderer", new ParadiseConsoleOptions { MinLevel = ParseLevel(logLevel) }));
                     break;
                 case "compute":
                     s_computeScene = new ComputeScene(s_renderer);
@@ -145,6 +154,12 @@ public static partial class Program
             Fail(ex);
         }
     }
+
+    /// <summary>The page's <c>?log=</c>, or Information when it is absent or unrecognised.</summary>
+    /// <remarks>Unrecognised falls back rather than failing: a mistyped query parameter must not
+    /// take down a harness whose job is to report whether the RENDERER works.</remarks>
+    private static LogLevel ParseLevel(string? value) =>
+        Enum.TryParse<LogLevel>(value, ignoreCase: true, out var level) ? level : LogLevel.Information;
 
     private static void Fail(Exception ex)
     {

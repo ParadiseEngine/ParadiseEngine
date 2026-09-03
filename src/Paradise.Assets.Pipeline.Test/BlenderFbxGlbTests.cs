@@ -1,5 +1,9 @@
 using System.IO;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using Paradise.Diagnostics;
 
 namespace Paradise.Assets.Pipeline.Test;
 
@@ -15,7 +19,7 @@ public class BlenderFbxGlbTests
             var stamp = new BlenderFbxGlb.SourceStamp("abc123", "Blender 4.2.0");
             await Assert.That(BlenderFbxGlb.GeneratedGlbMatchesStamp(glb, stamp)).IsFalse();
 
-            await Assert.That(BlenderFbxGlb.WriteSourceStamp(glb, stamp, null)).IsTrue();
+            await Assert.That(BlenderFbxGlb.WriteSourceStamp(glb, stamp, NullLogger.Instance)).IsTrue();
             await Assert.That(BlenderFbxGlb.GeneratedGlbMatchesStamp(glb, stamp)).IsTrue();
             await Assert.That(BlenderFbxGlb.GeneratedGlbMatchesStamp(glb, stamp with { FbxSha256 = "ABC123" })).IsTrue();
 
@@ -62,9 +66,9 @@ public class BlenderFbxGlbTests
         File.WriteAllText(corrupt, "not a glb");
         try
         {
-            string? reported = null;
-            await Assert.That(BlenderFbxGlb.WriteSourceStamp(corrupt, new BlenderFbxGlb.SourceStamp("x", "y"), message => reported = message)).IsFalse();
-            await Assert.That(reported).IsNotNull();
+            var reported = new CollectingLogger();
+            await Assert.That(BlenderFbxGlb.WriteSourceStamp(corrupt, new BlenderFbxGlb.SourceStamp("x", "y"), reported)).IsFalse();
+            await Assert.That(reported.MessagesAtLeast(LogLevel.Error)).IsNotEmpty();
         }
         finally
         {

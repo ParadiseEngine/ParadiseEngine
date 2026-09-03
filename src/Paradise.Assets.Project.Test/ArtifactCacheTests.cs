@@ -1,5 +1,9 @@
 using System.Text;
 
+using Microsoft.Extensions.Logging;
+
+using Paradise.Diagnostics;
+
 namespace Paradise.Assets.Project.Test;
 
 public class ArtifactCacheTests
@@ -201,7 +205,7 @@ public class ArtifactCacheTests
     {
         using var fileSystem = new MemoryFileSystem();
 
-        var cache = ArtifactCache.ForProject(fileSystem, s_layout, configured, warn: null);
+        var cache = ArtifactCache.ForProject(fileSystem, s_layout, configured, logger: null);
 
         await Assert.That(cache.IsEnabled).IsFalse();
     }
@@ -214,7 +218,7 @@ public class ArtifactCacheTests
     {
         using var fileSystem = new MemoryFileSystem();
 
-        var cache = ArtifactCache.ForProject(fileSystem, s_layout, configured, warn: null);
+        var cache = ArtifactCache.ForProject(fileSystem, s_layout, configured, logger: null);
 
         await Assert.That(cache.IsEnabled).IsTrue();
         await Assert.That(cache.Root).IsEqualTo(s_layout.EditorCache);
@@ -225,7 +229,7 @@ public class ArtifactCacheTests
     {
         using var fileSystem = new MemoryFileSystem();
 
-        var cache = ArtifactCache.ForProject(fileSystem, s_layout, "/elsewhere/shared-cache", warn: null);
+        var cache = ArtifactCache.ForProject(fileSystem, s_layout, "/elsewhere/shared-cache", logger: null);
 
         await Assert.That(cache.Root).IsEqualTo(new UPath("/elsewhere/shared-cache"));
     }
@@ -239,13 +243,13 @@ public class ArtifactCacheTests
         fileSystem.CreateDirectory("/game/.editor");
         fileSystem.WriteAllText("/game/.editor/cache", "not a directory");
 
-        var warnings = new List<string>();
-        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, warnings.Add);
+        var logger = new CollectingLogger();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, logger);
         cache.Store("ktx2", ArtifactDigest.Compute("x"), fileSystem, "/game/.editor/cache");
 
         await Assert.That(cache.IsEnabled).IsFalse();
-        await Assert.That(warnings.Count).IsEqualTo(1);
-        await Assert.That(warnings[0]).Contains("caching is off");
+        await Assert.That(logger.Messages.Count).IsEqualTo(1);
+        await Assert.That(logger.Messages[0]).Contains("caching is off");
     }
 
     [Test]
@@ -254,14 +258,14 @@ public class ArtifactCacheTests
         // The one outcome forbidden here is a destination that exists holding the wrong bytes.
         // A miss makes the caller redo the work: slow, but right.
         using var fileSystem = new MemoryFileSystem();
-        var warnings = new List<string>();
-        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, warnings.Add);
+        var logger = new CollectingLogger();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, logger);
         var key = ArtifactDigest.Compute("payload");
 
         fileSystem.CreateDirectory("/work");
         fileSystem.WriteAllBytes("/work/a.ktx2", [3]);
         cache.Store("ktx2", key, fileSystem, "/work/a.ktx2");
-        await Assert.That(warnings.Count).IsEqualTo(0);
+        await Assert.That(logger.Messages.Count).IsEqualTo(0);
 
         // A ReadOnlyFileSystem cannot inject this failure: CopyFileCross resolves both ends
         // through ComposeFileSystem.ResolvePath, which unwraps the wrapper and copies against
@@ -272,17 +276,17 @@ public class ArtifactCacheTests
 
         await Assert.That(cache.TryFetch("ktx2", key, destination, "/out/a.ktx2")).IsFalse();
         await Assert.That(destination.FileExists("/out/a.ktx2")).IsFalse();
-        await Assert.That(warnings.Count).IsEqualTo(1);
-        await Assert.That(warnings[0]).Contains("regenerating");
+        await Assert.That(logger.Messages.Count).IsEqualTo(1);
+        await Assert.That(logger.Messages[0]).Contains("regenerating");
     }
 
-    /// <summary><c>PARADISE_EXPORT_CACHE=.cache</c> used to throw out of <see cref="ArtifactCache.ForProject(IFileSystem, AssetProjectLayout, string?, Action{string}?)"/>; the addon resolves it against the working directory (issue #204).</summary>
+    /// <summary><c>PARADISE_EXPORT_CACHE=.cache</c> used to throw out of <see cref="ArtifactCache.ForProject(IFileSystem, AssetProjectLayout, string, ILogger)"/>; the addon resolves it against the working directory (issue #204).</summary>
     [Test]
     public async Task a_relative_environment_path_is_resolved_against_the_working_directory()
     {
         using var fileSystem = new PhysicalFileSystem();
 
-        var cache = ArtifactCache.ForProject(fileSystem, s_layout, ".cache", warn: null);
+        var cache = ArtifactCache.ForProject(fileSystem, s_layout, ".cache", logger: null);
 
         await Assert.That(cache.IsEnabled).IsTrue();
         await Assert.That(cache.Root).IsEqualTo(fileSystem.ConvertPathFromInternal(Path.Combine(Directory.GetCurrentDirectory(), ".cache")));
@@ -306,8 +310,8 @@ public class ArtifactCacheTests
     public async Task a_fetch_that_fails_mid_copy_leaves_no_destination()
     {
         using var fileSystem = new MemoryFileSystem();
-        var warnings = new List<string>();
-        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, warnings.Add);
+        var logger = new CollectingLogger();
+        var cache = new ArtifactCache(fileSystem, s_layout.EditorCache, logger);
         var key = ArtifactDigest.Compute("payload");
         fileSystem.CreateDirectory("/work");
         fileSystem.WriteAllBytes("/work/a.ktx2", [1, 2, 3, 4, 5, 6, 7, 8]);
@@ -318,7 +322,7 @@ public class ArtifactCacheTests
 
         await Assert.That(cache.TryFetch("ktx2", key, destination, "/out/a.ktx2")).IsFalse();
         await Assert.That(destination.FileExists("/out/a.ktx2")).IsFalse();
-        await Assert.That(warnings[0]).Contains("regenerating");
+        await Assert.That(logger.Messages[0]).Contains("regenerating");
     }
 
     /// <summary>A fetch goes through the destination's own <c>OpenFile</c>: a composed filesystem over the output (the pipeline's recording mount) must see the write, which <c>CopyFileCross</c> hides by resolving past it.</summary>

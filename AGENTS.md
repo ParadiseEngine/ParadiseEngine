@@ -8,7 +8,7 @@ AI agents; `CLAUDE.md` imports it.
 
 ```bash
 # Build all projects
-dotnet build --solution ParadiseEngine.slnx
+dotnet build ParadiseEngine.slnx
 
 # Run all tests
 dotnet test --solution ParadiseEngine.slnx --output normal
@@ -39,7 +39,8 @@ dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
 Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
-`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`.
+`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
+`Paradise.Ui.ImGui.CoyoteTest`.
 
 A fourth thing, learned from the asset watcher: **lock on an `object`, not on
 `System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
@@ -80,8 +81,8 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 
 ### Monorepo Layout
 
-- `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `netstandard2.1`.
-- `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `netstandard2.1;net10.0`.
+- `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `net10.0`.
+- `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `net10.0`.
 - `src/Paradise.BT.Sample` — Console sample demonstrating tree construction, blackboard usage, and ticking.
 - `src/Paradise.BT.Test` / `src/Paradise.BLOB.Test` — TUnit test suites.
 - `src/Directory.Build.props` — Shared build properties (C# 14, nullable, unsafe, warnings-as-errors).
@@ -128,6 +129,31 @@ public struct MyNode : INode
 ### Paradise.BLOB
 
 Low-level unmanaged binary blob library backing the BT layout. Key types: `BlobArray<T>`, `BlobString<TEncoding>`, `BlobPtr<T>`, `ManagedBlobAssetReference<T>`. Builders (`ValueBuilder`, `StructBuilder`, `ArrayBuilder`, `TreeBuilder`, `SortedArrayBuilder`) produce pinned memory blocks.
+
+### Diagnostics go through `ILogger`, never `Console`
+
+**An engine library takes an `ILogger` and references `Microsoft.Extensions.Logging.Abstractions`
+and nothing else.** Which sink a game logs to is the host's decision, the same way the mount is
+(above). `Paradise.Diagnostics` is one sink, used by `Paradise.Cli.Host`; adding a *provider* —
+ZLogger, Serilog, `Microsoft.Extensions.Logging.Console` — to a `Paradise.*` library decides for
+every host at once and is the mistake the rule exists to prevent.
+
+Three things that are not obvious, all of which the build will teach you the hard way:
+
+- **Use `[LoggerMessage]`, not `logger.LogInformation(...)`.** The generator ships inside the
+  Abstractions package and emits the `IsEnabled` check BEFORE touching arguments, so a disabled
+  level costs no boxing and no template parse. It needs a `partial` class, and its `ILogger`
+  parameter **cannot be nullable** — the generated body calls `IsEnabled` unguarded, so `ILogger?`
+  fails with CS8602 inside generated code. Carry `NullLogger.Instance` instead.
+- **Log a `UPath` as an argument, never a pre-rendered string.** The reader does not know what its
+  filesystem is mounted over and must not guess; the host does, and installs a renderer
+  (`ParadiseConsoleOptions.RenderValue`). A `Display`-style helper that shortens a path inside a
+  library is one host's preference in the layer that cannot know it.
+- **Thread safety is the sink's job.** Dawn, Noesis and SDL all call back on threads the engine did
+  not create, and `ILogger` promises no affinity.
+
+Program output is not a diagnostic: `Verbs` printing `verify: 3 error(s)` and
+`Paradise.Authoring.SchemaDump` writing its dump keep `Console.WriteLine`. See `docs/logging.md`.
 
 ### Everything that reads content takes an `IFileSystem`, not a path
 

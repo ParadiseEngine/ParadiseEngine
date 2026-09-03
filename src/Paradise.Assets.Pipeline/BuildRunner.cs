@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -19,21 +22,21 @@ public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, i
 /// build did not finish, and whatever the build did not write is swept before the manifest
 /// returns (issues #201, #202).
 /// </remarks>
-public sealed class BuildRunner
+public sealed partial class BuildRunner
 {
     private readonly IFileSystem _fileSystem;
     private readonly AssetProjectLayout _layout;
     private readonly ITextureEncoder? _encoder;
-    private readonly Action<string>? _log;
-    private readonly Action<string>? _warn;
+    private readonly ILogger _log;
     private readonly IReadOnlyList<IAssetImporter> _importers;
 
+    // One logger, not the `log` and `warn` pair this took before: severity is a level now rather
+    // than a choice of delegate, which is what the second delegate was standing in for.
     public BuildRunner(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         ITextureEncoder? encoder,
-        Action<string>? log = null,
-        Action<string>? warn = null,
+        ILogger? logger = null,
         IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
@@ -42,8 +45,7 @@ public sealed class BuildRunner
         _fileSystem = fileSystem;
         _layout = layout;
         _encoder = encoder;
-        _log = log;
-        _warn = warn;
+        _log = logger ?? NullLogger.Instance;
         _importers = importers ?? AssetImporters.All;
     }
 
@@ -96,7 +98,7 @@ public sealed class BuildRunner
                 0, output);
         }
 
-        var cache = ArtifactCache.ForProject(_fileSystem, _layout, _warn);
+        var cache = ArtifactCache.ForProject(_fileSystem, _layout, _log);
         var manifest = new BuildManifest { Project = projectManifest.Name, Profile = profileName ?? "" };
         if (!_fileSystem.DirectoryExists(output)) _fileSystem.CreateDirectory(output);
 
@@ -247,11 +249,11 @@ public sealed class BuildRunner
             try
             {
                 _fileSystem.DeleteFile(file);
-                _log?.Invoke($"swept: {relative}");
+                LogSwept(_log, relative);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
-                _warn?.Invoke($"could not sweep stale output '{relative}' ({error.Message})");
+                LogSweepFailed(_log, relative, error.Message);
             }
         }
 
@@ -268,4 +270,10 @@ public sealed class BuildRunner
             }
         }
     }
+
+    [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "swept: {Relative}")]
+    private static partial void LogSwept(ILogger logger, string relative);
+
+    [LoggerMessage(EventId = 11, Level = LogLevel.Warning, Message = "could not sweep stale output '{Relative}' ({Reason})")]
+    private static partial void LogSweepFailed(ILogger logger, string relative, string reason);
 }

@@ -8,10 +8,51 @@
     <!-- Runtime helpers -->
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
+    <!-- Logging ABSTRACTION ONLY. Engine packages reference this and never a provider: which sink
+         a game logs to is the host's decision, the same way the asset pipeline took an
+         `Action<string>` and let Paradise.Cli.Host decide it meant Console (issue #232).
+
+         The cost is two assemblies and NOTHING else, but only because we are on net10.0. The
+         nuspec's dependency groups differ by TFM and the difference is the whole argument:
+           netstandard2.0 -> DI.Abstractions + DiagnosticSource + System.Buffers + System.Memory
+           net8.0/net9.0  -> DI.Abstractions + DiagnosticSource
+           net10.0        -> DI.Abstractions, whose own net10.0 group is EMPTY
+         DiagnosticSource is in-box from net10. So if anything here is ever retargeted below
+         net10.0, re-run that comparison before assuming this is still nearly free — under the
+         netstandard2.1 targets this repo used to have, a hand-written interface was the better
+         call and this would not have been added.
+
+         DI.Abstractions is IServiceProvider extension types; it contains no container and none
+         of this obliges a host to use one. Engine types take an ILogger where they used to take
+         a delegate and default to NullLogger.Instance where they defaulted to a no-op.
+
+         The [LoggerMessage] source generator ships INSIDE this package
+         (analyzers/dotnet/roslyn*/cs/Microsoft.Extensions.Logging.Generators.dll) — there is no
+         second reference to add. Use it rather than ILogger.Log* at any site that could be hot:
+         it emits the IsEnabled check BEFORE touching arguments, so a disabled level costs no
+         boxing, no object[] and no template parse, and it is compile-time so it survives
+         trimming and NativeAOT with no IL warnings. -->
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
-    <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
+    <!-- Dear ImGui binding. Hexa, not ImGui.NET: ImGui.NET's last release (2025-01-06) is stuck
+         on Dear ImGui 1.91.6 and exposes no internals, so `ImGuiP.DockBuilder*` — which the
+         editor's layout needs — does not exist there at all. Hexa tracks 1.92.x, ships the
+         internals namespace, and carries natives for every desktop RID we target.
+
+         PINNED, and the pin is load-bearing:
+         - 2.2.10-prerelease and 3.x-experimental exist; 3.x has no release notes and a bus
+           factor of one. Never float this to 3.x — take a version bump deliberately.
+         - Hexa's cimgui build STRIPS Dear ImGui's obsolete API: no GetTexDataAsRGBA32, no
+           Fonts.Build(), no ImFontAtlas.SetTexID, no GetGlyphRanges*. The 1.92 texture protocol
+           (RendererHasTextures + ImTextureData ops) is therefore mandatory, not optional —
+           without it NewFrame asserts "font atlas is not built".
+         - HexaEngine/Hexa.NET.ImGui#90 (ARM64 HVA ABI, open) affects Windows-on-ARM + MSVC only;
+           do NOT add win-arm64 to a publish RID list until it closes. macOS arm64 is verified.
+         - HexaEngine/Hexa.NET.ImGui#130: ImGui.Text(string) goes through cimgui's printf, so an
+           unmatched %s in runtime text segfaults. Call TextUnformatted / ImGuiText instead. -->
+    <PackageVersion Include="Hexa.NET.ImGui" Version="2.2.9" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem

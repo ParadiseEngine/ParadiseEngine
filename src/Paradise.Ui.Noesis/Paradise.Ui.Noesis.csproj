@@ -13,6 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Noesis.GUI" />
     <!-- XAML, textures and fonts come out of a mount the host chooses, not off a host path. -->
     <PackageReference Include="Zio" />
