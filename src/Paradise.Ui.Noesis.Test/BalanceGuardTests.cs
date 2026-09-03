@@ -1,3 +1,6 @@
+using Zio;
+using Zio.FileSystems;
+
 namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
@@ -21,12 +24,11 @@ public class BalanceGuardTests
         </Grid>
         """;
 
-    private static NoesisViewCore NewCore(string tag, Action? simTick = null)
+    private static NoesisViewCore NewCore(Action? simTick = null)
     {
-        var dir = Directory.CreateTempSubdirectory(tag).FullName;
-        var path = Path.Combine(dir, "main.xaml");
-        File.WriteAllText(path, Xaml);
-        return new NoesisViewCore(path, 200, 100, simTick: simTick);
+        var content = new MemoryFileSystem();
+        content.WriteAllText("/main.xaml", Xaml);
+        return new NoesisViewCore(content, "/main.xaml", 200, 100, simTick: simTick);
     }
 
     /// <summary>A UI that changes every tick, with the render side never collecting: the tick
@@ -35,7 +37,7 @@ public class BalanceGuardTests
     public async Task ticking_without_rendering_stops_producing_snapshots()
     {
         var ticks = 0;
-        var core = NewCore("noesis-balance", () => ticks++);
+        var core = NewCore(() => ticks++);
 
         try { core.Input.Tick(0.0); }
         catch (DllNotFoundException ex) { Skip.Test($"Noesis native library not loadable: {ex.Message}"); return; }
@@ -57,7 +59,7 @@ public class BalanceGuardTests
     public async Task rendering_lets_the_next_tick_through()
     {
         var ticks = 0;
-        var core = NewCore("noesis-balance-resume", () => ticks++);
+        var core = NewCore(() => ticks++);
 
         try { core.Input.Tick(0.0); }
         catch (DllNotFoundException ex) { Skip.Test($"Noesis native library not loadable: {ex.Message}"); return; }

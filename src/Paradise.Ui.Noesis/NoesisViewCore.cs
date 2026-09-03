@@ -1,6 +1,6 @@
 using Noesis;
 using Paradise.Windowing;
-using IoPath = System.IO.Path;
+using Zio;
 
 namespace Paradise.Ui.Noesis;
 
@@ -33,7 +33,8 @@ namespace Paradise.Ui.Noesis;
 // ever hosts multiple sessions (tests, editor).
 public sealed class NoesisViewCore
 {
-    private readonly string _root;
+    private readonly IFileSystem _content;
+    private readonly UPath _root;
     private readonly string _xamlFile;
     private readonly object _sync = new();
     private readonly object? _dataContext;
@@ -65,12 +66,20 @@ public sealed class NoesisViewCore
     /// <c>NOESIS_LICENSE_NAME</c> environment variable when null.</param>
     /// <param name="licenseKey">NoesisGUI license key; falls back to the
     /// <c>NOESIS_LICENSE_KEY</c> environment variable when null.</param>
-    public NoesisViewCore(string xamlPath, uint pixelWidth, uint pixelHeight,
+    /// <param name="content">The mount the UI tree lives in — every XAML, texture and font this
+    /// view loads is resolved against the XAML's directory INSIDE it, and nothing outside it is
+    /// reachable. A host mounts a directory; a test mounts memory and needs no fixture files on
+    /// disk at all.</param>
+    /// <param name="xamlPath">The root XAML, as a path in <paramref name="content"/>.</param>
+    public NoesisViewCore(IFileSystem content, UPath xamlPath, uint pixelWidth, uint pixelHeight,
         object? dataContext = null, Action? simTick = null,
         string? licenseName = null, string? licenseKey = null)
     {
-        _root = IoPath.GetDirectoryName(IoPath.GetFullPath(xamlPath)) ?? ".";
-        _xamlFile = IoPath.GetFileName(xamlPath);
+        ArgumentNullException.ThrowIfNull(content);
+
+        _content = content;
+        _root = xamlPath.GetDirectory();
+        _xamlFile = xamlPath.GetName();
         _width = pixelWidth;
         _height = pixelHeight;
         _dataContext = dataContext;
@@ -127,11 +136,11 @@ public sealed class NoesisViewCore
         // Providers are process-global in Noesis: the most recently created core owns them.
         // Fine for the intended one-core-per-process hosts; a second core re-roots XAML
         // loading (and hot reload) at its own directory from this point on.
-        GUI.SetXamlProvider(new FolderXamlProvider(_root));
-        GUI.SetTextureProvider(new FolderTextureProvider(_root));
-        GUI.SetFontProvider(new FolderFontProvider(_root));
+        GUI.SetXamlProvider(new FolderXamlProvider(_content, _root));
+        GUI.SetTextureProvider(new FolderTextureProvider(_content, _root));
+        GUI.SetFontProvider(new FolderFontProvider(_content, _root));
         GUI.SetFontDefaultProperties(14.0f, FontWeight.Normal, FontStretch.Normal, FontStyle.Normal);
-        if (File.Exists(IoPath.Combine(_root, "Theme", "NoesisTheme.DarkBlue.xaml")))
+        if (_content.FileExists(_root / "Theme" / "NoesisTheme.DarkBlue.xaml"))
         {
             GUI.SetFontFallbacks(["Theme/Fonts/#PT Root UI", "Arial"]);
             GUI.LoadApplicationResources("Theme/NoesisTheme.DarkBlue.xaml");
@@ -426,58 +435,66 @@ public sealed class NoesisViewCore
             value <= 0x10FFFF && value is not (>= 0xD800 and <= 0xDFFF);
     }
 
-    // ---- file-system resource providers rooted at the XAML's directory ----
+    // ---- content-mount resource providers rooted at the XAML's directory ----
 
-    private static string Combine(string root, params string[] segments)
+    /// <summary>
+    /// A Noesis resource URI as a path under <paramref name="root"/>.
+    ///
+    /// Noesis hands out '/'-separated URI paths, which is what a <see cref="UPath"/> already is —
+    /// the separator translation this used to do disappears with the mount. Both separators are
+    /// still trimmed off the front of a segment: a URI may spell a root-relative resource
+    /// ("/Theme/Fonts"), and combining that onto the root would otherwise escape the mount.
+    /// </summary>
+    private static UPath Combine(UPath root, params string[] segments)
     {
         var path = root;
         foreach (var segment in segments)
         {
             if (string.IsNullOrWhiteSpace(segment)) continue;
-            var normalized = segment.Replace('\\', IoPath.DirectorySeparatorChar)
-                .Replace('/', IoPath.DirectorySeparatorChar)
-                .TrimStart(IoPath.DirectorySeparatorChar);
-            if (normalized.Length > 0) path = IoPath.Combine(path, normalized);
+            var normalized = segment.Replace('\\', UPath.DirectorySeparator)
+                .TrimStart(UPath.DirectorySeparator);
+            if (normalized.Length > 0) path /= normalized;
         }
         return path;
     }
 
-    private sealed class FolderXamlProvider(string root) : XamlProvider
+    private sealed class FolderXamlProvider(IFileSystem content, UPath root) : XamlProvider
     {
         public override Stream? LoadXaml(Uri uri)
         {
             var path = Combine(root, uri.GetPath());
-            return File.Exists(path) ? File.OpenRead(path) : null;
+            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
         }
     }
 
-    private sealed class FolderTextureProvider(string root) : FileTextureProvider
+    private sealed class FolderTextureProvider(IFileSystem content, UPath root) : FileTextureProvider
     {
         public override Stream? OpenStream(Uri uri)
         {
             var path = Combine(root, uri.GetPath());
-            return File.Exists(path) ? File.OpenRead(path) : null;
+            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
         }
     }
 
-    private sealed class FolderFontProvider(string root) : FontProvider
+    private sealed class FolderFontProvider(IFileSystem content, UPath root) : FontProvider
     {
         public override Stream? OpenFont(Uri folder, string filename)
         {
             var path = Combine(root, folder.GetPath(), filename);
-            return File.Exists(path) ? File.OpenRead(path) : null;
+            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
         }
 
         public override void ScanFolder(Uri folder)
         {
             var path = Combine(root, folder.GetPath());
-            if (!Directory.Exists(path)) return;
-            foreach (var file in Directory.GetFiles(path))
+            if (!content.DirectoryExists(path)) return;
+            foreach (var file in content.EnumerateFiles(path))
             {
-                var ext = IoPath.GetExtension(file);
-                if (ext.Equals(".ttf", StringComparison.OrdinalIgnoreCase) || ext.Equals(".otf", StringComparison.OrdinalIgnoreCase))
+                var ext = file.GetExtensionWithDot();
+                if (".ttf".Equals(ext, StringComparison.OrdinalIgnoreCase)
+                    || ".otf".Equals(ext, StringComparison.OrdinalIgnoreCase))
                 {
-                    RegisterFont(folder, IoPath.GetFileName(file));
+                    RegisterFont(folder, file.GetName());
                 }
             }
         }

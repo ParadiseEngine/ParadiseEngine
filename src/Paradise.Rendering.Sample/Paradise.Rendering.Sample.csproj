@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <PackageReference Include="ppy.SDL3-CS" />
+    <!-- The GLB's directory is mounted, and the mount is what confines its texture uris. -->
+    <PackageReference Include="Zio" />
   </ItemGroup>
 
   <Import Project="../Slang.targets" />
