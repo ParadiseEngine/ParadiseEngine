@@ -80,6 +80,43 @@ public class ParadiseConsoleLoggerTests
     }
 
     [Test]
+    public async Task literal_text_after_the_last_hole_survives()
+    {
+        // The substitution appends literal text in runs rather than character by character, so
+        // the run after the FINAL hole is flushed by its own tail case — a path no other test
+        // reaches, and one whose failure would silently truncate every message ending in prose.
+        var (logger, output, _) = Sink(
+            renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
+
+        logger.LogInformation(
+            "kept: {Destination} already holds {Guid}; dropped by rename",
+            new MountedPath("/a/b"), "1111");
+
+        await Assert.That(output.ToString().Trim())
+            .IsEqualTo("[Test] kept: </a/b> already holds 1111; dropped by rename");
+    }
+
+    [Test]
+    public async Task a_renderer_is_asked_about_each_argument_exactly_once()
+    {
+        // RenderValue is arbitrary host code — the CLI's calls ConvertPathToInternal — so asking
+        // twice is a duplicated path conversion, not just wasted cycles. The substitution used to
+        // ask once to decide whether to take over and again while building the string.
+        var asked = new List<object?>();
+        var (logger, _, _) = Sink(renderValue: value =>
+        {
+            asked.Add(value);
+            return value is MountedPath path ? $"<{path.Value}>" : null;
+        });
+
+        logger.LogInformation(
+            "kept: {Destination} already holds {Guid}; dropped {Source}",
+            new MountedPath("/a"), "1111", new MountedPath("/b"));
+
+        await Assert.That(asked.Count).IsEqualTo(3);
+    }
+
+    [Test]
     public async Task braces_in_a_template_are_not_holes()
     {
         var (logger, output, _) = Sink(renderValue: value => value is MountedPath ? "rendered" : null);

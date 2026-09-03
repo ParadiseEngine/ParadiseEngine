@@ -48,13 +48,22 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
     private void Write(LogLevel level, string category, string message, Exception? exception)
     {
         var writer = level >= _options.ErrorStreamThreshold ? _error : _out;
-        var line = _options.IncludeCategory && category.Length > 0
-            ? $"[{category}] {message}"
-            : message;
+        var prefix = _options.IncludeCategory && category.Length > 0;
 
+        // The prefix is WRITTEN rather than concatenated onto the message. `$"[{category}] {message}"`
+        // copied the whole formatted message a second time, which measured as roughly half of this
+        // path's allocation on a typical line — and it bought nothing, because everything between
+        // the lock and its close is already atomic against other threads.
         lock (_gate)
         {
-            writer.WriteLine(line);
+            if (prefix)
+            {
+                writer.Write('[');
+                writer.Write(category);
+                writer.Write("] ");
+            }
+
+            writer.WriteLine(message);
             if (exception is not null) writer.WriteLine(exception);
         }
     }
@@ -96,66 +105,102 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         }
         if (template is null) return null;
 
+        // ONE pass over the arguments, keeping what the renderer said. The previous shape asked
+        // the renderer once to find out whether anything was claimed and then AGAIN for each hole
+        // while substituting — so a four-argument message invoked host code five times and threw
+        // the first answer away. That is not merely wasted work: RenderValue is arbitrary host
+        // code, and the CLI's calls ConvertPathToInternal, so the duplicate was a real path
+        // conversion per path per message.
+        var count = values.Count;
+        var rendered = new string?[count];
         var claimed = false;
-        for (var i = 0; i < values.Count; i++)
+        for (var i = 0; i < count; i++)
         {
             if (values[i].Key == "{OriginalFormat}") continue;
-            if (render(values[i].Value) is not null) { claimed = true; break; }
+            rendered[i] = render(values[i].Value);
+            claimed |= rendered[i] is not null;
         }
         if (!claimed) return null;
 
         var builder = new StringBuilder(template.Length + 32);
         var argument = 0;
+        var run = 0; // start of the literal text not yet appended
+
         for (var i = 0; i < template.Length; i++)
         {
             var c = template[i];
+            if (c != '{' && c != '}') continue;
 
-            if (c == '{')
-            {
-                if (i + 1 < template.Length && template[i + 1] == '{') { builder.Append('{'); i++; continue; }
-
-                var close = template.IndexOf('}', i + 1);
-                if (close < 0) { builder.Append(template, i, template.Length - i); break; }
-
-                // "{Name}", "{Name:format}", "{Name,alignment}". Alignment is parsed only so it
-                // does not land in the output; no engine template uses one.
-                var hole = template.AsSpan(i + 1, close - i - 1);
-                var colon = hole.IndexOf(':');
-                var format = colon >= 0 ? hole[(colon + 1)..].ToString() : null;
-
-                builder.Append(Format(values, ref argument, render, format));
-                i = close;
-                continue;
-            }
+            // Literal text goes in RUNS, not a char at a time: Append(string, start, count) is one
+            // copy where the per-char loop was one call per character, and templates are mostly
+            // literal.
+            if (i > run) builder.Append(template, run, i - run);
 
             if (c == '}')
             {
                 if (i + 1 < template.Length && template[i + 1] == '}') i++;
                 builder.Append('}');
+                run = i + 1;
                 continue;
             }
 
-            builder.Append(c);
+            if (i + 1 < template.Length && template[i + 1] == '{')
+            {
+                builder.Append('{');
+                i++;
+                run = i + 1;
+                continue;
+            }
+
+            var close = template.IndexOf('}', i + 1);
+            if (close < 0)
+            {
+                // Unterminated hole: emit the rest verbatim rather than throwing out of a log call.
+                builder.Append(template, i, template.Length - i);
+                return builder.ToString();
+            }
+
+            // "{Name}", "{Name:format}", "{Name,alignment}". Alignment is parsed only so it does
+            // not land in the output; no engine template uses one.
+            var hole = template.AsSpan(i + 1, close - i - 1);
+            var colon = hole.IndexOf(':');
+            var format = colon >= 0 ? hole[(colon + 1)..].ToString() : null;
+
+            AppendValue(builder, values, rendered, ref argument, format);
+            i = close;
+            run = i + 1;
         }
 
+        if (run < template.Length) builder.Append(template, run, template.Length - run);
         return builder.ToString();
     }
 
-    private static string Format(
+    private static void AppendValue(
+        StringBuilder builder,
         IReadOnlyList<KeyValuePair<string, object?>> values,
+        string?[] rendered,
         ref int argument,
-        Func<object?, string?> render,
         string? format)
     {
         // More holes than arguments is a malformed template; leave the excess empty rather than
         // throwing out of a logging call.
-        if (argument >= values.Count) return string.Empty;
-        var value = values[argument++].Value;
+        if (argument >= values.Count) return;
 
-        if (render(value) is { } rendered) return rendered;
+        var index = argument++;
+        if (rendered[index] is { } claimed)
+        {
+            builder.Append(claimed);
+            return;
+        }
+
+        var value = values[index].Value;
         if (format is not null && value is IFormattable formattable)
-            return formattable.ToString(format, CultureInfo.InvariantCulture);
-        return value?.ToString() ?? string.Empty;
+        {
+            builder.Append(formattable.ToString(format, CultureInfo.InvariantCulture));
+            return;
+        }
+
+        builder.Append(value);
     }
 
     private sealed class Logger(ParadiseConsoleLoggerProvider provider, string category) : ILogger
