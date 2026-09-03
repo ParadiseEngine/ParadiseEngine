@@ -615,6 +615,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
     }
 
+    /// <summary><see cref="ColorFormat"/> in WebGPUSharp's vocabulary — the other half of what an
+    /// <see cref="OverlayPass"/> subsystem needs, since its pipeline's color target must match the
+    /// backbuffer or the backend rejects it at draw time. Without this a host has to maintain its
+    /// own copy of the engine-to-WebGPU format table to wire up a subsystem it does not otherwise
+    /// have to understand.</summary>
+    public WebGpuSharp.TextureFormat NativeColorFormat
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return Internal.FormatConversions.ToWgpu(_target.ColorFormat);
+        }
+    }
+
     /// <summary>Submit a recorded <see cref="RenderCommandStream"/>. Acquires the backbuffer view,
     /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU, presents (when windowed),
     /// and advances the frame counter so deferred destructions can drain.</summary>
