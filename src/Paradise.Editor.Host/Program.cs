@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Paradise.Diagnostics;
+using Paradise.Editor.Core.Persistence;
 using Paradise.Editor.ImGui;
+using Paradise.Editor.ImGui.Shell;
 using Paradise.Rendering;
 using Paradise.Rendering.WebGPU;
 using Paradise.Ui.ImGui;
@@ -68,7 +70,8 @@ internal static class Program
         using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
         using var core = CreateCore(window.Width, window.Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
-        var editor = new EditorFrame();
+        using var userMount = UserMount();
+        using var editor = new EditorFrame(new WorkspaceLayoutStore(core, userMount), s_log.CreateLogger("Paradise.Editor"));
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -99,8 +102,12 @@ internal static class Program
                 if (snapshot is not null) overlay.Render(encoder, view, window.Width, window.Height, snapshot);
             };
             renderer.Submit(scene.Record());
+            editor.SaveLayoutIfChanged(core.WantSaveLayout);
         }
 
+        // The arrangement at the moment of closing is the one to restore, not the one from the
+        // last time ImGui's save timer happened to fire.
+        editor.Layout.Save();
         return 0;
     }
 
@@ -117,7 +124,8 @@ internal static class Program
         using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
         using var core = CreateCore(Width, Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
-        var editor = new EditorFrame();
+        // No layout store: a smoke run must not read a developer's arrangement or leave one behind.
+        using var editor = new EditorFrame(log: log);
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -145,7 +153,7 @@ internal static class Program
         // drew nothing still produces a valid PNG of the clear colour, and a UI that drew
         // everything still writes nothing if the capture path is broken. Both are checked.
         if (commands == 0) throw new InvalidOperationException("The editor frame produced no draw commands.");
-        if (!editor.Dockspace.HasNode) throw new InvalidOperationException("The dockspace node was never built.");
+        if (editor.Layout.ActiveNode == 0) throw new InvalidOperationException("The dockspace node was never built.");
 
         var readback = capture!.GetAwaiter().GetResult();
         using (var file = File.Create(screenshot))
@@ -179,7 +187,23 @@ internal static class Program
         // `dotnet run` from the repo, into the repo.
         core.DisableIniFile();
         EditorDockspace.EnableDocking();
+        EditorTheme.Apply();
         return core;
+    }
+
+    /// <summary>The <c>/user</c> mount: this machine's config directory, and nothing above it.</summary>
+    /// <remarks>A <c>SubFileSystem</c> rather than a physical root, so a path that climbs out of
+    /// the editor's own directory throws instead of resolving somewhere in the user's home. The
+    /// containment is the mount's job, not a check written at each call site.</remarks>
+    private static SubFileSystem UserMount()
+    {
+        var physical = new PhysicalFileSystem();
+        var root = physical.ConvertPathFromInternal(
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.Create),
+                "ParadiseEditor"));
+        if (!physical.DirectoryExists(root)) physical.CreateDirectory(root);
+        return new SubFileSystem(physical, root, owned: true);
     }
 
     private static string? ValueAfter(string[] args, string flag)

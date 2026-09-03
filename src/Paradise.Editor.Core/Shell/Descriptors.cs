@@ -18,7 +18,14 @@ public sealed record WindowDescriptor(string Id, string Title, DockArea DefaultA
 public sealed record WorkspaceDescriptor(string Id, string Title);
 
 /// <summary>A menu item is a label pointing at an operator; it holds no code.</summary>
-public sealed record MenuEntry(string Menu, string Label, string OperatorId, int Order = 0);
+public sealed record MenuEntry(string Menu, string Label, string OperatorId, int Order = 0)
+{
+    /// <summary>Use as the <c>Label</c> to draw a divider instead of an item.</summary>
+    /// <remarks>A sentinel rather than a separate registry entry type, because a separator is
+    /// positional — it belongs at an <c>Order</c> between two items, and a second kind of entry
+    /// would need its own ordering rule to say so.</remarks>
+    public const string Separator = "-";
+}
 
 /// <summary>A chord pointing at an operator, optionally only while an input context is active.</summary>
 /// <remarks>The chord is PARSED, not a string: it is compared against every key event, and a

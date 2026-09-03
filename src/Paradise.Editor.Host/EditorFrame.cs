@@ -1,37 +1,71 @@
+using Microsoft.Extensions.Logging;
+using Paradise.Editor.Core;
+using Paradise.Editor.Core.Document;
+using Paradise.Editor.Core.Extensibility;
+using Paradise.Editor.Core.Operators;
 using Paradise.Editor.ImGui;
-using ImGuiApi = Hexa.NET.ImGui.ImGui;
+using Paradise.Editor.ImGui.Shell;
+using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Editor.Host;
 
-/// <summary>What the editor draws each frame.</summary>
+/// <summary>The editor, composed for the standalone host: a session, the registries the shell
+/// contributes to, and the shell itself.</summary>
 /// <remarks>
 /// <para>
-/// One type for both run modes so the windowed run and the headless capture cannot drift: a
-/// screenshot that proves nothing about what a person sees is worse than no screenshot.
+/// The composition is HERE rather than in the editor library because it is the part that differs
+/// between hosts: in-game the game supplies the scene provider, the filesystem and the layout
+/// store, and constructs the same three objects around them. Nothing below this file knows which
+/// host it is in.
 /// </para>
 /// <para>
-/// E0 draws the dockspace and ImGui's own demo window docked into it. The demo is a deliberate
-/// choice of subject, not a placeholder to delete later: it exercises far more of ImGui's widget
-/// surface — tables, plots, trees, popups, text input — than any panel written by hand at this
-/// stage would, so the capture is a real test of the texture protocol and the renderer. E1
-/// replaces the seed recipe and adds the shell around it.
+/// One type for both run modes, so the headless capture and the windowed run cannot drift — a
+/// screenshot that proves nothing about what a person sees is worse than no screenshot.
 /// </para>
 /// </remarks>
-internal sealed class EditorFrame
+internal sealed class EditorFrame : IDisposable
 {
-    private const string DemoWindowTitle = "Dear ImGui Demo";
+    private readonly EditorShell _shell;
+    private readonly IWorkspaceLayoutStore? _layouts;
 
-    private readonly EditorDockspace _dockspace = new(
-        "ParadiseEditorDockspace",
-        root => EditorDockspace.Dock(DemoWindowTitle, root));
-
-    private bool _showDemo = true;
-
-    public EditorDockspace Dockspace => _dockspace;
-
-    public void Draw()
+    public EditorFrame(IWorkspaceLayoutStore? layouts = null, ILogger? log = null)
     {
-        _dockspace.Draw();
-        if (_showDemo) ImGuiApi.ShowDemoWindow(ref _showDemo);
+        _layouts = layouts;
+
+        // No project is open yet, so the document is empty and lives in memory. E3 swaps this for
+        // a provider over assets/; nothing else here changes when it does.
+        Session = new EditorSession(
+            new InMemorySceneProvider(),
+            new MemoryFileSystem(),
+            HostCapabilities.Standalone,
+            log);
+
+        Registries = new EditorRegistries();
+        Dispatcher = new OperatorDispatcher(Session, Registries.Operators, log);
+
+        var layout = new EditorLayout(layouts);
+        _shell = new EditorShell(Dispatcher, Registries, layout);
+        new ShellExtension(_shell).Register(new EditorRegistrar(Registries, new OwnerToken(ShellExtension.OwnerId)));
+    }
+
+    public EditorSession Session { get; }
+
+    public EditorRegistries Registries { get; }
+
+    public OperatorDispatcher Dispatcher { get; }
+
+    public EditorLayout Layout => _shell.Layout;
+
+    public void Draw() => _shell.Draw();
+
+    public void Dispose() => _shell.Layout.Dispose();
+
+    /// <summary>Persist the arrangement when ImGui says it changed. Called once a frame; ImGui
+    /// raises the flag on its own timer rather than on every drag, so this is not a per-frame
+    /// write.</summary>
+    public void SaveLayoutIfChanged(bool wanted)
+    {
+        if (wanted && _layouts is not null) _shell.Layout.Save();
     }
 }
