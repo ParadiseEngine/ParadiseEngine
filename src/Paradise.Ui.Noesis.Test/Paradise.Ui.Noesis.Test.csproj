@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
+    <!-- The view takes its content mount from the caller; these mount memory. -->
+    <PackageReference Include="Zio" />
   </ItemGroup>
 
   <ItemGroup>

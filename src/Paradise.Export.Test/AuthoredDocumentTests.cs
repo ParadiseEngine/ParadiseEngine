@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Paradise.Authoring;
 using Paradise.Export.Data;
+using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Export.Tests;
 
@@ -230,20 +232,41 @@ public class AuthoredDocumentTests
     // ---- Load ---------------------------------------------------------------------------
 
     [Test]
-    public async Task load_reads_from_disk_and_names_the_file_in_an_error()
+    public async Task load_reads_from_the_mounted_filesystem_and_names_the_file_in_an_error()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"authored-{Guid.NewGuid():N}.json");
-        try
-        {
-            File.WriteAllText(path, """{ "Components": [ { "Id": "nope", "Data": {} } ] }""");
-            var thrown = Assert.Throws<InvalidDataException>(
-                () => AuthoredDocument.Load(path, new LedgeRegistry()));
-            await Assert.That(thrown!.Message).Contains(path);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        using var content = new MemoryFileSystem();
+        var path = (UPath)"/tuning/authored.json";
+        content.CreateDirectory(path.GetDirectory());
+        content.WriteAllText(path, """{ "Components": [ { "Id": "nope", "Data": {} } ] }""");
+
+        var thrown = Assert.Throws<InvalidDataException>(
+            () => AuthoredDocument.Load(content, path, new LedgeRegistry()));
+
+        await Assert.That(thrown!.Message).Contains(path.FullName);
+    }
+
+    /// <summary>
+    /// The form is the FILE's to declare, and it stays so through a mount: a build that writes
+    /// TOML hands the runtime a <c>.toml</c> document, and nothing between them is configured to
+    /// expect one.
+    /// </summary>
+    [Test]
+    public async Task load_bridges_a_toml_document_through_the_one_reader()
+    {
+        using var content = new MemoryFileSystem();
+        var path = (UPath)"/tuning/authored.toml";
+        content.CreateDirectory(path.GetDirectory());
+        content.WriteAllText(path, $"""
+            [[Components]]
+            Id = "{LedgeId}"
+
+            [Components.Data]
+            Label = "from toml"
+            """);
+
+        var document = AuthoredDocument.Load(content, path, new LedgeRegistry());
+
+        await Assert.That(document.Get<LedgeFixture>().Label).IsEqualTo("from toml");
     }
 
 

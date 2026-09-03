@@ -1,5 +1,7 @@
 using Paradise.Windowing;
 using WebGpuSharp;
+using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis.Test;
 
@@ -13,6 +15,10 @@ namespace Paradise.Ui.Noesis.Test;
 [NotInParallel]
 public class NoesisViewCoreTests
 {
+    /// <summary>Where the mounted XAML lives — the mount holds nothing else, so the name is
+    /// arbitrary and only has to agree with what MountXaml writes.</summary>
+    private const string XamlPath = "/main.xaml";
+
     private const string MinimalXaml = """
         <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
               Background="Transparent">
@@ -28,12 +34,13 @@ public class NoesisViewCoreTests
         public string Title { get; set; } = "hud";
     }
 
-    private static string WriteXamlToTempDir()
+    /// <summary>The UI tree these run against: one XAML in memory, mounted. No fixture on disk,
+    /// and nothing to clean up after a test that throws.</summary>
+    private static IFileSystem MountXaml(string xaml = MinimalXaml)
     {
-        var dir = Directory.CreateTempSubdirectory("noesis-host-test").FullName;
-        var path = System.IO.Path.Combine(dir, "main.xaml");
-        File.WriteAllText(path, MinimalXaml);
-        return path;
+        var content = new MemoryFileSystem();
+        content.WriteAllText(XamlPath, xaml);
+        return content;
     }
 
     private static Device? TryCreateDevice()
@@ -68,10 +75,9 @@ public class NoesisViewCoreTests
     [Test]
     public async Task sim_tick_creates_the_view_and_applies_the_data_context()
     {
-        var xamlPath = WriteXamlToTempDir();
         var dataContext = new TestViewModel();
         var simTicks = 0;
-        var core = new NoesisViewCore(xamlPath, 320, 240, dataContext, () => simTicks++);
+        var core = new NoesisViewCore(MountXaml(), XamlPath, 320, 240, dataContext, () => simTicks++);
 
         var beforeCreation = core.TryUpdateRenderTree();
         try
@@ -116,8 +122,7 @@ public class NoesisViewCoreTests
     [Test]
     public async Task key_and_text_events_reach_the_view_and_unmapped_keys_do_not()
     {
-        var xamlPath = WriteXamlToTempDir();
-        var core = new NoesisViewCore(xamlPath, 200, 100);
+        var core = new NoesisViewCore(MountXaml(), XamlPath, 200, 100);
 
         try
         {
@@ -168,8 +173,8 @@ public class NoesisViewCoreTests
     [Test]
     public async Task scroll_events_reach_the_view_including_sub_notch_trackpad_deltas()
     {
-        var xamlPath = WriteXamlToTempDir(); // a hit-testable Grid — the wheel needs something under it
-        var core = new NoesisViewCore(xamlPath, 200, 100);
+        // a hit-testable Grid — the wheel needs something under it
+        var core = new NoesisViewCore(MountXaml(), XamlPath, 200, 100);
 
         try
         {
@@ -234,10 +239,7 @@ public class NoesisViewCoreTests
               </Grid>
             </Grid>
             """;
-        var dir = Directory.CreateTempSubdirectory("noesis-host-test-opacity").FullName;
-        var xamlPath = System.IO.Path.Combine(dir, "main.xaml");
-        File.WriteAllText(xamlPath, opacityXaml);
-        var core = new NoesisViewCore(xamlPath, 128, 128);
+        var core = new NoesisViewCore(MountXaml(opacityXaml), XamlPath, 128, 128);
         var overlay = new NoesisOverlayRenderer(core, device, format);
         try
         {
@@ -360,10 +362,7 @@ public class NoesisViewCoreTests
               </Grid>
             </Grid>
             """;
-        var dir = Directory.CreateTempSubdirectory("noesis-host-test-threads").FullName;
-        var xamlPath = System.IO.Path.Combine(dir, "main.xaml");
-        File.WriteAllText(xamlPath, opacityXaml);
-        var core = new NoesisViewCore(xamlPath, 128, 128);
+        var core = new NoesisViewCore(MountXaml(opacityXaml), XamlPath, 128, 128);
         var overlay = new NoesisOverlayRenderer(core, device, format);
 
         // Sim thread: creates the view on its own thread (pinning its dispatcher there, like
@@ -486,8 +485,7 @@ public class NoesisViewCoreTests
             return;
         }
 
-        var xamlPath = WriteXamlToTempDir();
-        var core = new NoesisViewCore(xamlPath, 256, 256);
+        var core = new NoesisViewCore(MountXaml(), XamlPath, 256, 256);
         var overlay = new NoesisOverlayRenderer(core, device, WebGpuSharp.TextureFormat.RGBA8Unorm);
 
         try

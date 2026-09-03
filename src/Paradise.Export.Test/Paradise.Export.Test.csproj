@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
+    <!-- The document loader takes an IFileSystem; a memory mount is what these read out of. -->
+    <PackageReference Include="Zio" />
   </ItemGroup>
 
   <ItemGroup>

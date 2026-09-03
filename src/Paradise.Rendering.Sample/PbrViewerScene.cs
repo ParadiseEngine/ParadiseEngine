@@ -5,6 +5,8 @@ using Paradise.Rendering;
 using Paradise.Rendering.Pbr;
 using Paradise.Rendering.WebGPU;
 using Paradise.Assets.Gltf;
+using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Rendering.Sample;
 
@@ -30,8 +32,14 @@ internal sealed class PbrViewerScene : IDisposable
 
         if (glbPath is not null)
         {
-            var glbDir = Path.GetDirectoryName(Path.GetFullPath(glbPath))!;
-            var asset = GltfSceneReader.Read(File.ReadAllBytes(glbPath), uri => ReadSidecarImage(glbDir, uri));
+            // The GLB's own directory, mounted: KTX2 textures are sidecars next to the file, and
+            // the mount is what confines the uris inside the GLB to them.
+            using var physical = new PhysicalFileSystem();
+            var glbFile = physical.ConvertPathFromInternal(Path.GetFullPath(glbPath));
+            // owned: false — the mount is borrowed, and `physical` is disposed by its own using.
+            using var sidecars = new SubFileSystem(physical, glbFile.GetDirectory(), owned: false);
+            var asset = GltfSceneReader.Read(
+                physical.ReadAllBytes(glbFile), uri => ReadSidecarImage(sidecars, uri));
             var meshes = _pbr.UploadMesh(asset);
             if (asset.Instances.Length == 0)
                 throw new InvalidOperationException($"'{glbPath}' has no mesh instances in its default scene.");
@@ -118,14 +126,32 @@ internal sealed class PbrViewerScene : IDisposable
 
     public void Dispose() => _pbr.Dispose();
 
-    // The uri comes from untrusted GLB content, so confine the resolved path to glbDir — reject
-    // absolute uris (Path.Combine passes those through verbatim) and any ".." escape.
-    private static byte[] ReadSidecarImage(string glbDir, string uri)
+    // The uri comes from untrusted GLB content, and the mount is the confinement: an absolute uri
+    // is a path INSIDE the mount rather than one that escapes it, and a ".." that climbs past the
+    // root is refused by UPath itself. Neither failure is re-implemented here — both are only
+    // dressed, so the message names the URI THE GLB ASKED FOR. A raw IO error names the resolved
+    // path, which is not the string anyone can find in the file they are debugging.
+    private static byte[] ReadSidecarImage(IFileSystem sidecars, string uri)
     {
-        var root = glbDir.EndsWith(Path.DirectorySeparatorChar) ? glbDir : glbDir + Path.DirectorySeparatorChar;
-        var resolved = Path.GetFullPath(Path.Combine(glbDir, uri.Replace('/', Path.DirectorySeparatorChar)));
-        if (!resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-            throw new NotSupportedException($"Image uri '{uri}' resolves outside the GLB directory.");
-        return File.ReadAllBytes(resolved);
+        UPath path;
+        try
+        {
+            path = UPath.Root / uri;
+        }
+        catch (ArgumentException e)
+        {
+            throw new NotSupportedException($"Image uri '{uri}' resolves outside the GLB directory.", e);
+        }
+
+        try
+        {
+            return sidecars.ReadAllBytes(path);
+        }
+        catch (FileNotFoundException e)
+        {
+            throw new FileNotFoundException(
+                $"The GLB names image '{uri}', which is not beside it at '{path}'.",
+                path.FullName, e);
+        }
     }
 }

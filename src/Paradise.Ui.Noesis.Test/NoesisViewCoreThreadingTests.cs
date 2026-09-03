@@ -1,4 +1,7 @@
 using Paradise.Windowing;
+using Zio;
+using Zio.FileSystems;
+
 namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
@@ -26,12 +29,11 @@ public class NoesisViewCoreThreadingTests
 
     private sealed class Counters { public int Moves, Downs, Ups; }
 
-    private static NoesisViewCore NewCore(string tag)
+    private static NoesisViewCore NewCore()
     {
-        var dir = Directory.CreateTempSubdirectory(tag).FullName;
-        var path = Path.Combine(dir, "main.xaml");
-        File.WriteAllText(path, Xaml);
-        return new NoesisViewCore(path, 200, 100);
+        var content = new MemoryFileSystem();
+        content.WriteAllText("/main.xaml", Xaml);
+        return new NoesisViewCore(content, "/main.xaml", 200, 100);
     }
 
     /// <summary>Count what reaches the tree and mark it handled. View thread only.</summary>
@@ -55,7 +57,7 @@ public class NoesisViewCoreThreadingTests
     [Test]
     public async Task input_on_the_views_own_thread_is_handled()
     {
-        var core = NewCore("noesis-same-thread");
+        var core = NewCore();
         try { core.Input.Tick(0.0); }
         catch (DllNotFoundException ex) { Skip.Test($"Noesis native library not loadable: {ex.Message}"); return; }
 
@@ -76,7 +78,7 @@ public class NoesisViewCoreThreadingTests
     public async Task input_from_another_thread_reaches_the_view_and_reports_its_verdict()
     {
         const int Rounds = 100;
-        var core = NewCore("noesis-cross-thread");
+        var core = NewCore();
         var counters = new Counters();
         Exception? ownerFailure = null;
         using var ready = new ManualResetEventSlim();

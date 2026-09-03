@@ -1,4 +1,7 @@
 using Paradise.Windowing;
+using Zio;
+using Zio.FileSystems;
+
 namespace Paradise.Ui.Noesis.Test;
 
 /// <summary>
@@ -25,12 +28,11 @@ public class HitTestVisibilityTests
     /// <summary>Click the centre and report whether the inner element caught it. Null when
     /// Noesis is unavailable.</summary>
     /// <param name="hasInner">Whether the XAML declares an <c>Inner</c> element to watch.</param>
-    private static (bool Handled, int Reached)? ClickCentre(string xaml, string tag, bool hasInner = true)
+    private static (bool Handled, int Reached)? ClickCentre(string xaml, bool hasInner = true)
     {
-        var dir = Directory.CreateTempSubdirectory(tag).FullName;
-        var path = Path.Combine(dir, "main.xaml");
-        File.WriteAllText(path, xaml);
-        var core = new NoesisViewCore(path, 200, 100);
+        var content = new MemoryFileSystem();
+        content.WriteAllText("/main.xaml", xaml);
+        var core = new NoesisViewCore(content, "/main.xaml", 200, 100);
 
         try { core.Input.Tick(0.0); }
         catch (DllNotFoundException) { return null; }
@@ -59,7 +61,7 @@ public class HitTestVisibilityTests
                       Background="{x:Null}" IsHitTestVisible="False">
               <Grid x:Name="Inner" IsHitTestVisible="True" Background="#FF203040"/>
             </Grid>
-            """, "hit-nested");
+            """);
         if (result is not { } r) { Skip.Test("Noesis native library not loadable"); return; }
 
         await Assert.That(r.Reached).IsEqualTo(0);
@@ -74,7 +76,7 @@ public class HitTestVisibilityTests
                       Background="{x:Null}">
               <Grid x:Name="Inner" Background="#FF203040"/>
             </Grid>
-            """, "hit-fixed");
+            """);
         if (result is not { } r) { Skip.Test("Noesis native library not loadable"); return; }
 
         await Assert.That(r.Reached).IsEqualTo(1);
@@ -98,7 +100,7 @@ public class HitTestVisibilityTests
         var result = ClickCentre(
             Header + """
                       Background="{x:Null}"/>
-            """, "hit-empty", hasInner: false);
+            """, hasInner: false);
         if (result is not { } r) { Skip.Test("Noesis native library not loadable"); return; }
 
         await Assert.That(r.Handled).IsFalse();
