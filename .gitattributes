@@ -1,0 +1,31 @@
+# Line endings, decided here rather than by each contributor's Git install.
+#
+# Without this file, `core.autocrlf=true` — Git for Windows' INSTALL DEFAULT — rewrites LF to
+# CRLF on checkout. That is invisible for a .cs file and fatal for the parity corpus, whose whole
+# purpose is to be compared byte for byte: three of its four fixtures failed on every Windows
+# clone while CI, which is ubuntu-latest throughout, never saw it (issue #237).
+
+# The working tree matches what .editorconfig already says every file is: `end_of_line = lf`.
+# `text=auto` still lets Git detect and leave binaries alone; the explicit `-text` rules below
+# are belt-and-braces for the ones that would be unrecoverable if detection ever slipped.
+* text=auto eol=lf
+
+# The exception .editorconfig also makes: a batch file must have CRLF or cmd.exe mis-parses it.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# BYTE FIXTURES, not text that happens to be in a file. The parity corpus is one half of a
+# cross-language contract: the same bytes are re-emitted and compared by ParityCorpusTests here
+# and by the Blender addon's tests/unit/test_parity_corpus.py over its own copy, which must stay
+# byte-identical (ParadiseEngine#209, ParadiseBlenderEditor#29). Anything that rewrites a byte in
+# them — an autocrlf checkout, a helpful editor — breaks the contract rather than reformatting a
+# file, so they are marked binary and Git will not touch them at all.
+src/Paradise.Assets.Documents.Test/Fixtures/parity/** -text
+
+# Vendored native binaries. `bin/ktx` has NO EXTENSION and is a Mach-O executable, so it is named
+# by path: an extension rule cannot reach it and auto-detection is the only thing that would.
+*.ktx2 -text
+*.dylib -text
+*.so -text
+*.dll -text
+third_party/tools/KTX-Software/Darwin-arm64/bin/ktx -text
