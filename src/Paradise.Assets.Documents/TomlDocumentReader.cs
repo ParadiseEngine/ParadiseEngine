@@ -6,18 +6,21 @@ namespace Paradise.Assets.Documents;
 /// <summary>Shared plumbing of the strict readers. Untyped because payloads are open; strict about unknown keys because a typo a lenient reader ignored is dropped by the next machine rewrite, silently.</summary>
 internal static class TomlDocumentReader
 {
-    private static readonly TomlSerializerOptions s_validation = new() { DuplicateKeyHandling = TomlDuplicateKeyHandling.Error };
-
     public static TomlTable Parse(string toml, Func<string, Exception> fail)
     {
-        // Validated on the SYNTAX tree first: binding into TomlTable ignores DuplicateKeyHandling
-        // and keeps the last value, which silently dropped the first (issue #198). The parser's
-        // semantic pass refuses a redefined key at every level, as TOML and the Python mirror's
-        // tomllib do.
-        var syntax = Tomlyn.Parsing.SyntaxParser.Parse(toml, s_validation, sourceName: null, validate: true);
+        // Duplicates are refused on the SYNTAX tree first: binding into TomlTable keeps the last
+        // value, which silently dropped the first (issue #198). Tomlyn's own semantic pass
+        // (validate: true) is not used for it — see TomlDuplicateKeys for the valid document it
+        // refuses.
+        var syntax = Tomlyn.Parsing.SyntaxParser.Parse(toml, sourceName: null, validate: false);
         if (syntax.HasErrors)
         {
             throw fail($"is not valid TOML ({string.Join("; ", syntax.Diagnostics.Select(static d => d.Message))})");
+        }
+
+        if (TomlDuplicateKeys.FindDuplicate(syntax) is { } duplicate)
+        {
+            throw fail($"is not valid TOML ({duplicate})");
         }
 
         TomlTable? table;

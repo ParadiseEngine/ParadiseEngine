@@ -284,6 +284,36 @@ public class PrefabDocumentTests
         await Assert.That(error.Message).Contains("not valid TOML");
     }
 
+    /// <summary>The shape Tomlyn's own validator refuses (2.10.1): a subtable under one array element, then the same name as a plain key in the next element. A light's colour table followed by a direction's array is exactly this, and tomllib accepts it.</summary>
+    [Test]
+    public async Task a_subtable_in_one_component_and_a_plain_key_in_the_next_are_distinct_keys()
+    {
+        var text = "schema_version = 1\n" + Object(CrateGuid, extra:
+            "\n[[objects.components]]\nid = \"" + Guid.NewGuid() + "\"\ntype = \"Colour\"\n\n[objects.components.Value]\nr = 1.0\n" +
+            "\n[[objects.components]]\nid = \"" + Guid.NewGuid() + "\"\ntype = \"Direction\"\nValue = [0.0, -1.0, 0.0]\n");
+
+        var document = PrefabDocumentSerializer.Parse(text, "x.prefab");
+
+        await Assert.That(document.Objects[0].Components.Count).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task a_duplicate_key_inside_an_array_element_is_refused()
+    {
+        var error = Rejects("schema_version = 1\n" + Object(CrateGuid, extra: "Name = \"twice\"\n"));
+
+        await Assert.That(error.Message).Contains("not valid TOML");
+        await Assert.That(error.Message).Contains("Name");
+    }
+
+    [Test]
+    public async Task a_key_defined_as_a_value_cannot_be_reopened_as_a_table()
+    {
+        var error = Rejects("schema_version = 1\n" + Object(CrateGuid, extra: "Value = 1\n\n[objects.components.Value]\nr = 1.0\n"));
+
+        await Assert.That(error.Message).Contains("not valid TOML");
+    }
+
     [Test]
     public async Task the_single_root_is_inferred_from_the_absence_of_a_parent()
     {
