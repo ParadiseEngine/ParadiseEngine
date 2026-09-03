@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace Paradise.Ui.ImGui;
@@ -18,61 +19,41 @@ namespace Paradise.Ui.ImGui;
 /// create-then-update-then-destroy on one id is a sequence where every step assumes the last
 /// one happened. A queue, not a dictionary of latest-wins state.
 ///
-/// Locking is on a plain <c>object</c> rather than <c>System.Threading.Lock</c>: Coyote (1.7.11)
-/// rewrites <c>Monitor.Enter</c>/<c>Exit</c> and cannot intercept <c>Lock.EnterScope</c>, so the
-/// newer type would make every interleaving around this queue invisible to
-/// <c>Paradise.Ui.ImGui.CoyoteTest</c>. The lock is cold (a handful of ops per session), so
-/// there is nothing to win by it anyway.
+/// A <see cref="ConcurrentQueue{T}"/> and no lock, because there is no compound state to guard:
+/// an append is one operation and a drain is a run of them, so the queue's own atomicity is the
+/// whole requirement. (<see cref="ImGuiFrameExchange"/> does take a lock — see there for what
+/// makes that one different.) Coyote rewrites concurrent collections, so this stays schedulable
+/// by <c>Paradise.Ui.ImGui.CoyoteTest</c>.
 ///
 /// This type is deliberately free of any ImGui or GPU call — see
 /// <see cref="ImGuiTextureCapture"/> for the native half. That split is what lets the Coyote
 /// suite schedule it at all.</summary>
 public sealed class ImGuiTextureOps
 {
-    private readonly object _lock = new();
-    private readonly Queue<ImGuiTextureOp> _pending = new();
+    private readonly ConcurrentQueue<ImGuiTextureOp> _pending = new();
 
-    /// <summary>ImGui thread: append one operation. Never blocks on the render thread beyond
-    /// the lock.</summary>
-    public void Enqueue(in ImGuiTextureOp op)
-    {
-        lock (_lock)
-        {
-            _pending.Enqueue(op);
-        }
-    }
+    /// <summary>ImGui thread: append one operation.</summary>
+    public void Enqueue(in ImGuiTextureOp op) => _pending.Enqueue(op);
 
     /// <summary>Render thread: move every pending operation into <paramref name="into"/>, in
     /// enqueue order, and return how many. <paramref name="into"/> is CLEARED first, so callers
     /// can keep one scratch list for the process lifetime.
     ///
-    /// Draining into a caller-owned list rather than returning a snapshot keeps the lock held
-    /// for the copy only — applying an op touches the GPU, and holding a lock across that would
-    /// stall the ImGui thread on the render thread's slowest work.</summary>
+    /// Drains until momentarily empty rather than to a count fixed on entry, so an op enqueued
+    /// mid-drain may ride along. That is not a hazard but the direction the slack has to fall:
+    /// applying a texture the CURRENT snapshot does not name yet is free, while missing one it
+    /// does name is the failure this queue exists to prevent.</summary>
     public int DrainTo(List<ImGuiTextureOp> into)
     {
         into.Clear();
-        lock (_lock)
+        while (_pending.TryDequeue(out var op))
         {
-            while (_pending.Count > 0)
-            {
-                into.Add(_pending.Dequeue());
-            }
+            into.Add(op);
         }
         return into.Count;
     }
 
     /// <summary>How many operations are waiting. Diagnostics only — a caller that branches on
-    /// this before enqueuing or draining has reintroduced the check-then-act race the Coyote
-    /// suite exists to catch.</summary>
-    public int PendingCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _pending.Count;
-            }
-        }
-    }
+    /// this before enqueuing or draining has reintroduced a check-then-act race.</summary>
+    public int PendingCount => _pending.Count;
 }

@@ -20,8 +20,20 @@ namespace Paradise.Ui.ImGui;
 /// back to the free pool to be overwritten, while its ops stay queued until the render thread has
 /// applied them.
 ///
-/// Locking is on a plain <c>object</c> so <c>Paradise.Ui.ImGui.CoyoteTest</c> can schedule it —
-/// Coyote 1.7.11 does not intercept <c>Lock.EnterScope</c>.</summary>
+/// <b>Why a lock, where <see cref="ImGuiTextureOps"/> needs none.</b> This is not a queue but a
+/// three-slot state machine, and every transition touches more than one slot at once: publishing
+/// recycles the old latest AND installs the new one; acquiring retires the current rendering AND
+/// promotes AND clears latest. Making each slot individually atomic — a <c>ConcurrentStack</c>
+/// for the pool — would leave the race intact: a publish that reads <c>_latest</c>, loses the
+/// thread to an acquire that promotes that same snapshot, and then recycles it, hands the sim
+/// thread the buffer the render thread is drawing. An <c>Interlocked.Exchange</c> pair would in
+/// fact be correct here, and is not used: it buys nothing at two pointer swaps per frame, and it
+/// would rest on an unwritten "render thread only" rule for <c>_rendering</c> that the lock makes
+/// unnecessary to argue.
+///
+/// The lock is a plain <c>object</c> rather than <c>System.Threading.Lock</c> so that
+/// <c>Paradise.Ui.ImGui.CoyoteTest</c> can schedule it — Coyote 1.7.11 rewrites
+/// <c>Monitor.Enter</c>/<c>Exit</c> and does not intercept <c>Lock.EnterScope</c>.</summary>
 public sealed class ImGuiFrameExchange
 {
     private readonly object _lock = new();

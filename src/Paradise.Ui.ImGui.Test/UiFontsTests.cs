@@ -98,30 +98,80 @@ public class UiFontsTests
         await Assert.That(ops[0].Kind).IsEqualTo(ImGuiTextureOpKind.Create);
     }
 
+    /// <summary>Lookup is by NAME in the mount, so a font the caller overlays wins over the
+    /// system copy — this is the whole reason the search moved off absolute paths.</summary>
     [Test]
-    public async Task the_system_probe_returns_a_font_this_machine_can_actually_load()
+    public async Task an_overlaid_font_shadows_a_system_font_of_the_same_name()
+    {
+        var name = UiFonts.CjkFontFileNames[0];
+        using var system = new MemoryFileSystem();
+        system.WriteAllBytes(UPath.Combine("/", name), Sfnt(0x00010000u));
+        using var game = new MemoryFileSystem();
+        game.WriteAllBytes(UPath.Combine("/", name), Sfnt(0x74727565u));
+
+        using var fonts = new AggregateFileSystem(owned: false);
+        fonts.AddFileSystem(system);
+        fonts.AddFileSystem(game); // last added wins
+
+        var found = UiFonts.FindCjkFont(fonts, 18f);
+        await Assert.That(found).IsNotNull();
+        await Assert.That(found!.Path.GetName()).IsEqualTo(name);
+        // The overlay decided which bytes answer, not the layer order of the paths.
+        await Assert.That(fonts.FindFirstFileSystemEntry(found.Path)!.FileSystem).IsSameReferenceAs(game);
+    }
+
+    /// <summary>Linux nests fonts under <c>truetype/&lt;family&gt;/</c>, so a name that is not at
+    /// the root still has to be found — and preference must come from the list rather than from
+    /// wherever the walk reached first.</summary>
+    [Test]
+    public async Task a_nested_font_is_found_and_the_list_still_sets_preference()
+    {
+        var preferred = UiFonts.CjkFontFileNames[0];
+        var alsoPresent = UiFonts.CjkFontFileNames[^1];
+        using var fonts = new MemoryFileSystem();
+        fonts.CreateDirectory("/truetype/wqy");
+        fonts.CreateDirectory("/truetype/aaa");
+        // The less-preferred name sits in the directory a walk reaches first.
+        fonts.WriteAllBytes(UPath.Combine("/truetype/aaa", alsoPresent), Sfnt(0x00010000u));
+        fonts.WriteAllBytes(UPath.Combine("/truetype/wqy", preferred), Sfnt(0x00010000u));
+
+        var found = UiFonts.FindCjkFont(fonts, 18f);
+        await Assert.That(found!.Path.GetName()).IsEqualTo(preferred);
+    }
+
+    [Test]
+    public async Task a_mount_with_no_known_cjk_font_reports_nothing()
+    {
+        using var fonts = Mount("/arial.ttf", Sfnt(0x00010000u));
+        await Assert.That(UiFonts.FindCjkFont(fonts, 18f)).IsNull();
+    }
+
+    [Test]
+    public async Task mounting_system_fonts_yields_a_font_this_machine_can_actually_load()
     {
         using var host = new PhysicalFileSystem();
-        var font = UiFonts.FindSystemCjkFont(host, 18f);
+        using var fonts = UiFonts.MountSystemFonts(host);
+        var font = UiFonts.FindCjkFont(fonts, 18f);
         if (font is null)
         {
             Skip.Test("No stb-loadable CJK system font on this machine.");
             return;
         }
 
-        // The probe hands back a path in the MOUNT, not the host path it started from.
-        await Assert.That(font.Content).IsSameReferenceAs(host);
+        // The search hands back a path in the MOUNT, not the host path a directory started from.
+        await Assert.That(font.Content).IsSameReferenceAs((IFileSystem)fonts);
         await Assert.That(font.SizePixels).IsEqualTo(18f);
         await Assert.That(UiFonts.IsStbLoadableTrueType(font.Content, font.Path)).IsTrue();
     }
 
-    /// <summary>The probe's own output, loaded for real — the only test that puts a multi-megabyte
-    /// system font through stb and asks for a glyph it does not have in the default font.</summary>
+    /// <summary>The search's own output, loaded for real — the only test that puts a
+    /// multi-megabyte system font through stb and asks for a glyph the default font lacks.</summary>
     [Test]
     public async Task a_system_cjk_font_rasterizes_new_glyphs_on_demand()
     {
         using var host = new PhysicalFileSystem();
-        var font = UiFonts.FindSystemCjkFont(host, 18f);
+        using var fonts = UiFonts.MountSystemFonts(host);
+        var font = UiFonts.FindCjkFont(fonts, 18f);
         if (font is null)
         {
             Skip.Test("No stb-loadable CJK system font on this machine.");
