@@ -97,12 +97,22 @@ correct rather than depending on this reimplementation of MEL's formatting.
 
 The engine logs from threads it did not create: Dawn's uncaptured-error callback, Noesis's log
 callback, SDL. `ILogger` promises no thread affinity, so **thread safety is a requirement on the
-sink**, not something the abstraction provides. `ParadiseConsoleLoggerProvider` and
-`CollectingLogger` both serialise on a lock; a host installing its own provider owns the same
+sink**, not something the abstraction provides. A host installing its own provider owns the same
 requirement.
 
-Both lock on an `object` rather than `System.Threading.Lock`, because they are reachable from the
-Coyote suites — see AGENTS.md.
+The two sinks here meet it differently, and the difference is the useful part:
+
+- **`ParadiseConsoleLoggerProvider` holds a lock**, because what it shares is a `TextWriter`. Two
+  threads must not interleave halfway through a line — that is how a device-lost report becomes
+  unreadable — and the prefix, the message and an exception are several writes that have to land
+  together. No concurrent collection helps with that; the resource is the writer.
+- **`CollectingLogger` holds none.** Its records live in a `ConcurrentQueue`, and every operation
+  on it is single-step — append one record, snapshot, clear — so there is nothing for a lock to
+  make atomic. Appending is then lock-free, which is what a native callback thread wants.
+
+The lock that remains is on an `object` rather than a `System.Threading.Lock`, because it is
+reachable from the Coyote suites — see AGENTS.md. Coyote schedules concurrent collections too, so
+the queue is equally visible to it.
 
 ## Testing what the engine reported
 

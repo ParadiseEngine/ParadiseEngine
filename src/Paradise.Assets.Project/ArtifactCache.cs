@@ -113,7 +113,7 @@ public sealed partial class ArtifactCache
         catch (Exception error) when (IsRecoverable(error))
         {
             TryDelete(destinationFileSystem, destination);
-            Warn($"could not reuse '{entry}' ({error.Message}); regenerating");
+            LogReuseFailed(_log, entry, error.Message);
             return false;
         }
 
@@ -160,7 +160,7 @@ public sealed partial class ArtifactCache
         }
         catch (Exception error) when (IsRecoverable(error))
         {
-            Warn($"could not store '{source.GetName()}' ({error.Message})");
+            LogStoreFailed(_log, source, error.Message);
         }
         finally
         {
@@ -202,7 +202,7 @@ public sealed partial class ArtifactCache
             catch (Exception error) when (IsRecoverable(error))
             {
                 _enabled = false;
-                Warn($"'{Root}' is unusable ({error.Message}); caching is off");
+                LogRootUnusable(_log, Root, error.Message);
             }
 
             _prepared = true;
@@ -258,8 +258,18 @@ public sealed partial class ArtifactCache
 
     private static bool IsRecoverable(Exception error) => error is IOException or UnauthorizedAccessException;
 
-    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "Artifact cache: {Problem}.")]
-    private static partial void LogCacheWarning(ILogger logger, string problem);
+    // A message per site, each taking its UPath WHOLE, rather than one Warn(string) funnel every
+    // caller interpolated into first. The funnel could not help doing the thing this seam exists
+    // to prevent: by the time a path reached it, it was a string, and the host's renderer never
+    // saw it — so cache warnings printed raw mount paths (`/mnt/c/proj/...`) in the middle of a
+    // build whose every other line printed host or project-relative ones.
 
-    private void Warn(string message) => LogCacheWarning(_log, message);
+    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "Artifact cache: could not reuse '{Entry}' ({Reason}); regenerating.")]
+    private static partial void LogReuseFailed(ILogger logger, UPath entry, string reason);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "Artifact cache: could not store '{Source}' ({Reason}).")]
+    private static partial void LogStoreFailed(ILogger logger, UPath source, string reason);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Warning, Message = "Artifact cache: '{Root}' is unusable ({Reason}); caching is off.")]
+    private static partial void LogRootUnusable(ILogger logger, UPath root, string reason);
 }

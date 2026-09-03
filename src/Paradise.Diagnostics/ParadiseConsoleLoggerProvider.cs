@@ -85,6 +85,16 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
     /// MEL substitutes holes BY POSITION — a hole's name is a label for structured sinks, not a
     /// lookup key — so this walks holes and values in lockstep rather than matching names.
     /// </para>
+    /// <para>
+    /// The one case where that is not the whole truth: <c>FormattedLogValues</c> is positional and
+    /// counts HOLES, so <c>"{A} and {A}"</c> consumes two arguments there, while the
+    /// <c>[LoggerMessage]</c> generator maps holes to PARAMETERS by name and needs only one. A
+    /// template repeating a hole would therefore render its second occurrence as empty here while
+    /// the generated formatter renders it in full — a disagreement visible only when a renderer is
+    /// installed and claims something. No engine template repeats a hole, and matching by name
+    /// instead would break the positional case the engine does rely on, so this is recorded rather
+    /// than papered over. Do not add a repeated hole to a template without revisiting it.
+    /// </para>
     /// </remarks>
     private string? TryRender<TState>(TState state)
     {
@@ -95,11 +105,13 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         // The template lives in a trailing "{OriginalFormat}" entry; the preceding entries are the
         // arguments, in template order.
         string? template = null;
+        var formatIndex = -1;
         for (var i = values.Count - 1; i >= 0; i--)
         {
             if (values[i].Key == "{OriginalFormat}")
             {
                 template = values[i].Value as string;
+                formatIndex = i;
                 break;
             }
         }
@@ -111,12 +123,13 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         // the first answer away. That is not merely wasted work: RenderValue is arbitrary host
         // code, and the CLI's calls ConvertPathToInternal, so the duplicate was a real path
         // conversion per path per message.
-        var count = values.Count;
-        var rendered = new string?[count];
+        //
+        // The arguments are the entries BEFORE the template, which is why this stops at
+        // formatIndex rather than walking the whole list and skipping one entry by name.
+        var rendered = new string?[formatIndex];
         var claimed = false;
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < formatIndex; i++)
         {
-            if (values[i].Key == "{OriginalFormat}") continue;
             rendered[i] = render(values[i].Value);
             claimed |= rendered[i] is not null;
         }
@@ -182,9 +195,18 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         ref int argument,
         string? format)
     {
-        // More holes than arguments is a malformed template; leave the excess empty rather than
-        // throwing out of a logging call.
-        if (argument >= values.Count) return;
+        // Bounded by the ARGUMENTS, which end where the template entry begins — not by
+        // values.Count, which includes that entry. Bounding by Count would let a hole with no
+        // argument behind it append the template string as though it were a value: wrong output,
+        // silently, which is worse than the nothing appended here.
+        //
+        // This does not make a malformed template safe, and it is not trying to. A template with
+        // more holes than arguments throws — `FormattedLogValues.Count` is holes + 1, so MEL is
+        // asked for an argument that does not exist — and it throws through MEL's own formatter
+        // too (FormatException), with or without this sink. CA2017 catches it at build time. A
+        // sink that quietly rendered something here would disagree with every other provider and
+        // hide a bug the analyzer already reports.
+        if (argument >= rendered.Length) return;
 
         var index = argument++;
         if (rendered[index] is { } claimed)

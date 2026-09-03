@@ -10,7 +10,7 @@ namespace Paradise.Diagnostics.Test;
 /// dependency this package deliberately does not have, and the seam is defined over
 /// <see cref="object"/> precisely so that the sink never learns what a path is.
 /// </remarks>
-public class ParadiseConsoleLoggerTests
+public partial class ParadiseConsoleLoggerTests
 {
     /// <summary>Stands in for a Zio <c>UPath</c>: a value whose own ToString is not what a person wants to read.</summary>
     private readonly record struct MountedPath(string Value)
@@ -114,6 +114,74 @@ public class ParadiseConsoleLoggerTests
             new MountedPath("/a"), "1111", new MountedPath("/b"));
 
         await Assert.That(asked.Count).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task a_hole_with_no_argument_behind_it_appends_nothing_not_the_template()
+    {
+        // The substitution is bounded by the ARGUMENTS, which end where the template entry
+        // begins. Bounded by the list's Count instead — the template is the last entry — a
+        // surplus hole would append the template string as though it were a value: wrong output,
+        // silently, which is worse than the nothing asserted here.
+        //
+        // The state is hand-rolled because MEL's own FormattedLogValues cannot reach this: its
+        // Count is holes + 1, so a surplus hole makes it throw while being READ, before any of
+        // this runs (and it throws through MEL's own formatter too — that is CA2017's job, not
+        // this sink's). A generated [LoggerMessage] state is a different implementation whose
+        // shape this class does not control, so the bound is asserted rather than assumed.
+        var (logger, output, _) = Sink(
+            renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
+
+        var state = new StubState("first={A} second={B}", new MountedPath("/x"));
+        logger.Log(LogLevel.Information, default, state, null, static (s, _) => s.ToString()!);
+
+        await Assert.That(output.ToString().Trim()).IsEqualTo("[Test] first=</x> second=");
+    }
+
+    /// <summary>A log state shaped like MEL's, but tolerant of being read past its arguments.</summary>
+    private sealed class StubState(string template, params object?[] arguments)
+        : IReadOnlyList<KeyValuePair<string, object?>>
+    {
+        public int Count => arguments.Length + 1;
+
+        public KeyValuePair<string, object?> this[int index] => index == arguments.Length
+            ? new KeyValuePair<string, object?>("{OriginalFormat}", template)
+            : new KeyValuePair<string, object?>($"Arg{index}", arguments[index]);
+
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator()
+        {
+            for (var i = 0; i < Count; i++) yield return this[i];
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => template;
+    }
+
+    /// <summary>The state shape production actually logs through, which no other test here uses.</summary>
+    /// <remarks>
+    /// Every other test goes through <c>LogInformation</c>, which builds MEL's
+    /// <c>FormattedLogValues</c>. The engine logs through <c>[LoggerMessage]</c>, whose generated
+    /// state is a DIFFERENT implementation of the same interface — one entry per parameter rather
+    /// than one per hole. The substitution walks holes and entries in lockstep, so the two shapes
+    /// agreeing is an assumption worth holding down rather than inferring.
+    /// </remarks>
+    private static partial class Generated
+    {
+        [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "kept: {Destination} already holds {Guid}; dropped {Source}")]
+        public static partial void Kept(ILogger logger, MountedPath destination, string guid, MountedPath source);
+    }
+
+    [Test]
+    public async Task a_generated_logger_message_renders_through_the_same_seam()
+    {
+        var (logger, output, _) = Sink(
+            renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
+
+        Generated.Kept(logger, new MountedPath("/a/b"), "1111", new MountedPath("/c/d"));
+
+        await Assert.That(output.ToString().Trim())
+            .IsEqualTo("[Test] kept: </a/b> already holds 1111; dropped </c/d>");
     }
 
     [Test]

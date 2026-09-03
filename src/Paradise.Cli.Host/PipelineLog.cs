@@ -43,11 +43,17 @@ internal static class PipelineLog
     /// The pipeline used to hold the first half of this rule itself, in a `Display` helper on
     /// SidecarMaintainer. It never had the information for the second half.
     /// </remarks>
-    private static string Render(IFileSystem fileSystem, AssetProjectLayout layout, UPath path)
+    internal static string Render(IFileSystem fileSystem, AssetProjectLayout layout, UPath path)
     {
         var full = path.FullName;
         var root = layout.Assets.FullName;
-        if (full.StartsWith(root, StringComparison.Ordinal) && full.Length > root.Length)
+
+        // The separator check is the whole point of the third clause: without it a SIBLING whose
+        // name merely starts with the root's — `/game/assets-backup/x` against `/game/assets` —
+        // matches, and renders as `backup/x`, which reads like a path inside the project and is
+        // not one. A UPath is `/`-separated on every platform, so this is the only separator
+        // involved; Path.DirectorySeparatorChar here would be the bug AGENTS.md warns about.
+        if (full.Length > root.Length && full.StartsWith(root, StringComparison.Ordinal) && full[root.Length] == '/')
         {
             return full[(root.Length + 1)..];
         }
