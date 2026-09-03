@@ -1,0 +1,123 @@
+# shadows-directional_ssao-off_capture-on_bloom-on
+submit presenting passes=12 commands=85
+pass 00  colors=0
+         depth tex#0 view#0 load=Clear store=Store clear=1
+pass 01  colors=1
+         color0 view#1 load=Clear store=Store clear=(0.392,0.584,0.929,1)
+         depth tex#1 (default view) load=Clear store=Store clear=1
+pass 02  colors=1
+         color0 view#2 load=Clear store=Store clear=(0,0,0,0)
+         depth none
+pass 03  colors=1
+         color0 view#1 load=Load store=Store clear=(0.392,0.584,0.929,1)
+         depth tex#1 (default view) load=Load store=Store clear=1
+pass 04  colors=1
+         color0 view#3 load=Clear store=Store clear=(0,0,0,1)
+         depth none
+pass 05  colors=1
+         color0 view#4 load=Clear store=Store clear=(0,0,0,1)
+         depth none
+pass 06  colors=1
+         color0 view#5 load=Clear store=Store clear=(0,0,0,1)
+         depth none
+pass 07  colors=1
+         color0 view#6 load=Clear store=Store clear=(0,0,0,1)
+         depth none
+pass 08  colors=1
+         color0 view#5 load=Load store=Store clear=(0,0,0,1)
+         depth none
+pass 09  colors=1
+         color0 view#4 load=Load store=Store clear=(0,0,0,1)
+         depth none
+pass 10  colors=1
+         color0 view#3 load=Load store=Store clear=(0,0,0,1)
+         depth none
+pass 11  colors=1
+         color0 backbuffer load=Clear store=Store clear=(0,0,0,1)
+         depth none
+
+BeginPass 00
+  SetBindGroup 1 bg#0
+  SetPipeline pipeline#0
+  SetBindGroup 0 bg#1 dyn=0
+  SetVertexBuffer 0 buf#0 offset=0 size=1152
+  SetIndexBuffer buf#1 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetBindGroup 0 bg#1 dyn=256
+  SetVertexBuffer 0 buf#2 offset=0 size=1152
+  SetIndexBuffer buf#3 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+EndPass
+BeginPass 01
+  SetPipeline pipeline#1
+  SetBindGroup 0 bg#2
+  Draw verts=3 inst=1 first=0/0
+  SetBindGroup 1 bg#3
+  SetBindGroup 3 bg#4
+  SetPipeline pipeline#2
+  SetBindGroup 0 bg#5 dyn=0
+  SetBindGroup 2 bg#6
+  SetVertexBuffer 0 buf#0 offset=0 size=1152
+  SetIndexBuffer buf#1 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetBindGroup 0 bg#5 dyn=256
+  SetBindGroup 2 bg#7
+  SetVertexBuffer 0 buf#2 offset=0 size=1152
+  SetIndexBuffer buf#3 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+EndPass
+BeginPass 02
+  SetPipeline pipeline#3
+  SetBindGroup 0 bg#8
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 03
+  SetBindGroup 1 bg#3
+  SetBindGroup 3 bg#4
+  SetPipeline pipeline#4
+  SetBindGroup 0 bg#5 dyn=512
+  SetBindGroup 2 bg#9
+  SetVertexBuffer 0 buf#4 offset=0 size=1152
+  SetIndexBuffer buf#5 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+EndPass
+BeginPass 04
+  SetPipeline pipeline#5
+  SetBindGroup 0 bg#10
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 05
+  SetPipeline pipeline#6
+  SetBindGroup 0 bg#11
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 06
+  SetPipeline pipeline#6
+  SetBindGroup 0 bg#12
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 07
+  SetPipeline pipeline#6
+  SetBindGroup 0 bg#13
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 08
+  SetPipeline pipeline#7
+  SetBindGroup 0 bg#14
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 09
+  SetPipeline pipeline#7
+  SetBindGroup 0 bg#13
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 10
+  SetPipeline pipeline#7
+  SetBindGroup 0 bg#12
+  Draw verts=3 inst=1 first=0/0
+EndPass
+BeginPass 11
+  SetPipeline pipeline#8
+  SetBindGroup 0 bg#15
+  Draw verts=3 inst=1 first=0/0
+EndPass
