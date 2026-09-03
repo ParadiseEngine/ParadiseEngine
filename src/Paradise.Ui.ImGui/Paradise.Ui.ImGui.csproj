@@ -8,12 +8,18 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Title>Paradise.Ui.ImGui</Title>
     <PackageId>Paradise.Ui.ImGui</PackageId>
-    <Description>Dear ImGui overlay integration for Paradise Engine: ImGui.NET-driven debug UI rendered through the WebGPU backend.</Description>
+    <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through the WebGPU backend. Built on Hexa.NET.ImGui.</Description>
     <PackageTags>imgui;ui;overlay;webgpu;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ImGui.NET" />
+    <PackageReference Include="Hexa.NET.ImGui" />
     <PackageReference Include="WebGPUSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- IUiInput / WindowEvent: the ImGui core is one implementation of the engine's UI input
+         contract, stackable with the others through CompositeUiInput. -->
+    <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
   </ItemGroup>
 </Project>

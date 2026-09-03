@@ -1,0 +1,12 @@
+{
+	"AssembliesPath": ".",
+	"Assemblies": [
+		"Paradise.Ui.ImGui.CoyoteTest.dll",
+		"Paradise.Ui.ImGui.dll"
+	],
+	"OutputPath": ".",
+	"IsRewritingConcurrentCollections": true,
+	"IsRewritingUnitTests": false,
+	"IsRewritingThreads": true,
+	"IsDataRaceCheckingEnabled": true
+}

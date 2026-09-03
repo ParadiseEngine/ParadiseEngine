@@ -5,19 +5,35 @@ using WebGpuSharp;
 namespace Paradise.Ui.ImGui;
 
 /// <summary>WebGPU renderer for <see cref="ImGuiDrawSnapshot"/>s — a managed port of the
-/// official <c>imgui_impl_wgpu</c> backend, reduced to the classic static-font-atlas model
-/// (no 1.92 dynamic-texture protocol: its create/update statuses are the documented
-/// cross-thread hazard, and the font atlas is uploaded once at construction instead).
+/// official <c>imgui_impl_wgpu</c> backend, on Dear ImGui 1.92's dynamic-texture protocol.
+///
+/// <b>Textures arrive as work orders, not as an atlas.</b> There is no font-atlas upload here:
+/// 1.92 owns its textures and asks the backend to create, patch and free them as fonts are
+/// loaded and glyphs are rasterized on demand. Those requests reach this class as a queue of
+/// <see cref="ImGuiTextureOp"/>s (see <see cref="ImGuiTextureCapture"/> for how they are read
+/// off the ImGui thread), drained by <see cref="ApplyTextureOps"/> before each frame's
+/// <see cref="Render"/>. Textures the HOST owns — a scene render target shown in a panel — are
+/// still handed over directly by <see cref="RegisterTexture"/>, under ids at or above
+/// <see cref="FirstHostTextureId"/> so the two id spaces cannot collide.
 ///
 /// One pipeline: pos2f/uv2f/col-unorm8x4 vertices, straight-alpha SrcOver blending, ortho
 /// projection from the snapshot's display rect, per-command scissor. Draws with
 /// <c>LoadOp.Load</c> so the UI composites over whatever the frame already contains. Runs
-/// entirely on the render thread; snapshots arrive from the ImGui thread.</summary>
+/// entirely on the render thread; snapshots and texture ops arrive from the ImGui thread.</summary>
 public sealed class ImGuiWebGpuRenderer
 {
-    /// <summary>Texture id the font atlas registers under (set it via
-    /// <c>io.Fonts.SetTexID(ImGuiWebGpuRenderer.FontTextureId)</c>).</summary>
-    public static readonly nint FontTextureId = 1;
+    /// <summary>Where host-owned texture ids start. ImGui numbers its own textures from a
+    /// counter that starts at 1 and increments once per texture ever created, so a host that
+    /// registers above this bound cannot collide with it in any plausible session — while
+    /// still leaving both spaces plain integers a draw command can carry.</summary>
+    public const ulong FirstHostTextureId = 1UL << 32;
+
+    /// <summary>How many <see cref="ApplyTextureOps"/> calls a destroyed texture is kept alive
+    /// for. A <see cref="ImGuiTextureOpKind.Destroy"/> means ImGui has stopped REFERENCING the
+    /// texture, not that the GPU has stopped reading it: snapshots already submitted, and the
+    /// one in flight, may still name its id. Three frames is comfortably past the deepest
+    /// pipelining the handoff allows (one rendering + one latest + one being captured).</summary>
+    private const int DestroyDelayFrames = 3;
 
     private readonly Device _device;
     private readonly Queue _queue;
@@ -25,8 +41,12 @@ public sealed class ImGuiWebGpuRenderer
     private readonly WebGpuSharp.Buffer _uniformBuffer;
     private readonly Sampler _sampler;
     private readonly BindGroupLayout _bindGroupLayout;
-    private readonly Dictionary<nint, BindGroup> _bindGroups = new();
-    private readonly Dictionary<nint, TextureView> _textures = new();
+    private readonly Dictionary<ulong, BindGroup> _bindGroups = new();
+    private readonly Dictionary<ulong, TextureView> _textures = new();
+    /// <summary>Textures this renderer allocated itself (ImGui's), which it therefore has to
+    /// free. Host textures in <see cref="_textures"/> are the host's to dispose.</summary>
+    private readonly Dictionary<ulong, Texture> _ownedTextures = new();
+    private readonly List<(Texture Texture, int FramesLeft)> _retiring = new();
     private WebGpuSharp.Buffer? _vertexBuffer;
     private WebGpuSharp.Buffer? _indexBuffer;
     private ulong _vertexCapacity;
@@ -137,33 +157,126 @@ public sealed class ImGuiWebGpuRenderer
             ?? throw new InvalidOperationException("ImGui pipeline creation failed.");
     }
 
-    /// <summary>Upload the (static) font atlas and register it under
-    /// <see cref="FontTextureId"/>. Call once, before the first <see cref="Render"/>.</summary>
-    public void SetFontAtlas(ReadOnlySpan<byte> rgba, uint width, uint height)
+    /// <summary>Apply every operation in <paramref name="ops"/>, in order — the list
+    /// <c>ImGuiFrameExchange.AcquireForRender</c> just filled. Render thread only, once per
+    /// frame, BEFORE <see cref="Render"/>: the snapshot from that same acquire may name a texture
+    /// these ops are what create.
+    ///
+    /// Applying every op rather than the newest per texture is deliberate: the queue is a state
+    /// machine (create → update → destroy), and collapsing it would upload glyph patches into a
+    /// texture that does not exist yet.</summary>
+    public void ApplyTextureOps(IReadOnlyList<ImGuiTextureOp> ops)
     {
+        ArgumentNullException.ThrowIfNull(ops);
+        foreach (var op in ops)
+        {
+            switch (op.Kind)
+            {
+                case ImGuiTextureOpKind.Create:
+                    CreateTexture(op);
+                    break;
+                case ImGuiTextureOpKind.Update:
+                    UpdateTexture(op);
+                    break;
+                case ImGuiTextureOpKind.Destroy:
+                    RetireTexture(op.TextureId);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(ops), op.Kind, "Unknown ImGui texture op.");
+            }
+        }
+        AgeRetiredTextures();
+    }
+
+    /// <summary>Expose an arbitrary HOST-owned texture view to ImGui draws under
+    /// <paramref name="id"/> (use the id as <c>ImTextureID</c>). The view stays the caller's to
+    /// keep alive and dispose; this renderer only maps it.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is below
+    /// <see cref="FirstHostTextureId"/>, where it could collide with an ImGui-owned texture.</exception>
+    public void RegisterTexture(ulong id, TextureView view)
+    {
+        if (id < FirstHostTextureId)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(id), id, $"Host texture ids start at {FirstHostTextureId} — below that is ImGui's own id space.");
+        }
+        _textures[id] = view;
+        _bindGroups.Remove(id);
+    }
+
+    private void CreateTexture(in ImGuiTextureOp op)
+    {
+        // ImGui reuses a UniqueID only after the old texture is destroyed, but a create for an
+        // id we still hold would otherwise leak the old one silently.
+        RetireTexture(op.TextureId);
         var texture = _device.CreateTexture(new TextureDescriptor
         {
-            Label = "ImGui.FontAtlas",
-            Size = new Extent3D(width, height, 1),
+            Label = $"ImGui.Texture{op.TextureId}",
+            Size = new Extent3D(op.Width, op.Height, 1),
             Format = TextureFormat.RGBA8Unorm,
             Usage = TextureUsage.TextureBinding | TextureUsage.CopyDst,
             MipLevelCount = 1,
             SampleCount = 1,
             Dimension = TextureDimension.D2,
-        }) ?? throw new InvalidOperationException("ImGui font atlas creation failed.");
-        var destination = new TexelCopyTextureInfo { Texture = texture, MipLevel = 0 };
-        var layout = new TexelCopyBufferLayout { Offset = 0, BytesPerRow = width * 4, RowsPerImage = height };
-        var extent = new Extent3D(width, height, 1);
-        _queue.WriteTexture(destination, rgba, layout, extent);
-        RegisterTexture(FontTextureId, texture.CreateView()!);
+        }) ?? throw new InvalidOperationException($"ImGui texture {op.TextureId} creation failed.");
+        _ownedTextures[op.TextureId] = texture;
+        _textures[op.TextureId] = texture.CreateView()!;
+        _bindGroups.Remove(op.TextureId);
+        Write(texture, op);
     }
 
-    /// <summary>Expose an arbitrary texture view to ImGui draws under <paramref name="id"/>
-    /// (use the id as <c>ImTextureID</c>).</summary>
-    public void RegisterTexture(nint id, TextureView view)
+    private void UpdateTexture(in ImGuiTextureOp op)
     {
-        _textures[id] = view;
+        if (!_ownedTextures.TryGetValue(op.TextureId, out var texture))
+        {
+            // Only reachable if a Create was lost, which the ops queue is built not to allow —
+            // so this is a loud bug report, not a recoverable state.
+            throw new InvalidOperationException(
+                $"ImGui texture {op.TextureId} was updated before it was created — a texture op was dropped.");
+        }
+        Write(texture, op);
+    }
+
+    private void Write(Texture texture, in ImGuiTextureOp op)
+    {
+        var destination = new TexelCopyTextureInfo
+        {
+            Texture = texture,
+            MipLevel = 0,
+            Origin = new Origin3D(op.X, op.Y, 0),
+        };
+        var layout = new TexelCopyBufferLayout
+        {
+            Offset = 0,
+            BytesPerRow = op.Width * ImGuiTextureOp.BytesPerPixel,
+            RowsPerImage = op.Height,
+        };
+        _queue.WriteTexture(destination, op.Pixels, layout, new Extent3D(op.Width, op.Height, 1));
+    }
+
+    private void RetireTexture(ulong id)
+    {
+        _textures.Remove(id);
         _bindGroups.Remove(id);
+        if (_ownedTextures.Remove(id, out var texture))
+        {
+            _retiring.Add((texture, DestroyDelayFrames));
+        }
+    }
+
+    private void AgeRetiredTextures()
+    {
+        for (var i = _retiring.Count - 1; i >= 0; i--)
+        {
+            var (texture, framesLeft) = _retiring[i];
+            if (framesLeft > 1)
+            {
+                _retiring[i] = (texture, framesLeft - 1);
+                continue;
+            }
+            texture.Destroy();
+            _retiring.RemoveAt(i);
+        }
     }
 
     /// <summary>Record one snapshot into <paramref name="encoder"/>, compositing over
@@ -206,9 +319,10 @@ public sealed class ImGuiWebGpuRenderer
             var sw = (uint)Math.Clamp(x1, 0, targetWidth) - sx;
             var sh = (uint)Math.Clamp(y1, 0, targetHeight) - sy;
             if (sw == 0 || sh == 0) continue;
+            if (!TryGetBindGroup(command.TextureId, out var bindGroup)) continue;
 
             pass.SetScissorRect(sx, sy, sw, sh);
-            pass.SetBindGroup(0, GetBindGroup(command.TextureId));
+            pass.SetBindGroup(0, bindGroup);
             pass.DrawIndexed(command.ElementCount, 1, command.IndexOffset, (int)command.VertexOffset, 0);
         }
         pass.End();
@@ -247,15 +361,26 @@ public sealed class ImGuiWebGpuRenderer
         }) ?? throw new InvalidOperationException($"{label}: buffer creation failed.");
     }
 
-    private BindGroup GetBindGroup(nint textureId)
+    /// <summary>The bind group for <paramref name="textureId"/>, or false when nothing is
+    /// registered under it and the command must be skipped.
+    ///
+    /// There is no fallback texture on purpose. Under the static-atlas model an unknown id could
+    /// borrow the font atlas and still look roughly right; with dynamic textures a missing id
+    /// means an op was dropped or a host texture was unregistered while still referenced, and
+    /// painting the font atlas over the geometry would disguise exactly the bug worth seeing.</summary>
+    private bool TryGetBindGroup(ulong textureId, out BindGroup bindGroup)
     {
-        if (_bindGroups.TryGetValue(textureId, out var cached)) return cached;
+        if (_bindGroups.TryGetValue(textureId, out var cached))
+        {
+            bindGroup = cached;
+            return true;
+        }
         if (!_textures.TryGetValue(textureId, out var view))
         {
-            // Unknown id — fall back to the font atlas so the draw stays visible.
-            view = _textures[FontTextureId];
+            bindGroup = null!;
+            return false;
         }
-        var bindGroup = _device.CreateBindGroup(new BindGroupDescriptor
+        bindGroup = _device.CreateBindGroup(new BindGroupDescriptor
         {
             Label = "ImGui.BindGroup",
             Layout = _bindGroupLayout,
@@ -267,7 +392,7 @@ public sealed class ImGuiWebGpuRenderer
             ],
         }) ?? throw new InvalidOperationException("ImGui bind group creation failed.");
         _bindGroups[textureId] = bindGroup;
-        return bindGroup;
+        return true;
     }
 
     private const string Wgsl = """

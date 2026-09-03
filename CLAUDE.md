@@ -37,7 +37,8 @@ dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
 Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
-`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`.
+`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
+`Paradise.Ui.ImGui.CoyoteTest`.
 
 A fourth thing, learned from the asset watcher: **lock on an `object`, not on
 `System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites

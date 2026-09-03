@@ -1,35 +1,22 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
-using ImGuiNET;
+using Hexa.NET.ImGui;
+using ImGuiApi = Hexa.NET.ImGui.ImGui;
 using WebGpuSharp;
 
 namespace Paradise.Ui.ImGui.Test;
 
 /// <summary>Snapshot capture against a real ImGui frame (offset rebasing, totals) and the
-/// WebGPU renderer end-to-end: a real ImGui window rendered to an offscreen target must
-/// produce pixels where the window is, none where the scissor excludes it, and leave the
-/// composited background elsewhere. GPU tests skip without an adapter; ImGui work is
-/// serialized (one global context).</summary>
+/// WebGPU renderer end-to-end: a real ImGui window rendered to an offscreen target must produce
+/// pixels where the window is, none where the scissor excludes it, and leave the composited
+/// background elsewhere. GPU tests skip without an adapter; ImGui work is serialized (one
+/// process-global current context).</summary>
 [NotInParallel]
 public class ImGuiWebGpuRendererTests
 {
     private const int Width = 256;
     private const int Height = 256;
-
-    private static bool s_contextReady;
-
-    private static void EnsureImGui()
-    {
-        if (s_contextReady) return;
-        global::ImGuiNET.ImGui.CreateContext();
-        var io = global::ImGuiNET.ImGui.GetIO();
-        io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-        io.DisplaySize = new Vector2(Width, Height);
-        io.Fonts.AddFontDefault();
-        io.Fonts.Build();
-        io.Fonts.SetTexID(ImGuiWebGpuRenderer.FontTextureId);
-        s_contextReady = true;
-    }
 
     // WebGPU.CreateInstance() throws DllNotFoundException (rather than returning null) when the
     // native Dawn library isn't loadable on this host — matches the skip pattern established in
@@ -62,30 +49,17 @@ public class ImGuiWebGpuRendererTests
         return adapter.RequestDeviceSync(in desc, 10_000_000_000UL);
     }
 
-    private static ImGuiDrawSnapshot BuildFrame()
-    {
-        var io = global::ImGuiNET.ImGui.GetIO();
-        io.DeltaTime = 1f / 60f;
-        global::ImGuiNET.ImGui.NewFrame();
-        global::ImGuiNET.ImGui.SetNextWindowPos(new Vector2(40, 40));
-        global::ImGuiNET.ImGui.SetNextWindowSize(new Vector2(140, 100));
-        global::ImGuiNET.ImGui.Begin("panel", ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse);
-        global::ImGuiNET.ImGui.Text("hello");
-        global::ImGuiNET.ImGui.Button("button");
-        global::ImGuiNET.ImGui.End();
-        global::ImGuiNET.ImGui.Render();
-
-        var snapshot = new ImGuiDrawSnapshot();
-        snapshot.Capture(global::ImGuiNET.ImGui.GetDrawData());
-        return snapshot;
-    }
-
     [Test]
     public async Task snapshot_concatenates_lists_and_matches_totals()
     {
-        EnsureImGui();
-        var snapshot = BuildFrame();
-        var drawData = global::ImGuiNET.ImGui.GetDrawData();
+        using var imgui = new ImGuiTestContext(Width, Height);
+        var drawData = imgui.Frame(() => ImGuiTestContext.Panel("hello"));
+
+        // Texture capture first, always: it is what stamps the ImTextureID the draw commands
+        // carry, and reading a command's id before that trips an assert inside ImGui.
+        ImGuiTextureCapture.CaptureFrom(drawData, new ImGuiTextureOps());
+        var snapshot = new ImGuiDrawSnapshot();
+        snapshot.Capture(drawData);
 
         await Assert.That(snapshot.VertexBytes).IsEqualTo(drawData.TotalVtxCount * ImGuiDrawSnapshot.VertexStride);
         await Assert.That(snapshot.IndexBytes).IsEqualTo(drawData.TotalIdxCount * sizeof(ushort));
@@ -102,7 +76,7 @@ public class ImGuiWebGpuRendererTests
     [Test]
     public async Task renders_a_window_over_a_composited_background()
     {
-        EnsureImGui();
+        using var imgui = new ImGuiTestContext(Width, Height);
         var device = TryCreateDevice();
         if (device is null)
         {
@@ -112,14 +86,17 @@ public class ImGuiWebGpuRendererTests
         var queue = device.GetQueue()!;
 
         var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
-        unsafe
-        {
-            var io = global::ImGuiNET.ImGui.GetIO();
-            io.Fonts.GetTexDataAsRGBA32(out byte* pixels, out var width, out var height, out _);
-            renderer.SetFontAtlas(new ReadOnlySpan<byte>(pixels, width * height * 4), (uint)width, (uint)height);
-        }
+        var ops = new ImGuiTextureOps();
 
-        var snapshot = BuildFrame();
+        // The font atlas reaches the renderer the way it does in production: as texture ops
+        // captured off the frame, not as a one-shot atlas upload.
+        var drawData = imgui.Frame(() => ImGuiTestContext.Panel("hello"));
+        ImGuiTextureCapture.CaptureFrom(drawData, ops);
+        var snapshot = new ImGuiDrawSnapshot();
+        snapshot.Capture(drawData);
+        var pending = new List<ImGuiTextureOp>();
+        ops.DrainTo(pending);
+        renderer.ApplyTextureOps(pending);
 
         var target = device.CreateTexture(new TextureDescriptor
         {
@@ -192,5 +169,34 @@ public class ImGuiWebGpuRendererTests
         await Assert.That(outside.R).IsEqualTo((byte)0);
         await Assert.That(Math.Abs(outside.G - 102)).IsLessThan(3); // 0.4 x 255 in a Unorm target
         await Assert.That(outside.B).IsEqualTo((byte)0);
+    }
+
+    [Test]
+    public async Task host_texture_ids_below_the_reserved_floor_are_rejected()
+    {
+        var device = TryCreateDevice();
+        if (device is null)
+        {
+            Skip.Test("No WebGPU adapter available.");
+            return;
+        }
+        var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
+        var texture = device.CreateTexture(new TextureDescriptor
+        {
+            Label = "ImGuiTest.HostTexture",
+            Size = new Extent3D(4, 4, 1),
+            Format = TextureFormat.RGBA8Unorm,
+            Usage = TextureUsage.TextureBinding | TextureUsage.CopyDst,
+            MipLevelCount = 1,
+            SampleCount = 1,
+            Dimension = TextureDimension.D2,
+        })!;
+        var view = texture.CreateView()!;
+
+        // An id in ImGui's own space would be overwritten the moment ImGui created a texture
+        // with that UniqueID, so it is refused rather than silently shadowed.
+        await Assert.That(() => renderer.RegisterTexture(1, view))
+            .Throws<ArgumentOutOfRangeException>();
+        renderer.RegisterTexture(ImGuiWebGpuRenderer.FirstHostTextureId, view);
     }
 }

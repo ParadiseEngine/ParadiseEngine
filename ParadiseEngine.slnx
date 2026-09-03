@@ -73,6 +73,7 @@
     <Project Path="src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
     <Project Path="src/Paradise.Ui.Test/Paradise.Ui.Test.csproj" />
     <Project Path="src/Paradise.Ui.ImGui.Test/Paradise.Ui.ImGui.Test.csproj" />
+    <Project Path="src/Paradise.Ui.ImGui.CoyoteTest/Paradise.Ui.ImGui.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Ui.Noesis.Test/Paradise.Ui.Noesis.Test.csproj" />
   </Folder>
 </Solution>
