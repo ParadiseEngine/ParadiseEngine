@@ -146,6 +146,37 @@ public class UiFontsTests
         await Assert.That(UiFonts.FindCjkFont(fonts, 18f)).IsNull();
     }
 
+    /// <summary>The directory list must hold paths THIS platform's mount can express.
+    ///
+    /// Regression test: the list used to carry every platform's directories at once, and
+    /// Zio is asymmetric about a foreign one — a Unix path on Windows converts to an absolute
+    /// path that merely does not exist, while <c>C:\Windows\Fonts</c> on Unix converts to
+    /// <c>C:/Windows/Fonts</c>, which is not absolute, so the next call throws. That passed on
+    /// Windows and failed on Linux CI.</summary>
+    [Test]
+    public async Task the_platform_font_directories_can_all_be_expressed_by_a_physical_mount()
+    {
+        using var host = new PhysicalFileSystem();
+        await Assert.That(UiFonts.SystemFontDirectories).IsNotEmpty();
+        foreach (var directory in UiFonts.SystemFontDirectories)
+        {
+            await Assert.That(directory).IsNotNullOrEmpty();
+            var expanded = Environment.ExpandEnvironmentVariables(directory);
+            if (expanded.StartsWith('~') || expanded.Contains('%')) continue; // resolved later
+            await Assert.That(() => host.ConvertPathFromInternal(expanded)).ThrowsNothing();
+        }
+    }
+
+    /// <summary>Mounting must be total: a host that cannot express a font directory gets an empty
+    /// overlay, not an exception.</summary>
+    [Test]
+    public async Task mounting_system_fonts_over_a_mount_that_cannot_express_them_is_empty()
+    {
+        using var host = new MemoryFileSystem();
+        using var fonts = UiFonts.MountSystemFonts(host);
+        await Assert.That(UiFonts.FindCjkFont(fonts, 18f)).IsNull();
+    }
+
     [Test]
     public async Task mounting_system_fonts_yields_a_font_this_machine_can_actually_load()
     {

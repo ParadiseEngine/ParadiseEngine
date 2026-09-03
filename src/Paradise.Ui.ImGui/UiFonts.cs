@@ -41,25 +41,47 @@ public sealed record UiFontConfig(IFileSystem Content, UPath Path, float SizePix
 /// </summary>
 public static class UiFonts
 {
-    /// <summary>Where each platform keeps fonts. HOST paths — the last ones in this file, and
-    /// turning them into a mount at one point rather than leaking them through the font API is
-    /// what <see cref="MountSystemFonts"/> is for.</summary>
-    public static readonly string[] SystemFontDirectories =
-    [
-        // Windows. The per-user directory is where a font installed without admin rights lands.
-        @"C:\Windows\Fonts",
-        @"%LOCALAPPDATA%\Microsoft\Windows\Fonts",
-        // macOS
-        "/System/Library/Fonts",
-        "/System/Library/Fonts/Supplemental",
-        "/Library/Fonts",
-        "~/Library/Fonts",
-        // Linux
-        "/usr/share/fonts",
-        "/usr/local/share/fonts",
-        "~/.local/share/fonts",
-        "~/.fonts",
-    ];
+    /// <summary>Where THIS platform keeps fonts, in the order <see cref="MountSystemFonts"/>
+    /// overlays them. HOST paths — the last ones in this file.
+    ///
+    /// Selected per platform rather than kept as one combined list, because a foreign path is not
+    /// merely absent from a mount. Zio's <c>ConvertPathFromInternal</c> is asymmetric about it:
+    /// a Unix path on Windows becomes <c>/mnt/c/usr/share/fonts</c>, which is absolute and simply
+    /// does not exist, while <c>C:\Windows\Fonts</c> on Unix becomes <c>C:/Windows/Fonts</c>,
+    /// which is not absolute and makes the next call THROW. So the combined list passed locally
+    /// and failed on Linux CI, which is the failure this shape prevents.</summary>
+    public static readonly string[] SystemFontDirectories = BuildSystemFontDirectories();
+
+    private static string[] BuildSystemFontDirectories()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return
+            [
+                // Asked for rather than spelled: the Windows directory is not always on C:.
+                Environment.GetFolderPath(Environment.SpecialFolder.Fonts),
+                // Where a font installed without admin rights lands.
+                @"%LOCALAPPDATA%\Microsoft\Windows\Fonts",
+            ];
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            return
+            [
+                "/System/Library/Fonts",
+                "/System/Library/Fonts/Supplemental",
+                "/Library/Fonts",
+                "~/Library/Fonts",
+            ];
+        }
+        return
+        [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "~/.local/share/fonts",
+            "~/.fonts",
+        ];
+    }
 
     /// <summary>Font files known to carry CJK coverage, in preference order. NAMES, not paths:
     /// they resolve inside whatever mount is searched, so one list serves the system fonts, a
@@ -101,7 +123,19 @@ public static class UiFonts
         foreach (var directory in SystemFontDirectories)
         {
             if (Expand(directory) is not { } expanded) continue;
-            var path = host.ConvertPathFromInternal(expanded);
+            UPath path;
+            try
+            {
+                path = host.ConvertPathFromInternal(expanded);
+            }
+            catch (ArgumentException)
+            {
+                // A path this mount cannot express is "no such font directory", not a fault:
+                // ConvertPathFromInternal throws rather than returning nothing for a path shaped
+                // for another platform. SystemFontDirectories already avoids the case, so this
+                // only catches a host that mounted something other than the real filesystem.
+                continue;
+            }
             if (!host.DirectoryExists(path)) continue;
             fonts.AddFileSystem(new SubFileSystem(host, path, owned: false));
         }
@@ -114,6 +148,8 @@ public static class UiFonts
     /// to the mount to reject.</summary>
     private static string? Expand(string directory)
     {
+        // GetFolderPath answers "" for a folder this platform does not have.
+        if (string.IsNullOrEmpty(directory)) return null;
         var expanded = Environment.ExpandEnvironmentVariables(directory);
         if (expanded.StartsWith('~'))
         {
