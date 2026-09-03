@@ -19,6 +19,12 @@ public class ImGuiUiCoreTests
     private static ImGuiUiCore NewCore(Action draw)
     {
         var core = new ImGuiUiCore(Width, Height);
+        // The suite is a host, and this is the choice a host makes. Without it every test writes
+        // imgui.ini into the test binary's directory — ImGui saves on DestroyContext, not only on
+        // its timer — and the NEXT run restores those window positions, which beats a later
+        // ImGuiCond.FirstUseEver. Today's tests place windows unconditionally and survive it; that
+        // is luck, and this is the fix.
+        core.DisableIniFile();
         core.AddDraw(draw);
         return core;
     }

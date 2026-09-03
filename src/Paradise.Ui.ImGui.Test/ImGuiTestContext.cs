@@ -27,6 +27,9 @@ public sealed class ImGuiTestContext : IDisposable
         io.DisplaySize = new Vector2(width, height);
         io.DeltaTime = 1f / 60f;
         io.Fonts.AddFontDefault();
+        // Same choice ImGuiUiCoreTests makes: ImGui writes imgui.ini on DestroyContext, and a
+        // suite that keeps it restores the previous run.s window layout.
+        io.IniFilename = null;
     }
 
     /// <summary>Run one whole ImGui frame around <paramref name="draw"/> and return its draw

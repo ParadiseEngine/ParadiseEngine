@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Hexa.NET.ImGui;
 using ImGuiApi = Hexa.NET.ImGui.ImGui;
 using Paradise.Windowing;
+using Zio;
 
 namespace Paradise.Ui.ImGui;
 
@@ -97,6 +99,65 @@ public sealed class ImGuiUiCore : IDisposable
     /// Render, so it may read and mutate sim-owned state freely. Register before the sim
     /// starts.</summary>
     public void AddDraw(Action draw) => _draw.Add(draw);
+
+    /// <summary>Stop ImGui reading and writing its own <c>imgui.ini</c>.
+    ///
+    /// ImGui persists window layout to a path in the process's WORKING DIRECTORY by default, and
+    /// writes it when the context is DESTROYED as well as on its save timer — so even a context
+    /// that lives for a single frame leaves a file behind, somewhere the host never nominated.
+    /// This is the only file this library still touches outside a mount: fonts already arrive as
+    /// bytes the caller read (see <see cref="UiFonts"/>).
+    ///
+    /// <see cref="SaveLayout"/> and <see cref="TryLoadLayout"/> call this themselves, so a host
+    /// that persists through a mount cannot end up doing both. Call it directly to persist
+    /// nothing at all. Idempotent.</summary>
+    public unsafe void DisableIniFile()
+    {
+        var io = ImGuiApi.GetIO();
+        io.IniFilename = null;
+    }
+
+    /// <summary>True when ImGui has layout changes worth writing. Set on ImGui's own save timer
+    /// (<c>io.IniSavingRate</c>, five seconds by default) rather than on every move, so a host can
+    /// poll this each frame and call <see cref="SaveLayout"/> only when it says so.</summary>
+    public bool WantSaveLayout => ImGuiApi.GetIO().WantSaveIniSettings;
+
+    /// <summary>Write the current window layout into <paramref name="content"/> — the host's
+    /// mount, which may be an archive, a project tree, or memory in a test.
+    ///
+    /// Layout crosses as a STRING rather than through ImGui's file IO, because ImGui's is not
+    /// redirectable: replacing <c>ImFileOpen</c> and friends is a compile-time option in
+    /// <c>imconfig.h</c>, and this binding ships prebuilt natives. Eliminating the file IO is the
+    /// only route, and it is the better one — it is the same shape font loading already uses.
+    ///
+    /// Clears <see cref="WantSaveLayout"/>, so a poll-and-save loop settles.</summary>
+    public void SaveLayout(IFileSystem content, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        DisableIniFile();
+
+        var directory = path.GetDirectory();
+        if (!directory.IsEmpty && !content.DirectoryExists(directory)) content.CreateDirectory(directory);
+        content.WriteAllBytes(path, Encoding.UTF8.GetBytes(ImGuiApi.SaveIniSettingsToMemoryS()));
+
+        var io = ImGuiApi.GetIO();
+        io.WantSaveIniSettings = false;
+    }
+
+    /// <summary>Restore a layout written by <see cref="SaveLayout"/>. False when
+    /// <paramref name="path"/> holds nothing — a first run, which is not an error.
+    ///
+    /// Call before the first tick: ImGui applies a restored position and size when a window is
+    /// first created, and a restored entry beats a later <c>ImGuiCond.FirstUseEver</c>.</summary>
+    public bool TryLoadLayout(IFileSystem content, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        DisableIniFile();
+        if (!content.FileExists(path)) return false;
+
+        ImGuiApi.LoadIniSettingsFromMemory(Encoding.UTF8.GetString(content.ReadAllBytes(path)));
+        return true;
+    }
 
     /// <summary>Destroy the ImGui context and release the clipboard bridge. Call on the thread
     /// that owns the context, after the sim has stopped ticking — every member of this class

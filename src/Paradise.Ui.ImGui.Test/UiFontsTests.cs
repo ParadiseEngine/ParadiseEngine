@@ -88,6 +88,7 @@ public class UiFontsTests
         // Nothing here may reach stb: a CFF font that got through would abort the test process
         // inside native code, so "the core still ticks" is the whole assertion.
         using var core = new ImGuiUiCore(320, 240, new UiFontConfig(fs, "/fonts/font.otf", 18f));
+        core.DisableIniFile(); // a test is a host: do not leave imgui.ini in the test binary
         core.AddDraw(() => ImGuiTestContext.Panel("hello"));
 
         core.Input.Tick(0.0);
@@ -211,6 +212,7 @@ public class UiFontsTests
 
         var text = "hello";
         using var core = new ImGuiUiCore(320, 240, font);
+        core.DisableIniFile();
         core.AddDraw(() => ImGuiTestContext.Panel(text));
         var ops = new List<ImGuiTextureOp>();
 
