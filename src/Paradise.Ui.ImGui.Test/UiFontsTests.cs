@@ -217,6 +217,7 @@ public class UiFontsTests
         core.Input.Tick(0.0);
         core.AcquireSnapshotForRender(ops, out _);
         await Assert.That(ops[0].Kind).IsEqualTo(ImGuiTextureOpKind.Create);
+        ops.Clear(); // stands in for ApplyTextureOps, which is what clears in a real host
 
         // CJK the first frame never asked for: with no glyph ranges declared anywhere, these can
         // only appear if 1.92 rasterized them on demand.

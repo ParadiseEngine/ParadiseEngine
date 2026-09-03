@@ -39,6 +39,7 @@ public static class TextureOpsTests
             var batch = new List<ImGuiTextureOp>();
             while (observed.Count < OpsPerProducer)
             {
+                batch.Clear(); // the renderer clears what it applied; stand in for that
                 ops.DrainTo(batch);
                 foreach (var op in batch) observed.Add(op.TextureId);
             }
@@ -76,6 +77,7 @@ public static class TextureOpsTests
             var batch = new List<ImGuiTextureOp>();
             while (observed.Count < OpsPerProducer * 2)
             {
+                batch.Clear(); // the renderer clears what it applied; stand in for that
                 ops.DrainTo(batch);
                 foreach (var op in batch) observed.Add(op.TextureId);
             }
@@ -119,6 +121,7 @@ public static class TextureOpsTests
             var batch = new List<ImGuiTextureOp>();
             while (taken < OpsPerProducer)
             {
+                batch.Clear();
                 taken += ops.DrainTo(batch);
                 Specification.Assert(
                     taken + ops.PendingCount <= OpsPerProducer,

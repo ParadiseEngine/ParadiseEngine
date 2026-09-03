@@ -157,15 +157,19 @@ public sealed class ImGuiWebGpuRenderer
             ?? throw new InvalidOperationException("ImGui pipeline creation failed.");
     }
 
-    /// <summary>Apply every operation in <paramref name="ops"/>, in order — the list
-    /// <c>ImGuiFrameExchange.AcquireForRender</c> just filled. Render thread only, once per
-    /// frame, BEFORE <see cref="Render"/>: the snapshot from that same acquire may name a texture
-    /// these ops are what create.
+    /// <summary>Apply every operation in <paramref name="ops"/>, in order, and CLEAR the list.
+    /// Render thread only, once per frame, BEFORE <see cref="Render"/>: the snapshot from the
+    /// same acquire may name a texture these ops are what create.
+    ///
+    /// Clearing here rather than at the drain is what makes a skipped frame harmless.
+    /// <c>ImGuiFrameExchange.AcquireForRender</c> appends into the caller's list, so ops a host
+    /// acquired and never rendered are still there next frame; this method is the only thing that
+    /// says they have actually been applied.
     ///
     /// Applying every op rather than the newest per texture is deliberate: the queue is a state
     /// machine (create → update → destroy), and collapsing it would upload glyph patches into a
     /// texture that does not exist yet.</summary>
-    public void ApplyTextureOps(IReadOnlyList<ImGuiTextureOp> ops)
+    public void ApplyTextureOps(List<ImGuiTextureOp> ops)
     {
         ArgumentNullException.ThrowIfNull(ops);
         foreach (var op in ops)
@@ -185,6 +189,10 @@ public sealed class ImGuiWebGpuRenderer
                     throw new ArgumentOutOfRangeException(nameof(ops), op.Kind, "Unknown ImGui texture op.");
             }
         }
+        // Only once every op landed. A throw part-way leaves the list intact, so the next call
+        // replays it: a Create for a live id retires and recreates, an Update finds its texture,
+        // a Destroy for an already-retired id is a no-op. Wasteful, and correct.
+        ops.Clear();
         AgeRetiredTextures();
     }
 
@@ -229,10 +237,15 @@ public sealed class ImGuiWebGpuRenderer
     {
         if (!_ownedTextures.TryGetValue(op.TextureId, out var texture))
         {
-            // Only reachable if a Create was lost, which the ops queue is built not to allow —
-            // so this is a loud bug report, not a recoverable state.
+            // The queue is ordered and non-droppable and the list it drains into is only cleared
+            // by a completed apply, so reaching here means an op went missing OUTSIDE both — the
+            // likeliest cause by far is a caller that acquired a frame, cleared or discarded the
+            // drained list, and carried on. Named here so the message points at the layer that
+            // did it rather than at the queue.
             throw new InvalidOperationException(
-                $"ImGui texture {op.TextureId} was updated before it was created — a texture op was dropped.");
+                $"ImGui texture {op.TextureId} was updated before it was created. Its Create op " +
+                $"never reached {nameof(ApplyTextureOps)}: pass the same list to every " +
+                "AcquireForRender and let ApplyTextureOps be the only thing that clears it.");
         }
         Write(texture, op);
     }

@@ -71,9 +71,12 @@ public sealed class ImGuiFrameExchange
 
     /// <summary>Render thread: take the newest frame and everything needed to draw it.
     ///
-    /// Apply <paramref name="textureOps"/> before drawing the returned snapshot. The list is
-    /// CLEARED and refilled, so one scratch list serves for the process lifetime.</summary>
-    /// <param name="textureOps">Receives every texture operation not yet applied, in order.</param>
+    /// Apply <paramref name="textureOps"/> before drawing the returned snapshot. Ops are APPENDED
+    /// to it, and <c>ImGuiWebGpuRenderer.ApplyTextureOps</c> is what clears it — so a host that
+    /// acquires a frame and then does not render it keeps them rather than dropping the only copy.
+    /// Pass the same list every frame and never clear it yourself.</summary>
+    /// <param name="textureOps">Receives every texture operation not yet applied, in order,
+    /// appended after anything already in it.</param>
     /// <param name="isNew">False when this is the same snapshot as the previous call — hosts with
     /// retained scenes (Godot canvas items) skip the rebuild then. It says nothing about
     /// <paramref name="textureOps"/>, which must be applied either way.</param>

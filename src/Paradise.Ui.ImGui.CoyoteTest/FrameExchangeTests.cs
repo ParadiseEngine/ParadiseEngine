@@ -51,6 +51,7 @@ public static class FrameExchangeTests
             // render loop before the first publish would check nothing and call it a pass.
             while (drawn == 0 || !sim.IsCompleted)
             {
+                ops.Clear(); // ditto: ApplyTextureOps is what clears in a real host
                 var snapshot = exchange.AcquireForRender(ops, out _);
                 foreach (var op in ops)
                 {
@@ -97,6 +98,7 @@ public static class FrameExchangeTests
             var ops = new List<ImGuiTextureOp>();
             for (var pass = 0; pass < Frames * 2; pass++)
             {
+                ops.Clear();
                 var snapshot = exchange.AcquireForRender(ops, out var isNew);
                 if (snapshot is null) continue;
                 Specification.Assert(

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
@@ -35,9 +36,16 @@ public sealed class ImGuiTextureOps
     /// <summary>ImGui thread: append one operation.</summary>
     public void Enqueue(in ImGuiTextureOp op) => _pending.Enqueue(op);
 
-    /// <summary>Render thread: move every pending operation into <paramref name="into"/>, in
-    /// enqueue order, and return how many. <paramref name="into"/> is CLEARED first, so callers
-    /// can keep one scratch list for the process lifetime.
+    /// <summary>Render thread: move every pending operation onto the END of
+    /// <paramref name="into"/>, in enqueue order, and return how many were appended.
+    ///
+    /// <b>Appends rather than clears, and that is the non-droppable rule reaching one step
+    /// further.</b> A drain is destructive — the queue no longer has these ops — so the caller's
+    /// list is now the only copy. A host that acquires a frame and then does not render it (no
+    /// surface texture, a lost swapchain, a throw part-way) would drop exactly what this type
+    /// exists to preserve, and the next frame would fail somewhere else entirely, blaming the
+    /// queue. Appending makes the skip harmless: the ops stay in the list until something
+    /// actually applies them, and <c>ImGuiWebGpuRenderer.ApplyTextureOps</c> is what clears it.
     ///
     /// Drains until momentarily empty rather than to a count fixed on entry, so an op enqueued
     /// mid-drain may ride along. That is not a hazard but the direction the slack has to fall:
@@ -45,12 +53,14 @@ public sealed class ImGuiTextureOps
     /// does name is the failure this queue exists to prevent.</summary>
     public int DrainTo(List<ImGuiTextureOp> into)
     {
-        into.Clear();
+        ArgumentNullException.ThrowIfNull(into);
+        var drained = 0;
         while (_pending.TryDequeue(out var op))
         {
             into.Add(op);
+            drained++;
         }
-        return into.Count;
+        return drained;
     }
 
     /// <summary>How many operations are waiting. Diagnostics only — a caller that branches on

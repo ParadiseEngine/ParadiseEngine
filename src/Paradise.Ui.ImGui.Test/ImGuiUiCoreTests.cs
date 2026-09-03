@@ -56,8 +56,31 @@ public class ImGuiUiCoreTests
         await Assert.That(firstIsNew).IsTrue();
         await Assert.That(secondIsNew).IsFalse();
         await Assert.That(ReferenceEquals(first, second)).IsTrue();
-        // Ops are drained, not re-delivered — applying one twice would re-upload a whole atlas.
-        await Assert.That(ops).IsEmpty();
+        // Ops are drained from the QUEUE, so the second acquire adds nothing. They stay in the
+        // list until something applies them — re-delivering one would re-upload a whole atlas.
+        await Assert.That(ops.Count).IsEqualTo(1);
+    }
+
+    /// <summary>A host that acquires a frame and then does not render it must not lose the ops it
+    /// was handed: the drain already took them off the queue, so the list is the only copy.</summary>
+    [Test]
+    public async Task ops_survive_a_frame_the_host_acquired_and_never_rendered()
+    {
+        var text = "hello";
+        using var core = NewCore(() => ImGuiTestContext.Panel(text));
+        var ops = new List<ImGuiTextureOp>();
+
+        core.Input.Tick(0.0);
+        core.AcquireSnapshotForRender(ops, out _); // acquired... and the host renders nothing
+
+        text = "XYZ@#";
+        core.Input.Tick(1.0 / 60.0);
+        core.AcquireSnapshotForRender(ops, out _);
+
+        // Both the atlas and the glyphs added since are still waiting, in order.
+        await Assert.That(ops.Count).IsEqualTo(2);
+        await Assert.That(ops[0].Kind).IsEqualTo(ImGuiTextureOpKind.Create);
+        await Assert.That(ops[1].Kind).IsEqualTo(ImGuiTextureOpKind.Update);
     }
 
     [Test]
@@ -70,6 +93,7 @@ public class ImGuiUiCoreTests
         core.Input.Tick(0.0);
         core.AcquireSnapshotForRender(ops, out _);
         await Assert.That(ops[0].Kind).IsEqualTo(ImGuiTextureOpKind.Create);
+        ops.Clear(); // stands in for ApplyTextureOps, which is what clears in a real host
 
         text = "XYZ@#";
         core.Input.Tick(1.0 / 60.0);
