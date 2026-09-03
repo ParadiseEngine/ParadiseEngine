@@ -33,6 +33,7 @@
     <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
     <Project Path="src/Paradise.Authoring/Paradise.Authoring.csproj" />
+    <Project Path="src/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <Project Path="src/Paradise.Export/Paradise.Export.csproj" />
     <Project Path="src/Paradise.Physics/Paradise.Physics.csproj" />
     <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
@@ -52,6 +53,7 @@
     <Project Path="src/Paradise.Cli.Test/Paradise.Cli.Test.csproj" />
     <Project Path="src/Paradise.Cli.CoyoteTest/Paradise.Cli.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
+    <Project Path="src/Paradise.Diagnostics.Test/Paradise.Diagnostics.Test.csproj" />
     <Project Path="src/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
     <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />

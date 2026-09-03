@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Zio;
 
 namespace Paradise.Assets.Project;
@@ -16,7 +19,7 @@ namespace Paradise.Assets.Project;
 /// mount does), because the cache cannot rename inside a mount it does not own. Callers on one
 /// instance may run concurrently; <c>Paradise.Assets.Project.CoyoteTest</c> explores that.
 /// </remarks>
-public sealed class ArtifactCache
+public sealed partial class ArtifactCache
 {
     /// <summary>Overrides the cache location, or disables caching when set to a falsey word.</summary>
     /// <remarks>The name is the addon's, so one variable governs both tools.</remarks>
@@ -26,7 +29,7 @@ public sealed class ArtifactCache
         new(["0", "off", "false", "no", "none"], StringComparer.OrdinalIgnoreCase);
 
     private readonly IFileSystem? _fileSystem;
-    private readonly Action<string>? _warn;
+    private readonly ILogger _log;
 
     // `object`, not `System.Threading.Lock`: Coyote (1.7.11) rewrites Monitor.Enter/Exit but not
     // Lock.EnterScope, so with the newer type the Coyote suite cannot control this lock and
@@ -36,19 +39,20 @@ public sealed class ArtifactCache
     private volatile bool _prepared;
 
     /// <summary>Creates a cache rooted at <paramref name="root"/>.</summary>
-    public ArtifactCache(IFileSystem fileSystem, UPath root, Action<string>? warn = null)
+    public ArtifactCache(IFileSystem fileSystem, UPath root, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         root.AssertNotNull(nameof(root));
 
         _fileSystem = fileSystem;
-        _warn = warn;
+        _log = logger ?? NullLogger.Instance;
         _enabled = true;
         Root = root.ToAbsolute();
     }
 
     private ArtifactCache()
     {
+        _log = NullLogger.Instance;
         _enabled = false;
     }
 
@@ -63,27 +67,27 @@ public sealed class ArtifactCache
 
     /// <summary>The cache for a project: the environment override, else <see cref="AssetProjectLayout.EditorCache"/>.</summary>
     /// <remarks>Project-local rather than user-global, so <c>clean</c> clears it with everything else derived.</remarks>
-    public static ArtifactCache ForProject(IFileSystem fileSystem, AssetProjectLayout layout, Action<string>? warn = null)
-        => ForProject(fileSystem, layout, Environment.GetEnvironmentVariable(LocationEnvironmentVariable), warn);
+    public static ArtifactCache ForProject(IFileSystem fileSystem, AssetProjectLayout layout, ILogger? logger = null)
+        => ForProject(fileSystem, layout, Environment.GetEnvironmentVariable(LocationEnvironmentVariable), logger);
 
-    /// <summary>As <see cref="ForProject(IFileSystem, AssetProjectLayout, Action{string})"/>, with the environment value passed in so tests need not mutate process state.</summary>
+    /// <summary>As <see cref="ForProject(IFileSystem, AssetProjectLayout, ILogger)"/>, with the environment value passed in so tests need not mutate process state.</summary>
     public static ArtifactCache ForProject(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         string? configuredLocation,
-        Action<string>? warn)
+        ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
         var configured = configuredLocation?.Trim() ?? string.Empty;
         if (s_disabledValues.Contains(configured)) return Disabled;
-        if (configured.Length == 0) return new ArtifactCache(fileSystem, layout.EditorCache, warn);
+        if (configured.Length == 0) return new ArtifactCache(fileSystem, layout.EditorCache, logger);
 
         // Against the working directory, as the addon resolves it; UPath refuses a relative root.
         var location = ExpandUser(configured);
         if (!Path.IsPathRooted(location)) location = Path.GetFullPath(location);
-        return new ArtifactCache(fileSystem, fileSystem.ConvertPathFromInternal(location), warn);
+        return new ArtifactCache(fileSystem, fileSystem.ConvertPathFromInternal(location), logger);
     }
 
     /// <summary>Copies the cached entry to <paramref name="destination"/>, whose extension selects it; a copy failure is a miss and leaves no destination.</summary>
@@ -109,7 +113,7 @@ public sealed class ArtifactCache
         catch (Exception error) when (IsRecoverable(error))
         {
             TryDelete(destinationFileSystem, destination);
-            Warn($"could not reuse '{entry}' ({error.Message}); regenerating");
+            LogReuseFailed(_log, entry, error.Message);
             return false;
         }
 
@@ -156,7 +160,7 @@ public sealed class ArtifactCache
         }
         catch (Exception error) when (IsRecoverable(error))
         {
-            Warn($"could not store '{source.GetName()}' ({error.Message})");
+            LogStoreFailed(_log, source, error.Message);
         }
         finally
         {
@@ -198,7 +202,7 @@ public sealed class ArtifactCache
             catch (Exception error) when (IsRecoverable(error))
             {
                 _enabled = false;
-                Warn($"'{Root}' is unusable ({error.Message}); caching is off");
+                LogRootUnusable(_log, Root, error.Message);
             }
 
             _prepared = true;
@@ -254,5 +258,18 @@ public sealed class ArtifactCache
 
     private static bool IsRecoverable(Exception error) => error is IOException or UnauthorizedAccessException;
 
-    private void Warn(string message) => _warn?.Invoke($"Artifact cache: {message}.");
+    // A message per site, each taking its UPath WHOLE, rather than one Warn(string) funnel every
+    // caller interpolated into first. The funnel could not help doing the thing this seam exists
+    // to prevent: by the time a path reached it, it was a string, and the host's renderer never
+    // saw it — so cache warnings printed raw mount paths (`/mnt/c/proj/...`) in the middle of a
+    // build whose every other line printed host or project-relative ones.
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "Artifact cache: could not reuse '{Entry}' ({Reason}); regenerating.")]
+    private static partial void LogReuseFailed(ILogger logger, UPath entry, string reason);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "Artifact cache: could not store '{Source}' ({Reason}).")]
+    private static partial void LogStoreFailed(ILogger logger, UPath source, string reason);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Warning, Message = "Artifact cache: '{Root}' is unusable ({Reason}); caching is off.")]
+    private static partial void LogRootUnusable(ILogger logger, UPath root, string reason);
 }

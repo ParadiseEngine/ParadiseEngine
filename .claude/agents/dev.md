@@ -11,9 +11,9 @@ Follow the **Development Workflow** in `.claude/rules/development-workflow.md`.
 
 ## Tech Stack
 - **Language**: C# 14, nullable enabled, unsafe blocks
-- **Targets**: netstandard2.1 (libraries), net10.0 (libraries + tests)
+- **Targets**: net10.0 everywhere, except the three source generators (netstandard2.0, because that is what Roslyn loads analyzers from)
 - **Testing**: TUnit
-- **Build**: `dotnet build --solution ParadiseEngine.slnx`
+- **Build**: `dotnet build ParadiseEngine.slnx`
 - **Test**: `dotnet test --solution ParadiseEngine.slnx -p:PublishAot=false --output normal`
 
 ## Scope
@@ -34,6 +34,6 @@ Follow the **Development Workflow** in `.claude/rules/development-workflow.md`.
 - Read `.claude/lessons.md` at session start; project-specific lessons there take precedence over default workflow steps when they apply.
 - All game logic structs must be unmanaged (no managed references) for AOT/serialization
 - Use `ref` parameters for performance-critical paths
-- Maintain dual-target compatibility (netstandard2.1 + net10.0)
+- Everything is `net10.0`; there is no `netstandard2.1` left. A dependency's `net10.0` footprint is often much smaller than its `netstandard2.0` one, so check the actual TFM group before pricing one.
 - Follow `.editorconfig` naming: `_camelCase` private fields, `s_camelCase` statics, `PascalCase` constants/public
 - Warnings as errors — code must compile cleanly

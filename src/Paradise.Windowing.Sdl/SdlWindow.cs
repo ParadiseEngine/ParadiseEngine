@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -25,10 +28,11 @@ namespace Paradise.Windowing.Sdl;
 /// DIRECTLY and want more than the contract — a debug overlay renderer, an OS-specific
 /// tweak. Code that stays on <see cref="IWindow"/> stays backend-portable.
 /// </summary>
-public sealed unsafe class SdlWindow : IWindow
+public sealed unsafe partial class SdlWindow : IWindow
 {
     private readonly SDL_Window* _window;
     private readonly SdlWindowPlatform _platform;
+    private readonly ILogger _log;
     private readonly ConcurrentQueue<TimedWindowEvent> _events = new();
 
     private IntPtr _metalView;
@@ -57,9 +61,10 @@ public sealed unsafe class SdlWindow : IWindow
     private const float TriggerPressThreshold = 0.6f;
     private const float TriggerReleaseThreshold = 0.4f;
 
-    internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform)
+    internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform, ILogger? logger = null)
     {
         _platform = platform;
+        _log = logger ?? NullLogger.Instance;
         var flags = options.Resizable ? SDL_WindowFlags.SDL_WINDOW_RESIZABLE : 0;
         _window = SDL_CreateWindow(options.Title, (int)options.Width, (int)options.Height, flags);
         if (_window == null)
@@ -81,9 +86,7 @@ public sealed unsafe class SdlWindow : IWindow
         // raises the on-screen keyboard.
         if (!SDL_StartTextInput(_window))
         {
-            Console.Error.WriteLine(
-                $"[Paradise.Windowing.Sdl] SDL_StartTextInput failed: {SDL_GetError()}; "
-                + "typed text will not be reported.");
+            LogTextInputUnavailable(_log, SDL_GetError());
         }
     }
 
@@ -303,8 +306,7 @@ public sealed unsafe class SdlWindow : IWindow
         int w = 0, h = 0;
         if (!SDL_GetWindowSizeInPixels(_window, &w, &h))
         {
-            Console.Error.WriteLine(
-                $"[Paradise.Windowing.Sdl] SDL_GetWindowSizeInPixels failed: {SDL_GetError()}");
+            LogSizeQueryFailed(_log, SDL_GetError());
             if (Width != 0)
             {
                 return;
@@ -458,4 +460,12 @@ public sealed unsafe class SdlWindow : IWindow
         }
         SDL_DestroyWindow(_window);
     }
+
+    /// <remarks>Warning rather than Error because the window still works — it just never reports
+    /// typed text, which is the hard failure to discover by looking at it.</remarks>
+    [LoggerMessage(EventId = 70, Level = LogLevel.Warning, Message = "SDL_StartTextInput failed: {Error}; typed text will not be reported.")]
+    private static partial void LogTextInputUnavailable(ILogger logger, string? error);
+
+    [LoggerMessage(EventId = 71, Level = LogLevel.Warning, Message = "SDL_GetWindowSizeInPixels failed: {Error}")]
+    private static partial void LogSizeQueryFailed(ILogger logger, string? error);
 }

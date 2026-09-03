@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using System.Diagnostics;
 using SDL;
 using static SDL.SDL3;
@@ -16,7 +19,7 @@ namespace Paradise.Windowing.Sdl;
 /// One instance per process; dispose windows before it. Main thread throughout — see the
 /// contract on <see cref="IWindowPlatform"/>.
 /// </summary>
-public sealed unsafe class SdlWindowPlatform : IWindowPlatform
+public sealed unsafe partial class SdlWindowPlatform : IWindowPlatform
 {
     /// <summary>One clock for every window this platform creates, so timestamps from two
     /// windows share an epoch and compare directly — the contract on
@@ -31,10 +34,15 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
     /// number to be small, stable and reused. The lowest free index is assigned instead.</summary>
     private readonly Dictionary<uint, (byte Slot, IntPtr Handle)> _gamepads = [];
 
+    private readonly ILogger _log;
+
     private bool _disposed;
 
-    public SdlWindowPlatform()
+    /// <param name="logger">Where SDL failures that are reported rather than thrown go; omitted means nowhere.</param>
+    public SdlWindowPlatform(ILogger? logger = null)
     {
+        _log = logger ?? NullLogger.Instance;
+
         // GAMEPAD alongside VIDEO: the subsystem is what turns raw joysticks into the mapped,
         // position-named buttons and axes the contract speaks. It is initialized unconditionally
         // rather than on demand because SDL only reports the ADDED events for pads present at
@@ -48,7 +56,7 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
     public IWindow CreateWindow(in WindowOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var window = new SdlWindow(in options, this);
+        var window = new SdlWindow(in options, this, _log);
         _windows[window.Id] = window;
         return window;
     }
@@ -190,8 +198,7 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
         var handle = SDL_OpenGamepad(which);
         if (handle == null)
         {
-            Console.Error.WriteLine(
-                $"[Paradise.Windowing.Sdl] SDL_OpenGamepad({(uint)which}) failed: {SDL_GetError()}");
+            LogGamepadOpenFailed(_log, (uint)which, SDL_GetError());
             return;
         }
 
@@ -240,4 +247,9 @@ public sealed unsafe class SdlWindowPlatform : IWindowPlatform
         _gamepads.Clear();
         SDL_Quit();
     }
+
+    /// <remarks>Warning, not Error: one pad that would not open leaves the others working, and a
+    /// player wondering why their controller is dead needs this line to exist somewhere.</remarks>
+    [LoggerMessage(EventId = 72, Level = LogLevel.Warning, Message = "SDL_OpenGamepad({JoystickId}) failed: {Error}")]
+    private static partial void LogGamepadOpenFailed(ILogger logger, uint joystickId, string? error);
 }

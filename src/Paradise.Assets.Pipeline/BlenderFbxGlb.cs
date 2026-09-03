@@ -5,10 +5,13 @@ using System.IO;
 using System.Linq;
 using System.Text.Json.Nodes;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace Paradise.Assets.Pipeline
 {
     /// <summary>FBX to GLB through headless Blender, skipped when the stamp in the GLB's <c>asset.extras</c> (FBX hash and Blender version) matches.</summary>
-    public static class BlenderFbxGlb
+    public static partial class BlenderFbxGlb
     {
         public const string BlenderPathEnvironmentVariable = "PARADISE_BLENDER_PATH";
         private const string SourceFbxSha256ExtraName = "paradiseSourceFbxSha256";
@@ -30,34 +33,33 @@ namespace Paradise.Assets.Pipeline
             string fbxFullPath,
             string glbFullPath,
             bool force = false,
-            Action<string>? log = null,
-            Action<string>? error = null)
+            ILogger? logger = null)
         {
+            var log = logger ?? NullLogger.Instance;
             string? blenderPath = FindBlender();
             if (string.IsNullOrWhiteSpace(blenderPath))
             {
-                error?.Invoke(
-                    $"Blender not found. Set {BlenderPathEnvironmentVariable} or install Blender to a standard location.");
+                LogBlenderMissing(log, BlenderPathEnvironmentVariable);
                 return Result.ToolMissing;
             }
 
             if (!File.Exists(fbxFullPath))
             {
-                error?.Invoke($"FBX not found: '{fbxFullPath}'.");
+                LogFbxMissing(log, fbxFullPath);
                 return Result.Failed;
             }
 
             string? blenderVersion = BlenderVersion(blenderPath);
             if (blenderVersion is null)
             {
-                error?.Invoke($"Blender at '{blenderPath}' did not answer '--version'; is it runnable?");
+                LogBlenderUnrunnable(log, blenderPath);
                 return Result.ToolMissing;
             }
 
             var stamp = new SourceStamp(ProcessTools.ComputeFileSha256(fbxFullPath), blenderVersion);
             if (!force && GeneratedGlbMatchesStamp(glbFullPath, stamp))
             {
-                log?.Invoke($"GLB '{glbFullPath}' is current for '{fbxFullPath}'; skipping.");
+                LogGlbUpToDate(log, glbFullPath, fbxFullPath);
                 return Result.UpToDate;
             }
 
@@ -87,23 +89,23 @@ namespace Paradise.Assets.Pipeline
                 ProcessTools.ProcessResult run = ProcessTools.Run(blenderPath, arguments, BlenderTimeoutMilliseconds);
                 if (!run.Succeeded)
                 {
-                    error?.Invoke(run.Describe($"Blender converting '{fbxFullPath}'", BlenderTimeoutMilliseconds));
+                    LogBlenderRunFailed(log, run.Describe($"Blender converting '{fbxFullPath}'", BlenderTimeoutMilliseconds));
                     return Result.Failed;
                 }
 
                 if (!File.Exists(stagedGlbPath))
                 {
-                    error?.Invoke($"Blender exited 0 but exported no GLB for '{fbxFullPath}'.\n{run.Stdout}{run.Stderr}");
+                    LogBlenderExportedNothing(log, fbxFullPath, run.Stdout + run.Stderr);
                     return Result.Failed;
                 }
 
-                if (!WriteSourceStamp(stagedGlbPath, stamp, error))
+                if (!WriteSourceStamp(stagedGlbPath, stamp, log))
                 {
                     return Result.Failed;
                 }
 
                 File.Move(stagedGlbPath, glbFullPath, overwrite: true);
-                log?.Invoke($"Converted '{fbxFullPath}' → '{glbFullPath}'.");
+                LogConverted(log, fbxFullPath, glbFullPath);
                 return Result.Converted;
             }
             finally
@@ -213,11 +215,11 @@ bpy.ops.export_scene.gltf(
                 string.Equals(storedVersion, stamp.BlenderVersion, StringComparison.Ordinal);
         }
 
-        internal static bool WriteSourceStamp(string glbFullPath, SourceStamp stamp, Action<string>? error)
+        internal static bool WriteSourceStamp(string glbFullPath, SourceStamp stamp, ILogger log)
         {
             if (!GlbBinary.TryRead(glbFullPath, out JsonObject gltf, out byte[] binChunk))
             {
-                error?.Invoke($"Blender's export '{glbFullPath}' is not a readable GLB.");
+                LogUnreadableGlb(log, glbFullPath);
                 return false;
             }
 
@@ -238,5 +240,32 @@ bpy.ops.export_scene.gltf(
             GlbBinary.Write(glbFullPath, gltf, binChunk);
             return true;
         }
+
+        // These paths are host paths already — this drives an external Blender by absolute path
+        // and never sees a mount — so no renderer is involved and they log as plain strings.
+
+        [LoggerMessage(EventId = 40, Level = LogLevel.Error, Message = "Blender not found. Set {EnvironmentVariable} or install Blender to a standard location.")]
+        private static partial void LogBlenderMissing(ILogger logger, string environmentVariable);
+
+        [LoggerMessage(EventId = 41, Level = LogLevel.Error, Message = "FBX not found: '{FbxPath}'.")]
+        private static partial void LogFbxMissing(ILogger logger, string fbxPath);
+
+        [LoggerMessage(EventId = 42, Level = LogLevel.Error, Message = "Blender at '{BlenderPath}' did not answer '--version'; is it runnable?")]
+        private static partial void LogBlenderUnrunnable(ILogger logger, string blenderPath);
+
+        [LoggerMessage(EventId = 43, Level = LogLevel.Information, Message = "GLB '{GlbPath}' is current for '{FbxPath}'; skipping.")]
+        private static partial void LogGlbUpToDate(ILogger logger, string glbPath, string fbxPath);
+
+        [LoggerMessage(EventId = 44, Level = LogLevel.Error, Message = "{Report}")]
+        private static partial void LogBlenderRunFailed(ILogger logger, string report);
+
+        [LoggerMessage(EventId = 45, Level = LogLevel.Error, Message = "Blender exited 0 but exported no GLB for '{FbxPath}'.\n{Output}")]
+        private static partial void LogBlenderExportedNothing(ILogger logger, string fbxPath, string output);
+
+        [LoggerMessage(EventId = 46, Level = LogLevel.Information, Message = "Converted '{FbxPath}' → '{GlbPath}'.")]
+        private static partial void LogConverted(ILogger logger, string fbxPath, string glbPath);
+
+        [LoggerMessage(EventId = 47, Level = LogLevel.Error, Message = "Blender's export '{GlbPath}' is not a readable GLB.")]
+        private static partial void LogUnreadableGlb(ILogger logger, string glbPath);
     }
 }

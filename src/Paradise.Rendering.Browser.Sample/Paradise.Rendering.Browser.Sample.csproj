@@ -14,6 +14,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- A sample is a host, so it picks a sink (issue #232). Under wasm the console sink's
+         Console.Error lands in the browser's devtools console, which is where PbrRenderer's
+         diagnostics went before the seam existed. -->
+    <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
     <ProjectReference Include="../Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
     <ProjectReference Include="../Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />

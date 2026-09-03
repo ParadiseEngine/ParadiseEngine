@@ -61,7 +61,8 @@ internal static class Verbs
         bool tray,
         IReadOnlyList<IAssetImporter> importers)
     {
-        var maintainer = new SidecarMaintainer(fileSystem, layout, Console.WriteLine, dryRun, IgnoreRules(fileSystem, layout));
+        var log = PipelineLog.For(fileSystem, layout);
+        var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout));
         var settled = maintainer.Reconcile();
         Console.WriteLine(dryRun
             ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"
@@ -79,7 +80,7 @@ internal static class Verbs
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
         using var signals = new WatchSignals();
-        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, Console.WriteLine, importers: importers);
+        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers);
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
@@ -149,8 +150,7 @@ internal static class Verbs
 
         var runner = new BuildRunner(
             fileSystem, layout, encoder,
-            log: Console.WriteLine,
-            warn: message => Console.Error.WriteLine($"warning: {message}"),
+            logger: PipelineLog.For(fileSystem, layout),
             importers: importers);
         var result = runner.Run(profile, editor ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
 
@@ -167,7 +167,7 @@ internal static class Verbs
 
     public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to)
     {
-        var result = AssetMover.Move(fileSystem, layout, from, to, Console.WriteLine);
+        var result = AssetMover.Move(fileSystem, layout, from, to, PipelineLog.For(fileSystem, layout));
 
         foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
         foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
