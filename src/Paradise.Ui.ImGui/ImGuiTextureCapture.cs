@@ -64,7 +64,18 @@ public static class ImGuiTextureCapture
                     {
                         ops.Enqueue(ImGuiTextureOp.Destroy(texture.GetTexID().Handle));
                     }
+                    // Clear the id BEFORE reporting Destroyed. ImGui's atlas asserts that a
+                    // destroyed texture carries no id before it removes the ImTextureData, and
+                    // every official backend clears it here. Hexa ships release natives, so the
+                    // assert is compiled out today and this reads as cosmetic — it is not: it is
+                    // a hard abort against any debug native.
+                    texture.SetTexID(ImTextureID.Null);
                     texture.SetStatus(ImTextureStatus.Destroyed);
+                    // Deliberately NOT gated on UnusedFrames > 0, which is how the official
+                    // backends decline to free a texture ImGui drew with this frame. We answer
+                    // immediately and defer on our own side instead: the ops queue is ordered and
+                    // ImGuiWebGpuRenderer holds both the texture and its lookup for
+                    // DestroyDelayFrames, which covers the same window without making ImGui wait.
                     break;
 
                 case ImTextureStatus.Ok:

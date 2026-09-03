@@ -98,6 +98,84 @@ public class ImGuiWebGpuRendererTests
         ops.DrainTo(pending);
         renderer.ApplyTextureOps(pending);
 
+        var pixels = RenderOverGreen(device, renderer, snapshot);
+
+        // Inside the window (title bar region): not the green background.
+        await Assert.That(pixels.IsBackgroundAt(100, 50)).IsFalse();
+        // Far corner: untouched composited background (green, LoadOp.Load held).
+        var outside = pixels.At(Width - 8, Height - 8);
+        await Assert.That(outside.R).IsEqualTo((byte)0);
+        await Assert.That(Math.Abs(outside.G - 102)).IsLessThan(3); // 0.4 x 255 in a Unorm target
+        await Assert.That(outside.B).IsEqualTo((byte)0);
+    }
+
+    /// <summary>A Destroy op must not blind the snapshots that still name the texture.
+    ///
+    /// Regression test. The renderer deferred the GPU object by
+    /// <c>DestroyDelayFrames</c> but dropped the id's lookup entry immediately, and a command
+    /// whose id resolves to nothing is skipped — so a snapshot still in hand lost every glyph the
+    /// moment ImGui asked for the old atlas to go, which is the silent-vanish failure the ops
+    /// queue exists to prevent. <c>AcquireForRender</c> returns the same snapshot when nothing new
+    /// was published and drains the queue anyway, so this is reachable on any frame where the sim
+    /// has captured its ops and not yet published.</summary>
+    [Test]
+    public async Task a_destroyed_texture_keeps_drawing_until_the_snapshots_naming_it_are_gone()
+    {
+        using var imgui = new ImGuiTestContext(Width, Height);
+        var device = TryCreateDevice();
+        if (device is null)
+        {
+            Skip.Test("No WebGPU adapter available.");
+            return;
+        }
+
+        var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
+        var ops = new ImGuiTextureOps();
+        var drawData = imgui.Frame(() => ImGuiTestContext.Panel("hello"));
+        ImGuiTextureCapture.CaptureFrom(drawData, ops);
+        var snapshot = new ImGuiDrawSnapshot();
+        snapshot.Capture(drawData);
+        var pending = new List<ImGuiTextureOp>();
+        ops.DrainTo(pending);
+        renderer.ApplyTextureOps(pending);
+        var atlasId = snapshot.Commands[0].TextureId;
+
+        await Assert.That(RenderOverGreen(device, renderer, snapshot).IsBackgroundAt(100, 50)).IsFalse();
+
+        // ImGui asks for the atlas back — the frame that would replace this snapshot has not been
+        // published yet, so the renderer is still handed the one that names it.
+        renderer.ApplyTextureOps([ImGuiTextureOp.Destroy(atlasId)]);
+        await Assert.That(RenderOverGreen(device, renderer, snapshot).IsBackgroundAt(100, 50)).IsFalse();
+
+        // Once the delay is spent the texture really is freed, and the stale snapshot draws
+        // nothing rather than sampling a destroyed texture.
+        renderer.ApplyTextureOps([]);
+        renderer.ApplyTextureOps([]);
+        await Assert.That(RenderOverGreen(device, renderer, snapshot).IsBackgroundAt(100, 50)).IsTrue();
+    }
+
+    private readonly record struct Readback(byte[] Pixels)
+    {
+        public (byte R, byte G, byte B) At(int x, int y)
+        {
+            var i = (y * Width + x) * 4;
+            return (Pixels[i], Pixels[i + 1], Pixels[i + 2]);
+        }
+
+        /// <summary>True when nothing was drawn here — the clear colour survived.</summary>
+        public bool IsBackgroundAt(int x, int y)
+        {
+            var (r, g, b) = At(x, y);
+            return r == 0 && b == 0 && Math.Abs(g - 102) < 3; // 0.4 x 255 in a Unorm target
+        }
+    }
+
+    /// <summary>Clear to green, draw <paramref name="snapshot"/> over it, and read the result
+    /// back. Green because <see cref="ImGuiWebGpuRenderer.Render"/> composites with
+    /// <c>LoadOp.Load</c>, so "still green" is exactly "this command did not draw".</summary>
+    private static Readback RenderOverGreen(Device device, ImGuiWebGpuRenderer renderer, ImGuiDrawSnapshot snapshot)
+    {
+        var queue = device.GetQueue()!;
         var target = device.CreateTexture(new TextureDescriptor
         {
             Label = "ImGuiTest.Target",
@@ -154,21 +232,7 @@ public class ImGuiWebGpuRendererTests
                 mapped.Slice((int)(y * padded), Width * 4).CopyTo(pixelsOut.AsSpan(y * Width * 4));
         });
         readback.Unmap();
-
-        (byte R, byte G, byte B) At(int x, int y)
-        {
-            var i = (y * Width + x) * 4;
-            return (pixelsOut[i], pixelsOut[i + 1], pixelsOut[i + 2]);
-        }
-
-        // Inside the window (title bar region): not the green background.
-        var inside = At(100, 50);
-        await Assert.That(inside.G == 102 && inside.R == 0).IsFalse();
-        // Far corner: untouched composited background (green, LoadOp.Load held).
-        var outside = At(Width - 8, Height - 8);
-        await Assert.That(outside.R).IsEqualTo((byte)0);
-        await Assert.That(Math.Abs(outside.G - 102)).IsLessThan(3); // 0.4 x 255 in a Unorm target
-        await Assert.That(outside.B).IsEqualTo((byte)0);
+        return new Readback(pixelsOut);
     }
 
     [Test]

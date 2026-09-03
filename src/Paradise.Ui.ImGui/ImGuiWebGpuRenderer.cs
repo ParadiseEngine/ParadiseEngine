@@ -46,7 +46,7 @@ public sealed class ImGuiWebGpuRenderer
     /// <summary>Textures this renderer allocated itself (ImGui's), which it therefore has to
     /// free. Host textures in <see cref="_textures"/> are the host's to dispose.</summary>
     private readonly Dictionary<ulong, Texture> _ownedTextures = new();
-    private readonly List<(Texture Texture, int FramesLeft)> _retiring = new();
+    private readonly List<RetiredTexture> _retiring = new();
     private WebGpuSharp.Buffer? _vertexBuffer;
     private WebGpuSharp.Buffer? _indexBuffer;
     private ulong _vertexCapacity;
@@ -254,30 +254,50 @@ public sealed class ImGuiWebGpuRenderer
         _queue.WriteTexture(destination, op.Pixels, layout, new Extent3D(op.Width, op.Height, 1));
     }
 
+    /// <summary>Retire <paramref name="id"/>: the GPU object AND its lookup entry wait out
+    /// <see cref="DestroyDelayFrames"/> together.
+    ///
+    /// Dropping the lookup here while keeping the texture — which is what this did — made the
+    /// delay pointless, and failed with the same signature the Create path is careful about. A
+    /// snapshot the render thread still holds names this id, a command whose id resolves to no
+    /// bind group is SKIPPED, so the UI vanishes for as long as that snapshot is redrawn with
+    /// nothing in the geometry path to say why. The window is not theoretical:
+    /// <see cref="ImGuiFrameExchange.AcquireForRender"/> returns the SAME snapshot when nothing
+    /// new was published and drains the op queue anyway, so a sim tick that has enqueued its ops
+    /// and not yet published its snapshot is exactly that state.</summary>
     private void RetireTexture(ulong id)
     {
-        _textures.Remove(id);
-        _bindGroups.Remove(id);
-        if (_ownedTextures.Remove(id, out var texture))
-        {
-            _retiring.Add((texture, DestroyDelayFrames));
-        }
+        if (!_ownedTextures.Remove(id, out var texture)) return;
+        _textures.TryGetValue(id, out var view);
+        _retiring.Add(new RetiredTexture(id, texture, view, DestroyDelayFrames));
     }
 
     private void AgeRetiredTextures()
     {
         for (var i = _retiring.Count - 1; i >= 0; i--)
         {
-            var (texture, framesLeft) = _retiring[i];
-            if (framesLeft > 1)
+            var retired = _retiring[i];
+            if (retired.FramesLeft > 1)
             {
-                _retiring[i] = (texture, framesLeft - 1);
+                _retiring[i] = retired with { FramesLeft = retired.FramesLeft - 1 };
                 continue;
             }
-            texture.Destroy();
+            // Only drop the lookup if it still names the texture being freed: CreateTexture
+            // retires an id it is about to re-register, and that newer entry has to outlive its
+            // predecessor's wait.
+            if (_textures.TryGetValue(retired.Id, out var current) && ReferenceEquals(current, retired.View))
+            {
+                _textures.Remove(retired.Id);
+                _bindGroups.Remove(retired.Id);
+            }
+            retired.Texture.Destroy();
             _retiring.RemoveAt(i);
         }
     }
+
+    /// <param name="View">The view registered when the texture was retired, so aging can tell a
+    /// stale entry from one a later Create put back under the same id.</param>
+    private readonly record struct RetiredTexture(ulong Id, Texture Texture, TextureView? View, int FramesLeft);
 
     /// <summary>Record one snapshot into <paramref name="encoder"/>, compositing over
     /// <paramref name="target"/>. Render thread only.</summary>

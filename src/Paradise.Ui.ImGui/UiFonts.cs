@@ -263,6 +263,10 @@ public static class UiFonts
         var buffer = Hexa.NET.ImGui.ImGui.MemAlloc((nuint)bytes.Length);
         if (buffer is null) return false;
         bytes.AsSpan().CopyTo(new Span<byte>(buffer, bytes.Length));
-        return io.Fonts.AddFontFromMemoryTTF(buffer, bytes.Length, font.SizePixels) is not null;
+        if (io.Fonts.AddFontFromMemoryTTF(buffer, bytes.Length, font.SizePixels) is not null) return true;
+        // Refused: the atlas never took ownership, so this is the one path where the pairing
+        // above is ours to complete.
+        Hexa.NET.ImGui.ImGui.MemFree(buffer);
+        return false;
     }
 }
