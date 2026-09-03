@@ -1,6 +1,7 @@
 using Noesis;
 using Paradise.Windowing;
 using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis;
 
@@ -35,6 +36,9 @@ public sealed class NoesisViewCore
 {
     private readonly IFileSystem _content;
     private readonly UPath _root;
+    /// <summary>Where the UI tree came FROM, for the log line only: _root is "/" inside the
+    /// re-mount, which tells a reader nothing about which directory was loaded.</summary>
+    private readonly UPath _origin;
     private readonly string _xamlFile;
     private readonly object _sync = new();
     private readonly object? _dataContext;
@@ -66,19 +70,39 @@ public sealed class NoesisViewCore
     /// <c>NOESIS_LICENSE_NAME</c> environment variable when null.</param>
     /// <param name="licenseKey">NoesisGUI license key; falls back to the
     /// <c>NOESIS_LICENSE_KEY</c> environment variable when null.</param>
-    /// <param name="content">The mount the UI tree lives in — every XAML, texture and font this
-    /// view loads is resolved against the XAML's directory INSIDE it, and nothing outside it is
-    /// reachable. A host mounts a directory; a test mounts memory and needs no fixture files on
-    /// disk at all.</param>
-    /// <param name="xamlPath">The root XAML, as a path in <paramref name="content"/>.</param>
+    /// <param name="content">The mount the UI tree lives in. A host mounts a directory; a test
+    /// mounts memory and needs no fixture files on disk at all.</param>
+    /// <param name="xamlPath">The root XAML, as a path in <paramref name="content"/>. Its
+    /// DIRECTORY becomes this view's whole world — see the remarks.</param>
+    /// <remarks>
+    /// The XAML's directory is re-mounted as the providers' root, so a resource URI cannot name
+    /// anything above it. That bound is not new policy; it is what the UI tree already assumes —
+    /// Noesis resolves every resource against the XAML's own directory, which is why a shell must
+    /// sit AT <c>ui/</c> rather than in a subfolder or its <c>Theme/Fonts</c> stop resolving. What
+    /// is new is that the bound is now ENFORCED rather than merely conventional, and it makes this
+    /// path symmetric with the GLB sidecar reader, which mounts the file's own directory for the
+    /// same reason.
+    ///
+    /// <c>owned: false</c> because the mount belongs to the host: this view borrows it for the
+    /// process and disposes nothing (see the lifetime note above the class).
+    /// </remarks>
     public NoesisViewCore(IFileSystem content, UPath xamlPath, uint pixelWidth, uint pixelHeight,
         object? dataContext = null, Action? simTick = null,
         string? licenseName = null, string? licenseKey = null)
     {
         ArgumentNullException.ThrowIfNull(content);
+        // Named HERE rather than left to Zio, which rejects a relative path at first USE — and
+        // first use is the lazy construction on the sim thread, a long way from this argument.
+        if (!xamlPath.IsAbsolute)
+        {
+            throw new ArgumentException(
+                $"'{xamlPath}' must be absolute in the mount: a UPath is rooted at the mount, "
+                + "not at a working directory.", nameof(xamlPath));
+        }
 
-        _content = content;
-        _root = xamlPath.GetDirectory();
+        _content = new SubFileSystem(content, xamlPath.GetDirectory(), owned: false);
+        _root = UPath.Root;
+        _origin = xamlPath.GetDirectory();
         _xamlFile = xamlPath.GetName();
         _width = pixelWidth;
         _height = pixelHeight;
@@ -158,7 +182,7 @@ public sealed class NoesisViewCore
         // host's choice (a sim-thread UI, or a render-thread one whose ViewModel reads
         // presentation state directly), and it is pinned here for the view's whole life — so
         // the log has to say which one it actually was.
-        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_root} ({_width}x{_height}) "
+        Console.WriteLine($"[NoesisUi] '{_xamlFile}' loaded from {_origin} ({_width}x{_height}) "
             + $"on thread '{Thread.CurrentThread.Name ?? "unnamed"}' — the view is pinned to it.");
         return view;
     }
@@ -438,14 +462,25 @@ public sealed class NoesisViewCore
     // ---- content-mount resource providers rooted at the XAML's directory ----
 
     /// <summary>
-    /// A Noesis resource URI as a path under <paramref name="root"/>.
-    ///
+    /// A Noesis resource URI as a path under <paramref name="root"/>, or null for one that names
+    /// nothing this view may load.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// Noesis hands out '/'-separated URI paths, which is what a <see cref="UPath"/> already is —
     /// the separator translation this used to do disappears with the mount. Both separators are
     /// still trimmed off the front of a segment: a URI may spell a root-relative resource
-    /// ("/Theme/Fonts"), and combining that onto the root would otherwise escape the mount.
-    /// </summary>
-    private static UPath Combine(UPath root, params string[] segments)
+    /// ("/Theme/Fonts"), and combining that onto the root would otherwise escape it.
+    /// </para>
+    /// <para>
+    /// NULL RATHER THAN A THROW, because of who the caller is. A URI that climbs past the root
+    /// ("../secrets.xaml") makes <see cref="UPath"/>'s combine throw, and these run inside
+    /// callbacks Noesis invokes from NATIVE code — so an authoring typo would leave a managed
+    /// exception crossing a native frame instead of the "no such resource" every provider here
+    /// is contracted to answer with.
+    /// </para>
+    /// </remarks>
+    private static UPath? Combine(UPath root, params string[] segments)
     {
         var path = root;
         foreach (var segment in segments)
@@ -453,7 +488,16 @@ public sealed class NoesisViewCore
             if (string.IsNullOrWhiteSpace(segment)) continue;
             var normalized = segment.Replace('\\', UPath.DirectorySeparator)
                 .TrimStart(UPath.DirectorySeparator);
-            if (normalized.Length > 0) path /= normalized;
+            if (normalized.Length == 0) continue;
+
+            try
+            {
+                path /= normalized;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
         }
         return path;
     }
@@ -462,8 +506,9 @@ public sealed class NoesisViewCore
     {
         public override Stream? LoadXaml(Uri uri)
         {
-            var path = Combine(root, uri.GetPath());
-            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
+            return Combine(root, uri.GetPath()) is { } path && content.FileExists(path)
+                ? content.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+                : null;
         }
     }
 
@@ -471,8 +516,9 @@ public sealed class NoesisViewCore
     {
         public override Stream? OpenStream(Uri uri)
         {
-            var path = Combine(root, uri.GetPath());
-            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
+            return Combine(root, uri.GetPath()) is { } path && content.FileExists(path)
+                ? content.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+                : null;
         }
     }
 
@@ -480,14 +526,14 @@ public sealed class NoesisViewCore
     {
         public override Stream? OpenFont(Uri folder, string filename)
         {
-            var path = Combine(root, folder.GetPath(), filename);
-            return content.FileExists(path) ? content.OpenFile(path, FileMode.Open, FileAccess.Read) : null;
+            return Combine(root, folder.GetPath(), filename) is { } path && content.FileExists(path)
+                ? content.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+                : null;
         }
 
         public override void ScanFolder(Uri folder)
         {
-            var path = Combine(root, folder.GetPath());
-            if (!content.DirectoryExists(path)) return;
+            if (Combine(root, folder.GetPath()) is not { } path || !content.DirectoryExists(path)) return;
             foreach (var file in content.EnumerateFiles(path))
             {
                 var ext = file.GetExtensionWithDot();

@@ -36,7 +36,8 @@ internal sealed class PbrViewerScene : IDisposable
             // the mount is what confines the uris inside the GLB to them.
             using var physical = new PhysicalFileSystem();
             var glbFile = physical.ConvertPathFromInternal(Path.GetFullPath(glbPath));
-            using var sidecars = new SubFileSystem(physical, glbFile.GetDirectory());
+            // owned: false — the mount is borrowed, and `physical` is disposed by its own using.
+            using var sidecars = new SubFileSystem(physical, glbFile.GetDirectory(), owned: false);
             var asset = GltfSceneReader.Read(
                 physical.ReadAllBytes(glbFile), uri => ReadSidecarImage(sidecars, uri));
             var meshes = _pbr.UploadMesh(asset);
@@ -127,8 +128,9 @@ internal sealed class PbrViewerScene : IDisposable
 
     // The uri comes from untrusted GLB content, and the mount is the confinement: an absolute uri
     // is a path INSIDE the mount rather than one that escapes it, and a ".." that climbs past the
-    // root is refused by UPath itself. Only the refusal is dressed up here, so the message names
-    // the uri the GLB actually asked for rather than a path nobody wrote.
+    // root is refused by UPath itself. Neither failure is re-implemented here — both are only
+    // dressed, so the message names the URI THE GLB ASKED FOR. A raw IO error names the resolved
+    // path, which is not the string anyone can find in the file they are debugging.
     private static byte[] ReadSidecarImage(IFileSystem sidecars, string uri)
     {
         UPath path;
@@ -141,6 +143,15 @@ internal sealed class PbrViewerScene : IDisposable
             throw new NotSupportedException($"Image uri '{uri}' resolves outside the GLB directory.", e);
         }
 
-        return sidecars.ReadAllBytes(path);
+        try
+        {
+            return sidecars.ReadAllBytes(path);
+        }
+        catch (FileNotFoundException e)
+        {
+            throw new FileNotFoundException(
+                $"The GLB names image '{uri}', which is not beside it at '{path}'.",
+                path.FullName, e);
+        }
     }
 }

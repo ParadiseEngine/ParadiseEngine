@@ -109,6 +109,13 @@ namespace Paradise.Export.Data
             IFileSystem fileSystem, UPath path, IAuthoredComponentRegistry? registry = null)
         {
             ArgumentNullException.ThrowIfNull(fileSystem);
+            // A UPath is rooted at the MOUNT, not at a working directory, so a relative one names
+            // nothing: Zio refuses it, and this says which argument was wrong when it does.
+            if (!path.IsAbsolute)
+            {
+                throw new ArgumentException(
+                    $"'{path}' must be absolute in the file system it is read from.", nameof(path));
+            }
 
             string text = fileSystem.ReadAllText(path);
             if (".toml".Equals(path.GetExtensionWithDot(), StringComparison.OrdinalIgnoreCase))
