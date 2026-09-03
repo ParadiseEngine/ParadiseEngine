@@ -369,10 +369,21 @@
   past CA1823 on the now-unused lock field, and check the rewrite actually ran — a failed build
   silently reruns the OLD Coyote binary).
 
-### [hits: 1] `dotnet build --solution` is not a switch on SDK 10.0.400; pass the .slnx path directly
-- AGENTS.md's `dotnet build --solution ParadiseEngine.slnx` fails with `MSB1001: Unknown switch` on this machine's 10.0.400. `dotnet build ParadiseEngine.slnx` works. Same for `dotnet test`.
-- 2026-09-03, editor skeleton build.
+### [hits: 3] A primary-constructor parameter used BOTH in a field initializer and in a method body is CS9124
+- The compiler captures it into synthesised state AND stores it, and says so as a warning that
+  warnings-as-errors turns fatal. Fix: `private readonly T _x = x;` and read `_x` everywhere
+  below. Hit in `History` (twice: `SceneDocument initial`, then `ISceneProvider scene`) and in
+  `OperatorDispatcher` (`IOperatorContext context` feeding both `_logger` and every method).
+- 2026-09-03/04, editor skeleton.
+
+
+### [hits: 2] `--solution` is a `dotnet test` switch, NOT a `dotnet build` one, on SDK 10.0.400
+- `dotnet build --solution ParadiseEngine.slnx` fails with `MSB1001: Unknown switch`; pass the path
+  directly (`dotnet build ParadiseEngine.slnx`). `dotnet test --solution ParadiseEngine.slnx` is
+  correct and works — an earlier version of this entry claimed otherwise and was wrong.
+- AGENTS.md carried the bad build line until #236 corrected it; the test line was always right.
+- 2026-09-03 first hit, corrected 2026-09-04 after a review caught the entry contradicting AGENTS.md.
+
 
 ### [hits: 1] TUnit 1.65: `HasCount()` is obsolete and warnings-as-errors turns it into CS0618; use `.Count().IsEqualTo(n)`
-- Also: a C# primary-constructor parameter used BOTH to initialize a property and captured in a method body is CS9124 under this compiler; copy it to a field first.
 - 2026-09-03, editor skeleton tests.

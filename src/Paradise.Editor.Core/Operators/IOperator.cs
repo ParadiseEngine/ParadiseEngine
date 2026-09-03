@@ -19,7 +19,21 @@ public sealed record OperatorArgs(ImmutableDictionary<string, object?> Values)
 {
     public static OperatorArgs None { get; } = new(ImmutableDictionary<string, object?>.Empty);
 
-    public T? Get<T>(string key) => Values.TryGetValue(key, out var value) && value is T typed ? typed : default;
+    public T? Get<T>(string key) => TryGet<T>(key, out var value) ? value : default;
+
+    /// <summary>Distinguishes absent and wrong-typed from present-and-default, which
+    /// <see cref="Get{T}"/> cannot: an operator invoked from a menu with no arguments should
+    /// report <see cref="OperatorResult.Cancelled"/>, not apply <see langword="default"/>.</summary>
+    public bool TryGet<T>(string key, out T value)
+    {
+        if (Values.TryGetValue(key, out var held) && held is T typed)
+        {
+            value = typed;
+            return true;
+        }
+        value = default!;
+        return false;
+    }
 }
 
 /// <summary>A named, dispatchable editor action: the only way anything is done.</summary>

@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Paradise.Editor.Core.Extensibility;
 
 namespace Paradise.Editor.Core.Operators;
@@ -25,7 +24,14 @@ public sealed partial class OperatorDispatcher(
     IOperatorContext context, IRegistry<IOperator> operators, ILogger? logger = null)
     : IOperatorDispatcher
 {
-    private readonly ILogger _logger = logger ?? NullLogger.Instance;
+    // Read through the fields, never the parameters: a primary-constructor parameter used BOTH in
+    // a field initializer and in a method body is CS9124.
+    private readonly IOperatorContext _context = context;
+
+    // Falls back to the CONTEXT's logger rather than to silence. A host that installed a real one
+    // and constructed this with two arguments would otherwise lose exactly the reports it wanted
+    // — unknown id, unavailable, threw — while every operator's own lines kept arriving.
+    private readonly ILogger _logger = logger ?? context.Log;
 
     /// <summary>The LAST registration wins, so a game overrides a built-in operator by id — the
     /// same rule the inspector's field renderers follow.</summary>
@@ -40,7 +46,7 @@ public sealed partial class OperatorDispatcher(
             return OperatorResult.Unavailable;
         }
 
-        if (!operatorInstance.IsAvailable(context))
+        if (!operatorInstance.IsAvailable(_context))
         {
             LogUnavailable(_logger, id);
             return OperatorResult.Unavailable;
@@ -48,7 +54,7 @@ public sealed partial class OperatorDispatcher(
 
         try
         {
-            OperatorResult result = operatorInstance.Execute(context, args);
+            OperatorResult result = operatorInstance.Execute(_context, args);
             LogFinished(_logger, id, result);
             return result;
         }

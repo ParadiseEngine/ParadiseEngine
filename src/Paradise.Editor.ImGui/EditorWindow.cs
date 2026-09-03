@@ -18,16 +18,32 @@ public abstract class EditorWindow(WindowDescriptor descriptor)
 
     protected virtual ImGuiWindowFlags Flags => ImGuiWindowFlags.None;
 
+    // "Title###id": ImGui keys the window on what follows ###, so layout persistence and docking
+    // survive a renamed or localised title, and two panels may share one.
+    private readonly string _label = $"{descriptor.Title}###{descriptor.Id}";
+
     /// <summary>Draw this window into the current frame; the host has already begun it.</summary>
+    /// <remarks><c>End</c> is unconditional and in a <c>finally</c> for the same reason
+    /// <c>OperatorDispatcher</c> contains a throwing operator: an exception leaving a panel
+    /// mid-frame unbalances Begin/End, and the frame that then breaks is the NEXT one, somewhere
+    /// that names neither this window nor the panel that threw. Containing operators is not
+    /// enough — a field renderer or any drawing code throws straight through here, and this is
+    /// the one place every panel shares.</remarks>
     public void Draw()
     {
         if (!IsOpen) return;
         var open = IsOpen;
-        if (ImGuiApi.Begin(descriptor.Title, ref open, Flags))
+        try
         {
-            DrawContent();
+            if (ImGuiApi.Begin(_label, ref open, Flags))
+            {
+                DrawContent();
+            }
         }
-        ImGuiApi.End();
+        finally
+        {
+            ImGuiApi.End();
+        }
         IsOpen = open;
     }
 

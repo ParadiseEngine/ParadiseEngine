@@ -27,10 +27,11 @@ public interface IReversibleFileOperation : IHistoryEntry
 
 /// <summary>A linear list of steps with a cursor; document steps and file steps share it so
 /// undo is one stream.</summary>
+/// <remarks>There is no <c>Current</c> here on purpose. The live document has exactly one owner,
+/// the <see cref="ISceneProvider"/>, and history publishes to it — otherwise the in-game host has
+/// two copies and undo moves only the one the editor happens to read.</remarks>
 public interface IHistory
 {
-    SceneDocument Current { get; }
-
     bool CanUndo { get; }
 
     bool CanRedo { get; }

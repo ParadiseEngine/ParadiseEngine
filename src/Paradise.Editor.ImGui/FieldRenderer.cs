@@ -13,6 +13,10 @@ public sealed record FieldRenderer(string FieldType, Action<FieldRenderContext> 
 
 /// <summary>The UI-layer registry the Inspector resolves rows from; Core has no counterpart
 /// because drawing is not Core's business.</summary>
+/// <remarks>Owner-scoped like Core's registries but NOT reachable from
+/// <c>EditorRegistries.RemoveOwner</c>, which cannot know about a type in this assembly. The shell
+/// owns both and tears them down together; an extension that registers rows here and is unloaded
+/// through Core alone would otherwise leave them behind.</remarks>
 public sealed class FieldRendererRegistry
 {
     private readonly Registry<FieldRenderer> _renderers = new();

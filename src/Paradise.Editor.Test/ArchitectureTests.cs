@@ -1,12 +1,13 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Paradise.Editor.Core.Document;
+using Paradise.Editor.ImGui;
 
 namespace Paradise.Editor.Test;
 
-/// <summary>The three boundaries that keep the editor model clean, enforced by the build rather
-/// than by review: Core knows no ImGui, Core touches no file except through a Zio mount, and Core
-/// names no logging sink.</summary>
+/// <summary>The boundaries that keep the editor layers clean, enforced by the build rather than
+/// by review: Core knows no ImGui, touches no file except through a Zio mount and names no logging
+/// sink, and the ImGui layer draws without owning a frame, a window or a device.</summary>
 public partial class ArchitectureTests
 {
     private static readonly Assembly s_core = typeof(SceneDocument).Assembly;
@@ -40,14 +41,32 @@ public partial class ArchitectureTests
         var sources = CoreSourceFiles();
         await Assert.That(sources).IsNotEmpty();
         var offenders = sources
-            .Where(path => FileApiCall().IsMatch(File.ReadAllText(path)))
+            .Where(path => FileApiCall().IsMatch(CommentLine().Replace(File.ReadAllText(path), "")))
             .Select(Path.GetFileName)
             .ToArray();
         await Assert.That(offenders).IsEmpty();
     }
 
+    // The csproj comment claims this library never owns a window, an input pump or a renderer.
+    // Referencing Paradise.Ui.ImGui to obtain the binding would quietly make that false — it
+    // carries WebGPUSharp and the frame-owning core — and nothing else would notice.
+    [Test]
+    public async Task the_imgui_layer_takes_the_binding_and_not_the_runtime()
+    {
+        var referenced = typeof(EditorWindow).Assembly.GetReferencedAssemblies()
+            .Select(name => name.Name ?? "").ToArray();
+        await Assert.That(referenced).Contains("Hexa.NET.ImGui");
+        await Assert.That(referenced).DoesNotContain("Paradise.Ui.ImGui");
+        await Assert.That(referenced).DoesNotContain("WebGPUSharp");
+    }
+
     [GeneratedRegex(@"\b(File|Directory|FileStream|StreamReader|StreamWriter|Path)\.")]
     private static partial Regex FileApiCall();
+
+    // Comments are stripped before matching so that documenting the rule does not break it: the
+    // remarks on ISceneDocumentStore have every reason to name File and Path.
+    [GeneratedRegex(@"^\s*//.*$", RegexOptions.Multiline)]
+    private static partial Regex CommentLine();
 
     private static string[] CoreSourceFiles()
     {

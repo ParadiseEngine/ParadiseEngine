@@ -16,7 +16,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The binding DIRECTLY, not through Paradise.Ui.ImGui. That package owns the frame, the
+         input pump and a WebGPU backend — everything the comment above says this library never
+         touches — so referencing it to obtain the binding would put the whole renderer behind a
+         boundary that has no other way to be enforced. Paradise.Editor.Test guards it. -->
+    <PackageReference Include="Hexa.NET.ImGui" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
-    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
   </ItemGroup>
 </Project>
