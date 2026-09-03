@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ImGuiApi = Hexa.NET.ImGui.ImGui;
 using Paradise.Windowing;
 
 namespace Paradise.Ui.ImGui.Test;
@@ -140,5 +141,43 @@ public class ImGuiUiCoreTests
         core.SetHostClipboard("from the host");
         // Nothing was copied IN the UI, so there is still nothing for the host to publish.
         await Assert.That(core.TryTakeClipboardCopy(out _)).IsFalse();
+    }
+
+    /// <summary>The clipboard bridge driven through ImGui's OWN entry points, so the call crosses
+    /// the <c>[UnmanagedCallersOnly]</c> trampolines installed into <c>ImGuiPlatformIO</c>.
+    ///
+    /// The test above exercises only the managed cache — both halves of it are our own methods —
+    /// so it passes whether or not those function pointers ever reach cimgui. A field-offset
+    /// mismatch in Hexa's <c>ImGuiPlatformIO</c>, or a marshalling mistake in either trampoline,
+    /// would leave the UI unable to copy or paste and ship green.</summary>
+    [Test]
+    public async Task the_clipboard_bridge_is_reached_through_native_imgui()
+    {
+        using var core = NewCore(() => ImGuiTestContext.Panel("hello"));
+
+        // Copy: cimgui calls out through Platform_SetClipboardTextFn.
+        ImGuiApi.SetClipboardText("copied in the ui");
+        await Assert.That(core.TryTakeClipboardCopy(out var copied)).IsTrue();
+        await Assert.That(copied).IsEqualTo("copied in the ui");
+
+        // Paste: the host publishes the system clipboard, cimgui asks for it through
+        // Platform_GetClipboardTextFn.
+        core.SetHostClipboard("from the host");
+        await Assert.That(ImGuiApi.GetClipboardTextS()).IsEqualTo("from the host");
+    }
+
+    /// <summary>Non-ASCII both ways: the trampolines marshal UTF-8, and a bridge that only ever
+    /// saw ASCII would hide a length-vs-byte-count mistake.</summary>
+    [Test]
+    public async Task the_clipboard_bridge_carries_utf8()
+    {
+        using var core = NewCore(() => ImGuiTestContext.Panel("hello"));
+
+        ImGuiApi.SetClipboardText("复制的文本");
+        await Assert.That(core.TryTakeClipboardCopy(out var copied)).IsTrue();
+        await Assert.That(copied).IsEqualTo("复制的文本");
+
+        core.SetHostClipboard("粘贴的文本");
+        await Assert.That(ImGuiApi.GetClipboardTextS()).IsEqualTo("粘贴的文本");
     }
 }
