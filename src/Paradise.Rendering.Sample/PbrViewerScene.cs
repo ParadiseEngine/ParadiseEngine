@@ -27,13 +27,14 @@ internal sealed class PbrViewerScene : IDisposable
     private uint _width;
     private uint _height;
 
-    public PbrViewerScene(WebGpuRenderer renderer, uint width, uint height, string? glbPath)
+    /// <param name="logger">Where <see cref="PbrRenderer"/>'s diagnostics go. Taken rather than
+    /// created: a scene is not the host, and which sink to install — and at what level — is the
+    /// host's call. <c>Program</c> makes it once from <c>--log-level</c>.</param>
+    public PbrViewerScene(WebGpuRenderer renderer, uint width, uint height, string? glbPath, ILogger? logger = null)
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(
-            renderer, _width, _height,
-            logger: ParadiseConsole.CreateLogger("PbrRenderer", new ParadiseConsoleOptions { MinLevel = LogLevel.Information }));
+        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger);
 
         if (glbPath is not null)
         {

@@ -27,15 +27,14 @@ internal sealed class PbrShadowScene : IDisposable
     /// <param name="extraBoxes">Additional boxes in a ring around the centre. The default scene is
     /// three; raising it is how the harness measures what a real draw count costs across the JS
     /// boundary, since every instance adds a main-pass draw AND a shadow-pass draw.</param>
-    public PbrShadowScene(IRenderer renderer, uint width, uint height, int extraBoxes = 0)
+    /// <param name="logger">Where <see cref="PbrRenderer"/>'s diagnostics go — under wasm, the
+    /// browser's devtools console. Taken rather than created: a scene is not the host, and
+    /// <c>Program.InitAsync</c> builds it from the page's <c>?log=</c> query parameter.</param>
+    public PbrShadowScene(IRenderer renderer, uint width, uint height, int extraBoxes = 0, ILogger? logger = null)
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        // Under wasm this reaches the browser's devtools console, which is where PbrRenderer's
-        // joint-palette overflow used to print from inside the renderer.
-        _pbr = new PbrRenderer(
-            renderer, _width, _height,
-            logger: ParadiseConsole.CreateLogger("PbrRenderer", new ParadiseConsoleOptions { MinLevel = LogLevel.Information }));
+        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger);
 
         var (vertices, indices) = Procedural.UnitCube();
         var groundMaterial = _pbr.Materials.AddDefaultMaterial(new Vector4(0.42f, 0.45f, 0.5f, 1f), metallic: 0f, roughness: 0.9f);

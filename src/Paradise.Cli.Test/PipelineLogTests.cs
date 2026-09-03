@@ -60,14 +60,22 @@ public class PipelineLogTests
     [Test]
     public async Task a_physical_mount_renders_a_path_a_person_can_paste()
     {
-        // The case that raised the issue: inside the abstraction `/mnt/c/...` is correct and to a
-        // person it is useless. Outside assets/, the host form is what gets printed.
         using var physical = new PhysicalFileSystem();
         var outside = physical.ConvertPathFromInternal(Path.GetTempPath());
 
         var rendered = PipelineLog.Render(physical, s_layout, outside);
 
+        // The contract, on every platform: outside assets/, what gets printed is the mount's own
+        // host form rather than the UPath.
         await Assert.That(rendered).IsEqualTo(physical.ConvertPathToInternal(outside));
-        await Assert.That(rendered).IsNotEqualTo(outside.FullName);
+
+        // That the two DIFFER is a Windows fact, not a universal one, and asserting it everywhere
+        // is how this test first failed on CI. Zio only rewrites a drive into `/mnt/c/...` on
+        // Windows; on POSIX the UPath and the host path are the same string, so there is nothing
+        // to translate — which is also why the case that raised issue #232 is a Windows case.
+        if (OperatingSystem.IsWindows())
+        {
+            await Assert.That(rendered).IsNotEqualTo(outside.FullName);
+        }
     }
 }

@@ -17,12 +17,19 @@ internal static class Program
     private const int InitialWidth = 640;
     private const int InitialHeight = 480;
 
-    /// <summary>Where the engine's own diagnostics go — Dawn validation errors, device loss.</summary>
-    /// <remarks>The sample keeps printing these on stderr with a bracketed prefix, which is what
-    /// they looked like when the renderer wrote them itself. The difference is that the renderer
-    /// no longer decides: this line does, and a host that wants them elsewhere changes it.</remarks>
-    private static readonly ILogger EngineLog =
-        ParadiseConsole.CreateLogger("WebGPU", new ParadiseConsoleOptions { MinLevel = LogLevel.Information });
+    /// <summary>The sink every engine diagnostic in this sample goes through.</summary>
+    /// <remarks>
+    /// One factory, built once from <c>--log-level</c>, handing out a logger per category — which
+    /// is what <see cref="ParadiseConsole.CreateFactory"/> is for, and the first place in the repo
+    /// that needs more than one category behind the same options.
+    ///
+    /// A flag rather than an environment variable, because this host already parses flags and a
+    /// command you can read back is better than ambient state. It replaces
+    /// <c>PARADISE_CLUSTER_DEBUG=1</c>, which used to switch the cluster dump on at runtime and
+    /// was read once per frame to do it; the level costs one parse at startup and covers every
+    /// diagnostic rather than that one.
+    /// </remarks>
+    private static ILoggerFactory s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions());
 
     private enum SceneKind
     {
@@ -34,6 +41,9 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        if (ParseLogLevel(args) is not { } level) return 1;
+        s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions { MinLevel = level });
+
         var headlessFrames = ParseHeadless(args);
         var kind = SceneKind.Triangle;
         string? glbPath = null;
@@ -62,6 +72,24 @@ internal static class Program
             Console.Error.WriteLine($"Sample failed: {ex}");
             return 1;
         }
+    }
+
+    /// <summary><c>--log-level &lt;level&gt;</c>, or Information. Null means the argument was bad and was reported.</summary>
+    /// <remarks><c>Debug</c> is what turns the PBR cluster dump on — the froxel counts that
+    /// <c>PARADISE_CLUSTER_DEBUG=1</c> used to switch.</remarks>
+    private static LogLevel? ParseLogLevel(string[] args)
+    {
+        var index = Array.IndexOf(args, "--log-level");
+        if (index < 0) return LogLevel.Information;
+
+        if (index + 1 >= args.Length || !Enum.TryParse<LogLevel>(args[index + 1], ignoreCase: true, out var level))
+        {
+            Console.Error.WriteLine(
+                $"Usage: --log-level <{string.Join('|', Enum.GetNames<LogLevel>())}>  (Debug shows the PBR cluster dump)");
+            return null;
+        }
+
+        return level;
     }
 
     private static int? ParseHeadless(string[] args)
@@ -98,12 +126,12 @@ internal static class Program
 
         try
         {
-            using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight, EngineLog);
+            using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight, s_log.CreateLogger("WebGPU"));
             switch (kind)
             {
                 case SceneKind.Pbr:
                 {
-                    using var scene = new PbrViewerScene(renderer, InitialWidth, InitialHeight, glbPath);
+                    using var scene = new PbrViewerScene(renderer, InitialWidth, InitialHeight, glbPath, s_log.CreateLogger("PbrRenderer"));
                     for (var i = 0; i < frameCount; i++)
                         scene.RenderFrame();
                     break;
@@ -160,11 +188,11 @@ internal static class Program
             }
 
             var surfaceDesc = BuildSurfaceDescriptor(window, out metalView);
-            renderer = new WebGpuRenderer(in surfaceDesc, logger: EngineLog);
+            renderer = new WebGpuRenderer(in surfaceDesc, logger: s_log.CreateLogger("WebGPU"));
             using var triangleScene = kind == SceneKind.Triangle ? new TriangleScene(renderer) : null;
             using var cubeScene = kind == SceneKind.Cube ? new LitCubeScene(renderer, surfaceDesc.Width, surfaceDesc.Height) : null;
             using var computeScene = kind == SceneKind.Compute ? new ComputeScene(renderer) : null;
-            using var pbrScene = kind == SceneKind.Pbr ? new PbrViewerScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath) : null;
+            using var pbrScene = kind == SceneKind.Pbr ? new PbrViewerScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath, s_log.CreateLogger("PbrRenderer")) : null;
 
             var quit = false;
             SDL_Event ev;
