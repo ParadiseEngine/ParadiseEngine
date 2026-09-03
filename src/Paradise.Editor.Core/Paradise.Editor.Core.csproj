@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The editor's model: documents, host kinds, schema binding, selection, operators, registries
+    and history. Engine-AGNOSTIC in the sense that matters: no runtime, no renderer, no game
+    assembly, no window, and no assumption about which process or thread hosts it. Engine
+    packages are used as libraries for the authored-data types (the .scene.toml document, the
+    project layout, the authoring schema); that is content vocabulary, not a runtime dependency.
+    Two rules are enforced by Paradise.Editor.Test rather than by review: no ImGui reference
+    (Paradise.Editor.ImGui is the only place ImGui exists) and no System.IO file API (every read
+    and write goes through a Zio IFileSystem the host mounts).
+  -->
+  <PropertyGroup>
+    <AssemblyName>Paradise.Editor.Core</AssemblyName>
+    <RootNamespace>Paradise.Editor.Core</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
+    <ProjectReference Include="../Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
+    <ProjectReference Include="../Paradise.Authoring/Paradise.Authoring.csproj" />
+  </ItemGroup>
+</Project>

@@ -361,3 +361,11 @@
   real OS has. Prove it fails with the guard removed (`-p:TreatWarningsAsErrors=false` to get
   past CA1823 on the now-unused lock field, and check the rewrite actually ran — a failed build
   silently reruns the OLD Coyote binary).
+
+### [hits: 1] `dotnet build --solution` is not a switch on SDK 10.0.400; pass the .slnx path directly
+- AGENTS.md's `dotnet build --solution ParadiseEngine.slnx` fails with `MSB1001: Unknown switch` on this machine's 10.0.400. `dotnet build ParadiseEngine.slnx` works. Same for `dotnet test`.
+- 2026-09-03, editor skeleton build.
+
+### [hits: 1] TUnit 1.65: `HasCount()` is obsolete and warnings-as-errors turns it into CS0618; use `.Count().IsEqualTo(n)`
+- Also: a C# primary-constructor parameter used BOTH to initialize a property and captured in a method body is CS9124 under this compiler; copy it to a field first.
+- 2026-09-03, editor skeleton tests.

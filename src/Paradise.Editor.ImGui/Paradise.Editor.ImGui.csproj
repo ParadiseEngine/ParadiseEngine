@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The editor's panels and shell as a DRAW-INTO-YOUR-FRAME library. It never calls NewFrame or
+    Render, never owns a window, never pumps input: the host runs the ImGui frame and calls
+    IEditorShell.Draw inside it. Standalone, that host is Paradise.Editor.Host. In-game, it is
+    the game's existing ImGui overlay, so the editor draws inside the game's own draw delegate on
+    whichever thread runs that frame. That is what makes one editor serve both hosts.
+  -->
+  <PropertyGroup>
+    <AssemblyName>Paradise.Editor.ImGui</AssemblyName>
+    <RootNamespace>Paradise.Editor.ImGui</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
+    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+  </ItemGroup>
+</Project>
