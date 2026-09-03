@@ -53,6 +53,29 @@
          - HexaEngine/Hexa.NET.ImGui#130: ImGui.Text(string) goes through cimgui's printf, so an
            unmatched %s in runtime text segfaults. Call TextUnformatted / ImGuiText instead. -->
     <PackageVersion Include="Hexa.NET.ImGui" Version="2.2.9" />
+    <!-- Transform gizmos for the editor's Scene panel: translate/rotate/scale handles, the
+         orientation cube (ViewManipulate) and matrix decompose/recompose. Versioned in LOCKSTEP
+         with the binding above — 2.2.9 depends on Hexa.NET.ImGui 2.2.9 exactly — so the two pins
+         move together or not at all.
+
+         IT SHIPS ITS OWN NATIVE, and that is the thing to know. cimguizmo statically links its
+         own copy of Dear ImGui, so it has its own `GImGui` and cannot see the context cimgui
+         created. `ImGuizmo.SetImGuiContext` is what bridges them, and skipping it is a null
+         dereference in native code rather than an exception. EditorGizmo.Attach owns that call.
+
+         Its three siblings were evaluated (2026-09-04) and deliberately NOT taken:
+         - Hexa.NET.ImPlot — the Stats panel plots frame times, which ImGui's own PlotLines
+           already does. 6 MB of native per platform for nicer axes, plus a second context to
+           create and destroy. Revisit at E2 if PlotLines proves too thin.
+         - Hexa.NET.ImNodes — a node-graph editor with no consumer on the roadmap. The candidate
+           is a Paradise.BT graph panel, and that is not a thing anyone has asked for.
+         - Hexa.NET.ImGui.Widgets — declined on two counts. It pins Hexa.NET.ImGui 2.2.8.4, one
+           release BEHIND the pin above, and 2.2.9 is where the 1.92 texture-protocol surface
+           lands, so its assembly would run against a binding it was not compiled against. And it
+           is a window-manager plus dialogs, which is the layer #222 decided the editor owns; its
+           file dialogs hand back HOST PATHS, while every file the editor touches arrives through
+           a Zio mount. -->
+    <PackageVersion Include="Hexa.NET.ImGuizmo" Version="2.2.9" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem

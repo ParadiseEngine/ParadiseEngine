@@ -1,0 +1,94 @@
+# The editor host, booted for real on every change: a window-less run that renders the dockspace
+# and reads the frame back. Separate from .NET Test because it needs a GPU, and the only GPU a
+# hosted runner has is a software one — keeping it apart means a lavapipe problem reads as a
+# lavapipe problem rather than reddening the whole test job.
+#
+# Linux only. macOS runners have no GPU at all and Windows runners have no software Vulkan, so
+# this is the one platform where the check can actually run.
+name: Editor Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  headless-boot:
+    runs-on: ubuntu-latest
+    # The capture waits inside the renderer are bounded, but adapter acquisition on a software
+    # driver is not, and the default is six hours. A boot that has not produced a frame in ten
+    # minutes has hung.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # libc++ is not optional and is not about Vulkan: Dawn's Linux build links LLVM's C++
+      # runtime rather than libstdc++, so without it the native library fails to load and the
+      # renderer never gets as far as asking for an adapter. It is also why the main test job has
+      # always been green here — its GPU tests take their "native library not loadable" skip.
+      - name: Install lavapipe and Dawn's runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools libc++1 libc++abi1
+
+      # The ICD path is DISCOVERED, not assumed. Setting VK_ICD_FILENAMES replaces the loader's
+      # own search rather than adding to it, so naming a file that is not there is worse than
+      # naming nothing — it turns "a driver the loader would have found" into "found no drivers".
+      # Reported before the editor runs, so a missing adapter is distinguishable from a crash.
+      - name: Find the software Vulkan driver
+        run: |
+          ls -la /usr/share/vulkan/icd.d/ || true
+          icd=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1)
+          if [ -n "$icd" ]; then
+            echo "using $icd"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            export VK_ICD_FILENAMES="$icd" VK_DRIVER_FILES="$icd"
+          else
+            echo "no lavapipe ICD found; leaving the loader to its own search"
+          fi
+          vulkaninfo --summary 2>&1 | head -30 || true
+
+      # Paradise.Rendering imports Slang.targets, so the host's graph downloads slangc on first
+      # build. Same cache key as .NET Test uses.
+      - name: Cache slangc
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_slang
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
+          restore-keys: |
+            slang-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the editor host
+        run: dotnet build src/Paradise.Editor.Host/Paradise.Editor.Host.csproj -c Release -p:TreatWarningsAsErrors=true
+
+      # The host asserts the frame produced draw commands and the dockspace node was built, so a
+      # non-zero exit is a real failure rather than something this step has to re-check.
+      - name: Boot headless and capture a frame
+        run: |
+          dotnet run --project src/Paradise.Editor.Host/Paradise.Editor.Host.csproj -c Release --no-build -- \
+            --frames 8 --screenshot editor.png
+
+      - name: Check the screenshot is not empty
+        run: test -s editor.png
+
+      # Uploaded because when this goes wrong the picture is the diagnosis: a clear-coloured frame
+      # says the overlay never composited, a blank one says the capture path did not.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-headless-frame
+          path: editor.png
+          if-no-files-found: warn

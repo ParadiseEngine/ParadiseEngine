@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -7,7 +6,6 @@ using Paradise.Rendering.WebGPU;
 using Paradise.Rendering;
 using Paradise.Windowing;
 using Paradise.Windowing.Sdl;
-using PdTextureFormat = Paradise.Rendering.TextureFormat;
 using Zio.FileSystems;
 
 namespace Paradise.Ui.ImGui.Sample;
@@ -150,56 +148,12 @@ internal static class Program
 
         // The last frame only: the first has an atlas that is still arriving.
         var readback = capture!.GetAwaiter().GetResult();
-        WriteCapture(path, readback, renderer.ColorFormat);
+        using (var file = System.IO.File.Create(path))
+        {
+            PngWriter.Write(file, readback, renderer.ColorFormat);
+        }
         Console.WriteLine($"[sample] {frames} frames rendered; wrote {path} ({readback.Width}x{readback.Height}).");
         fonts.Dispose();
         return 0;
-    }
-
-    private static void WriteCapture(string path, ColorReadback readback, PdTextureFormat format)
-    {
-        var pixels = readback.Pixels;
-        if (format is PdTextureFormat.Bgra8Unorm or PdTextureFormat.Bgra8UnormSrgb)
-        {
-            // A headless target is BGRA; PNG wants RGBA.
-            for (var i = 0; i + 3 < pixels.Length; i += 4)
-            {
-                (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-            }
-        }
-        PngWriter.WriteRgba(path, pixels, readback.Width, readback.Height);
-    }
-
-    /// <summary>Stands in for the scene: one pass that clears the backbuffer, so the overlay has
-    /// something to composite over and the frame goes through <c>Submit</c> — the path that runs
-    /// <c>OverlayPass</c> and presents. <c>RenderClearFrame</c> deliberately does neither.
-    ///
-    /// The pass has to be RECORDED, not merely described. A stream carrying the descriptor table
-    /// and no commands submits nothing at all: the first capture off this sample came out with an
-    /// untouched backbuffer behind the UI, and a red clear colour proved it by not appearing.</summary>
-    private sealed class ClearFrame
-    {
-        private readonly ArrayBufferWriter<RenderCommand> _commands = new(2);
-        private readonly RenderPassDesc[] _passes;
-
-        public ClearFrame(ColorRgba color)
-        {
-            _passes = new RenderPassDesc[1];
-            _passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
-            _passes[0].Colors.Slot0 = new ColorAttachmentDesc(
-                View: RenderViewHandle.Invalid, // backbuffer
-                Load: LoadOp.Clear,
-                Store: StoreOp.Store,
-                ClearValue: color);
-        }
-
-        public RenderCommandStream Record()
-        {
-            _commands.ResetWrittenCount();
-            var encoder = new RenderCommandEncoder(_commands);
-            encoder.BeginPass(0);
-            encoder.EndPass();
-            return new RenderCommandStream(_commands.WrittenMemory, _passes);
-        }
     }
 }

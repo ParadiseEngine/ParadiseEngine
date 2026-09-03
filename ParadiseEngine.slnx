@@ -44,6 +44,7 @@
     <Project Path="src/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
     <Project Path="src/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
     <Project Path="src/Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
+    <Project Path="src/Paradise.Editor.Host/Paradise.Editor.Host.csproj" />
     <Project Path="src/Paradise.Ui/Paradise.Ui.csproj" />
     <Project Path="src/Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
     <Project Path="src/Paradise.Ui.Noesis/Paradise.Ui.Noesis.csproj" />

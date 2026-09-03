@@ -225,6 +225,31 @@
   (`element.MouseWheel += …`, reading `MouseWheelEventArgs.Delta`/`.Orientation`), not against a
   templated control's state — it is the honest assertion AND needs no WebGPU device.
 
+## Dear ImGui / Paradise.Ui.ImGui
+
+- [hits: 1] **`ImGui.GetID(string)` outside a frame SEGFAULTS, and inside one it is seeded by the
+  CURRENT WINDOW's id stack.** It reads `GImGui->CurrentWindow->IDStack`, which is null between
+  `Render` and the next `NewFrame` — the process dies with no managed exception and no output, so
+  it looks like the renderer or the capture path. Found 2026-09-04: `EditorDockspace.HasNode`
+  called it after the frame in the host's headless smoke run, exit 139 with an empty log.
+  **Rule**: an id that must survive across frames, be stable wherever it is computed, and be
+  readable between frames — a dockspace id, a persisted node id — comes from
+  `ImGuiP.ImHashStr(name)`, which is a pure function of the string. Reserve `GetID` for ids that
+  are genuinely scoped to the window being drawn. The stack-seeding half matters too: taking a
+  dockspace id with `GetID` silently changes it if the call ever moves inside a `Begin`/`End`,
+  which loses the saved layout with no error.
+
+- [hits: 1] **Every Hexa ImGui SIBLING ships its own native with its own statically-linked Dear
+  ImGui, and therefore its own `GImGui`.** `cimguizmo`, `cimplot` and `cimnodes` cannot see the
+  context `cimgui` created, so `ImGuizmo.SetImGuiContext(ImGui.GetCurrentContext())` (and the
+  ImPlot/ImNodes equivalents, plus their own `CreateContext`) is mandatory setup, not a nicety.
+  Verified 2026-09-04 by deleting the `Attach()` call: `ImGuizmo.BeginFrame()` segfaults the TEST
+  HOST — exit 139, no managed stack, and the affected tests simply never report, so the run looks
+  like "16 passed" beside a non-zero EXIT CODE rather than a failure. Read the exit code, not the
+  summary line: this failure mode is invisible in "failed: 0". **Rule**: wire the context in one
+  place per sibling and cover it with a test; a missing handoff cannot be caught by reading a
+  stack trace, because there is not one.
+
 ## Concurrency testing
 
 - `[hits: 1]` **A stress-loop race test can pass against genuinely broken code — use Coyote and
