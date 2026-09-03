@@ -239,6 +239,17 @@
   dockspace id with `GetID` silently changes it if the call ever moves inside a `Begin`/`End`,
   which loses the saved layout with no error.
 
+- [hits: 1] **Every Hexa ImGui SIBLING ships its own native with its own statically-linked Dear
+  ImGui, and therefore its own `GImGui`.** `cimguizmo`, `cimplot` and `cimnodes` cannot see the
+  context `cimgui` created, so `ImGuizmo.SetImGuiContext(ImGui.GetCurrentContext())` (and the
+  ImPlot/ImNodes equivalents, plus their own `CreateContext`) is mandatory setup, not a nicety.
+  Verified 2026-09-04 by deleting the `Attach()` call: `ImGuizmo.BeginFrame()` segfaults the TEST
+  HOST — exit 139, no managed stack, and the affected tests simply never report, so the run looks
+  like "16 passed" beside a non-zero EXIT CODE rather than a failure. Read the exit code, not the
+  summary line: this failure mode is invisible in "failed: 0". **Rule**: wire the context in one
+  place per sibling and cover it with a test; a missing handoff cannot be caught by reading a
+  stack trace, because there is not one.
+
 ## Concurrency testing
 
 - `[hits: 1]` **A stress-loop race test can pass against genuinely broken code — use Coyote and

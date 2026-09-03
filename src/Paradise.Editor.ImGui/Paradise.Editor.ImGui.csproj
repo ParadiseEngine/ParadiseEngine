@@ -21,6 +21,8 @@
          touches — so referencing it to obtain the binding would put the whole renderer behind a
          boundary that has no other way to be enforced. Paradise.Editor.Test guards it. -->
     <PackageReference Include="Hexa.NET.ImGui" />
+    <!-- Its own native, its own GImGui: see EditorGizmo.Attach. -->
+    <PackageReference Include="Hexa.NET.ImGuizmo" />
   </ItemGroup>
 
   <ItemGroup>
