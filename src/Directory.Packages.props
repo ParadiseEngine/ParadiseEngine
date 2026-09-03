@@ -11,7 +11,23 @@
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
-    <PackageVersion Include="ImGui.NET" Version="1.91.6.1" />
+    <!-- Dear ImGui binding. Hexa, not ImGui.NET: ImGui.NET's last release (2025-01-06) is stuck
+         on Dear ImGui 1.91.6 and exposes no internals, so `ImGuiP.DockBuilder*` — which the
+         editor's layout needs — does not exist there at all. Hexa tracks 1.92.x, ships the
+         internals namespace, and carries natives for every desktop RID we target.
+
+         PINNED, and the pin is load-bearing:
+         - 2.2.10-prerelease and 3.x-experimental exist; 3.x has no release notes and a bus
+           factor of one. Never float this to 3.x — take a version bump deliberately.
+         - Hexa's cimgui build STRIPS Dear ImGui's obsolete API: no GetTexDataAsRGBA32, no
+           Fonts.Build(), no ImFontAtlas.SetTexID, no GetGlyphRanges*. The 1.92 texture protocol
+           (RendererHasTextures + ImTextureData ops) is therefore mandatory, not optional —
+           without it NewFrame asserts "font atlas is not built".
+         - HexaEngine/Hexa.NET.ImGui#90 (ARM64 HVA ABI, open) affects Windows-on-ARM + MSVC only;
+           do NOT add win-arm64 to a publish RID list until it closes. macOS arm64 is verified.
+         - HexaEngine/Hexa.NET.ImGui#130: ImGui.Text(string) goes through cimgui's printf, so an
+           unmatched %s in runtime text segfaults. Call TextUnformatted / ImGuiText instead. -->
+    <PackageVersion Include="Hexa.NET.ImGui" Version="2.2.9" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem

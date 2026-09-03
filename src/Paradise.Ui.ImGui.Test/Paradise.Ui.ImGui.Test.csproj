@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
+    <!-- Font fixtures mount memory rather than land on disk. -->
+    <PackageReference Include="Zio" />
   </ItemGroup>
 
   <ItemGroup>
