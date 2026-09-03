@@ -39,6 +39,13 @@
 
 ## C# / .NET gotchas
 
+- [hits: 1] **`<paramref>` in a TYPE-level XML doc is CS1734, and this repo's warnings-as-errors
+  turns that into a build failure.** Hit 2026-09-04 documenting `ISceneDocumentStore`'s
+  absolute-`UPath` contract on the interface rather than on each method: `<paramref name="path"/>`
+  resolves against the *declaring member's* parameters, and a type has none. The message names the
+  parameter, not the placement, so it reads like a typo. **Rule**: in a `<summary>`/`<remarks>` on
+  a type, name parameters with `<c>path</c>`; `<paramref>` only inside a method's own doc.
+
 - [hits: 1] **`MemoryMarshal.CreateReadOnlySpan(ref local, 1)` over a stack local COMPILES even
   when the span escapes the method** — the parameter is `scoped ref`, so ref-safety analysis does
   not tie the returned span's lifetime to the local, and a `private ReadOnlySpan<byte> AsBytes()
@@ -361,3 +368,22 @@
   real OS has. Prove it fails with the guard removed (`-p:TreatWarningsAsErrors=false` to get
   past CA1823 on the now-unused lock field, and check the rewrite actually ran — a failed build
   silently reruns the OLD Coyote binary).
+
+### [hits: 3] A primary-constructor parameter used BOTH in a field initializer and in a method body is CS9124
+- The compiler captures it into synthesised state AND stores it, and says so as a warning that
+  warnings-as-errors turns fatal. Fix: `private readonly T _x = x;` and read `_x` everywhere
+  below. Hit in `History` (twice: `SceneDocument initial`, then `ISceneProvider scene`) and in
+  `OperatorDispatcher` (`IOperatorContext context` feeding both `_logger` and every method).
+- 2026-09-03/04, editor skeleton.
+
+
+### [hits: 2] `--solution` is a `dotnet test` switch, NOT a `dotnet build` one, on SDK 10.0.400
+- `dotnet build --solution ParadiseEngine.slnx` fails with `MSB1001: Unknown switch`; pass the path
+  directly (`dotnet build ParadiseEngine.slnx`). `dotnet test --solution ParadiseEngine.slnx` is
+  correct and works — an earlier version of this entry claimed otherwise and was wrong.
+- AGENTS.md carried the bad build line until #236 corrected it; the test line was always right.
+- 2026-09-03 first hit, corrected 2026-09-04 after a review caught the entry contradicting AGENTS.md.
+
+
+### [hits: 1] TUnit 1.65: `HasCount()` is obsolete and warnings-as-errors turns it into CS0618; use `.Count().IsEqualTo(n)`
+- 2026-09-03, editor skeleton tests.
