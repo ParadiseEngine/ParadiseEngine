@@ -1,3 +1,5 @@
+using Paradise.Editor.Core.Input;
+
 namespace Paradise.Editor.Core.Shell;
 
 public enum DockArea
@@ -19,4 +21,7 @@ public sealed record WorkspaceDescriptor(string Id, string Title);
 public sealed record MenuEntry(string Menu, string Label, string OperatorId, int Order = 0);
 
 /// <summary>A chord pointing at an operator, optionally only while an input context is active.</summary>
-public sealed record KeyBinding(string Chord, string OperatorId, string? Context = null);
+/// <remarks>The chord is PARSED, not a string: it is compared against every key event, and a
+/// binding whose spelling was never checked would fail silently at the moment somebody presses
+/// it rather than at the moment it was registered.</remarks>
+public sealed record KeyBinding(Chord Chord, string OperatorId, string? Context = null);
