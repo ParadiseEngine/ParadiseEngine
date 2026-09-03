@@ -149,7 +149,8 @@ PM maintains `PLAN.md` to reflect current project status. Update when:
 ## Direct Commits
 
 PM may commit and push documentation changes directly to `main` without a PR:
-- `CLAUDE.md`, `PLAN.md`, `docs/`, `.claude/agents/*.md`, `.claude/pm-state.md`
+- `AGENTS.md` (and the `CLAUDE.md` stub that imports it), `PLAN.md`, `docs/`,
+  `.claude/agents/*.md`, `.claude/pm-state.md`
 
 ## Lifecycle
 - **PM runs for the session** — processes available work, does proactive reviews when idle
