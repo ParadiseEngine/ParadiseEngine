@@ -15,6 +15,25 @@ namespace Paradise.Rendering.Graph;
 /// second.</para></summary>
 public delegate void PassRecorder(object context, ref RenderCommandEncoder encoder, int argument);
 
+/// <summary>Who can observe a resource, which is what decides whether writing it is worth
+/// doing.</summary>
+public enum GraphResourceScope
+{
+    /// <summary>Something outside the graph reads this — it is presented, sampled by a host, or
+    /// handed to game code. Writing it is observable, so a pass that writes it is never culled.
+    /// The default, because it is the assumption that cannot silently lose work.</summary>
+    External,
+
+    /// <summary>Only passes in this graph consume it. A write nobody declares a
+    /// <see cref="FrameGraph.PassBuilder.Reads"/> for is dead, and the pass producing it is culled.
+    ///
+    /// <para>This is information the declaring code has and the graph cannot derive: the read
+    /// usually lives inside a bind group built once at resize, where nothing in the frame's
+    /// declaration mentions it. Marking a resource graph-only is a promise that every consumer of
+    /// it declares that read.</para></summary>
+    GraphOnly,
+}
+
 /// <summary>A texture the graph can route a pass's attachment to. Opaque by design: it is an index
 /// into the graph's resource table, not a GPU handle, so the same declaration can later resolve to
 /// a pooled transient without the declaring code changing.</summary>
@@ -33,6 +52,11 @@ public readonly record struct GraphTexture(int Index)
 /// also the shape that lets recording move onto worker threads later, since each pass's commands
 /// occupy their own contiguous run.</para>
 ///
+/// <para>Between sorting and recording the graph culls: a pass whose every output is
+/// <see cref="GraphResourceScope.GraphOnly"/> and read by nobody does not run. That moves the
+/// decision to switch a feature off from the producer — which had to know how many passes to skip —
+/// to the consumer, which only has to stop asking for the result.</para>
+///
 /// <para>One instance per renderer, reused every frame: <see cref="Reset"/> clears without
 /// releasing, so a steady-state frame allocates nothing.</para></summary>
 public sealed class FrameGraph
@@ -41,6 +65,8 @@ public sealed class FrameGraph
 
     private readonly List<Resource> _resources = [];
     private readonly List<Pass> _passes = [];
+    private readonly List<ReadEdge> _reads = [];
+    private readonly Stack<int> _liveStack = new();
     private RenderPassDesc[] _descs = [];
     private int[] _order = [];
 
@@ -48,31 +74,37 @@ public sealed class FrameGraph
     {
         // Index 0 is always the backbuffer, so Reset never has to re-add it and Backbuffer needs
         // no null check at a declaration site.
-        _resources.Add(new Resource(ResourceKind.Backbuffer, default, default));
+        _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default));
     }
 
-    /// <summary>The frame's presentation target.</summary>
+    /// <summary>The frame's presentation target. Always <see cref="GraphResourceScope.External"/>:
+    /// the whole point of the frame is that somebody sees it.</summary>
     public static GraphTexture Backbuffer => new(0);
+
+    /// <summary>How many passes the last <see cref="Compile"/> dropped as unreachable.</summary>
+    public int CulledPassCount { get; private set; }
 
     /// <summary>Drop the previous frame's declarations. Capacity is kept.</summary>
     public void Reset()
     {
         _passes.Clear();
+        _reads.Clear();
         _resources.RemoveRange(1, _resources.Count - 1);
     }
 
     /// <summary>Route a color attachment to a texture view the caller owns.</summary>
-    public GraphTexture ImportColor(TextureViewHandle view)
+    public GraphTexture ImportColor(TextureViewHandle view, GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedColor, view, default));
+        _resources.Add(new Resource(ResourceKind.ImportedColor, scope, view, default));
         return new GraphTexture(_resources.Count - 1);
     }
 
     /// <summary>Route a depth attachment to a texture the caller owns. <paramref name="view"/>
     /// selects one slice of an array (a shadow-map layer); default takes the texture's own view.</summary>
-    public GraphTexture ImportDepth(TextureHandle texture, TextureViewHandle view = default)
+    public GraphTexture ImportDepth(TextureHandle texture, TextureViewHandle view = default,
+        GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedDepth, view, texture));
+        _resources.Add(new Resource(ResourceKind.ImportedDepth, scope, view, texture));
         return new GraphTexture(_resources.Count - 1);
     }
 
@@ -90,9 +122,9 @@ public sealed class FrameGraph
         return new PassBuilder(this, _passes.Count - 1);
     }
 
-    /// <summary>Sort, resolve attachments, and record every pass into <paramref name="writer"/>.
-    /// The returned stream borrows the writer's memory, so it is valid until the writer is next
-    /// reset.</summary>
+    /// <summary>Sort, cull, resolve attachments, and record every surviving pass into
+    /// <paramref name="writer"/>. The returned stream borrows the writer's memory, so it is valid
+    /// until the writer is next reset.</summary>
     /// <remarks>The concrete <see cref="ArrayBufferWriter{T}"/> rather than
     /// <see cref="IBufferWriter{T}"/>: the stream has to carry back what was recorded, and the
     /// interface has no way to read that. Pretending otherwise would only move the cast to a
@@ -101,12 +133,19 @@ public sealed class FrameGraph
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        var count = _passes.Count;
-        if (_order.Length < count) _order = new int[Math.Max(count, 16)];
-        if (_descs.Length < count) _descs = new RenderPassDesc[Math.Max(count, 16)];
+        var declared = _passes.Count;
+        if (_order.Length < declared) _order = new int[Math.Max(declared, 16)];
+        if (_descs.Length < declared) _descs = new RenderPassDesc[Math.Max(declared, 16)];
 
         var passes = CollectionsMarshal.AsSpan(_passes);
-        for (var i = 0; i < count; i++) _order[i] = i;
+        Validate(passes, declared);
+        MarkLive(passes, declared);
+
+        var count = 0;
+        for (var i = 0; i < declared; i++)
+            if (passes[i].Live)
+                _order[count++] = i;
+        CulledPassCount = declared - count;
 
         // Insertion sort over the index array: stable (so declaration order breaks ties, which is
         // what makes "two features at the same event keep their registration order" true), and
@@ -128,13 +167,6 @@ public sealed class FrameGraph
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
-            if (pass.ColorCount == 0 && !pass.HasDepth)
-                throw new InvalidOperationException(
-                    $"Raster pass '{pass.Name}' declares no attachments; it would render nowhere.");
-            if (pass.Recorder is null)
-                throw new InvalidOperationException(
-                    $"Pass '{pass.Name}' was declared but never given a recorder.");
-
             ref var desc = ref _descs[slot];
             desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(in pass));
             for (var c = 0; c < pass.ColorCount; c++)
@@ -151,6 +183,69 @@ public sealed class FrameGraph
         }
 
         return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, count));
+    }
+
+    private static void Validate(Span<Pass> passes, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            ref var pass = ref passes[i];
+            if (pass.ColorCount == 0 && !pass.HasDepth)
+                throw new InvalidOperationException(
+                    $"Raster pass '{pass.Name}' declares no attachments; it would render nowhere.");
+            if (pass.Recorder is null)
+                throw new InvalidOperationException(
+                    $"Pass '{pass.Name}' was declared but never given a recorder.");
+        }
+    }
+
+    /// <summary>Reachability: start from the passes whose output somebody outside the graph can
+    /// see, then walk backwards through declared reads to whatever produced what they consume.
+    ///
+    /// <para>Writing an <see cref="GraphResourceScope.External"/> resource roots a pass because the
+    /// graph cannot know who else reads it — the same rule Filament states as "calling write() on
+    /// an imported resource automatically adds a side-effect". A renderer that imports every target
+    /// therefore culls nothing, which is correct rather than useless: culling only removes work
+    /// once the declaring code has said which resources are its own.</para></summary>
+    private void MarkLive(Span<Pass> passes, int count)
+    {
+        for (var i = 0; i < count; i++) passes[i].Live = false;
+
+        _liveStack.Clear();
+        for (var i = 0; i < count; i++)
+            if (passes[i].NeverCull || WritesObservable(in passes[i]))
+                _liveStack.Push(i);
+
+        while (_liveStack.Count > 0)
+        {
+            var index = _liveStack.Pop();
+            if (passes[index].Live) continue;
+            passes[index].Live = true;
+
+            foreach (var edge in _reads)
+            {
+                if (edge.Pass != index) continue;
+                for (var producer = 0; producer < count; producer++)
+                    if (!passes[producer].Live && Writes(in passes[producer], edge.Resource))
+                        _liveStack.Push(producer);
+            }
+        }
+    }
+
+    private bool WritesObservable(in Pass pass)
+    {
+        for (var c = 0; c < pass.ColorCount; c++)
+            if (_resources[pass.Colors[c].Target.Index].Scope == GraphResourceScope.External)
+                return true;
+        return pass.HasDepth && _resources[pass.Depth.Target.Index].Scope == GraphResourceScope.External;
+    }
+
+    private static bool Writes(in Pass pass, int resourceIndex)
+    {
+        for (var c = 0; c < pass.ColorCount; c++)
+            if (pass.Colors[c].Target.Index == resourceIndex)
+                return true;
+        return pass.HasDepth && pass.Depth.Target.Index == resourceIndex;
     }
 
     private ColorAttachmentDesc ResolveColor(in Attachment a)
@@ -171,7 +266,10 @@ public sealed class FrameGraph
 
     private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth }
 
-    private readonly record struct Resource(ResourceKind Kind, TextureViewHandle View, TextureHandle Texture);
+    private readonly record struct Resource(
+        ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture);
+
+    private readonly record struct ReadEdge(int Pass, int Resource);
 
     private struct Attachment
     {
@@ -199,13 +297,14 @@ public sealed class FrameGraph
         public ColorSlots Colors;
         public bool HasDepth;
         public Attachment Depth;
+        public bool NeverCull;
+        public bool Live;
     }
 
     private ref Pass PassAt(int index) => ref CollectionsMarshal.AsSpan(_passes)[index];
 
-    /// <summary>Fluent handle to the pass just declared. A struct over
-    /// <c>(graph, index)</c> — it holds no state of its own, so passing it around copies nothing
-    /// that matters.</summary>
+    /// <summary>Fluent handle to the pass just declared. A struct over <c>(graph, index)</c> — it
+    /// holds no state of its own, so passing it around copies nothing that matters.</summary>
     public readonly struct PassBuilder
     {
         private readonly FrameGraph _graph;
@@ -241,6 +340,27 @@ public sealed class FrameGraph
             ref var pass = ref _graph.PassAt(_index);
             pass.HasDepth = true;
             pass.Depth = new Attachment { Target = target, Load = load, Store = store, ClearDepth = clear };
+            return this;
+        }
+
+        /// <summary>Declare that this pass samples <paramref name="source"/>.
+        ///
+        /// <para>Almost always the read physically happens through a bind group the graph never
+        /// sees, so this is the only way the dependency exists at all. Leaving it out on a
+        /// <see cref="GraphResourceScope.GraphOnly"/> resource does not produce a slower frame — it
+        /// produces a culled producer and a pass sampling stale contents.</para></summary>
+        public PassBuilder Reads(GraphTexture source)
+        {
+            if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
+            _graph._reads.Add(new ReadEdge(_index, source.Index));
+            return this;
+        }
+
+        /// <summary>Keep this pass even when nothing reads its output — for work whose effect the
+        /// graph cannot see, such as a readback or a side effect on a host-owned resource.</summary>
+        public PassBuilder NeverCull()
+        {
+            _graph.PassAt(_index).NeverCull = true;
             return this;
         }
 
