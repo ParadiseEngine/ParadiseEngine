@@ -1,12 +1,9 @@
-using System.Buffers;
 using Paradise.Editor.ImGui;
-using Paradise.Rendering;
-using Hexa.NET.ImGui;
 using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Editor.Host;
 
-/// <summary>What the editor draws each frame, and the pass the renderer clears behind it.</summary>
+/// <summary>What the editor draws each frame.</summary>
 /// <remarks>
 /// <para>
 /// One type for both run modes so the windowed run and the headless capture cannot drift: a
@@ -36,37 +33,5 @@ internal sealed class EditorFrame
     {
         _dockspace.Draw();
         if (_showDemo) ImGuiApi.ShowDemoWindow(ref _showDemo);
-    }
-
-    /// <summary>Stands in for the scene until E3 gives the central node a render target: one pass
-    /// that clears the backbuffer, so the overlay composites over something and the frame goes
-    /// through <c>Submit</c> — the path that runs <c>OverlayPass</c> and presents.</summary>
-    /// <remarks>The pass has to be RECORDED, not merely described. A stream carrying the
-    /// descriptor table and no commands submits nothing at all, and the symptom is an untouched
-    /// backbuffer behind a UI that looks perfectly correct.</remarks>
-    internal sealed class ClearPass
-    {
-        private readonly ArrayBufferWriter<RenderCommand> _commands = new(2);
-        private readonly RenderPassDesc[] _passes;
-
-        public ClearPass(ColorRgba color)
-        {
-            _passes = new RenderPassDesc[1];
-            _passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
-            _passes[0].Colors.Slot0 = new ColorAttachmentDesc(
-                View: RenderViewHandle.Invalid, // backbuffer
-                Load: LoadOp.Clear,
-                Store: StoreOp.Store,
-                ClearValue: color);
-        }
-
-        public RenderCommandStream Record()
-        {
-            _commands.ResetWrittenCount();
-            var encoder = new RenderCommandEncoder(_commands);
-            encoder.BeginPass(0);
-            encoder.EndPass();
-            return new RenderCommandStream(_commands.WrittenMemory, _passes);
-        }
     }
 }

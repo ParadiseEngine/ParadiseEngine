@@ -6,6 +6,7 @@ using Paradise.Rendering.WebGPU;
 using Paradise.Ui.ImGui;
 using Paradise.Windowing;
 using Paradise.Windowing.Sdl;
+using Zio;
 using Zio.FileSystems;
 
 namespace Paradise.Editor.Host;
@@ -39,12 +40,12 @@ internal static class Program
         if (ParseLogLevel(args) is not { } level) return 1;
         s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions { MinLevel = level });
 
-        var screenshot = ValueAfter(args, "--screenshot");
+        if (ParseScreenshot(args) is not { } screenshot) return 1;
         if (ParseFrames(args) is not { } frames) return 1;
 
         try
         {
-            return screenshot is null ? RunWindowed() : RunHeadless(screenshot, frames);
+            return screenshot.Length == 0 ? RunWindowed() : RunHeadless(screenshot, frames);
         }
         catch (Exception exception)
         {
@@ -64,13 +65,14 @@ internal static class Program
         using var renderer = new WebGpuRenderer(
             window.CreateSurface(), logger: s_log.CreateLogger<WebGpuRenderer>());
 
-        using var core = CreateCore(window.Width, window.Height, out var fonts);
+        using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
+        using var core = CreateCore(window.Width, window.Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
         var editor = new EditorFrame();
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
-        var scene = new EditorFrame.ClearPass(Background);
+        var scene = new ClearFrame(Background);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         while (!window.CloseRequested)
         {
@@ -99,7 +101,6 @@ internal static class Program
             renderer.Submit(scene.Record());
         }
 
-        fonts.Dispose();
         return 0;
     }
 
@@ -113,13 +114,14 @@ internal static class Program
         using var renderer = WebGpuRenderer.CreateHeadless(Width, Height, s_log.CreateLogger<WebGpuRenderer>());
         if (!renderer.CanCaptureFrame) throw new InvalidOperationException("Headless target cannot be captured.");
 
-        using var core = CreateCore(Width, Height, out var fonts);
+        using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
+        using var core = CreateCore(Width, Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
         var editor = new EditorFrame();
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
-        var scene = new EditorFrame.ClearPass(Background);
+        var scene = new ClearFrame(Background);
         var commands = 0;
         Task<ColorReadback>? capture = null;
         for (var frame = 0; frame < frames; frame++)
@@ -154,15 +156,16 @@ internal static class Program
         log.LogInformation(
             "{Frames} frames, {Commands} draw commands in the last; wrote {Path} ({Width}x{Height})",
             frames, commands, screenshot, readback.Width, readback.Height);
-        fonts.Dispose();
         return 0;
     }
 
-    /// <summary>Build the core over the best CJK-capable system font, falling back to ImGui's
-    /// ASCII-only default. The mount is the host's and outlives the core.</summary>
-    private static ImGuiUiCore CreateCore(uint width, uint height, out AggregateFileSystem fonts)
+    /// <summary>Build the core over the best CJK-capable system font in <paramref name="fonts"/>,
+    /// falling back to ImGui's ASCII-only default.</summary>
+    /// <remarks>The mount is the caller's so it can be a <c>using</c> and therefore survive an
+    /// exception — the core reads bytes out of it during construction and holds none afterwards,
+    /// but the two still have to be torn down in order.</remarks>
+    private static ImGuiUiCore CreateCore(uint width, uint height, IFileSystem fonts)
     {
-        fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
         var font = UiFonts.FindCjkFont(fonts, FontSize);
         var core = new ImGuiUiCore(width, height, font);
 
@@ -180,6 +183,23 @@ internal static class Program
         return index >= 0 && index + 1 < args.Length && !args[index + 1].StartsWith("--", StringComparison.Ordinal)
             ? args[index + 1]
             : null;
+    }
+
+    /// <summary>The screenshot path, or empty for windowed. Null means the argument was bad and
+    /// was reported.</summary>
+    /// <remarks>A bare <c>--screenshot</c>, or one whose value was swallowed by the next flag,
+    /// must NOT fall through to the windowed path. On a CI runner that boots SDL with no display
+    /// and fails somewhere that says nothing about the real mistake — which is exactly the
+    /// misdiagnosis the smoke workflow is arranged to avoid.</remarks>
+    private static string? ParseScreenshot(string[] args)
+    {
+        if (Array.IndexOf(args, "--screenshot") < 0) return string.Empty;
+        if (ValueAfter(args, "--screenshot") is not { Length: > 0 } path)
+        {
+            Console.Error.WriteLine("Usage: --screenshot <path>");
+            return null;
+        }
+        return path;
     }
 
     /// <summary><c>--frames N</c>, or 8. Null means the argument was bad and was reported.</summary>

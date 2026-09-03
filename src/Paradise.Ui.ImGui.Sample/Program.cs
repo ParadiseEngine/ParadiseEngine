@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -156,38 +155,5 @@ internal static class Program
         Console.WriteLine($"[sample] {frames} frames rendered; wrote {path} ({readback.Width}x{readback.Height}).");
         fonts.Dispose();
         return 0;
-    }
-
-    /// <summary>Stands in for the scene: one pass that clears the backbuffer, so the overlay has
-    /// something to composite over and the frame goes through <c>Submit</c> — the path that runs
-    /// <c>OverlayPass</c> and presents. <c>RenderClearFrame</c> deliberately does neither.
-    ///
-    /// The pass has to be RECORDED, not merely described. A stream carrying the descriptor table
-    /// and no commands submits nothing at all: the first capture off this sample came out with an
-    /// untouched backbuffer behind the UI, and a red clear colour proved it by not appearing.</summary>
-    private sealed class ClearFrame
-    {
-        private readonly ArrayBufferWriter<RenderCommand> _commands = new(2);
-        private readonly RenderPassDesc[] _passes;
-
-        public ClearFrame(ColorRgba color)
-        {
-            _passes = new RenderPassDesc[1];
-            _passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
-            _passes[0].Colors.Slot0 = new ColorAttachmentDesc(
-                View: RenderViewHandle.Invalid, // backbuffer
-                Load: LoadOp.Clear,
-                Store: StoreOp.Store,
-                ClearValue: color);
-        }
-
-        public RenderCommandStream Record()
-        {
-            _commands.ResetWrittenCount();
-            var encoder = new RenderCommandEncoder(_commands);
-            encoder.BeginPass(0);
-            encoder.EndPass();
-            return new RenderCommandStream(_commands.WrittenMemory, _passes);
-        }
     }
 }

@@ -20,6 +20,10 @@ concurrency:
 jobs:
   headless-boot:
     runs-on: ubuntu-latest
+    # The capture waits inside the renderer are bounded, but adapter acquisition on a software
+    # driver is not, and the default is six hours. A boot that has not produced a frame in ten
+    # minutes has hung.
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
