@@ -39,6 +39,13 @@
 
 ## C# / .NET gotchas
 
+- [hits: 1] **`<paramref>` in a TYPE-level XML doc is CS1734, and this repo's warnings-as-errors
+  turns that into a build failure.** Hit 2026-09-04 documenting `ISceneDocumentStore`'s
+  absolute-`UPath` contract on the interface rather than on each method: `<paramref name="path"/>`
+  resolves against the *declaring member's* parameters, and a type has none. The message names the
+  parameter, not the placement, so it reads like a typo. **Rule**: in a `<summary>`/`<remarks>` on
+  a type, name parameters with `<c>path</c>`; `<paramref>` only inside a method's own doc.
+
 - [hits: 1] **`MemoryMarshal.CreateReadOnlySpan(ref local, 1)` over a stack local COMPILES even
   when the span escapes the method** — the parameter is `scoped ref`, so ref-safety analysis does
   not tie the returned span's lifetime to the local, and a `private ReadOnlySpan<byte> AsBytes()
