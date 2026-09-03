@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <PackageReference Include="Hexa.NET.ImGui" />
+    <!-- Fonts come out of a mount the host chooses, not off a host path. -->
+    <PackageReference Include="Zio" />
     <PackageReference Include="WebGPUSharp" />
   </ItemGroup>
 

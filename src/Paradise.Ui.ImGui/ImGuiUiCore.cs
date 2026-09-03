@@ -58,10 +58,11 @@ public sealed class ImGuiUiCore : IDisposable
     /// <param name="pixelWidth">Initial display width in pixels; resizes arrive as
     /// <see cref="WindowEventKind.Resize"/> events.</param>
     /// <param name="pixelHeight">Initial display height in pixels.</param>
-    /// <param name="font">Optional font to load in place of ImGui's ASCII-only default (see
-    /// <see cref="UiFonts"/>). Under the 1.92 texture protocol glyphs rasterize ON DEMAND, so a
-    /// CJK-capable font here costs nothing until CJK text is actually drawn — there are no glyph
-    /// ranges to declare and no atlas size to budget. When the font cannot be resolved or loaded
+    /// <param name="font">Optional font to load in place of ImGui's ASCII-only default, carrying
+    /// the mount it is read out of (see <see cref="UiFonts"/>). Under the 1.92 texture protocol
+    /// glyphs rasterize ON DEMAND, so a CJK-capable font here costs nothing until CJK text is
+    /// actually drawn — there are no glyph ranges to declare and no atlas size to budget. The
+    /// bytes are handed to ImGui and freed with the context. When the font cannot be loaded
     /// the core degrades to the default font.</param>
     public unsafe ImGuiUiCore(uint pixelWidth, uint pixelHeight, UiFontConfig? font = null)
     {

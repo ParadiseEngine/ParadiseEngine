@@ -2,34 +2,36 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using Hexa.NET.ImGui;
+using Zio;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>Which font <see cref="ImGuiUiCore"/> loads. An empty or null
-/// <paramref name="Path"/> means "probe the platform's known CJK-capable system fonts".
+/// <summary>Which font <see cref="ImGuiUiCore"/> loads, and the mount it lives in.
 ///
 /// There is no glyph-range parameter, and that is the 1.92 texture protocol paying for itself:
 /// glyphs rasterize on demand and the atlas grows to fit, so nothing has to be declared up
 /// front. The pre-1.92 core took the game's whole content as a string to bake ranges from.</summary>
-/// <param name="Path">A TrueType file, or null/empty to probe the system.</param>
+/// <param name="Content">The mount the font file lives in — a host mounts its content tree, a
+/// test mounts memory. See <see cref="UiFonts.FindSystemCjkFont"/> for the one case that starts
+/// from a host path.</param>
+/// <param name="Path">The font file, as a path in <paramref name="Content"/>.</param>
 /// <param name="SizePixels">Rasterization size in pixels.</param>
-public sealed record UiFontConfig(string? Path, float SizePixels);
+public sealed record UiFontConfig(IFileSystem Content, UPath Path, float SizePixels);
 
 /// <summary>
 /// Font resolution for <see cref="ImGuiUiCore"/>. ImGui's default font is ASCII-only, so any CJK
-/// text renders as '?'; loading a system font fixes that.
+/// text renders as '?'; loading a real font fixes that.
 ///
 /// The catch, and the reason this file still exists at all: Hexa's cimgui natives are built with
-/// stb_truetype and no ImGuiFreeType, and stb only parses TrueType ('glyf') outlines — feeding
-/// it a CFF/OpenType font (Hiragino, Noto CJK OTC) asserts inside native code where there is
-/// nothing to catch. So candidates are sniffed by container magic first and CFF fonts are
-/// skipped; a font that fails the sniff falls back to the next candidate, and no candidate at all
-/// falls back to ImGui's default font.
+/// stb_truetype and no ImGuiFreeType, and stb only parses TrueType ('glyf') outlines — feeding it
+/// a CFF/OpenType font (Hiragino, Noto CJK OTC) asserts inside native code where there is nothing
+/// to catch. So a candidate is sniffed by container magic first and CFF is refused; a font that
+/// fails the sniff falls back to ImGui's default font.
 /// </summary>
 public static class UiFonts
 {
-    /// <summary>Well-known CJK-capable system fonts per platform, tried in order. All are
-    /// verified TrueType by <see cref="IsStbLoadableTrueType"/> before use anyway.</summary>
+    /// <summary>Well-known CJK-capable system fonts per platform, tried in order by
+    /// <see cref="FindSystemCjkFont"/>. HOST paths, not mount paths — see that method.</summary>
     public static readonly string[] SystemCjkFontCandidates =
     [
         // macOS
@@ -47,14 +49,22 @@ public static class UiFonts
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
     ];
 
-    /// <summary>True when the file exists and its first face uses TrueType outlines that
-    /// stb_truetype can parse (sfnt 0x00010000 / 'true'; for 'ttcf' collections the first face is
-    /// checked). 'OTTO' (CFF) and anything unreadable is rejected.</summary>
-    public static bool IsStbLoadableTrueType(string path)
+    /// <summary>True when <paramref name="path"/> exists in <paramref name="content"/> and its
+    /// first face uses TrueType outlines stb_truetype can parse (sfnt 0x00010000 / 'true'; for a
+    /// 'ttcf' collection the first face is checked). 'OTTO' (CFF) and anything unreadable is
+    /// refused.
+    ///
+    /// Reads the header only. A CJK font is tens of megabytes and most candidates are rejected,
+    /// so the sniff does not pay to load one.</summary>
+    public static bool IsStbLoadableTrueType(IFileSystem content, UPath path)
     {
+        ArgumentNullException.ThrowIfNull(content);
         try
         {
-            using var stream = File.OpenRead(path);
+            if (!content.FileExists(path)) return false;
+            // FileShare.Read explicitly: Zio's three-argument OpenFile defaults the share to
+            // None, which turns a second concurrent open of a system font into an IOException.
+            using var stream = content.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             Span<byte> header = stackalloc byte[16];
             if (stream.Read(header[..4]) != 4) return false;
             var tag = BinaryPrimitives.ReadUInt32BigEndian(header[..4]);
@@ -80,23 +90,54 @@ public static class UiFonts
         }
     }
 
-    /// <summary>The first stb-loadable CJK system font on this machine, or null.</summary>
-    public static string? FindSystemCjkFont()
+    /// <summary>The first stb-loadable CJK font among the platform's well-known SYSTEM fonts, as
+    /// a config ready to hand to <see cref="ImGuiUiCore"/>. Null when this machine has none.
+    ///
+    /// <b>This is the one place here that starts from a host path, and it has to.</b> The OS font
+    /// directory is not in a game's content mount and never will be, so the candidates are host
+    /// paths that <paramref name="host"/> translates. Everything downstream — the sniff, the read —
+    /// still goes through the mount, which is why <paramref name="host"/> is passed in rather than
+    /// created: whatever this font is loaded through stays the host's to own and dispose.</summary>
+    /// <param name="host">A mount over the real filesystem (a <c>PhysicalFileSystem</c>), used to
+    /// translate a host path into one of its own.</param>
+    /// <param name="sizePixels">Rasterization size for the returned config.</param>
+    public static UiFontConfig? FindSystemCjkFont(IFileSystem host, float sizePixels)
     {
+        ArgumentNullException.ThrowIfNull(host);
         foreach (var candidate in SystemCjkFontCandidates)
         {
-            if (File.Exists(candidate) && IsStbLoadableTrueType(candidate)) return candidate;
+            var path = host.ConvertPathFromInternal(candidate);
+            if (IsStbLoadableTrueType(host, path)) return new UiFontConfig(host, path, sizePixels);
         }
         return null;
     }
 
-    /// <summary>Resolve <paramref name="font"/> to a usable file and add it to the atlas. False =
+    /// <summary>Read <paramref name="font"/> out of its mount and add it to the atlas. False =
     /// nothing added and the caller should fall back to ImGui's default font.</summary>
     internal static unsafe bool TryAddFont(ImGuiIOPtr io, UiFontConfig font)
     {
-        var path = string.IsNullOrWhiteSpace(font.Path) ? FindSystemCjkFont() : font.Path;
-        if (path is null || !File.Exists(path) || !IsStbLoadableTrueType(path)) return false;
+        if (!IsStbLoadableTrueType(font.Content, font.Path)) return false;
 
-        return io.Fonts.AddFontFromFileTTF(path, font.SizePixels) is not null;
+        byte[] bytes;
+        try
+        {
+            using var stream = font.Content.OpenFile(font.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            bytes = new byte[stream.Length];
+            stream.ReadExactly(bytes);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+
+        // ImGui's OWN allocator, not Marshal's. AddFontFromMemoryTTF defaults to
+        // FontDataOwnedByAtlas, so the atlas frees this buffer with IM_FREE when the context goes
+        // away — and it must, because 1.92 rasterizes glyphs on demand and re-reads the font data
+        // for the whole life of the atlas, so the bytes cannot be a managed array we let go of.
+        // Pairing IM_FREE with anything but ImGui.MemAlloc is undefined.
+        var buffer = Hexa.NET.ImGui.ImGui.MemAlloc((nuint)bytes.Length);
+        if (buffer is null) return false;
+        bytes.AsSpan().CopyTo(new Span<byte>(buffer, bytes.Length));
+        return io.Fonts.AddFontFromMemoryTTF(buffer, bytes.Length, font.SizePixels) is not null;
     }
 }
