@@ -20,7 +20,7 @@ namespace Paradise.Ui.ImGui;
 /// projection from the snapshot's display rect, per-command scissor. Draws with
 /// <c>LoadOp.Load</c> so the UI composites over whatever the frame already contains. Runs
 /// entirely on the render thread; snapshots and texture ops arrive from the ImGui thread.</summary>
-public sealed class ImGuiWebGpuRenderer
+public sealed class ImGuiWebGpuRenderer : IDisposable
 {
     /// <summary>Where host-owned texture ids start. ImGui numbers its own textures from a
     /// counter that starts at 1 and increments once per texture ever created, so a host that
@@ -51,6 +51,7 @@ public sealed class ImGuiWebGpuRenderer
     private WebGpuSharp.Buffer? _indexBuffer;
     private ulong _vertexCapacity;
     private ulong _indexCapacity;
+    private bool _disposed;
 
     public ImGuiWebGpuRenderer(Device device, TextureFormat colorFormat)
     {
@@ -210,6 +211,52 @@ public sealed class ImGuiWebGpuRenderer
         }
         _textures[id] = view;
         _bindGroups.Remove(id);
+    }
+
+    /// <summary>Stop exposing the host texture under <paramref name="id"/>. Call before the host
+    /// destroys the underlying texture — a bind group outlives its registration otherwise, and a
+    /// swapped-out scene render target would leak one per swap and leave a stale view bound.
+    ///
+    /// Only for host ids. An ImGui-owned texture is retired through its
+    /// <see cref="ImGuiTextureOpKind.Destroy"/> op, which also frees the GPU object and holds the
+    /// lookup for <see cref="DestroyDelayFrames"/>; taking it away here would skip both.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="id"/> is below
+    /// <see cref="FirstHostTextureId"/>, so it belongs to ImGui rather than the host.</exception>
+    public void UnregisterTexture(ulong id)
+    {
+        if (id < FirstHostTextureId)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(id), id, $"Host texture ids start at {FirstHostTextureId}; an ImGui-owned texture is retired by its Destroy op.");
+        }
+        _textures.Remove(id);
+        _bindGroups.Remove(id);
+    }
+
+    /// <summary>Free the GPU memory this renderer allocated: every ImGui texture it still holds,
+    /// every one waiting out its destroy delay, and the vertex/index/uniform buffers.
+    ///
+    /// <b>A partial teardown, by necessity rather than choice.</b> WebGPUSharp exposes
+    /// <c>Destroy</c> on textures and buffers only — views, samplers, bind groups, the pipeline
+    /// and its layout have no disposal at all and are released by their handle finalizers. So
+    /// this frees what can be freed deterministically, which is the part that is unbounded and
+    /// the part that is actually large, and leaves the fixed-size remainder to the binding.
+    ///
+    /// Host textures registered through <see cref="RegisterTexture"/> are NOT destroyed: they are
+    /// the host's, and this renderer only ever mapped them. Idempotent.</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        foreach (var texture in _ownedTextures.Values) texture.Destroy();
+        _ownedTextures.Clear();
+        foreach (var retired in _retiring) retired.Texture.Destroy();
+        _retiring.Clear();
+        _textures.Clear();
+        _bindGroups.Clear();
+        _vertexBuffer?.Destroy();
+        _indexBuffer?.Destroy();
+        _uniformBuffer.Destroy();
     }
 
     private void CreateTexture(in ImGuiTextureOp op)

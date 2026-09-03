@@ -262,5 +262,42 @@ public class ImGuiWebGpuRendererTests
         await Assert.That(() => renderer.RegisterTexture(1, view))
             .Throws<ArgumentOutOfRangeException>();
         renderer.RegisterTexture(ImGuiWebGpuRenderer.FirstHostTextureId, view);
+
+        // Unregistering has the same floor, and for a sharper reason: an ImGui-owned texture is
+        // retired by its Destroy op, which also frees the GPU object and holds the lookup for the
+        // destroy delay. Taking it away here would skip both.
+        await Assert.That(() => renderer.UnregisterTexture(1)).Throws<ArgumentOutOfRangeException>();
+        renderer.UnregisterTexture(ImGuiWebGpuRenderer.FirstHostTextureId);
+        // Idempotent: unregistering what is not there is not an error.
+        renderer.UnregisterTexture(ImGuiWebGpuRenderer.FirstHostTextureId);
+    }
+
+    /// <summary>Disposal frees what it can and is safe to repeat. It cannot be checked from
+    /// outside — WebGPUSharp offers no "is destroyed" — so this pins the contract that matters to
+    /// a caller: it does not throw, and a second call is a no-op.</summary>
+    [Test]
+    public async Task disposing_twice_is_a_no_op()
+    {
+        using var imgui = new ImGuiTestContext(Width, Height);
+        var device = TryCreateDevice();
+        if (device is null)
+        {
+            Skip.Test("No WebGPU adapter available.");
+            return;
+        }
+
+        var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
+        var ops = new ImGuiTextureOps();
+        var drawData = imgui.Frame(() => ImGuiTestContext.Panel("hello"));
+        ImGuiTextureCapture.CaptureFrom(drawData, ops);
+        var snapshot = new ImGuiDrawSnapshot();
+        snapshot.Capture(drawData);
+        var pending = new List<ImGuiTextureOp>();
+        ops.DrainTo(pending);
+        renderer.ApplyTextureOps(pending);
+        // Render once so the vertex/index buffers exist and there is something to free.
+        RenderOverGreen(device, renderer, snapshot);
+
+        await Assert.That(() => { renderer.Dispose(); renderer.Dispose(); }).ThrowsNothing();
     }
 }
