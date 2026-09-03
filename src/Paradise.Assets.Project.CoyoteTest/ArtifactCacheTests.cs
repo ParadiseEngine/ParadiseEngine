@@ -35,8 +35,9 @@ public static class ArtifactCacheTests
     {
         var fileSystem = new ExclusiveMarkerFileSystem();
         fileSystem.CreateDirectory("/work");
-        // CollectingLogger locks on an `object`, so Coyote can schedule around it the way it does
-        // the cache's own gate; a List<string> behind a delegate had no lock to schedule at all.
+        // CollectingLogger keeps its records in a ConcurrentQueue, which Coyote schedules the way
+        // it schedules the cache's own lock; the List<string> behind a delegate this replaced was
+        // an unsynchronized append Coyote could not see into at all.
         var warnings = new CollectingLogger();
         return (new ArtifactCache(fileSystem, s_layout.EditorCache, warnings), fileSystem, warnings);
     }

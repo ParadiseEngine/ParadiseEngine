@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 using Microsoft.Extensions.Logging;
 
 namespace Paradise.Diagnostics;
@@ -27,40 +29,33 @@ public readonly record struct LogRecord(LogLevel Level, EventId EventId, string 
 /// </remarks>
 public sealed class CollectingLogger : ILogger
 {
-    // `object`, not System.Threading.Lock — this is reachable from the Coyote suites, which
-    // rewrite Monitor.Enter/Exit but not Lock.EnterScope. See AGENTS.md.
-    private readonly object _gate = new();
-    private readonly List<LogRecord> _records = [];
+    // ConcurrentQueue rather than a lock around a List: every operation here is single-step —
+    // append one record, snapshot, clear — so there is nothing for a lock to make atomic that
+    // the queue does not already. It matters because the engine logs from threads it did not
+    // create (Dawn's uncaptured-error callback, Noesis, SDL), and a native callback blocking on
+    // a managed lock is the one cost worth avoiding on this path.
+    //
+    // Enqueue order IS the log order, and ToArray takes a consistent snapshot, so `Records`
+    // stays oldest-first without holding anything. Coyote schedules concurrent collections as
+    // well as locks (AGENTS.md), so the ArtifactCache suite still explores interleavings here.
+    private readonly ConcurrentQueue<LogRecord> _records = new();
 
     /// <summary>Messages at or above this level are kept; the rest are dropped unformatted.</summary>
     public LogLevel MinLevel { get; init; } = LogLevel.Trace;
 
     /// <summary>Everything logged so far, oldest first.</summary>
-    public IReadOnlyList<LogRecord> Records
-    {
-        get { lock (_gate) { return _records.ToArray(); } }
-    }
+    public IReadOnlyList<LogRecord> Records => _records.ToArray();
 
     /// <summary>Just the rendered text of everything logged so far.</summary>
-    public IReadOnlyList<string> Messages
-    {
-        get { lock (_gate) { return _records.Select(record => record.Message).ToArray(); } }
-    }
+    public IReadOnlyList<string> Messages =>
+        _records.Select(record => record.Message).ToArray();
 
     /// <summary>The rendered text of everything logged at <paramref name="level"/> or above.</summary>
-    public IReadOnlyList<string> MessagesAtLeast(LogLevel level)
-    {
-        lock (_gate)
-        {
-            return _records.Where(record => record.Level >= level).Select(record => record.Message).ToArray();
-        }
-    }
+    public IReadOnlyList<string> MessagesAtLeast(LogLevel level) =>
+        _records.Where(record => record.Level >= level).Select(record => record.Message).ToArray();
 
     /// <summary>Forgets everything kept so far.</summary>
-    public void Clear()
-    {
-        lock (_gate) { _records.Clear(); }
-    }
+    public void Clear() => _records.Clear();
 
     /// <inheritdoc />
     public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= MinLevel;
@@ -76,8 +71,7 @@ public sealed class CollectingLogger : ILogger
         if (!IsEnabled(logLevel)) return;
         ArgumentNullException.ThrowIfNull(formatter);
 
-        var record = new LogRecord(logLevel, eventId, formatter(state, exception), exception);
-        lock (_gate) { _records.Add(record); }
+        _records.Enqueue(new LogRecord(logLevel, eventId, formatter(state, exception), exception));
     }
 
     /// <inheritdoc />
