@@ -126,6 +126,23 @@ public class ReferenceGraphTests
     }
 
     [Test]
+    public async Task a_material_is_an_edge_from_the_document_to_the_texture_it_samples()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var grass = Asset(fileSystem, "/game/assets/textures/grass.png");
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/materials/grass.material",
+            $"BaseColorTexture = {{ guid = \"{grass}\", path = \"textures/grass.png\" }}\nNormalTexture = {{}}\n");
+        var material = SidecarMeta.Load(fileSystem, "/game/assets/materials/grass.material.meta").Guid;
+
+        var graph = Graph(fileSystem);
+
+        await Assert.That(graph.DependentsOf(grass).Count).IsEqualTo(1);
+        await Assert.That(graph.DependentsOf(grass)[0].Referrer).IsEqualTo(material);
+        await Assert.That(graph.DependentsOf(grass)[0].Where).IsEqualTo("BaseColorTexture");
+        await Assert.That(graph.Unreadable).IsEmpty();
+    }
+
+    [Test]
     public async Task dependent_files_are_listed_once_however_many_references_they_hold()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

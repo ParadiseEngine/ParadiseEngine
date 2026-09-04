@@ -110,6 +110,11 @@ public static class PrefabBake
             return JsonValue.Create(string.Concat(path.AsSpan(0, path.Length - ".toml".Length), extensions.Config));
         }
 
+        if (path.EndsWith(MaterialDocument.Suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonValue.Create(string.Concat(path.AsSpan(0, path.Length - MaterialDocument.Suffix.Length), extensions.Config));
+        }
+
         return JsonValue.Create(path);
     }
 

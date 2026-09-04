@@ -369,6 +369,116 @@ public sealed class PrefabImporter : IAssetImporter
 }
 
 /// <summary>Authored config documents, compiled to the profile's document format.</summary>
+/// <summary>
+/// The <c>*.material</c> step: a config that references textures. Bakes each texture slot to the
+/// KTX2 the texture step writes for it — by the reference's guid, through <see cref="ImportContext.Resolve"/>,
+/// so a moved texture is a recorded input — and declares those references so the graph, <c>mv</c>,
+/// <c>rm</c> and <c>verify</c> follow them.
+/// </summary>
+public sealed class MaterialImporter : IAssetImporter
+{
+    public string Name => "material";
+
+    public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MaterialDocument.Suffix);
+
+    /// <inheritdoc />
+    public bool Import(ImportContext context, List<string> errors)
+    {
+        if (!context.HasExtension(MaterialDocument.Suffix)) return false;
+        if (DocumentOutput.Unsupported(context, errors)) return true;
+
+        CanonicalTomlTable material;
+        try
+        {
+            material = MaterialDocument.Parse(context.FileSystem.ReadAllText(context.Asset), context.Source);
+        }
+        catch (FormatException failure)
+        {
+            errors.Add(failure.Message);
+            return true;
+        }
+
+        var before = errors.Count;
+        var baked = MaterialDocument.Bake(material, reference =>
+        {
+            var resolution = context.Resolve(reference);
+            if (!resolution.Found)
+            {
+                errors.Add($"{context.Source}: references texture '{reference.Path}' (guid {DocumentGuid.Format(reference.Guid)}), which no asset under assets/ carries");
+                return null;
+            }
+
+            // The texture step writes its KTX2 at the source's own place in the tree.
+            return Path.ChangeExtension(resolution.Path, ".ktx2");
+        });
+        if (errors.Count > before) return true;
+
+        var extension = DocumentOutput.MaterialExtension(context.Profile);
+        var text = context.Profile.DocumentFormat == DocumentFormat.Json
+            ? CanonicalJson.ToNode(baked).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true })
+            : CanonicalTomlWriter.WriteString(baked);
+        context.Output.WriteAllBytes(
+            "/" + Path.ChangeExtension(context.Source, extension),
+            DocumentOutput.Utf8NoBom.GetBytes(text));
+        return true;
+    }
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.Classify(asset) != AssetClass.Material) return AssetReferences.None;
+
+        CanonicalTomlTable material;
+        try
+        {
+            material = MaterialDocument.Load(context.FileSystem, asset);
+        }
+        catch (FormatException failure)
+        {
+            return AssetReferences.Unreadable(failure.Message);
+        }
+
+        var sites = MaterialDocument.References(material)
+            .Select(found => new ReferenceSite(found.Key, found.Reference, found.Reference.Path, found.Reference.Path))
+            .ToList();
+        return new AssetReferences(sites);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!context.RewriteSources) return null;
+
+        CanonicalTomlTable material;
+        try
+        {
+            material = MaterialDocument.Load(context.FileSystem, asset);
+        }
+        catch (FormatException)
+        {
+            return null;   // verify's finding
+        }
+
+        var repointed = new List<string>();
+        var updated = MaterialDocument.Rewrite(material, reference =>
+        {
+            var resolution = context.Index.Resolve(reference);
+            if (resolution.Status != ReferenceStatus.Stale) return reference;
+            repointed.Add($"{reference.Path} -> {resolution.Path}");
+            return resolution.Current;
+        });
+        if (updated is null) return null;
+
+        context.FileSystem.WriteAllBytes(asset, CanonicalTomlWriter.WriteBytes(updated));
+        return new RepairedDocument(asset, repointed);
+    }
+}
+
 public sealed class ConfigImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -426,6 +536,9 @@ internal static class DocumentOutput
     /// <summary>Play keeps <c>.prefab</c> (TOML inside) so spawners and the editor's Play button still name a file that exists; the runtime dispatches on extension.</summary>
     public static string PrefabExtension(BuildProfile profile, ProjectOutputTarget target)
         => target == ProjectOutputTarget.Play ? AssetClassifier.PrefabSuffix : Extension(profile);
+
+    /// <summary>A material builds to the same <c>.toml</c>/<c>.json</c> a config does: a host that reads <c>LevelMaterialData</c> by extension is unchanged.</summary>
+    public static string MaterialExtension(BuildProfile profile) => Extension(profile);
 
     public static bool PrefabAsJson(BuildProfile profile, ProjectOutputTarget target)
         => target != ProjectOutputTarget.Play && profile.DocumentFormat == DocumentFormat.Json;

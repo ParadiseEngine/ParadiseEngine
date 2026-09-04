@@ -580,6 +580,22 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task a_material_sampling_a_texture_nobody_carries_is_an_error_and_a_broken_one_names_the_line()
+    {
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/grass.material",
+            "BaseColorTexture = { guid = \"11111111-2222-4333-8444-555555555555\", path = \"textures/grass.png\" }\n");
+        WriteDocument(fileSystem, "/game/assets/materials/broken.material", "BaseColorTexture = \"textures/grass.png\"\n");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(2);
+        await Assert.That(findings.All(f => f.Severity == VerifySeverity.Error)).IsTrue();
+        await Assert.That(findings.Any(f => f.Path.FullName.EndsWith("broken.material") && f.Message.Contains("BaseColorTexture"))).IsTrue();
+        await Assert.That(findings.Any(f => f.Path.FullName.EndsWith("grass.material") && f.Message.Contains("no asset under assets/ carries"))).IsTrue();
+    }
+
+    [Test]
     public async Task a_leftover_hash_is_an_error_naming_the_sidecar()
     {
         // The field is gone from the format; a sidecar from before that is refused rather than

@@ -1141,6 +1141,39 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task a_material_bakes_its_texture_slot_to_the_ktx2_where_the_texture_now_lives()
+    {
+        // The reference's path is stale (the texture moved in Finder); the guid resolves it, and
+        // the baked material names the KTX2 the texture step writes at the texture's real place.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.CreateDirectory("/game/assets/textures/ground");
+        fileSystem.WriteAllBytes("/game/assets/textures/ground/grass.png", [1]);
+        var grass = ProjectVerifierTests.Mint(fileSystem, "/game/assets/textures/ground/grass.png");
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/materials/grass.material",
+            $"Name = \"grass\"\nBaseColorTexture = {{ guid = \"{grass}\", path = \"textures/grass.png\" }}\n");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.toml")).IsTrue();
+        await Assert.That(fileSystem.ReadAllText("/game/build/materials/grass.toml")).Contains("BaseColorTexture = \"textures/ground/grass.ktx2\"");
+        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.material")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_material_naming_a_texture_nobody_carries_fails_the_build_by_name()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/materials/grass.material",
+            "BaseColorTexture = { guid = \"11111111-2222-4333-8444-555555555555\", path = \"textures/grass.png\" }\n");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("grass.material") && e.Contains("no asset under assets/ carries"))).IsTrue();
+    }
+
+    [Test]
     public async Task a_reference_escaping_assets_is_refused()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

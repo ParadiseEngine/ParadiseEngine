@@ -87,6 +87,10 @@ public static class ProjectVerifier
                     VerifyDocument(fileSystem, sources, path, findings);
                     break;
 
+                case AssetClass.Material:
+                    VerifyMaterial(fileSystem, path, findings);
+                    break;
+
                 // No "nothing handles this file" warning: only an importer, during a build, can
                 // answer that, and a decline may mean "not for this tree" (issue #208).
             }
@@ -211,6 +215,18 @@ public static class ProjectVerifier
             findings.Add(new VerifyFinding(
                 VerifySeverity.Warning, sidecar.Path,
                 $"names no importer; '{claimant.Name}' claims it — run `paradise assets verify --fix` (or `watch`) to record that"));
+        }
+    }
+
+    private static void VerifyMaterial(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    {
+        try
+        {
+            MaterialDocument.Load(fileSystem, path);
+        }
+        catch (FormatException failure)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, failure.Message));
         }
     }
 

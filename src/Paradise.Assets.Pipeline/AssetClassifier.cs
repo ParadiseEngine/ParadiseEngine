@@ -15,6 +15,9 @@ public enum AssetClass
     /// <summary>Any other <c>*.toml</c>.</summary>
     Config,
 
+    /// <summary>A <c>*.material</c> document: a config that references textures.</summary>
+    Material,
+
     Sidecar,
 
     /// <summary>Listed in the project's <c>[assets] ignore</c>: never built, never given a sidecar, never a verify finding.</summary>
@@ -39,6 +42,7 @@ public static class AssetClassifier
         if (ignore.Matches(assetsRoot, path)) return AssetClass.Ignored;
         if (path == assetsRoot / AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
         if (name.EndsWith(PrefabSuffix, StringComparison.OrdinalIgnoreCase)) return AssetClass.Prefab;
+        if (name.EndsWith(MaterialDocument.Suffix, StringComparison.OrdinalIgnoreCase)) return AssetClass.Material;
         if (name.EndsWith(".toml", StringComparison.OrdinalIgnoreCase)) return AssetClass.Config;
         return AssetClass.Foreign;
     }
