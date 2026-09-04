@@ -306,7 +306,7 @@ public static class AnimationBuilder
         destination[at + 2] = HalfFloat.FromSingle(value.Z);
     }
 
-    /// <summary>The largest component is dropped and the other three quantized to 15 bits over −√2/2..√2/2; see <see cref="SamplingContext.ReadQuaternion"/> for the inverse.</summary>
+    /// <summary>The largest component is dropped and the other three quantized to 15 bits over −√2/2..√2/2; see <see cref="SamplingContext.ReadQuaternions"/> for the inverse.</summary>
     internal static void CompressQuaternion(Quaternion value, ushort[] destination, int at)
     {
         Span<float> q = [value.X, value.Y, value.Z, value.W];

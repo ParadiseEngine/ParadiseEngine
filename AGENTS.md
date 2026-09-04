@@ -219,6 +219,11 @@ RUNTIME is unmanaged: `SkeletonBlob`, `AnimationBlob` and `SamplingContext` are 
 layouts opened as `NativeBlobAssetReference<T>` (one native allocation each, at load), and
 `SamplingContext.Sample(ref clip, ratio, poses)` plus `LocalToModel.Compute(ref skeleton, ...)`
 allocate nothing — reach every blob through a `ref`, never a copy (see the BLOB README). The
+sampler keeps ozz's structure-of-arrays half: keys are decoded and interpolated four tracks per
+`Vector128` lane; the cursor walk is scalar on purpose (its search hits within an entry or two,
+so a vectorized `IndexOf` costs more than it saves), and lanes leave a vector through a stack
+store, never `GetElement` with a variable index (a software path). On Enemy it matches native
+ozz per frame. The
 archive is the only persisted format; blobs exist in memory only. The offline builders are
 managed (lists, sorting) because they run in the cook, not the player, and hand back native blobs.
 Inside a blob's hot loop take `field.ToSpan()` ONCE and index the span: the `BlobArray` indexer

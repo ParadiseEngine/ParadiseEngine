@@ -18,9 +18,21 @@ public static class LocalToModel
         for (var i = 0; i < count; i++)
         {
             var parent = parents[i];
-            models[i] = parent == SkeletonBlob.NoParent
-                ? locals[i].ToMatrix() * rootMatrix
-                : locals[i].ToMatrix() * models[parent];
+            models[i] = Affine(in locals[i]) * (parent == SkeletonBlob.NoParent ? rootMatrix : models[parent]);
         }
+    }
+
+    /// <summary>Scale, then rotate, then translate, written straight into the rows: the rotation matrix's rows scaled per axis and the translation as the fourth row, instead of three matrices multiplied.</summary>
+    public static Matrix4x4 Affine(in JointPose pose)
+    {
+        var q = pose.Rotation;
+        var xx = q.X * q.X; var yy = q.Y * q.Y; var zz = q.Z * q.Z;
+        var xy = q.X * q.Y; var wz = q.Z * q.W; var xz = q.Z * q.X; var wy = q.Y * q.W; var yz = q.Y * q.Z; var wx = q.X * q.W;
+        var s = pose.Scale;
+        return new Matrix4x4(
+            (1f - 2f * (yy + zz)) * s.X, 2f * (xy + wz) * s.X, 2f * (xz - wy) * s.X, 0f,
+            2f * (xy - wz) * s.Y, (1f - 2f * (zz + xx)) * s.Y, 2f * (yz + wx) * s.Y, 0f,
+            2f * (xz + wy) * s.Z, 2f * (yz - wx) * s.Z, (1f - 2f * (yy + xx)) * s.Z, 0f,
+            pose.Translation.X, pose.Translation.Y, pose.Translation.Z, 1f);
     }
 }

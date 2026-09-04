@@ -15,8 +15,8 @@ namespace Paradise.Animation;
 /// Cross-language contract with ozz-animation 0.17 (<c>ozz/base/io/archive.h</c>,
 /// <c>skeleton.cc</c>, <c>animation.cc</c>): a file written by <c>gltf2ozz</c> loads here, and a
 /// file written here loads in ozz's C++ runtime. The archive stores rest poses in
-/// structure-of-arrays groups of four; the blob holds one pose per joint because the sampler in
-/// this assembly is scalar.
+/// structure-of-arrays groups of four; the blob holds one pose per joint, the shape the
+/// hierarchy walk and the renderer consume.
 /// </remarks>
 public static class OzzArchive
 {
