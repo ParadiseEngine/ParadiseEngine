@@ -13,7 +13,7 @@ namespace Paradise.Rendering.Graph;
 /// layer, a bloom mip. That keeps every declaration site a cached static method group rather than a
 /// closure allocated per pass per frame, which matters in a path that runs sixty times a
 /// second.</para></summary>
-public delegate void PassRecorder(object context, ref RenderCommandEncoder encoder, int argument);
+public delegate void PassRecorder(object context, ref PassRecording pass, int argument);
 
 /// <summary>Who can observe a resource, which is what decides whether writing it is worth
 /// doing.</summary>
@@ -62,20 +62,25 @@ public readonly record struct GraphTexture(int Index)
 public sealed class FrameGraph
 {
     private const int MaxColorAttachments = RenderPassDesc.MaxColorAttachments;
+    private const int MaxBindGroups = 4;
 
     private readonly List<Resource> _resources = [];
     private readonly Dictionary<string, int> _owned = new(StringComparer.Ordinal);
     private readonly List<Pass> _passes = [];
     private readonly List<ReadEdge> _reads = [];
+    private readonly List<GraphBinding> _bindings = [];
     private readonly Stack<int> _liveStack = new();
     private RenderPassDesc[] _descs = [];
     private int[] _order = [];
 
     /// <param name="textures">The targets this graph owns. Null for a graph that only routes
     /// imported resources.</param>
-    public FrameGraph(GraphTextureRegistry? textures = null)
+    /// <param name="bindGroups">Where a pass's declared bind groups are resolved. Null for a
+    /// graph whose passes bind nothing through it.</param>
+    public FrameGraph(GraphTextureRegistry? textures = null, BindGroupCache? bindGroups = null)
     {
         Textures = textures;
+        BindGroups = bindGroups;
         // Index 0 is always the backbuffer, so Reset never has to re-add it and Backbuffer needs
         // no null check at a declaration site.
         _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default, null));
@@ -83,6 +88,9 @@ public sealed class FrameGraph
 
     /// <summary>The targets this graph owns, or null.</summary>
     public GraphTextureRegistry? Textures { get; }
+
+    /// <summary>The cache declared bind groups resolve through, or null.</summary>
+    public BindGroupCache? BindGroups { get; }
 
     /// <summary>The frame's presentation target. Always <see cref="GraphResourceScope.External"/>:
     /// the whole point of the frame is that somebody sees it.</summary>
@@ -96,6 +104,7 @@ public sealed class FrameGraph
     {
         _passes.Clear();
         _reads.Clear();
+        _bindings.Clear();
         _owned.Clear();
         _resources.RemoveRange(1, _resources.Count - 1);
     }
@@ -199,16 +208,49 @@ public sealed class FrameGraph
                 desc[c] = ResolveColor(pass.Colors[c]);
         }
 
+        // Bind groups resolve only for passes that survived culling: a culled feature's groups
+        // are never requested, so the cache lets them go instead of holding views nobody samples.
+        for (var slot = 0; slot < count; slot++)
+            ResolveBindGroups(ref passes[_order[slot]]);
+
         var encoder = new RenderCommandEncoder(writer);
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
             encoder.BeginPass(slot);
-            pass.Recorder!.Invoke(pass.Context!, ref encoder, pass.Argument);
+            var recording = new PassRecording(encoder, pass.Groups, pass.Name);
+            pass.Recorder!.Invoke(pass.Context!, ref recording, pass.Argument);
             encoder.EndPass();
         }
 
         return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, count));
+    }
+
+    private void ResolveBindGroups(ref Pass pass)
+    {
+        Span<BindGroupEntryDesc> entries = stackalloc BindGroupEntryDesc[BindGroupCache.MaxEntries];
+        for (var g = 0; g < MaxBindGroups; g++)
+        {
+            ref var group = ref pass.GroupDecls[g];
+            if (group.Layout is null) continue;
+
+            for (var i = 0; i < group.Count; i++)
+                entries[i] = Resolve(_bindings[group.Start + i]);
+            pass.Groups[g] = BindGroups!.Get(group.Name, group.Layout, entries[..group.Count]);
+        }
+    }
+
+    private BindGroupEntryDesc Resolve(in GraphBinding binding)
+    {
+        if (binding.Kind == GraphBindingKind.Raw) return binding.Raw;
+
+        var resource = _resources[binding.Target.Index];
+        if (resource.Kind != ResourceKind.Owned)
+            throw new InvalidOperationException("A bind group can name only textures the graph owns; bind an imported view with GraphBinding.View.");
+        var view = binding.Kind == GraphBindingKind.TextureArrayView
+            ? Textures!.ArrayView(resource.Name!)
+            : resource.View;
+        return BindGroupEntryDesc.ForTextureView(binding.Binding, view);
     }
 
     private static void Validate(Span<Pass> passes, int count)
@@ -333,6 +375,26 @@ public sealed class FrameGraph
         private Attachment _slot0;
     }
 
+    private struct GroupDecl
+    {
+        public string Name;
+        public BindGroupLayoutDesc? Layout;
+        public int Start;
+        public int Count;
+    }
+
+    [InlineArray(MaxBindGroups)]
+    private struct GroupDecls
+    {
+        private GroupDecl _slot0;
+    }
+
+    [InlineArray(MaxBindGroups)]
+    private struct GroupHandles
+    {
+        private BindGroupHandle _slot0;
+    }
+
     private struct Pass
     {
         public string Name;
@@ -344,6 +406,8 @@ public sealed class FrameGraph
         public ColorSlots Colors;
         public bool HasDepth;
         public Attachment Depth;
+        public GroupDecls GroupDecls;
+        public GroupHandles Groups;
         public bool NeverCull;
         public bool Live;
     }
@@ -402,12 +466,37 @@ public sealed class FrameGraph
             return this;
         }
 
-        /// <summary>Declare that this pass samples <paramref name="source"/>.
-        ///
-        /// <para>Almost always the read physically happens through a bind group the graph never
-        /// sees, so this is the only way the dependency exists at all. Leaving it out on a
-        /// <see cref="GraphResourceScope.GraphOnly"/> resource does not produce a slower frame — it
-        /// produces a culled producer and a pass sampling stale contents.</para></summary>
+        /// <summary>Declare a bind group the pass will bind at <paramref name="groupIndex"/>. Every
+        /// owned texture among <paramref name="bindings"/> becomes a read of that texture, and the
+        /// group is resolved after culling through the graph's <see cref="BindGroupCache"/>, so the
+        /// recorder binds it by index with <see cref="PassRecording.SetBindGroup"/>.</summary>
+        public PassBuilder BindGroup(uint groupIndex, string name, BindGroupLayoutDesc layout, ReadOnlySpan<GraphBinding> bindings)
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(groupIndex, (uint)MaxBindGroups);
+            ArgumentNullException.ThrowIfNull(name);
+            ArgumentNullException.ThrowIfNull(layout);
+            if (_graph.BindGroups is null)
+                throw new InvalidOperationException("This graph has no bind group cache; bind groups cannot be declared on its passes.");
+
+            var start = _graph._bindings.Count;
+            foreach (var binding in bindings)
+            {
+                _graph._bindings.Add(binding);
+                if (binding.Kind != GraphBindingKind.Raw)
+                    Reads(binding.Target);
+            }
+            _graph.PassAt(_index).GroupDecls[(int)groupIndex] = new GroupDecl
+            {
+                Name = name, Layout = layout, Start = start, Count = bindings.Length,
+            };
+            return this;
+        }
+
+        /// <summary>Declare that this pass samples <paramref name="source"/> through a bind group
+        /// the graph does not build — a material's, a host's. The escape hatch: a read declared on
+        /// the pass with <see cref="BindGroup"/> cannot be forgotten, and this one can, and
+        /// forgetting it on a private target culls the producer while the pass samples stale
+        /// contents.</summary>
         public PassBuilder Reads(GraphTexture source)
         {
             if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));

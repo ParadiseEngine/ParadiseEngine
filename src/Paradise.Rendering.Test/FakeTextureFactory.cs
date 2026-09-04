@@ -42,6 +42,11 @@ internal sealed class FakeTextureFactory : ITextureFactory
         if (!Views.Remove(handle)) throw new InvalidOperationException("View destroyed twice.");
     }
 
+    public List<(TextureHandle Texture, int Bytes)> Writes { get; } = [];
+
     public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
-        => throw new NotSupportedException();
+    {
+        if (!Textures.ContainsKey(handle)) throw new InvalidOperationException("Write to a texture that does not exist.");
+        Writes.Add((handle, data.Length));
+    }
 }

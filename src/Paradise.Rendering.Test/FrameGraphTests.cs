@@ -7,11 +7,11 @@ namespace Paradise.Rendering.Test;
 /// renderer's pass declarations rest on, so they are worth asserting where nothing can skip.</summary>
 public class FrameGraphTests
 {
-    private static readonly PassRecorder Nothing = static (object _, ref RenderCommandEncoder _, int _) => { };
+    private static readonly PassRecorder Nothing = static (object _, ref PassRecording _, int _) => { };
 
     private static PassRecorder MarkWith(int vertexCount) =>
-        (object _, ref RenderCommandEncoder e, int argument) =>
-            e.Draw(new DrawCommand((uint)(vertexCount + argument), 1, 0, 0));
+        (object _, ref PassRecording pass, int argument) =>
+            pass.Encoder.Draw(new DrawCommand((uint)(vertexCount + argument), 1, 0, 0));
 
     private static FrameGraph GraphWithOneColorTarget(out GraphTexture target)
     {
@@ -480,5 +480,137 @@ public class FrameGraphTests
         var graph = new FrameGraph();
 
         await Assert.That(() => graph.Texture("hdr")).Throws<InvalidOperationException>();
+    }
+
+    private static (FrameGraph Graph, GraphTextureRegistry Textures, FakeBindGroupFactory Groups) BindingGraph()
+    {
+        var textures = new GraphTextureRegistry(new FakeTextureFactory());
+        var groups = new FakeBindGroupFactory();
+        return (new FrameGraph(textures, new BindGroupCache(groups)), textures, groups);
+    }
+
+    private static readonly BindGroupLayoutDesc SomeLayout = new(0, []);
+
+    private static readonly PassRecorder BindGroupZero =
+        static (object _, ref PassRecording pass, int _) => pass.SetBindGroup(0);
+
+    /// <summary>The point of declaring bindings on the pass: the read is derived from the
+    /// binding, so it cannot be left out.</summary>
+    [Test]
+    public async Task binding_an_owned_texture_is_a_read_of_it()
+    {
+        var (graph, textures, _) = BindingGraph();
+        textures.Ensure("source", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("produce", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("source"), LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("consume", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear, StoreOp.Store)
+            .BindGroup(0, "g", SomeLayout, [GraphBinding.Texture(0, graph.Texture("source"))])
+            .Record(graph, BindGroupZero);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(2);
+    }
+
+    /// <summary>How a feature is switched off at its consumer: bind the fallback instead of the
+    /// result, and the passes that would have produced the result are unreachable.</summary>
+    [Test]
+    public async Task binding_the_black_fallback_reads_nothing_and_culls_the_producer()
+    {
+        var (graph, textures, _) = BindingGraph();
+        textures.Ensure("source", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("produce", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("source"), LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("consume", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear, StoreOp.Store)
+            .BindGroup(0, "g", SomeLayout, [GraphBinding.Texture(0, graph.Texture(textures.Black))])
+            .Record(graph, BindGroupZero);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        var culled = graph.CulledPassCount;
+        await Assert.That(passes).IsEqualTo(1);
+        await Assert.That(culled).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task the_recorder_binds_the_resolved_group_by_index()
+    {
+        var (graph, textures, groups) = BindingGraph();
+        textures.Ensure("shadows", DepthArray(2));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+        var sampler = new SamplerHandle(9, 1);
+
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear, StoreOp.Store)
+            .BindGroup(0, "frame", SomeLayout,
+                [GraphBinding.TextureArray(0, graph.Texture("shadows")), GraphBinding.Sampler(1, sampler)])
+            .Record(graph, BindGroupZero);
+
+        var stream = graph.Compile(writer);
+        var bound = stream.Commands.Span[1];
+        var kind = bound.Kind;
+        var desc = groups.Groups[bound.SetBindGroup.Group];
+        var entries = desc.Entries.ToArray();
+        var expectedArrayView = textures.ArrayView("shadows");
+
+        await Assert.That(kind).IsEqualTo(RenderCommandKind.SetBindGroup);
+        await Assert.That(desc.Name).IsEqualTo("frame");
+        await Assert.That(entries[0].View).IsEqualTo(expectedArrayView);
+        await Assert.That(entries[1].Sampler).IsEqualTo(sampler);
+    }
+
+    /// <summary>A culled pass never resolves its groups, so a feature that is off costs no bind
+    /// groups — and its groups are what the cache lets go.</summary>
+    [Test]
+    public async Task a_culled_pass_resolves_no_bind_group()
+    {
+        var (graph, textures, groups) = BindingGraph();
+        textures.Ensure("dead", DepthArray(1));
+        textures.Ensure("other", DepthArray(1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("culled", RenderPassEvent.Post)
+            .Depth(graph.Texture("dead"), LoadOp.Clear, StoreOp.Store)
+            .BindGroup(0, "g", SomeLayout, [GraphBinding.Texture(0, graph.Texture("other"))])
+            .Record(graph, BindGroupZero);
+        graph.Compile(writer);
+
+        await Assert.That(groups.Created).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task binding_a_group_the_pass_did_not_declare_is_an_error_naming_the_pass()
+    {
+        var (graph, textures, _) = BindingGraph();
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("forgetful", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear, StoreOp.Store)
+            .Record(graph, BindGroupZero);
+
+        await Assert.That(() => graph.Compile(writer)).Throws<InvalidOperationException>()
+            .WithMessageContaining("forgetful");
+    }
+
+    [Test]
+    public async Task a_graph_without_a_cache_refuses_bind_group_declarations()
+    {
+        var graph = GraphWithOneColorTarget(out var target);
+
+        await Assert.That(() => graph.AddRasterPass("p", RenderPassEvent.Opaque)
+            .Color(0, target, LoadOp.Load, StoreOp.Store)
+            .BindGroup(0, "g", SomeLayout, [])).Throws<InvalidOperationException>();
     }
 }

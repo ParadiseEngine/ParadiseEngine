@@ -28,7 +28,7 @@ namespace Paradise.Rendering;
 /// invalidates the handle synchronously, and any later use of it throws rather than silently
 /// resolving to a recycled resource.</para>
 /// </remarks>
-public interface IRenderer : ITextureFactory
+public interface IRenderer : ITextureFactory, IBindGroupFactory
 {
     /// <summary>The backend's color-target format — the swapchain format when presenting to a
     /// surface, or the offscreen target's format when headless. Pipeline color targets must match
@@ -69,13 +69,6 @@ public interface IRenderer : ITextureFactory
 
     /// <summary>Destroy a sampler.</summary>
     void DestroySampler(SamplerHandle handle);
-
-    /// <summary>Create a bind group binding concrete resources to one of a program's bind-group
-    /// layouts.</summary>
-    BindGroupHandle CreateBindGroup(in BindGroupDesc desc);
-
-    /// <summary>Destroy a bind group.</summary>
-    void DestroyBindGroup(BindGroupHandle handle);
 
     /// <summary>Build a render pipeline from a Slang-reflected program plus a target color format.
     /// Vertex layout comes verbatim from the program's reflection record — never hand-coded. The
