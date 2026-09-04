@@ -95,6 +95,10 @@ public static class ProjectVerifier
                     VerifyExtracted(fileSystem, path, findings);
                     break;
 
+                case AssetClass.Foreign when path.GetName().EndsWith(".ktx2", StringComparison.OrdinalIgnoreCase):
+                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, "is KTX2, which is build output; author the PNG or JPEG it was encoded from and let the build write the KTX2"));
+                    break;
+
                 // No "nothing handles this file" warning: only an importer, during a build, can
                 // answer that, and a decline may mean "not for this tree" (issue #208).
             }

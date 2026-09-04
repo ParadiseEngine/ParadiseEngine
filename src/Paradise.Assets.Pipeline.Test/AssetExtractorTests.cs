@@ -30,10 +30,10 @@ public class AssetExtractorTests
         """;
 
     /// <summary>A crate: one embedded PNG, two materials (the first samples it), one clip on the mesh node.</summary>
-    private static byte[] CrateGlb(float x = 0f)
+    private static byte[] CrateGlb(float x = 0f, byte[]? png = null)
     {
         var b = new GlbTestBuilder();
-        var image = b.AddImage(s_png, "image/png");
+        var image = b.AddImage(png ?? s_png, "image/png");
         var texture = b.AddTexture(source: image);
         b.AddMaterial(new JsonObject { ["name"] = "wood", ["pbrMetallicRoughness"] = new JsonObject { ["baseColorTexture"] = new JsonObject { ["index"] = texture }, ["metallicFactor"] = 0.0 } });
         b.AddMaterial(new JsonObject { ["name"] = "metal", ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = 1.0 }, ["alphaMode"] = "MASK", ["alphaCutoff"] = 0.4 });
@@ -146,6 +146,53 @@ public class AssetExtractorTests
     }
 
     [Test]
+    public async Task a_re_exported_texture_is_re_extracted_not_kept()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        byte[] repainted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9];
+        fileSystem.WriteAllBytes(Glb, CrateGlb(png: repainted));
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Written.Any(w => w.StartsWith("models/crate_0.png") && w.Contains("re-extracted"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
+        var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(recorded.Images.Single().Name).IsEqualTo("images[0]");
+        await Assert.That(recorded.Images.Single().Entry.Reference.Path).IsEqualTo("models/crate_0.png");
+    }
+
+    [Test]
+    public async Task a_file_this_verb_did_not_write_is_adopted_only_when_it_holds_the_glbs_own_bytes()
+    {
+        using var fileSystem = Project();
+        // Another GLB's texture (or the author's) already sits where this one extracts to.
+        fileSystem.WriteAllBytes("/game/assets/models/crate_0.png", [0xFF, 0xFF]);
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate_0.png");
+
+        var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(refused.Succeeded).IsFalse();
+        await Assert.That(refused.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-glb"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xFF, 0xFF });
+        // The GLB was not rewritten to point at pixels that are not its own, and nothing was recorded.
+        await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Images).IsEmpty();
+
+        var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
+        await Assert.That(taken.Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png);
+
+        // A file that already holds what the GLB extracts to is simply adopted.
+        fileSystem.DeleteFile(Glb + ".meta");
+        ProjectVerifierTests.Mint(fileSystem, Glb);
+        fileSystem.WriteAllBytes(Glb, CrateGlb());
+        var adopted = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(adopted.Errors.Where(e => e.Contains("crate_0.png"))).IsEmpty();
+        await Assert.That(adopted.Kept.Any(k => k.StartsWith("models/crate_0.png") && k.Contains("adopted"))).IsTrue();
+    }
+
+    [Test]
     public async Task an_edited_blob_is_a_warning_and_both_sides_changed_is_a_conflict_the_flags_resolve()
     {
         using var fileSystem = Project();
@@ -222,7 +269,7 @@ public class AssetExtractorTests
         AssetExtractor.Extract(fileSystem, s_layout, Glb);   // settles the Paradise-only edit as no divergence
 
         // The artist re-exports with a different roughness on 'metal'.
-        var glb = GlbMaterialWriter.Write(fileSystem.ReadAllBytes(Glb), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } });
+        var glb = GlbMaterialWriter.Write(fileSystem.ReadAllBytes(Glb), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _);
         fileSystem.WriteAllBytes(Glb, glb);
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
@@ -231,6 +278,93 @@ public class AssetExtractorTests
         var updated = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
         await Assert.That(updated.Value("RoughnessFactor")).IsEqualTo(0.1);
         await Assert.That(updated.Value("MaterialKind")).IsEqualTo("lava");
+    }
+
+    [Test]
+    public async Task a_ktx2_is_never_authored_so_extract_refuses_one_embedded_or_referenced()
+    {
+        var b = new GlbTestBuilder();
+        byte[] ktx2 = [.. Ktx2Header.Identifier, 0, 0, 0, 0];
+        var texture = b.AddTexture(source: b.AddImage(ktx2, "image/ktx2"));
+        b.AddMaterial(new JsonObject { ["name"] = "wood", ["pbrMetallicRoughness"] = new JsonObject { ["baseColorTexture"] = new JsonObject { ["index"] = texture } } });
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        b.SetSceneRoots(b.AddNode(mesh: b.AddMesh(GlbTestBuilder.Primitive(position, material: 0)), name: "Crate"));
+        using var embedded = Project(b.Build());
+
+        var refused = AssetExtractor.Extract(embedded, s_layout, Glb);
+        await Assert.That(refused.Succeeded).IsFalse();
+        await Assert.That(refused.Errors.Single()).Contains("KTX2");
+        await Assert.That(embedded.FileExists("/game/assets/models/crate_0.ktx2")).IsFalse();
+        await Assert.That(embedded.FileExists("/game/assets/models/crate.mesh")).IsFalse();
+
+        // A material document rebound to a .ktx2 is refused on write-back, and keeps its last sync.
+        using var referenced = Project();
+        AssetExtractor.Extract(referenced, s_layout, Glb);
+        ProjectVerifierTests.WriteCarried(referenced, "/game/assets/textures/rust.ktx2", "ktx2");
+        var rust = SidecarMeta.Load(referenced, "/game/assets/textures/rust.ktx2.meta").Guid;
+        var metal = MaterialDocument.Load(referenced, "/game/assets/models/crate.metal.material");
+        var rebound = new CanonicalTomlTable();
+        foreach (var (key, value) in metal) rebound.Add(key, key == "BaseColorTexture" ? AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(rust, "textures/rust.ktx2")) : value);
+        referenced.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(rebound));
+
+        var result = AssetExtractor.Extract(referenced, s_layout, Glb);
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Single()).Contains("rust.ktx2");
+        await Assert.That(MeshContainer.Read(Glb, referenced.ReadAllBytes(Glb)).Any(i => i.Uri.EndsWith(".ktx2"))).IsFalse();
+    }
+
+    [Test]
+    public async Task duplicate_names_get_their_own_documents_and_slots_bind_by_index()
+    {
+        var b = new GlbTestBuilder();
+        b.AddMaterial(new JsonObject { ["name"] = "Mat A", ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = 0.0 } });
+        b.AddMaterial(new JsonObject { ["name"] = "Mat/A", ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = 1.0 } });
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, material: 1), GlbTestBuilder.Primitive(position, material: 0));
+        b.SetSceneRoots(b.AddNode(mesh: mesh, name: "Crate"));
+        using var fileSystem = Project(b.Build());
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Mat_A.material")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Mat_A_1.material")).IsTrue();
+        await Assert.That(MaterialDocument.Load(fileSystem, "/game/assets/models/crate.Mat_A_1.material").Value("MetallicFactor")).IsEqualTo(1.0);
+
+        var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(recorded.Materials.Select(m => m.Index)).IsEquivalentTo([0, 1]);
+        var root = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/models/crate.prefab").Root;
+        var slots = (IReadOnlyList<object>)root.Component(GlbExtraction.MaterialsComponentId)!.Data.Value("Slots")!;
+        await Assert.That(((CanonicalInlineTable)slots[0]).Value("path")).IsEqualTo("models/crate.Mat_A_1.material");
+        await Assert.That(((CanonicalInlineTable)slots[1]).Value("path")).IsEqualTo("models/crate.Mat_A.material");
+    }
+
+    [Test]
+    public async Task a_refused_entry_does_not_turn_the_ones_that_resolved_into_conflicts_on_retry()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        // The author edits 'metal'; the artist re-exports both the geometry and 'metal'.
+        var metal = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
+        var doc = new CanonicalTomlTable();
+        foreach (var (key, value) in metal) doc.Add(key, key == "RoughnessFactor" ? 0.9 : value);
+        if (!doc.ContainsKey("RoughnessFactor")) doc.Add("RoughnessFactor", 0.9);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(doc));
+        fileSystem.WriteAllBytes(Glb, GlbMaterialWriter.Write(CrateGlb(x: 5f), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _));
+
+        var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(refused.Succeeded).IsFalse();
+        await Assert.That(refused.Errors.Single()).Contains("crate.metal.material");
+        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
+
+        // The retry sees the same one conflict, not a manufactured one on the mesh it already rewrote.
+        var retry = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(retry.Errors.Single()).Contains("crate.metal.material");
+        await Assert.That(retry.Written).IsEmpty();
+
+        var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeDocument);
+        await Assert.That(resolved.Succeeded).IsTrue();
     }
 
     [Test]

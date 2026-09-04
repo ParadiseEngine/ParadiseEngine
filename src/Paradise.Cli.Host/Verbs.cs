@@ -290,7 +290,10 @@ internal static class Verbs
                 return 1;
             }
 
-            targets.AddRange(fileSystem.EnumerateFiles(target, "*", SearchOption.AllDirectories).Where(MeshContainer.IsMesh).OrderBy(p => p.FullName, StringComparer.Ordinal));
+            var ignore = IgnoreRules(fileSystem, layout);
+            targets.AddRange(fileSystem.EnumerateFiles(target, "*", SearchOption.AllDirectories)
+                .Where(path => MeshContainer.IsMesh(path) && !ignore.Matches(layout.Assets, path))
+                .OrderBy(p => p.FullName, StringComparer.Ordinal));
         }
         else
         {

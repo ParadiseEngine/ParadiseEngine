@@ -43,6 +43,19 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task a_ktx2_under_assets_is_an_error_because_it_is_build_output()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/rust.ktx2", "ktx2");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("build output");
+    }
+
+    [Test]
     public async Task an_orphaned_sidecar_is_an_error()
     {
         using var fileSystem = CreateProject();

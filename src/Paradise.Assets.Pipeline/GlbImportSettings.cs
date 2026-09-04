@@ -39,7 +39,9 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public const string PrefabKey = "prefab";
     public const string ClipsKey = "clips";
     public const string MaterialsKey = "materials";
+    public const string ImagesKey = "images";
     public const string NameKey = "name";
+    public const string IndexKey = "index";
     public const string GlbFingerprintKey = "glb";
     public const string DocumentFingerprintKey = "doc";
 
@@ -64,17 +66,17 @@ public sealed class GlbImportSettings : IImportSettingsDomain
                 case ExtractKey: return $"holds a non-string '{ExtractKey}' in [{Domain}]";
                 case MeshKey or SkeletonKey or PrefabKey when ReadExtracted(value) is not null: continue;
                 case MeshKey or SkeletonKey or PrefabKey: return $"holds '{key}' in [{Domain}] that is not {{ guid, path, glb, doc }}";
-                case ClipsKey or MaterialsKey when value is IReadOnlyList<object> named:
+                case ClipsKey or MaterialsKey or ImagesKey when value is IReadOnlyList<object> named:
                     foreach (var item in named)
                     {
-                        if (Lookup(item, NameKey) is not string || ReadExtracted(item) is null)
+                        if (ReadIndex(item) is null || Lookup(item, NameKey) is not string || ReadExtracted(item) is null)
                         {
-                            return $"holds an entry in [{Domain}].{key} that is not {{ name, guid, path, glb, doc }}";
+                            return $"holds an entry in [{Domain}].{key} that is not {{ index, name, guid, path, glb, doc }}";
                         }
                     }
 
                     continue;
-                case ClipsKey or MaterialsKey: return $"holds a non-array '{key}' in [{Domain}]";
+                case ClipsKey or MaterialsKey or ImagesKey: return $"holds a non-array '{key}' in [{Domain}]";
                 case ReferencesKey: break;
                 default: return $"holds '{key}' in [{Domain}], which is not a glb setting";
             }
@@ -144,6 +146,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             ReadExtracted(table.Value(SkeletonKey)),
             ReadNamed(table.Value(ClipsKey)),
             ReadNamed(table.Value(MaterialsKey)),
+            ReadNamed(table.Value(ImagesKey)),
             ReadExtracted(table.Value(PrefabKey)));
     }
 
@@ -169,6 +172,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         if (extraction.Prefab is { } prefab) table.Add(PrefabKey, WriteEntry(prefab));
         if (extraction.Clips.Count > 0) table.Add(ClipsKey, extraction.Clips.Select(WriteNamed).Cast<object>().ToList());
         if (extraction.Materials.Count > 0) table.Add(MaterialsKey, extraction.Materials.Select(WriteNamed).Cast<object>().ToList());
+        if (extraction.Images.Count > 0) table.Add(ImagesKey, extraction.Images.Select(WriteNamed).Cast<object>().ToList());
         if (references.Count > 0)
         {
             table.Add(ReferencesKey, references.Select(reference => (object)new CanonicalInlineTable
@@ -190,9 +194,9 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         if (value is not IReadOnlyList<object> items) return result;
         foreach (var item in items)
         {
-            if (Lookup(item, NameKey) is string name && ReadExtracted(item) is { } entry)
+            if (ReadIndex(item) is { } index && Lookup(item, NameKey) is string name && ReadExtracted(item) is { } entry)
             {
-                result.Add(new GlbExtraction.NamedEntry(name, entry));
+                result.Add(new GlbExtraction.NamedEntry(index, name, entry));
             }
         }
 
@@ -227,9 +231,16 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         { DocumentFingerprintKey, entry.DocumentFingerprint },
     };
 
+    private static int? ReadIndex(object? item) => Lookup(item, IndexKey) switch
+    {
+        long index and >= 0 and <= int.MaxValue => (int)index,
+        int index and >= 0 => index,
+        _ => null,
+    };
+
     private static CanonicalInlineTable WriteNamed(GlbExtraction.NamedEntry named)
     {
-        var table = new CanonicalInlineTable { { NameKey, named.Name } };
+        var table = new CanonicalInlineTable { { IndexKey, (long)named.Index }, { NameKey, named.Name } };
         foreach (var (key, value) in WriteEntry(named.Entry)) table.Add(key, value);
         return table;
     }
@@ -253,6 +264,7 @@ public sealed record GlbExtraction(
     GlbExtraction.Entry? Skeleton,
     IReadOnlyList<GlbExtraction.NamedEntry> Clips,
     IReadOnlyList<GlbExtraction.NamedEntry> Materials,
+    IReadOnlyList<GlbExtraction.NamedEntry> Images,
     GlbExtraction.Entry? Prefab)
 {
     /// <summary>The meta field a generated prefab carries: the guid of the GLB it was generated from.</summary>
@@ -262,7 +274,7 @@ public sealed record GlbExtraction(
 
     public const string MaterialsComponentType = "Paradise.Export.Data.MaterialsComponentData";
 
-    public static GlbExtraction None { get; } = new(null, null, null, [], [], null);
+    public static GlbExtraction None { get; } = new(null, null, null, [], [], [], null);
 
     public bool Extracted => Mesh is not null;
 
@@ -270,5 +282,10 @@ public sealed record GlbExtraction(
     /// <param name="DocumentFingerprint">SHA-256 of the document's bytes at the last sync.</param>
     public sealed record Entry(AssetReference Reference, string GlbFingerprint, string DocumentFingerprint);
 
-    public sealed record NamedEntry(string Name, Entry Entry);
+    /// <summary>
+    /// An entry the GLB has several of, keyed by its glTF index: that is what the GLB's own draw
+    /// slots bind by, and it survives a rename in the DCC, which a name does not; glTF names are
+    /// optional and need not be unique. The name is the file's readable stem.
+    /// </summary>
+    public sealed record NamedEntry(int Index, string Name, Entry Entry);
 }

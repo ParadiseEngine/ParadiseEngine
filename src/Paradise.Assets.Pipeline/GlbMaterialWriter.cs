@@ -44,14 +44,21 @@ public static class GlbMaterialWriter
         return subset;
     }
 
-    /// <summary>The GLB with material <paramref name="materialIndex"/> rewritten from <paramref name="material"/>; the input bytes when nothing changed.</summary>
+    /// <summary>The texture bindings a material document can carry, each the document key of an asset reference.</summary>
+    private static readonly string[] s_textureKeys = ["BaseColorTexture", "MetallicRoughnessTexture", "NormalTexture", "OcclusionTexture", "EmissiveTexture"];
+
+    private static readonly string[] s_authoredImageExtensions = [".png", ".jpg", ".jpeg"];
+
+    /// <summary>The GLB with material <paramref name="materialIndex"/> rewritten from <paramref name="material"/>; the input bytes when nothing changed, or when <paramref name="problem"/> says why it was refused.</summary>
     /// <param name="glbPath">Where the GLB sits under <c>assets/</c>, since image uris are relative to it.</param>
-    public static byte[] Write(byte[] glb, string glbPath, int materialIndex, CanonicalTomlTable material)
+    public static byte[] Write(byte[] glb, string glbPath, int materialIndex, CanonicalTomlTable material, out string? problem)
     {
         ArgumentNullException.ThrowIfNull(glb);
         ArgumentNullException.ThrowIfNull(glbPath);
         ArgumentNullException.ThrowIfNull(material);
 
+        problem = UnauthoredImage(material);
+        if (problem is not null) return glb;
         if (!GlbBinary.TryRead(glb, out var gltf, out var bin)) return glb;
         if (gltf["materials"] is not JsonArray materials || materialIndex < 0 || materialIndex >= materials.Count) return glb;
         if (materials[materialIndex] is not JsonObject target) return glb;
@@ -103,6 +110,19 @@ public static class GlbMaterialWriter
         return gltf.ToJsonString() == before ? glb : GlbBinary.Write(gltf, bin);
     }
 
+    /// <summary>An authored texture is a PNG or JPEG; KTX2 is what the build writes from one, and a GLB in <c>assets/</c> never names it.</summary>
+    private static string? UnauthoredImage(CanonicalTomlTable material)
+    {
+        foreach (var key in s_textureKeys)
+        {
+            if (material.Value(key) is not CanonicalInlineTable inline || !AssetReferenceCodec.TryRead(inline, out var reference)) continue;
+            if (s_authoredImageExtensions.Contains(Path.GetExtension(reference.Path), StringComparer.OrdinalIgnoreCase)) continue;
+            return $"{key} names '{reference.Path}', which is not a PNG or JPEG; an authored texture is one of those, and KTX2 is build output";
+        }
+
+        return null;
+    }
+
     private static void Bind(JsonObject gltf, string glbPath, JsonObject owner, string infoKey, CanonicalTomlTable material, string documentKey, Action<JsonObject>? decorate)
     {
         if (material.Value(documentKey) is not CanonicalInlineTable inline) return;
@@ -144,7 +164,7 @@ public static class GlbMaterialWriter
             images.Add((JsonNode)new JsonObject
             {
                 ["uri"] = MeshContainer.UriFor(glbPath, reference.Path),
-                ["mimeType"] = extension switch { ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", _ => "image/ktx2" },
+                ["mimeType"] = extension is ".jpg" or ".jpeg" ? "image/jpeg" : "image/png",
             });
             imageIndex = images.Count - 1;
         }

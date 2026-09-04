@@ -123,20 +123,19 @@ public static class GltfCook
         return new ClipData(clip.Name ?? $"clip_{index}", channels);
     }
 
-    /// <summary>Positions through the matrix, normals through its inverse-transpose (non-uniform scale would shear them off the surface otherwise), tangents through the matrix; uv and tangent sign pass through.</summary>
+    /// <summary>Positions through the matrix, normals and tangents through its cofactor matrix (non-uniform scale would shear them off the surface otherwise), re-normalized; uv and tangent sign pass through.</summary>
     private static float[] BakeTransform(float[] vertices, in Matrix4x4 transform)
     {
         if (transform.IsIdentity) return vertices;
 
         var baked = new float[vertices.Length];
-        Matrix4x4.Invert(transform, out var inverse);
-        var normalMatrix = Matrix4x4.Transpose(inverse);
+        var normalMatrix = Cofactor(transform);
 
         for (var i = 0; i < vertices.Length; i += GltfPrimitive.FloatsPerVertex)
         {
             var position = Vector3.Transform(new Vector3(vertices[i], vertices[i + 1], vertices[i + 2]), transform);
-            var normal = Vector3.Normalize(Vector3.TransformNormal(new Vector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]), normalMatrix));
-            var tangent = Vector3.TransformNormal(new Vector3(vertices[i + 8], vertices[i + 9], vertices[i + 10]), transform);
+            var normal = NormalizeOrZero(Vector3.TransformNormal(new Vector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]), normalMatrix));
+            var tangent = NormalizeOrZero(Vector3.TransformNormal(new Vector3(vertices[i + 8], vertices[i + 9], vertices[i + 10]), transform));
 
             baked[i] = position.X; baked[i + 1] = position.Y; baked[i + 2] = position.Z;
             baked[i + 3] = normal.X; baked[i + 4] = normal.Y; baked[i + 5] = normal.Z;
@@ -146,5 +145,23 @@ public static class GltfCook
         }
 
         return baked;
+    }
+
+    /// <summary>
+    /// The inverse-transpose up to a scalar, which normalization removes — and, unlike the inverse,
+    /// defined for a singular matrix: exporters do emit a zero scale axis for a hidden or collapsed
+    /// object, and inverting that put NaN in the blob.
+    /// </summary>
+    private static Matrix4x4 Cofactor(in Matrix4x4 m) => new(
+        m.M22 * m.M33 - m.M23 * m.M32, m.M23 * m.M31 - m.M21 * m.M33, m.M21 * m.M32 - m.M22 * m.M31, 0f,
+        m.M13 * m.M32 - m.M12 * m.M33, m.M11 * m.M33 - m.M13 * m.M31, m.M12 * m.M31 - m.M11 * m.M32, 0f,
+        m.M12 * m.M23 - m.M13 * m.M22, m.M13 * m.M21 - m.M11 * m.M23, m.M11 * m.M22 - m.M12 * m.M21, 0f,
+        0f, 0f, 0f, 1f);
+
+    /// <summary>A vector a degenerate transform collapsed has no direction; zero is what a shader can clamp, NaN is not.</summary>
+    private static Vector3 NormalizeOrZero(Vector3 v)
+    {
+        var lengthSquared = v.LengthSquared();
+        return lengthSquared > 1e-12f ? v / MathF.Sqrt(lengthSquared) : Vector3.Zero;
     }
 }

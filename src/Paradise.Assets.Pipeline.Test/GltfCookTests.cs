@@ -38,6 +38,28 @@ public class GltfCookTests
     }
 
     [Test]
+    public async Task a_zero_scale_axis_bakes_finite_normals_and_a_non_uniform_scale_keeps_them_on_the_surface()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var normal = b.AddFloatAccessor([0f, 0f, 1f, 0f, 0f, 1f, 0f, 0f, 1f], "VEC3");
+        var tangent = b.AddFloatAccessor([1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f], "VEC4");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, normal: normal, tangent: tangent));
+        var flattened = b.AddNode(mesh: mesh, scale: [1f, 1f, 0f], name: "Flat");
+        var squashed = b.AddNode(mesh: mesh, scale: [4f, 1f, 1f], name: "Squashed");
+        b.SetSceneRoots(flattened, squashed);
+
+        var cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(b.Build()));
+
+        var stride = MeshBlob.StaticFloatsPerVertex;
+        await Assert.That(cooked.Mesh.Vertices.All(float.IsFinite)).IsTrue();
+        // Squashed along X: the surface still faces +Z, and the tangent along X is unit length again.
+        var second = 3 * stride;
+        await Assert.That(cooked.Mesh.Vertices[second + 5]).IsEqualTo(1f);
+        await Assert.That(cooked.Mesh.Vertices[second + 8]).IsEqualTo(1f);
+    }
+
+    [Test]
     public async Task two_instances_become_two_draws_in_scene_order_with_rebased_indices()
     {
         var b = new GlbTestBuilder();

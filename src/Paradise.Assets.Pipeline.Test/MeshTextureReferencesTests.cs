@@ -31,33 +31,16 @@ public class MeshTextureReferencesTests
     }
 
     [Test]
-    public async Task an_authored_ktx2_reference_is_declared_like_a_repointed_one()
+    public async Task a_reference_that_is_already_ktx2_is_not_a_source_and_is_left_alone()
     {
-        // One answer for every external KTX2 the built mesh names: an author-supplied .ktx2 is
-        // under the same extension as one the texture step wrote, or the file would carry the
-        // undeclared image/ktx2 shape #207 removed everywhere else.
-        var glb = Glb("""{"images":[{"uri":"t.png"},{"uri":"other.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0},{"source":1}]}""");
-
-        var rewrite = MeshTextureReferences.Rewrite(glb);
-
-        var gltf = Read(rewrite.Glb);
-        await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
-        await Assert.That(gltf["textures"]![1]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(1);
-        await Assert.That(gltf["textures"]![1]!["source"]).IsNull();
-        // Only the PNG is a source to compile; the authored KTX2 is already what ships.
-        await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "t.png" });
-    }
-
-    [Test]
-    public async Task an_image_no_texture_uses_leaves_the_mesh_unchanged()
-    {
-        var glb = Glb("""{"images":[{"uri":"other.ktx2","mimeType":"image/ktx2"}]}""");
+        // A KTX2 is never authored (verify refuses one under assets/), so the only .ktx2 this
+        // pass meets is its own earlier output; touching it would make the rewrite non-idempotent.
+        var glb = Glb("""{"images":[{"uri":"other.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0}]}""");
 
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(Read(rewrite.Glb)["extensionsUsed"]!.AsArray().Count).IsEqualTo(1);
-        await Assert.That(Read(rewrite.Glb)["extensionsRequired"]).IsNull();
+        await Assert.That(rewrite.Glb).IsEquivalentTo(glb);
     }
 
     [Test]
@@ -98,18 +81,6 @@ public class MeshTextureReferencesTests
         GlbBinary.TryRead(MeshTextureReferences.Rewrite(glb).Glb, out _, out var rewritten);
 
         await Assert.That(rewritten).IsEquivalentTo(bin);
-    }
-
-    [Test]
-    public async Task a_reference_that_is_already_ktx2_is_no_source_and_keeps_its_uri()
-    {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.ktx2","mimeType":"image/ktx2"}],"textures":[{"source":0}]}""");
-
-        var rewrite = MeshTextureReferences.Rewrite(glb);
-
-        await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(Images(rewrite.Glb)[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
-        await Assert.That(Read(rewrite.Glb)["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
     }
 
     [Test]

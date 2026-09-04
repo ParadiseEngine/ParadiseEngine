@@ -58,7 +58,7 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is externalised to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> beside the mesh through the same cache the texture step uses.</summary>
+/// <summary>A GLB is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, declares its image references so they follow moves, and refuses JSON glTF by name.</summary>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -284,7 +284,6 @@ public sealed class PrefabImporter : IAssetImporter
     }
 }
 
-/// <summary>Authored config documents, compiled to the profile's document format.</summary>
 /// <summary>A blob the pipeline extracted (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>) ships as it is: the step checks the magic and copies the bytes, so an unrelated file with the extension is refused by name rather than shipped.</summary>
 internal static class BlobStep
 {
@@ -446,6 +445,7 @@ public sealed class MaterialImporter : IAssetImporter
     }
 }
 
+/// <summary>Authored config documents, compiled to the profile's document format.</summary>
 public sealed class ConfigImporter : IAssetImporter
 {
     /// <inheritdoc />
