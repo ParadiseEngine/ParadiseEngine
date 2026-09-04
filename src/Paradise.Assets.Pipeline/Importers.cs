@@ -86,6 +86,14 @@ public sealed class MeshImporter : IAssetImporter
             return true;
         }
 
+        // By identity first: a texture renamed outside `mv` still carries the stamp's guid, and
+        // the uri the DCC wrote is only a hint. Through Resolve, so the move is a recorded input.
+        bytes = GlbTextureReferences.FollowUris(bytes, context.Source, reference =>
+        {
+            var resolution = context.Resolve(reference);
+            return resolution.Status == ReferenceStatus.Stale ? resolution.Path : null;
+        });
+
         var rewrite = MeshTextureReferences.Rewrite(bytes);
 
         // Against the SOURCE tree: Models/ builds before textures/, so the KTX2 does not exist yet.

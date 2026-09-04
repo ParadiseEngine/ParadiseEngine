@@ -161,10 +161,20 @@ public sealed partial class AssetWatcher : IDisposable
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
     {
         _maintainer.Reconcile();
+        StampMeshes();
         // One logger through, where this used to synthesise a second delegate that prefixed
         // "warning: " — the severity is BuildRunner's to state as a level now.
         return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
             .Run(profile, target);
+    }
+
+    /// <summary>Puts <c>extras.paradise</c> onto every GLB image that lacks it — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Stamps only; uris are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
+    public int StampMeshes()
+    {
+        var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
+        var stamped = ReferenceRepair.StampMeshes(_fileSystem, _layout, index);
+        foreach (var mesh in stamped) LogStamped(_log, index.Relative(mesh.Path), mesh.Repointed.Count);
+        return stamped.Count;
     }
 
     /// <inheritdoc/>
@@ -189,6 +199,9 @@ public sealed partial class AssetWatcher : IDisposable
     // watch loop cannot tell the author any other way.
     [LoggerMessage(EventId = 12, Level = LogLevel.Warning, Message = "watch: the filesystem watcher faulted — {Reason}")]
     private static partial void LogWatcherFaulted(ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "stamped: {Relative} ({Images} image reference(s) by identity)")]
+    private static partial void LogStamped(ILogger logger, string relative, int images);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

@@ -84,6 +84,10 @@ public static class ProjectVerifier
                     VerifyDocument(fileSystem, sources, path, findings);
                     break;
 
+                case AssetClass.Foreign when ReferenceRepair.IsGlb(path):
+                    VerifyMesh(fileSystem, sources, path, findings);
+                    break;
+
                 // No "nothing handles this file" warning: only an importer, during a build, can
                 // answer that, and a decline may mean "not for this tree" (issue #208).
             }
@@ -165,6 +169,62 @@ public static class ProjectVerifier
             if (domain.Problem(settings) is { } problem)
             {
                 findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
+            }
+        }
+    }
+
+    /// <summary>
+    /// A GLB's external images, by the same rule as a document's references: the stamp's guid
+    /// decides, the uri is a hint. An unstamped image whose uri names an identified texture is a
+    /// warning (<c>--fix</c> stamps it); one whose uri names nothing is an error, since the build
+    /// cannot follow it either.
+    /// </summary>
+    private static void VerifyMesh(IFileSystem fileSystem, AssetIndex sources, UPath path, List<VerifyFinding> findings)
+    {
+        var relative = sources.Relative(path);
+        foreach (var image in GlbTextureReferences.Read(fileSystem.ReadAllBytes(path)))
+        {
+            var where = $"images[{image.ImageIndex}]";
+            var hinted = GlbTextureReferences.AssetPathFor(relative, image.Uri);
+
+            if (image.Reference is not { } reference)
+            {
+                if (hinted is null || sources.IdentityOf(sources.Root / hinted) is null)
+                {
+                    var problem = hinted is null
+                        ? $"references '{image.Uri}', which resolves outside assets/"
+                        : sources.Problem(sources.Root / hinted, image.Uri) ?? $"references '{image.Uri}', which has no identity to stamp";
+                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"in {where}, {problem}"));
+                    continue;
+                }
+
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Warning, path,
+                    $"in {where}, '{image.Uri}' is not stamped with the texture's identity, so a rename would " +
+                    "break it — run `paradise assets verify --fix` (or `watch`) to stamp it"));
+                continue;
+            }
+
+            var resolution = sources.Resolve(reference);
+            var guid = DocumentGuid.Format(reference.Guid);
+            switch (resolution.Status)
+            {
+                case ReferenceStatus.Resolved when hinted == resolution.Path:
+                    break;
+
+                case ReferenceStatus.Resolved or ReferenceStatus.Stale:
+                    findings.Add(new VerifyFinding(
+                        VerifySeverity.Warning, path,
+                        $"in {where}, the uri says '{image.Uri}' but guid '{guid}' names '{resolution.Path}'; " +
+                        "the guid resolves it, so this builds — run `paradise assets verify --fix` to catch the uri up"));
+                    break;
+
+                case ReferenceStatus.Undetermined:
+                    break;
+
+                default:
+                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, Unresolved(sources, resolution, guid, where)));
+                    break;
             }
         }
     }

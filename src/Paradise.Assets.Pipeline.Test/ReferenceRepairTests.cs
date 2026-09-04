@@ -95,6 +95,44 @@ public class ReferenceRepairTests
     }
 
     [Test]
+    public async Task an_unstamped_glb_is_stamped_from_its_uri()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+
+        var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
+
+        await Assert.That(repaired.Count).IsEqualTo(1);
+        await Assert.That(repaired[0].Repointed[0]).Contains("stamped as textures/rust.png");
+        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.glb"))[0];
+        await Assert.That(image.Reference).IsEqualTo(new AssetReference(rust, "textures/rust.png"));
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_glb_whose_texture_moved_has_its_uri_caught_up()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
+            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
+            _ => new AssetReference(rust, "textures/rust.png")));
+
+        var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
+
+        await Assert.That(repaired.Count).IsEqualTo(1);
+        await Assert.That(repaired[0].Repointed).Contains("textures/rust.png -> textures/metal/rust.png");
+        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.glb"))[0];
+        await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
     public async Task a_stale_prefab_instance_reference_is_caught_up_too()
     {
         // The instance's prefab is a typed field rather than a payload table, so it takes a

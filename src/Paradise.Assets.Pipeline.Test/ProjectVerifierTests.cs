@@ -418,6 +418,69 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task an_unstamped_glb_image_naming_an_identified_texture_is_a_warning()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("not stamped");
+    }
+
+    [Test]
+    public async Task a_glb_image_whose_uri_names_nothing_is_an_error()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/gone.png"}]}"""));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("does not exist under assets/");
+    }
+
+    [Test]
+    public async Task a_stamped_glb_image_whose_texture_moved_is_a_warning_naming_where_it_went()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
+            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
+            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("textures/metal/rust.png");
+    }
+
+    [Test]
+    public async Task a_stamped_glb_image_whose_guid_nobody_carries_is_an_error()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
+            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
+            _ => new Paradise.Authoring.AssetReference(Guid.NewGuid(), "textures/rust.png")));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("no asset under assets/ carries");
+    }
+
+    [Test]
     public async Task a_reference_into_an_asset_whose_own_sidecar_is_missing_is_reported_once()
     {
         // The asset has no identity to match, so the finding belongs to the asset — repeating it
