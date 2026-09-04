@@ -29,17 +29,17 @@ public class SamplingTests
         using var _ = skeleton;
         using var __ = clip;
         using var context = SamplingContext.Create(skeleton.Value.JointCount);
-        var poses = new JointPose[skeleton.Value.JointCount];
+        using var poses = JointPoses.Create(skeleton.Value.JointCount);
 
-        context.Value.Sample(ref clip.Value, 0.25f, poses);
+        context.Value.Sample(ref clip.Value, 0.25f, ref poses.Value);
 
-        await Assert.That(Vector3.Distance(poses[0].Translation, new Vector3(0, 1.5f, 0))).IsLessThan(Quantization);
-        await Assert.That(Quaternion.Dot(poses[0].Rotation, Quaternion.Identity)).IsGreaterThan(1f - Quantization);
+        await Assert.That(Vector3.Distance(poses.Value[0].Translation, new Vector3(0, 1.5f, 0))).IsLessThan(Quantization);
+        await Assert.That(Quaternion.Dot(poses.Value[0].Rotation, Quaternion.Identity)).IsGreaterThan(1f - Quantization);
         var expected = Quaternion.Normalize(Quaternion.Lerp(Quaternion.Identity, TestRigs.QuarterTurnZ, 0.25f));
-        await Assert.That(Quaternion.Dot(poses[1].Rotation, expected)).IsGreaterThan(1f - Quantization);
-        await Assert.That(poses[1].Translation).IsEqualTo(Vector3.Zero);
-        await Assert.That(poses[2].Scale).IsEqualTo(Vector3.One);
-        await Assert.That(poses[2].Translation).IsEqualTo(Vector3.Zero);
+        await Assert.That(Quaternion.Dot(poses.Value[1].Rotation, expected)).IsGreaterThan(1f - Quantization);
+        await Assert.That(poses.Value[1].Translation).IsEqualTo(Vector3.Zero);
+        await Assert.That(poses.Value[2].Scale).IsEqualTo(Vector3.One);
+        await Assert.That(poses.Value[2].Translation).IsEqualTo(Vector3.Zero);
     }
 
     [Test]
@@ -49,12 +49,12 @@ public class SamplingTests
         using var _ = skeleton;
         using var __ = clip;
         using var context = SamplingContext.Create(skeleton.Value.JointCount);
-        var poses = new JointPose[skeleton.Value.JointCount];
+        using var poses = JointPoses.Create(skeleton.Value.JointCount);
 
-        context.Value.Sample(ref clip.Value, 0.49f, poses);
-        var before = poses[2].Scale;
-        context.Value.Sample(ref clip.Value, 0.5f, poses);
-        var at = poses[2].Scale;
+        context.Value.Sample(ref clip.Value, 0.49f, ref poses.Value);
+        var before = poses.Value[2].Scale;
+        context.Value.Sample(ref clip.Value, 0.5f, ref poses.Value);
+        var at = poses.Value[2].Scale;
 
         await Assert.That(before).IsEqualTo(Vector3.One);
         await Assert.That(Vector3.Distance(at, new Vector3(2, 2, 2))).IsLessThan(Quantization);
@@ -69,14 +69,14 @@ public class SamplingTests
             using var _ = skeleton;
             using var __ = clip;
             using var walked = SamplingContext.Create(skeleton.Value.JointCount);
-            var poses = new JointPose[skeleton.Value.JointCount];
+            using var poses = JointPoses.Create(skeleton.Value.JointCount);
             foreach (var ratio in new[] { 0f, 0.3f, 0.6f, 0.9f, 0.4f, 0.1f, 0.95f, 0.05f })
             {
-                walked.Value.Sample(ref clip.Value, ratio, poses);
-                var fresh = new JointPose[skeleton.Value.JointCount];
+                walked.Value.Sample(ref clip.Value, ratio, ref poses.Value);
+                using var fresh = JointPoses.Create(skeleton.Value.JointCount);
                 using var context = SamplingContext.Create(skeleton.Value.JointCount);
-                context.Value.Sample(ref clip.Value, ratio, fresh);
-                await Assert.That(poses).IsEquivalentTo(fresh);
+                context.Value.Sample(ref clip.Value, ratio, ref fresh.Value);
+                await Assert.That(poses.Value.ToArray()).IsEquivalentTo(fresh.Value.ToArray());
             }
         }
     }
@@ -89,14 +89,14 @@ public class SamplingTests
         using var __ = clip;
         using var context = SamplingContext.Create(skeleton.Value.JointCount);
         using var small = SamplingContext.Create(0);
-        var poses = new JointPose[skeleton.Value.JointCount];
-        var end = new JointPose[skeleton.Value.JointCount];
+        using var poses = JointPoses.Create(skeleton.Value.JointCount);
+        using var end = JointPoses.Create(skeleton.Value.JointCount);
 
-        context.Value.Sample(ref clip.Value, 1f, end);
-        context.Value.Sample(ref clip.Value, 7f, poses);
+        context.Value.Sample(ref clip.Value, 1f, ref end.Value);
+        context.Value.Sample(ref clip.Value, 7f, ref poses.Value);
 
-        await Assert.That(poses).IsEquivalentTo(end);
-        var error = await Assert.That(() => small.Value.Sample(ref clip.Value, 0f, poses)).Throws<ArgumentException>();
+        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(end.Value.ToArray());
+        var error = await Assert.That(() => small.Value.Sample(ref clip.Value, 0f, ref poses.Value)).Throws<ArgumentException>();
         await Assert.That(error!.Message).Contains("at most 0");
     }
 
@@ -110,25 +110,26 @@ public class SamplingTests
         using var ___ = other;
         using var ____ = second;
         using var context = SamplingContext.Create(skeleton.Value.JointCount);
-        var poses = new JointPose[skeleton.Value.JointCount];
-        var expected = new JointPose[skeleton.Value.JointCount];
+        using var poses = JointPoses.Create(skeleton.Value.JointCount);
+        using var expected = JointPoses.Create(skeleton.Value.JointCount);
 
-        context.Value.Sample(ref first.Value, 0.9f, poses);
-        context.Value.Sample(ref second.Value, 0.3f, poses);
+        context.Value.Sample(ref first.Value, 0.9f, ref poses.Value);
+        context.Value.Sample(ref second.Value, 0.3f, ref poses.Value);
         using var fresh = SamplingContext.Create(skeleton.Value.JointCount);
-        fresh.Value.Sample(ref second.Value, 0.3f, expected);
+        fresh.Value.Sample(ref second.Value, 0.3f, ref expected.Value);
 
-        await Assert.That(poses).IsEquivalentTo(expected);
+        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(expected.Value.ToArray());
     }
 
     [Test]
     public async Task local_to_model_walks_the_parents_in_the_row_vector_convention()
     {
         using var skeleton = TestRigs.Chain();
-        var locals = skeleton.Value.RestPoses.ToArray();
+        using var locals = JointPoses.Create(skeleton.Value.JointCount);
+        locals.Value.CopyFrom(skeleton.Value.RestPoses.ToSpan());
         var models = new Matrix4x4[skeleton.Value.JointCount];
 
-        LocalToModel.Compute(ref skeleton.Value, locals, models, Matrix4x4.CreateTranslation(10, 0, 0));
+        LocalToModel.Compute(ref skeleton.Value, ref locals.Value, models, Matrix4x4.CreateTranslation(10, 0, 0));
 
         await Assert.That(models[0].Translation).IsEqualTo(new Vector3(10, 1, 0));
         await Assert.That(TestRigs.MaxAbs(models[1] - Matrix4x4.CreateFromQuaternion(TestRigs.QuarterTurnZ) * Matrix4x4.CreateTranslation(10, 1, 0))).IsLessThan(1e-6f);

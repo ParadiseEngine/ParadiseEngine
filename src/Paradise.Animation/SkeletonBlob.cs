@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 using Paradise.BLOB;
@@ -6,13 +7,42 @@ using Paradise.BLOB;
 namespace Paradise.Animation;
 
 /// <summary>One joint's local transform: what a clip samples to and a rest pose holds.</summary>
-public readonly record struct JointPose(Vector3 Translation, Quaternion Rotation, Vector3 Scale)
+/// <remarks>
+/// 48 bytes, not the 40 the fields need: translation, rotation and scale each start on a 16-byte
+/// boundary so a blend or a matrix build loads each as one <see cref="System.Runtime.Intrinsics.Vector128{T}"/>.
+/// The padding lanes are zero and stay zero; nothing reads them.
+/// </remarks>
+[StructLayout(LayoutKind.Explicit, Size = 48)]
+public readonly struct JointPose : IEquatable<JointPose>
 {
+    [FieldOffset(0)] public readonly Vector3 Translation;
+    [FieldOffset(16)] public readonly Quaternion Rotation;
+    [FieldOffset(32)] public readonly Vector3 Scale;
+
+    public JointPose(Vector3 translation, Quaternion rotation, Vector3 scale)
+    {
+        Translation = translation;
+        Rotation = rotation;
+        Scale = scale;
+    }
+
     public static JointPose Identity { get; } = new(Vector3.Zero, Quaternion.Identity, Vector3.One);
 
     /// <summary>Row-vector convention: scale, then rotate, then translate.</summary>
     public Matrix4x4 ToMatrix() =>
         Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Translation);
+
+    public bool Equals(JointPose other) => Translation == other.Translation && Rotation == other.Rotation && Scale == other.Scale;
+
+    public override bool Equals(object? obj) => obj is JointPose other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(Translation, Rotation, Scale);
+
+    public override string ToString() => $"JointPose {{ Translation = {Translation}, Rotation = {Rotation}, Scale = {Scale} }}";
+
+    public static bool operator ==(JointPose left, JointPose right) => left.Equals(right);
+
+    public static bool operator !=(JointPose left, JointPose right) => !left.Equals(right);
 }
 
 /// <summary>

@@ -62,12 +62,13 @@ public struct SamplingContext
         _scales.Next = 0;
     }
 
-    /// <summary>Samples at <paramref name="ratio"/> (clamped to 0..1) into <paramref name="output"/>, one pose per track; tracks past the output's length are skipped.</summary>
-    /// <exception cref="ArgumentException">The clip has more tracks than this context was sized for.</exception>
-    public unsafe void Sample(ref AnimationBlob clip, float ratio, Span<JointPose> output)
+    /// <summary>Samples at <paramref name="ratio"/> (clamped to 0..1) into <paramref name="output"/>, one lane per track; the output must be sized for at least the clip's tracks.</summary>
+    /// <exception cref="ArgumentException">The clip has more tracks than this context or the output was sized for.</exception>
+    public unsafe void Sample(ref AnimationBlob clip, float ratio, ref JointPoses output)
     {
         var padded = clip.PaddedTracks;
         if (padded > MaxPaddedTracks) throw new ArgumentException($"The clip has {clip.TrackCount} tracks; this context samples at most {MaxPaddedTracks}.", nameof(clip));
+        if (output.JointCount < clip.TrackCount) throw new ArgumentException($"The clip has {clip.TrackCount} tracks; the output holds {output.JointCount} joints.", nameof(output));
         if (padded == 0) return;
 
         var clamped = Math.Clamp(ratio, 0f, 1f);
@@ -99,53 +100,45 @@ public struct SamplingContext
         UpdateCache(clamped, previousRatio, padded, timepoints, in scales, ref _scales);
         DecompressVector3(groups, timepoints, in scales, ref _scales, scaleKeys);
 
-        Interpolate(clamped, Math.Min(output.Length, clip.TrackCount), translationKeys, rotationKeys, scaleKeys, output);
+        Interpolate(clamped, groups, translationKeys, rotationKeys, scaleKeys, ref output);
     }
 
-    /// <summary>Four tracks per lane: blend factors, lerp for translation and scale, normalized lerp for rotation, then the lanes go out as poses.</summary>
-    private static void Interpolate(float ratio, int count, ReadOnlySpan<SoaVector3Keys> translations, ReadOnlySpan<SoaQuaternionKeys> rotations, ReadOnlySpan<SoaVector3Keys> scales, Span<JointPose> output)
+    /// <summary>Four tracks per lane: blend factors, lerp for translation and scale, normalized lerp for rotation, written straight into the output's groups — the same layout, no transpose.</summary>
+    private static void Interpolate(float ratio, int groups, ReadOnlySpan<SoaVector3Keys> translations, ReadOnlySpan<SoaQuaternionKeys> rotations, ReadOnlySpan<SoaVector3Keys> scales, ref JointPoses output)
     {
         var at = Vector128.Create(ratio);
-        Span<float> lanes = stackalloc float[40];
-        for (var g = 0; g * 4 < count; g++)
+        var outT = output.Translations.ToSpan();
+        var outR = output.Rotations.ToSpan();
+        var outS = output.Scales.ToSpan();
+        for (var g = 0; g < groups; g++)
         {
             ref readonly var t = ref translations[g];
             ref readonly var r = ref rotations[g];
             ref readonly var s = ref scales[g];
 
             var tBlend = (at - t.LeftRatio) / (t.RightRatio - t.LeftRatio);
-            var tx = (t.RightX - t.LeftX) * tBlend + t.LeftX;
-            var ty = (t.RightY - t.LeftY) * tBlend + t.LeftY;
-            var tz = (t.RightZ - t.LeftZ) * tBlend + t.LeftZ;
+            ref var ot = ref outT[g];
+            ot.X = (t.RightX - t.LeftX) * tBlend + t.LeftX;
+            ot.Y = (t.RightY - t.LeftY) * tBlend + t.LeftY;
+            ot.Z = (t.RightZ - t.LeftZ) * tBlend + t.LeftZ;
 
             var rBlend = (at - r.LeftRatio) / (r.RightRatio - r.LeftRatio);
             var rx = (r.RightX - r.LeftX) * rBlend + r.LeftX;
             var ry = (r.RightY - r.LeftY) * rBlend + r.LeftY;
             var rz = (r.RightZ - r.LeftZ) * rBlend + r.LeftZ;
             var rw = (r.RightW - r.LeftW) * rBlend + r.LeftW;
-            var inverseLength = Vector128.Create(1f) / Vector128.Sqrt(rx * rx + ry * ry + rz * rz + rw * rw);
-            rx *= inverseLength;
-            ry *= inverseLength;
-            rz *= inverseLength;
-            rw *= inverseLength;
+            var inverseLength = Vector128<float>.One / Vector128.Sqrt(rx * rx + ry * ry + rz * rz + rw * rw);
+            ref var or = ref outR[g];
+            or.X = rx * inverseLength;
+            or.Y = ry * inverseLength;
+            or.Z = rz * inverseLength;
+            or.W = rw * inverseLength;
 
             var sBlend = (at - s.LeftRatio) / (s.RightRatio - s.LeftRatio);
-            var sx = (s.RightX - s.LeftX) * sBlend + s.LeftX;
-            var sy = (s.RightY - s.LeftY) * sBlend + s.LeftY;
-            var sz = (s.RightZ - s.LeftZ) * sBlend + s.LeftZ;
-
-            // Lanes out through memory: GetElement with a variable lane is a software path.
-            tx.CopyTo(lanes[..4]); ty.CopyTo(lanes[4..8]); tz.CopyTo(lanes[8..12]);
-            rx.CopyTo(lanes[12..16]); ry.CopyTo(lanes[16..20]); rz.CopyTo(lanes[20..24]); rw.CopyTo(lanes[24..28]);
-            sx.CopyTo(lanes[28..32]); sy.CopyTo(lanes[32..36]); sz.CopyTo(lanes[36..40]);
-            var laneCount = Math.Min(4, count - g * 4);
-            for (var lane = 0; lane < laneCount; lane++)
-            {
-                output[g * 4 + lane] = new JointPose(
-                    new Vector3(lanes[lane], lanes[4 + lane], lanes[8 + lane]),
-                    new Quaternion(lanes[12 + lane], lanes[16 + lane], lanes[20 + lane], lanes[24 + lane]),
-                    new Vector3(lanes[28 + lane], lanes[32 + lane], lanes[36 + lane]));
-            }
+            ref var os = ref outS[g];
+            os.X = (s.RightX - s.LeftX) * sBlend + s.LeftX;
+            os.Y = (s.RightY - s.LeftY) * sBlend + s.LeftY;
+            os.Z = (s.RightZ - s.LeftZ) * sBlend + s.LeftZ;
         }
     }
 

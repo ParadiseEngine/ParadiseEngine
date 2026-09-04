@@ -68,7 +68,7 @@ public class OzzParityTests
         using var skeleton = OzzArchive.ReadSkeleton(TestRigs.Fixture("ozz-skeleton.ozz"));
         using var clip = OzzArchive.ReadAnimation(TestRigs.Fixture("ozz-animation.ozz"));
         using var context = SamplingContext.Create(clip.Value.TrackCount);
-        var poses = new JointPose[clip.Value.TrackCount];
+        using var poses = JointPoses.Create(clip.Value.TrackCount);
 
         await Assert.That(clip.Value.Name.ToString()).IsEqualTo("parity");
         await Assert.That(clip.Value.Duration).IsEqualTo(2.5f);
@@ -76,8 +76,8 @@ public class OzzParityTests
         await Assert.That(clip.Value.Rotations.IframeDesc.Length).IsEqualTo(2 * 5);
         foreach (var ratio in new[] { 0f, 0.3f, 0.9f, 0.1f, 1f })
         {
-            context.Value.Sample(ref clip.Value, ratio, poses);
-            foreach (var pose in poses) await Assert.That(float.IsFinite(pose.Rotation.Length())).IsTrue();
+            context.Value.Sample(ref clip.Value, ratio, ref poses.Value);
+            foreach (var pose in poses.Value.ToArray()) await Assert.That(float.IsFinite(pose.Rotation.Length())).IsTrue();
         }
     }
 }

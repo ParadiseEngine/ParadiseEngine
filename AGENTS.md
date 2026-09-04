@@ -223,7 +223,15 @@ sampler keeps ozz's structure-of-arrays half: keys are decoded and interpolated 
 `Vector128` lane; the cursor walk is scalar on purpose (its search hits within an entry or two,
 so a vectorized `IndexOf` costs more than it saves), and lanes leave a vector through a stack
 store, never `GetElement` with a variable index (a software path). On Enemy it matches native
-ozz per frame. The
+ozz per frame. `AnimationPlayer` is the per-character layer on top: current and outgoing clip,
+time, rate, loop or clamp, cross-fade, `Advance(dt)` then `Evaluate()` into `LocalPose` and
+`ModelMatrices`; `SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the
+GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
+nothing more. Poses travel as `JointPoses`, a native blob in ozz's structure-of-arrays layout
+(groups of four joints, one `Vector128` per component with a joint per lane): the sampler writes
+it without a transpose, `JointPoses.Blend` and the hierarchy walk take four joints per
+instruction, and the indexer gathers one `JointPose` for per-joint code (attachments, tests),
+which is not the hot path. The
 archive is the only persisted format; blobs exist in memory only. The offline builders are
 managed (lists, sorting) because they run in the cook, not the player, and hand back native blobs.
 Inside a blob's hot loop take `field.ToSpan()` ONCE and index the span: the `BlobArray` indexer

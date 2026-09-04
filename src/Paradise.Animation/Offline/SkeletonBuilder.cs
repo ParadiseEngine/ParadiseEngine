@@ -22,7 +22,7 @@ public static class SkeletonBuilder
             indexOf[joint] = (short)names.Count;
             names.Add(joint.Name);
             parents.Add(parent is null ? SkeletonBlob.NoParent : indexOf[parent]);
-            poses.Add(joint.Transform with { Rotation = NormalizeOrIdentity(joint.Transform.Rotation) });
+            poses.Add(new JointPose(joint.Transform.Translation, NormalizeOrIdentity(joint.Transform.Rotation), joint.Transform.Scale));
         });
         return SkeletonBlob.Create([.. names], [.. parents], [.. poses]);
     }

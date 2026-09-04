@@ -108,23 +108,20 @@ public class AnimationGoldenTests
 
         using var contextBlob = SamplingContext.Create(animation.TrackCount);
         ref var context = ref contextBlob.Value;
-        var locals = new JointPose[animation.TrackCount];
+        using var locals = JointPoses.Create(animation.TrackCount);
         var models = new Matrix4x4[skeleton.JointCount];
         var reference = new Matrix4x4[skin.Joints.Length];
+        var palette = new Matrix4x4[skin.Joints.Length];
         var worst = 0f;
         foreach (var ratio in new[] { 0f, 0.1f, 0.3f, 0.5f, 0.55f, 0.7f, 0.9f, 1f, 0.2f })
         {
             rig.EvaluatePose(clip, ratio * clip.Duration);
             rig.ComputeJointPalette(0, meshNode, reference);
 
-            context.Sample(ref animation, ratio, locals);
-            LocalToModel.Compute(ref skeleton, locals, models);
-            if (!Matrix4x4.Invert(models[draw.NodeIndex], out var inverseMeshWorld)) inverseMeshWorld = Matrix4x4.Identity;
-            for (var i = 0; i < skin.Joints.Length; i++)
-            {
-                var palette = skin.InverseBindMatrices[i] * models[skin.Joints[i]] * inverseMeshWorld;
-                worst = MathF.Max(worst, MaxAbs(palette - reference[i]));
-            }
+            context.Sample(ref animation, ratio, ref locals.Value);
+            LocalToModel.Compute(ref skeleton, ref locals.Value, models);
+            SkinningPalette.Compute(models, skin.Joints, skin.InverseBindMatrices, draw.NodeIndex, palette);
+            for (var i = 0; i < skin.Joints.Length; i++) worst = MathF.Max(worst, MaxAbs(palette[i] - reference[i]));
         }
 
         return worst;

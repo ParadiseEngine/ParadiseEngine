@@ -29,7 +29,8 @@ public unsafe class AnimationBenchmarks
     private NativeBlobAssetReference<SkeletonBlob> _blobSkeleton = null!;
     private NativeBlobAssetReference<AnimationBlob> _blobClip = null!;
     private NativeBlobAssetReference<SamplingContext> _blobContext = null!;
-    private JointPose[] _poses = null!;
+    private NativeBlobAssetReference<JointPoses> _poses = null!;
+    private JointPose[] _managedPoses = null!;
     private Matrix4x4[] _models = null!;
 
     private Managed.Skeleton _managedSkeleton = null!;
@@ -54,7 +55,8 @@ public unsafe class AnimationBenchmarks
         _blobSkeleton = OzzArchive.ReadSkeleton(_rig.SkeletonArchive);
         _blobClip = OzzArchive.ReadAnimation(_rig.ClipArchive);
         _blobContext = SamplingContext.Create(_blobClip.Value.TrackCount);
-        _poses = new JointPose[_blobClip.Value.TrackCount];
+        _poses = JointPoses.Create(_blobClip.Value.TrackCount);
+        _managedPoses = new JointPose[_blobClip.Value.TrackCount];
         _models = new Matrix4x4[_blobSkeleton.Value.JointCount];
 
         _managedSkeleton = Managed.Skeleton.Load(_rig.SkeletonArchive);
@@ -76,6 +78,7 @@ public unsafe class AnimationBenchmarks
     [GlobalCleanup]
     public void Cleanup()
     {
+        _poses.Dispose();
         _blobContext.Dispose();
         _blobClip.Dispose();
         _blobSkeleton.Dispose();
@@ -91,15 +94,15 @@ public unsafe class AnimationBenchmarks
     [Benchmark(Baseline = true), BenchmarkCategory("Advance")]
     public void Blob_Advance()
     {
-        _blobContext.Value.Sample(ref _blobClip.Value, Advance(), _poses);
-        LocalToModel.Compute(ref _blobSkeleton.Value, _poses, _models);
+        _blobContext.Value.Sample(ref _blobClip.Value, Advance(), ref _poses.Value);
+        LocalToModel.Compute(ref _blobSkeleton.Value, ref _poses.Value, _models);
     }
 
     [Benchmark, BenchmarkCategory("Advance")]
     public void Managed_Advance()
     {
-        _managedContext.Sample(_managedClip, Advance(), _poses);
-        Managed.LocalToModel.Compute(_managedSkeleton, _poses, _models);
+        _managedContext.Sample(_managedClip, Advance(), _managedPoses);
+        Managed.LocalToModel.Compute(_managedSkeleton, _managedPoses, _models);
     }
 
     [Benchmark, BenchmarkCategory("Advance")]
@@ -119,15 +122,15 @@ public unsafe class AnimationBenchmarks
     [Benchmark, BenchmarkCategory("Seek")]
     public void Blob_Seek()
     {
-        _blobContext.Value.Sample(ref _blobClip.Value, Seek(), _poses);
-        LocalToModel.Compute(ref _blobSkeleton.Value, _poses, _models);
+        _blobContext.Value.Sample(ref _blobClip.Value, Seek(), ref _poses.Value);
+        LocalToModel.Compute(ref _blobSkeleton.Value, ref _poses.Value, _models);
     }
 
     [Benchmark, BenchmarkCategory("Seek")]
     public void Managed_Seek()
     {
-        _managedContext.Sample(_managedClip, Seek(), _poses);
-        Managed.LocalToModel.Compute(_managedSkeleton, _poses, _models);
+        _managedContext.Sample(_managedClip, Seek(), _managedPoses);
+        Managed.LocalToModel.Compute(_managedSkeleton, _managedPoses, _models);
     }
 
     [Benchmark, BenchmarkCategory("Seek")]

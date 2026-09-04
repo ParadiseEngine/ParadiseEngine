@@ -100,11 +100,11 @@ public class OfflineTests
         using var built = AnimationBuilder.Build(raw);
         using var read = OzzArchive.ReadAnimation(OzzArchive.WriteAnimation(ref built.Value));
         using var context = SamplingContext.Create(read.Value.TrackCount);
-        var poses = new JointPose[read.Value.TrackCount];
-        context.Value.Sample(ref read.Value, 0.75f, poses);
+        using var poses = JointPoses.Create(read.Value.TrackCount);
+        context.Value.Sample(ref read.Value, 0.75f, ref poses.Value);
 
         await Assert.That(read.Value.Translations.KeyCount).IsGreaterThan(1023 * 140 + 3);
-        await Assert.That(MathF.Abs(poses[0].Translation.X - 2f)).IsLessThan(0.01f);
-        await Assert.That(MathF.Abs(poses[5].Translation.X - 104.25f)).IsLessThan(0.1f);
+        await Assert.That(MathF.Abs(poses.Value[0].Translation.X - 2f)).IsLessThan(0.01f);
+        await Assert.That(MathF.Abs(poses.Value[5].Translation.X - 104.25f)).IsLessThan(0.1f);
     }
 }
