@@ -5,11 +5,21 @@ using Paradise.Editor.Core.Shell;
 
 namespace Paradise.Editor.ImGui.Shell;
 
-/// <summary>Everything the built-in shell contributes, registered through the same registrar an
-/// external extension would use.</summary>
-/// <remarks>This is the claim in #222 that "built-in panels register through the same path an
-/// external extension would" being kept honest rather than asserted: if the shell needed a private
-/// route to add a menu item or a keybinding, so would everyone else.</remarks>
+/// <summary>The shell's own chrome: undo and redo, the palette, layout reset, and the workspaces.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Registered through the same registrar an external extension uses, which is the claim in #222
+/// that "built-in panels register through the same path an external extension would" kept honest
+/// rather than asserted: if the shell needed a private route to add a menu item or a keybinding,
+/// so would everyone else.
+/// </para>
+/// <para>
+/// It contributes no PANELS. Each of those is its own extension under its own owner token (see
+/// <c>Paradise.Editor.ImGui.Panels</c>), so a host can drop one without dropping the shell, and so
+/// the claim above holds once per panel rather than once in total.
+/// </para>
+/// </remarks>
 public sealed class ShellExtension : IShellExtension
 {
     public const string OwnerId = "editor.shell";
@@ -32,7 +42,6 @@ public sealed class ShellExtension : IShellExtension
             .AddOperator(new ResetLayoutOperator(shell.Layout))
             .AddOperator(new OpenPaletteOperator(shell.Palette));
 
-        foreach (var window in Windows) registrar.AddPanel(new PlaceholderPanel(window));
         var workspaceOrder = WorkspaceMenuOrder;
         foreach (var workspace in shell.Layout.Workspaces)
         {
@@ -55,19 +64,6 @@ public sealed class ShellExtension : IShellExtension
         Bind(registrar, "Ctrl+Shift+Z", RedoOperator.OperatorId);
         Bind(registrar, "Ctrl+Shift+P", OpenPaletteOperator.OperatorId);
     }
-
-    /// <summary>The panels the shell knows about. They have no drawing yet — E2 brings that — but
-    /// the descriptors exist now because the dock recipe positions them by id, and a recipe
-    /// referring to windows nothing declares is a layout nobody can check.</summary>
-    private static IEnumerable<WindowDescriptor> Windows =>
-    [
-        new(EditorWindows.Hierarchy, $"{EditorIcons.AccountTree} Hierarchy", DockArea.Left, "Scene"),
-        new(EditorWindows.Inspector, $"{EditorIcons.Tune} Inspector", DockArea.Right, "Scene"),
-        new(EditorWindows.Assets, $"{EditorIcons.Folder} Assets", DockArea.Bottom, "Project"),
-        new(EditorWindows.Console, $"{EditorIcons.Terminal} Console", DockArea.Bottom, "Project"),
-        new(EditorWindows.Scene, $"{EditorIcons.ViewInAr} Scene", DockArea.Center, "Scene"),
-        new(EditorWindows.Stats, $"{EditorIcons.BarChart} Stats", DockArea.Bottom, "Project"),
-    ];
 
     private static void Bind(ShellRegistrar registrar, string chord, string operatorId)
     {

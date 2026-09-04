@@ -4,6 +4,7 @@ using Paradise.Editor.Core.Document;
 using Paradise.Editor.Core.Extensibility;
 using Paradise.Editor.Core.Operators;
 using Paradise.Editor.Core.Shell;
+using Paradise.Editor.ImGui.Panels;
 using Paradise.Editor.ImGui.Shell;
 using Zio.FileSystems;
 using Paradise.Editor.ImGui;
@@ -141,7 +142,7 @@ public class ShellWiringTests
         var dispatcher = new OperatorDispatcher(session, registries.Operators);
         var layout = new EditorLayout();
         var shell = new EditorShell(dispatcher, registries, layout);
-        shell.Register(new ShellExtension(), registries);
+        foreach (var extension in EditorExtensions.BuiltIn) shell.Register(extension, registries);
         return new Composed(shell, layout, registries, dispatcher);
     }
 
@@ -265,7 +266,7 @@ public class ShellExtensibilityTests
         var dispatcher = new OperatorDispatcher(session, registries.Operators);
         var layout = new EditorLayout();
         var shell = new EditorShell(dispatcher, registries, layout);
-        shell.Register(new ShellExtension(), registries);
+        foreach (var extension in EditorExtensions.BuiltIn) shell.Register(extension, registries);
         shell.Register(new VendorExtension(), registries);
         return (shell, layout, registries, dispatcher);
     }
@@ -385,5 +386,88 @@ public class ShellExtensibilityTests
             .ToArray();
 
         await Assert.That(panelOrders.Distinct().Count()).IsEqualTo(panelOrders.Length);
+    }
+}
+
+
+/// <summary>Every built-in view is an extension in its own right.</summary>
+/// <remarks>The claim in #222 is that built-ins register the way an external extension would. With
+/// all six panels inside one extension that was true once; with one extension each it is true six
+/// times, and — the part that has teeth — a host can drop a single panel without dropping the
+/// shell.</remarks>
+[NotInParallel]
+public class BuiltInPanelExtensionTests
+{
+    private static (EditorShell Shell, EditorLayout Layout, EditorRegistries Registries, OperatorDispatcher Dispatcher) Compose()
+    {
+        var session = new EditorSession(new InMemorySceneProvider(), new MemoryFileSystem());
+        var registries = new EditorRegistries();
+        var dispatcher = new OperatorDispatcher(session, registries.Operators);
+        var layout = new EditorLayout();
+        var shell = new EditorShell(dispatcher, registries, layout);
+        foreach (var extension in EditorExtensions.BuiltIn) shell.Register(extension, registries);
+        return (shell, layout, registries, dispatcher);
+    }
+
+    [Test]
+    public async Task the_shell_extension_contributes_no_panels_of_its_own()
+    {
+        var registries = new EditorRegistries();
+        var session = new EditorSession(new InMemorySceneProvider(), new MemoryFileSystem());
+        using var layout = new EditorLayout();
+        var shell = new EditorShell(new OperatorDispatcher(session, registries.Operators), registries, layout);
+
+        shell.Register(new ShellExtension(), registries);
+
+        await Assert.That(shell.Windows.Entries).IsEmpty();
+        // …but its chrome is there, so the split did not take the shell with it.
+        await Assert.That(registries.Operators.Entries.Any(op => op.Id == UndoOperator.OperatorId)).IsTrue();
+    }
+
+    [Test]
+    public async Task every_built_in_panel_owns_a_distinct_token()
+    {
+        var (shell, layout, _, _) = Compose();
+        using var _unused = layout;
+
+        var owners = EditorExtensions.BuiltIn.Select(extension => extension.Id).ToArray();
+        await Assert.That(owners.Distinct().Count()).IsEqualTo(owners.Length);
+        await Assert.That(shell.Windows.Entries.Count).IsEqualTo(6);
+    }
+
+    // The point of the split: dropping one panel leaves the other five and the shell alone.
+    [Test]
+    public async Task one_panel_can_be_dropped_without_touching_the_others()
+    {
+        var (shell, layout, registries, dispatcher) = Compose();
+        using var _unused = layout;
+
+        shell.Unregister(AssetsExtension.OwnerId, registries);
+
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == EditorWindows.Assets)).IsFalse();
+        await Assert.That(dispatcher.Find($"{EditorWindows.Assets}.toggle")).IsNull();
+        await Assert.That(shell.Windows.Entries.Count).IsEqualTo(5);
+        await Assert.That(dispatcher.Find(UndoOperator.OperatorId)).IsNotNull();
+        await Assert.That(dispatcher.Find(ResetLayoutOperator.OperatorId)).IsNotNull();
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == EditorWindows.Console)).IsTrue();
+    }
+
+    // A host composing its own set — an in-game editor has no use for an asset browser — should
+    // not have to register a panel and then remove it.
+    [Test]
+    public async Task a_host_can_compose_a_subset_up_front()
+    {
+        var registries = new EditorRegistries();
+        var session = new EditorSession(new InMemorySceneProvider(), new MemoryFileSystem());
+        using var layout = new EditorLayout();
+        var shell = new EditorShell(new OperatorDispatcher(session, registries.Operators), registries, layout);
+
+        foreach (var extension in EditorExtensions.BuiltIn.Where(e => e.Id != AssetsExtension.OwnerId))
+        {
+            shell.Register(extension, registries);
+        }
+
+        await Assert.That(shell.Windows.Entries.Count).IsEqualTo(5);
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == EditorWindows.Assets)).IsFalse();
     }
 }

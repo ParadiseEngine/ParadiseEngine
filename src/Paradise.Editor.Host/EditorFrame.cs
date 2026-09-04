@@ -53,7 +53,10 @@ internal sealed class EditorFrame : IDisposable
         var layout = new EditorLayout(layouts);
         _shell = new EditorShell(Dispatcher, Registries, layout);
 
-        _shell.Register(new ShellExtension(), Registries);
+        // The stock set first — the shell's chrome, then one extension per panel — and anything
+        // the host adds after, so a contributed panel lands below the built-in ones in View. A host
+        // that wants FEWER drops one afterwards with Unregister; that is one call now.
+        foreach (var extension in EditorExtensions.BuiltIn) _shell.Register(extension, Registries);
         foreach (var extension in extensions ?? []) _shell.Register(extension, Registries);
     }
 
