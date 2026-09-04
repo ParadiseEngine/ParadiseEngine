@@ -3,6 +3,7 @@ using Paradise.Diagnostics;
 using Paradise.Editor.Core.Persistence;
 using Paradise.Editor.ImGui;
 using Paradise.Editor.ImGui.Shell;
+using System.IO;
 using Paradise.Rendering;
 using Paradise.Rendering.WebGPU;
 using Paradise.Ui.ImGui;
@@ -44,6 +45,7 @@ internal static class Program
 
         if (ParseScreenshot(args) is not { } screenshot) return 1;
         if (ParseFrames(args) is not { } frames) return 1;
+        s_extensionDirectory = ValueAfter(args, "--extensions");
 
         try
         {
@@ -62,6 +64,7 @@ internal static class Program
 
     private static int RunWindowed()
     {
+        var log = s_log.CreateLogger("Paradise.Editor.Host");
         using var platform = new SdlWindowPlatform(s_log.CreateLogger<SdlWindowPlatform>());
         using var window = platform.CreateWindow(new WindowOptions("Paradise Editor", Width, Height));
         using var renderer = new WebGpuRenderer(
@@ -71,7 +74,10 @@ internal static class Program
         using var core = CreateCore(window.Width, window.Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
         using var userMount = UserMount();
-        using var editor = new EditorFrame(new WorkspaceLayoutStore(core, userMount), s_log.CreateLogger("Paradise.Editor"));
+        using var plugins = LoadExtensions(s_log.CreateLogger<ExtensionCatalog>(), includeDefault: true);
+        using var editor = new EditorFrame(
+            new WorkspaceLayoutStore(core, userMount), s_log.CreateLogger("Paradise.Editor"), plugins.Extensions);
+        foreach (var problem in plugins.Problems) log.LogWarning("{Problem}", problem);
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -125,7 +131,9 @@ internal static class Program
         using var core = CreateCore(Width, Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
         // No layout store: a smoke run must not read a developer's arrangement or leave one behind.
-        using var editor = new EditorFrame(log: log);
+        using var plugins = LoadExtensions(s_log.CreateLogger<ExtensionCatalog>(), includeDefault: false);
+        using var editor = new EditorFrame(log: log, extensions: plugins.Extensions);
+        foreach (var problem in plugins.Problems) log.LogWarning("{Problem}", problem);
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -190,6 +198,33 @@ internal static class Program
         EditorTheme.Apply();
         return core;
     }
+
+    /// <summary>Extensions dropped beside the executable.</summary>
+    /// <remarks>
+    /// <para>
+    /// A host PATH, not a mount: the runtime's assembly loader opens the file itself, so no Zio
+    /// filesystem can back it — the same exception <c>Paradise.Audio.Wwise</c> makes for the same
+    /// reason.
+    /// </para>
+    /// <para>
+    /// Beside the executable rather than in the user's config directory, because an extension is
+    /// code: putting the load path somewhere a stray download lands would make "open the editor" a
+    /// way to run it. Somebody deploying extensions centrally can point <c>--extensions</c>
+    /// wherever they like.
+    /// </para>
+    /// </remarks>
+    /// <param name="includeDefault">False in headless mode. A smoke run must not pick up whatever
+    /// happens to be in a folder beside the binary: the captured frame is compared byte for byte,
+    /// and a machine with an extension installed would produce a different one. An explicit
+    /// <c>--extensions</c> still loads, so the path stays testable from the command line.</param>
+    private static ExtensionCatalog LoadExtensions(ILogger logger, bool includeDefault)
+    {
+        var directory = s_extensionDirectory
+            ?? (includeDefault ? Path.Combine(AppContext.BaseDirectory, "extensions") : null);
+        return directory is null ? ExtensionCatalog.Empty : ExtensionCatalog.Discover(directory, logger);
+    }
+
+    private static string? s_extensionDirectory;
 
     /// <summary>The <c>/user</c> mount: this machine's config directory, and nothing above it.</summary>
     /// <remarks>A <c>SubFileSystem</c> rather than a physical root, so a path that climbs out of

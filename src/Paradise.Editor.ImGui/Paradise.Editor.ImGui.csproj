@@ -16,8 +16,6 @@
     <PackageId>Paradise.Editor.ImGui</PackageId>
     <Description>The Paradise editor's shell and panels as a draw-into-your-frame library: dockspace and workspace layouts, main menu bar, fuzzy command palette, dark theme, and the embedded Inter and Material Symbols faces. It never calls NewFrame or Render, never owns a window and never pumps input, so the same shell serves a standalone editor and an editor embedded in a running game.</Description>
     <PackageTags>editor;imgui;tooling;game-dev</PackageTags>
-    <IsTrimmable>true</IsTrimmable>
-    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

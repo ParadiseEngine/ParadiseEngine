@@ -19,8 +19,6 @@
     <PackageId>Paradise.Editor.Core</PackageId>
     <Description>The Paradise editor's model, with no UI framework in it: the immutable scene document, the scene provider seam, selection, operators and their dispatcher, owner-scoped extension registries, snapshot history with a file-operation journal, chords and keymaps, and the editor's persisted user and project state. Everything reads and writes through a Zio mount the host chooses.</Description>
     <PackageTags>editor;tooling;game-dev</PackageTags>
-    <IsTrimmable>true</IsTrimmable>
-    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
