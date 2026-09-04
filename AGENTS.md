@@ -202,17 +202,21 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 (use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
 `reference.Guid`, and carry the path only to phrase the message).
 
-**A GLB ships nothing; `extract` makes what ships.** `GlbImporter.Import` writes no output: the
-runtime draws `.mesh`, `.skeleton` and `.anim` blobs (`Paradise.Assets.Mesh`, `Paradise.Animation`
-— `Paradise.BLOB` layouts, one aligned native copy, magic and version first) and reads `.material`
-documents, each through its own importer, all written once by `AssetExtractor`. Extraction is a
-verb, never a build side effect: it mints identities and writes files an author edits, and a build
-that did that per save would edit committed sidecars under them. The GLB's `[glb]` sidecar domain
-records each extracted entry with a fingerprint of BOTH sides (the GLB side is what the GLB would
-extract to now; a material's is over the glTF-expressible subset only), so `extract` tells a
-re-export from an edit and refuses when both moved. Two traps: reach every `BlobArray`/`BlobString`
-through a mutable `ref` (a readonly reference copies the header and its relative offset points at
-the stack), and read a sidecar domain's inline tables through both `CanonicalTomlTable` and
+**A GLB ships nothing; documents name its parts and the build cooks them.** `GlbImporter.Import`
+writes no output. A `.mesh`, `.skeleton` or `.anim` under `assets/` is a `MeshReferenceDocument`
+— `{ source = { guid, path }, slot, name, index }` — and `MeshImporter`/`AnimationImporter` cook
+the named part of the GLB (`GltfCook`) to the `Paradise.BLOB` blob at the document's own path
+(`Paradise.Assets.Mesh`, `Paradise.Animation`: one aligned native copy, magic and version first).
+A clip is found by name, index as the tiebreak. The documents are tool-owned: the watcher mints
+them for any GLB with geometry, and `extract` overwrites one that disagrees with the GLB without a
+conflict rule — but never one that names ANOTHER GLB. Materials, textures and the prefab are
+authored the moment they exist, so only the `extract` verb writes them, and the GLB's `[glb]`
+sidecar domain records a material's or image's entry with a fingerprint of BOTH sides (the GLB
+side is what the GLB would extract to now; a material's is over the glTF-expressible subset only)
+so `extract` tells a re-export from an edit and refuses when both moved. KTX2 is never authored:
+`verify` errors on one under `assets/`. Two traps: reach every `BlobArray`/`BlobString` through a
+mutable `ref` (a readonly reference copies the header and its relative offset points at the
+stack), and read a sidecar domain's inline tables through both `CanonicalTomlTable` and
 `CanonicalInlineTable` (the reader hands a root-level inline table back as a plain one).
 
 **The sidecar names the importer; nothing walks the chain except `ImporterChain`.** `Claims` is

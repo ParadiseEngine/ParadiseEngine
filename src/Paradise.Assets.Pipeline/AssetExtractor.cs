@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-using Paradise.Animation;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Mesh;
@@ -15,12 +14,14 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>What one <c>extract</c> did: the authored files it wrote, the ones it left because they were the author's, and what stopped it.</summary>
+/// <param name="HasAuthoredParts">Whether the GLB holds anything only the verb writes — glTF materials or embedded images — as read on this run, so a caller need not parse it again to know whether to offer <c>extract</c>.</param>
 public sealed record ExtractResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
     IReadOnlyList<ExtractedFile> Written,
     IReadOnlyList<string> Kept,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    bool HasAuthoredParts = false);
 
 /// <summary>A file <c>extract</c> wrote, and why when it was not a first write: the path stays a path, so a consumer that resolves it never sees the note.</summary>
 /// <param name="Path">Relative to <c>assets/</c>.</param>
@@ -38,24 +39,26 @@ public enum ConflictResolution
 }
 
 /// <summary>
-/// The <c>extract</c> verb: what a GLB embeds becomes authored assets beside it — the mesh blob,
-/// the skeleton and clips, a material document per glTF material, the embedded textures as
-/// files — and a prefab that wires them together. The GLB is then a pure interchange container:
-/// everything downstream references the extracted assets, and the build never opens a GLB.
+/// The <c>extract</c> verb: what a GLB holds becomes authored assets beside it — a mesh, skeleton
+/// and clip reference document per part the build cooks from the GLB, a material document per
+/// glTF material, the embedded textures as files — and a prefab that wires them together. The
+/// GLB stays the one source of its geometry; everything downstream references the documents.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Explicit, never a build side effect: extraction mints identities and creates files an author
-/// edits, and a build doing that per save would edit committed sidecars under them. Idempotent:
-/// a second run writes nothing and reports what it kept. A file this verb did not create is
-/// adopted when it holds what the GLB extracts to, and is otherwise refused — not recorded, not
-/// overwritten, not bound — until the author deletes it or names a side with a flag.
+/// The reference documents are tool-owned and carry no author work, so the watcher mints them
+/// for a new or re-exported GLB (<see cref="MintReferences"/>). Materials, textures and the
+/// prefab are the author's from the moment they are written, so those are this verb's alone:
+/// a build doing that per save would edit committed files under an author. Idempotent: a second
+/// run writes nothing and reports what it kept. A file this verb did not create is adopted when
+/// it holds what the GLB extracts to, and is otherwise refused — not recorded, not overwritten,
+/// not bound — until the author deletes it or names a side with a flag.
 /// </para>
 /// <para>
-/// Each extracted entry is recorded in the GLB's sidecar with the document it maps to and a
-/// FINGERPRINT of each side as of the last sync — the GLB side is the hash of what the GLB
-/// would extract to now, the document side the hash of the file's parsed values — so the next
-/// run can tell "the GLB was re-exported" from "the author edited the document": the first
+/// A material or image has two sides that can change under each other, so its entry is recorded
+/// with a FINGERPRINT of each as of the last sync — the GLB side is the hash of what the GLB
+/// would extract to now, the document side the hash of the file's parsed values — and the next
+/// run tells "the GLB was re-exported" from "the author edited the document": the first
 /// re-extracts, the second is the document's to keep (and, for a material, to write back), and
 /// both at once is a conflict the author resolves by name.
 /// </para>
@@ -69,7 +72,8 @@ public static partial class AssetExtractor
         IReadOnlyList<IAssetImporter>? importers = null,
         ConflictResolution resolution = ConflictResolution.Refuse,
         ILogger? logger = null,
-        bool generatePrefab = true)
+        bool generatePrefab = true,
+        SidecarMaintainer? maintainer = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -77,11 +81,49 @@ public static partial class AssetExtractor
 
         var chain = importers ?? AssetImporters.All;
         var log = logger ?? NullLogger.Instance;
-        var run = new Run(fileSystem, layout, glb, chain, resolution, log, generatePrefab);
+        var run = new Run(fileSystem, layout, glb, chain, resolution, log, generatePrefab, referencesOnly: false, maintainer);
         return run.Execute();
     }
 
-    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab)
+    /// <summary>Whether the GLB holds anything only the verb writes — glTF materials or embedded images; the reference documents the watcher mints are not that.</summary>
+    public static bool HasAuthoredParts(byte[] glb)
+    {
+        ArgumentNullException.ThrowIfNull(glb);
+        try
+        {
+            if (GltfSceneReader.ReadGeometry(glb).Materials.Length > 0) return true;
+        }
+        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
+        {
+            return false;   // the build's or extract's error to name
+        }
+
+        return GlbTextureRewriter.TryListEmbedded(glb, "", out var embedded, out _) && embedded.Count > 0;
+    }
+
+    /// <summary>
+    /// Only the mesh, skeleton and clip reference documents, for the watcher: they carry no author
+    /// work, so minting them on a save is the same class of action as minting a sidecar. Nothing
+    /// an author edits is touched, and a foreign document is reported, never overwritten.
+    /// </summary>
+    /// <param name="maintainer">The one minting authority: the watcher's own, so a document re-minted inside the quarantine window gets its held identity back. A caller with no watcher alive passes none and one is made for the run.</param>
+    public static ExtractResult MintReferences(
+        IFileSystem fileSystem,
+        AssetProjectLayout layout,
+        UPath glb,
+        IReadOnlyList<IAssetImporter>? importers = null,
+        ILogger? logger = null,
+        SidecarMaintainer? maintainer = null)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(layout);
+        glb.AssertAbsolute(nameof(glb));
+
+        var run = new Run(fileSystem, layout, glb, importers ?? AssetImporters.All, ConflictResolution.Refuse, logger ?? NullLogger.Instance, generatePrefab: false, referencesOnly: true, maintainer);
+        return run.Execute();
+    }
+
+    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
     {
         private readonly List<string> _errors = [];
         private readonly List<ExtractedFile> _written = [];
@@ -117,8 +159,10 @@ public static partial class AssetExtractor
             var stem = Path.GetFileNameWithoutExtension(glb.GetName());
 
             // Sidecars for what is written are minted as it is written: the materials name the
-            // extracted textures by guid, and the prefab names everything by guid.
-            var maintainer = new SidecarMaintainer(fileSystem, layout, log, ignore: manifest.Ignore, importers: chain);
+            // extracted textures by guid, and the prefab names everything by guid. Through the
+            // caller's maintainer when there is one — a second authority with its own quarantine
+            // memory would mint a fresh identity for a document the watcher is holding.
+            var maintainer = sharedMaintainer ?? new SidecarMaintainer(fileSystem, layout, log, ignore: manifest.Ignore, importers: chain);
             AssetIndex Rescan()
             {
                 foreach (var path in _minted) maintainer.Ensure(path);
@@ -126,15 +170,20 @@ public static partial class AssetExtractor
             }
 
             var bytes = fileSystem.ReadAllBytes(glb);
-            bytes = Textures(index, directory, stem, bytes, settings, out var images);
-            index = Rescan();
-            if (_errors.Count > 0) return Abort(index, sidecarPath, settings with { Images = images });
+            var images = settings.Images.ToList();
+            if (!referencesOnly)
+            {
+                bytes = Textures(index, directory, stem, bytes, settings, out images);
+                index = Rescan();
+                if (_errors.Count > 0) return Abort(index, sidecarPath, settings with { Images = images });
+            }
 
             GltfAsset asset;
             CookedGlb cooked;
             try
             {
                 asset = GltfSceneReader.ReadGeometry(bytes);
+                _hasAuthoredParts = asset.Materials.Length > 0 || (GlbTextureRewriter.TryListEmbedded(bytes, stem, out var embeddedImages, out _) && embeddedImages.Count > 0);
                 cooked = GltfCook.Cook(asset);
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException)
@@ -144,9 +193,19 @@ public static partial class AssetExtractor
             }
 
             var recorded = settings;
-            var mesh = Blob(index, Target(index, recorded.Mesh, directory / $"{stem}.mesh"), MeshBlobFormat.Write(cooked.Mesh), recorded.Mesh, "mesh");
-            var skeleton = cooked.Skeleton is { } rig ? Blob(index, Target(index, recorded.Skeleton, directory / $"{stem}.skeleton"), SkeletonFormat.Write(rig), recorded.Skeleton, "skeleton") : null;
-            var clips = Named(Clips(index, directory, stem, cooked, recorded));
+            var source = new AssetReference(meta.Guid, index.Relative(glb));
+            var mesh = Document(index, Target(index, recorded.Mesh, directory / $"{stem}.mesh"), new MeshReferenceDocument(source, MeshSlot.Mesh), recorded.Mesh);
+            var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directory / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
+            var clips = Clips(index, directory, stem, source, cooked, recorded);
+            if (referencesOnly)
+            {
+                index = Rescan();
+                var minted = Identified(index, recorded with { Mesh = mesh, Skeleton = skeleton, Clips = clips });
+                // Every drain of a GLB comes through here; the steady state must not touch the sidecar.
+                if (!Same(minted, recorded)) Save(index, sidecarPath, minted);
+                return Finish();
+            }
+
             var materials = Materials(index, directory, stem, bytes, asset, recorded);
 
             index = Rescan();
@@ -155,7 +214,7 @@ public static partial class AssetExtractor
 
             var prefabPath = Target(index, recorded.Prefab, directory / $"{stem}.prefab");
             if (generatePrefab) extraction = extraction with { Prefab = Prefab(index, layout, prefabPath, stem, meta.Guid, Identified(index, extraction), cooked, asset) };
-            if (extraction.Prefab is { } prefab && prefab.Reference.Guid == Guid.Empty) index = Rescan();
+            if (extraction.Prefab is { } prefab && prefab.Guid == Guid.Empty) index = Rescan();
 
             Save(index, sidecarPath, extraction);
 
@@ -168,13 +227,18 @@ public static partial class AssetExtractor
         /// <summary>
         /// The record is saved on the way out even when an entry refused: the ones that resolved
         /// were already written, and a sidecar that does not say so reports them as conflicts the
-        /// author never made on the retry. A refused entry keeps its last sync, so it re-detects.
+        /// author never made on the retry. A refused image or material keeps its last sync, so it
+        /// re-detects; a refused document keeps its last reference, so it is still followed.
         /// </summary>
         private ExtractResult Abort(AssetIndex index, UPath sidecarPath, GlbExtraction extraction)
         {
             Save(index, sidecarPath, extraction);
             return Finish();
         }
+
+        private static bool Same(GlbExtraction a, GlbExtraction b)
+            => a.Mesh == b.Mesh && a.Skeleton == b.Skeleton && a.Prefab == b.Prefab && a.Directory == b.Directory
+                && a.Clips.SequenceEqual(b.Clips) && a.Materials.SequenceEqual(b.Materials) && a.Images.SequenceEqual(b.Images);
 
         private void Save(AssetIndex index, UPath sidecarPath, GlbExtraction extraction)
         {
@@ -217,7 +281,7 @@ public static partial class AssetExtractor
                 }
 
                 var previous = recorded.Images.FirstOrDefault(i => i.Index == image.Index)?.Entry;
-                var path = Target(index, previous, directory / $"{stem}_{image.Index}{image.SourceExtension}");
+                var path = Target(index, previous?.Reference, directory / $"{stem}_{image.Index}{image.SourceExtension}");
                 var entry = Blob(index, path, image.Bytes, previous, "image");
                 images.RemoveAll(i => i.Index == image.Index);
                 if (entry is not null) images.Add(new GlbExtraction.NamedEntry(image.Index, ImageSlot(image.Index), entry));
@@ -240,26 +304,134 @@ public static partial class AssetExtractor
         private static string ImageSlot(int imageIndex) => $"images[{imageIndex}]";
 
         /// <summary>Where a recorded entry's document is NOW, by identity — a moved file is re-synced in place, not abandoned for a fresh one beside the GLB; <paramref name="fallback"/> when nothing carries the guid.</summary>
-        private static UPath Target(AssetIndex index, GlbExtraction.Entry? recorded, UPath fallback)
+        private static UPath Target(AssetIndex index, AssetReference? recorded, UPath fallback)
         {
             if (recorded is null) return fallback;
-            var resolution = index.Resolve(recorded.Reference);
+            var resolution = index.Resolve(recorded);
             return resolution.Status is ReferenceStatus.Resolved or ReferenceStatus.Stale ? resolution.Asset : fallback;
         }
 
-        private IEnumerable<(int Index, string Name, GlbExtraction.Entry? Entry)> Clips(AssetIndex index, UPath directory, string stem, CookedGlb cooked, GlbExtraction recorded)
+        /// <summary>
+        /// Each clip the GLB has now, paired with the document that already stands for it: by
+        /// name when the GLB has that name once, else by the hash the document recorded (the DCC
+        /// renamed it), else by index (the DCC renamed AND edited it). What pairs with nothing
+        /// gets a new document; a reorder or rename updates the one it has, under its guid.
+        /// </summary>
+        private List<GlbExtraction.NamedReference> Clips(AssetIndex index, UPath directory, string stem, AssetReference source, CookedGlb cooked, GlbExtraction recorded)
         {
+            var previous = recorded.Clips
+                .Select(clip => (clip, Path: Target(index, clip.Reference, UPath.Empty), Existing: (MeshReferenceDocument?)null))
+                .Where(pair => pair.Path != UPath.Empty && fileSystem.FileExists(pair.Path))
+                .Select(pair =>
+                {
+                    try { return pair with { Existing = MeshReferenceDocument.Load(fileSystem, pair.Path) }; }
+                    catch (FormatException) { return pair; }
+                })
+                .ToList();
+
+            var hashes = cooked.Clips.Select(GltfCook.ClipFingerprint).ToList();
+            var unpaired = previous.ToList();
+            var pairing = new (UPath Path, string? Reason, AssetReference Recorded)?[cooked.Clips.Count];
+            for (var i = 0; i < cooked.Clips.Count; i++)
+            {
+                var name = cooked.Clips[i].Name;
+                if (cooked.Clips.Count(c => c.Name == name) != 1) continue;
+                var byName = unpaired.FindIndex(p => p.clip.Name == name);
+                if (byName < 0) continue;
+                pairing[i] = (unpaired[byName].Path, unpaired[byName].clip.Index == i ? null : "reordered in the GLB", unpaired[byName].clip.Reference);
+                unpaired.RemoveAt(byName);
+            }
+
+            for (var i = 0; i < cooked.Clips.Count; i++)
+            {
+                if (pairing[i] is not null) continue;
+                var byHash = unpaired.FindIndex(p => p.Existing?.Hash == hashes[i]);
+                if (byHash < 0) continue;
+                pairing[i] = (unpaired[byHash].Path, $"renamed in the GLB from '{unpaired[byHash].clip.Name}'", unpaired[byHash].clip.Reference);
+                unpaired.RemoveAt(byHash);
+            }
+
+            for (var i = 0; i < cooked.Clips.Count; i++)
+            {
+                if (pairing[i] is not null) continue;
+                var byIndex = unpaired.FindIndex(p => p.clip.Index == i);
+                if (byIndex < 0) continue;
+                pairing[i] = (unpaired[byIndex].Path, $"renamed and re-exported in the GLB from '{unpaired[byIndex].clip.Name}'", unpaired[byIndex].clip.Reference);
+                unpaired.RemoveAt(byIndex);
+            }
+
             var names = new UniqueNames();
+            var result = new List<GlbExtraction.NamedReference>();
             for (var i = 0; i < cooked.Clips.Count; i++)
             {
                 var clip = cooked.Clips[i];
                 var name = names.Mint(clip.Name, i);
-                var previous = recorded.Clips.FirstOrDefault(c => c.Index == i)?.Entry;
-                yield return (i, name, Blob(index, Target(index, previous, directory / $"{stem}.{name}.anim"), ClipFormat.Write(clip), previous, "clip"));
+                var path = pairing[i]?.Path ?? directory / $"{stem}.{name}.anim";
+                var wanted = new MeshReferenceDocument(source, MeshSlot.Clip, clip.Name, i, hashes[i]);
+                if (Document(index, path, wanted, pairing[i]?.Recorded, pairing[i]?.Reason) is { } reference)
+                {
+                    result.Add(new GlbExtraction.NamedReference(i, name, reference));
+                }
             }
+
+            return result;
         }
 
-        /// <summary>One extracted blob under the sync rule: the GLB side is what it extracts to now, the document side is the file on disk. <see langword="null"/> when a foreign file was refused.</summary>
+        /// <summary>
+        /// A mesh reference document is tool-owned: written when missing, rewritten when the GLB
+        /// changed what it names (a clip renamed or reordered), left alone when it already says
+        /// so. One that names ANOTHER GLB, or does not parse, is not this GLB's to overwrite —
+        /// refused until the author deletes it or passes <c>--take-glb</c>; the record keeps
+        /// naming what it named, so the file is still followed and the GLB still reads as minted.
+        /// </summary>
+        private AssetReference? Document(AssetIndex index, UPath path, MeshReferenceDocument wanted, AssetReference? recorded, string? why = null)
+        {
+            var relative = index.Relative(path);
+            if (!fileSystem.FileExists(path))
+            {
+                Write(index, path, wanted.WriteBytes());
+                return Reference(index, path);
+            }
+
+            MeshReferenceDocument? existing;
+            try
+            {
+                existing = MeshReferenceDocument.Load(fileSystem, path);
+            }
+            catch (FormatException)
+            {
+                existing = null;
+            }
+
+            if (existing is not null && existing.Source.Guid == wanted.Source.Guid && existing.Slot == wanted.Slot)
+            {
+                if (existing != wanted)
+                {
+                    fileSystem.WriteAllBytes(path, wanted.WriteBytes());
+                    _written.Add(new ExtractedFile(relative, why ?? "updated: the GLB changed what it names"));
+                }
+                else
+                {
+                    _kept.Add(relative);
+                }
+
+                return Reference(index, path);
+            }
+
+            if (resolution == ConflictResolution.TakeGlb)
+            {
+                fileSystem.WriteAllBytes(path, wanted.WriteBytes());
+                _written.Add(new ExtractedFile(relative, "existed and was not this GLB's: took the GLB's"));
+                return Reference(index, path);
+            }
+
+            _errors.Add(existing is null
+                ? $"{relative}: exists and is not a readable mesh reference; delete it, or re-run with `--take-glb` to overwrite it"
+                : $"{relative}: names '{existing.Source.Path}', not this GLB; delete it, or re-run with `--take-glb` to overwrite it");
+            return recorded;
+        }
+
+        /// <summary>One extracted file under the sync rule (an image today): the GLB side is what it extracts to now, the document side is the file on disk. <see langword="null"/> when a foreign file was refused.</summary>
         private GlbExtraction.Entry? Blob(AssetIndex index, UPath path, byte[] fresh, GlbExtraction.Entry? recorded, string kind)
         {
             var glbSide = Fingerprint(fresh);
@@ -371,7 +543,7 @@ public static partial class AssetExtractor
                 var material = asset.Materials[i];
                 var name = names.Mint(material.Name ?? $"material_{i}", i);
                 var previous = recorded.Materials.FirstOrDefault(m => m.Index == i)?.Entry;
-                var path = Target(index, previous, directory / $"{stem}.{name}.material");
+                var path = Target(index, previous?.Reference, directory / $"{stem}.{name}.material");
                 var document = MaterialDocumentFrom(material, name, TextureAt, out var unresolved);
                 foreach (var missing in unresolved) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
 
@@ -522,12 +694,12 @@ public static partial class AssetExtractor
         private static double Widen(float value) => double.Parse(value.ToString("R", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>The prefab wiring the extracted assets: written once, the author's from then on.</summary>
-        private GlbExtraction.Entry? Prefab(AssetIndex index, AssetProjectLayout layout, UPath path, string stem, Guid glbGuid, GlbExtraction extraction, CookedGlb cooked, GltfAsset asset)
+        private AssetReference? Prefab(AssetIndex index, AssetProjectLayout layout, UPath path, string stem, Guid glbGuid, GlbExtraction extraction, CookedGlb cooked, GltfAsset asset)
         {
             if (fileSystem.FileExists(path))
             {
                 _kept.Add(index.Relative(path));
-                return extraction.Prefab ?? new GlbExtraction.Entry(Reference(index, path), "", "");
+                return extraction.Prefab ?? Reference(index, path);
             }
 
             var document = new PrefabDocument();
@@ -539,7 +711,7 @@ public static partial class AssetExtractor
             {
                 root.Components.Add(new PrefabComponent(component.Id, component.Type, new CanonicalTomlTable
                 {
-                    { component.Field, AssetReferenceCodec.Write(extraction.Mesh!.Reference) },
+                    { component.Field, AssetReferenceCodec.Write(extraction.Mesh!) },
                 }));
             }
             else
@@ -559,7 +731,7 @@ public static partial class AssetExtractor
             PrefabDocumentSerializer.Save(fileSystem, path, document);
             _written.Add(new ExtractedFile(index.Relative(path)));
             _minted.Add(path);
-            return new GlbExtraction.Entry(new AssetReference(Guid.Empty, index.Relative(path)), "", "");
+            return new AssetReference(Guid.Empty, index.Relative(path));
         }
 
         /// <summary>The component the game authors a mesh into: the manifest's choice, else the schema's — a component with a mesh-authored field, "Skinned" in its name deciding the rigged one.</summary>
@@ -625,13 +797,16 @@ public static partial class AssetExtractor
             Mesh = extraction.Mesh is null ? null : Identified(index, extraction.Mesh),
             Skeleton = extraction.Skeleton is null ? null : Identified(index, extraction.Skeleton),
             Prefab = extraction.Prefab is null ? null : Identified(index, extraction.Prefab),
-            Clips = extraction.Clips.Select(clip => clip with { Entry = Identified(index, clip.Entry) }).ToList(),
+            Clips = extraction.Clips.Select(clip => clip with { Reference = Identified(index, clip.Reference) }).ToList(),
             Materials = extraction.Materials.Select(material => material with { Entry = Identified(index, material.Entry) }).ToList(),
             Images = extraction.Images.Select(image => image with { Entry = Identified(index, image.Entry) }).ToList(),
         };
 
         private static GlbExtraction.Entry Identified(AssetIndex index, GlbExtraction.Entry entry)
-            => entry with { Reference = Reference(index, index.Root / entry.Reference.Path) };
+            => entry with { Reference = Identified(index, entry.Reference) };
+
+        private static AssetReference Identified(AssetIndex index, AssetReference reference)
+            => Reference(index, index.Root / reference.Path);
 
         private static string Fingerprint(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
@@ -666,6 +841,8 @@ public static partial class AssetExtractor
             return Finish();
         }
 
-        private ExtractResult Finish() => new(_errors.Count == 0, _errors, _written, _kept, _warnings);
+        private bool _hasAuthoredParts;
+
+        private ExtractResult Finish() => new(_errors.Count == 0, _errors, _written, _kept, _warnings, _hasAuthoredParts);
     }
 }

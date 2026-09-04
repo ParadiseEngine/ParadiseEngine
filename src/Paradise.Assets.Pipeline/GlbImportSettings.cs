@@ -64,9 +64,19 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             {
                 case ExtractKey when value is string: continue;
                 case ExtractKey: return $"holds a non-string '{ExtractKey}' in [{Domain}]";
-                case MeshKey or SkeletonKey or PrefabKey when ReadExtracted(value) is not null: continue;
-                case MeshKey or SkeletonKey or PrefabKey: return $"holds '{key}' in [{Domain}] that is not {{ guid, path, glb, doc }}";
-                case ClipsKey or MaterialsKey or ImagesKey when value is IReadOnlyList<object> named:
+                case MeshKey or SkeletonKey or PrefabKey when ReadReference(value) is not null: continue;
+                case MeshKey or SkeletonKey or PrefabKey: return $"holds '{key}' in [{Domain}] that is not {{ guid, path }}";
+                case ClipsKey when value is IReadOnlyList<object> clips:
+                    foreach (var item in clips)
+                    {
+                        if (ReadIndex(item) is null || Lookup(item, NameKey) is not string || ReadReference(item) is null)
+                        {
+                            return $"holds an entry in [{Domain}].{key} that is not {{ index, name, guid, path }}";
+                        }
+                    }
+
+                    continue;
+                case MaterialsKey or ImagesKey when value is IReadOnlyList<object> named:
                     foreach (var item in named)
                     {
                         if (ReadIndex(item) is null || Lookup(item, NameKey) is not string || ReadExtracted(item) is null)
@@ -142,12 +152,12 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 
         return new GlbExtraction(
             table.Value(ExtractKey) as string,
-            ReadExtracted(table.Value(MeshKey)),
-            ReadExtracted(table.Value(SkeletonKey)),
-            ReadNamed(table.Value(ClipsKey)),
+            ReadReference(table.Value(MeshKey)),
+            ReadReference(table.Value(SkeletonKey)),
+            ReadNamedReferences(table.Value(ClipsKey)),
             ReadNamed(table.Value(MaterialsKey)),
             ReadNamed(table.Value(ImagesKey)),
-            ReadExtracted(table.Value(PrefabKey)));
+            ReadReference(table.Value(PrefabKey)));
     }
 
     /// <summary>Records <paramref name="extraction"/>, keeping the references half of the domain.</summary>
@@ -167,10 +177,10 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         var table = new CanonicalTomlTable();
         if (extraction.Directory is { } directory) table.Add(ExtractKey, directory);
-        if (extraction.Mesh is { } mesh) table.Add(MeshKey, WriteEntry(mesh));
-        if (extraction.Skeleton is { } skeleton) table.Add(SkeletonKey, WriteEntry(skeleton));
-        if (extraction.Prefab is { } prefab) table.Add(PrefabKey, WriteEntry(prefab));
-        if (extraction.Clips.Count > 0) table.Add(ClipsKey, extraction.Clips.Select(WriteNamed).Cast<object>().ToList());
+        if (extraction.Mesh is { } mesh) table.Add(MeshKey, AssetReferenceCodec.Write(mesh));
+        if (extraction.Skeleton is { } skeleton) table.Add(SkeletonKey, AssetReferenceCodec.Write(skeleton));
+        if (extraction.Prefab is { } prefab) table.Add(PrefabKey, AssetReferenceCodec.Write(prefab));
+        if (extraction.Clips.Count > 0) table.Add(ClipsKey, extraction.Clips.Select(WriteNamedReference).Cast<object>().ToList());
         if (extraction.Materials.Count > 0) table.Add(MaterialsKey, extraction.Materials.Select(WriteNamed).Cast<object>().ToList());
         if (extraction.Images.Count > 0) table.Add(ImagesKey, extraction.Images.Select(WriteNamed).Cast<object>().ToList());
         if (references.Count > 0)
@@ -187,6 +197,37 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         if (table.Count == 0) meta.RemoveSetting(Domain);
         else meta.SetSetting(Domain, table);
     }
+
+    private static AssetReference? ReadReference(object? value)
+    {
+        if (value is not (CanonicalTomlTable or CanonicalInlineTable)) return null;
+        if (Lookup(value, AssetReferenceCodec.GuidKey) is not string guidText || !DocumentGuid.TryParse(guidText, out var guid)) return null;
+        if (Lookup(value, AssetReferenceCodec.PathKey) is not string { Length: > 0 } path) return null;
+        return new AssetReference(guid, path);
+    }
+
+    private static List<GlbExtraction.NamedReference> ReadNamedReferences(object? value)
+    {
+        var result = new List<GlbExtraction.NamedReference>();
+        if (value is not IReadOnlyList<object> items) return result;
+        foreach (var item in items)
+        {
+            if (ReadIndex(item) is { } index && Lookup(item, NameKey) is string name && ReadReference(item) is { } reference)
+            {
+                result.Add(new GlbExtraction.NamedReference(index, name, reference));
+            }
+        }
+
+        return result;
+    }
+
+    private static CanonicalInlineTable WriteNamedReference(GlbExtraction.NamedReference named) => new()
+    {
+        { IndexKey, (long)named.Index },
+        { NameKey, named.Name },
+        { AssetReferenceCodec.GuidKey, DocumentGuid.Format(named.Reference.Guid) },
+        { AssetReferenceCodec.PathKey, named.Reference.Path },
+    };
 
     private static List<GlbExtraction.NamedEntry> ReadNamed(object? value)
     {
@@ -257,15 +298,21 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     }
 }
 
-/// <summary>What a GLB has been extracted to, as its sidecar records it: each entry is the document and the two fingerprints of the last sync.</summary>
+/// <summary>
+/// What a GLB has been extracted to, as its sidecar records it. The mesh, skeleton, clips and
+/// prefab are plain references: the first three are tool-owned documents the build cooks from
+/// the GLB, the prefab is the author's from the moment it is written, and none of them has a
+/// second side to keep in step. A material or image is an authored file whose GLB side can
+/// change under it, so those entries carry the two fingerprints of the last sync.
+/// </summary>
 public sealed record GlbExtraction(
     string? Directory,
-    GlbExtraction.Entry? Mesh,
-    GlbExtraction.Entry? Skeleton,
-    IReadOnlyList<GlbExtraction.NamedEntry> Clips,
+    AssetReference? Mesh,
+    AssetReference? Skeleton,
+    IReadOnlyList<GlbExtraction.NamedReference> Clips,
     IReadOnlyList<GlbExtraction.NamedEntry> Materials,
     IReadOnlyList<GlbExtraction.NamedEntry> Images,
-    GlbExtraction.Entry? Prefab)
+    AssetReference? Prefab)
 {
     /// <summary>The meta field a generated prefab carries: the guid of the GLB it was generated from.</summary>
     public const string GeneratedFrom = "GeneratedFrom";
@@ -276,17 +323,21 @@ public sealed record GlbExtraction(
 
     public static GlbExtraction None { get; } = new(null, null, null, [], [], [], null);
 
+    /// <summary>Whether the GLB's geometry ships: the mesh document exists. The watcher mints it, so this is only ever false for a GLB nobody has drained yet.</summary>
     public bool Extracted => Mesh is not null;
 
+    /// <summary>Whether <c>extract</c> has run: something only it writes — a material, an image, the prefab — is recorded. The watcher's documents alone are not that.</summary>
+    public bool Authored => Materials.Count > 0 || Images.Count > 0 || Prefab is not null;
+
     /// <summary>Every recorded entry with the site name <c>verify</c> and <c>refs</c> use for it, so the GLB's extracted files are references it holds like any other.</summary>
-    public IEnumerable<(string Where, Entry Entry)> Entries()
+    public IEnumerable<(string Where, AssetReference Reference)> Entries()
     {
         if (Mesh is { } mesh) yield return ("extract.mesh", mesh);
         if (Skeleton is { } skeleton) yield return ("extract.skeleton", skeleton);
         if (Prefab is { } prefab) yield return ("extract.prefab", prefab);
-        foreach (var clip in Clips) yield return ($"extract.clips[{clip.Index}]", clip.Entry);
-        foreach (var material in Materials) yield return ($"extract.materials[{material.Index}]", material.Entry);
-        foreach (var image in Images) yield return ($"extract.images[{image.Index}]", image.Entry);
+        foreach (var clip in Clips) yield return ($"extract.clips[{clip.Index}]", clip.Reference);
+        foreach (var material in Materials) yield return ($"extract.materials[{material.Index}]", material.Entry.Reference);
+        foreach (var image in Images) yield return ($"extract.images[{image.Index}]", image.Entry.Reference);
     }
 
     /// <summary>The same record with every entry's path half brought up to date through <paramref name="resolve"/>; the input when none moved.</summary>
@@ -295,21 +346,23 @@ public sealed record GlbExtraction(
         ArgumentNullException.ThrowIfNull(resolve);
         ArgumentNullException.ThrowIfNull(changes);
 
-        Entry? Repoint(Entry? entry, string where)
+        AssetReference? Repoint(AssetReference? reference, string where)
         {
-            if (entry is null || resolve(entry.Reference) is not { } current || current == entry.Reference) return entry;
-            changes.Add($"{where}: {entry.Reference.Path} -> {current.Path}");
-            return entry with { Reference = current };
+            if (reference is null || resolve(reference) is not { } current || current == reference) return reference;
+            changes.Add($"{where}: {reference.Path} -> {current.Path}");
+            return current;
         }
+
+        Entry RepointEntry(Entry entry, string where) => entry with { Reference = Repoint(entry.Reference, where)! };
 
         return this with
         {
             Mesh = Repoint(Mesh, "extract.mesh"),
             Skeleton = Repoint(Skeleton, "extract.skeleton"),
             Prefab = Repoint(Prefab, "extract.prefab"),
-            Clips = Clips.Select(c => c with { Entry = Repoint(c.Entry, $"extract.clips[{c.Index}]")! }).ToList(),
-            Materials = Materials.Select(m => m with { Entry = Repoint(m.Entry, $"extract.materials[{m.Index}]")! }).ToList(),
-            Images = Images.Select(i => i with { Entry = Repoint(i.Entry, $"extract.images[{i.Index}]")! }).ToList(),
+            Clips = Clips.Select(c => c with { Reference = Repoint(c.Reference, $"extract.clips[{c.Index}]")! }).ToList(),
+            Materials = Materials.Select(m => m with { Entry = RepointEntry(m.Entry, $"extract.materials[{m.Index}]") }).ToList(),
+            Images = Images.Select(i => i with { Entry = RepointEntry(i.Entry, $"extract.images[{i.Index}]") }).ToList(),
         };
     }
 
@@ -323,4 +376,7 @@ public sealed record GlbExtraction(
     /// optional and need not be unique. The name is the file's readable stem.
     /// </summary>
     public sealed record NamedEntry(int Index, string Name, Entry Entry);
+
+    /// <summary>A clip's document, keyed like a <see cref="NamedEntry"/> but with no sync to record.</summary>
+    public sealed record NamedReference(int Index, string Name, AssetReference Reference);
 }

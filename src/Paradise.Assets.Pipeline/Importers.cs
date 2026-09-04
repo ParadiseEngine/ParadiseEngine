@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 
+using Paradise.Animation;
 using Paradise.Assets.Documents;
+using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
 using Paradise.Export.Serialization;
@@ -97,9 +99,9 @@ public sealed class GlbImporter : IAssetImporter
         // a dangling reference the author hears about, not a file that quietly re-mints.
         if (Extraction(context, asset) is { } extraction)
         {
-            foreach (var (where, entry) in extraction.Entries())
+            foreach (var (where, reference) in extraction.Entries())
             {
-                sites.Add(new ReferenceSite(where, entry.Reference, entry.Reference.Path, entry.Reference.Path));
+                sites.Add(new ReferenceSite(where, reference, reference.Path, reference.Path));
             }
         }
 
@@ -328,24 +330,146 @@ public sealed class PrefabImporter : IAssetImporter
     }
 }
 
-/// <summary>A blob the pipeline extracted (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>) ships as it is: the step checks the magic and copies the bytes, so an unrelated file with the extension is refused by name rather than shipped.</summary>
-internal static class BlobStep
+/// <summary>
+/// The cook behind <c>.mesh</c>, <c>.skeleton</c> and <c>.anim</c>: the document names a GLB and
+/// a slot, the GLB is read through the context (so a re-export rebuilds every document that
+/// names it, and a move of the GLB is a recorded input), and the slot's blob is written at the
+/// document's own path. The GLB is cooked once per document; that is milliseconds, and the build
+/// index skips the whole step when neither side changed.
+/// </summary>
+internal static class MeshReferenceStep
 {
-    public static bool Copy(ImportContext context, Func<ReadOnlySpan<byte>, bool> isBlob, string kind, List<string> errors)
+    public static bool Cook(ImportContext context, MeshSlot slot, List<string> errors)
     {
-        var bytes = context.FileSystem.ReadAllBytes(context.Asset);
-        if (!isBlob(bytes))
+        MeshReferenceDocument document;
+        try
         {
-            errors.Add($"{context.Source}: is not a Paradise {kind} blob (bad magic) — run `paradise assets extract` on its GLB to regenerate it");
+            document = MeshReferenceDocument.Parse(context.FileSystem.ReadAllText(context.Asset), context.Source);
+        }
+        catch (FormatException failure)
+        {
+            errors.Add(failure.Message);
             return true;
         }
 
-        context.Output.WriteAllBytes("/" + context.Source, bytes);
+        if (document.Slot != slot)
+        {
+            errors.Add($"{context.Source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
+            return true;
+        }
+
+        var resolution = context.Resolve(document.Source);
+        if (!resolution.Found)
+        {
+            errors.Add($"{context.Source}: names GLB '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
+            return true;
+        }
+
+        if (!MeshContainer.IsMesh(resolution.Asset))
+        {
+            errors.Add($"{context.Source}: names '{resolution.Path}' as its GLB, which is not one");
+            return true;
+        }
+
+        CookedGlb cooked;
+        try
+        {
+            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(context.FileSystem.ReadAllBytes(resolution.Asset)));
+        }
+        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
+        {
+            errors.Add($"{context.Source}: {resolution.Path}: {error.Message}");
+            return true;
+        }
+
+        byte[] blob;
+        switch (slot)
+        {
+            case MeshSlot.Mesh:
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh);
+                break;
+
+            case MeshSlot.Skeleton:
+                if (cooked.Skeleton is null)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} has no node tree to cook a skeleton from");
+                    return true;
+                }
+
+                blob = Paradise.Animation.SkeletonFormat.Write(cooked.Skeleton);
+                break;
+
+            default:
+                if (Clip(cooked, document, out var problem) is not { } clip)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} {problem}");
+                    return true;
+                }
+
+                blob = Paradise.Animation.ClipFormat.Write(clip);
+                break;
+        }
+
+        context.Output.WriteAllBytes("/" + context.Source, blob);
         return true;
+    }
+
+    /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
+    internal static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out string problem)
+    {
+        problem = "";
+        var named = document.Name is null ? [] : cooked.Clips.Where(clip => clip.Name == document.Name).ToList();
+        if (named.Count == 1) return named[0];
+        if (document.Hash is { } hash && cooked.Clips.FirstOrDefault(clip => GltfCook.ClipFingerprint(clip) == hash) is { } same) return same;
+        if (document.Index is { } index && index < cooked.Clips.Count) return cooked.Clips[index];
+
+        var available = cooked.Clips.Count == 0 ? "no clips" : "clips " + string.Join(", ", cooked.Clips.Select(clip => $"'{clip.Name}'"));
+        problem = named.Count > 1
+            ? $"has {named.Count} clips named '{document.Name}' and no index picks one; re-run `paradise assets extract` on the GLB"
+            : $"has no clip named '{document.Name ?? $"#{document.Index}"}' ({available}); re-run `paradise assets extract` on the GLB, or delete this document";
+        return null;
+    }
+
+    public static AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        if (context.Classify(asset) != AssetClass.MeshReference) return AssetReferences.None;
+
+        MeshReferenceDocument document;
+        try
+        {
+            document = MeshReferenceDocument.Load(context.FileSystem, asset);
+        }
+        catch (FormatException failure)
+        {
+            return AssetReferences.Unreadable(failure.Message);
+        }
+
+        return new AssetReferences([new ReferenceSite("source", document.Source, document.Source.Path, document.Source.Path)]);
+    }
+
+    public static RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        if (!context.RewriteSources) return null;
+
+        MeshReferenceDocument document;
+        try
+        {
+            document = MeshReferenceDocument.Load(context.FileSystem, asset);
+        }
+        catch (FormatException)
+        {
+            return null;   // verify's finding
+        }
+
+        var resolution = context.Index.Resolve(document.Source);
+        if (resolution.Status != ReferenceStatus.Stale) return null;
+
+        context.FileSystem.WriteAllBytes(asset, (document with { Source = resolution.Current }).WriteBytes());
+        return new RepairedDocument(asset, [$"{document.Source.Path} -> {resolution.Path}"]);
     }
 }
 
-/// <summary>The <c>*.mesh</c> step: a mesh blob (<see cref="Paradise.Assets.Mesh.MeshBlobFormat"/>) extracted from a GLB ships verbatim.</summary>
+/// <summary>The <c>*.mesh</c> step: a mesh reference cooked to the mesh blob (<see cref="Paradise.Assets.Mesh.MeshBlobFormat"/>) of the GLB it names.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
     public string Name => "mesh";
@@ -353,14 +477,28 @@ public sealed class MeshImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".mesh");
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MeshReferenceDocument.MeshSuffix);
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
-        => context.HasExtension(".mesh") && BlobStep.Copy(context, Paradise.Assets.Mesh.MeshBlobFormat.IsMeshBlob, "mesh", errors);
+        => context.HasExtension(MeshReferenceDocument.MeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.Mesh, errors);
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.References(context, asset);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.Rewrite(context, asset);
+    }
 }
 
-/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: animation blobs (<see cref="Paradise.Animation.SkeletonFormat"/>, <see cref="Paradise.Animation.ClipFormat"/>) extracted from a GLB ship verbatim.</summary>
+/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to the animation blobs (<see cref="Paradise.Animation.SkeletonFormat"/>, <see cref="Paradise.Animation.ClipFormat"/>) of the GLB they name.</summary>
 public sealed class AnimationImporter : IAssetImporter
 {
     public string Name => "animation";
@@ -368,14 +506,28 @@ public sealed class AnimationImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <inheritdoc />
-    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".skeleton", ".anim");
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MeshReferenceDocument.SkeletonSuffix, MeshReferenceDocument.ClipSuffix);
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (context.HasExtension(".skeleton")) return BlobStep.Copy(context, Paradise.Animation.SkeletonFormat.IsSkeleton, "skeleton", errors);
-        if (context.HasExtension(".anim")) return BlobStep.Copy(context, Paradise.Animation.ClipFormat.IsClip, "clip", errors);
+        if (context.HasExtension(MeshReferenceDocument.SkeletonSuffix)) return MeshReferenceStep.Cook(context, MeshSlot.Skeleton, errors);
+        if (context.HasExtension(MeshReferenceDocument.ClipSuffix)) return MeshReferenceStep.Cook(context, MeshSlot.Clip, errors);
         return false;
+    }
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.References(context, asset);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.Rewrite(context, asset);
     }
 }
 

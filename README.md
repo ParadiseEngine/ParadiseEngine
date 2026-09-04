@@ -146,7 +146,7 @@ paradise assets watch          # keep *.meta in step, rebuilding as you go
 paradise assets mv <from> <to> # move a file or directory; sidecars and every reference follow
 paradise assets rm <path>      # delete an asset; refused while anything references it (--force to leave them dangling)
 paradise assets refs <path>    # who references it, and what it references (--transitive)
-paradise assets extract <glb>  # mesh, skeleton, clips, materials, textures and a prefab, beside it (--all on a dir)
+paradise assets extract <glb>  # materials, textures and a prefab beside it, plus the mesh/clip documents watch mints (--all on a dir)
 paradise tools doctor          # every build tool: found, version, how to fix
 ```
 
@@ -159,20 +159,23 @@ them all with the shared `--project` and `--profile` options.
 paradise assets extract Models/crate.glb          # or a directory with --all
 ```
 
-What a GLB embeds becomes authored assets beside it (or under `[extract] directory` in
-`project.toml`, or the sidecar's `[glb] extract`): the mesh blob (`.mesh`), the skeleton and
-clips (`.skeleton`, `.anim`), a `.material` document per glTF material with its textures as
-references, the embedded images as files the GLB now points at, and a `.prefab` wiring them —
-generated once, the author's from then on. The build never opens a GLB: each extracted kind ships
-through its own importer, and a GLB with geometry nobody extracted is a `verify` warning.
+What a GLB holds becomes authored assets beside it (or under `[extract] directory` in
+`project.toml`, or the sidecar's `[glb] extract`): a `.mesh` document, a `.skeleton` and one
+`.anim` per clip — each a small TOML naming the GLB and the part it stands for, which the build
+cooks into the blob at the same path — a `.material` document per glTF material with its textures
+as references, the embedded images as files the GLB now points at, and a `.prefab` wiring them,
+generated once and the author's from then on. The runtime never sees glTF: it reads the cooked
+blobs and the built materials.
 
-The GLB's sidecar records every extracted entry with a fingerprint of both sides, so a later run
-tells a re-export from an edit: a re-exported GLB re-extracts, an edited material document is
-written back into the GLB (its glTF-expressible half; `MaterialKind` and friends are the
-document's alone), an edited mesh or clip blob is flagged (nothing can write one back yet), and
-both sides changed is a conflict `--take-glb` or `--take-document` resolves. `watch` offers
-extraction for a new GLB and never runs it: extraction mints identities and writes files an
-author edits.
+The mesh, skeleton and clip documents carry no author work, so `watch` mints them for a new or
+re-exported GLB on its own; a re-export that changes geometry or adds a clip needs no verb at
+all. Materials, textures and the prefab are the author's from the moment they exist, so `watch`
+only offers `extract` for those. The GLB's sidecar records every extracted entry; a material or
+image also carries a fingerprint of both sides, so a later run tells a re-export from an edit: a
+re-exported material re-extracts (keeping the document's Paradise-only fields), an edited
+material document is written back into the GLB (its glTF-expressible half), an edited image is
+flagged, and both sides changed is a conflict `--take-glb` or `--take-document` resolves. KTX2 is
+build output and never an authored asset: `verify` refuses one under `assets/`.
 
 ### A reference's guid decides; its path is a hint
 

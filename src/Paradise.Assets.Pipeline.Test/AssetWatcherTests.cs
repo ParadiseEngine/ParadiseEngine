@@ -103,6 +103,117 @@ public class AssetWatcherTests
         await Assert.That(watcher.HasPending).IsFalse();
     }
 
+    private static byte[] CrateGlb()
+    {
+        var b = new Paradise.Assets.Gltf.Test.GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var node = b.AddNode(mesh: b.AddMesh(Paradise.Assets.Gltf.Test.GlbTestBuilder.Primitive(position)), name: "Crate");
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
+        b.AddAnimation("Bob", (node, "translation", times, values, null));
+        b.SetSceneRoots(node);
+        return b.Build();
+    }
+
+    [Test]
+    public async Task a_deleted_document_re_minted_inside_the_quarantine_window_keeps_its_identity()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb());
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.mesh.meta").Guid;
+
+        // The author deletes the document (a plain delete leaves the sidecar, which is where the
+        // identity is held from), then saves the GLB again before the quarantine window closes:
+        // the watcher's maintainer is holding the identity, and the mint has to go through THAT
+        // maintainer to get it back.
+        fileSystem.DeleteFile("/game/assets/models/crate.mesh");
+        watcher.ObserveDelete("/game/assets/models/crate.mesh");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb());
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsTrue();
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.mesh.meta").Guid).IsEqualTo(guid);
+    }
+
+    [Test]
+    public async Task a_deleted_document_comes_back_from_its_glb_with_its_identity()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb());
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Bob.anim.meta").Guid;
+
+        // Deleted like a sidecar would be: the GLB still has the clip, so the document is the
+        // watcher's to put back, and the prefab that names it by guid keeps resolving.
+        fileSystem.DeleteFile("/game/assets/models/crate.Bob.anim");
+        watcher.ObserveDelete("/game/assets/models/crate.Bob.anim");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim")).IsTrue();
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Bob.anim.meta").Guid).IsEqualTo(guid);
+    }
+
+    [Test]
+    public async Task the_start_of_a_watch_mints_every_glbs_documents()
+    {
+        var (watcher, fileSystem, _) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb());
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
+
+        var minted = watcher.MintReferences();
+
+        await Assert.That(minted).IsEqualTo(3);
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh.meta")).IsTrue();
+        await Assert.That(watcher.MintReferences()).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task a_glb_with_geometry_gets_its_reference_documents_on_the_spot()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb());
+
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        // Mesh and clip documents, with sidecars, and the GLB's record names them; materials and
+        // the prefab are the author's and stay the verb's to make.
+        foreach (var expected in new[] { "crate.mesh", "crate.skeleton", "crate.Bob.anim" })
+        {
+            await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected)).IsTrue().Because(expected);
+            await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected + ".meta")).IsTrue().Because(expected + ".meta");
+        }
+
+        var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta"));
+        await Assert.That(recorded.Extracted).IsTrue();
+        await Assert.That(recorded.Authored).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsFalse();
+
+        // Draining again is quiet: the documents already say what the GLB says, and the GLB's own
+        // sidecar is not rewritten — every save of a GLB comes through here.
+        var sidecar = fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb.meta", [.. sidecar, (byte)'\n']);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        await Assert.That(watcher.Drain().SidecarActions).IsEqualTo(0);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta")).IsEquivalentTo([.. sidecar, (byte)'\n']);
+    }
+
     /// <summary>
     /// The case every real project is in: the asset already has a sidecar, so an edit needs no
     /// sidecar work at all — and it still has to reach the build. The watch loop rebuilds on
