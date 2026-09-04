@@ -580,9 +580,10 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_leftover_hash_is_not_a_finding()
+    public async Task a_leftover_hash_is_an_error_naming_the_sidecar()
     {
-        // Hash is read for migration and ignored. Line-ending drift after a pull must not warn.
+        // The field is gone from the format; a sidecar from before that is refused rather than
+        // silently rewritten, so a stale branch learns what to run.
         using var fileSystem = CreateProject();
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
@@ -596,7 +597,11 @@ public class ProjectVerifierTests
 
             """);
 
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Count).IsEqualTo(0);
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("hash");
     }
 
     [Test]

@@ -35,7 +35,6 @@ public class SidecarMaintainerTests
 
         await Assert.That(action).IsEqualTo(SidecarAction.Minted);
         var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        await Assert.That(meta.Hash).IsNull();
         await Assert.That(meta.Write()).DoesNotContain("hash");
     }
 
@@ -110,32 +109,6 @@ public class SidecarMaintainerTests
         await Assert.That(action).IsEqualTo(SidecarAction.None);
         var after = SidecarMeta.Load(fileSystem, "/game/assets/textures/fire.png.meta");
         await Assert.That(after.Guid).IsEqualTo(before.Guid);
-        await Assert.That(after.Hash).IsNull();
-    }
-
-    [Test]
-    public async Task a_leftover_recorded_hash_is_dropped()
-    {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
-        new SidecarMeta(Guid.NewGuid()) { Hash = new string('a', 64) }
-            .Save(fileSystem, "/game/assets/models/crate.glb.meta");
-        // Save no longer emits hash, so write the old shape by hand.
-        fileSystem.WriteAllText(
-            "/game/assets/models/crate.glb.meta",
-            """
-            schema_version = 1
-            guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
-            hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
-            """);
-
-        var action = Maintainer(fileSystem).Ensure("/game/assets/models/crate.glb");
-
-        await Assert.That(action).IsEqualTo(SidecarAction.Refreshed);
-        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        await Assert.That(meta.Hash).IsNull();
-        await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.glb.meta")).DoesNotContain("hash");
     }
 
     [Test]
@@ -372,6 +345,5 @@ public class SidecarMaintainerTests
         // left alone — content is not recorded in the sidecar.
         await Assert.That(touched).IsEqualTo(1);
         await Assert.That(fileSystem.FileExists("/game/assets/models/barrel.glb.meta")).IsTrue();
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Hash).IsNull();
     }
 }

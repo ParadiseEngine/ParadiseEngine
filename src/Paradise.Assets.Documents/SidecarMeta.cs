@@ -14,7 +14,7 @@ public sealed class SidecarMeta
 
     public const string Suffix = ".meta";
 
-    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "importer", "hash"];
+    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "importer"];
 
     private readonly List<KeyValuePair<string, CanonicalTomlTable>> _settings = [];
 
@@ -32,13 +32,6 @@ public sealed class SidecarMeta
     /// tooling records one on its next pass — never empty.
     /// </summary>
     public string? Importer { get; set; }
-
-    /// <summary>
-    /// A legacy recorded hash: read for migration, never written, because line endings, smudge
-    /// filters and BOMs make one committed text file hash differently per machine, turning the
-    /// sidecar into a permanent dirty file. Move re-linking keeps hashes in memory instead.
-    /// </summary>
-    public string? Hash { get; set; }
 
     /// <summary>Import-settings tables in document order, one per domain.</summary>
     public IReadOnlyList<KeyValuePair<string, CanonicalTomlTable>> Settings => _settings;
@@ -155,17 +148,6 @@ public sealed class SidecarMeta
         {
             if (importer.Length == 0) throw Fail("holds an empty 'importer'; name one, or delete the line and let the tooling record it");
             meta.Importer = importer;
-        }
-
-        if (TomlDocumentReader.OptionalString(root, "hash", "at the document root", Fail) is { } hash)
-        {
-            // A truncated or upper-case hash would silently never match.
-            if (hash.Length != 64 || !hash.All(static c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f')))
-            {
-                throw Fail($"holds '{hash}' where 'hash' must be a 64-character lowercase hex SHA-256");
-            }
-
-            meta.Hash = hash;
         }
 
         // A scalar here is a typo'd structural key; failing beats the next rewrite dropping it.

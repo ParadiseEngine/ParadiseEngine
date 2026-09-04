@@ -14,7 +14,7 @@ public enum SidecarAction
 
     Minted,
 
-    /// <summary>A legacy recorded hash was dropped.</summary>
+    /// <summary>A sidecar from before the importer field was recorded one.</summary>
     Refreshed,
 
     Carried,
@@ -36,8 +36,10 @@ public enum SidecarAction
 /// Nothing here may destroy an identity: a deleted <c>.meta</c> breaks every reference, and most
 /// moves (<c>git mv</c> on Windows, Finder) arrive as delete-then-add. So a delete quarantines,
 /// and an asset reappearing with the same content takes the identity back. The match is on a hash
-/// held in memory, never a field in the sidecar, because a recorded hash of a text asset differs
-/// per checkout (line endings, smudge filters) and would make every clone a dirty tree.
+/// held in memory, never a field in the sidecar: one was recorded there once, and a text asset
+/// hashes differently per checkout (line endings, smudge filters), which made every clone a dirty
+/// tree. The field is gone from the format; a sidecar still carrying one is refused as an unknown
+/// root key, which is the loud version of the silent cleanup it used to get.
 /// </remarks>
 public sealed partial class SidecarMaintainer
 {
@@ -129,11 +131,9 @@ public sealed partial class SidecarMaintainer
 
             // A recorded importer is never overwritten, even when the chain would now choose
             // differently: an author's edit of that line is exactly what recording it is for.
-            var claimant = existing.Importer is null ? ClaimantFor(asset, existing) : null;
-            if (existing.Hash is null && claimant is null) return SidecarAction.None;
+            if (existing.Importer is not null || ClaimantFor(asset, existing) is not { } claimant) return SidecarAction.None;
 
-            existing.Hash = null;
-            existing.Importer ??= claimant;
+            existing.Importer = claimant;
             Save(existing, sidecar);
             LogRefreshed(_log, sidecar);
             return SidecarAction.Refreshed;
@@ -191,7 +191,6 @@ public sealed partial class SidecarMaintainer
             return SidecarAction.Conflicted;
         }
 
-        meta.Hash = null;
         Save(meta, destination);
         Remove(source);
         LogCarried(_log, source, destination);
@@ -225,8 +224,10 @@ public sealed partial class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        var hash = _seen.Remove(asset, out var seen) ? seen.Hash : meta.Hash;
-        if (hash is null) return SidecarAction.None;
+        // Only an asset this process has hashed can be relinked: the hash is held in memory, never
+        // in the sidecar, so a delete of something never seen is simply a delete.
+        if (!_seen.Remove(asset, out var seen)) return SidecarAction.None;
+        var hash = seen.Hash;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
         LogQuarantined(_log, sidecar);
@@ -299,7 +300,7 @@ public sealed partial class SidecarMaintainer
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "{Sidecar}: left alone — {Reason}")]
     private static partial void LogLeftAlone(ILogger logger, UPath sidecar, string reason);
 
-    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "refreshed: {Sidecar} (dropped recorded hash)")]
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "refreshed: {Sidecar} (importer recorded)")]
     private static partial void LogRefreshed(ILogger logger, UPath sidecar);
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Information, Message = "relinked: {From} -> {To} (guid kept)")]

@@ -133,15 +133,15 @@ public class SidecarMetaTests
     }
 
     [Test]
-    public async Task a_recorded_hash_is_read_and_never_written()
+    public async Task a_recorded_hash_from_an_old_sidecar_is_refused_by_name()
     {
-        var digest = new string('a', 64);
-        var text = $"schema_version = 1\nguid = \"{AssetGuid}\"\nhash = \"{digest}\"\n";
+        // The field left the format: it hashed differently per checkout and dirtied every clone.
+        // Refusing it names the line, where the old silent strip would have hidden a stale tree.
+        var text = $"schema_version = 1\nguid = \"{AssetGuid}\"\nhash = \"{new string('a', 64)}\"\n";
 
-        var meta = SidecarMeta.Parse(text, "fire.png.meta");
+        var error = await Assert.That(() => SidecarMeta.Parse(text, "fire.png.meta")).Throws<SidecarMetaException>();
 
-        await Assert.That(meta.Hash).IsEqualTo(digest);
-        await Assert.That(meta.Write()).IsEqualTo($"schema_version = 1\nguid = \"{AssetGuid}\"\n");
+        await Assert.That(error!.Message).Contains("hash");
     }
 
     [Test]
