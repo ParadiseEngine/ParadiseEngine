@@ -26,7 +26,7 @@ public static class ProjectScaffold
     private const string CubePrefabPath = "prefabs/cube" + AssetClassifier.PrefabSuffix;
     private const string MaterialPath = "materials/default.toml";
     private const string MeshPath = "Models/cube.glb";
-    private const string MeshBlobPath = "Models/cube.mesh";
+    private const string MeshReferencePath = "Models/cube.mesh";
 
     /// <exception cref="IOException">The directory exists and is not empty.</exception>
     public static IReadOnlyList<ScaffoldedFile> Create(IFileSystem fileSystem, UPath root, string name)
@@ -54,7 +54,7 @@ public static class ProjectScaffold
         if (!extracted.Succeeded) throw new InvalidOperationException($"the sample GLB could not be extracted: {string.Join("; ", extracted.Errors)}");
         foreach (var file in extracted.Written) written.Add(new ScaffoldedFile(assets / file.Path, "extracted from the unit cube"));
 
-        var mesh = Reference(fileSystem, assets, MeshBlobPath);
+        var mesh = Reference(fileSystem, assets, MeshReferencePath);
         var material = Reference(fileSystem, assets, MaterialPath);
 
         WriteDocument(fileSystem, assets, CubePrefabPath,

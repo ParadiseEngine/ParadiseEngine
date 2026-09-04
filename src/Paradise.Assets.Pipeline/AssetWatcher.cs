@@ -159,7 +159,7 @@ public sealed partial class AssetWatcher : IDisposable
             var action = _maintainer.Ensure(path);
             if (action != SidecarAction.None) actions++;
             if (action == SidecarAction.Relinked) carried.Add(path);
-            OfferExtraction(path);
+            actions += MintReferences(path);
         }
 
         var expired = _maintainer.Expire(held => now - held.At > QuarantineWindow);
@@ -198,24 +198,34 @@ public sealed partial class AssetWatcher : IDisposable
     }
 
     /// <summary>
-    /// A GLB with geometry that nobody extracted is offered, never extracted: extraction mints
-    /// identities and writes files an author will edit, which is not a watcher's to do on a save.
+    /// A GLB with geometry gets its mesh, skeleton and clip reference documents on the spot: they
+    /// are tool-owned, carry no author work, and a re-export that adds a clip should add its
+    /// document without a verb. Materials, textures and the prefab are the author's from the
+    /// moment they exist, so those are offered, never written — extraction of them mints files an
+    /// author edits, which is not a watcher's to do on a save.
     /// </summary>
-    private void OfferExtraction(UPath path)
+    private int MintReferences(UPath path)
     {
-        if (!MeshContainer.IsMesh(path) || !_fileSystem.FileExists(path)) return;
+        if (!MeshContainer.IsMesh(path) || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
-        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, _fileSystem.ReadAllBytes(path))) return;
+        var bytes = _fileSystem.ReadAllBytes(path);
+        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, bytes)) return 0;
+
+        var relative = path.FullName[(_layout.Assets.FullName.Length + 1)..];
+        var result = AssetExtractor.MintReferences(_fileSystem, _layout, path, _importers, _log);
+        foreach (var error in result.Errors) LogMintRefused(_log, error);
+        foreach (var written in result.Written) LogMinted(_log, written.ToString());
+
         try
         {
-            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Extracted) return;
+            if (AssetExtractor.HasAuthoredParts(bytes) && !GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Authored) LogOffer(_log, relative);
         }
         catch (SidecarMetaException)
         {
-            return;
+            // verify's finding
         }
 
-        LogOffer(_log, path.FullName[(_layout.Assets.FullName.Length + 1)..]);
+        return result.Written.Count;
     }
 
     /// <summary>Whatever an earlier pass deferred and is quiet now.</summary>
@@ -345,8 +355,14 @@ public sealed partial class AssetWatcher : IDisposable
     [LoggerMessage(EventId = 18, Level = LogLevel.Information, Message = "would record references (dry run)")]
     private static partial void LogWouldReconcile(ILogger logger);
 
-    [LoggerMessage(EventId = 19, Level = LogLevel.Information, Message = "not extracted: {Relative} — run `paradise assets extract {Relative}` to make its mesh, materials and clips")]
+    [LoggerMessage(EventId = 19, Level = LogLevel.Information, Message = "not extracted: {Relative} — run `paradise assets extract {Relative}` to make its materials, textures and prefab")]
     private static partial void LogOffer(ILogger logger, string relative);
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Information, Message = "minted: {Written}")]
+    private static partial void LogMinted(ILogger logger, string written);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "not minted: {Error}")]
+    private static partial void LogMintRefused(ILogger logger, string error);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

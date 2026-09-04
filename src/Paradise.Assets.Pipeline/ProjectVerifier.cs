@@ -91,6 +91,10 @@ public static class ProjectVerifier
                     VerifyMaterial(fileSystem, path, findings);
                     break;
 
+                case AssetClass.MeshReference:
+                    VerifyMeshReference(fileSystem, path, findings);
+                    break;
+
                 case AssetClass.Foreign when MeshContainer.IsMesh(path):
                     VerifyExtracted(fileSystem, path, findings);
                     break;
@@ -231,10 +235,11 @@ public static class ProjectVerifier
     {
         var sidecar = SidecarMeta.PathFor(path);
         if (!fileSystem.FileExists(sidecar)) return;   // the missing-sidecar finding already covers it
-        if (!MeshContainer.HasGeometry(path, fileSystem.ReadAllBytes(path))) return;
+        var bytes = fileSystem.ReadAllBytes(path);
+        if (!MeshContainer.HasGeometry(path, bytes) || !AssetExtractor.HasAuthoredParts(bytes)) return;
         try
         {
-            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecar)).Extracted) return;
+            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecar)).Authored) return;
         }
         catch (SidecarMetaException)
         {
@@ -243,7 +248,23 @@ public static class ProjectVerifier
 
         findings.Add(new VerifyFinding(
             VerifySeverity.Warning, path,
-            "has not been extracted, so nothing of it ships — run `paradise assets extract` on it to produce its mesh, materials and clips"));
+            "has not been extracted — run `paradise assets extract` on it to produce its materials, textures and prefab (the watcher mints its mesh and clips)"));
+    }
+
+    private static void VerifyMeshReference(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    {
+        try
+        {
+            var document = MeshReferenceDocument.Load(fileSystem, path);
+            if (MeshReferenceDocument.SlotOf(path) is { } slot && document.Slot != slot)
+            {
+                findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names slot '{document.Slot}' but its extension says {slot}; the extension is what the build cooks to"));
+            }
+        }
+        catch (FormatException failure)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, failure.Message));
+        }
     }
 
     private static void VerifyMaterial(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)

@@ -18,6 +18,9 @@ public enum AssetClass
     /// <summary>A <c>*.material</c> document: a config that references textures.</summary>
     Material,
 
+    /// <summary>A <c>*.mesh</c>, <c>*.skeleton</c> or <c>*.anim</c> document: a name for one part of a GLB the build cooks.</summary>
+    MeshReference,
+
     Sidecar,
 
     /// <summary>Listed in the project's <c>[assets] ignore</c>: never built, never given a sidecar, never a verify finding.</summary>
@@ -43,6 +46,7 @@ public static class AssetClassifier
         if (path == assetsRoot / AssetProjectLayout.ManifestFileName) return AssetClass.Manifest;
         if (name.EndsWith(PrefabSuffix, StringComparison.OrdinalIgnoreCase)) return AssetClass.Prefab;
         if (name.EndsWith(MaterialDocument.Suffix, StringComparison.OrdinalIgnoreCase)) return AssetClass.Material;
+        if (MeshReferenceDocument.IsMeshReferencePath(path)) return AssetClass.MeshReference;
         if (name.EndsWith(".toml", StringComparison.OrdinalIgnoreCase)) return AssetClass.Config;
         return AssetClass.Foreign;
     }

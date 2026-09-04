@@ -103,6 +103,43 @@ public class AssetWatcherTests
         await Assert.That(watcher.HasPending).IsFalse();
     }
 
+    [Test]
+    public async Task a_glb_with_geometry_gets_its_reference_documents_on_the_spot()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        var b = new Paradise.Assets.Gltf.Test.GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var node = b.AddNode(mesh: b.AddMesh(Paradise.Assets.Gltf.Test.GlbTestBuilder.Primitive(position)), name: "Crate");
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
+        b.AddAnimation("Bob", (node, "translation", times, values, null));
+        b.SetSceneRoots(node);
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", b.Build());
+
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        // Mesh and clip documents, with sidecars, and the GLB's record names them; materials and
+        // the prefab are the author's and stay the verb's to make.
+        foreach (var expected in new[] { "crate.mesh", "crate.skeleton", "crate.Bob.anim" })
+        {
+            await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected)).IsTrue().Because(expected);
+            await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected + ".meta")).IsTrue().Because(expected + ".meta");
+        }
+
+        var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta"));
+        await Assert.That(recorded.Extracted).IsTrue();
+        await Assert.That(recorded.Authored).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsFalse();
+
+        // Draining again is quiet: the documents already say what the GLB says.
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        await Assert.That(watcher.Drain().SidecarActions).IsEqualTo(0);
+    }
+
     /// <summary>
     /// The case every real project is in: the asset already has a sidecar, so an edit needs no
     /// sidecar work at all — and it still has to reach the build. The watch loop rebuilds on

@@ -30,7 +30,7 @@ public class AssetExtractorTests
         """;
 
     /// <summary>A crate: one embedded PNG, two materials (the first samples it), one clip on the mesh node.</summary>
-    private static byte[] CrateGlb(float x = 0f, byte[]? png = null)
+    private static byte[] CrateGlb(float x = 0f, byte[]? png = null, string clip = "Bob")
     {
         var b = new GlbTestBuilder();
         var image = b.AddImage(png ?? s_png, "image/png");
@@ -42,7 +42,7 @@ public class AssetExtractorTests
         var node = b.AddNode(mesh: mesh, name: "Crate");
         var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
         var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
-        b.AddAnimation("Bob", (node, "translation", times, values, null));
+        b.AddAnimation(clip, (node, "translation", times, values, null));
         b.SetSceneRoots(node);
         return b.Build();
     }
@@ -72,6 +72,13 @@ public class AssetExtractorTests
             await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected)).IsTrue().Because(expected);
             await Assert.That(fileSystem.FileExists("/game/assets/models/" + expected + ".meta")).IsTrue().Because(expected + ".meta");
         }
+
+        // The mesh, skeleton and clip are documents naming the GLB; the build cooks the blobs.
+        var meshDocument = MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.mesh");
+        await Assert.That(meshDocument.Slot).IsEqualTo(MeshSlot.Mesh);
+        await Assert.That(meshDocument.Source.Guid).IsEqualTo(SidecarMeta.Load(fileSystem, Glb + ".meta").Guid);
+        var clipDocument = MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Bob.anim");
+        await Assert.That(clipDocument).IsEqualTo(new MeshReferenceDocument(meshDocument.Source, MeshSlot.Clip, "Bob", 0));
 
         // The image left the container: the file IS the texture now, and the GLB points at it.
         var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
@@ -130,19 +137,50 @@ public class AssetExtractorTests
     }
 
     [Test]
-    public async Task a_re_exported_glb_re_extracts_the_mesh_and_leaves_the_prefab_alone()
+    public async Task a_re_exported_glb_changes_no_document_and_the_build_cooks_the_new_geometry()
     {
         using var fileSystem = Project();
         AssetExtractor.Extract(fileSystem, s_layout, Glb);
         var prefab = fileSystem.ReadAllText("/game/assets/models/crate.prefab");
+        var mesh = fileSystem.ReadAllText("/game/assets/models/crate.mesh");
         fileSystem.WriteAllBytes(Glb, CrateGlb(x: 5f));
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Written.Any(w => w.Path == "models/crate.mesh" && w.Note!.Contains("re-extracted"))).IsTrue();
-        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
+        // The re-export embedded the same image again, so the GLB is rewritten to point at the file; nothing else is.
+        await Assert.That(result.Written.Select(w => w.Path)).IsEquivalentTo(["models/crate.glb"]);
+        await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.mesh")).IsEqualTo(mesh);
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.prefab")).IsEqualTo(prefab);
+
+        var build = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(build.Errors).IsEmpty();
+        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
+    }
+
+    [Test]
+    public async Task a_renamed_clip_updates_its_document_and_a_foreign_document_is_refused()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        fileSystem.WriteAllBytes(Glb, CrateGlb(clip: "Bounce"));
+
+        var renamed = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(renamed.Errors).IsEmpty();
+        // The document keeps its file (renaming is the author's, through mv) and now names the new clip.
+        await Assert.That(renamed.Written.Single(w => w.Path.EndsWith(".anim")).Path).IsEqualTo("models/crate.Bob.anim");
+        await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Bob.anim").Name).IsEqualTo("Bounce");
+
+        // A document at the extraction path that names ANOTHER GLB is not this one's to overwrite.
+        var other = new MeshReferenceDocument(new Paradise.Authoring.AssetReference(Guid.NewGuid(), "models/other.glb"), MeshSlot.Mesh);
+        fileSystem.WriteAllBytes("/game/assets/models/crate.mesh", other.WriteBytes());
+        var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(refused.Errors.Single()).Contains("models/other.glb");
+        await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.mesh").Source.Path).IsEqualTo("models/other.glb");
+        var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
+        await Assert.That(taken.Errors).IsEmpty();
+        await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.mesh").Source.Path).IsEqualTo("models/crate.glb");
     }
 
     [Test]
@@ -193,30 +231,34 @@ public class AssetExtractorTests
     }
 
     [Test]
-    public async Task an_edited_blob_is_a_warning_and_both_sides_changed_is_a_conflict_the_flags_resolve()
+    public async Task an_edited_image_is_a_warning_and_both_sides_changed_is_a_conflict_the_flags_resolve()
     {
         using var fileSystem = Project();
         AssetExtractor.Extract(fileSystem, s_layout, Glb);
-        fileSystem.WriteAllBytes("/game/assets/models/crate.Bob.anim", [1, 2, 3]);
+        byte[] painted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 7, 7, 7, 7];
+        fileSystem.WriteAllBytes("/game/assets/models/crate_0.png", painted);
 
+        // The GLB no longer embeds the image, so an edit alone is nothing to sync; a re-export
+        // that embeds the ORIGINAL pixels again is the GLB side unchanged and the file's edit kept.
+        fileSystem.WriteAllBytes(Glb, CrateGlb());
         var edited = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(edited.Errors).IsEmpty();
-        await Assert.That(edited.Warnings.Any(w => w.Contains("crate.Bob.anim") && w.Contains("cannot be written back"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.Bob.anim")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+        await Assert.That(edited.Warnings.Any(w => w.Contains("crate_0.png") && w.Contains("cannot be written back"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted);
 
-        // Both sides of the MESH move: the GLB's geometry, and the extracted blob under it.
-        fileSystem.WriteAllBytes(Glb, CrateGlb(x: 5f));
-        fileSystem.WriteAllBytes("/game/assets/models/crate.mesh", [4, 5, 6]);
+        // Both sides move: the artist re-textures, and the file on disk is still the author's edit.
+        byte[] repainted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9];
+        fileSystem.WriteAllBytes(Glb, CrateGlb(png: repainted));
         var conflict = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(conflict.Succeeded).IsFalse();
-        await Assert.That(conflict.Errors.Any(e => e.Contains("crate.mesh") && e.Contains("--take-glb"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).IsEquivalentTo(new byte[] { 4, 5, 6 });
+        await Assert.That(conflict.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-glb"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted);
+        // And the GLB was not rewritten to point at a file that is not what it embeds.
+        await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
 
         var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
         await Assert.That(resolved.Succeeded).IsTrue();
-        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
-        // The edited clip is still the author's, still diverged, still said so.
-        await Assert.That(resolved.Warnings.Any(w => w.Contains("crate.Bob.anim"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
     }
 
     [Test]
@@ -325,14 +367,13 @@ public class AssetExtractorTests
         // mv rewrote the GLB's record on the spot, through its importer, like any reference.
         await Assert.That(moved.Rewritten).Contains("models/crate.glb");
         var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
-        await Assert.That(recorded.Mesh!.Reference.Path).IsEqualTo("blobs/crate.mesh");
+        await Assert.That(recorded.Mesh!.Path).IsEqualTo("blobs/crate.mesh");
 
-        fileSystem.WriteAllBytes(Glb, CrateGlb(x: 5f));
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Written).IsEmpty();
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsFalse();
-        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/blobs/crate.mesh")).Vertices[0]).IsEqualTo(5f);
         await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/blobs/crate.mesh.meta").Guid).IsEqualTo(meshGuid);
 
         // And a removed one is a dangling reference the GLB reports, not a silent re-mint.
@@ -372,20 +413,21 @@ public class AssetExtractorTests
         using var fileSystem = Project();
         AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
-        // The author edits 'metal'; the artist re-exports both the geometry and 'metal'.
+        // The author edits 'metal'; the artist re-exports both the texture and 'metal'.
         var metal = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
         var doc = new CanonicalTomlTable();
         foreach (var (key, value) in metal) doc.Add(key, key == "RoughnessFactor" ? 0.9 : value);
         if (!doc.ContainsKey("RoughnessFactor")) doc.Add("RoughnessFactor", 0.9);
         fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(doc));
-        fileSystem.WriteAllBytes(Glb, GlbMaterialWriter.Write(CrateGlb(x: 5f), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _));
+        byte[] repainted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9];
+        fileSystem.WriteAllBytes(Glb, GlbMaterialWriter.Write(CrateGlb(png: repainted), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _));
 
         var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(refused.Succeeded).IsFalse();
         await Assert.That(refused.Errors.Single()).Contains("crate.metal.material");
-        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
 
-        // The retry sees the same one conflict, not a manufactured one on the mesh it already rewrote.
+        // The retry sees the same one conflict, not a manufactured one on the image it already rewrote.
         var retry = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(retry.Errors.Single()).Contains("crate.metal.material");
         await Assert.That(retry.Written).IsEmpty();
