@@ -141,6 +141,15 @@ public sealed partial class AssetWatcher : IDisposable
         }
 
         var actions = 0;
+        // A deleted mesh, skeleton or clip document is the watcher's to put back, like a deleted
+        // sidecar: its GLB still has the part. The guid is read now, while the sidecar a plain
+        // delete leaves behind still says it; the GLB is found through the graph after the
+        // quarantine, so the re-minted document relinks to the held identity.
+        var orphaned = deletes
+            .Where(path => MeshReferenceDocument.IsMeshReferencePath(path))
+            .Select(path => IdentityOf(path))
+            .OfType<Guid>()
+            .ToList();
         foreach (var path in deletes)
         {
             if (_maintainer.Quarantine(path, now) != SidecarAction.None) actions++;
@@ -161,6 +170,8 @@ public sealed partial class AssetWatcher : IDisposable
             if (action == SidecarAction.Relinked) carried.Add(path);
             actions += MintReferences(path);
         }
+
+        foreach (var glb in OwnersOf(orphaned)) actions += MintReferences(glb);
 
         var expired = _maintainer.Expire(held => now - held.At > QuarantineWindow);
 
@@ -197,6 +208,46 @@ public sealed partial class AssetWatcher : IDisposable
         return CatchUp(index, dependents.Distinct());
     }
 
+    /// <summary>Every GLB's mesh, skeleton and clip documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
+    public int MintReferences()
+    {
+        var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
+        var minted = 0;
+        foreach (var path in index.Files.Where(MeshContainer.IsMesh).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal))
+        {
+            minted += MintReferences(path);
+        }
+
+        return minted;
+    }
+
+    private Guid? IdentityOf(UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!_fileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return SidecarMeta.Load(_fileSystem, sidecar).Guid;
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The GLBs whose records name any of <paramref name="documents"/>, each once.</summary>
+    private List<UPath> OwnersOf(IReadOnlyList<Guid> documents)
+    {
+        if (documents.Count == 0) return [];
+        var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
+        var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
+        return documents
+            .SelectMany(graph.DependentFilesOf)
+            .Where(MeshContainer.IsMesh)
+            .Distinct()
+            .ToList();
+    }
+
     /// <summary>
     /// A GLB with geometry gets its mesh, skeleton and clip reference documents on the spot: they
     /// are tool-owned, carry no author work, and a re-export that adds a clip should add its
@@ -208,17 +259,22 @@ public sealed partial class AssetWatcher : IDisposable
     {
         if (!MeshContainer.IsMesh(path) || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
-        var bytes = _fileSystem.ReadAllBytes(path);
-        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, bytes)) return 0;
+        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, _fileSystem.ReadAllBytes(path))) return 0;
 
         var relative = path.FullName[(_layout.Assets.FullName.Length + 1)..];
-        var result = AssetExtractor.MintReferences(_fileSystem, _layout, path, _importers, _log);
+        if (_maintainer.DryRun)
+        {
+            LogWouldMint(_log, relative);
+            return 0;
+        }
+
+        var result = AssetExtractor.MintReferences(_fileSystem, _layout, path, _importers, _log, _maintainer);
         foreach (var error in result.Errors) LogMintRefused(_log, error);
         foreach (var written in result.Written) LogMinted(_log, written.ToString());
 
         try
         {
-            if (AssetExtractor.HasAuthoredParts(bytes) && !GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Authored) LogOffer(_log, relative);
+            if (result.HasAuthoredParts && !GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Authored) LogOffer(_log, relative);
         }
         catch (SidecarMetaException)
         {
@@ -363,6 +419,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "not minted: {Error}")]
     private static partial void LogMintRefused(ILogger logger, string error);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Information, Message = "would mint the mesh, skeleton and clip documents of {Relative} (dry run)")]
+    private static partial void LogWouldMint(ILogger logger, string relative);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

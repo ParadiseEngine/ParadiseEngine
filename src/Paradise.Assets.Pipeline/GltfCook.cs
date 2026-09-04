@@ -123,6 +123,13 @@ public static class GltfCook
         return new ClipData(clip.Name ?? $"clip_{index}", channels);
     }
 
+    /// <summary>SHA-256 of the clip's cooked channels, name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
+    public static string ClipFingerprint(ClipData clip)
+    {
+        ArgumentNullException.ThrowIfNull(clip);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
+    }
+
     /// <summary>Positions through the matrix, normals and tangents through its cofactor matrix (non-uniform scale would shear them off the surface otherwise), re-normalized; uv and tangent sign pass through.</summary>
     private static float[] BakeTransform(float[] vertices, in Matrix4x4 transform)
     {

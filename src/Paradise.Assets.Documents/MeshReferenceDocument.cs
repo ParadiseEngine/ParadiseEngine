@@ -20,12 +20,14 @@ public enum MeshSlot
 /// DCC changes nothing an author has to keep in step.
 /// </summary>
 /// <remarks>
-/// A clip is named by its glTF animation name, with the animation index as the tiebreak when the
-/// name is missing, duplicated, or changed by a re-export: the name is what an animator means,
-/// the index is what the file guarantees. Tool-written and never hand-edited, which is why
-/// <c>extract</c> may overwrite one that disagrees with the GLB without a conflict rule.
+/// A clip is named by its glTF animation name; when the GLB no longer has that name, the
+/// <see cref="Hash"/> of the clip's cooked data finds the same clip under a new name, and the
+/// animation index is the last tiebreak: the name is what an animator means, the hash is what the
+/// data is, the index is what the file guarantees. Tool-written and never hand-edited, which is
+/// why <c>extract</c> may overwrite one that disagrees with the GLB without a conflict rule.
 /// </remarks>
-public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null)
+/// <param name="Hash">SHA-256 of the part's cooked bytes as of the last extract; a clip renamed in the DCC is found by it.</param>
+public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null, string? Hash = null)
 {
     public const int SchemaVersion = 1;
 
@@ -33,9 +35,7 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
     public const string SkeletonSuffix = ".skeleton";
     public const string ClipSuffix = ".anim";
 
-    public static readonly IReadOnlyList<string> Suffixes = [MeshSuffix, SkeletonSuffix, ClipSuffix];
-
-    private static readonly string[] s_knownKeys = ["schema_version", "source", "slot", "name", "index"];
+    private static readonly string[] s_knownKeys = ["schema_version", "source", "slot", "name", "index", "hash"];
 
     public static bool IsMeshReferencePath(UPath path)
         => SlotOf(path) is not null;
@@ -49,11 +49,12 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         _ => null,
     };
 
-    public static string SuffixFor(MeshSlot slot) => slot switch
+    /// <summary>The slot as the document spells it, for a message that quotes the file.</summary>
+    public static string Spell(MeshSlot slot) => slot switch
     {
-        MeshSlot.Mesh => MeshSuffix,
-        MeshSlot.Skeleton => SkeletonSuffix,
-        MeshSlot.Clip => ClipSuffix,
+        MeshSlot.Mesh => "mesh",
+        MeshSlot.Skeleton => "skeleton",
+        MeshSlot.Clip => "clip",
         _ => throw new ArgumentOutOfRangeException(nameof(slot)),
     };
 
@@ -93,10 +94,11 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
             index = (int)value;
         }
 
+        var hash = TomlDocumentReader.OptionalString(table, "hash", "at the document root", Fail);
         if (slot == MeshSlot.Clip && name is null && index is null) throw Fail("a clip names its animation by 'name' or 'index'");
         if (slot != MeshSlot.Clip && (name is not null || index is not null)) throw Fail($"a {slotText} carries no 'name' or 'index'; a GLB has one of each");
 
-        return new MeshReferenceDocument(reference, slot, name, index);
+        return new MeshReferenceDocument(reference, slot, name, index, hash);
     }
 
     public static MeshReferenceDocument Load(IFileSystem fileSystem, UPath path)
@@ -115,10 +117,11 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         {
             { "schema_version", (long)SchemaVersion },
             { "source", AssetReferenceCodec.Write(Source) },
-            { "slot", Slot switch { MeshSlot.Mesh => "mesh", MeshSlot.Skeleton => "skeleton", _ => "clip" } },
+            { "slot", Spell(Slot) },
         };
         if (Name is not null) table.Add("name", Name);
         if (Index is { } index) table.Add("index", (long)index);
+        if (Hash is not null) table.Add("hash", Hash);
         return table;
     }
 }

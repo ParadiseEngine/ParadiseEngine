@@ -1,4 +1,5 @@
 using Paradise.Assets.Documents;
+using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
 
 using Zio;
@@ -64,6 +65,7 @@ public static class ProjectVerifier
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var chain = importers ?? AssetImporters.All;
         var guids = new Dictionary<Guid, UPath>();
+        var cooked = new Dictionary<UPath, CookedGlb?>();
         foreach (var path in sources.Files)
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
@@ -92,7 +94,7 @@ public static class ProjectVerifier
                     break;
 
                 case AssetClass.MeshReference:
-                    VerifyMeshReference(fileSystem, path, findings);
+                    VerifyMeshReference(fileSystem, sources, path, cooked, findings);
                     break;
 
                 case AssetClass.Foreign when MeshContainer.IsMesh(path):
@@ -251,19 +253,54 @@ public static class ProjectVerifier
             "has not been extracted — run `paradise assets extract` on it to produce its materials, textures and prefab (the watcher mints its mesh and clips)"));
     }
 
-    private static void VerifyMeshReference(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    /// <summary>A document parses, its slot is its extension, and the GLB it names still has the part — by the build's own rule, so a stale document is a finding here and not a build failure later.</summary>
+    private static void VerifyMeshReference(IFileSystem fileSystem, AssetIndex sources, UPath path, Dictionary<UPath, CookedGlb?> cooked, List<VerifyFinding> findings)
     {
+        MeshReferenceDocument document;
         try
         {
-            var document = MeshReferenceDocument.Load(fileSystem, path);
-            if (MeshReferenceDocument.SlotOf(path) is { } slot && document.Slot != slot)
-            {
-                findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names slot '{document.Slot}' but its extension says {slot}; the extension is what the build cooks to"));
-            }
+            document = MeshReferenceDocument.Load(fileSystem, path);
         }
         catch (FormatException failure)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, path, failure.Message));
+            return;
+        }
+
+        if (MeshReferenceDocument.SlotOf(path) is { } slot && document.Slot != slot)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension says '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build cooks to"));
+            return;
+        }
+
+        // A source that resolves to nothing is the reference check's finding.
+        var resolution = sources.Resolve(document.Source);
+        if (!resolution.Found || !MeshContainer.IsMesh(resolution.Asset)) return;
+
+        if (!cooked.TryGetValue(resolution.Asset, out var glb))
+        {
+            try
+            {
+                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(resolution.Asset)));
+            }
+            catch (Exception error) when (error is InvalidDataException or NotSupportedException)
+            {
+                glb = null;   // the GLB's own problem, reported when it is built or extracted
+            }
+
+            cooked[resolution.Asset] = glb;
+        }
+
+        if (glb is null) return;
+        var missing = document.Slot switch
+        {
+            MeshSlot.Skeleton when glb.Skeleton is null => "has no node tree to cook a skeleton from",
+            MeshSlot.Clip when MeshReferenceStep.Clip(glb, document, out var problem) is null => problem,
+            _ => null,
+        };
+        if (missing is not null)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names a part '{resolution.Path}' no longer has: it {missing}"));
         }
     }
 

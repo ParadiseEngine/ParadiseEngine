@@ -10,12 +10,13 @@ public class MeshReferenceDocumentTests
     [Test]
     public async Task a_clip_round_trips_with_its_name_and_index()
     {
-        var document = new MeshReferenceDocument(s_source, MeshSlot.Clip, "Bob", 2);
+        var document = new MeshReferenceDocument(s_source, MeshSlot.Clip, "Bob", 2, "ab12");
 
         var parsed = MeshReferenceDocument.Parse(document.Write(), "crate.Bob.anim");
 
         await Assert.That(parsed).IsEqualTo(document);
         await Assert.That(document.Write()).Contains("slot = \"clip\"");
+        await Assert.That(document.Write()).Contains("hash = \"ab12\"");
     }
 
     [Test]

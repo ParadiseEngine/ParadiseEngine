@@ -61,19 +61,24 @@ public class MeshReferenceImportTests
     }
 
     [Test]
-    public async Task a_clip_is_found_by_name_and_by_index_when_the_name_changed()
+    public async Task a_clip_is_found_by_name_then_by_hash_then_by_index()
     {
-        var (fileSystem, source) = Project(CrateGlb(0f, "Idle", "Run"));
+        var glb = CrateGlb(0f, "Idle", "Run");
+        var (fileSystem, source) = Project(glb);
         using var _ = fileSystem;
+        var cooked = GltfCook.Cook(Paradise.Assets.Gltf.GltfSceneReader.ReadGeometry(glb));
         Reference(fileSystem, "/game/assets/models/crate.Run.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Run", 1));
-        // Renamed in the DCC since the document was written: the index still finds it.
-        Reference(fileSystem, "/game/assets/models/crate.Walk.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Walk", 0));
+        // Renamed in the DCC since the document was written, and the index points elsewhere: the hash finds it.
+        Reference(fileSystem, "/game/assets/models/crate.Walk.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Walk", 1, GltfCook.ClipFingerprint(cooked.Clips[0])));
+        // Renamed and re-exported: only the index is left.
+        Reference(fileSystem, "/game/assets/models/crate.Jog.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Jog", 0, "0000"));
 
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim")).Name).IsEqualTo("Run");
         await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Idle");
+        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Jog.anim")).Name).IsEqualTo("Idle");
     }
 
     [Test]
@@ -111,6 +116,22 @@ public class MeshReferenceImportTests
     }
 
     [Test]
+    public async Task verify_reports_a_document_for_a_clip_the_glb_no_longer_has()
+    {
+        var (fileSystem, source) = Project();
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Bob.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Bob", 0));
+        Reference(fileSystem, "/game/assets/models/crate.Jump.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Jump", 7, "0000"));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        var stale = findings.Single(f => f.Severity == VerifySeverity.Error);
+        await Assert.That(stale.Path.GetName()).IsEqualTo("crate.Jump.anim");
+        await Assert.That(stale.Message).Contains("no longer has");
+        await Assert.That(stale.Message).Contains("'Jump'");
+    }
+
+    [Test]
     public async Task verify_reports_a_document_whose_slot_disagrees_with_its_extension()
     {
         var (fileSystem, source) = Project();
@@ -119,6 +140,6 @@ public class MeshReferenceImportTests
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
-        await Assert.That(findings.Single(f => f.Severity == VerifySeverity.Error).Message).Contains("extension says Mesh");
+        await Assert.That(findings.Single(f => f.Severity == VerifySeverity.Error).Message).Contains("extension says 'mesh'");
     }
 }

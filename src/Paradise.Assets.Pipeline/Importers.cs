@@ -354,7 +354,7 @@ internal static class MeshReferenceStep
 
         if (document.Slot != slot)
         {
-            errors.Add($"{context.Source}: names slot '{document.Slot}' but its extension cooks a {slot}; the extension is what the build writes");
+            errors.Add($"{context.Source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
             return true;
         }
 
@@ -414,12 +414,13 @@ internal static class MeshReferenceStep
         return true;
     }
 
-    /// <summary>The name decides when it names exactly one clip; the index is the tiebreak for a name the GLB lost or has twice.</summary>
-    private static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out string problem)
+    /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
+    internal static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out string problem)
     {
         problem = "";
         var named = document.Name is null ? [] : cooked.Clips.Where(clip => clip.Name == document.Name).ToList();
         if (named.Count == 1) return named[0];
+        if (document.Hash is { } hash && cooked.Clips.FirstOrDefault(clip => GltfCook.ClipFingerprint(clip) == hash) is { } same) return same;
         if (document.Index is { } index && index < cooked.Clips.Count) return cooked.Clips[index];
 
         var available = cooked.Clips.Count == 0 ? "no clips" : "clips " + string.Join(", ", cooked.Clips.Select(clip => $"'{clip.Name}'"));

@@ -106,6 +106,8 @@ internal static class Verbs
 
         using var signals = new WatchSignals();
         using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers);
+        var minted = watcher.MintReferences();
+        if (minted > 0) Console.WriteLine($"watch: {minted} mesh, skeleton and clip document(s) minted");
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
@@ -302,9 +304,12 @@ internal static class Verbs
 
         var failed = 0;
         var log = PipelineLog.For(fileSystem, layout);
+        // The same minting authority `watch` runs, started for this command; no watcher is alive
+        // to hold a quarantined identity, so there is none to lose.
+        var maintainer = new SidecarMaintainer(fileSystem, layout, log, ignore: IgnoreRules(fileSystem, layout), importers: importers);
         foreach (var glb in targets)
         {
-            var result = AssetExtractor.Extract(fileSystem, layout, glb, importers, resolution, log);
+            var result = AssetExtractor.Extract(fileSystem, layout, glb, importers, resolution, log, maintainer: maintainer);
             foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
             foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
             foreach (var written in result.Written) Console.WriteLine($"wrote: {written}");

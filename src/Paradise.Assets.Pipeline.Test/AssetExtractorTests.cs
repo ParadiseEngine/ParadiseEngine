@@ -30,7 +30,7 @@ public class AssetExtractorTests
         """;
 
     /// <summary>A crate: one embedded PNG, two materials (the first samples it), one clip on the mesh node.</summary>
-    private static byte[] CrateGlb(float x = 0f, byte[]? png = null, string clip = "Bob")
+    private static byte[] CrateGlb(float x = 0f, byte[]? png = null, string clip = "Bob", string[]? clips = null)
     {
         var b = new GlbTestBuilder();
         var image = b.AddImage(png ?? s_png, "image/png");
@@ -42,7 +42,12 @@ public class AssetExtractorTests
         var node = b.AddNode(mesh: mesh, name: "Crate");
         var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
         var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
-        b.AddAnimation(clip, (node, "translation", times, values, null));
+        var bounce = b.AddFloatAccessor([0f, 0f, 0f, 0f, 4f, 0f], "VEC3");
+        foreach (var (name, n) in (clips ?? [clip]).Select((name, n) => (name, n)))
+        {
+            // Every clip after the first has its own data, so a hash tells them apart.
+            b.AddAnimation(name, (node, "translation", times, n == 0 ? values : bounce, null));
+        }
         b.SetSceneRoots(node);
         return b.Build();
     }
@@ -78,7 +83,8 @@ public class AssetExtractorTests
         await Assert.That(meshDocument.Slot).IsEqualTo(MeshSlot.Mesh);
         await Assert.That(meshDocument.Source.Guid).IsEqualTo(SidecarMeta.Load(fileSystem, Glb + ".meta").Guid);
         var clipDocument = MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Bob.anim");
-        await Assert.That(clipDocument).IsEqualTo(new MeshReferenceDocument(meshDocument.Source, MeshSlot.Clip, "Bob", 0));
+        await Assert.That(clipDocument with { Hash = null }).IsEqualTo(new MeshReferenceDocument(meshDocument.Source, MeshSlot.Clip, "Bob", 0));
+        await Assert.That(clipDocument.Hash).IsNotNull();
 
         // The image left the container: the file IS the texture now, and the GLB points at it.
         var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
@@ -178,9 +184,45 @@ public class AssetExtractorTests
         var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(refused.Errors.Single()).Contains("models/other.glb");
         await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.mesh").Source.Path).IsEqualTo("models/other.glb");
+        // The record still names the file, so it is followed on a move and the GLB still reads as minted.
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Mesh!.Path).IsEqualTo("models/crate.mesh");
         var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
         await Assert.That(taken.Errors).IsEmpty();
         await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.mesh").Source.Path).IsEqualTo("models/crate.glb");
+    }
+
+    [Test]
+    public async Task a_reordered_clip_keeps_its_document_and_a_renamed_one_is_found_by_its_hash()
+    {
+        using var fileSystem = Project(CrateGlb(clips: ["Walk", "Run"]));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var walk = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Walk.anim.meta").Guid;
+        var run = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Run.anim.meta").Guid;
+
+        // Swapped in the DCC: each document keeps its name and guid and learns its new index.
+        fileSystem.WriteAllBytes(Glb, CrateGlb(clips: ["Run", "Walk"]));
+        var reordered = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(reordered.Errors).IsEmpty();
+        await Assert.That(reordered.Written.Where(w => w.Path.EndsWith(".anim")).All(w => w.Note!.Contains("reordered"))).IsTrue();
+        var walkDocument = MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Walk.anim");
+        await Assert.That(walkDocument.Name).IsEqualTo("Walk");
+        await Assert.That(walkDocument.Index).IsEqualTo(1);
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Walk.anim.meta").Guid).IsEqualTo(walk);
+        await Assert.That(fileSystem.EnumerateFiles("/game/assets/models", "*.anim").Count()).IsEqualTo(2);
+
+        // The build agrees with the documents: Walk's blob is the Walk clip, whatever its index.
+        var build = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(build.Errors).IsEmpty();
+        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Walk");
+
+        // Renamed in the DCC with the same data: the hash finds it, the document follows the name.
+        fileSystem.WriteAllBytes(Glb, CrateGlb(clips: ["Run", "Stride"]));
+        var renamed = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(renamed.Errors).IsEmpty();
+        await Assert.That(renamed.Written.Single(w => w.Path.EndsWith(".anim")).Note).Contains("renamed in the GLB from 'Walk'");
+        await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Walk.anim").Name).IsEqualTo("Stride");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Walk.anim.meta").Guid).IsEqualTo(walk);
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Run.anim.meta").Guid).IsEqualTo(run);
     }
 
     [Test]
