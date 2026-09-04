@@ -170,6 +170,47 @@ public class AssetMoverTests
     }
 
     [Test]
+    public async Task a_stamped_mesh_uri_follows_its_moved_texture()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
+            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
+            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
+
+        await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" });
+        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.glb"))[0];
+        await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
+        await Assert.That(image.Reference!.Path).IsEqualTo("textures/metal/rust.png");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_moved_mesh_has_its_own_uris_relocated()
+    {
+        // The texture did not move; the mesh did, so every relative uri in it went stale at once.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
+            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
+            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
+
+        await Assert.That(result.Warnings).IsEmpty();
+        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/props/box/crate.glb"))[0];
+        await Assert.That(image.Uri).IsEqualTo("../../textures/rust.png");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
     public async Task a_document_that_cannot_be_rewritten_is_an_error_after_the_files_moved()
     {
         if (OperatingSystem.IsWindows()) Skip.Test("read-only bits are a Unix notion here");

@@ -89,10 +89,28 @@ public static partial class AssetMover
 
         var after = AssetIndex.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
+        var graph = ReferenceGraph.Build(fileSystem, layout, after, ignore);
         var rewritten = new List<string>();
         var warnings = new List<string>();
 
-        foreach (var path in after.Files)
+        // Only what points at something that moved, plus the moved meshes themselves — a mesh's
+        // uris are relative to it, so moving it stales every one of them at once. Everything else
+        // is left byte for byte alone; the whole-tree walk this replaced rewrote nothing there
+        // either, it just read it all.
+        var affected = new List<UPath>();
+        foreach (var destination in mapping.Values)
+        {
+            var path = after.Root / destination;
+            if (IsGlb(path)) affected.Add(path);
+            if (after.IdentityOf(path) is { } guid) affected.AddRange(graph.DependentFilesOf(guid));
+        }
+
+        // What the graph could not check is walked the old way: a document with no identity yet
+        // still references things, and a move must not leave it behind because of a missing sidecar.
+        affected.AddRange(graph.Unreadable);
+        affected.AddRange(graph.Unstamped.Select(entry => entry.Glb));
+
+        foreach (var path in affected.Distinct())
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
             try
@@ -101,10 +119,9 @@ public static partial class AssetMover
                 {
                     RewriteDocument(fileSystem, after, path, mapping, rewritten, warnings, log);
                 }
-                else if (assetClass == AssetClass.Foreign && path.GetExtensionWithDot() is { } extension
-                    && string.Equals(extension, ".glb", StringComparison.OrdinalIgnoreCase))
+                else if (assetClass == AssetClass.Foreign && IsGlb(path))
                 {
-                    WarnAboutMeshUris(fileSystem, after, path, mapping, warnings);
+                    FollowMesh(fileSystem, after, path, mapping, rewritten, warnings, log);
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -207,22 +224,41 @@ public static partial class AssetMover
     private static AssetReference Follow(AssetReference reference, IReadOnlyDictionary<string, string> mapping)
         => mapping.TryGetValue(reference.Path, out var moved) ? reference with { Path = moved } : reference;
 
-    /// <summary>Only uris THIS move broke — the texture moved away, or the mesh moved away from it; a uri that was already broken belongs to verify.</summary>
-    private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetIndex sources, UPath glb, IReadOnlyDictionary<string, string> mapping, List<string> warnings)
+    /// <summary>
+    /// A mesh's stamped uris follow the move like a document's references; an UNSTAMPED uri this
+    /// move broke is reported, since without an identity there is nothing to follow it by — the
+    /// texture moved away, or the mesh moved away from it. A uri that was already broken belongs
+    /// to verify.
+    /// </summary>
+    private static void FollowMesh(
+        IFileSystem fileSystem, AssetIndex sources, UPath glb, IReadOnlyDictionary<string, string> mapping,
+        List<string> rewritten, List<string> warnings, ILogger log)
     {
-        var meshMoved = mapping.Values.Contains(sources.Relative(glb), StringComparer.Ordinal);
+        var relative = sources.Relative(glb);
         var bytes = fileSystem.ReadAllBytes(glb);
-        foreach (var uri in MeshTextureReferences.Rewrite(bytes).Sources)
+        var followed = GlbTextureReferences.FollowUris(bytes, relative, reference => Follow(reference, mapping).Path);
+        if (!ReferenceEquals(followed, bytes))
         {
-            var resolved = (glb.GetDirectory() / Uri.UnescapeDataString(uri)).ToAbsolute();
+            fileSystem.WriteAllBytes(glb, followed);
+            rewritten.Add(relative);
+            LogRewrote(log, relative);
+        }
+
+        var meshMoved = mapping.Values.Contains(relative, StringComparer.Ordinal);
+        foreach (var image in GlbTextureReferences.Read(followed))
+        {
+            if (image.Reference is not null) continue;
+            var resolved = (glb.GetDirectory() / Uri.UnescapeDataString(image.Uri)).ToAbsolute();
             if (sources.Contains(resolved)) continue;
             if (!meshMoved && !(sources.IsUnderRoot(resolved) && mapping.ContainsKey(sources.Relative(resolved)))) continue;
 
             warnings.Add(
-                $"{sources.Relative(glb)}: references '{uri}' inside the GLB, which no longer resolves; " +
-                "mv cannot rewrite a mesh — re-export it with the new path, or verify will refuse it");
+                $"{relative}: references '{image.Uri}' inside the GLB with no identity stamped, so the move could not " +
+                "follow it — run `paradise assets verify --fix` to stamp the mesh, then move again, or re-export it");
         }
     }
+
+    private static bool IsGlb(UPath path) => ReferenceRepair.IsGlb(path);
 
     [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "moved: {Source} -> {Destination}")]
     private static partial void LogMoved(ILogger logger, string source, string destination);

@@ -75,11 +75,12 @@ public static class GlbTextureReferences
     }
 
     /// <summary>
-    /// Rewrites every stamped image whose guid now lives somewhere other than where its uri points:
-    /// the uri and the stamp's path both follow. <paramref name="currentPath"/> answers with the
-    /// assets-relative path the guid lives at now, or null to leave the image alone.
+    /// Makes every stamped image's uri say where its guid lives now, from <paramref name="glbPath"/>:
+    /// the texture moved, or the GLB itself did and every relative uri in it went stale at once.
+    /// <paramref name="currentPath"/> answers with the assets-relative path the guid lives at now,
+    /// or null to keep the stamp's path. Bytes come back unchanged when every uri already agrees.
     /// </summary>
-    /// <param name="glbPath">Where this GLB sits under <c>assets/</c>, since uris are relative to it.</param>
+    /// <param name="glbPath">Where this GLB sits under <c>assets/</c> NOW, since uris are relative to it.</param>
     public static byte[] FollowUris(byte[] glb, string glbPath, Func<AssetReference, string?> currentPath)
     {
         ArgumentNullException.ThrowIfNull(glb);
@@ -88,12 +89,15 @@ public static class GlbTextureReferences
 
         if (!GlbBinary.TryRead(glb, out var gltf, out var bin)) return glb;
         var changed = false;
-        foreach (var (_, image, _) in ExternalImages(gltf))
+        foreach (var (_, image, uri) in ExternalImages(gltf))
         {
             if (ReadStamp(image) is not { } reference) continue;
-            if (currentPath(reference) is not { } current || current == reference.Path) continue;
 
-            image["uri"] = UriFor(glbPath, current);
+            var current = currentPath(reference) ?? reference.Path;
+            var expected = UriFor(glbPath, current);
+            if (current == reference.Path && expected == uri) continue;
+
+            image["uri"] = expected;
             WriteStamp(image, reference with { Path = current });
             changed = true;
         }
