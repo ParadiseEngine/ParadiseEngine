@@ -54,34 +54,55 @@ public static class ReferenceRepair
             }
 
             if (assetClass != AssetClass.Prefab) continue;
-
-            PrefabDocument document;
-            try
-            {
-                document = PrefabDocumentSerializer.Load(fileSystem, path);
-            }
-            catch (PrefabDocumentException)
-            {
-                continue;   // reported by verify against the document itself
-            }
-
-            var repointed = new List<string>();
-            var updated = DocumentReferences.Rewrite(document, reference =>
-            {
-                var resolution = index.Resolve(reference);
-                if (resolution.Status != ReferenceStatus.Stale) return reference;
-
-                repointed.Add($"{reference.Path} -> {resolution.Path}");
-                return resolution.Current;
-            });
-
-            if (updated is null) continue;
-
-            PrefabDocumentSerializer.Save(fileSystem, path, updated);
-            repaired.Add(new RepairedDocument(path, repointed));
+            if (FixDocument(fileSystem, index, path) is { } repairedDocument) repaired.Add(repairedDocument);
         }
 
         return repaired;
+    }
+
+    /// <summary>One document's stale paths caught up; null when nothing changed, or when it will not parse (verify's finding, not this pass's).</summary>
+    public static RepairedDocument? FixDocument(IFileSystem fileSystem, AssetIndex index, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(index);
+
+        PrefabDocument document;
+        try
+        {
+            document = PrefabDocumentSerializer.Load(fileSystem, path);
+        }
+        catch (PrefabDocumentException)
+        {
+            return null;
+        }
+
+        var repointed = new List<string>();
+        var updated = DocumentReferences.Rewrite(document, reference =>
+        {
+            var resolution = index.Resolve(reference);
+            if (resolution.Status != ReferenceStatus.Stale) return reference;
+
+            repointed.Add($"{reference.Path} -> {resolution.Path}");
+            return resolution.Current;
+        });
+
+        if (updated is null) return null;
+
+        PrefabDocumentSerializer.Save(fileSystem, path, updated);
+        return new RepairedDocument(path, repointed);
+    }
+
+    /// <summary>Whichever of <see cref="FixDocument"/> and <see cref="FixMesh"/> the file is.</summary>
+    public static RepairedDocument? FixFile(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+
+        return AssetClassifier.Classify(layout.Assets, path, IgnoreRules(fileSystem, layout)) switch
+        {
+            AssetClass.Prefab => FixDocument(fileSystem, index, path),
+            AssetClass.Foreign when IsGlb(path) => FixMesh(fileSystem, index, path),
+            _ => null,
+        };
     }
 
     /// <summary>

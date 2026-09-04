@@ -1,3 +1,4 @@
+using Paradise.Assets.Documents;
 using Paradise.Assets.Pipeline;
 using Paradise.Assets.Project;
 
@@ -200,6 +201,80 @@ internal static class Verbs
         // author must know the tree changed.
         var summary = $"{result.Moved.Count} file(s) moved, {result.Rewritten.Count} document(s) rewritten, {result.Warnings.Count} warning(s)";
         Console.WriteLine(result.Succeeded ? $"mv: {summary}" : $"mv: FAILED with {result.Errors.Count} error(s) — {summary}");
+        return result.Succeeded ? 0 : 1;
+    }
+
+    /// <summary>A query, so it exits 0: who references the asset, then what it references.</summary>
+    public static int Refs(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool transitive)
+    {
+        var ignore = IgnoreRules(fileSystem, layout);
+        var index = AssetIndex.Scan(fileSystem, layout.Assets, ignore);
+        if (!index.Contains(target))
+        {
+            Console.Error.WriteLine($"refs: '{Display(fileSystem, target)}' is not a file under assets/");
+            return 1;
+        }
+
+        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore);
+        if (index.IdentityOf(target) is not { } guid)
+        {
+            Console.Error.WriteLine($"refs: '{index.Relative(target)}' has no identity (no readable sidecar), so nothing can reference it");
+            return 1;
+        }
+
+        Console.WriteLine($"{index.Relative(target)} ({DocumentGuid.Format(guid)})");
+        Console.WriteLine("referenced by:");
+        var dependents = graph.DependentsOf(guid);
+        if (dependents.Count == 0) Console.WriteLine("  (nothing)");
+        foreach (var edge in dependents.OrderBy(edge => edge.ReferrerPath.FullName, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"  {index.Relative(edge.ReferrerPath)}: in {edge.Where} -> {edge.Path}");
+        }
+
+        if (transitive)
+        {
+            var direct = dependents.Select(edge => edge.Referrer).ToHashSet();
+            var beyond = graph.TransitiveDependentsOf(guid).Where(referrer => !direct.Contains(referrer))
+                .Select(referrer => index.Find(referrer) is { } file ? index.Relative(file) : DocumentGuid.Format(referrer))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+            Console.WriteLine("and, through those:");
+            if (beyond.Count == 0) Console.WriteLine("  (nothing)");
+            foreach (var name in beyond) Console.WriteLine($"  {name}");
+        }
+
+        Console.WriteLine("references:");
+        var dependencies = graph.DependenciesOf(guid);
+        if (dependencies.Count == 0) Console.WriteLine("  (nothing)");
+        foreach (var edge in dependencies)
+        {
+            var where = index.Find(edge.Target) is { } asset ? index.Relative(asset) : $"{edge.Path} (MISSING)";
+            Console.WriteLine($"  in {edge.Where} -> {where} ({DocumentGuid.Format(edge.Target)})");
+        }
+
+        if (graph.Unreadable.Count > 0)
+        {
+            Console.WriteLine($"{graph.Unreadable.Count} file(s) could not be checked: {string.Join(", ", graph.Unreadable.Select(index.Relative))}");
+        }
+
+        return 0;
+    }
+
+    public static int Remove(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force, bool dryRun)
+    {
+        var result = AssetRemover.Remove(fileSystem, layout, target, force, dryRun, PipelineLog.For(fileSystem, layout));
+
+        foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+        foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
+        foreach (var edge in result.Dangling)
+        {
+            Console.WriteLine($"  {Display(fileSystem, edge.ReferrerPath)}: in {edge.Where} -> {edge.Path}");
+        }
+
+        foreach (var removed in result.Removed) Console.WriteLine(dryRun ? $"would remove: {removed}" : $"removed: {removed}");
+
+        var summary = $"{result.Removed.Count} file(s) removed, {result.Dangling.Count} reference(s) left dangling";
+        Console.WriteLine(result.Succeeded ? $"rm: {summary}" : $"rm: FAILED — {summary}");
         return result.Succeeded ? 0 : 1;
     }
 

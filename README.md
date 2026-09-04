@@ -143,7 +143,9 @@ paradise assets verify         # sidecars, identities, validity
 paradise assets verify --fix   # ... and repoint reference paths a rename left stale
 paradise assets build          # assets/ -> build/  (--editor for .editor/play)
 paradise assets watch          # keep *.meta in step, rebuilding as you go
-paradise assets mv <from> <to> # move a file or directory; sidecars and prefab references follow
+paradise assets mv <from> <to> # move a file or directory; sidecars and every reference follow
+paradise assets rm <path>      # delete an asset; refused while anything references it (--force to leave them dangling)
+paradise assets refs <path>    # who references it, and what it references (--transitive)
 paradise tools doctor          # every build tool: found, version, how to fix
 ```
 
@@ -166,7 +168,20 @@ because a guid alone is unreadable in a diff, and it is only ever a hint:
   time two filenames were swapped.
 
 `paradise assets mv` still rewrites eagerly, because a tree whose paths are true is the one worth
-committing. It is the tidy path, not the load-bearing one.
+committing. It is the tidy path, not the load-bearing one. `watch` does the same after a rename it
+sees, so a Finder rename leaves the tree as tidy as `mv` would — and when a delete outlives the
+30 s the identity is held for, it names every reference left dangling.
+
+**A GLB names its textures the same way.** Each external image carries
+`images[i].extras.paradise = { guid, path }` beside its `uri`; the uri is what Blender follows, the
+stamp is what the pipeline follows. `verify --fix` and `watch` stamp a GLB that lacks it (a re-export
+from a tool that does not know the block drops it; the next pass puts it back from the uri), and a
+texture rename catches the uri up instead of forcing a re-export.
+
+**Who references what** is answered by `ReferenceGraph`, built per run from the sidecars and the
+documents — never stored in a sidecar, which would be a second copy of the document kept in sync
+by a watcher that may not be running. `mv` rewrites only the dependents of what moved, `rm` refuses
+what is still referenced, and `refs` prints both directions.
 
 A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
 `Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —

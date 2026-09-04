@@ -179,6 +179,96 @@ public class AssetWatcherTests
     }
 
     /// <summary>
+    /// A rename seen as one: the sidecar is carried, and then every reference to the identity has
+    /// its path caught up, so a Finder rename leaves the tree as tidy as `mv` would.
+    /// </summary>
+    [Test]
+    public async Task a_rename_catches_every_reference_to_it_up()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        var crate = SidecarMeta.Mint();
+        crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
+
+        fileSystem.MoveFile("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        clock.Now += AssetWatcher.Debounce;
+        var drained = watcher.Drain();
+
+        await Assert.That(drained.Rewritten).IsEqualTo(1);
+        var document = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/levels/district.prefab");
+        var mesh = (CanonicalInlineTable)document.Objects[0].Components[1].Data.Value("Mesh")!;
+        await Assert.That(mesh.Value("path")).IsEqualTo("models/box.glb");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    /// <summary>A document the author is mid-saving is not rewritten under them; the next drain does it.</summary>
+    [Test]
+    public async Task a_dependent_still_in_its_debounce_is_caught_up_on_the_next_drain()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        var crate = SidecarMeta.Mint();
+        crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
+
+        fileSystem.MoveFile("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Observe("/game/assets/levels/district.prefab");   // still being written
+        var first = watcher.Drain();
+
+        await Assert.That(first.Rewritten).IsEqualTo(0);
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Count).IsEqualTo(1);
+
+        clock.Now += AssetWatcher.Debounce;
+        var second = watcher.Drain();
+
+        await Assert.That(second.Rewritten).IsEqualTo(1);
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    /// <summary>A delete that outlived the quarantine names every reference it left dangling.</summary>
+    [Test]
+    public async Task an_expired_delete_reports_what_still_references_it()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1, 2, 3]);
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        var crate = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid;
+        Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate, "models/crate.glb"));
+
+        fileSystem.DeleteFile("/game/assets/models/crate.glb");
+        watcher.ObserveDelete("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        var quarantined = watcher.Drain();
+        clock.Now += AssetWatcher.QuarantineWindow + TimeSpan.FromSeconds(1);
+        var expired = watcher.Drain();
+
+        await Assert.That(quarantined.Dangling ?? []).IsEmpty();
+        await Assert.That(expired.Dangling!.Count).IsEqualTo(1);
+        await Assert.That(expired.Dangling![0]).Contains("levels/district.prefab");
+        await Assert.That(expired.Dangling![0]).Contains("models/crate.glb");
+    }
+
+    private static void Level(MemoryFileSystem fileSystem, UPath path, Paradise.Authoring.AssetReference reference)
+    {
+        var root = PrefabObject.WithMeta(Guid.NewGuid(), "object");
+        root.Components.Add(new PrefabComponent(Guid.NewGuid(), "game.Mesh", new CanonicalTomlTable { { "Mesh", AssetReferenceCodec.Write(reference) } }));
+        var document = new PrefabDocument();
+        document.Objects.Add(root);
+        fileSystem.CreateDirectory(path.GetDirectory());
+        PrefabDocumentSerializer.Save(fileSystem, path, document);
+        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+    }
+
+    /// <summary>
     /// Wiping a sidecar while the asset stays is an identity spent, not a loop event. Drain
     /// mints a replacement so the next rebuild is not a verify failure.
     /// </summary>

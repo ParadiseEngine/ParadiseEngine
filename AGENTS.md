@@ -202,6 +202,17 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 (use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
 `reference.Guid`, and carry the path only to phrase the message).
 
+**"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus the
+prefab documents and the GLBs' `images[i].extras.paradise` stamps; never persisted, never put in
+a sidecar (a reference list there is a second copy of the document, kept in sync by a watcher that
+may not be running, dirtying two files per edit). Nodes are guids; an edge into an identity nothing
+carries is KEPT with its path, because that is the moment someone asks who pointed there. `mv`
+rewrites `DependentsOf` the moved guids (plus what the graph lists as `Unreadable`, walked the old
+way), `rm` refuses on non-empty dependents unless forced and never nulls a slot, and the watcher
+follows a carried identity's dependents after a rename — skipping one still inside its debounce
+and retrying it next drain. GLB uris are the one path-only reference left: an unstamped one is in
+`Unstamped`, and a move can only warn about it.
+
 ## Code Style
 
 Enforced via `.editorconfig` with warnings-as-errors:

@@ -73,6 +73,9 @@ public sealed partial class SidecarMaintainer
 
     public AssetIgnoreRules Ignore => _ignore;
 
+    /// <summary>Whether this maintainer only reports; the watcher follows the same setting for everything it would write.</summary>
+    public bool DryRun => _dryRun;
+
     public IReadOnlyCollection<string> Quarantined => _quarantine.Keys;
 
     /// <summary>Brings every asset under <c>assets/</c> into line and returns how many it touched.</summary>
@@ -221,15 +224,19 @@ public sealed partial class SidecarMaintainer
         return SidecarAction.Quarantined;
     }
 
-    /// <summary>Forgets held identities; the sidecar stays on disk, so this only drops the chance to re-link.</summary>
-    public void Expire(Func<QuarantinedIdentity, bool> stale)
+    /// <summary>Forgets held identities and returns them; the sidecar stays on disk, so this only drops the chance to re-link.</summary>
+    public IReadOnlyList<QuarantinedIdentity> Expire(Func<QuarantinedIdentity, bool> stale)
     {
         ArgumentNullException.ThrowIfNull(stale);
+        var expired = new List<QuarantinedIdentity>();
         foreach (var (hash, held) in _quarantine.Where(entry => stale(entry.Value)).ToList())
         {
             _quarantine.Remove(hash);
+            expired.Add(held);
             LogOrphaned(_log, held.Sidecar);
         }
+
+        return expired;
     }
 
     /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
