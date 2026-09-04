@@ -189,6 +189,7 @@ public class AssetWatcherTests
         using var _guard = watcher;
         WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
         var crate = SidecarMeta.Mint();
+        crate.Importer = "mesh";
         crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
 
@@ -212,6 +213,7 @@ public class AssetWatcherTests
         using var _guard = watcher;
         WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
         var crate = SidecarMeta.Mint();
+        crate.Importer = "mesh";
         crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
 
@@ -265,7 +267,7 @@ public class AssetWatcherTests
         document.Objects.Add(root);
         fileSystem.CreateDirectory(path.GetDirectory());
         PrefabDocumentSerializer.Save(fileSystem, path, document);
-        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+        ProjectVerifierTests.Mint(fileSystem, path);
     }
 
     /// <summary>

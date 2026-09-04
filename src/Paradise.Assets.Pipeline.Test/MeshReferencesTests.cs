@@ -144,7 +144,7 @@ public class MeshReferencesTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllBytes(path, MeshContainerTests.Glb(json));
-        if (!fileSystem.FileExists(SidecarMeta.PathFor(path))) SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+        if (!fileSystem.FileExists(SidecarMeta.PathFor(path))) ProjectVerifierTests.Mint(fileSystem, path);
     }
 
     /// <summary>Records one reference in the mesh's sidecar, minting the sidecar first when it has none.</summary>

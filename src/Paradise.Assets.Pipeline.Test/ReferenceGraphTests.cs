@@ -144,9 +144,7 @@ public class ReferenceGraphTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllBytes(path, bytes ?? [1]);
-        var meta = SidecarMeta.Mint();
-        meta.Save(fileSystem, SidecarMeta.PathFor(path));
-        return meta.Guid;
+        return ProjectVerifierTests.Mint(fileSystem, path);
     }
 
     /// <summary>A document with one object whose <c>game.Mesh</c> component holds the references, one field per reference.</summary>
@@ -164,8 +162,6 @@ public class ReferenceGraphTests
         document.Objects.Add(root);
         fileSystem.CreateDirectory(path.GetDirectory());
         PrefabDocumentSerializer.Save(fileSystem, path, document);
-        var meta = SidecarMeta.Mint();
-        meta.Save(fileSystem, SidecarMeta.PathFor(path));
-        return meta.Guid;
+        return ProjectVerifierTests.Mint(fileSystem, path);
     }
 }

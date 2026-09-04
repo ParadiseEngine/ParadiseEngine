@@ -22,6 +22,8 @@ public class ReferenceChainTests
 
         public bool RecordsIdentity => true;
 
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".recipe");
+
         public bool Import(ImportContext context, List<string> errors) => context.HasExtension(".recipe");
 
         public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [new RecipeDomain()];
@@ -138,8 +140,6 @@ public class ReferenceChainTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllText(path, text);
-        var meta = SidecarMeta.Mint();
-        meta.Save(fileSystem, SidecarMeta.PathFor(path));
-        return meta.Guid;
+        return ProjectVerifierTests.Mint(fileSystem, path);
     }
 }

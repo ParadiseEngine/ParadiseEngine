@@ -46,6 +46,7 @@ public sealed partial class SidecarMaintainer
     private readonly ILogger _log;
     private readonly bool _dryRun;
     private readonly AssetIgnoreRules _ignore;
+    private readonly IReadOnlyList<IAssetImporter> _importers;
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
@@ -54,12 +55,14 @@ public sealed partial class SidecarMaintainer
     private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
     /// <param name="ignore">The project's <c>[assets] ignore</c>; taken once, so a change to it needs the watch restarted.</param>
+    /// <param name="importers">The chain a mint asks for the asset's importer; the built-ins when omitted.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         ILogger? logger = null,
         bool dryRun = false,
-        AssetIgnoreRules? ignore = null)
+        AssetIgnoreRules? ignore = null,
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -69,6 +72,7 @@ public sealed partial class SidecarMaintainer
         _log = logger ?? NullLogger.Instance;
         _dryRun = dryRun;
         _ignore = ignore ?? AssetIgnoreRules.None;
+        _importers = importers ?? AssetImporters.All;
     }
 
     public AssetIgnoreRules Ignore => _ignore;
@@ -123,9 +127,13 @@ public sealed partial class SidecarMaintainer
                 return SidecarAction.None;
             }
 
-            if (existing.Hash is null) return SidecarAction.None;
+            // A recorded importer is never overwritten, even when the chain would now choose
+            // differently: an author's edit of that line is exactly what recording it is for.
+            var claimant = existing.Importer is null ? ClaimantFor(asset, existing) : null;
+            if (existing.Hash is null && claimant is null) return SidecarAction.None;
 
             existing.Hash = null;
+            existing.Importer ??= claimant;
             Save(existing, sidecar);
             LogRefreshed(_log, sidecar);
             return SidecarAction.Refreshed;
@@ -133,7 +141,7 @@ public sealed partial class SidecarMaintainer
 
         if (_quarantine.Remove(hash, out var held))
         {
-            var restored = new SidecarMeta(held.Meta.Guid);
+            var restored = new SidecarMeta(held.Meta.Guid) { Importer = held.Meta.Importer };
             foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
@@ -143,6 +151,7 @@ public sealed partial class SidecarMaintainer
         }
 
         var minted = new SidecarMeta(Guid.NewGuid());
+        minted.Importer = ClaimantFor(asset, minted);
         Save(minted, sidecar);
         LogMinted(_log, sidecar);
         return SidecarAction.Minted;
@@ -260,6 +269,10 @@ public sealed partial class SidecarMaintainer
         else _seen.Remove(asset);
         return hash;
     }
+
+    /// <summary>The chain's answer for <paramref name="asset"/>, or null when nothing claims it — a sidecar without an importer is legal, and verify says which files those are.</summary>
+    private string? ClaimantFor(UPath asset, SidecarMeta meta)
+        => ImporterChain.Claim(_importers, new ImportCandidate(_fileSystem, _layout, asset, meta))?.Name;
 
     private void Save(SidecarMeta meta, UPath path)
     {

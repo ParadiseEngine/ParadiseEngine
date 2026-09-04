@@ -14,7 +14,7 @@ public class AssetMoverTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1]);
-        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         WriteLevel(fileSystem, "/game/assets/levels/district.prefab", "models/crate.glb");
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
@@ -40,7 +40,7 @@ public class AssetMoverTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1]);
-        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/sub/lid.glb");
         WriteLevel(fileSystem, "/game/assets/levels/district.prefab", "models/crate.glb");
         // A document inside the moved directory keeps working: references are root-relative.
@@ -79,10 +79,10 @@ public class AssetMoverTests
         var boxGuid = new Guid("4c296cda-6844-574c-8f56-8ab5e04bbd20");
         ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/prefabs/box.prefab");
         var box = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/prefabs/box.prefab");
-        new SidecarMeta(boxGuid).Save(fileSystem, "/game/assets/prefabs/box.prefab.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/prefabs/box.prefab", boxGuid);
         fileSystem.CreateDirectory("/game/assets/materials");
         fileSystem.WriteAllBytes("/game/assets/materials/grass.toml", [1]);
-        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/materials/grass.toml.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/materials/grass.toml", s_crate);
 
         var level = new PrefabDocument();
         var root = PrefabObject.WithMeta(s_root, "level");
@@ -137,7 +137,7 @@ public class AssetMoverTests
             ["images"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["uri"] = "../textures/rust.png", ["mimeType"] = "image/png" }),
         }, []);
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
@@ -158,7 +158,7 @@ public class AssetMoverTests
             ["images"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["uri"] = "../textures/gone.png", ["mimeType"] = "image/png" }),
         }, []);
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var unrelated = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
         var meshItself = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/crate.glb");
@@ -176,7 +176,7 @@ public class AssetMoverTests
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
-        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
@@ -197,7 +197,7 @@ public class AssetMoverTests
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
-        new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
@@ -223,7 +223,7 @@ public class AssetMoverTests
             using var physical = new Zio.FileSystems.PhysicalFileSystem();
             var layout = new AssetProjectLayout(physical.ConvertPathFromInternal(root));
             physical.WriteAllBytes(layout.Assets / "models/crate.glb", [1]);
-            new SidecarMeta(s_crate).Save(physical, layout.Assets / "models/crate.glb.meta");
+            new SidecarMeta(s_crate) { Importer = "mesh" }.Save(physical, layout.Assets / "models/crate.glb.meta");
             var level = new PrefabDocument();
             var top = PrefabObject.WithMeta(s_root, "crate_01");
             top.Components.Add(new PrefabComponent(new Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc"), "Renderable",
@@ -261,7 +261,7 @@ public class AssetMoverTests
             using var physical = new Zio.FileSystems.PhysicalFileSystem();
             var layout = new AssetProjectLayout(physical.ConvertPathFromInternal(root));
             physical.WriteAllBytes(layout.Assets / "Models/crate.glb", [1]);
-            new SidecarMeta(s_crate).Save(physical, layout.Assets / "Models/crate.glb.meta");
+            new SidecarMeta(s_crate) { Importer = "mesh" }.Save(physical, layout.Assets / "Models/crate.glb.meta");
             var level = new PrefabDocument();
             var top = PrefabObject.WithMeta(s_root, "crate_01");
             top.Components.Add(new PrefabComponent(new Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc"), "Renderable",

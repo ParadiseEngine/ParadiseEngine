@@ -57,6 +57,35 @@ public class SidecarMetaTests
     }
 
     [Test]
+    public async Task the_importer_is_written_beside_the_guid_and_read_back()
+    {
+        var meta = new SidecarMeta(Guid.Parse(AssetGuid)) { Importer = "mesh" };
+
+        var text = meta.Write();
+        var parsed = SidecarMeta.Parse(text, "x.meta");
+
+        await Assert.That(text).Contains($"guid = \"{AssetGuid}\"\nimporter = \"mesh\"\n");
+        await Assert.That(parsed.Importer).IsEqualTo("mesh");
+        await Assert.That(parsed.Write()).IsEqualTo(text);
+    }
+
+    [Test]
+    public async Task a_sidecar_from_before_the_field_reads_with_no_importer()
+    {
+        var parsed = SidecarMeta.Parse($"schema_version = 1\nguid = \"{AssetGuid}\"\n", "x.meta");
+
+        await Assert.That(parsed.Importer).IsNull();
+    }
+
+    [Test]
+    public async Task an_empty_importer_is_refused()
+    {
+        // Empty is neither "decide for me" (absent) nor a name; refusing it keeps the two apart.
+        await Assert.That(() => SidecarMeta.Parse($"schema_version = 1\nguid = \"{AssetGuid}\"\nimporter = \"\"\n", "x.meta"))
+            .Throws<SidecarMetaException>();
+    }
+
+    [Test]
     public async Task minting_yields_a_fresh_nonempty_guid()
     {
         var first = SidecarMeta.Mint();

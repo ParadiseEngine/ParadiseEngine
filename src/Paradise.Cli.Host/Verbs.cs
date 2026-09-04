@@ -87,7 +87,7 @@ internal static class Verbs
         IReadOnlyList<IAssetImporter> importers)
     {
         var log = PipelineLog.For(fileSystem, layout);
-        var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout));
+        var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout), importers);
         var settled = maintainer.Reconcile();
         Console.WriteLine(dryRun
             ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"

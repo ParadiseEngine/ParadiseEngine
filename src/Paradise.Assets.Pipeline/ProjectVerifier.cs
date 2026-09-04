@@ -153,6 +153,8 @@ public static class ProjectVerifier
             return;
         }
 
+        VerifyImporter(fileSystem, assetsRoot, path, asset, meta, importers, findings);
+
         if (guids.TryGetValue(meta.Guid, out var first))
         {
             findings.Add(new VerifyFinding(
@@ -165,10 +167,14 @@ public static class ProjectVerifier
         }
 
         // Unknown domain: warning (a typo, or a newer pipeline's sidecar). Malformed known domain:
-        // error, because the build would refuse it with less context.
+        // error, because the build would refuse it with less context. The recorded importer's own
+        // domains first; then the chain's, since a domain another importer reads is not a typo.
+        var recorded = meta.Importer is { } named ? ImporterChain.Named(importers, named) : null;
         foreach (var (name, settings) in meta.Settings)
         {
-            if (ImportSettings.Find(name, importers) is not { } domain)
+            var domain = recorded?.SettingsDomains.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.Ordinal))
+                ?? ImportSettings.Find(name, importers);
+            if (domain is null)
             {
                 findings.Add(new VerifyFinding(
                     VerifySeverity.Warning, path,
@@ -180,6 +186,34 @@ public static class ProjectVerifier
             {
                 findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
             }
+        }
+    }
+
+    /// <summary>The sidecar names its importer; a name the chain lacks is an error (a game's importer missing from the list, or a typo), and no name is a warning the tooling clears.</summary>
+    private static void VerifyImporter(
+        IFileSystem fileSystem, UPath assetsRoot, UPath sidecar, UPath asset, SidecarMeta meta,
+        IReadOnlyList<IAssetImporter> importers, List<VerifyFinding> findings)
+    {
+        if (!fileSystem.FileExists(asset)) return;   // the orphan finding already covers it
+
+        if (meta.Importer is { } named)
+        {
+            if (ImporterChain.Named(importers, named) is null)
+            {
+                findings.Add(new VerifyFinding(
+                    VerifySeverity.Error, sidecar,
+                    $"names importer '{named}', which this chain does not have (it has: {ImporterChain.Resolution.Known(importers)}) — a game's own importer missing from the list, or a typo"));
+            }
+
+            return;
+        }
+
+        var candidate = new ImportCandidate(fileSystem, new AssetProjectLayout(assetsRoot.GetDirectory()), asset, meta);
+        if (ImporterChain.Claim(importers, candidate) is { } claimant)
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Warning, sidecar,
+                $"names no importer; '{claimant.Name}' claims it — run `paradise assets verify --fix` (or `watch`) to record that"));
         }
     }
 

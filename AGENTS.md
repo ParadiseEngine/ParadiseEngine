@@ -202,6 +202,16 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 (use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
 `reference.Guid`, and carry the path only to phrase the message).
 
+**The sidecar names the importer; nothing walks the chain except `ImporterChain`.** `Claims` is
+the one claim point — cheap, a path and at most a header — and the maintainer records the answer
+when it mints the sidecar. `Import` keeps its extension guard only as a defence: a hand-edited
+`importer` line can name it for anything, and the build reports a decline as an error rather than
+skipping the asset. A recorded name is never overwritten by the tooling, and a name the chain lacks
+is never silently replaced by a claim — both are what recording it is for. Decided at mint, not at
+first build: a build that edits committed sidecars is the dirty-tree failure the recorded hash
+already taught. Two ways to reintroduce the old search: walking `importers` anywhere but
+`ImporterChain`, and a `Claims` that reads more than a header.
+
 **"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus what
 each importer declares through `IAssetImporter.References` (a prefab's document, a mesh's `[mesh]`
 sidecar entries — and a game's own kind, with no format list anywhere in the pipeline); never persisted, and a DOCUMENT's

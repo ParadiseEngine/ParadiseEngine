@@ -81,6 +81,7 @@ public class BuildRunnerTests
             "name = \"x\"\nschema_version = 1\n\n[build.profiles.fastdev]\ntexture_quality = \"fast\"\n");
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
         var meta = SidecarMeta.Mint();
+        meta.Importer = "texture";
         meta.SetSetting(TextureImportSettings.Domain, new CanonicalTomlTable { { "preset", "normal" } });
         meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
         var encoder = new FakeEncoder();
@@ -97,9 +98,10 @@ public class BuildRunnerTests
     public async Task two_primary_outputs_under_one_identity_fail_the_build_by_name()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
+        IReadOnlyList<IAssetImporter> chain = [new TwinOutputImporter()];
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", chain);
 
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [new TwinOutputImporter()]).Run();
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains("audio/init.bnk");
@@ -110,6 +112,8 @@ public class BuildRunnerTests
     /// <summary>Writes the source at two extensions, both "primary" by stem, so one guid would name two files.</summary>
     private sealed class TwinOutputImporter : IAssetImporter
     {
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".bnk");
+
         public string Name => "twin";
 
         public bool RecordsIdentity => true;
@@ -157,7 +161,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4];
         fileSystem.WriteAllBytes("/game/assets/models/lamp.glb", EmbeddedImageGlb(png, "Lamp_Albedo"));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/lamp.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/lamp.glb");
         var encoder = new FakeEncoder();
         var runner = new BuildRunner(fileSystem, s_layout, encoder);
 
@@ -195,7 +199,7 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.WriteAllBytes("/game/assets/models/lamp.glb", EmbeddedImageGlb([1, 2, 3, 4], "Lamp_Albedo"));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/lamp.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/lamp.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, encoder: null).Run();
 
@@ -212,7 +216,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
         var glb = MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}""");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
@@ -232,7 +236,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var glb = MakeGlb("""{"images":[{"uri":"../textures/gone.png","mimeType":"image/png"}]}""");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
@@ -498,6 +502,8 @@ public class BuildRunnerTests
     /// <summary>An importer that answers whatever it is told, so a chain can be arranged.</summary>
     private sealed class StubImporter(string name, string extension, bool handles) : IAssetImporter
     {
+        public bool Claims(ImportCandidate candidate) => handles && candidate.HasExtension(extension);
+
         public int Offers;
 
         public string Name => name;
@@ -520,13 +526,14 @@ public class BuildRunnerTests
     public async Task an_appended_importer_shadows_the_built_in_it_replaces()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         var mine = new StubImporter("mine", ".glb", handles: true);
+        IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, mine];
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", chain);
 
         // The whole reason the chain is walked backwards: a project extends the pipeline by
-        // APPENDING, and what it appends has to win against the built-in it is replacing.
-        var result = new BuildRunner(
-            fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, mine]).Run();
+        // APPENDING, and what it appends has to win against the built-in it is replacing — for
+        // an asset minted under that chain; one recorded earlier keeps its importer until edited.
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.mine")).IsTrue();
@@ -536,7 +543,7 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task an_importer_that_declines_passes_the_asset_down_the_chain()
+    public async Task an_importer_that_does_not_claim_is_never_offered_and_the_claimant_builds()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
@@ -546,10 +553,76 @@ public class BuildRunnerTests
             fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, passive]).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
-        await Assert.That(passive.Offers).IsEqualTo(1);
-        // Declining is not handling: MeshImporter, further down, still built the asset.
+        // The sidecar names 'mesh'; a build does not search, so the appended non-claimant is never asked.
+        await Assert.That(passive.Offers).IsEqualTo(0);
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.passive")).IsFalse();
+    }
+
+    [Test]
+    public async Task the_recorded_importer_is_used_without_searching_the_chain()
+    {
+        // A decoy appended LAST would win any claim; the sidecar names 'mesh', so it is never asked.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var decoy = new StubImporter("decoy", ".glb", handles: true);
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, decoy]).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(decoy.Offers).IsEqualTo(0);
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.decoy")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_hand_picked_importer_is_honoured()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var mine = new StubImporter("mine", ".glb", handles: true);
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        meta.Importer = "mine";
+        meta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, mine]).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(mine.Offers).IsEqualTo(1);
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.mine")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_recorded_importer_the_chain_lacks_fails_the_build_naming_the_chain()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        meta.Importer = "mine";
+        meta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("names importer 'mine'");
+        await Assert.That(result.Errors[0]).Contains("mesh");
+    }
+
+    [Test]
+    public async Task a_recorded_importer_that_declines_the_asset_is_an_error_not_a_skip()
+    {
+        // A hand edit that is wrong should be loud: a silent skip ships a tree missing the asset.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        meta.Importer = "texture";
+        meta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors[0]).Contains("names importer 'texture'");
+        await Assert.That(result.Errors[0]).Contains("declined");
     }
 
     [Test]
@@ -655,7 +728,7 @@ public class BuildRunnerTests
         // A new sidecar means a new GUID, which lands in the manifest -- so the asset's output
         // changed even though not one of its own bytes did. A key blind to this would keep
         // serving the old identity.
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/models/crate.glb")).IsEquivalentTo(new byte[] { 1, 2, 3 });
@@ -700,7 +773,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
 
         fileSystem.DeleteFile("/game/assets/textures/rust.png");
@@ -717,7 +790,7 @@ public class BuildRunnerTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsFalse();
 
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/rust.png");
@@ -1021,7 +1094,7 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/Rust.png");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}]}"""));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
@@ -1039,7 +1112,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}],"textures":[{"source":0}]}"""));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
@@ -1056,7 +1129,7 @@ public class BuildRunnerTests
         fileSystem.CreateDirectory("/game/textures");
         fileSystem.WriteAllBytes("/game/textures/rust.png", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../../textures/rust.png","mimeType":"image/png"}]}"""));
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
@@ -1068,6 +1141,8 @@ public class BuildRunnerTests
 
     private sealed class ThrowingImporter : IAssetImporter
     {
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb");
+
         public string Name => "throwing";
 
         public bool RecordsIdentity => true;
@@ -1083,7 +1158,7 @@ public class BuildRunnerTests
     public async Task an_importer_that_throws_costs_one_asset_not_the_build()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", [.. AssetImporters.All, new ThrowingImporter()]);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
 
         var result = new BuildRunner(
@@ -1101,8 +1176,9 @@ public class BuildRunnerTests
     public async Task an_importer_cannot_write_into_assets()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        
         var writer = new SourceWritingImporter();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb", [.. AssetImporters.All, writer]);
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, writer]).Run();
 
@@ -1113,6 +1189,8 @@ public class BuildRunnerTests
 
     private sealed class SourceWritingImporter : IAssetImporter
     {
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb");
+
         public string Name => "writer";
 
         public bool RecordsIdentity => true;
@@ -1128,6 +1206,8 @@ public class BuildRunnerTests
     /// <summary>An importer reads a companion file that may not exist and swallows the miss; the miss is still an input.</summary>
     private sealed class OptionalCompanionImporter : IAssetImporter
     {
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".bnk");
+
         public string Name => "companion";
 
         public bool RecordsIdentity => true;
@@ -1155,8 +1235,8 @@ public class BuildRunnerTests
     public async Task a_read_that_missed_is_recorded_so_the_file_appearing_rebuilds()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk");
         IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, new OptionalCompanionImporter()];
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", chain);
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
 

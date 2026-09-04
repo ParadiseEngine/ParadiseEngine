@@ -51,8 +51,19 @@ public static class ReferenceRepair
         var repaired = new List<RepairedDocument>();
         if (!fileSystem.DirectoryExists(layout.Assets)) return repaired;
 
-        var context = new ReferenceContext(fileSystem, layout, index, IgnoreRules(fileSystem, layout), rewriteSources);
+        var ignore = IgnoreRules(fileSystem, layout);
+        var context = new ReferenceContext(fileSystem, layout, index, ignore, rewriteSources);
         var chain = importers ?? AssetImporters.All;
+
+        // A sidecar without an importer is recorded first, through the maintainer (tooling owns
+        // sidecars), so the references below are read by the importer the asset will keep.
+        var maintainer = new SidecarMaintainer(fileSystem, layout, ignore: ignore, importers: chain);
+        foreach (var path in index.Files)
+        {
+            if (SidecarMeta.IsSidecarPath(path) || !fileSystem.FileExists(SidecarMeta.PathFor(path))) continue;
+            if (maintainer.Ensure(path) == SidecarAction.Refreshed) repaired.Add(new RepairedDocument(SidecarMeta.PathFor(path), ["importer recorded"]));
+        }
+
         foreach (var path in index.Files)
         {
             if (SidecarMeta.IsSidecarPath(path)) continue;

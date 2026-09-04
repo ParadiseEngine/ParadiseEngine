@@ -40,6 +40,63 @@ public class SidecarMaintainerTests
     }
 
     [Test]
+    public async Task a_mint_records_the_importer_the_chain_claims()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        WriteAsset(fileSystem, "/game/assets/notes.txt", [1]);
+
+        Maintainer(fileSystem).Reconcile();
+
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("mesh");
+        // Nothing claims a .txt: it has an identity and no importer, and verify says nothing about it.
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/notes.txt.meta").Importer).IsNull();
+    }
+
+    [Test]
+    public async Task a_reconcile_records_a_missing_importer_on_an_existing_sidecar()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        new SidecarMeta(Guid.Parse("11111111-2222-4333-8444-555555555555")).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var touched = Maintainer(fileSystem).Reconcile();
+
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        await Assert.That(touched).IsEqualTo(1);
+        await Assert.That(meta.Importer).IsEqualTo("mesh");
+        await Assert.That(meta.Guid).IsEqualTo(Guid.Parse("11111111-2222-4333-8444-555555555555"));
+    }
+
+    [Test]
+    public async Task a_recorded_importer_is_never_overwritten_even_when_the_chain_would_choose_otherwise()
+    {
+        // An author's edit of the importer line is exactly what recording it is for.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        new SidecarMeta(Guid.NewGuid()) { Importer = "texture" }.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var touched = Maintainer(fileSystem).Reconcile();
+
+        await Assert.That(touched).IsEqualTo(0);
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("texture");
+    }
+
+    [Test]
+    public async Task a_rename_carries_the_importer_with_the_identity()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", [1]);
+        var maintainer = Maintainer(fileSystem);
+        maintainer.Reconcile();
+        fileSystem.MoveFile("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+
+        maintainer.Carry("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Importer).IsEqualTo("mesh");
+    }
+
+    [Test]
     public async Task a_changed_asset_keeps_its_identity_and_the_sidecar_is_left_alone()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

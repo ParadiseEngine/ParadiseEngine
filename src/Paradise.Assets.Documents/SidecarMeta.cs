@@ -14,7 +14,7 @@ public sealed class SidecarMeta
 
     public const string Suffix = ".meta";
 
-    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "hash"];
+    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "importer", "hash"];
 
     private readonly List<KeyValuePair<string, CanonicalTomlTable>> _settings = [];
 
@@ -24,6 +24,14 @@ public sealed class SidecarMeta
     }
 
     public Guid Guid { get; }
+
+    /// <summary>
+    /// The importer that handles this asset, by <c>Name</c>: decided by the chain when the sidecar
+    /// was minted and honoured as written from then on, so an author can pick a different one for
+    /// one asset by editing this line. Null on a sidecar from before the field existed — the
+    /// tooling records one on its next pass — never empty.
+    /// </summary>
+    public string? Importer { get; set; }
 
     /// <summary>
     /// A legacy recorded hash: read for migration, never written, because line endings, smudge
@@ -143,6 +151,12 @@ public sealed class SidecarMeta
 
         var meta = new SidecarMeta(guid);
 
+        if (TomlDocumentReader.OptionalString(root, "importer", "at the document root", Fail) is { } importer)
+        {
+            if (importer.Length == 0) throw Fail("holds an empty 'importer'; name one, or delete the line and let the tooling record it");
+            meta.Importer = importer;
+        }
+
         if (TomlDocumentReader.OptionalString(root, "hash", "at the document root", Fail) is { } hash)
         {
             // A truncated or upper-case hash would silently never match.
@@ -186,6 +200,7 @@ public sealed class SidecarMeta
             { "schema_version", (long)SupportedSchemaVersion },
             { "guid", DocumentGuid.Format(Guid) },
         };
+        if (Importer is { Length: > 0 } importer) root.Add("importer", importer);
 
         foreach (var (domain, settings) in _settings) root.Add(domain, settings);
 

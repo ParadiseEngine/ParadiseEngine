@@ -107,7 +107,20 @@ public interface IAssetImporter
     /// <summary>False for outputs addressed by path alone (a config).</summary>
     bool RecordsIdentity { get; }
 
-    /// <summary>A failure is reported through <paramref name="errors"/>, prefixed with the source, and writes nothing.</summary>
+    /// <summary>
+    /// Whether this importer handles the asset — a path, at most a header of the bytes. The one
+    /// claim point: the chain asks it once, when the sidecar is minted, and records the answer;
+    /// nothing else searches. Abstract on purpose: an importer that cannot say whether an asset is
+    /// its own cannot be recorded for one.
+    /// </summary>
+    bool Claims(ImportCandidate candidate);
+
+    /// <summary>
+    /// Imports an asset the sidecar names this importer for. A failure is reported through
+    /// <paramref name="errors"/>, prefixed with the source, and writes nothing. Returning false
+    /// says the asset is not what it claimed to be — kept as a guard, since a hand-edited
+    /// <c>importer</c> line can name this importer for anything, and the build reports it.
+    /// </summary>
     bool Import(ImportContext context, List<string> errors);
 
     /// <summary>

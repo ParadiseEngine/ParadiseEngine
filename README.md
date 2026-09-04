@@ -186,9 +186,21 @@ documents — never stored in a sidecar, which would be a second copy of the doc
 by a watcher that may not be running. `mv` rewrites only the dependents of what moved, `rm` refuses
 what is still referenced, and `refs` prints both directions.
 
-A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
-`Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —
-the tool cannot be handed code, and NativeAOT rules out scanning for it:
+### Every asset names its importer
+
+A sidecar carries `importer = "mesh"` beside its guid. The watcher decides it when it mints the
+sidecar, by asking the chain (`Claims`, last appended first) — not at the first build, because a
+build that edits committed sidecars is a dirty tree. From then on the name is honoured as written:
+the build, `verify`, and every reference verb look the importer up by name and never search. Edit
+the line to pick a different importer for one asset; append to the chain to change the default for
+NEW assets (existing ones keep their name until edited). A name the chain does not have is a
+`verify` error naming the chain; a sidecar with no name is a warning that `verify --fix` and
+`watch` clear; a named importer that declines the asset fails the build, loudly.
+
+A game that needs its own asset kind writes an `IAssetImporter` — `Claims` says whether an asset
+is its own from the path and, at most, a header; `Import` does the work — and runs the same verbs
+through `Paradise.Cli.Host` from a console project of its own — the tool cannot be handed code,
+and NativeAOT rules out scanning for it:
 
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`

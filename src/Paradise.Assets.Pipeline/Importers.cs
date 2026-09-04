@@ -12,6 +12,9 @@ namespace Paradise.Assets.Pipeline;
 public sealed class TextureImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".png", ".jpg", ".jpeg");
+
+    /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [TextureImportSettings.Instance];
 
     /// <inheritdoc />
@@ -58,6 +61,9 @@ public sealed class TextureImporter : IAssetImporter
 /// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is externalised to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> beside the mesh through the same cache the texture step uses.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf");
+
     /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [MeshImportSettings.Instance];
 
@@ -240,6 +246,9 @@ internal static class TextureStep
 public sealed class AudioImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".bnk", ".wem");
+
+    /// <inheritdoc />
     public string Name => "audio";
 
     /// <inheritdoc />
@@ -258,6 +267,9 @@ public sealed class AudioImporter : IAssetImporter
 /// <summary>Compiles one authoring document into the export contract; every document is baked, so a prop can be played on its own.</summary>
 public sealed class PrefabImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(AssetClassifier.PrefabSuffix);
+
     /// <inheritdoc />
     public AssetReferences? References(ReferenceContext context, UPath asset)
     {
@@ -353,6 +365,9 @@ public sealed class PrefabImporter : IAssetImporter
 /// <summary>Authored config documents, compiled to the profile's document format.</summary>
 public sealed class ConfigImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".toml") && !candidate.IsManifest;
+
     /// <inheritdoc />
     public string Name => "config";
 

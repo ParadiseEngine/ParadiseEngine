@@ -127,9 +127,7 @@ public class AssetRemoverTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllBytes(path, [1]);
-        var meta = SidecarMeta.Mint();
-        meta.Save(fileSystem, SidecarMeta.PathFor(path));
-        return meta.Guid;
+        return ProjectVerifierTests.Mint(fileSystem, path);
     }
 
     private static void Level(MemoryFileSystem fileSystem, UPath path, AssetReference reference)
@@ -140,6 +138,6 @@ public class AssetRemoverTests
         document.Objects.Add(root);
         fileSystem.CreateDirectory(path.GetDirectory());
         PrefabDocumentSerializer.Save(fileSystem, path, document);
-        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+        ProjectVerifierTests.Mint(fileSystem, path);
     }
 }

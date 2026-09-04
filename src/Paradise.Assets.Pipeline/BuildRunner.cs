@@ -88,7 +88,7 @@ public sealed partial class BuildRunner
         }
 
         var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -191,13 +191,24 @@ public sealed partial class BuildRunner
             observed, sources, path, relative, meta,
             profile, target, written, cache, _encoder, _log);
 
-        IAssetImporter? handler = null;
-        for (var i = _importers.Count - 1; i >= 0 && handler is null; i--)
+        // The importer the sidecar names, not a search: recording it is what lets an author pick
+        // one per asset, and what keeps a build from re-deciding under them. A name the chain
+        // lacks, or a named importer that declines, is loud — a silent skip would ship a tree
+        // missing the asset while the build reports success.
+        var resolution = ImporterChain.For(_importers, new ImportCandidate(observed, _layout, path, meta));
+        if (resolution.Unknown)
         {
-            if (_importers[i].Import(context, errors)) handler = _importers[i];
+            errors.Add($"{relative}: its sidecar names importer '{resolution.Name}', which this chain does not have (it has: {ImporterChain.Resolution.Known(_importers)})");
+            return (null, observed.Records);
         }
 
-        if (handler is null) return (null, observed.Records);
+        if (resolution.Importer is not { } handler) return (null, observed.Records);
+
+        if (!handler.Import(context, errors))
+        {
+            if (resolution.Recorded) errors.Add($"{relative}: its sidecar names importer '{handler.Name}', which declined it — edit the importer line, or let `paradise assets verify --fix` re-record it after deleting the line");
+            return (null, observed.Records);
+        }
 
         foreach (var file in written.Written)
         {
