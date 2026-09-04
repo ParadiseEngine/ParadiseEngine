@@ -55,5 +55,6 @@ libs/*.so
 # Unity asset uid files
 *.uid
 
-# Claude Code worktrees (local-only)
-/.claude/worktrees/
+# Claude Code / Codex agent config (local-only)
+/.claude/
+/.Codex/
