@@ -253,8 +253,10 @@ public sealed class PrefabImporter : IAssetImporter
             try
             {
                 // By guid: a prefab renamed outside `mv` still carries this instance's identity,
-                // and the path half of the reference is only a hint.
-                return PrefabDocumentSerializer.Load(context.FileSystem, context.Resolve(reference).Asset);
+                // and the path half of the reference is only a hint. An unfound reference has no
+                // file to open; verify already reported it, and the resolver reports the instance.
+                var resolution = context.Resolve(reference);
+                return resolution.Found ? PrefabDocumentSerializer.Load(context.FileSystem, resolution.Asset) : null;
             }
             catch (PrefabDocumentException)
             {

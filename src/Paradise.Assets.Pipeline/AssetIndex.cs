@@ -29,7 +29,7 @@ public enum ReferenceStatus
 /// <summary>What one <see cref="AssetReference"/> resolved to.</summary>
 /// <param name="Reference">The reference as authored.</param>
 /// <param name="Status">Which of the four cases this is.</param>
-/// <param name="Asset">The absolute path of the asset the guid names; the path half's target when nothing carries the guid.</param>
+/// <param name="Asset">The absolute path of the asset the guid names; the path half's target when nothing carries the guid. NULL (<c>IsNull</c>) when nothing carries the guid and the path half cannot even be combined onto the root (one that climbs above it; an absolute path merely resolves to itself and fails <see cref="AssetIndex.Problem"/>), so every consumer that opens it checks <see cref="Found"/> first.</param>
 /// <param name="Path">The assets-relative, '/'-separated path the reference SHOULD spell; unchanged from the reference when it did not resolve.</param>
 /// <param name="HintIdentity">The identity of whatever the path half names, when that asset exists and has one. Only interesting when the two disagree.</param>
 public readonly record struct ReferenceResolution(
@@ -80,6 +80,7 @@ public sealed class AssetIndex
     private readonly Dictionary<Guid, UPath> _byGuid = [];
     private readonly Dictionary<UPath, Guid> _byPath = [];
     private readonly HashSet<UPath> _withoutIdentity = [];
+    private readonly HashSet<UPath> _ignored = [];
 
     private AssetIndex(UPath root, List<UPath> files)
     {
@@ -178,17 +179,22 @@ public sealed class AssetIndex
         return new ReferenceResolution(reference, status, hinted ?? default, reference.Path, hintIdentity);
     }
 
-    /// <summary>The absolute path of the asset a reference names — by guid, falling back to its path half so an unresolvable reference still points somewhere nameable.</summary>
+    /// <summary>The absolute path of the asset a reference names — by guid, falling back to its path half so an unresolvable reference still points somewhere nameable. Null when even the path half names nothing combinable (see <see cref="ReferenceResolution.Asset"/>).</summary>
     public UPath AssetOf(AssetReference reference) => Resolve(reference).Asset;
 
-    /// <summary>The assets-relative path a reference should spell.</summary>
-    public string PathOf(AssetReference reference) => Resolve(reference).Path;
+    /// <summary>Whether <paramref name="path"/> is a file the manifest's <c>[assets] ignore</c> excludes, and so carries no identity by design rather than by omission.</summary>
+    public bool IsIgnored(UPath path) => _ignored.Contains(path);
 
     private void ReadIdentities(IFileSystem fileSystem, AssetIgnoreRules ignore)
     {
         foreach (var path in Files)
         {
-            if (SidecarMeta.IsSidecarPath(path) || ignore.Matches(Root, path)) continue;
+            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (ignore.Matches(Root, path))
+            {
+                _ignored.Add(path);
+                continue;
+            }
 
             var sidecar = SidecarMeta.PathFor(path);
             if (!Contains(sidecar))
@@ -210,7 +216,7 @@ public sealed class AssetIndex
         }
     }
 
-    /// <summary>Null when the path half cannot even be combined onto the root (an absolute path, or one that climbs out of the mount).</summary>
+    /// <summary>Null when the path half cannot even be combined onto the root (it climbs above the mount). An absolute path combines to itself and is caught downstream as outside assets/.</summary>
     private UPath? Hinted(string path)
     {
         try

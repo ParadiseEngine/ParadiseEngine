@@ -60,6 +60,8 @@ public sealed record ImportContext(
         ArgumentNullException.ThrowIfNull(reference);
 
         var resolution = Sources.Resolve(reference);
+        if (!resolution.Found) return resolution;
+
         var sidecar = SidecarMeta.PathFor(resolution.Asset);
         if (FileSystem.FileExists(sidecar)) FileSystem.ReadAllBytes(sidecar);
 

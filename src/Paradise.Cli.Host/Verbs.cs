@@ -8,19 +8,33 @@ namespace Paradise.Cli;
 /// <summary>The verbs' console rendering. Logic lives in the pipeline library; this prints.</summary>
 internal static class Verbs
 {
-    /// <param name="fix">Catches stale reference paths up to where their guids now live BEFORE checking, so the findings printed describe the tree as it is left.</param>
+    /// <param name="fix">
+    /// Catches stale reference paths up to where their guids now live. Only over a tree with no
+    /// errors: a duplicate guid resolves to the ordinal-first asset, and fixing before that error
+    /// was shown would rewrite paths toward an arbitrary winner the author never saw named.
+    /// </param>
     public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix)
     {
-        if (fix)
+        // One scan for both passes: the fix rewrites document bodies only, never files or
+        // identities, so the index it was taken over still describes the tree after it.
+        var index = AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout));
+        var findings = ProjectVerifier.Verify(fileSystem, layout, index);
+
+        if (fix && findings.All(finding => finding.Severity != VerifySeverity.Error))
         {
-            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout))
+            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout, index))
             {
                 Console.WriteLine($"fixed: {Display(fileSystem, repaired.Path)}");
                 foreach (var repointed in repaired.Repointed) Console.WriteLine($"       {repointed}");
             }
+
+            findings = ProjectVerifier.Verify(fileSystem, layout, index);
+        }
+        else if (fix)
+        {
+            Console.WriteLine("verify: not fixing paths while the tree has errors — resolve those first");
         }
 
-        var findings = ProjectVerifier.Verify(fileSystem, layout);
         foreach (var finding in findings)
         {
             var severity = finding.Severity == VerifySeverity.Error ? "error" : "warning";

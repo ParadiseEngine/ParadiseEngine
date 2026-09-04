@@ -225,11 +225,7 @@ public static class ProjectVerifier
                 // Not an error: the guid resolved it, so the build is correct and only the text is
                 // out of date — a rename in Finder, or a sidecar the maintainer relinked by hash.
                 case ReferenceStatus.Stale:
-                    findings.Add(new VerifyFinding(
-                        VerifySeverity.Warning, path,
-                        $"in {where}, the path half says '{reference.Path}' but guid '{guid}' names " +
-                        $"'{resolution.Path}'; the guid resolves it, so this builds — run " +
-                        "`paradise assets verify --fix` to catch the path up"));
+                    findings.Add(new VerifyFinding(VerifySeverity.Warning, path, Stale(resolution, guid, where)));
                     return;
 
                 default:
@@ -239,10 +235,45 @@ public static class ProjectVerifier
         }
     }
 
+    /// <summary>
+    /// The guid resolved the reference and only its path text is out of date. A path that names
+    /// a DIFFERENT real asset is called out by that asset's guid: a Finder rename and a hand edit
+    /// that changed only the path look identical here, and <c>--fix</c> reverts the second one,
+    /// so the message has to say which guid to change if the path was the intended half.
+    /// </summary>
+    private static string Stale(ReferenceResolution resolution, string guid, string where)
+    {
+        var reference = resolution.Reference;
+        var message = $"in {where}, the path half says '{reference.Path}' but guid '{guid}' names " +
+            $"'{resolution.Path}'; the guid resolves it, so this builds — run " +
+            "`paradise assets verify --fix` to catch the path up";
+
+        if (resolution.HintIdentity is { } other && other != reference.Guid)
+        {
+            message += $". Note '{reference.Path}' exists and is '{DocumentGuid.Format(other)}': " +
+                "if THAT is the asset meant here, change the guid instead, since --fix keeps the guid";
+        }
+
+        return message;
+    }
+
     /// <summary>The guid names no asset in the tree, so the reference resolves to nothing; what the PATH half names decides how to say so.</summary>
     private static string Unresolved(AssetIndex sources, ReferenceResolution resolution, string guid, string where)
     {
         var reference = resolution.Reference;
+
+        if (resolution.Asset.IsNull)
+        {
+            return $"in {where}, references guid '{guid}', which no asset under assets/ carries, and " +
+                $"'{reference.Path}' does not name a place under assets/ either";
+        }
+
+        if (sources.IsIgnored(resolution.Asset))
+        {
+            return $"in {where}, references guid '{guid}', which no asset under assets/ carries; " +
+                $"'{reference.Path}' exists but is ignored by the manifest, so it has no identity to " +
+                "reference. Un-ignore it, or point the reference at an asset the build owns";
+        }
 
         if (resolution.HintIdentity is { } other)
         {
@@ -327,7 +358,8 @@ public static class ProjectVerifier
         {
             try
             {
-                return PrefabDocumentSerializer.Load(fileSystem, sources.AssetOf(reference));
+                var resolution = sources.Resolve(reference);
+                return resolution.Found ? PrefabDocumentSerializer.Load(fileSystem, resolution.Asset) : null;
             }
             catch (PrefabDocumentException)
             {

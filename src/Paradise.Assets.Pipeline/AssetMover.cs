@@ -21,8 +21,9 @@ public sealed record MoveResult(
 /// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars, then
 /// rewrites every asset reference in every prefab document to the new path. Identity never
 /// changes — the sidecar travels as-is — so a reference's guid still names the same asset and
-/// only its path half is touched (issue #208: a rename outside this verb leaves every reference
-/// into it failing verify).
+/// only its path half is touched. A rename outside this verb is not fatal — the guid still
+/// resolves it and <c>verify</c> warns until <c>verify --fix</c> catches the path up — but this
+/// is the tidy path: the documents follow the file in the same change (issue #208).
 /// </summary>
 /// <remarks>
 /// A GLB's texture uris are inside the mesh and belong to the DCC that exported it; they are

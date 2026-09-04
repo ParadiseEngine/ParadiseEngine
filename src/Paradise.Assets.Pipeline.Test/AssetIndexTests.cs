@@ -95,6 +95,22 @@ public class AssetIndexTests
         await Assert.That(resolution.Path).IsEqualTo("materials/rust.toml");
     }
 
+    [Test]
+    public async Task a_path_climbing_above_the_root_with_a_guid_nobody_carries_resolves_to_no_place_at_all()
+    {
+        // The path half cannot even be combined onto the root (an absolute path merely resolves
+        // to itself, which Problem reports as outside assets/), so there is nothing to name;
+        // consumers check Found before opening Asset rather than throwing on a null path.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        Material(fileSystem, "/game/assets/materials/rust.toml");
+
+        var resolution = Index(fileSystem).Resolve(new AssetReference(Guid.NewGuid(), "../../../etc/passwd"));
+
+        await Assert.That(resolution.Status).IsEqualTo(ReferenceStatus.Unresolved);
+        await Assert.That(resolution.Found).IsFalse();
+        await Assert.That(resolution.Asset.IsNull).IsTrue();
+    }
+
     /// <summary>Two sidecars claiming one identity: whichever asset the ordinal scan reached first, always — an arbitrary but stable answer, while verify reports the duplicate.</summary>
     [Test]
     public async Task a_duplicated_guid_resolves_to_the_first_asset_in_scan_order()
