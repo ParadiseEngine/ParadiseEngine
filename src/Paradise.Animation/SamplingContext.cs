@@ -39,17 +39,23 @@ public struct SamplingContext
 
     public static NativeBlobAssetReference<SamplingContext> Create(int maxTracks)
     {
+        var builder = new StructBuilder<SamplingContext>();
+        Set(builder, ref builder.Value, maxTracks);
+        return builder.CreateNativeBlobAssetReference();
+    }
+
+    /// <summary>Sizes a context that is a field of a larger blob (<see cref="AnimationPlayerState"/>), the same way <see cref="Create"/> sizes a standalone one.</summary>
+    internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref SamplingContext context, int maxTracks) where TRoot : unmanaged
+    {
         var padded = AnimationBlob.PaddedTrackCount(Math.Max(0, maxTracks));
         var groups = padded / 4;
-        var builder = new StructBuilder<SamplingContext>();
-        builder.Value.MaxPaddedTracks = padded;
-        Cache.Set(builder, ref builder.Value._translations, padded);
-        Cache.Set(builder, ref builder.Value._rotations, padded);
-        Cache.Set(builder, ref builder.Value._scales, padded);
-        builder.SetArray(ref builder.Value._translationKeys, new SoaVector3Keys[groups], alignment: 16);
-        builder.SetArray(ref builder.Value._rotationKeys, new SoaQuaternionKeys[groups], alignment: 16);
-        builder.SetArray(ref builder.Value._scaleKeys, new SoaVector3Keys[groups], alignment: 16);
-        return builder.CreateNativeBlobAssetReference();
+        context.MaxPaddedTracks = padded;
+        Cache.Set(builder, ref context._translations, padded);
+        Cache.Set(builder, ref context._rotations, padded);
+        Cache.Set(builder, ref context._scales, padded);
+        builder.SetArray(ref context._translationKeys, new SoaVector3Keys[groups], alignment: 16);
+        builder.SetArray(ref context._rotationKeys, new SoaQuaternionKeys[groups], alignment: 16);
+        builder.SetArray(ref context._scaleKeys, new SoaVector3Keys[groups], alignment: 16);
     }
 
     /// <summary>Forgets the cursor, so the next sample walks from an i-frame; <see cref="Sample"/> does this itself when handed a different clip.</summary>
@@ -388,7 +394,7 @@ public struct SamplingContext
         public BlobArray<byte> Outdated;
         public uint Next;
 
-        public static void Set(StructBuilder<SamplingContext> builder, ref Cache cache, int paddedTracks)
+        public static void Set<TRoot>(StructBuilder<TRoot> builder, ref Cache cache, int paddedTracks) where TRoot : unmanaged
         {
             builder.SetArray(ref cache.Entries, new uint[paddedTracks]);
             builder.SetArray(ref cache.Outdated, new byte[paddedTracks]);

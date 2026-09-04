@@ -145,6 +145,27 @@ public class AnimationPlayerTests
     }
 
     [Test]
+    public async Task the_player_s_buffers_are_one_blob()
+    {
+        var (skeleton, rise, turn) = Clips();
+        using var _ = skeleton;
+        using var __ = rise;
+        using var ___ = turn;
+        using var player = new AnimationPlayer(skeleton);
+        player.Play(rise);
+        player.Advance(0.25f);
+        player.Evaluate();
+
+        var sameMemory = System.Runtime.CompilerServices.Unsafe.AreSame(ref player.LocalPose, ref player.State.Pose);
+        var modelsFromState = player.State.Models.ToArray();
+
+        await Assert.That(sameMemory).IsTrue();
+        await Assert.That(player.State.Models.Length).IsEqualTo(player.JointCount);
+        await Assert.That(player.ModelMatrices.ToArray()).IsEquivalentTo(modelsFromState);
+        await Assert.That(player.State.Current.MaxPaddedTracks).IsEqualTo(AnimationBlob.PaddedTrackCount(player.JointCount));
+    }
+
+    [Test]
     public async Task a_frame_allocates_nothing()
     {
         var (skeleton, rise, turn) = Clips();

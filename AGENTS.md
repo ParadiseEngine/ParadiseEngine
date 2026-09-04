@@ -225,8 +225,9 @@ so a vectorized `IndexOf` costs more than it saves), and lanes leave a vector th
 store, never `GetElement` with a variable index (a software path). On Enemy it matches native
 ozz per frame. `AnimationPlayer` is the per-character layer on top: current and outgoing clip,
 time, rate, loop or clamp, cross-fade, `Advance(dt)` then `Evaluate()` into `LocalPose` and
-`ModelMatrices`; `SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the
-GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
+`ModelMatrices`; its cursors, pose sets and matrices are ONE blob (`AnimationPlayerState`), so a
+character is one native allocation and the class only holds the clip and skeleton references.
+`SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
 nothing more. Poses travel as `JointPoses`, a native blob in ozz's structure-of-arrays layout
 (groups of four joints, one `Vector128` per component with a joint per lane): the sampler writes
 it without a transpose, `JointPoses.Blend` and the hierarchy walk take four joints per
