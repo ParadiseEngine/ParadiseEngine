@@ -13,6 +13,16 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- The editor publishes ahead-of-time: no JIT, one binary, and a start-up that does not
+         wait for tiering. Verified end to end in CI, which publishes this and runs it headless
+         (.github/workflows/editor-smoke.yml). The three editor/UI libraries below it carry
+         IsAotCompatible so the analyzers police the guarantee at BUILD time rather than leaving
+         it to whether a publish happened to warn on one machine.
+
+         Note for anyone reaching for the command line: -p:PublishAot=true propagates to every
+         project in the graph, including the netstandard2.0 source generators, which fail with
+         NETSDK1207. Set it here, not there. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

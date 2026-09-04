@@ -21,7 +21,25 @@ dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 ```
 
-AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
+AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`.
+
+**The editor host is AOT too, and it is a supported configuration rather than a thing that happens
+to work.** `Paradise.Editor.Host` sets `PublishAot`; `Paradise.Ui.ImGui`, `Paradise.Editor.Core`
+and `Paradise.Editor.ImGui` carry `IsAotCompatible`, so the trim and AOT analyzers police the
+guarantee at build time instead of leaving it to whether somebody's publish happened to warn. The
+`Editor Smoke` workflow then publishes it and boots it headless on lavapipe, and asserts the AOT
+frame is **byte-identical** to the JIT one — not merely that both are non-empty, because a trimmed
+build that lost the embedded fonts still renders, still exits zero and still writes a valid PNG,
+just in ImGui's fallback face.
+
+Two things that will bite:
+
+- **Never pass `-p:PublishAot=true` on the command line.** It propagates to every project in the
+  graph, and the `netstandard2.0` source generators fail with `NETSDK1207: Ahead-of-time
+  compilation is not supported for the target framework`. Set it in the executable's csproj.
+- The captured frame is deterministic — same bytes across runs, Debug/Release and JIT/AOT — which
+  is what makes the comparison above a usable check rather than a flaky one. Anything drawn into
+  the smoke frame that varies per run (a frame counter, a timestamp, a frame rate) breaks it. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
 
 ### Concurrent code gets a Coyote test
 

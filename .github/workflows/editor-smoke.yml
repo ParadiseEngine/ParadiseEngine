@@ -1,7 +1,11 @@
 # The editor host, booted for real on every change: a window-less run that renders the dockspace
-# and reads the frame back. Separate from .NET Test because it needs a GPU, and the only GPU a
-# hosted runner has is a software one — keeping it apart means a lavapipe problem reads as a
-# lavapipe problem rather than reddening the whole test job.
+# and reads the frame back, JIT and then published ahead-of-time. Separate from .NET Test because
+# it needs a GPU, and the only GPU a hosted runner has is a software one — keeping it apart means
+# a lavapipe problem reads as a lavapipe problem rather than reddening the whole test job.
+#
+# Both runs share one job rather than getting one each: they need the same apt packages, the same
+# discovered ICD and the same slangc cache, and paying for that twice buys nothing. The step names
+# are what keep a failure unambiguous.
 #
 # Linux only. macOS runners have no GPU at all and Windows runners have no software Vulkan, so
 # this is the one platform where the check can actually run.
@@ -21,9 +25,9 @@ jobs:
   headless-boot:
     runs-on: ubuntu-latest
     # The capture waits inside the renderer are bounded, but adapter acquisition on a software
-    # driver is not, and the default is six hours. A boot that has not produced a frame in ten
-    # minutes has hung.
-    timeout-minutes: 10
+    # driver is not, and the default is six hours. Generous enough for an AOT publish, which is
+    # minutes of native compilation on its own.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -84,11 +88,38 @@ jobs:
       - name: Check the screenshot is not empty
         run: test -s editor.png
 
+      # PublishAot lives in Paradise.Editor.Host.csproj, NOT on this command line: passing it here
+      # propagates to every project in the graph, and the netstandard2.0 source generators fail
+      # with NETSDK1207. The three editor/UI libraries carry IsAotCompatible, so the trim and AOT
+      # analyzers have already run by the time this step does — what it adds is proof that the
+      # published binary actually starts, which no analyzer can tell you.
+      - name: Publish the editor host ahead-of-time
+        run: |
+          dotnet publish src/Paradise.Editor.Host/Paradise.Editor.Host.csproj \
+            -c Release -r linux-x64 -p:TreatWarningsAsErrors=true
+
+      - name: Boot the AOT binary and capture a frame
+        run: |
+          src/Paradise.Editor.Host/bin/Release/net10.0/linux-x64/publish/Paradise.Editor.Host \
+            --frames 8 --screenshot editor-aot.png
+
+      # Identical bytes, not merely both non-empty. A trimmed build that quietly lost the embedded
+      # fonts still renders, still exits zero and still writes a valid PNG — it just draws in
+      # ImGui's fallback face, which only a comparison catches.
+      - name: The AOT frame must match the JIT frame
+        run: |
+          if ! cmp -s editor.png editor-aot.png; then
+            echo "AOT and JIT frames differ; both are uploaded as artifacts."
+            exit 1
+          fi
+
       # Uploaded because when this goes wrong the picture is the diagnosis: a clear-coloured frame
       # says the overlay never composited, a blank one says the capture path did not.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: editor-headless-frame
-          path: editor.png
+          path: |
+            editor.png
+            editor-aot.png
           if-no-files-found: warn
