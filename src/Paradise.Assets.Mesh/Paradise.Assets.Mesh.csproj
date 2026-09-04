@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Assets.Mesh</AssemblyName>
+    <RootNamespace>Paradise.Assets.Mesh</RootNamespace>
+    <PackageId>Paradise.Assets.Mesh</PackageId>
+    <Title>Paradise.Assets.Mesh</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>The Paradise mesh blob: GPU-ready interleaved geometry with draw records as a Paradise.BLOB layout, read at runtime by pinning the bytes the asset pipeline extracted from a GLB. No glTF, no JSON, no images.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>mesh;geometry;blob;nativeaot;game-dev</PackageTags>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.BLOB\Paradise.BLOB.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -25,7 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Paradise.Animation\Paradise.Animation.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Documents\Paradise.Assets.Documents.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Gltf\Paradise.Assets.Gltf.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Mesh\Paradise.Assets.Mesh.csproj" />
     <ProjectReference Include="..\Paradise.Assets.Project\Paradise.Assets.Project.csproj" />
     <!-- The bake writes the export contract, so the pipeline needs its DTOs and JSON writer. -->
     <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
