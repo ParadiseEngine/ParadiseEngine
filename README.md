@@ -140,6 +140,7 @@ dotnet tool install --global Paradise.Cli
 ```bash
 paradise new MyGame            # assets tree, a sample level, .gitignore
 paradise assets verify         # sidecars, identities, validity
+paradise assets verify --fix   # ... and repoint reference paths a rename left stale
 paradise assets build          # assets/ -> build/  (--editor for .editor/play)
 paradise assets watch          # keep *.meta in step, rebuilding as you go
 paradise assets mv <from> <to> # move a file or directory; sidecars and prefab references follow
@@ -148,6 +149,24 @@ paradise tools doctor          # every build tool: found, version, how to fix
 
 Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
 them all with the shared `--project` and `--profile` options.
+
+### A reference's guid decides; its path is a hint
+
+An authored reference is `{ guid = "…", path = "…" }`. The **guid is the identity** and the
+sidecars are the guid → path index the whole pipeline resolves through. The path is carried
+because a guid alone is unreadable in a diff, and it is only ever a hint:
+
+- Renaming a file in Finder or with `git mv` **never breaks a reference**. The sidecar travels
+  with the file (or `watch` relinks the identity by content hash), so the guid still names it and
+  the build resolves it. `verify` says so as a **warning**, and `verify --fix` catches the path up.
+- A guid **no asset carries** is an error: the reference names nothing, and no path can stand in
+  for an identity that is gone. Restore the asset or its sidecar, or repoint the reference.
+- When the two halves disagree — the path names a different asset than the guid — **the guid
+  wins**. Resolving by path would silently repoint every reference at the wrong asset the first
+  time two filenames were swapped.
+
+`paradise assets mv` still rewrites eagerly, because a tree whose paths are true is the one worth
+committing. It is the tidy path, not the load-bearing one.
 
 A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
 `Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —

@@ -8,8 +8,18 @@ namespace Paradise.Cli;
 /// <summary>The verbs' console rendering. Logic lives in the pipeline library; this prints.</summary>
 internal static class Verbs
 {
-    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout)
+    /// <param name="fix">Catches stale reference paths up to where their guids now live BEFORE checking, so the findings printed describe the tree as it is left.</param>
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix)
     {
+        if (fix)
+        {
+            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout))
+            {
+                Console.WriteLine($"fixed: {Display(fileSystem, repaired.Path)}");
+                foreach (var repointed in repaired.Repointed) Console.WriteLine($"       {repointed}");
+            }
+        }
+
         var findings = ProjectVerifier.Verify(fileSystem, layout);
         foreach (var finding in findings)
         {

@@ -758,6 +758,79 @@ public class BuildRunnerTests
         await Assert.That(second).Contains("lid");
     }
 
+    /// <summary>A rename done outside `mv` — Finder, `git mv` — leaves every reference into the asset spelling the old path. The guid still names it, so the build must not care.</summary>
+    [Test]
+    public async Task a_prefab_instance_whose_path_a_rename_left_stale_still_builds()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCanonicalDocument(fileSystem, "/game/assets/prefabs/barrel.prefab");
+        var barrel = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/prefabs/barrel.prefab");
+        barrel.Objects.Add(PrefabObject.WithMeta(Guid.NewGuid(), "lid", parent: barrel.Objects[0].Guid));
+        PrefabDocumentSerializer.Save(fileSystem, "/game/assets/prefabs/barrel.prefab", barrel);
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/prefabs/barrel.prefab.meta").Guid;
+
+        var scene = new PrefabDocument();
+        var instance = PrefabObject.WithMeta(Guid.NewGuid(), "barrel_01");
+        instance.Prefab = new Paradise.Authoring.AssetReference(guid, "prefabs/crate.prefab");
+        scene.Objects.Add(instance);
+        PrefabDocumentSerializer.Save(fileSystem, "/game/assets/levels/scene.prefab", scene);
+        ProjectVerifierTests.MintDocumentSidecar(fileSystem, "/game/assets/levels/scene.prefab");
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        // The child comes only from the prefab, so it is there exactly when the guid found it.
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).Contains("lid");
+    }
+
+    /// <summary>The instance resolved by guid; the reference the bake FLATTENS must point at the built path of that same asset, not at the stale one nothing wrote.</summary>
+    [Test]
+    public async Task a_stale_reference_bakes_the_path_its_asset_actually_built_to()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/materials/patina.toml", "a = 1\n");
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/materials/patina.toml.meta").Guid;
+        ProjectVerifierTests.WriteDocumentWith(fileSystem, "/game/assets/levels/scene.prefab", new CanonicalTomlTable
+        {
+            {
+                "Material",
+                AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(guid, "materials/rust.toml"))
+            },
+        });
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        var baked = fileSystem.ReadAllText("/game/build/levels/scene.toml");
+        await Assert.That(baked).Contains("materials/patina.toml");
+        await Assert.That(baked).DoesNotContain("materials/rust.toml");
+    }
+
+    /// <summary>A reference is flattened to the referenced asset's BUILT path, so where that asset lives is an input of this one — and a rename that touches not one byte of the referencing document must still rebuild it.</summary>
+    [Test]
+    public async Task moving_a_referenced_asset_rebuilds_the_document_that_references_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteDocument(fileSystem, "/game/assets/materials/rust.toml", "a = 1\n");
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/materials/rust.toml.meta").Guid;
+        ProjectVerifierTests.WriteDocumentWith(fileSystem, "/game/assets/levels/scene.prefab", new CanonicalTomlTable
+        {
+            {
+                "Material",
+                AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(guid, "materials/rust.toml"))
+            },
+        });
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).Contains("materials/rust.toml");
+
+        // A Finder rename: the file and its sidecar move, and no document is rewritten.
+        fileSystem.MoveFile("/game/assets/materials/rust.toml", "/game/assets/materials/patina.toml");
+        fileSystem.MoveFile("/game/assets/materials/rust.toml.meta", "/game/assets/materials/patina.toml.meta");
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).Contains("materials/patina.toml");
+    }
+
     /// <summary>Textures used to opt out of the index and re-fetch from the cache every run; now an unchanged texture costs nothing, not even a cache lookup.</summary>
     [Test]
     public async Task an_unchanged_texture_is_served_by_the_index_without_the_cache()

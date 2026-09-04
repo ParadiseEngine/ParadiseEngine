@@ -244,5 +244,37 @@ public class CanonicalInlineTableTests
             .Throws<FormatException>();
     }
 
+    [Test]
+    public async Task try_read_takes_a_well_formed_reference()
+    {
+        var table = new CanonicalInlineTable
+        {
+            { "guid", "5f2a6666-7777-4888-8999-aaaaaaaaaaaa" },
+            { "path", "models/x.glb" },
+        };
+
+        await Assert.That(AssetReferenceCodec.TryRead(table, out var reference)).IsTrue();
+        await Assert.That(reference.Guid).IsEqualTo(Guid.Parse("5f2a6666-7777-4888-8999-aaaaaaaaaaaa"));
+        await Assert.That(reference.Path).IsEqualTo("models/x.glb");
+    }
+
+    /// <summary>A rewrite walks every table in a document, so the malformed ones must come back as "not a reference" rather than as an exception that stops the walk.</summary>
+    [Test]
+    [Arguments("not-a-uuid", "models/x.glb")]
+    [Arguments("00000000-0000-0000-0000-000000000000", "models/x.glb")]
+    [Arguments("5f2a6666-7777-4888-8999-aaaaaaaaaaaa", "")]
+    public async Task try_read_refuses_without_throwing(string guid, string path)
+    {
+        var table = new CanonicalInlineTable { { "guid", guid }, { "path", path } };
+
+        await Assert.That(AssetReferenceCodec.TryRead(table, out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task try_read_refuses_the_empty_table()
+    {
+        await Assert.That(AssetReferenceCodec.TryRead(new CanonicalInlineTable(), out _)).IsFalse();
+    }
+
     private static Exception Fail(string problem) => new FormatException(problem);
 }

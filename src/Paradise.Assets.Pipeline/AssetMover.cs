@@ -195,90 +195,16 @@ public static partial class AssetMover
             return;
         }
 
-        var changed = false;
-        var updated = new PrefabDocument();
-        foreach (var entry in document.Objects)
-        {
-            var copy = new PrefabObject { Prefab = entry.Prefab is { } prefab ? Follow(prefab, mapping, ref changed) : null };
-            foreach (var component in entry.Components)
-            {
-                copy.Components.Add(new PrefabComponent(
-                    component.Id, component.Type, FollowTable(component.Data, mapping, ref changed), component.Removed));
-            }
-
-            updated.Objects.Add(copy);
-        }
-
-        if (!changed) return;
+        if (DocumentReferences.Rewrite(document, reference => Follow(reference, mapping)) is not { } updated) return;
 
         PrefabDocumentSerializer.Save(fileSystem, path, updated);
         rewritten.Add(sources.Relative(path));
         LogRewrote(log, sources.Relative(path));
     }
 
-    private static AssetReference Follow(AssetReference reference, IReadOnlyDictionary<string, string> mapping, ref bool changed)
-    {
-        if (!mapping.TryGetValue(reference.Path, out var moved)) return reference;
-
-        changed = true;
-        return new AssetReference(reference.Guid, moved);
-    }
-
-    private static CanonicalTomlTable FollowTable(CanonicalTomlTable table, IReadOnlyDictionary<string, string> mapping, ref bool changed)
-    {
-        var copy = new CanonicalTomlTable();
-        foreach (var (key, value) in table) copy.Add(key, FollowValue(value, mapping, ref changed));
-        return copy;
-    }
-
-    // Shapes mirror TomlDocumentReader.ToCanonicalValue: the inline reference, generic tables,
-    // arrays of tables, and plain arrays holding any of those.
-    private static object FollowValue(object value, IReadOnlyDictionary<string, string> mapping, ref bool changed)
-    {
-        switch (value)
-        {
-            case CanonicalInlineTable inline:
-                return FollowInline(inline, mapping, ref changed);
-
-            case CanonicalTomlTable nested:
-                return FollowTable(nested, mapping, ref changed);
-
-            case IReadOnlyList<CanonicalTomlTable> tables:
-            {
-                var copies = new CanonicalTomlTable[tables.Count];
-                for (var i = 0; i < tables.Count; i++) copies[i] = FollowTable(tables[i], mapping, ref changed);
-                return copies;
-            }
-
-            case IReadOnlyList<object> list:
-            {
-                var copies = new List<object>(list.Count);
-                foreach (var element in list) copies.Add(FollowValue(element, mapping, ref changed));
-                return copies;
-            }
-
-            default:
-                return value;
-        }
-    }
-
-    private static CanonicalInlineTable FollowInline(CanonicalInlineTable inline, IReadOnlyDictionary<string, string> mapping, ref bool changed)
-    {
-        var pairs = inline.ToList();
-        if (pairs.Count == 0 || !AssetReferenceCodec.IsWrittenInline(pairs)
-            || inline.Value(AssetReferenceCodec.PathKey) is not string path
-            || !mapping.TryGetValue(path, out var moved))
-        {
-            var same = new CanonicalInlineTable();
-            foreach (var (key, member) in pairs) same.Add(key, FollowValue(member, mapping, ref changed));
-            return same;
-        }
-
-        changed = true;
-        var followed = new CanonicalInlineTable();
-        foreach (var (key, member) in pairs) followed.Add(key, key == AssetReferenceCodec.PathKey ? moved : member);
-        return followed;
-    }
+    /// <summary>Identity never changes in a move, so only the path half is followed.</summary>
+    private static AssetReference Follow(AssetReference reference, IReadOnlyDictionary<string, string> mapping)
+        => mapping.TryGetValue(reference.Path, out var moved) ? reference with { Path = moved } : reference;
 
     /// <summary>Only uris THIS move broke — the texture moved away, or the mesh moved away from it; a uri that was already broken belongs to verify.</summary>
     private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetPaths sources, UPath glb, IReadOnlyDictionary<string, string> mapping, List<string> warnings)

@@ -117,7 +117,7 @@ public static class BuildHost
 
         return assetVerb switch
         {
-            "verify" => Verbs.Verify(physical, layout),
+            "verify" => Verbs.Verify(physical, layout, fix),
             "prefab-check" => Verbs.PrefabCheck(physical, layout, fix),
             "clean" => Verbs.Clean(physical, layout, keepEditor),
             "build" => Verbs.Build(physical, layout, profile, editor, importers),
@@ -197,7 +197,8 @@ public static class BuildHost
 
             new <name> [--output <dir>]   create a project: assets tree, a sample level, .gitignore
 
-            assets verify                 check the assets/ tree: sidecars, identities, validity
+            assets verify [--fix]         check the assets/ tree: sidecars, identities, validity
+                                            --fix repoints reference paths a rename left stale
             assets prefab-check [--fix]   police (or restore) canonical form of *.prefab documents
             assets build [--profile p]    compile assets/ into build/ (or .editor/play with --editor)
             assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)

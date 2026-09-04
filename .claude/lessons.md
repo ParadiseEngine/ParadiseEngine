@@ -373,6 +373,21 @@
 
 ## Zio / Paradise.Assets.Pipeline
 
+- [hits: 1] **Relaxing a `verify` ERROR to a warning can expose a build-index dependency the
+  error was hiding.** Making a stale reference path resolve by guid (2026-09-04) meant the build
+  now SUCCEEDS on a tree where a referenced asset moved — and `PrefabBake` flattens a reference
+  to that asset's built path without ever READING it, so nothing in `ObservedSources` recorded
+  the dependency and `BuildIndex.TryReuse` served the previous output with the old path baked in.
+  Nobody had noticed because the verify error meant the build never got that far. Fixed by
+  `ImportContext.Resolve`, which reads the referenced asset's **sidecar** through the observed
+  filesystem: the dependency is "where this guid lives", and the sidecar beside the asset is the
+  record of that — the asset's own bytes are the wrong input (identical at the new path, and they
+  churn on every unrelated edit). **Rule**: when a build stops failing on something, ask what the
+  failure was standing in for; anything an importer computes from the TREE rather than from bytes
+  it read is an input the index cannot see. Guarded by
+  `BuildRunnerTests.moving_a_referenced_asset_rebuilds_the_document_that_references_it` — which
+  passes against the broken version unless the dependency is recorded, so prove it fails first.
+
 - [hits: 1] **`CopyFileCross` never reaches an override on a composed filesystem** — it resolves
   both ends through `ComposeFileSystem.ResolvePath` down to the physical/memory filesystem, so a
   `SubFileSystem` subclass that overrides `OpenFileImpl` to record or make writes atomic sees

@@ -53,7 +53,16 @@ public sealed class AssetPaths
     public bool TryFindIgnoringCase(UPath path, out UPath actual)
         => _byFoldedName.TryGetValue(path.FullName, out actual) && actual != path;
 
-    /// <summary>What went wrong with a reference, or null when it resolves; the message continues "<c>{source}: references '{reference}', which …</c>".</summary>
+    /// <summary>
+/// What went wrong with a PATH, or null when it names a file here; the message continues
+/// "<c>{source}: references '{reference}', which …</c>".
+/// </summary>
+/// <remarks>
+/// About the path alone. An authored reference carries a guid too, and that guid decides — see
+/// <see cref="AssetIndex"/>; this answers only for paths a file format carries with no identity
+/// beside them (a GLB's image uris) and for phrasing the case where an identity resolved to
+/// nothing either.
+/// </remarks>
     public string? Problem(UPath resolved, string reference)
     {
         if (!IsUnderRoot(resolved))
@@ -69,7 +78,7 @@ public sealed class AssetPaths
                 "references are case-exact because a build that passes on this machine ships a path Linux cannot open";
         }
 
-        return $"references '{reference}', which does not exist under assets/ (a file moved or renamed outside `paradise assets mv`, which carries references with the file)";
+        return $"references '{reference}', which does not exist under assets/";
     }
 
     public string Relative(UPath path) => path.FullName[(Root.FullName.Length + 1)..];

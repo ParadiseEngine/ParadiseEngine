@@ -20,7 +20,7 @@ public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path,
     public override string ToString() => $"{(Severity == VerifySeverity.Error ? "error" : "warning")}: {Path}: {Message}";
 }
 
-/// <summary>The <c>verify</c> verb: the CI gate for the source tree. It never mutates the tree; minting sidecars is <c>watch</c>'s decision, not a side effect of checking.</summary>
+/// <summary>The <c>verify</c> verb: the CI gate for the source tree. It never mutates the tree; minting sidecars is <c>watch</c>'s decision and catching a stale reference path up is <see cref="ReferenceRepair"/>'s, not a side effect of checking.</summary>
 public static class ProjectVerifier
 {
     /// <summary>Findings, errors first.</summary>
@@ -29,15 +29,30 @@ public static class ProjectVerifier
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        return Verify(fileSystem, layout, AssetPaths.Scan(fileSystem, layout.Assets));
+        var sources = AssetPaths.Scan(fileSystem, layout.Assets);
+
+        // The ignore list twice: once here so the index matches the one a build takes, and once
+        // inside so an unreadable manifest is reported rather than thrown.
+        AssetIgnoreRules ignore;
+        try
+        {
+            ignore = ProjectManifest.Load(fileSystem, layout.Manifest).Ignore;
+        }
+        catch (ProjectManifestException)
+        {
+            ignore = AssetIgnoreRules.None;
+        }
+
+        return Verify(fileSystem, layout, sources, AssetIndex.Build(fileSystem, sources, ignore));
     }
 
-    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources)
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan and index, so a build verifies the same tree it then walks and resolves references the same way.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, AssetIndex index)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(sources);
+        ArgumentNullException.ThrowIfNull(index);
 
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
@@ -69,7 +84,7 @@ public static class ProjectVerifier
                     break;
 
                 case AssetClass.Prefab:
-                    VerifyDocument(fileSystem, layout, sources, path, findings);
+                    VerifyDocument(fileSystem, sources, index, path, findings);
                     break;
 
                 // No "nothing handles this file" warning: only an importer, during a build, can
@@ -157,7 +172,8 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifyDocument(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, UPath path, List<VerifyFinding> findings)
+    private static void VerifyDocument(
+        IFileSystem fileSystem, AssetPaths sources, AssetIndex index, UPath path, List<VerifyFinding> findings)
     {
         PrefabDocument document;
         try
@@ -180,98 +196,133 @@ public static class ProjectVerifier
                 "is valid but not in canonical form; rewrite it (prefab-check --fix) so machine edits stay out of your diffs"));
         }
 
-        VerifyReferences(fileSystem, layout, sources, path, document, findings);
-        VerifyInstances(fileSystem, layout, path, document, findings);
+        VerifyReferences(sources, index, path, document, findings);
+        VerifyInstances(fileSystem, index, path, document, findings);
     }
 
     private static void VerifyReferences(
-        IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, UPath path, PrefabDocument document, List<VerifyFinding> findings)
+        AssetPaths sources, AssetIndex index, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
-        foreach (var candidate in document.Objects)
+        foreach (var (reference, where) in DocumentReferences.Enumerate(document))
         {
-            if (candidate.Prefab is { } prefab) Check(prefab, "prefab");
-
-            foreach (var component in candidate.Components)
-            {
-                var name = component.Type ?? DocumentGuid.Format(component.Id);
-                foreach (var (key, value) in component.Data) Walk(value, $"{name}.{key}");
-            }
+            Check(reference, where);
         }
 
-        // Must match CanonicalJson's reference rule (the bake's hook): a reference the bake flattens is one verify checked.
-        void Walk(object? value, string where)
+        foreach (var problem in MalformedReferences(path, document))
         {
-            switch (value)
-            {
-                // Gated on the reference SHAPE, not the model type: inside an array every table is
-                // inline (#187), so a payload record would otherwise be reported as a bad reference.
-                case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table.ToList()):
-                    try
-                    {
-                        if (AssetReferenceCodec.Read(table, $"in {where}",
-                                problem => new PrefabDocumentException(path.FullName, problem)) is { } reference)
-                        {
-                            Check(reference, where);
-                        }
-                    }
-                    catch (PrefabDocumentException error)
-                    {
-                        findings.Add(new VerifyFinding(VerifySeverity.Error, path, error.Message));
-                    }
-
-                    break;
-
-                case CanonicalTomlTable nested:
-                    foreach (var (key, member) in nested) Walk(member, $"{where}.{key}");
-                    break;
-
-                case IReadOnlyList<object> list:
-                    for (var i = 0; i < list.Count; i++) Walk(list[i], $"{where}[{i}]");
-                    break;
-            }
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
         }
 
         void Check(Paradise.Authoring.AssetReference reference, string where)
         {
-            var target = (layout.Assets / reference.Path).ToAbsolute();
-            if (sources.Problem(target, reference.Path) is { } problem)
-            {
-                findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"in {where}, {problem}"));
-                return;
-            }
+            var resolution = index.Resolve(reference);
+            var guid = DocumentGuid.Format(reference.Guid);
 
-            if (IdentityOf(fileSystem, target) is { } identity && identity != reference.Guid)
+            switch (resolution.Status)
             {
-                findings.Add(new VerifyFinding(
-                    VerifySeverity.Error, path,
-                    $"references '{reference.Path}' in {where} with guid " +
-                    $"'{DocumentGuid.Format(reference.Guid)}', but that asset's identity is " +
-                    $"'{DocumentGuid.Format(identity)}' — a half-finished move, and the two halves " +
-                    "must name the same asset"));
+                // The path half names an asset whose own identity could not be read; that sidecar
+                // carries its own finding, and repeating it per reference buries it.
+                case ReferenceStatus.Resolved or ReferenceStatus.Undetermined:
+                    return;
+
+                // Not an error: the guid resolved it, so the build is correct and only the text is
+                // out of date — a rename in Finder, or a sidecar the maintainer relinked by hash.
+                case ReferenceStatus.Stale:
+                    findings.Add(new VerifyFinding(
+                        VerifySeverity.Warning, path,
+                        $"in {where}, the path half says '{reference.Path}' but guid '{guid}' names " +
+                        $"'{resolution.Path}'; the guid resolves it, so this builds — run " +
+                        "`paradise assets verify --fix` to catch the path up"));
+                    return;
+
+                default:
+                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, Unresolved(sources, resolution, guid, where)));
+                    return;
             }
         }
     }
 
-    private static Guid? IdentityOf(IFileSystem fileSystem, UPath target)
+    /// <summary>The guid names no asset in the tree, so the reference resolves to nothing; what the PATH half names decides how to say so.</summary>
+    private static string Unresolved(AssetPaths sources, ReferenceResolution resolution, string guid, string where)
     {
-        var sidecar = SidecarMeta.PathFor(target);
-        if (fileSystem.FileExists(sidecar))
+        var reference = resolution.Reference;
+
+        if (resolution.HintIdentity is { } other)
+        {
+            return $"in {where}, references guid '{guid}', which no asset under assets/ carries; " +
+                $"'{reference.Path}' exists but is '{DocumentGuid.Format(other)}'. Re-point the " +
+                "reference, or restore the asset whose identity this is";
+        }
+
+        if (sources.Problem(resolution.Asset, reference.Path) is { } problem)
+        {
+            return $"in {where}, {problem}, and no asset under assets/ carries its guid '{guid}'";
+        }
+
+        return $"in {where}, references guid '{guid}', which no asset under assets/ carries " +
+            $"('{reference.Path}' exists but has no readable identity)";
+    }
+
+    /// <summary>References the walk could not read: the shape is reserved, so a table wearing it and failing to BE one must name the field rather than being skipped.</summary>
+    private static IEnumerable<string> MalformedReferences(UPath path, PrefabDocument document)
+    {
+        foreach (var candidate in document.Objects)
+        {
+            foreach (var component in candidate.Components)
+            {
+                var name = component.Type ?? DocumentGuid.Format(component.Id);
+                foreach (var (key, value) in component.Data)
+                {
+                    foreach (var problem in Walk(value, $"{name}.{key}")) yield return problem;
+                }
+            }
+        }
+
+        IEnumerable<string> Walk(object? value, string where)
+        {
+            switch (value)
+            {
+                case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table.ToList()):
+                    if (AssetReferenceCodec.TryRead(table, out _)) break;
+
+                    var reported = Problem(table, where);
+                    if (reported is not null) yield return reported;
+                    break;
+
+                case CanonicalTomlTable nested:
+                    foreach (var (key, member) in nested)
+                    {
+                        foreach (var problem in Walk(member, $"{where}.{key}")) yield return problem;
+                    }
+
+                    break;
+
+                case IReadOnlyList<object> list:
+                    for (var i = 0; i < list.Count; i++)
+                    {
+                        foreach (var problem in Walk(list[i], $"{where}[{i}]")) yield return problem;
+                    }
+
+                    break;
+            }
+        }
+
+        string? Problem(CanonicalInlineTable table, string where)
         {
             try
             {
-                return SidecarMeta.Load(fileSystem, sidecar).Guid;
+                AssetReferenceCodec.Read(table, $"in {where}", message => new PrefabDocumentException(path.FullName, message));
+                return null;
             }
-            catch (SidecarMetaException)
+            catch (PrefabDocumentException error)
             {
-                return null;   // reported against the sidecar itself, not against every reference
+                return error.Message;
             }
         }
-
-        return null;
     }
 
     private static void VerifyInstances(
-        IFileSystem fileSystem, AssetProjectLayout layout, UPath path, PrefabDocument document, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetIndex index, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         if (!document.Objects.Any(o => o.Prefab is not null || o.Target is not null)) return;
 
@@ -279,7 +330,7 @@ public static class ProjectVerifier
         {
             try
             {
-                return PrefabDocumentSerializer.Load(fileSystem, layout.Assets / reference.Path);
+                return PrefabDocumentSerializer.Load(fileSystem, index.AssetOf(reference));
             }
             catch (PrefabDocumentException)
             {

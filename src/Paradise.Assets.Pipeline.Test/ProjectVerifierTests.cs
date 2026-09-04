@@ -215,7 +215,7 @@ public class ProjectVerifierTests
     }
 
     /// <summary>Writes a canonical one-object document whose single component carries <paramref name="data"/>.</summary>
-    private static void WriteDocumentWith(MemoryFileSystem fileSystem, UPath path, CanonicalTomlTable data)
+    internal static void WriteDocumentWith(MemoryFileSystem fileSystem, UPath path, CanonicalTomlTable data)
     {
         var root = PrefabObject.WithMeta(Guid.NewGuid(), "crate");
         root.Components.Add(new PrefabComponent(Guid.NewGuid(), "game.Mesh", data));
@@ -272,8 +272,11 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_reference_with_the_wrong_case_is_an_error_naming_the_real_file()
+    public async Task a_reference_with_the_wrong_case_is_a_warning_naming_the_real_file()
     {
+        // Case-exactness still matters — the built tree must open on Linux — but the guid names
+        // the asset whatever the path's case, so this is a stale spelling to catch up, not a
+        // build to refuse.
         using var fileSystem = CreateProject();
         WriteDocument(fileSystem, "/game/assets/materials/Rust.toml", "a = 1\n");
         var guid = SidecarMeta.Load(fileSystem, "/game/assets/materials/Rust.toml.meta").Guid;
@@ -285,9 +288,96 @@ public class ProjectVerifierTests
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("materials/Rust.toml");
+        await Assert.That(findings[0].Message).Contains("--fix");
+    }
+
+    // ---- the path is a hint; the guid decides ---------------------------------------------
+
+    [Test]
+    public async Task a_reference_whose_path_a_rename_left_stale_is_a_warning_naming_where_the_asset_went()
+    {
+        // A Finder rename: the sidecar travelled with the file, so the identity is intact and
+        // every document still spells the old path. That used to fail the build.
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/patina.toml", "a = 1\n");
+        var guid = SidecarMeta.Load(fileSystem, "/game/assets/materials/patina.toml.meta").Guid;
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(guid, "materials/rust.toml")) },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("materials/rust.toml");
+        await Assert.That(findings[0].Message).Contains("materials/patina.toml");
+        await Assert.That(findings[0].Message).Contains(DocumentGuid.Format(guid));
+    }
+
+    [Test]
+    public async Task a_reference_whose_path_names_a_different_asset_resolves_by_its_guid()
+    {
+        // Both halves name something real and they disagree. The guid wins — anything else makes
+        // a swapped pair of filenames silently repoint every reference at the wrong asset.
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/rust.toml", "a = 1\n");
+        WriteDocument(fileSystem, "/game/assets/materials/patina.toml", "a = 2\n");
+        var patina = SidecarMeta.Load(fileSystem, "/game/assets/materials/patina.toml.meta").Guid;
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(patina, "materials/rust.toml")) },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("materials/patina.toml");
+    }
+
+    [Test]
+    public async Task a_guid_no_asset_carries_is_an_error_even_when_its_path_names_a_real_file()
+    {
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/rust.toml", "a = 1\n");
+        var stranger = Guid.Parse("11111111-2222-4333-8444-555555555555");
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            { "Material", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(stranger, "materials/rust.toml")) },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
-        await Assert.That(findings[0].Message).Contains("'materials/Rust.toml' does");
-        await Assert.That(findings[0].Message).Contains("case-exact");
+        await Assert.That(findings[0].Message).Contains(DocumentGuid.Format(stranger));
+        await Assert.That(findings[0].Message).Contains("no asset under assets/ carries");
+    }
+
+    [Test]
+    public async Task a_reference_into_an_asset_whose_own_sidecar_is_missing_is_reported_once()
+    {
+        // The asset has no identity to match, so the finding belongs to the asset — repeating it
+        // against every reference into it buries the one line that says what to do.
+        using var fileSystem = CreateProject();
+        fileSystem.CreateDirectory("/game/assets/materials");
+        fileSystem.WriteAllText("/game/assets/materials/rust.toml", "a = 1\n");
+        WriteDocumentWith(fileSystem, "/game/assets/levels/district.prefab", new CanonicalTomlTable
+        {
+            {
+                "Material",
+                AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(Guid.NewGuid(), "materials/rust.toml"))
+            },
+        });
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Path).IsEqualTo(new UPath("/game/assets/materials/rust.toml"));
+        await Assert.That(findings[0].Message).Contains("no sidecar");
     }
 
     [Test]

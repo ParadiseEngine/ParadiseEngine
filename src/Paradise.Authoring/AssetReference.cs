@@ -7,16 +7,18 @@ namespace Paradise.Authoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The GUID is authoritative and the path is the fallback.</b> Resolution tries the GUID first,
-/// so renaming or moving an asset never touches a document that references it. The path is kept
-/// because a GUID alone is unreadable in a diff and, more importantly, because it is the recovery
-/// route: a sidecar that gets lost or clobbered would otherwise break every reference to its
-/// asset, and with the path present it degrades to something a person can fix by hand.
+/// <b>The GUID is the identity; the path is a HINT.</b> Every consumer resolves through the
+/// sidecars' guid → path index (<c>Paradise.Assets.Pipeline.AssetIndex</c>), so a rename done
+/// outside <c>paradise assets mv</c> — Finder, <c>git mv</c> — cannot break a reference: the
+/// sidecar travels with the file, and <c>watch</c> relinks an identity a delete-then-add split.
 /// </para>
 /// <para>
-/// Both are written, and <c>verify</c> refuses a document where the two name DIFFERENT assets.
-/// That check is the point of carrying both: a half-finished move is then a named error rather
-/// than a reference that silently resolves to the wrong file.
+/// The path is written anyway because a GUID alone is unreadable in a diff and unsearchable in a
+/// grep. When it falls out of date <c>verify</c> reports a WARNING naming where the asset now
+/// lives, and <c>verify --fix</c> rewrites it; a GUID no asset carries stays an error, because
+/// nothing can stand in for an identity that is gone. Where the two disagree the GUID wins —
+/// resolving by path would repoint every reference at the wrong asset the first time two
+/// filenames were swapped.
 /// </para>
 /// <para>
 /// <see cref="Path"/> is always the <b>authoring</b> path — <c>materials/x.toml</c>, the file that
@@ -46,8 +48,8 @@ public sealed record AssetReference
     public Guid Guid { get; init; }
 
     /// <summary>
-    /// The assets-relative authoring path, '/'-separated. Readable, and the fallback when the
-    /// GUID resolves to nothing.
+    /// The assets-relative authoring path, '/'-separated. Readable, and a hint only: a rename can
+    /// leave it stale without breaking anything that reads this reference.
     /// </summary>
     public string Path { get; init; } = "";
 

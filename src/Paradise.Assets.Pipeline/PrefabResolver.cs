@@ -46,8 +46,8 @@ public static class PrefabResolver
         Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
         PrefabDocument into,
         List<ResolveError> errors,
-        List<string> stack,
-        Dictionary<string, PrefabDocument?> cache,
+        List<(Guid Guid, string Path)> stack,
+        Dictionary<Guid, PrefabDocument?> cache,
         int depth)
     {
         var expanded = 0;
@@ -102,24 +102,29 @@ public static class PrefabResolver
         Paradise.Authoring.AssetReference reference,
         Func<Paradise.Authoring.AssetReference, PrefabDocument?> prefabs,
         List<ResolveError> errors,
-        List<string> stack,
-        Dictionary<string, PrefabDocument?> cache,
+        List<(Guid Guid, string Path)> stack,
+        Dictionary<Guid, PrefabDocument?> cache,
         int depth)
     {
-        var key = reference.Path;
+        // Keyed on IDENTITY, not on the path: the path half of a reference is a hint that a
+        // rename can leave stale, and two spellings of one prefab would then be two cache
+        // entries — and a cycle through them would not be seen as one. The path is carried
+        // alongside only so the messages below can name something a person recognises.
+        var key = reference.Guid;
+        var display = reference.Path;
 
-        var loop = stack.FindIndex(entry => string.Equals(entry, key, StringComparison.OrdinalIgnoreCase));
+        var loop = stack.FindIndex(entry => entry.Guid == key);
         if (loop >= 0)
         {
             errors.Add(new ResolveError(
-                $"prefabs form a cycle: {string.Join(" -> ", stack.Skip(loop).Append(key))}"));
+                $"prefabs form a cycle: {string.Join(" -> ", stack.Skip(loop).Select(entry => entry.Path).Append(display))}"));
             return null;
         }
 
         if (depth >= MaxNestingDepth)
         {
             errors.Add(new ResolveError(
-                $"prefab '{key}' nests more than {MaxNestingDepth} deep; this is almost certainly a mistake"));
+                $"prefab '{display}' nests more than {MaxNestingDepth} deep; this is almost certainly a mistake"));
             return null;
         }
 
@@ -128,12 +133,12 @@ public static class PrefabResolver
         var raw = prefabs(reference);
         if (raw is null)
         {
-            errors.Add(new ResolveError($"prefab '{key}' could not be read"));
+            errors.Add(new ResolveError($"prefab '{display}' could not be read"));
             cache[key] = null;
             return null;
         }
 
-        stack.Add(key);
+        stack.Add((key, display));
         var flat = new PrefabDocument();
         ExpandDocument(raw, prefabs, flat, errors, stack, cache, depth + 1);
         stack.RemoveAt(stack.Count - 1);
