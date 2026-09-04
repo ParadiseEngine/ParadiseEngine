@@ -278,6 +278,41 @@ public sealed record GlbExtraction(
 
     public bool Extracted => Mesh is not null;
 
+    /// <summary>Every recorded entry with the site name <c>verify</c> and <c>refs</c> use for it, so the GLB's extracted files are references it holds like any other.</summary>
+    public IEnumerable<(string Where, Entry Entry)> Entries()
+    {
+        if (Mesh is { } mesh) yield return ("extract.mesh", mesh);
+        if (Skeleton is { } skeleton) yield return ("extract.skeleton", skeleton);
+        if (Prefab is { } prefab) yield return ("extract.prefab", prefab);
+        foreach (var clip in Clips) yield return ($"extract.clips[{clip.Index}]", clip.Entry);
+        foreach (var material in Materials) yield return ($"extract.materials[{material.Index}]", material.Entry);
+        foreach (var image in Images) yield return ($"extract.images[{image.Index}]", image.Entry);
+    }
+
+    /// <summary>The same record with every entry's path half brought up to date through <paramref name="resolve"/>; the input when none moved.</summary>
+    public GlbExtraction Repointed(Func<AssetReference, AssetReference?> resolve, List<string> changes)
+    {
+        ArgumentNullException.ThrowIfNull(resolve);
+        ArgumentNullException.ThrowIfNull(changes);
+
+        Entry? Repoint(Entry? entry, string where)
+        {
+            if (entry is null || resolve(entry.Reference) is not { } current || current == entry.Reference) return entry;
+            changes.Add($"{where}: {entry.Reference.Path} -> {current.Path}");
+            return entry with { Reference = current };
+        }
+
+        return this with
+        {
+            Mesh = Repoint(Mesh, "extract.mesh"),
+            Skeleton = Repoint(Skeleton, "extract.skeleton"),
+            Prefab = Repoint(Prefab, "extract.prefab"),
+            Clips = Clips.Select(c => c with { Entry = Repoint(c.Entry, $"extract.clips[{c.Index}]")! }).ToList(),
+            Materials = Materials.Select(m => m with { Entry = Repoint(m.Entry, $"extract.materials[{m.Index}]")! }).ToList(),
+            Images = Images.Select(i => i with { Entry = Repoint(i.Entry, $"extract.images[{i.Index}]")! }).ToList(),
+        };
+    }
+
     /// <param name="GlbFingerprint">SHA-256 of what the GLB extracted to at the last sync.</param>
     /// <param name="DocumentFingerprint">SHA-256 of the document's bytes at the last sync.</param>
     public sealed record Entry(AssetReference Reference, string GlbFingerprint, string DocumentFingerprint);

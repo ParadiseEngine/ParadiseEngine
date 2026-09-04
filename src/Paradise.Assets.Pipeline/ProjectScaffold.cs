@@ -52,7 +52,7 @@ public static class ProjectScaffold
         // `extract` makes of it. The prefabs below are the sample's own, so none is generated.
         var extracted = AssetExtractor.Extract(fileSystem, AssetProjectLayout.Locate(fileSystem, root), assets / MeshPath, generatePrefab: false);
         if (!extracted.Succeeded) throw new InvalidOperationException($"the sample GLB could not be extracted: {string.Join("; ", extracted.Errors)}");
-        foreach (var relative in extracted.Written) written.Add(new ScaffoldedFile(assets / relative, "extracted from the unit cube"));
+        foreach (var file in extracted.Written) written.Add(new ScaffoldedFile(assets / file.Path, "extracted from the unit cube"));
 
         var mesh = Reference(fileSystem, assets, MeshBlobPath);
         var material = Reference(fileSystem, assets, MaterialPath);

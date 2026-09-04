@@ -166,6 +166,14 @@ public static class MeshBlobFormat
             ref var draw = ref blob.Draws[i];
             if (draw.FirstIndex + (ulong)draw.IndexCount > (ulong)blob.Indices.Length) throw new InvalidDataException($"Draw {i} runs past the index buffer.");
         }
+
+        // A draw that fits the index buffer can still name a vertex past the end; that is an
+        // out-of-range GPU read at upload, so it is refused here where it can be named.
+        var vertexCount = (uint)blob.VertexCount;
+        for (var i = 0; i < blob.Indices.Length; i++)
+        {
+            if (blob.Indices[i] >= vertexCount) throw new InvalidDataException($"Index {i} names vertex {blob.Indices[i]} of {vertexCount}.");
+        }
     }
 
     private static IBuilder<MeshDraw> Draw(MeshDrawData data)

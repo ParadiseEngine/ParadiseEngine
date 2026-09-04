@@ -87,6 +87,16 @@ public class MeshBlobTests
     }
 
     [Test]
+    public async Task an_index_past_the_vertex_count_is_refused()
+    {
+        var broken = Sample() with { Indices = [0, 1, 3] };
+
+        var error = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(broken))).Throws<InvalidDataException>();
+
+        await Assert.That(error!.Message).Contains("vertex 3 of 3");
+    }
+
+    [Test]
     public async Task a_vertex_stream_that_is_not_whole_vertices_is_refused_at_write()
     {
         var broken = Sample() with { Vertices = new float[13] };

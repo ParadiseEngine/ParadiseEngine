@@ -18,9 +18,16 @@ namespace Paradise.Assets.Pipeline;
 public sealed record ExtractResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
-    IReadOnlyList<string> Written,
+    IReadOnlyList<ExtractedFile> Written,
     IReadOnlyList<string> Kept,
     IReadOnlyList<string> Warnings);
+
+/// <summary>A file <c>extract</c> wrote, and why when it was not a first write: the path stays a path, so a consumer that resolves it never sees the note.</summary>
+/// <param name="Path">Relative to <c>assets/</c>.</param>
+public sealed record ExtractedFile(string Path, string? Note = null)
+{
+    public override string ToString() => Note is null ? Path : $"{Path} ({Note})";
+}
 
 /// <summary>Which side wins when both the GLB and an extracted document changed since their last sync; the default is to refuse and say so.</summary>
 public enum ConflictResolution
@@ -77,7 +84,7 @@ public static partial class AssetExtractor
     private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab)
     {
         private readonly List<string> _errors = [];
-        private readonly List<string> _written = [];
+        private readonly List<ExtractedFile> _written = [];
         private readonly List<string> _kept = [];
         private readonly List<string> _warnings = [];
         private readonly List<UPath> _minted = [];
@@ -137,8 +144,8 @@ public static partial class AssetExtractor
             }
 
             var recorded = settings;
-            var mesh = Blob(index, directory / $"{stem}.mesh", MeshBlobFormat.Write(cooked.Mesh), recorded.Mesh, "mesh");
-            var skeleton = cooked.Skeleton is { } rig ? Blob(index, directory / $"{stem}.skeleton", SkeletonFormat.Write(rig), recorded.Skeleton, "skeleton") : null;
+            var mesh = Blob(index, Target(index, recorded.Mesh, directory / $"{stem}.mesh"), MeshBlobFormat.Write(cooked.Mesh), recorded.Mesh, "mesh");
+            var skeleton = cooked.Skeleton is { } rig ? Blob(index, Target(index, recorded.Skeleton, directory / $"{stem}.skeleton"), SkeletonFormat.Write(rig), recorded.Skeleton, "skeleton") : null;
             var clips = Named(Clips(index, directory, stem, cooked, recorded));
             var materials = Materials(index, directory, stem, bytes, asset, recorded);
 
@@ -146,7 +153,7 @@ public static partial class AssetExtractor
             var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images, recorded.Prefab);
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
-            var prefabPath = directory / $"{stem}.prefab";
+            var prefabPath = Target(index, recorded.Prefab, directory / $"{stem}.prefab");
             if (generatePrefab) extraction = extraction with { Prefab = Prefab(index, layout, prefabPath, stem, meta.Guid, Identified(index, extraction), cooked, asset) };
             if (extraction.Prefab is { } prefab && prefab.Reference.Guid == Guid.Empty) index = Rescan();
 
@@ -209,8 +216,9 @@ public static partial class AssetExtractor
                     continue;
                 }
 
-                var path = directory / $"{stem}_{image.Index}{image.SourceExtension}";
-                var entry = Blob(index, path, image.Bytes, recorded.Images.FirstOrDefault(i => i.Index == image.Index)?.Entry, "image");
+                var previous = recorded.Images.FirstOrDefault(i => i.Index == image.Index)?.Entry;
+                var path = Target(index, previous, directory / $"{stem}_{image.Index}{image.SourceExtension}");
+                var entry = Blob(index, path, image.Bytes, previous, "image");
                 images.RemoveAll(i => i.Index == image.Index);
                 if (entry is not null) images.Add(new GlbExtraction.NamedEntry(image.Index, ImageSlot(image.Index), entry));
                 uris[image.Index] = MeshContainer.UriFor(index.Relative(glb), index.Relative(path));
@@ -225,11 +233,19 @@ public static partial class AssetExtractor
             }
 
             fileSystem.WriteAllBytes(glb, rewritten);
-            _written.Add(index.Relative(glb) + " (images now external)");
+            _written.Add(new ExtractedFile(index.Relative(glb), "images now external"));
             return rewritten;
         }
 
         private static string ImageSlot(int imageIndex) => $"images[{imageIndex}]";
+
+        /// <summary>Where a recorded entry's document is NOW, by identity — a moved file is re-synced in place, not abandoned for a fresh one beside the GLB; <paramref name="fallback"/> when nothing carries the guid.</summary>
+        private static UPath Target(AssetIndex index, GlbExtraction.Entry? recorded, UPath fallback)
+        {
+            if (recorded is null) return fallback;
+            var resolution = index.Resolve(recorded.Reference);
+            return resolution.Status is ReferenceStatus.Resolved or ReferenceStatus.Stale ? resolution.Asset : fallback;
+        }
 
         private IEnumerable<(int Index, string Name, GlbExtraction.Entry? Entry)> Clips(AssetIndex index, UPath directory, string stem, CookedGlb cooked, GlbExtraction recorded)
         {
@@ -239,7 +255,7 @@ public static partial class AssetExtractor
                 var clip = cooked.Clips[i];
                 var name = names.Mint(clip.Name, i);
                 var previous = recorded.Clips.FirstOrDefault(c => c.Index == i)?.Entry;
-                yield return (i, name, Blob(index, directory / $"{stem}.{name}.anim", ClipFormat.Write(clip), previous, "clip"));
+                yield return (i, name, Blob(index, Target(index, previous, directory / $"{stem}.{name}.anim"), ClipFormat.Write(clip), previous, "clip"));
             }
         }
 
@@ -268,7 +284,7 @@ public static partial class AssetExtractor
 
                 case (true, false):
                     fileSystem.WriteAllBytes(path, fresh);
-                    _written.Add($"{relative} (re-extracted: the GLB changed)");
+                    _written.Add(new ExtractedFile(relative, "re-extracted: the GLB changed"));
                     return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
 
                 case (false, true):
@@ -301,7 +317,7 @@ public static partial class AssetExtractor
             {
                 case ConflictResolution.TakeGlb:
                     takeGlb();
-                    _written.Add($"{relative} (existed and was not extracted by this tool: took the GLB's)");
+                    _written.Add(new ExtractedFile(relative, "existed and was not extracted by this tool: took the GLB's"));
                     return new GlbExtraction.Entry(reference, glbSide, glbSide);
 
                 case ConflictResolution.TakeDocument:
@@ -320,11 +336,11 @@ public static partial class AssetExtractor
             {
                 case ConflictResolution.TakeGlb:
                     fileSystem.WriteAllBytes(path, fresh);
-                    _written.Add($"{relative} (conflict: took the GLB's)");
+                    _written.Add(new ExtractedFile(relative, "conflict: took the GLB's"));
                     return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
 
                 case ConflictResolution.TakeDocument:
-                    _written.Add($"{relative} (conflict: kept the document's)");
+                    _written.Add(new ExtractedFile(relative, "conflict: kept the document's"));
                     return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = documentSide };
 
                 default:
@@ -354,11 +370,11 @@ public static partial class AssetExtractor
             {
                 var material = asset.Materials[i];
                 var name = names.Mint(material.Name ?? $"material_{i}", i);
-                var path = directory / $"{stem}.{name}.material";
+                var previous = recorded.Materials.FirstOrDefault(m => m.Index == i)?.Entry;
+                var path = Target(index, previous, directory / $"{stem}.{name}.material");
                 var document = MaterialDocumentFrom(material, name, TextureAt, out var unresolved);
                 foreach (var missing in unresolved) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
 
-                var previous = recorded.Materials.FirstOrDefault(m => m.Index == i)?.Entry;
                 result.Add((i, name, Material(index, path, i, document, previous)));
             }
 
@@ -431,7 +447,7 @@ public static partial class AssetExtractor
             }
 
             fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(merged));
-            _written.Add($"{index.Relative(path)} ({why})");
+            _written.Add(new ExtractedFile(index.Relative(path), why));
             return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
         }
 
@@ -449,7 +465,7 @@ public static partial class AssetExtractor
             if (!ReferenceEquals(rewritten, bytes))
             {
                 fileSystem.WriteAllBytes(glb, rewritten);
-                _written.Add($"{index.Relative(glb)} (material '{path.GetName()}' {why})");
+                _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
             }
 
             return recorded with { GlbFingerprint = documentSide, DocumentFingerprint = documentSide };
@@ -541,7 +557,7 @@ public static partial class AssetExtractor
             root.Components.Add(new PrefabComponent(GlbExtraction.MaterialsComponentId, GlbExtraction.MaterialsComponentType, new CanonicalTomlTable { { "Slots", slots } }));
             document.Objects.Add(root);
             PrefabDocumentSerializer.Save(fileSystem, path, document);
-            _written.Add(index.Relative(path));
+            _written.Add(new ExtractedFile(index.Relative(path)));
             _minted.Add(path);
             return new GlbExtraction.Entry(new AssetReference(Guid.Empty, index.Relative(path)), "", "");
         }
@@ -593,7 +609,7 @@ public static partial class AssetExtractor
         {
             fileSystem.CreateDirectory(path.GetDirectory());
             fileSystem.WriteAllBytes(path, bytes);
-            _written.Add(index.Relative(path));
+            _written.Add(new ExtractedFile(index.Relative(path)));
             _minted.Add(path);
         }
 

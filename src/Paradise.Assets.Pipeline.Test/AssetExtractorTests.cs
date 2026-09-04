@@ -140,7 +140,7 @@ public class AssetExtractorTests
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Written.Any(w => w.StartsWith("models/crate.mesh") && w.Contains("re-extracted"))).IsTrue();
+        await Assert.That(result.Written.Any(w => w.Path == "models/crate.mesh" && w.Note!.Contains("re-extracted"))).IsTrue();
         await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.mesh")).Vertices[0]).IsEqualTo(5f);
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.prefab")).IsEqualTo(prefab);
     }
@@ -156,7 +156,7 @@ public class AssetExtractorTests
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Written.Any(w => w.StartsWith("models/crate_0.png") && w.Contains("re-extracted"))).IsTrue();
+        await Assert.That(result.Written.Any(w => w.Path == "models/crate_0.png" && w.Note!.Contains("re-extracted"))).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
         var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
         await Assert.That(recorded.Images.Single().Name).IsEqualTo("images[0]");
@@ -244,7 +244,7 @@ public class AssetExtractorTests
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Written.Any(w => w.Contains("crate.glb") && w.Contains("written back"))).IsTrue();
+        await Assert.That(result.Written.Any(w => w.Path == "models/crate.glb" && w.Note!.Contains("written back"))).IsTrue();
         var asset = Paradise.Assets.Gltf.GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(Glb));
         await Assert.That(asset.Materials[1].MetallicFactor).IsEqualTo(0.25f);
         await Assert.That(asset.Materials[1].BaseColorImage).IsGreaterThanOrEqualTo(0);
@@ -311,6 +311,33 @@ public class AssetExtractorTests
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors.Single()).Contains("rust.ktx2");
         await Assert.That(MeshContainer.Read(Glb, referenced.ReadAllBytes(Glb)).Any(i => i.Uri.EndsWith(".ktx2"))).IsFalse();
+    }
+
+    [Test]
+    public async Task a_moved_extracted_file_is_followed_by_the_record_and_re_synced_in_place()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var meshGuid = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.mesh.meta").Guid;
+
+        var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.mesh", "/game/assets/blobs/crate.mesh");
+        await Assert.That(moved.Errors).IsEmpty();
+        // mv rewrote the GLB's record on the spot, through its importer, like any reference.
+        await Assert.That(moved.Rewritten).Contains("models/crate.glb");
+        var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(recorded.Mesh!.Reference.Path).IsEqualTo("blobs/crate.mesh");
+
+        fileSystem.WriteAllBytes(Glb, CrateGlb(x: 5f));
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsFalse();
+        await Assert.That(Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/assets/blobs/crate.mesh")).Vertices[0]).IsEqualTo(5f);
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/blobs/crate.mesh.meta").Guid).IsEqualTo(meshGuid);
+
+        // And a removed one is a dangling reference the GLB reports, not a silent re-mint.
+        var removed = AssetRemover.Remove(fileSystem, s_layout, "/game/assets/blobs/crate.mesh", force: true);
+        await Assert.That(removed.Dangling.Any(d => d.ReferrerPath.GetName() == "crate.glb" && d.Where == "extract.mesh")).IsTrue();
     }
 
     [Test]
@@ -384,6 +411,24 @@ public class AssetExtractorTests
         var bySidecar = AssetExtractor.Extract(overridden, s_layout, Glb);
         await Assert.That(bySidecar.Errors).IsEmpty();
         await Assert.That(overridden.FileExists("/game/assets/models/crate/crate.mesh")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_deleted_extracted_file_is_a_verify_error_against_the_glb()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+
+        // Deleted outside the tooling (a file manager, git): the GLB still says it was extracted.
+        fileSystem.DeleteFile("/game/assets/models/crate.mesh");
+        fileSystem.DeleteFile("/game/assets/models/crate.mesh.meta");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        var dangling = findings.Where(f => f.Severity == VerifySeverity.Error && f.Path == Glb).ToList();
+        await Assert.That(dangling.Count).IsEqualTo(1);
+        await Assert.That(dangling[0].Message).Contains("extract.mesh");
     }
 
     [Test]

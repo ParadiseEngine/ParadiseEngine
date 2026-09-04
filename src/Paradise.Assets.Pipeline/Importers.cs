@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
+using Paradise.Authoring;
 using Paradise.Export.Serialization;
 
 using Zio;
@@ -92,6 +93,16 @@ public sealed class GlbImporter : IAssetImporter
             }
         }
 
+        // What extract made of it is the GLB's too: a moved blob is followed, a removed one is
+        // a dangling reference the author hears about, not a file that quietly re-mints.
+        if (Extraction(context, asset) is { } extraction)
+        {
+            foreach (var (where, entry) in extraction.Entries())
+            {
+                sites.Add(new ReferenceSite(where, entry.Reference, entry.Reference.Path, entry.Reference.Path));
+            }
+        }
+
         return new AssetReferences(sites);
     }
 
@@ -100,7 +111,40 @@ public sealed class GlbImporter : IAssetImporter
     {
         ArgumentNullException.ThrowIfNull(context);
         var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
-        return MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+        var repaired = MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+
+        if (Extraction(context, asset) is not { } extraction) return repaired;
+        var changes = new List<string>();
+        var repointed = extraction.Repointed(reference => Current(context.Index, reference), changes);
+        if (changes.Count == 0) return repaired;
+
+        var sidecar = SidecarMeta.PathFor(asset);
+        var meta = SidecarMeta.Load(context.FileSystem, sidecar);
+        GlbImportSettings.WriteExtraction(meta, repointed);
+        meta.Save(context.FileSystem, sidecar);
+        return new RepairedDocument(asset, [.. repaired?.Repointed ?? [], .. changes]);
+    }
+
+    /// <summary>What the sidecar records as extracted; null with no sidecar, or one verify already reports as unreadable.</summary>
+    private static GlbExtraction? Extraction(ReferenceContext context, UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!context.FileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar));
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Where the asset the reference names is now, or null to leave a reference that resolves to nothing as the evidence it is.</summary>
+    private static AssetReference? Current(AssetIndex index, AssetReference reference)
+    {
+        var resolution = index.Resolve(reference);
+        return resolution.Status is ReferenceStatus.Resolved or ReferenceStatus.Stale ? resolution.Current : null;
     }
 
     /// <inheritdoc />
