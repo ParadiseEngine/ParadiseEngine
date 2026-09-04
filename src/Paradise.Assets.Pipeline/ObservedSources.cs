@@ -28,10 +28,10 @@ namespace Paradise.Assets.Pipeline;
 /// </remarks>
 internal sealed class ObservedSources : ComposeFileSystem
 {
-    private readonly AssetPaths _sources;
+    private readonly AssetIndex _sources;
     private readonly Dictionary<string, BuildInput> _records = new(StringComparer.Ordinal);
 
-    public ObservedSources(IFileSystem fileSystem, AssetPaths sources)
+    public ObservedSources(IFileSystem fileSystem, AssetIndex sources)
         : base(fileSystem, owned: false)
     {
         _sources = sources;

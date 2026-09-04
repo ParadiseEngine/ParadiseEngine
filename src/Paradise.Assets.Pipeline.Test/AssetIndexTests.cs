@@ -121,14 +121,14 @@ public class AssetIndexTests
         var meta = SidecarMeta.Mint();
         meta.Save(fileSystem, "/game/assets/models/crate.blend.meta");
 
-        var sources = AssetPaths.Scan(fileSystem, s_layout.Assets);
-        var index = AssetIndex.Build(fileSystem, sources, ProjectManifest.Load(fileSystem, s_layout.Manifest).Ignore);
+        var index = AssetIndex.Scan(
+            fileSystem, s_layout.Assets, ProjectManifest.Load(fileSystem, s_layout.Manifest).Ignore);
 
         await Assert.That(index.Find(meta.Guid)).IsNull();
     }
 
     private static AssetIndex Index(MemoryFileSystem fileSystem)
-        => AssetIndex.Build(fileSystem, AssetPaths.Scan(fileSystem, s_layout.Assets));
+        => AssetIndex.Scan(fileSystem, s_layout.Assets);
 
     private static Guid Material(MemoryFileSystem fileSystem, UPath path)
     {

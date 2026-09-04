@@ -15,13 +15,12 @@ namespace Paradise.Assets.Pipeline;
 /// output depends on that is NOT read through it — a tool's version, the profile's settings — is
 /// the runner's to fold into the index environment; the built-ins have nothing else.
 /// <paramref name="Meta"/> is the asset's sidecar, which verify guarantees exists before a build
-/// runs. <paramref name="References"/> resolves an <see cref="Paradise.Authoring.AssetReference"/>
+/// runs. <paramref name="Sources"/> also resolves an <see cref="Paradise.Authoring.AssetReference"/>
 /// the asset makes: the guid decides, the path half is a hint a rename can leave stale.
 /// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
-    AssetPaths Sources,
-    AssetIndex References,
+    AssetIndex Sources,
     UPath Asset,
     string Source,
     SidecarMeta? Meta,
@@ -60,7 +59,7 @@ public sealed record ImportContext(
     {
         ArgumentNullException.ThrowIfNull(reference);
 
-        var resolution = References.Resolve(reference);
+        var resolution = Sources.Resolve(reference);
         var sidecar = SidecarMeta.PathFor(resolution.Asset);
         if (FileSystem.FileExists(sidecar)) FileSystem.ReadAllBytes(sidecar);
 
@@ -74,7 +73,7 @@ public sealed record ImportContext(
     /// <remarks>
     /// Path-only on purpose, and the one place that is right: these live inside a container the
     /// DCC wrote and carry no identity, so there is no guid to prefer. An authored reference goes
-    /// through <see cref="References"/> instead.
+    /// through <see cref="Resolve"/> instead.
     /// </remarks>
     public string? CheckReference(string reference, out UPath resolved)
     {

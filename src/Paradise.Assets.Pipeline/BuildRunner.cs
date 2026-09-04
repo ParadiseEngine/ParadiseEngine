@@ -87,9 +87,8 @@ public sealed partial class BuildRunner
                 0, output);
         }
 
-        var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
-        var references = AssetIndex.Build(_fileSystem, sources, projectManifest.Ignore);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, references);
+        var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -128,7 +127,7 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (handler, inputs) = Offer(path, relative, profile!, target, cache, output, manifest, sources, references, errors);
+                var (handler, inputs) = Offer(path, relative, profile!, target, cache, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
@@ -181,8 +180,7 @@ public sealed partial class BuildRunner
         ArtifactCache cache,
         UPath output,
         BuildManifest manifest,
-        AssetPaths sources,
-        AssetIndex references,
+        AssetIndex sources,
         List<string> errors)
     {
         using var observed = new ObservedSources(_fileSystem, sources);
@@ -190,7 +188,7 @@ public sealed partial class BuildRunner
 
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
-            observed, sources, references, path, relative, meta,
+            observed, sources, path, relative, meta,
             profile, target, written, cache, _encoder, _log);
 
         IAssetImporter? handler = null;

@@ -44,7 +44,7 @@ public static partial class AssetMover
         }
 
         var isDirectory = fileSystem.DirectoryExists(from);
-        var before = AssetPaths.Scan(fileSystem, layout.Assets);
+        var before = AssetIndex.Scan(fileSystem, layout.Assets);
         var mapping = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var file in before.Files)
         {
@@ -86,7 +86,7 @@ public static partial class AssetMover
         var log = logger ?? NullLogger.Instance;
         foreach (var (source, destination) in mapping) LogMoved(log, source, destination);
 
-        var after = AssetPaths.Scan(fileSystem, layout.Assets);
+        var after = AssetIndex.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
         var rewritten = new List<string>();
         var warnings = new List<string>();
@@ -177,7 +177,7 @@ public static partial class AssetMover
 
     private static void RewriteDocument(
         IFileSystem fileSystem,
-        AssetPaths sources,
+        AssetIndex sources,
         UPath path,
         IReadOnlyDictionary<string, string> mapping,
         List<string> rewritten,
@@ -207,7 +207,7 @@ public static partial class AssetMover
         => mapping.TryGetValue(reference.Path, out var moved) ? reference with { Path = moved } : reference;
 
     /// <summary>Only uris THIS move broke — the texture moved away, or the mesh moved away from it; a uri that was already broken belongs to verify.</summary>
-    private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetPaths sources, UPath glb, IReadOnlyDictionary<string, string> mapping, List<string> warnings)
+    private static void WarnAboutMeshUris(IFileSystem fileSystem, AssetIndex sources, UPath glb, IReadOnlyDictionary<string, string> mapping, List<string> warnings)
     {
         var meshMoved = mapping.Values.Contains(sources.Relative(glb), StringComparer.Ordinal);
         var bytes = fileSystem.ReadAllBytes(glb);

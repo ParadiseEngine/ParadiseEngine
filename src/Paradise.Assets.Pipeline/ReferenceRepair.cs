@@ -29,24 +29,21 @@ public static class ReferenceRepair
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        var sources = AssetPaths.Scan(fileSystem, layout.Assets);
-        return Fix(fileSystem, layout, sources, AssetIndex.Build(fileSystem, sources, IgnoreRules(fileSystem, layout)));
+        return Fix(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout)));
     }
 
-    /// <summary>As <see cref="Fix(IFileSystem, AssetProjectLayout)"/> over a scan and index already taken.</summary>
-    public static IReadOnlyList<RepairedDocument> Fix(
-        IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, AssetIndex index)
+    /// <summary>As <see cref="Fix(IFileSystem, AssetProjectLayout)"/> over a scan already taken.</summary>
+    public static IReadOnlyList<RepairedDocument> Fix(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
-        ArgumentNullException.ThrowIfNull(sources);
         ArgumentNullException.ThrowIfNull(index);
 
         var repaired = new List<RepairedDocument>();
         if (!fileSystem.DirectoryExists(layout.Assets)) return repaired;
 
         var ignore = IgnoreRules(fileSystem, layout);
-        foreach (var path in sources.Files)
+        foreach (var path in index.Files)
         {
             if (AssetClassifier.Classify(layout.Assets, path, ignore) != AssetClass.Prefab) continue;
 

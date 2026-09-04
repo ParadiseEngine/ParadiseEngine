@@ -7,8 +7,9 @@ namespace Paradise.Authoring;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The GUID is the identity; the path is a HINT.</b> Every consumer resolves through the
-/// sidecars' guid → path index (<c>Paradise.Assets.Pipeline.AssetIndex</c>), so a rename done
+/// <b>The GUID is the identity; the path is a HINT.</b> Every consumer resolves through the one
+/// scan of <c>assets/</c> that reads the sidecars (<c>Paradise.Assets.Pipeline.AssetIndex</c>,
+/// which holds what exists and which asset carries which guid), so a rename done
 /// outside <c>paradise assets mv</c> — Finder, <c>git mv</c> — cannot break a reference: the
 /// sidecar travels with the file, and <c>watch</c> relinks an identity a delete-then-add split.
 /// </para>

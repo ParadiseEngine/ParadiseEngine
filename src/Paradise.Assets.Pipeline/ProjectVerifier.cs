@@ -29,10 +29,8 @@ public static class ProjectVerifier
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        var sources = AssetPaths.Scan(fileSystem, layout.Assets);
-
-        // The ignore list twice: once here so the index matches the one a build takes, and once
-        // inside so an unreadable manifest is reported rather than thrown.
+        // The ignore list is read twice: once here so the scan matches the one a build takes,
+        // and once inside so an unreadable manifest is reported rather than thrown.
         AssetIgnoreRules ignore;
         try
         {
@@ -43,16 +41,15 @@ public static class ProjectVerifier
             ignore = AssetIgnoreRules.None;
         }
 
-        return Verify(fileSystem, layout, sources, AssetIndex.Build(fileSystem, sources, ignore));
+        return Verify(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, ignore));
     }
 
-    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan and index, so a build verifies the same tree it then walks and resolves references the same way.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetPaths sources, AssetIndex index)
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(sources);
-        ArgumentNullException.ThrowIfNull(index);
 
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
@@ -84,7 +81,7 @@ public static class ProjectVerifier
                     break;
 
                 case AssetClass.Prefab:
-                    VerifyDocument(fileSystem, sources, index, path, findings);
+                    VerifyDocument(fileSystem, sources, path, findings);
                     break;
 
                 // No "nothing handles this file" warning: only an importer, during a build, can
@@ -173,7 +170,7 @@ public static class ProjectVerifier
     }
 
     private static void VerifyDocument(
-        IFileSystem fileSystem, AssetPaths sources, AssetIndex index, UPath path, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetIndex sources, UPath path, List<VerifyFinding> findings)
     {
         PrefabDocument document;
         try
@@ -196,12 +193,12 @@ public static class ProjectVerifier
                 "is valid but not in canonical form; rewrite it (prefab-check --fix) so machine edits stay out of your diffs"));
         }
 
-        VerifyReferences(sources, index, path, document, findings);
-        VerifyInstances(fileSystem, index, path, document, findings);
+        VerifyReferences(sources, path, document, findings);
+        VerifyInstances(fileSystem, sources, path, document, findings);
     }
 
     private static void VerifyReferences(
-        AssetPaths sources, AssetIndex index, UPath path, PrefabDocument document, List<VerifyFinding> findings)
+        AssetIndex sources, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         foreach (var (reference, where) in DocumentReferences.Enumerate(document))
         {
@@ -215,7 +212,7 @@ public static class ProjectVerifier
 
         void Check(Paradise.Authoring.AssetReference reference, string where)
         {
-            var resolution = index.Resolve(reference);
+            var resolution = sources.Resolve(reference);
             var guid = DocumentGuid.Format(reference.Guid);
 
             switch (resolution.Status)
@@ -243,7 +240,7 @@ public static class ProjectVerifier
     }
 
     /// <summary>The guid names no asset in the tree, so the reference resolves to nothing; what the PATH half names decides how to say so.</summary>
-    private static string Unresolved(AssetPaths sources, ReferenceResolution resolution, string guid, string where)
+    private static string Unresolved(AssetIndex sources, ReferenceResolution resolution, string guid, string where)
     {
         var reference = resolution.Reference;
 
@@ -322,7 +319,7 @@ public static class ProjectVerifier
     }
 
     private static void VerifyInstances(
-        IFileSystem fileSystem, AssetIndex index, UPath path, PrefabDocument document, List<VerifyFinding> findings)
+        IFileSystem fileSystem, AssetIndex sources, UPath path, PrefabDocument document, List<VerifyFinding> findings)
     {
         if (!document.Objects.Any(o => o.Prefab is not null || o.Target is not null)) return;
 
@@ -330,7 +327,7 @@ public static class ProjectVerifier
         {
             try
             {
-                return PrefabDocumentSerializer.Load(fileSystem, index.AssetOf(reference));
+                return PrefabDocumentSerializer.Load(fileSystem, sources.AssetOf(reference));
             }
             catch (PrefabDocumentException)
             {

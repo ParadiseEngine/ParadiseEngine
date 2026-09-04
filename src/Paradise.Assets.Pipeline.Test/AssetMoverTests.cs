@@ -258,13 +258,13 @@ public class AssetMoverTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/taken.glb");
-        var files = AssetPaths.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName).ToList();
+        var files = AssetIndex.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName).ToList();
 
         var result = AssetMover.Move(fileSystem, s_layout, from, to);
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains(reason);
-        await Assert.That(AssetPaths.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName)).IsEquivalentTo(files);
+        await Assert.That(AssetIndex.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName)).IsEquivalentTo(files);
     }
 
     private static void WriteLevel(MemoryFileSystem fileSystem, UPath path, string meshPath)
