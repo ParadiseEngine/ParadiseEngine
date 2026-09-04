@@ -28,7 +28,7 @@ public readonly record struct ReferenceEdge(Guid Referrer, UPath ReferrerPath, G
 /// is gone — which is exactly the moment someone asks who pointed there.
 /// </para>
 /// <para>
-/// Referrers are prefab documents and meshes (their sidecars' <see cref="MeshImportSettings"/> entries); a file without an
+/// Referrers are whatever the importer chain claims (<see cref="IAssetImporter.References"/>); a file without an
 /// identity of its own can reference but cannot be referenced, and is listed in
 /// <see cref="Unreadable"/> along with anything that would not parse, so a verb that acts on the
 /// graph can say "and N files could not be checked" rather than silently miss them.
@@ -40,7 +40,7 @@ public sealed class ReferenceGraph
     private readonly Dictionary<Guid, List<ReferenceEdge>> _byTarget = [];
     private readonly Dictionary<Guid, List<ReferenceEdge>> _byReferrer = [];
     private readonly List<UPath> _unreadable = [];
-    private readonly List<(UPath Glb, string Uri)> _unstamped = [];
+    private readonly List<(UPath Asset, ReferenceSite Site)> _pathOnly = [];
 
     private ReferenceGraph()
     {
@@ -52,83 +52,45 @@ public sealed class ReferenceGraph
     /// <summary>Files whose references could not be taken: no identity of their own, or a document that would not parse. A consumer acting on the graph walks these itself or says it could not check them.</summary>
     public IReadOnlyList<UPath> Unreadable => _unreadable;
 
-    /// <summary>Container uris with no identity recorded: not edges, since they name nothing by guid, but the one kind of reference a move can only warn about.</summary>
-    public IReadOnlyList<(UPath Glb, string Uri)> Unstamped => _unstamped;
+    /// <summary>Sites that carry only a path (a container uri nothing has recorded yet): not edges, since they name nothing by guid, and the one kind of reference a move can only warn about.</summary>
+    public IReadOnlyList<(UPath Asset, ReferenceSite Site)> PathOnly => _pathOnly;
 
-    /// <summary>Reads every prefab document and GLB under <paramref name="index"/>.</summary>
-    public static ReferenceGraph Build(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, AssetIgnoreRules? ignore = null)
+    /// <summary>Asks the importer chain about every file under <paramref name="index"/>; the built-ins when <paramref name="importers"/> is omitted.</summary>
+    public static ReferenceGraph Build(
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, AssetIgnoreRules? ignore = null, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(index);
 
-        var rules = ignore ?? AssetIgnoreRules.None;
+        var context = new ReferenceContext(fileSystem, layout, index, ignore ?? AssetIgnoreRules.None);
+        var chain = importers ?? AssetImporters.All;
         var graph = new ReferenceGraph();
         foreach (var path in index.Files)
         {
-            var assetClass = AssetClassifier.Classify(layout.Assets, path, rules);
-            var isMesh = assetClass == AssetClass.Foreign && ReferenceRepair.IsGlb(path);
-            if (assetClass != AssetClass.Prefab && !isMesh) continue;
+            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (ReferenceChain.Claim(chain, context, path) is not { } claimed) continue;
 
-            if (index.IdentityOf(path) is not { } referrer)
+            if (claimed.References.Problem is not null || index.IdentityOf(path) is not { } referrer)
             {
                 graph._unreadable.Add(path);
                 continue;
             }
 
-            var edges = isMesh
-                ? MeshEdges(fileSystem, referrer, path, graph._unstamped)
-                : DocumentEdges(fileSystem, referrer, path);
-            if (edges is null)
+            foreach (var site in claimed.References.Sites)
             {
-                graph._unreadable.Add(path);
-                continue;
+                if (site.Reference is { } reference)
+                {
+                    graph.Add([new ReferenceEdge(referrer, path, reference.Guid, site.Where, reference.Path)]);
+                }
+                else
+                {
+                    graph._pathOnly.Add((path, site));
+                }
             }
-
-            graph.Add(edges);
         }
 
         return graph;
-    }
-
-    /// <summary>The edges one prefab document holds, or null when it will not parse.</summary>
-    public static IReadOnlyList<ReferenceEdge>? DocumentEdges(IFileSystem fileSystem, Guid referrer, UPath path)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-
-        PrefabDocument document;
-        try
-        {
-            document = PrefabDocumentSerializer.Load(fileSystem, path);
-        }
-        catch (PrefabDocumentException)
-        {
-            return null;
-        }
-
-        return DocumentReferences.Enumerate(document)
-            .Select(found => new ReferenceEdge(referrer, path, found.Reference.Guid, found.Where, found.Reference.Path))
-            .ToList();
-    }
-
-    /// <summary>The edges one mesh holds: its sidecar's recorded references. A uri with no entry is not an edge, since it names no identity; it is listed in <paramref name="unstamped"/> when given.</summary>
-    public static IReadOnlyList<ReferenceEdge> MeshEdges(IFileSystem fileSystem, Guid referrer, UPath path, List<(UPath Glb, string Uri)>? unstamped = null)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-
-        var recorded = MeshReferences.Recorded(fileSystem, path);
-        if (unstamped is not null)
-        {
-            var slots = recorded.Select(entry => entry.Slot).ToHashSet(StringComparer.Ordinal);
-            foreach (var named in MeshContainer.Read(path, fileSystem.ReadAllBytes(path)))
-            {
-                if (!slots.Contains(named.Slot)) unstamped.Add((path, named.Uri));
-            }
-        }
-
-        return recorded
-            .Select(entry => new ReferenceEdge(referrer, path, entry.Reference.Guid, entry.Slot, entry.Reference.Path))
-            .ToList();
     }
 
     /// <summary>Every reference INTO <paramref name="asset"/>: what a move must follow and a delete would break.</summary>

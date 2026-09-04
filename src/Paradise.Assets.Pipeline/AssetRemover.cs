@@ -26,7 +26,8 @@ public sealed record RemoveResult(
 public static partial class AssetRemover
 {
     public static RemoveResult Remove(
-        IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force = false, bool dryRun = false, ILogger? logger = null)
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force = false, bool dryRun = false, ILogger? logger = null,
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -37,7 +38,7 @@ public static partial class AssetRemover
         var isDirectory = fileSystem.DirectoryExists(target);
         var ignore = IgnoreRules(fileSystem, layout);
         var index = AssetIndex.Scan(fileSystem, layout.Assets, ignore);
-        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore);
+        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore, importers);
 
         var doomed = index.Files
             .Where(file => !SidecarMeta.IsSidecarPath(file))

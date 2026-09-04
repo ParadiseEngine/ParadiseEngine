@@ -109,6 +109,25 @@ public interface IAssetImporter
 
     /// <summary>A failure is reported through <paramref name="errors"/>, prefixed with the source, and writes nothing.</summary>
     bool Import(ImportContext context, List<string> errors);
+
+    /// <summary>
+    /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar — or
+    /// null to decline, which is how an importer claims an asset for the reference verbs (graph,
+    /// <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c>, the watcher). Decline inside, as
+    /// <see cref="Import"/> does; there is no extension table anywhere else.
+    /// </summary>
+    AssetReferences? References(ReferenceContext context, UPath asset) => null;
+
+    /// <summary>
+    /// Brings the asset's references in line with the tree — its sidecar's entries, and its own
+    /// bytes when <see cref="ReferenceContext.RewriteSources"/> allows — through the one rule: the
+    /// guid decides, the path is a hint. Null when nothing changed. Called only after
+    /// <see cref="References"/> claimed the asset.
+    /// </summary>
+    RepairedDocument? Rewrite(ReferenceContext context, UPath asset) => null;
+
+    /// <summary>The sidecar settings domains this importer reads, so <c>verify</c> knows a table under one is meant and can check its shape. A domain exists exactly when a step reads it.</summary>
+    IReadOnlyList<IImportSettingsDomain> SettingsDomains => [];
 }
 
 public static class AssetImporters

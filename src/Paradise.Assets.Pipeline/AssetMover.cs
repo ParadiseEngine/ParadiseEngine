@@ -32,7 +32,8 @@ public sealed record MoveResult(
 /// </remarks>
 public static partial class AssetMover
 {
-    public static MoveResult Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, ILogger? logger = null)
+    public static MoveResult Move(
+        IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, ILogger? logger = null, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -89,39 +90,36 @@ public static partial class AssetMover
 
         var after = AssetIndex.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
-        var graph = ReferenceGraph.Build(fileSystem, layout, after, ignore);
+        var chain = importers ?? AssetImporters.All;
+        var graph = ReferenceGraph.Build(fileSystem, layout, after, ignore, chain);
+        var context = new ReferenceContext(fileSystem, layout, after, ignore);
         var rewritten = new List<string>();
         var warnings = new List<string>();
 
-        // Only what points at something that moved, plus the moved meshes themselves — a mesh's
-        // uris are relative to it, so moving it stales every one of them at once. Everything else
-        // is left byte for byte alone; the whole-tree walk this replaced rewrote nothing there
-        // either, it just read it all.
+        // Only what points at something that moved, plus the moved assets themselves — a mesh's
+        // uris are relative to it, so moving it stales every one of them at once — plus what the
+        // graph could not read (a document with no sidecar yet still references things) and
+        // whatever holds a path-only site, which only its importer can judge. Everything else is
+        // left byte for byte alone.
         var affected = new List<UPath>();
         foreach (var destination in mapping.Values)
         {
             var path = after.Root / destination;
-            if (IsGlb(path)) affected.Add(path);
+            affected.Add(path);
             if (after.IdentityOf(path) is { } guid) affected.AddRange(graph.DependentFilesOf(guid));
         }
 
-        // What the graph could not check is walked the old way: a document with no identity yet
-        // still references things, and a move must not leave it behind because of a missing sidecar.
         affected.AddRange(graph.Unreadable);
-        affected.AddRange(graph.Unstamped.Select(entry => entry.Glb));
+        affected.AddRange(graph.PathOnly.Select(entry => entry.Asset));
 
         foreach (var path in affected.Distinct())
         {
-            var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
             try
             {
-                if (assetClass == AssetClass.Prefab)
+                if (ReferenceChain.Rewrite(chain, context, path) is not null)
                 {
-                    RewriteDocument(fileSystem, after, path, mapping, rewritten, warnings, log);
-                }
-                else if (assetClass == AssetClass.Foreign && IsGlb(path))
-                {
-                    FollowMesh(fileSystem, after, path, mapping, rewritten, warnings, log);
+                    rewritten.Add(after.Relative(path));
+                    LogRewrote(log, after.Relative(path));
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -130,6 +128,21 @@ public static partial class AssetMover
                 // fixes by hand, not a reason to leave the rest unrewritten.
                 errors.Add($"{after.Relative(path)}: could not be rewritten to follow the move ({error.Message}); its references still name the old path");
             }
+        }
+
+        // A path-only site this move broke — the target moved away, or the holder moved away from
+        // it — has nothing to follow it by; one already broken belongs to verify.
+        foreach (var (asset, site) in graph.PathOnly)
+        {
+            var relative = after.Relative(asset);
+            var holderMoved = mapping.Values.Contains(relative, StringComparer.Ordinal);
+            var stillThere = site.Hint is { } hint && after.Contains(after.Root / hint);
+            if (stillThere) continue;
+            if (!holderMoved && !(site.Hint is { } hinted && mapping.ContainsKey(hinted))) continue;
+
+            warnings.Add(
+                $"{relative}: references '{site.Spelled}' in {site.Where} with no identity recorded, so the move could not " +
+                "follow it — run `paradise assets verify --fix` to record the references, then move again, or re-export it");
         }
 
         return new MoveResult(errors.Count == 0, errors, moved, rewritten, warnings);
@@ -192,69 +205,6 @@ public static partial class AssetMover
             return AssetIgnoreRules.None;
         }
     }
-
-    private static void RewriteDocument(
-        IFileSystem fileSystem,
-        AssetIndex sources,
-        UPath path,
-        IReadOnlyDictionary<string, string> mapping,
-        List<string> rewritten,
-        List<string> warnings,
-        ILogger log)
-    {
-        PrefabDocument document;
-        try
-        {
-            document = PrefabDocumentSerializer.Load(fileSystem, path);
-        }
-        catch (PrefabDocumentException error)
-        {
-            warnings.Add($"{sources.Relative(path)}: not rewritten — {error.Message}");
-            return;
-        }
-
-        if (DocumentReferences.Rewrite(document, reference => Follow(reference, mapping)) is not { } updated) return;
-
-        PrefabDocumentSerializer.Save(fileSystem, path, updated);
-        rewritten.Add(sources.Relative(path));
-        LogRewrote(log, sources.Relative(path));
-    }
-
-    /// <summary>Identity never changes in a move, so only the path half is followed.</summary>
-    private static AssetReference Follow(AssetReference reference, IReadOnlyDictionary<string, string> mapping)
-        => mapping.TryGetValue(reference.Path, out var moved) ? reference with { Path = moved } : reference;
-
-    /// <summary>
-    /// A mesh's recorded references follow the move like a document's; a uri with NO identity
-    /// recorded that this move broke is reported, since there is nothing to follow it by — the
-    /// texture moved away, or the mesh moved away from it. One already broken belongs to verify.
-    /// </summary>
-    private static void FollowMesh(
-        IFileSystem fileSystem, AssetIndex sources, UPath mesh, IReadOnlyDictionary<string, string> mapping,
-        List<string> rewritten, List<string> warnings, ILogger log)
-    {
-        var relative = sources.Relative(mesh);
-        var reconciliation = MeshReferences.Reconcile(fileSystem, sources, mesh);
-        if (MeshReferences.Apply(fileSystem, mesh, reconciliation, rewriteContainer: true) is not null)
-        {
-            rewritten.Add(relative);
-            LogRewrote(log, relative);
-        }
-
-        var meshMoved = mapping.Values.Contains(relative, StringComparer.Ordinal);
-        foreach (var named in reconciliation.Unresolved)
-        {
-            var resolved = (mesh.GetDirectory() / Uri.UnescapeDataString(named.Uri)).ToAbsolute();
-            if (sources.Contains(resolved)) continue;
-            if (!meshMoved && !(sources.IsUnderRoot(resolved) && mapping.ContainsKey(sources.Relative(resolved)))) continue;
-
-            warnings.Add(
-                $"{relative}: references '{named.Uri}' in {named.Slot} with no identity recorded, so the move could not " +
-                "follow it — run `paradise assets verify --fix` to record the mesh's references, then move again, or re-export it");
-        }
-    }
-
-    private static bool IsGlb(UPath path) => ReferenceRepair.IsGlb(path);
 
     [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "moved: {Source} -> {Destination}")]
     private static partial void LogMoved(ILogger logger, string source, string destination);

@@ -12,6 +12,9 @@ namespace Paradise.Assets.Pipeline;
 public sealed class TextureImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [TextureImportSettings.Instance];
+
+    /// <inheritdoc />
     public string Name => "texture";
 
     /// <inheritdoc />
@@ -55,6 +58,45 @@ public sealed class TextureImporter : IAssetImporter
 /// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is externalised to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> beside the mesh through the same cache the texture step uses.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [MeshImportSettings.Instance];
+
+    /// <inheritdoc />
+    public AssetReferences? References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return null;
+
+        var relative = context.Relative(asset);
+        var recorded = MeshReferences.Recorded(context.FileSystem, asset).ToDictionary(entry => entry.Slot, StringComparer.Ordinal);
+        var sites = new List<ReferenceSite>();
+        foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
+        {
+            var hint = MeshContainer.AssetPathFor(relative, named.Uri);
+            if (recorded.TryGetValue(named.Slot, out var entry) && entry.Uri == named.Uri)
+            {
+                sites.Add(new ReferenceSite(named.Slot, entry.Reference, hint, named.Uri));
+            }
+            else
+            {
+                // A changed uri is a re-export: the recorded identity no longer describes what
+                // the container spells, so the site is path-only until it is re-resolved.
+                var note = recorded.ContainsKey(named.Slot) ? "changed its uri since its identity was recorded (a re-export)" : null;
+                sites.Add(new ReferenceSite(named.Slot, null, hint, named.Uri, note));
+            }
+        }
+
+        return new AssetReferences(sites);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
+        return MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+    }
+
     /// <inheritdoc />
     public string Name => "mesh";
 
@@ -216,6 +258,36 @@ public sealed class AudioImporter : IAssetImporter
 /// <summary>Compiles one authoring document into the export contract; every document is baked, so a prop can be played on its own.</summary>
 public sealed class PrefabImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public AssetReferences? References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.Classify(asset) != AssetClass.Prefab) return null;
+
+        PrefabDocument document;
+        try
+        {
+            document = PrefabDocumentSerializer.Load(context.FileSystem, asset);
+        }
+        catch (PrefabDocumentException error)
+        {
+            return AssetReferences.Unreadable(error.Message);
+        }
+
+        var sites = DocumentReferences.Enumerate(document)
+            .Select(found => new ReferenceSite(found.Where, found.Reference, found.Reference.Path, found.Reference.Path))
+            .ToList();
+        return new AssetReferences(sites);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        // A document's paths ARE its bytes; a build-time reconcile leaves them for --fix.
+        return context.RewriteSources ? ReferenceRepair.FixDocument(context.FileSystem, context.Index, asset) : null;
+    }
+
     /// <inheritdoc />
     public string Name => "prefab";
 

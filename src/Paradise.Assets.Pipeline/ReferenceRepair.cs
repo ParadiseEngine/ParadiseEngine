@@ -24,17 +24,25 @@ public readonly record struct RepairedDocument(UPath Path, IReadOnlyList<string>
 /// </remarks>
 public static class ReferenceRepair
 {
-    /// <summary>Fixes every document under <c>assets/</c>; a document that will not parse is left for <c>verify</c> to report.</summary>
-    public static IReadOnlyList<RepairedDocument> Fix(IFileSystem fileSystem, AssetProjectLayout layout)
+    /// <summary>Fixes every asset under <c>assets/</c> its importer claims; an asset that will not parse is left for <c>verify</c> to report.</summary>
+    public static IReadOnlyList<RepairedDocument> Fix(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
 
-        return Fix(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout)));
+        return Fix(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout)), importers);
     }
 
-    /// <summary>As <see cref="Fix(IFileSystem, AssetProjectLayout)"/> over a scan already taken.</summary>
-    public static IReadOnlyList<RepairedDocument> Fix(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index)
+    /// <summary>As <see cref="Fix(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetImporter})"/> over a scan already taken.</summary>
+    public static IReadOnlyList<RepairedDocument> Fix(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, IReadOnlyList<IAssetImporter>? importers = null)
+        => Run(fileSystem, layout, index, importers, rewriteSources: true);
+
+    /// <summary>The sidecar half only, over every asset: what a reconcile at build time does, since a build must not move a path or a uri under an author's feet.</summary>
+    public static IReadOnlyList<RepairedDocument> Reconcile(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, IReadOnlyList<IAssetImporter>? importers = null)
+        => Run(fileSystem, layout, index, importers, rewriteSources: false);
+
+    private static IReadOnlyList<RepairedDocument> Run(
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, IReadOnlyList<IAssetImporter>? importers, bool rewriteSources)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -43,18 +51,12 @@ public static class ReferenceRepair
         var repaired = new List<RepairedDocument>();
         if (!fileSystem.DirectoryExists(layout.Assets)) return repaired;
 
-        var ignore = IgnoreRules(fileSystem, layout);
+        var context = new ReferenceContext(fileSystem, layout, index, IgnoreRules(fileSystem, layout), rewriteSources);
+        var chain = importers ?? AssetImporters.All;
         foreach (var path in index.Files)
         {
-            var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
-            if (assetClass == AssetClass.Foreign && IsGlb(path))
-            {
-                if (FixMesh(fileSystem, index, path) is { } repairedMesh) repaired.Add(repairedMesh);
-                continue;
-            }
-
-            if (assetClass != AssetClass.Prefab) continue;
-            if (FixDocument(fileSystem, index, path) is { } repairedDocument) repaired.Add(repairedDocument);
+            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (ReferenceChain.Rewrite(chain, context, path) is { } fixedAsset) repaired.Add(fixedAsset);
         }
 
         return repaired;
@@ -91,54 +93,6 @@ public static class ReferenceRepair
         PrefabDocumentSerializer.Save(fileSystem, path, updated);
         return new RepairedDocument(path, repointed);
     }
-
-    /// <summary>Whichever of <see cref="FixDocument"/> and <see cref="FixMesh"/> the file is.</summary>
-    public static RepairedDocument? FixFile(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, UPath path)
-    {
-        ArgumentNullException.ThrowIfNull(layout);
-
-        return AssetClassifier.Classify(layout.Assets, path, IgnoreRules(fileSystem, layout)) switch
-        {
-            AssetClass.Prefab => FixDocument(fileSystem, index, path),
-            AssetClass.Foreign when IsGlb(path) => FixMesh(fileSystem, index, path),
-            _ => null,
-        };
-    }
-
-    /// <summary>
-    /// A mesh's external references, reconciled into its sidecar (<see cref="MeshImportSettings"/>)
-    /// and its uris caught up where the format can be written. Null when nothing changed.
-    /// </summary>
-    public static RepairedDocument? FixMesh(IFileSystem fileSystem, AssetIndex index, UPath mesh)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        ArgumentNullException.ThrowIfNull(index);
-
-        return MeshReferences.Apply(fileSystem, mesh, MeshReferences.Reconcile(fileSystem, index, mesh), rewriteContainer: true);
-    }
-
-    /// <summary>The sidecar half of <see cref="FixMesh"/> over every mesh: what a reconcile does, since a build must not move uris under an author's feet.</summary>
-    public static IReadOnlyList<RepairedDocument> StampMeshes(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        ArgumentNullException.ThrowIfNull(layout);
-        ArgumentNullException.ThrowIfNull(index);
-
-        var ignore = IgnoreRules(fileSystem, layout);
-        var stamped = new List<RepairedDocument>();
-        foreach (var mesh in index.Files)
-        {
-            if (!IsGlb(mesh) || AssetClassifier.Classify(layout.Assets, mesh, ignore) != AssetClass.Foreign) continue;
-            if (MeshReferences.Apply(fileSystem, mesh, MeshReferences.Reconcile(fileSystem, index, mesh), rewriteContainer: false) is { } repaired)
-            {
-                stamped.Add(repaired);
-            }
-        }
-
-        return stamped;
-    }
-
-    internal static bool IsGlb(UPath path) => MeshContainer.IsMesh(path);
 
     /// <summary>An unreadable manifest is verify's finding, not this pass's; nothing is ignored until it reads.</summary>
     private static AssetIgnoreRules IgnoreRules(IFileSystem fileSystem, AssetProjectLayout layout)

@@ -197,6 +197,13 @@ return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImport
 
 The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
 
+An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
+`rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
+`References` (every site the asset holds, from its bytes and its sidecar; null to decline) and
+`Rewrite` (bring them in line with the tree: the sidecar's entries always, the asset's own bytes
+only when the context allows). The findings are derived from the sites by the one rule, so an
+importer cannot forget one; nothing in the pipeline lists formats.
+
 ## Releasing
 
 Pushing a `v*` tag (or manually dispatching the *Publish NuGet packages* workflow with a

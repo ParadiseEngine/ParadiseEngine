@@ -14,22 +14,22 @@ internal static class Verbs
     /// errors: a duplicate guid resolves to the ordinal-first asset, and fixing before that error
     /// was shown would rewrite paths toward an arbitrary winner the author never saw named.
     /// </param>
-    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix)
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix, IReadOnlyList<IAssetImporter>? importers = null)
     {
         // One scan for both passes: the fix rewrites document bodies only, never files or
         // identities, so the index it was taken over still describes the tree after it.
         var index = AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout));
-        var findings = ProjectVerifier.Verify(fileSystem, layout, index);
+        var findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
 
         if (fix && findings.All(finding => finding.Severity != VerifySeverity.Error))
         {
-            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout, index))
+            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout, index, importers))
             {
                 Console.WriteLine($"fixed: {Display(fileSystem, repaired.Path)}");
                 foreach (var repointed in repaired.Repointed) Console.WriteLine($"       {repointed}");
             }
 
-            findings = ProjectVerifier.Verify(fileSystem, layout, index);
+            findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
         }
         else if (fix)
         {
@@ -190,9 +190,9 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
-    public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to)
+    public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, IReadOnlyList<IAssetImporter>? importers = null)
     {
-        var result = AssetMover.Move(fileSystem, layout, from, to, PipelineLog.For(fileSystem, layout));
+        var result = AssetMover.Move(fileSystem, layout, from, to, PipelineLog.For(fileSystem, layout), importers);
 
         foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
         foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
@@ -205,7 +205,7 @@ internal static class Verbs
     }
 
     /// <summary>A query, so it exits 0: who references the asset, then what it references.</summary>
-    public static int Refs(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool transitive)
+    public static int Refs(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool transitive, IReadOnlyList<IAssetImporter>? importers = null)
     {
         var ignore = IgnoreRules(fileSystem, layout);
         var index = AssetIndex.Scan(fileSystem, layout.Assets, ignore);
@@ -215,7 +215,7 @@ internal static class Verbs
             return 1;
         }
 
-        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore);
+        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore, importers);
         if (index.IdentityOf(target) is not { } guid)
         {
             Console.Error.WriteLine($"refs: '{index.Relative(target)}' has no identity (no readable sidecar), so nothing can reference it");
@@ -260,9 +260,9 @@ internal static class Verbs
         return 0;
     }
 
-    public static int Remove(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force, bool dryRun)
+    public static int Remove(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null)
     {
-        var result = AssetRemover.Remove(fileSystem, layout, target, force, dryRun, PipelineLog.For(fileSystem, layout));
+        var result = AssetRemover.Remove(fileSystem, layout, target, force, dryRun, PipelineLog.For(fileSystem, layout), importers);
 
         foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
         foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");

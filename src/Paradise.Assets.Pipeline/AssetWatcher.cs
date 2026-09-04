@@ -184,12 +184,12 @@ public sealed partial class AssetWatcher : IDisposable
     private int FollowRenames(IReadOnlyList<UPath> carried)
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
-        var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore);
+        var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
 
-        var dependents = new List<UPath>();
+        // The carried assets themselves too: a mesh's uris are relative to it.
+        var dependents = new List<UPath>(carried);
         foreach (var path in carried)
         {
-            if (IsGlb(path)) dependents.Add(path);
             if (index.IdentityOf(path) is { } guid) dependents.AddRange(graph.DependentFilesOf(guid));
         }
 
@@ -225,7 +225,8 @@ public sealed partial class AssetWatcher : IDisposable
                 continue;
             }
 
-            if (ReferenceRepair.FixFile(_fileSystem, _layout, index, path) is not { } repaired) continue;
+            var context = new ReferenceContext(_fileSystem, _layout, index, _maintainer.Ignore);
+            if (ReferenceChain.Rewrite(_importers, context, path) is not { } repaired) continue;
             rewritten++;
             LogRewrote(_log, index.Relative(path), repaired.Repointed.Count);
         }
@@ -237,7 +238,7 @@ public sealed partial class AssetWatcher : IDisposable
     private List<string> ReportDangling(IReadOnlyList<QuarantinedIdentity> expired)
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
-        var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore);
+        var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
 
         var dangling = new List<string>();
         foreach (var held in expired)
@@ -253,24 +254,24 @@ public sealed partial class AssetWatcher : IDisposable
         return dangling;
     }
 
-    private static bool IsGlb(UPath path) => ReferenceRepair.IsGlb(path);
+
 
     /// <summary>Reconciles sidecars, then builds; reconcile first because rebuild-now does not wait out the debounce, and a wipe of every <c>.meta</c> would otherwise sit unnoticed until the next asset save.</summary>
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
     {
         _maintainer.Reconcile();
-        StampMeshes();
+        ReconcileReferences();
         // One logger through, where this used to synthesise a second delegate that prefixed
         // "warning: " — the severity is BuildRunner's to state as a level now.
         return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
             .Run(profile, target);
     }
 
-    /// <summary>Records every mesh's external references in its sidecar (<see cref="MeshImportSettings"/>) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; a container's uris are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
-    public int StampMeshes()
+    /// <summary>Records every asset's references where its importer keeps them (a mesh's sidecar) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; an asset's own bytes are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
+    public int ReconcileReferences()
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
-        var stamped = ReferenceRepair.StampMeshes(_fileSystem, _layout, index);
+        var stamped = ReferenceRepair.Reconcile(_fileSystem, _layout, index, _importers);
         foreach (var mesh in stamped) LogStamped(_log, index.Relative(mesh.Path), mesh.Repointed.Count);
         return stamped.Count;
     }

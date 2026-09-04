@@ -78,11 +78,18 @@ public sealed class TextureImportSettings : IImportSettingsDomain
 /// <summary>The registry <c>verify</c> checks sidecars against; a domain exists exactly when a step reads it, which is why this lives beside the steps and not in the format layer.</summary>
 public static class ImportSettings
 {
-    public static IReadOnlyList<IImportSettingsDomain> Domains { get; } = [TextureImportSettings.Instance, MeshImportSettings.Instance];
+    /// <summary>The built-in importers' domains, for a caller with no chain of its own.</summary>
+    public static IReadOnlyList<IImportSettingsDomain> Domains => Declared(AssetImporters.All);
 
-    public static IImportSettingsDomain? Find(string name)
+    public static IReadOnlyList<IImportSettingsDomain> Declared(IReadOnlyList<IAssetImporter> importers)
     {
-        foreach (var domain in Domains)
+        ArgumentNullException.ThrowIfNull(importers);
+        return importers.SelectMany(importer => importer.SettingsDomains).ToList();
+    }
+
+    public static IImportSettingsDomain? Find(string name, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        foreach (var domain in Declared(importers ?? AssetImporters.All))
         {
             if (string.Equals(domain.Name, name, StringComparison.Ordinal)) return domain;
         }

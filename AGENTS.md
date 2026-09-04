@@ -202,8 +202,9 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 (use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
 `reference.Guid`, and carry the path only to phrase the message).
 
-**"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus the
-prefab documents and the meshes' `[mesh]` sidecar entries; never persisted, and a DOCUMENT's
+**"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus what
+each importer declares through `IAssetImporter.References` (a prefab's document, a mesh's `[mesh]`
+sidecar entries — and a game's own kind, with no format list anywhere in the pipeline); never persisted, and a DOCUMENT's
 reference list never goes in a sidecar (a second copy of the document, kept in sync by a watcher that
 may not be running, dirtying two files per edit). A mesh container's references DO live in its
 sidecar (`MeshImportSettings`), because that is derived data the tooling resolves from bytes it
@@ -213,7 +214,10 @@ carries is KEPT with its path, because that is the moment someone asks who point
 rewrites `DependentsOf` the moved guids (plus what the graph lists as `Unreadable`, walked the old
 way), `rm` refuses on non-empty dependents unless forced and never nulls a slot, and the watcher
 follows a carried identity's dependents after a rename — skipping one still inside its debounce
-and retrying it next drain. A container uri with no entry recorded is the one path-only reference
+and retrying it next drain. All of them go through `ReferenceChain` and `IAssetImporter.Rewrite`;
+a verb that branches on an asset's extension is the shape this rule exists to keep out. A
+reconcile at build time passes `RewriteSources = false`: sidecars only, never a path or a uri
+moved under the author's feet. A container uri with no entry recorded is the one path-only reference
 left: it is in `Unstamped`, and a move can only warn about it.
 
 ## Code Style
