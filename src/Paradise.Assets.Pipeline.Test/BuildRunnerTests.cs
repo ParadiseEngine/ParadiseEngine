@@ -9,7 +9,7 @@ public class BuildRunnerTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");
 
-    private sealed class FakeEncoder : ITextureEncoder
+    internal sealed class FakeEncoder : ITextureEncoder
     {
         public int Encodes;
         public bool Fail;
@@ -1120,6 +1120,24 @@ public class BuildRunnerTests
         await Assert.That(result.Succeeded).IsTrue();
         var built = MeshContainer.Read("/game/build/models/crate.glb", fileSystem.ReadAllBytes("/game/build/models/crate.glb"));
         await Assert.That(built[0].Uri).IsEqualTo("../textures/metal/rust.ktx2");
+    }
+
+    [Test]
+    public async Task a_re_exported_slot_is_not_repointed_by_its_stale_record()
+    {
+        // The sidecar still records rust for images[0]; the container now says patina. A build
+        // without a reconcile first must not bake rust's KTX2 under patina's slot.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        MeshReferencesTests.Texture(fileSystem, "/game/assets/textures/rust.png", out var rust);
+        MeshReferencesTests.Texture(fileSystem, "/game/assets/textures/patina.png", out _);
+        MeshReferencesTests.WriteMesh(fileSystem, "/game/assets/models/crate.glb", """{"images":[{"uri":"../textures/patina.png","mimeType":"image/png"}],"textures":[{"source":0}]}""");
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsTrue();
+        var built = MeshContainer.Read("/game/build/models/crate.glb", fileSystem.ReadAllBytes("/game/build/models/crate.glb"));
+        await Assert.That(built[0].Uri).IsEqualTo("../textures/patina.ktx2");
     }
 
     [Test]

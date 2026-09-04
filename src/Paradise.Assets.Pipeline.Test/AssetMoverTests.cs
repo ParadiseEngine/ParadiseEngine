@@ -190,6 +190,25 @@ public class AssetMoverTests
     }
 
     [Test]
+    public async Task an_unrelated_move_leaves_an_unrecorded_mesh_alone()
+    {
+        // Recording is `verify --fix`'s job; a move that touched neither the mesh nor its texture
+        // must not dirty the mesh's sidecar (it did: 17 of them on ShiningPie, review of #244).
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/other.png", "png");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
+        var sidecar = fileSystem.ReadAllText("/game/assets/models/crate.glb.meta");
+
+        var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/other.png", "/game/assets/textures/misc/other.png");
+
+        await Assert.That(result.Rewritten).IsEmpty();
+        await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.glb.meta")).IsEqualTo(sidecar);
+    }
+
+    [Test]
     public async Task a_moved_mesh_has_its_own_uris_relocated()
     {
         // The texture did not move; the mesh did, so every relative uri in it went stale at once.

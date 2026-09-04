@@ -51,11 +51,17 @@ public sealed class MeshImportSettings : IImportSettingsDomain
             if (key != ReferencesKey) return $"holds '{key}' in [{Domain}], which is not a mesh setting";
             if (value is not IReadOnlyList<object> entries) return $"holds a non-array '{ReferencesKey}' in [{Domain}]";
 
+            var slots = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in entries)
             {
-                if (ReadEntry(entry) is null)
+                if (ReadEntry(entry) is not { } reference)
                 {
                     return $"holds an entry in [{Domain}].{ReferencesKey} that is not {{ slot, uri, guid, path }} with a non-empty UUID";
+                }
+
+                if (!slots.Add(reference.Slot))
+                {
+                    return $"records slot '{reference.Slot}' twice in [{Domain}].{ReferencesKey}; a slot has one identity";
                 }
             }
         }
@@ -76,6 +82,15 @@ public sealed class MeshImportSettings : IImportSettingsDomain
         }
 
         return references;
+    }
+
+    /// <summary>Entries by slot, last wins: a duplicate is verify's finding, not a reason for every other verb to throw.</summary>
+    public static Dictionary<string, MeshReference> BySlot(IReadOnlyList<MeshReference> references)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        var bySlot = new Dictionary<string, MeshReference>(StringComparer.Ordinal);
+        foreach (var reference in references) bySlot[reference.Slot] = reference;
+        return bySlot;
     }
 
     /// <summary>Records <paramref name="references"/>; an empty list removes the domain, so a mesh with no external files carries no table.</summary>

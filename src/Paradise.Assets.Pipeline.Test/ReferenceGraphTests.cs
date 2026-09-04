@@ -83,29 +83,6 @@ public class ReferenceGraphTests
     }
 
     [Test]
-    public async Task replacing_a_referrer_swaps_its_edges_and_forgetting_drops_them_while_edges_into_it_stay()
-    {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        var crate = Asset(fileSystem, "/game/assets/models/crate.glb");
-        var barrel = Asset(fileSystem, "/game/assets/models/barrel.glb");
-        var box = Level(fileSystem, "/game/assets/prefabs/box.prefab", new AssetReference(crate, "models/crate.glb"));
-        var level = Level(fileSystem, "/game/assets/levels/district.prefab", new AssetReference(box, "prefabs/box.prefab"));
-        var graph = Graph(fileSystem);
-
-        graph.Replace(box, [new ReferenceEdge(box, "/game/assets/prefabs/box.prefab", barrel, "game.Mesh.Mesh", "models/barrel.glb")]);
-
-        await Assert.That(graph.DependentsOf(crate)).IsEmpty();
-        await Assert.That(graph.DependentsOf(barrel).Count).IsEqualTo(1);
-
-        graph.Forget(box);
-
-        await Assert.That(graph.DependenciesOf(box)).IsEmpty();
-        await Assert.That(graph.DependentsOf(barrel)).IsEmpty();
-        // The level still points at the box: that reference is the level's, and now dangling.
-        await Assert.That(graph.DependentsOf(box).Select(e => e.Referrer)).IsEquivalentTo(new[] { level });
-    }
-
-    [Test]
     public async Task a_document_that_will_not_parse_or_has_no_identity_is_unreadable_not_silent()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -121,6 +98,31 @@ public class ReferenceGraphTests
         {
             "/game/assets/levels/broken.prefab", "/game/assets/levels/orphan.prefab",
         });
+    }
+
+    [Test]
+    public async Task ignored_files_are_neither_edges_nor_unreadable_nor_rewritten()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject(ignore: ["scratch/**"]);
+        var crate = Asset(fileSystem, "/game/assets/models/crate.glb");
+        fileSystem.CreateDirectory("/game/assets/scratch");
+        fileSystem.WriteAllBytes("/game/assets/scratch/old.png", [1]);
+        var draft = new PrefabDocument();
+        var root = PrefabObject.WithMeta(Guid.NewGuid(), "draft");
+        root.Components.Add(new PrefabComponent(Guid.NewGuid(), "game.Mesh", new CanonicalTomlTable { { "Mesh", AssetReferenceCodec.Write(new AssetReference(crate, "models/OLD.glb")) } }));
+        draft.Objects.Add(root);
+        PrefabDocumentSerializer.Save(fileSystem, "/game/assets/scratch/draft.prefab", draft);
+        var before = fileSystem.ReadAllText("/game/assets/scratch/draft.prefab");
+        var ignore = ProjectManifest.Load(fileSystem, s_layout.Manifest).Ignore;
+        var index = AssetIndex.Scan(fileSystem, s_layout.Assets, ignore);
+
+        var graph = ReferenceGraph.Build(fileSystem, s_layout, index, ignore);
+        ReferenceRepair.Fix(fileSystem, s_layout, index);
+
+        await Assert.That(graph.Unreadable).IsEmpty();
+        await Assert.That(graph.PathOnly).IsEmpty();
+        await Assert.That(graph.DependentsOf(crate)).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/assets/scratch/draft.prefab")).IsEqualTo(before);
     }
 
     [Test]

@@ -60,13 +60,13 @@ public static class ReferenceRepair
         var maintainer = new SidecarMaintainer(fileSystem, layout, ignore: ignore, importers: chain);
         foreach (var path in index.Files)
         {
-            if (SidecarMeta.IsSidecarPath(path) || !fileSystem.FileExists(SidecarMeta.PathFor(path))) continue;
-            if (maintainer.Ensure(path) == SidecarAction.Refreshed) repaired.Add(new RepairedDocument(SidecarMeta.PathFor(path), ["importer recorded"]));
+            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (maintainer.RecordImporter(path) == SidecarAction.Refreshed) repaired.Add(new RepairedDocument(SidecarMeta.PathFor(path), ["importer recorded"]));
         }
 
         foreach (var path in index.Files)
         {
-            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (SidecarMeta.IsSidecarPath(path) || index.IsIgnored(path)) continue;
             if (ReferenceChain.Rewrite(chain, context, path) is { } fixedAsset) repaired.Add(fixedAsset);
         }
 

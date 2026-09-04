@@ -23,7 +23,8 @@ public readonly record struct ReferenceEdge(Guid Referrer, UPath ReferrerPath, G
 /// DERIVED from <see cref="AssetIndex"/> plus the files, and never stored: a reference list kept in
 /// a sidecar is a second copy of the document that a watcher may or may not be running to keep in
 /// step, and it dirties two files per edit. ShiningPie has thirty documents; the walk is not
-/// what a build's time goes on. Nodes are guids because paths are hints (#243), so a renamed
+/// what a build's time goes on, and the watcher rebuilds it per drain rather than patching one
+/// file's edges — an incremental update is the upgrade if a project ever makes the walk measurable. Nodes are guids because paths are hints (#243), so a renamed
 /// level keeps its edges and a reference into a deleted asset keeps pointing at the identity that
 /// is gone — which is exactly the moment someone asks who pointed there.
 /// </para>
@@ -68,7 +69,7 @@ public sealed class ReferenceGraph
         var graph = new ReferenceGraph();
         foreach (var path in index.Files)
         {
-            if (SidecarMeta.IsSidecarPath(path)) continue;
+            if (SidecarMeta.IsSidecarPath(path) || index.IsIgnored(path)) continue;
             if (ReferenceChain.Claim(chain, context, path) is not { } claimed) continue;
 
             if (claimed.References.Problem is not null || index.IdentityOf(path) is not { } referrer)
@@ -121,31 +122,6 @@ public sealed class ReferenceGraph
     /// <summary>The files that reference <paramref name="asset"/>, each once, in the order the graph first saw them.</summary>
     public IReadOnlyList<UPath> DependentFilesOf(Guid asset)
         => DependentsOf(asset).Select(edge => edge.ReferrerPath).Distinct().ToList();
-
-    /// <summary>Swaps in a file's edges after it changed, so the watcher need not rebuild the graph per save.</summary>
-    public void Replace(Guid referrer, IEnumerable<ReferenceEdge> fresh)
-    {
-        ArgumentNullException.ThrowIfNull(fresh);
-
-        Forget(referrer);
-        Add(fresh);
-    }
-
-    /// <summary>Drops every edge out of the file carrying <paramref name="referrer"/>. Edges INTO it stay: they are other files' references, and now dangling.</summary>
-    public void Forget(Guid referrer)
-    {
-        if (!_byReferrer.Remove(referrer, out var edges)) return;
-
-        _edges.RemoveAll(edge => edge.Referrer == referrer);
-        foreach (var edge in edges)
-        {
-            if (_byTarget.TryGetValue(edge.Target, out var targets))
-            {
-                targets.RemoveAll(candidate => candidate.Referrer == referrer);
-                if (targets.Count == 0) _byTarget.Remove(edge.Target);
-            }
-        }
-    }
 
     private void Add(IEnumerable<ReferenceEdge> edges)
     {

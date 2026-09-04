@@ -74,12 +74,12 @@ public sealed class MeshImporter : IAssetImporter
         if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
 
         var relative = context.Relative(asset);
-        var recorded = MeshReferences.Recorded(context.FileSystem, asset).ToDictionary(entry => entry.Slot, StringComparer.Ordinal);
+        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
         var sites = new List<ReferenceSite>();
         foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
         {
             var hint = MeshContainer.AssetPathFor(relative, named.Uri);
-            if (recorded.TryGetValue(named.Slot, out var entry) && entry.Uri == named.Uri)
+            if (recorded.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
             {
                 sites.Add(new ReferenceSite(named.Slot, entry.Reference, hint, named.Uri));
             }
@@ -137,11 +137,17 @@ public sealed class MeshImporter : IAssetImporter
         // By identity first: a texture renamed outside `mv` still carries the guid the sidecar
         // recorded for it, and the uri the DCC wrote is only a hint. Through Resolve, so the move
         // is a recorded input of this output.
+        // Only where the container still spells the uri the entry was recorded from: a
+        // re-export that changed a slot's uri has outrun its record, and following the old guid
+        // there would bake the wrong texture (review of #244). That slot keeps the container's
+        // own text, which the path check below validates or fails loudly.
+        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, context.Asset));
         var uris = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var entry in MeshReferences.Recorded(context.FileSystem, context.Asset))
+        foreach (var named in MeshContainer.Read(context.Asset, bytes))
         {
+            if (!recorded.TryGetValue(named.Slot, out var entry) || !MeshContainer.SameUri(entry.Uri, named.Uri)) continue;
             var resolution = context.Resolve(entry.Reference);
-            if (resolution.Found) uris[entry.Slot] = MeshContainer.UriFor(context.Source, resolution.Path);
+            if (resolution.Found) uris[named.Slot] = MeshContainer.UriFor(context.Source, resolution.Path);
         }
 
         bytes = MeshContainer.RewriteUris(context.Asset, bytes, uris);

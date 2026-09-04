@@ -113,6 +113,8 @@ public sealed partial class SidecarMaintainer
         }
 
         var sidecar = SidecarMeta.PathFor(asset);
+        // Hashed even for an existing sidecar, through the (mtime, size) cache: this is what keeps
+        // the in-memory hash current, so a Finder move of an asset edited since its mint relinks.
         var hash = HashOf(asset);
 
         if (_fileSystem.FileExists(sidecar))
@@ -269,6 +271,34 @@ public sealed partial class SidecarMaintainer
         if (stamp is { } taken) _seen[asset] = new SeenAsset(taken, hash);
         else _seen.Remove(asset);
         return hash;
+    }
+
+    /// <summary>
+    /// Records the importer on an existing sidecar that names none, and nothing else: no hash,
+    /// no mint. What <c>verify --fix</c> runs over the tree — <see cref="Ensure"/> would hash
+    /// every asset through a cache this pass does not keep (review of #244).
+    /// </summary>
+    public SidecarAction RecordImporter(UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!_fileSystem.FileExists(sidecar) || _ignore.Matches(_layout.Assets, asset) || !_fileSystem.FileExists(asset)) return SidecarAction.None;
+
+        SidecarMeta existing;
+        try
+        {
+            existing = SidecarMeta.Load(_fileSystem, sidecar);
+        }
+        catch (SidecarMetaException)
+        {
+            return SidecarAction.None;
+        }
+
+        if (existing.Importer is not null || ClaimantFor(asset, existing) is not { } claimant) return SidecarAction.None;
+
+        existing.Importer = claimant;
+        Save(existing, sidecar);
+        LogRefreshed(_log, sidecar);
+        return SidecarAction.Refreshed;
     }
 
     /// <summary>The chain's answer for <paramref name="asset"/>, or null when nothing claims it — a sidecar without an importer is legal, and verify says which files those are.</summary>

@@ -26,9 +26,10 @@ public sealed record MoveResult(
 /// is the tidy path: the documents follow the file in the same change (issue #208).
 /// </summary>
 /// <remarks>
-/// A GLB's texture uris are inside the mesh and belong to the DCC that exported it; they are
-/// not rewritten, and any that no longer resolve after the move are reported so the mesh can
-/// be re-exported before verify says the same thing with less context.
+/// A mesh's texture uris follow too, through its importer, where the sidecar records their
+/// identities; a uri with no identity recorded has nothing to follow it by, so one this move
+/// broke is reported for `verify --fix` to record (or the mesh to be re-exported) before verify
+/// says the same thing with less context.
 /// </remarks>
 public static partial class AssetMover
 {
@@ -110,7 +111,17 @@ public static partial class AssetMover
         }
 
         affected.AddRange(graph.Unreadable);
-        affected.AddRange(graph.PathOnly.Select(entry => entry.Asset));
+        // A path-only holder only when THIS move touched it — it moved, or its target did. The
+        // rest are `verify --fix`'s to record; recording them here dirtied every unrecorded mesh
+        // on an unrelated move (review of #244).
+        foreach (var (asset, site) in graph.PathOnly)
+        {
+            var relative = after.Relative(asset);
+            if (mapping.Values.Contains(relative, StringComparer.Ordinal) || (site.Hint is { } hint && mapping.ContainsKey(hint)))
+            {
+                affected.Add(asset);
+            }
+        }
 
         foreach (var path in affected.Distinct())
         {

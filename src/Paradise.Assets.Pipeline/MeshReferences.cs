@@ -8,7 +8,7 @@ namespace Paradise.Assets.Pipeline;
 /// <summary>What a reconcile found a mesh's references should be, and what it would take to get there.</summary>
 /// <param name="Recorded">The sidecar's entries before.</param>
 /// <param name="References">The entries the sidecar should hold now.</param>
-/// <param name="UriBySlot">The uri each slot should spell from where the container sits, for a format that can be rewritten.</param>
+/// <param name="UriBySlot">The slots whose uri should change and what to, for a format that can be rewritten; the entries in <see cref="References"/> still spell what the container spells until it does.</param>
 /// <param name="Unresolved">Slots whose uri names nothing identified: not recorded, and <c>verify</c>'s finding.</param>
 /// <param name="Changes">One line per entry recorded, re-resolved or caught up, for the verb to print.</param>
 public sealed record MeshReconciliation(
@@ -41,7 +41,7 @@ public static class MeshReferences
 
         var relative = index.Relative(container);
         var recorded = Recorded(fileSystem, container);
-        var bySlot = recorded.ToDictionary(entry => entry.Slot, StringComparer.Ordinal);
+        var bySlot = MeshImportSettings.BySlot(recorded);
 
         var references = new List<MeshReference>();
         var uris = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -50,7 +50,7 @@ public static class MeshReferences
 
         foreach (var named in MeshContainer.Read(container, fileSystem.ReadAllBytes(container)))
         {
-            if (bySlot.TryGetValue(named.Slot, out var entry) && entry.Uri == named.Uri)
+            if (bySlot.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
             {
                 var resolution = index.Resolve(entry.Reference);
                 if (!resolution.Found)
@@ -59,14 +59,18 @@ public static class MeshReferences
                     continue;
                 }
 
+                // The entry keeps the uri the container SPELLS. Recording the desired one here
+                // would, on a sidecar-only pass, leave sidecar and container disagreeing, and the
+                // next pass would read that as a re-export and drop the identity (review of #244).
+                // Apply substitutes it only once the container really says it.
                 var expected = MeshContainer.UriFor(relative, resolution.Path);
-                if (resolution.Status == ReferenceStatus.Stale || expected != named.Uri)
+                if (!MeshContainer.SameUri(expected, named.Uri))
                 {
                     changes.Add($"{named.Slot}: {entry.Reference.Path} -> {resolution.Path}");
+                    uris[named.Slot] = expected;
                 }
 
-                references.Add(new MeshReference(named.Slot, expected, resolution.Current));
-                uris[named.Slot] = expected;
+                references.Add(new MeshReference(named.Slot, named.Uri, resolution.Current));
                 continue;
             }
 
@@ -77,7 +81,6 @@ public static class MeshReferences
                     ? $"{named.Slot}: re-exported as {named.Uri}, now {assetPath}"
                     : $"{named.Slot}: {named.Uri} recorded as {assetPath}");
                 references.Add(new MeshReference(named.Slot, named.Uri, new AssetReference(guid, assetPath)));
-                uris[named.Slot] = named.Uri;
                 continue;
             }
 
@@ -94,15 +97,9 @@ public static class MeshReferences
         ArgumentNullException.ThrowIfNull(reconciliation);
 
         var written = false;
-        if (reconciliation.SidecarChanged && fileSystem.FileExists(SidecarMeta.PathFor(container)))
-        {
-            var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
-            MeshImportSettings.Write(meta, reconciliation.References);
-            meta.Save(fileSystem, SidecarMeta.PathFor(container));
-            written = true;
-        }
+        var entries = reconciliation.References;
 
-        if (rewriteContainer && MeshContainer.CanRewrite(container))
+        if (rewriteContainer && MeshContainer.CanRewrite(container) && reconciliation.UriBySlot.Count > 0)
         {
             var bytes = fileSystem.ReadAllBytes(container);
             var rewritten = MeshContainer.RewriteUris(container, bytes, reconciliation.UriBySlot);
@@ -110,7 +107,19 @@ public static class MeshReferences
             {
                 fileSystem.WriteAllBytes(container, rewritten);
                 written = true;
+                // Only now does the container spell the new uri, so only now may the entries.
+                entries = entries
+                    .Select(entry => reconciliation.UriBySlot.TryGetValue(entry.Slot, out var uri) ? entry with { Uri = uri } : entry)
+                    .ToList();
             }
+        }
+
+        if (!entries.SequenceEqual(reconciliation.Recorded) && fileSystem.FileExists(SidecarMeta.PathFor(container)))
+        {
+            var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
+            MeshImportSettings.Write(meta, entries);
+            meta.Save(fileSystem, SidecarMeta.PathFor(container));
+            written = true;
         }
 
         return written ? new RepairedDocument(container, reconciliation.Changes) : null;

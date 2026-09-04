@@ -270,6 +270,12 @@ public sealed partial class AssetWatcher : IDisposable
     /// <summary>Records every asset's references where its importer keeps them (a mesh's sidecar) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; an asset's own bytes are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
     public int ReconcileReferences()
     {
+        if (_maintainer.DryRun)
+        {
+            LogWouldReconcile(_log);
+            return 0;
+        }
+
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var stamped = ReferenceRepair.Reconcile(_fileSystem, _layout, index, _importers);
         foreach (var mesh in stamped) LogStamped(_log, index.Relative(mesh.Path), mesh.Repointed.Count);
@@ -313,6 +319,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     [LoggerMessage(EventId = 17, Level = LogLevel.Warning, Message = "dangling: {Message}")]
     private static partial void LogDangling(ILogger logger, string message);
+
+    [LoggerMessage(EventId = 18, Level = LogLevel.Information, Message = "would record references (dry run)")]
+    private static partial void LogWouldReconcile(ILogger logger);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

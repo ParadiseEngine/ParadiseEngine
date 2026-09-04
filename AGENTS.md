@@ -228,7 +228,7 @@ and retrying it next drain. All of them go through `ReferenceChain` and `IAssetI
 a verb that branches on an asset's extension is the shape this rule exists to keep out. A
 reconcile at build time passes `RewriteSources = false`: sidecars only, never a path or a uri
 moved under the author's feet. A container uri with no entry recorded is the one path-only reference
-left: it is in `Unstamped`, and a move can only warn about it.
+left: it is in `PathOnly`, and a move follows it only when the move touched it, and otherwise warns.
 
 ## Code Style
 
