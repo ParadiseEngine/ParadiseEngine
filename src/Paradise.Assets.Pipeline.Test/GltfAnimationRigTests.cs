@@ -1,6 +1,9 @@
 using System.Numerics;
 
-namespace Paradise.Assets.Gltf.Test;
+using Paradise.Assets.Gltf;
+using Paradise.Assets.Gltf.Test;
+
+namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>The animation rig's math: rest-pose palettes are identity (skinned output ==
 /// bind mesh), animated joints move only their weighted vertices, and channel sampling

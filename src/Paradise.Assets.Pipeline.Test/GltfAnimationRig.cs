@@ -1,14 +1,16 @@
-using System;
 using System.Numerics;
 
-namespace Paradise.Assets.Gltf;
+using Paradise.Assets.Gltf;
 
-/// <summary>Samples animation clips over a <see cref="GltfAsset"/>'s node hierarchy and
-/// produces joint palettes + CPU-skinned vertices. Pure math — no GPU types — mirroring
-/// bank-heist's AnimatedGltfModel: palette[i] = inverseBind[i] × jointWorld[i] ×
-/// inverse(meshWorld) in the row-vector convention, 4-weight blend with a bind-pose fallback
-/// for zero-weight vertices. Allocate once per asset and reuse; all per-frame state lives in
-/// caller-provided spans.</summary>
+namespace Paradise.Assets.Pipeline.Test;
+
+/// <summary>
+/// The REFERENCE sampler: glTF semantics straight off the source asset — rest pose on
+/// unanimated paths, lerp and slerp, STEP holds, clamp outside the clip — with the palette as
+/// <c>inverseBind[i] × jointWorld[i] × inverse(meshWorld)</c> in the row-vector convention.
+/// Test-only since the runtime moved to ozz archives: the golden test holds the cooked clip to
+/// this within a stated tolerance, so a cook or sampler regression shows up as a pose error.
+/// </summary>
 public sealed class GltfAnimationRig
 {
     private readonly GltfAsset _asset;

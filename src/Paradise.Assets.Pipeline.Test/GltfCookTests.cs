@@ -107,17 +107,51 @@ public class GltfCookTests
         await Assert.That(cooked.Mesh.Vertices[13]).IsEqualTo(1f);      // joint 1
         await Assert.That(cooked.Mesh.Vertices[16]).IsEqualTo(0.75f);   // weight 0
         await Assert.That(cooked.Mesh.Draws[0].SkinIndex).IsEqualTo(0);
-        await Assert.That(cooked.Mesh.Draws[0].NodeIndex).IsEqualTo(meshNode);
+        await Assert.That(cooked.Mesh.Draws[0].NodeIndex).IsEqualTo(0);
+        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(cooked.Mesh.Skin.InverseBindMatrices.Length).IsEqualTo(2);
         await Assert.That(cooked.Skeleton).IsNotNull();
-        await Assert.That(cooked.Skeleton!.Nodes.Count).IsEqualTo(3);
-        await Assert.That(cooked.Skeleton.Nodes[knee].Parent).IsEqualTo(hip);
-        await Assert.That(cooked.Skeleton.Skins[0].Name).IsEqualTo("rig");
-        await Assert.That(cooked.Skeleton.Skins[0].JointNodes).IsEquivalentTo(new[] { hip, knee });
+        await Assert.That(cooked.Skeleton!.JointCount).IsEqualTo(3);
+        await Assert.That(cooked.Skeleton.Names.ToArray()).IsEquivalentTo(new[] { "Body", "hip", "knee" });
+        await Assert.That(cooked.Skeleton.Parents[2]).IsEqualTo((short)1);
+        await Assert.That(cooked.Skeleton.RestPoses[1].Translation).IsEqualTo(new Vector3(0, 1, 0));
         await Assert.That(cooked.Clips.Count).IsEqualTo(1);
         await Assert.That(cooked.Clips[0].Name).IsEqualTo("Walk");
-        await Assert.That(cooked.Clips[0].Channels[0].Node).IsEqualTo(knee);
+        await Assert.That(cooked.Clips[0].Channels[0].Joint).IsEqualTo(2);
         await Assert.That(cooked.Clips[0].Channels[0].Path).IsEqualTo(ChannelPath.Rotation);
         await Assert.That(cooked.Clips[0].Duration).IsEqualTo(1f);
+    }
+
+    [Test]
+    public async Task joints_are_depth_first_whatever_order_the_glb_lists_its_nodes()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var jointsView = b.AddBufferView(new byte[] { 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 });
+        var joints = b.AddAccessor(jointsView, GlbTestBuilder.UByte, "VEC4", 3);
+        var weights = b.AddFloatAccessor([0.75f, 0.25f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f], "VEC4");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, joints: joints, weights: weights));
+        var knee = b.AddNode(rotation: [0f, 0f, 0.7071068f, 0.7071068f], name: "knee");                 // node 0, a child
+        var hip = b.AddNode(translation: [0f, 1f, 0f], name: "hip", children: [knee]);                  // node 1, its parent
+        var meshNode = b.AddNode(mesh: mesh, skin: 0, name: "Body");                                   // node 2
+        var ibm = b.AddFloatAccessor([.. Identity(), .. Identity()], "MAT4");
+        b.AddSkin([hip, knee], ibm, name: "rig");
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0.7071068f, 0.7071068f], "VEC4");
+        b.AddAnimation("Walk", (knee, "rotation", times, values, null));
+        b.SetSceneRoots(meshNode, hip);
+
+        var cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(b.Build()));
+
+        // Roots in node order, each followed by its subtree: hip, knee, Body.
+        await Assert.That(cooked.Skeleton!.Names.ToArray()).IsEquivalentTo(new[] { "hip", "knee", "Body" });
+        await Assert.That(cooked.Skeleton.Parents.ToArray()).IsEquivalentTo(new short[] { -1, 0, -1 });
+        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 0, 1 });
+        await Assert.That(cooked.Mesh.Draws[0].NodeIndex).IsEqualTo(2);
+        await Assert.That(cooked.Clips[0].Channels[0].Joint).IsEqualTo(1);
+        // The skeleton and clip cook to ozz archives that load back.
+        await Assert.That(Skeleton.Load(cooked.Skeleton.Save()).FindJoint("knee")).IsEqualTo(1);
+        await Assert.That(AnimationClip.Load(GltfCook.BuildClip(cooked.Clips[0], cooked.Skeleton).Save()).Name).IsEqualTo("Walk");
     }
 
     [Test]

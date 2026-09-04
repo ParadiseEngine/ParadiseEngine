@@ -204,10 +204,30 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 
 **A GLB ships nothing; documents name its parts and the build cooks them.** `GlbImporter.Import`
 writes no output. A `.mesh`, `.skeleton` or `.anim` under `assets/` is a `MeshReferenceDocument`
-— `{ source = { guid, path }, slot, name, index }` — and `MeshImporter`/`AnimationImporter` cook
-the named part of the GLB (`GltfCook`) to the `Paradise.BLOB` blob at the document's own path
-(`Paradise.Assets.Mesh`, `Paradise.Animation`: one aligned native copy, magic and version first).
-A clip is found by name, index as the tiebreak. The documents are tool-owned: the watcher mints
+— `{ source = { guid, path }, slot, name, index, hash }` — and `MeshImporter`/`AnimationImporter`
+cook the named part of the GLB (`GltfCook`) to the file at the document's own path: the mesh to
+a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`, one aligned native copy, magic and version first),
+the skeleton and clips to **ozz-animation archives**. A clip is found by name, then by the hash
+of its channels, then by index.
+
+**Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
+`Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives and
+carries both halves in C#: the runtime (`SamplingContext`, `LocalToModel`) and the offline side
+(`SkeletonBuilder`, `AnimationBuilder`, `AnimationOptimizer`, `ClipConverter`). No native code
+anywhere, so NativeAOT and browser hosts get it for free. The contract is held as bytes:
+`OzzParityTests` regenerates a procedural rig and checks this builder writes exactly what ozz's
+C++ builder wrote (`Paradise.Animation.Test/Fixtures`), so a change to key sorting, quantization
+or i-frames that still "works" fails there. The skeleton is the GLB's WHOLE node tree in ozz's
+depth-first order (parents first, siblings by ascending glTF node index); skins, clips and draws
+address joints by that index, and the mesh blob carries its own skin (palette slot → joint +
+inverse bind) so one skeleton can drive many meshes. Unanimated joints hold the REST pose, not
+identity — ozz's builder pads an empty track with identity, `ClipConverter` fills rest first.
+STEP channels are baked into held keys and rotation arcs wider than 15° get slerped keys inserted
+(ozz only lerps — normalized lerp for rotations — where glTF means slerp, and a 90° arc puts the
+two a degree apart mid-way). A clip is then lossless but for ozz's 16-bit quantization unless the GLB's sidecar sets `[glb] optimize = { tolerance, distance }`
+(`AnimationOptimizer`; ozz's defaults are 1 mm at 10 cm). The reference sampler that plays the
+source glTF (`GltfAnimationRig`) lives in `Paradise.Assets.Pipeline.Test` only, as the golden
+test's oracle. The documents are tool-owned: the watcher mints
 them for any GLB with geometry, and `extract` overwrites one that disagrees with the GLB without a
 conflict rule — but never one that names ANOTHER GLB. Materials, textures and the prefab are
 authored the moment they exist, so only the `extract` verb writes them, and the GLB's `[glb]`

@@ -7,20 +7,16 @@
     <PackageId>Paradise.Animation</PackageId>
     <Title>Paradise.Animation</Title>
     <Authors>ParadiseEngine</Authors>
-    <Description>Skeletons and animation clips as Paradise.BLOB layouts: the node tree with rest pose and skins, and per-node keyframe channels, read at runtime from bytes the asset pipeline extracted from a GLB.</Description>
+    <Description>Skeletal animation runtime and offline builder in managed code, using ozz-animation's archive format: load an ozz skeleton and clips, sample a clip into local poses and model-space matrices; build, optimize and save the same archives from raw keyframes. No native code.</Description>
     <Copyright>ParadiseEngine</Copyright>
     <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>animation;skeleton;skinning;nativeaot;game-dev</PackageTags>
+    <PackageTags>animation;skeleton;skinning;ozz;nativeaot;game-dev</PackageTags>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Paradise.BLOB\Paradise.BLOB.csproj" />
-  </ItemGroup>
 
 </Project>

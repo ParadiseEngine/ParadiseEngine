@@ -213,7 +213,7 @@ public class AssetExtractorTests
         // The build agrees with the documents: Walk's blob is the Walk clip, whatever its index.
         var build = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
         await Assert.That(build.Errors).IsEmpty();
-        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Walk");
+        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Walk");
 
         // Renamed in the DCC with the same data: the hash finds it, the document follows the name.
         fileSystem.WriteAllBytes(Glb, CrateGlb(clips: ["Run", "Stride"]));

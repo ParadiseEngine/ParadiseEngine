@@ -76,9 +76,53 @@ public class MeshReferenceImportTests
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim")).Name).IsEqualTo("Run");
-        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Idle");
-        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Jog.anim")).Name).IsEqualTo("Idle");
+        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim")).Name).IsEqualTo("Run");
+        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Idle");
+        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Jog.anim")).Name).IsEqualTo("Idle");
+    }
+
+    [Test]
+    public async Task a_skeleton_document_cooks_to_an_ozz_archive_of_the_node_tree()
+    {
+        var (fileSystem, source) = Project();
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.skeleton", new MeshReferenceDocument(source, MeshSlot.Skeleton));
+
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        var skeleton = Paradise.Animation.Skeleton.Load(fileSystem.ReadAllBytes("/game/build/models/crate.skeleton"));
+        await Assert.That(skeleton.FindJoint("Crate")).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task the_glb_sidecar_decides_whether_the_clips_are_decimated()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var node = b.AddNode(mesh: b.AddMesh(GlbTestBuilder.Primitive(position)), name: "Crate");
+        var times = b.AddFloatAccessor([0f, 0.5f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 1f, 0f, 0f, 2f, 0f], "VEC3");   // linear: the middle key is redundant
+        b.AddAnimation("Rise", (node, "translation", times, values, null));
+        b.SetSceneRoots(node);
+        var (fileSystem, source) = Project(b.Build());
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Rise.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Rise", 0));
+
+        var lossless = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(lossless.Errors).IsEmpty();
+        var every = Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
+
+        var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        GlbImportSettings.WriteOptimization(meta, Paradise.Animation.Offline.AnimationOptimizer.Setting.Default);
+        meta.Save(fileSystem, Glb + ".meta");
+        var decimated = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(decimated.Errors).IsEmpty();
+        var fewer = Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
+
+        await Assert.That(every.Timepoints.Length).IsEqualTo(3);
+        await Assert.That(fewer.Timepoints.Length).IsEqualTo(2);
+        await Assert.That(GlbImportSettings.ReadOptimization(SidecarMeta.Load(fileSystem, Glb + ".meta"))).IsEqualTo(Paradise.Animation.Offline.AnimationOptimizer.Setting.Default);
     }
 
     [Test]

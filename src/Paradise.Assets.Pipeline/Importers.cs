@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 
 using Paradise.Animation;
+using Paradise.Animation.Offline;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
@@ -396,7 +397,7 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Animation.SkeletonFormat.Write(cooked.Skeleton);
+                blob = cooked.Skeleton.Save();
                 break;
 
             default:
@@ -406,12 +407,42 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Animation.ClipFormat.Write(clip);
+                if (cooked.Skeleton is null)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} has no node tree to cook a clip over");
+                    return true;
+                }
+
+                try
+                {
+                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, Optimization(context, resolution.Asset)).Save();
+                }
+                catch (ArgumentException failure)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} {failure.Message}");
+                    return true;
+                }
+
                 break;
         }
 
         context.Output.WriteAllBytes("/" + context.Source, blob);
         return true;
+    }
+
+    /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key.</summary>
+    private static AnimationOptimizer.Setting? Optimization(ImportContext context, UPath glb)
+    {
+        var sidecar = SidecarMeta.PathFor(glb);
+        if (!context.FileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return GlbImportSettings.ReadOptimization(SidecarMeta.Load(context.FileSystem, sidecar));
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
@@ -498,7 +529,7 @@ public sealed class MeshImporter : IAssetImporter
     }
 }
 
-/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to the animation blobs (<see cref="Paradise.Animation.SkeletonFormat"/>, <see cref="Paradise.Animation.ClipFormat"/>) of the GLB they name.</summary>
+/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to ozz archives (<see cref="Paradise.Animation.Skeleton"/>, <see cref="Paradise.Animation.AnimationClip"/>) of the GLB they name.</summary>
 public sealed class AnimationImporter : IAssetImporter
 {
     public string Name => "animation";

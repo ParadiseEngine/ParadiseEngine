@@ -89,6 +89,8 @@ jobs:
           projects=(
             Paradise.Authoring
             Paradise.BLOB
+            Paradise.Animation
+            Paradise.Assets.Mesh
             Paradise.Diagnostics
             Paradise.BT
             Paradise.BT.Builder
