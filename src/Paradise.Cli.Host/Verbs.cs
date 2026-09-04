@@ -1,3 +1,4 @@
+using Paradise.Assets.Documents;
 using Paradise.Assets.Pipeline;
 using Paradise.Assets.Project;
 
@@ -13,22 +14,22 @@ internal static class Verbs
     /// errors: a duplicate guid resolves to the ordinal-first asset, and fixing before that error
     /// was shown would rewrite paths toward an arbitrary winner the author never saw named.
     /// </param>
-    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix)
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix, IReadOnlyList<IAssetImporter>? importers = null)
     {
         // One scan for both passes: the fix rewrites document bodies only, never files or
         // identities, so the index it was taken over still describes the tree after it.
         var index = AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout));
-        var findings = ProjectVerifier.Verify(fileSystem, layout, index);
+        var findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
 
         if (fix && findings.All(finding => finding.Severity != VerifySeverity.Error))
         {
-            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout, index))
+            foreach (var repaired in ReferenceRepair.Fix(fileSystem, layout, index, importers))
             {
                 Console.WriteLine($"fixed: {Display(fileSystem, repaired.Path)}");
                 foreach (var repointed in repaired.Repointed) Console.WriteLine($"       {repointed}");
             }
 
-            findings = ProjectVerifier.Verify(fileSystem, layout, index);
+            findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
         }
         else if (fix)
         {
@@ -86,7 +87,7 @@ internal static class Verbs
         IReadOnlyList<IAssetImporter> importers)
     {
         var log = PipelineLog.For(fileSystem, layout);
-        var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout));
+        var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout), importers);
         var settled = maintainer.Reconcile();
         Console.WriteLine(dryRun
             ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"
@@ -189,9 +190,9 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
-    public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to)
+    public static int Move(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, IReadOnlyList<IAssetImporter>? importers = null)
     {
-        var result = AssetMover.Move(fileSystem, layout, from, to, PipelineLog.For(fileSystem, layout));
+        var result = AssetMover.Move(fileSystem, layout, from, to, PipelineLog.For(fileSystem, layout), importers);
 
         foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
         foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
@@ -200,6 +201,80 @@ internal static class Verbs
         // author must know the tree changed.
         var summary = $"{result.Moved.Count} file(s) moved, {result.Rewritten.Count} document(s) rewritten, {result.Warnings.Count} warning(s)";
         Console.WriteLine(result.Succeeded ? $"mv: {summary}" : $"mv: FAILED with {result.Errors.Count} error(s) — {summary}");
+        return result.Succeeded ? 0 : 1;
+    }
+
+    /// <summary>A query, so it exits 0: who references the asset, then what it references.</summary>
+    public static int Refs(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool transitive, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        var ignore = IgnoreRules(fileSystem, layout);
+        var index = AssetIndex.Scan(fileSystem, layout.Assets, ignore);
+        if (!index.Contains(target))
+        {
+            Console.Error.WriteLine($"refs: '{Display(fileSystem, target)}' is not a file under assets/");
+            return 1;
+        }
+
+        var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore, importers);
+        if (index.IdentityOf(target) is not { } guid)
+        {
+            Console.Error.WriteLine($"refs: '{index.Relative(target)}' has no identity (no readable sidecar), so nothing can reference it");
+            return 1;
+        }
+
+        Console.WriteLine($"{index.Relative(target)} ({DocumentGuid.Format(guid)})");
+        Console.WriteLine("referenced by:");
+        var dependents = graph.DependentsOf(guid);
+        if (dependents.Count == 0) Console.WriteLine("  (nothing)");
+        foreach (var edge in dependents.OrderBy(edge => edge.ReferrerPath.FullName, StringComparer.Ordinal))
+        {
+            Console.WriteLine($"  {index.Relative(edge.ReferrerPath)}: in {edge.Where} -> {edge.Path}");
+        }
+
+        if (transitive)
+        {
+            var direct = dependents.Select(edge => edge.Referrer).ToHashSet();
+            var beyond = graph.TransitiveDependentsOf(guid).Where(referrer => !direct.Contains(referrer))
+                .Select(referrer => index.Find(referrer) is { } file ? index.Relative(file) : DocumentGuid.Format(referrer))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToList();
+            Console.WriteLine("and, through those:");
+            if (beyond.Count == 0) Console.WriteLine("  (nothing)");
+            foreach (var name in beyond) Console.WriteLine($"  {name}");
+        }
+
+        Console.WriteLine("references:");
+        var dependencies = graph.DependenciesOf(guid);
+        if (dependencies.Count == 0) Console.WriteLine("  (nothing)");
+        foreach (var edge in dependencies)
+        {
+            var where = index.Find(edge.Target) is { } asset ? index.Relative(asset) : $"{edge.Path} (MISSING)";
+            Console.WriteLine($"  in {edge.Where} -> {where} ({DocumentGuid.Format(edge.Target)})");
+        }
+
+        if (graph.Unreadable.Count > 0)
+        {
+            Console.WriteLine($"{graph.Unreadable.Count} file(s) could not be checked: {string.Join(", ", graph.Unreadable.Select(index.Relative))}");
+        }
+
+        return 0;
+    }
+
+    public static int Remove(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool force, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        var result = AssetRemover.Remove(fileSystem, layout, target, force, dryRun, PipelineLog.For(fileSystem, layout), importers);
+
+        foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+        foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
+        foreach (var edge in result.Dangling)
+        {
+            Console.WriteLine($"  {Display(fileSystem, edge.ReferrerPath)}: in {edge.Where} -> {edge.Path}");
+        }
+
+        foreach (var removed in result.Removed) Console.WriteLine(dryRun ? $"would remove: {removed}" : $"removed: {removed}");
+
+        var summary = $"{result.Removed.Count} file(s) removed, {result.Dangling.Count} reference(s) left dangling";
+        Console.WriteLine(result.Succeeded ? $"rm: {summary}" : $"rm: FAILED — {summary}");
         return result.Succeeded ? 0 : 1;
     }
 

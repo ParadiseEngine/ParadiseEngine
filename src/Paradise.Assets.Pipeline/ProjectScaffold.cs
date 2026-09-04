@@ -250,7 +250,7 @@ public static class ProjectScaffold
     {
         var path = assets / relative;
         Write(fileSystem, path, text, written, description);
-        Sidecar(fileSystem, path, written);
+        Sidecar(fileSystem, assets, path, written);
     }
 
     private static void WriteBinary(
@@ -260,7 +260,7 @@ public static class ProjectScaffold
         CreateParent(fileSystem, path);
         fileSystem.WriteAllBytes(path, bytes);
         written.Add(new ScaffoldedFile(path, description));
-        Sidecar(fileSystem, path, written);
+        Sidecar(fileSystem, assets, path, written);
     }
 
     private static void Write(IFileSystem fileSystem, UPath path, string text, List<ScaffoldedFile> written, string description)
@@ -270,10 +270,14 @@ public static class ProjectScaffold
         written.Add(new ScaffoldedFile(path, description));
     }
 
-    private static void Sidecar(IFileSystem fileSystem, UPath asset, List<ScaffoldedFile> written)
+    /// <summary>Minted the way the watcher mints one: identity, and the importer the built-in chain claims — the manifest excepted, which nothing imports.</summary>
+    private static void Sidecar(IFileSystem fileSystem, UPath assets, UPath asset, List<ScaffoldedFile> written)
     {
         var path = SidecarMeta.PathFor(asset);
-        SidecarMeta.Mint().Save(fileSystem, path);
+        var meta = SidecarMeta.Mint();
+        meta.Importer = ImporterChain.Claim(
+            AssetImporters.All, new ImportCandidate(fileSystem, new AssetProjectLayout(assets.GetDirectory()), asset, null))?.Name;
+        meta.Save(fileSystem, path);
         written.Add(new ScaffoldedFile(path, "identity"));
     }
 

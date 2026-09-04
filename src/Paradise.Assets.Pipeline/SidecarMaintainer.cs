@@ -14,7 +14,7 @@ public enum SidecarAction
 
     Minted,
 
-    /// <summary>A legacy recorded hash was dropped.</summary>
+    /// <summary>A sidecar from before the importer field was recorded one.</summary>
     Refreshed,
 
     Carried,
@@ -36,8 +36,10 @@ public enum SidecarAction
 /// Nothing here may destroy an identity: a deleted <c>.meta</c> breaks every reference, and most
 /// moves (<c>git mv</c> on Windows, Finder) arrive as delete-then-add. So a delete quarantines,
 /// and an asset reappearing with the same content takes the identity back. The match is on a hash
-/// held in memory, never a field in the sidecar, because a recorded hash of a text asset differs
-/// per checkout (line endings, smudge filters) and would make every clone a dirty tree.
+/// held in memory, never a field in the sidecar: one was recorded there once, and a text asset
+/// hashes differently per checkout (line endings, smudge filters), which made every clone a dirty
+/// tree. The field is gone from the format; a sidecar still carrying one is refused as an unknown
+/// root key, which is the loud version of the silent cleanup it used to get.
 /// </remarks>
 public sealed partial class SidecarMaintainer
 {
@@ -46,6 +48,7 @@ public sealed partial class SidecarMaintainer
     private readonly ILogger _log;
     private readonly bool _dryRun;
     private readonly AssetIgnoreRules _ignore;
+    private readonly IReadOnlyList<IAssetImporter> _importers;
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
@@ -54,12 +57,14 @@ public sealed partial class SidecarMaintainer
     private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
     /// <param name="ignore">The project's <c>[assets] ignore</c>; taken once, so a change to it needs the watch restarted.</param>
+    /// <param name="importers">The chain a mint asks for the asset's importer; the built-ins when omitted.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         ILogger? logger = null,
         bool dryRun = false,
-        AssetIgnoreRules? ignore = null)
+        AssetIgnoreRules? ignore = null,
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -69,9 +74,13 @@ public sealed partial class SidecarMaintainer
         _log = logger ?? NullLogger.Instance;
         _dryRun = dryRun;
         _ignore = ignore ?? AssetIgnoreRules.None;
+        _importers = importers ?? AssetImporters.All;
     }
 
     public AssetIgnoreRules Ignore => _ignore;
+
+    /// <summary>Whether this maintainer only reports; the watcher follows the same setting for everything it would write.</summary>
+    public bool DryRun => _dryRun;
 
     public IReadOnlyCollection<string> Quarantined => _quarantine.Keys;
 
@@ -104,6 +113,8 @@ public sealed partial class SidecarMaintainer
         }
 
         var sidecar = SidecarMeta.PathFor(asset);
+        // Hashed even for an existing sidecar, through the (mtime, size) cache: this is what keeps
+        // the in-memory hash current, so a Finder move of an asset edited since its mint relinks.
         var hash = HashOf(asset);
 
         if (_fileSystem.FileExists(sidecar))
@@ -120,9 +131,11 @@ public sealed partial class SidecarMaintainer
                 return SidecarAction.None;
             }
 
-            if (existing.Hash is null) return SidecarAction.None;
+            // A recorded importer is never overwritten, even when the chain would now choose
+            // differently: an author's edit of that line is exactly what recording it is for.
+            if (existing.Importer is not null || ClaimantFor(asset, existing) is not { } claimant) return SidecarAction.None;
 
-            existing.Hash = null;
+            existing.Importer = claimant;
             Save(existing, sidecar);
             LogRefreshed(_log, sidecar);
             return SidecarAction.Refreshed;
@@ -130,7 +143,7 @@ public sealed partial class SidecarMaintainer
 
         if (_quarantine.Remove(hash, out var held))
         {
-            var restored = new SidecarMeta(held.Meta.Guid);
+            var restored = new SidecarMeta(held.Meta.Guid) { Importer = held.Meta.Importer };
             foreach (var (domain, settings) in held.Meta.Settings) restored.SetSetting(domain, settings);
             Save(restored, sidecar);
             Remove(held.Sidecar);
@@ -140,6 +153,7 @@ public sealed partial class SidecarMaintainer
         }
 
         var minted = new SidecarMeta(Guid.NewGuid());
+        minted.Importer = ClaimantFor(asset, minted);
         Save(minted, sidecar);
         LogMinted(_log, sidecar);
         return SidecarAction.Minted;
@@ -179,7 +193,6 @@ public sealed partial class SidecarMaintainer
             return SidecarAction.Conflicted;
         }
 
-        meta.Hash = null;
         Save(meta, destination);
         Remove(source);
         LogCarried(_log, source, destination);
@@ -213,23 +226,29 @@ public sealed partial class SidecarMaintainer
             return SidecarAction.None;
         }
 
-        var hash = _seen.Remove(asset, out var seen) ? seen.Hash : meta.Hash;
-        if (hash is null) return SidecarAction.None;
+        // Only an asset this process has hashed can be relinked: the hash is held in memory, never
+        // in the sidecar, so a delete of something never seen is simply a delete.
+        if (!_seen.Remove(asset, out var seen)) return SidecarAction.None;
+        var hash = seen.Hash;
 
         _quarantine[hash] = new QuarantinedIdentity(asset, sidecar, meta, at);
         LogQuarantined(_log, sidecar);
         return SidecarAction.Quarantined;
     }
 
-    /// <summary>Forgets held identities; the sidecar stays on disk, so this only drops the chance to re-link.</summary>
-    public void Expire(Func<QuarantinedIdentity, bool> stale)
+    /// <summary>Forgets held identities and returns them; the sidecar stays on disk, so this only drops the chance to re-link.</summary>
+    public IReadOnlyList<QuarantinedIdentity> Expire(Func<QuarantinedIdentity, bool> stale)
     {
         ArgumentNullException.ThrowIfNull(stale);
+        var expired = new List<QuarantinedIdentity>();
         foreach (var (hash, held) in _quarantine.Where(entry => stale(entry.Value)).ToList())
         {
             _quarantine.Remove(hash);
+            expired.Add(held);
             LogOrphaned(_log, held.Sidecar);
         }
+
+        return expired;
     }
 
     /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
@@ -253,6 +272,38 @@ public sealed partial class SidecarMaintainer
         else _seen.Remove(asset);
         return hash;
     }
+
+    /// <summary>
+    /// Records the importer on an existing sidecar that names none, and nothing else: no hash,
+    /// no mint. What <c>verify --fix</c> runs over the tree — <see cref="Ensure"/> would hash
+    /// every asset through a cache this pass does not keep (review of #244).
+    /// </summary>
+    public SidecarAction RecordImporter(UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!_fileSystem.FileExists(sidecar) || _ignore.Matches(_layout.Assets, asset) || !_fileSystem.FileExists(asset)) return SidecarAction.None;
+
+        SidecarMeta existing;
+        try
+        {
+            existing = SidecarMeta.Load(_fileSystem, sidecar);
+        }
+        catch (SidecarMetaException)
+        {
+            return SidecarAction.None;
+        }
+
+        if (existing.Importer is not null || ClaimantFor(asset, existing) is not { } claimant) return SidecarAction.None;
+
+        existing.Importer = claimant;
+        Save(existing, sidecar);
+        LogRefreshed(_log, sidecar);
+        return SidecarAction.Refreshed;
+    }
+
+    /// <summary>The chain's answer for <paramref name="asset"/>, or null when nothing claims it — a sidecar without an importer is legal, and verify says which files those are.</summary>
+    private string? ClaimantFor(UPath asset, SidecarMeta meta)
+        => ImporterChain.Claim(_importers, new ImportCandidate(_fileSystem, _layout, asset, AssetSidecar.Resolve(asset, SidecarMeta.PathFor(asset), meta, _importers)))?.Name;
 
     private void Save(SidecarMeta meta, UPath path)
     {
@@ -279,7 +330,7 @@ public sealed partial class SidecarMaintainer
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "{Sidecar}: left alone — {Reason}")]
     private static partial void LogLeftAlone(ILogger logger, UPath sidecar, string reason);
 
-    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "refreshed: {Sidecar} (dropped recorded hash)")]
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "refreshed: {Sidecar} (importer recorded)")]
     private static partial void LogRefreshed(ILogger logger, UPath sidecar);
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Information, Message = "relinked: {From} -> {To} (guid kept)")]

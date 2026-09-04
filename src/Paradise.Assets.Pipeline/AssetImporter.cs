@@ -23,7 +23,7 @@ public sealed record ImportContext(
     AssetIndex Sources,
     UPath Asset,
     string Source,
-    SidecarMeta? Meta,
+    AssetSidecar? Meta,
     BuildProfile Profile,
     ProjectOutputTarget Target,
     IFileSystem Output,
@@ -107,8 +107,40 @@ public interface IAssetImporter
     /// <summary>False for outputs addressed by path alone (a config).</summary>
     bool RecordsIdentity { get; }
 
-    /// <summary>A failure is reported through <paramref name="errors"/>, prefixed with the source, and writes nothing.</summary>
+    /// <summary>
+    /// Whether this importer handles the asset — a path, at most a header of the bytes. The one
+    /// claim point: the chain asks it once, when the sidecar is minted, and records the answer;
+    /// nothing else searches. Abstract on purpose: an importer that cannot say whether an asset is
+    /// its own cannot be recorded for one.
+    /// </summary>
+    bool Claims(ImportCandidate candidate);
+
+    /// <summary>
+    /// Imports an asset the sidecar names this importer for. A failure is reported through
+    /// <paramref name="errors"/>, prefixed with the source, and writes nothing. Returning false
+    /// says the asset is not what it claimed to be — kept as a guard, since a hand-edited
+    /// <c>importer</c> line can name this importer for anything, and the build reports it.
+    /// </summary>
     bool Import(ImportContext context, List<string> errors);
+
+    /// <summary>
+    /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar.
+    /// <see cref="AssetReferences.None"/> for a kind that holds none (the default), never null:
+    /// the graph, <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c> and the watcher iterate what
+    /// comes back. Which importer is asked is the sidecar's to say, not this method's.
+    /// </summary>
+    AssetReferences References(ReferenceContext context, UPath asset) => AssetReferences.None;
+
+    /// <summary>
+    /// Brings the asset's references in line with the tree — its sidecar's entries, and its own
+    /// bytes when <see cref="ReferenceContext.RewriteSources"/> allows — through the one rule: the
+    /// guid decides, the path is a hint. Null when nothing changed. Called only after
+    /// <see cref="References"/> claimed the asset.
+    /// </summary>
+    RepairedDocument? Rewrite(ReferenceContext context, UPath asset) => null;
+
+    /// <summary>The sidecar settings domains this importer reads, so <c>verify</c> knows a table under one is meant and can check its shape. A domain exists exactly when a step reads it.</summary>
+    IReadOnlyList<IImportSettingsDomain> SettingsDomains => [];
 }
 
 public static class AssetImporters

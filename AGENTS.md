@@ -202,6 +202,34 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 (use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
 `reference.Guid`, and carry the path only to phrase the message).
 
+**The sidecar names the importer; nothing walks the chain except `ImporterChain`.** `Claims` is
+the one claim point — cheap, a path and at most a header — and the maintainer records the answer
+when it mints the sidecar. `Import` keeps its extension guard only as a defence: a hand-edited
+`importer` line can name it for anything, and the build reports a decline as an error rather than
+skipping the asset. A recorded name is never overwritten by the tooling, and a name the chain lacks
+is never silently replaced by a claim — both are what recording it is for. Decided at mint, not at
+first build: a build that edits committed sidecars is the dirty-tree failure the recorded hash
+already taught. Two ways to reintroduce the old search: walking `importers` anywhere but
+`ImporterChain`, and a `Claims` that reads more than a header.
+
+**"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus what
+each importer declares through `IAssetImporter.References` (a prefab's document, a mesh's `[mesh]`
+sidecar entries — and a game's own kind, with no format list anywhere in the pipeline); never persisted, and a DOCUMENT's
+reference list never goes in a sidecar (a second copy of the document, kept in sync by a watcher that
+may not be running, dirtying two files per edit). A mesh container's references DO live in its
+sidecar (`MeshImportSettings`), because that is derived data the tooling resolves from bytes it
+cannot author — the container is read, never written, so FBX and GLB get one mechanism; the uri
+is rewritten only where the format allows, and only for the DCC's benefit. Nodes are guids; an edge into an identity nothing
+carries is KEPT with its path, because that is the moment someone asks who pointed there. `mv`
+rewrites `DependentsOf` the moved guids (plus what the graph lists as `Unreadable`, walked the old
+way), `rm` refuses on non-empty dependents unless forced and never nulls a slot, and the watcher
+follows a carried identity's dependents after a rename — skipping one still inside its debounce
+and retrying it next drain. All of them go through `ReferenceChain` and `IAssetImporter.Rewrite`;
+a verb that branches on an asset's extension is the shape this rule exists to keep out. A
+reconcile at build time passes `RewriteSources = false`: sidecars only, never a path or a uri
+moved under the author's feet. A container uri with no entry recorded is the one path-only reference
+left: it is in `PathOnly`, and a move follows it only when the move touched it, and otherwise warns.
+
 ## Code Style
 
 Enforced via `.editorconfig` with warnings-as-errors:
@@ -209,6 +237,7 @@ Enforced via `.editorconfig` with warnings-as-errors:
 - **Layout**: Allman braces, 4-space indent, file-scoped namespaces, LF line endings
 - **Types**: Prefer language keywords (`int` not `Int32`), avoid `this.` qualification
 - **Performance**: Struct-based nodes, `ref` parameters throughout, zero-allocation design, `System.Runtime.CompilerServices.Unsafe` for low-level ops
+- **Collections**: prefer empty over null. A method whose result is a list, set, or a record of them returns an empty one (a shared static like `AssetReferences.None` where the type is a class); null is reserved for "there is no such thing" on a single object, never for "nothing in it". A caller iterates an empty result with no branch; a null forces one at every call site and is the shape of the next `NullReferenceException`.
 - **Comments**: Code explains itself; comments explain why. Prefer a name, a type, a small method, or a guard over a comment that says what the code does, and restructure before commenting. A comment is for what code cannot say: a constraint, a decision and its rejected alternative, a failure mode someone would reintroduce, a cross-repo or cross-language contract. XML `<summary>` is one sentence; `<remarks>` only when it carries such a why. Delete comments that narrate control flow or restate the next line.
 
 ## Git conventions

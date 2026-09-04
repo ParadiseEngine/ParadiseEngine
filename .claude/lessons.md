@@ -427,3 +427,11 @@
 
 ### [hits: 1] TUnit 1.65: `HasCount()` is obsolete and warnings-as-errors turns it into CS0618; use `.Count().IsEqualTo(n)`
 - 2026-09-03, editor skeleton tests.
+
+- `[hits: 1]` **A field the tooling derives goes into the sidecar at MINT, never at first build.**
+  Recording the importer after the first successful `Import` would have been the smaller change,
+  but a build that edits committed sidecars is the dirty-tree failure the recorded hash already
+  taught: commit a new asset with its fresh `.meta`, and the first build on any checkout changes
+  a committed file. So `IAssetImporter.Claims` exists (cheap, no output) purely so the maintainer
+  can decide at mint time. **Why it matters:** the two designs look identical on a single
+  machine; the difference only shows in CI and in a teammate's `git status`.

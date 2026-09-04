@@ -69,7 +69,7 @@ public static class BuildHost
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
     {
-        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, catalogue)");
+        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, catalogue)");
 
         string? projectDirectory = null;
         string? profile = null;
@@ -80,6 +80,8 @@ public static class BuildHost
         var dryRun = false;
         var noBuild = false;
         var noTray = false;
+        var force = false;
+        var transitive = false;
         var positional = new List<string>();
 
         for (var i = 0; i < arguments.Length; i++)
@@ -95,8 +97,10 @@ public static class BuildHost
                 case "--dry-run": dryRun = true; break;
                 case "--no-build": noBuild = true; break;
                 case "--no-tray": noTray = true; break;
+                case "--force": force = true; break;
+                case "--transitive": transitive = true; break;
                 default:
-                    if (arguments[i].StartsWith('-') || assetVerb != "mv") return Unknown($"unknown argument '{arguments[i]}'");
+                    if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs")) return Unknown($"unknown argument '{arguments[i]}'");
                     positional.Add(arguments[i]);
                     break;
             }
@@ -117,14 +121,18 @@ public static class BuildHost
 
         return assetVerb switch
         {
-            "verify" => Verbs.Verify(physical, layout, fix),
+            "verify" => Verbs.Verify(physical, layout, fix, importers),
             "prefab-check" => Verbs.PrefabCheck(physical, layout, fix),
             "clean" => Verbs.Clean(physical, layout, keepEditor),
             "build" => Verbs.Build(physical, layout, profile, editor, importers),
             "catalogue" => Verbs.Catalogue(physical, layout),
             "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers),
-            "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, positional[0]), Absolute(physical, positional[1])),
+            "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, positional[0]), Absolute(physical, positional[1]), importers),
             "mv" => Unknown("'mv' needs a source and a destination: paradise assets mv <from> <to>"),
+            "rm" when positional.Count == 1 => Verbs.Remove(physical, layout, Absolute(physical, positional[0]), force, dryRun, importers),
+            "rm" => Unknown("'rm' needs one path: paradise assets rm <path> [--force] [--dry-run]"),
+            "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, positional[0]), transitive, importers),
+            "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };

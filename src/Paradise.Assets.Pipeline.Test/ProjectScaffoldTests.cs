@@ -87,7 +87,6 @@ public class ProjectScaffoldTests
             await Assert.That(fileSystem.FileExists(sidecar)).IsTrue();
 
             var meta = SidecarMeta.Load(fileSystem, sidecar);
-            await Assert.That(meta.Hash).IsNull();
         }
     }
 

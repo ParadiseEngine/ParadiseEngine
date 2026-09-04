@@ -143,7 +143,9 @@ paradise assets verify         # sidecars, identities, validity
 paradise assets verify --fix   # ... and repoint reference paths a rename left stale
 paradise assets build          # assets/ -> build/  (--editor for .editor/play)
 paradise assets watch          # keep *.meta in step, rebuilding as you go
-paradise assets mv <from> <to> # move a file or directory; sidecars and prefab references follow
+paradise assets mv <from> <to> # move a file or directory; sidecars and every reference follow
+paradise assets rm <path>      # delete an asset; refused while anything references it (--force to leave them dangling)
+paradise assets refs <path>    # who references it, and what it references (--transitive)
 paradise tools doctor          # every build tool: found, version, how to fix
 ```
 
@@ -166,11 +168,39 @@ because a guid alone is unreadable in a diff, and it is only ever a hint:
   time two filenames were swapped.
 
 `paradise assets mv` still rewrites eagerly, because a tree whose paths are true is the one worth
-committing. It is the tidy path, not the load-bearing one.
+committing. It is the tidy path, not the load-bearing one. `watch` does the same after a rename it
+sees, so a Finder rename leaves the tree as tidy as `mv` would — and when a delete outlives the
+30 s the identity is held for, it names every reference left dangling.
 
-A game that needs its own asset kind writes an `IAssetImporter` (it claims or declines inside
-`Import`) and runs the same verbs through `Paradise.Cli.Host` from a console project of its own —
-the tool cannot be handed code, and NativeAOT rules out scanning for it:
+**A mesh names its textures the same way, in its sidecar.** A container's external uris are
+resolved once and recorded under `[mesh]` in the mesh's `.meta` as `{ slot, uri, guid, path }`
+entries; the uri is what the DCC follows, the recorded guid is what the pipeline follows. The
+container is only ever READ, so an FBX gets the same story as a GLB — the resolution lives in
+tooling-owned import settings, the way an FBX importer records its texture remaps. `verify --fix`
+and `watch` record what is missing, a texture rename catches the entry (and, for a format that
+can be written, the uri) up instead of forcing a re-export, and a uri that changed since it was
+recorded is a re-export and is re-resolved from scratch.
+
+**Who references what** is answered by `ReferenceGraph`, built per run from the sidecars and the
+documents — never stored in a sidecar, which would be a second copy of the document kept in sync
+by a watcher that may not be running. `mv` rewrites only the dependents of what moved, `rm` refuses
+what is still referenced, and `refs` prints both directions.
+
+### Every asset names its importer
+
+A sidecar carries `importer = "mesh"` beside its guid. The watcher decides it when it mints the
+sidecar, by asking the chain (`Claims`, last appended first) — not at the first build, because a
+build that edits committed sidecars is a dirty tree. From then on the name is honoured as written:
+the build, `verify`, and every reference verb look the importer up by name and never search. Edit
+the line to pick a different importer for one asset; append to the chain to change the default for
+NEW assets (existing ones keep their name until edited). A name the chain does not have is a
+`verify` error naming the chain; a sidecar with no name is a warning that `verify --fix` and
+`watch` clear; a named importer that declines the asset fails the build, loudly.
+
+A game that needs its own asset kind writes an `IAssetImporter` — `Claims` says whether an asset
+is its own from the path and, at most, a header; `Import` does the work — and runs the same verbs
+through `Paradise.Cli.Host` from a console project of its own — the tool cannot be handed code,
+and NativeAOT rules out scanning for it:
 
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
@@ -178,6 +208,13 @@ return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImport
 ```
 
 The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
+
+An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
+`rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
+`References` (every site the asset holds, from its bytes and its sidecar; null to decline) and
+`Rewrite` (bring them in line with the tree: the sidecar's entries always, the asset's own bytes
+only when the context allows). The findings are derived from the sites by the one rule, so an
+importer cannot forget one; nothing in the pipeline lists formats.
 
 ## Releasing
 

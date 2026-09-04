@@ -182,6 +182,9 @@ public sealed class AssetIndex
     /// <summary>The absolute path of the asset a reference names — by guid, falling back to its path half so an unresolvable reference still points somewhere nameable. Null when even the path half names nothing combinable (see <see cref="ReferenceResolution.Asset"/>).</summary>
     public UPath AssetOf(AssetReference reference) => Resolve(reference).Asset;
 
+    /// <summary>The identity the asset at <paramref name="path"/> carries, or null when it has none the index could read.</summary>
+    public Guid? IdentityOf(UPath path) => _byPath.TryGetValue(path, out var guid) ? guid : null;
+
     /// <summary>Whether <paramref name="path"/> is a file the manifest's <c>[assets] ignore</c> excludes, and so carries no identity by design rather than by omission.</summary>
     public bool IsIgnored(UPath path) => _ignored.Contains(path);
 

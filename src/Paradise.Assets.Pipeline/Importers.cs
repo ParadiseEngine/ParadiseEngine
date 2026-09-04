@@ -12,6 +12,12 @@ namespace Paradise.Assets.Pipeline;
 public sealed class TextureImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".png", ".jpg", ".jpeg");
+
+    /// <inheritdoc />
+    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [TextureImportSettings.Instance];
+
+    /// <inheritdoc />
     public string Name => "texture";
 
     /// <inheritdoc />
@@ -56,6 +62,48 @@ public sealed class TextureImporter : IAssetImporter
 public sealed class MeshImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf");
+
+    /// <inheritdoc />
+    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [MeshImportSettings.Instance];
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
+
+        var relative = context.Relative(asset);
+        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
+        var sites = new List<ReferenceSite>();
+        foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
+        {
+            var hint = MeshContainer.AssetPathFor(relative, named.Uri);
+            if (recorded.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
+            {
+                sites.Add(new ReferenceSite(named.Slot, entry.Reference, hint, named.Uri));
+            }
+            else
+            {
+                // A changed uri is a re-export: the recorded identity no longer describes what
+                // the container spells, so the site is path-only until it is re-resolved.
+                var note = recorded.ContainsKey(named.Slot) ? "changed its uri since its identity was recorded (a re-export)" : null;
+                sites.Add(new ReferenceSite(named.Slot, null, hint, named.Uri, note));
+            }
+        }
+
+        return new AssetReferences(sites);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
+        return MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+    }
+
+    /// <inheritdoc />
     public string Name => "mesh";
 
     /// <inheritdoc />
@@ -85,6 +133,24 @@ public sealed class MeshImporter : IAssetImporter
             errors.Add($"{context.Source}: {problem}");
             return true;
         }
+
+        // By identity first: a texture renamed outside `mv` still carries the guid the sidecar
+        // recorded for it, and the uri the DCC wrote is only a hint. Through Resolve, so the move
+        // is a recorded input of this output.
+        // Only where the container still spells the uri the entry was recorded from: a
+        // re-export that changed a slot's uri has outrun its record, and following the old guid
+        // there would bake the wrong texture (review of #244). That slot keeps the container's
+        // own text, which the path check below validates or fails loudly.
+        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, context.Asset));
+        var uris = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var named in MeshContainer.Read(context.Asset, bytes))
+        {
+            if (!recorded.TryGetValue(named.Slot, out var entry) || !MeshContainer.SameUri(entry.Uri, named.Uri)) continue;
+            var resolution = context.Resolve(entry.Reference);
+            if (resolution.Found) uris[named.Slot] = MeshContainer.UriFor(context.Source, resolution.Path);
+        }
+
+        bytes = MeshContainer.RewriteUris(context.Asset, bytes, uris);
 
         var rewrite = MeshTextureReferences.Rewrite(bytes);
 
@@ -186,6 +252,9 @@ internal static class TextureStep
 public sealed class AudioImporter : IAssetImporter
 {
     /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".bnk", ".wem");
+
+    /// <inheritdoc />
     public string Name => "audio";
 
     /// <inheritdoc />
@@ -204,6 +273,39 @@ public sealed class AudioImporter : IAssetImporter
 /// <summary>Compiles one authoring document into the export contract; every document is baked, so a prop can be played on its own.</summary>
 public sealed class PrefabImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(AssetClassifier.PrefabSuffix);
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.Classify(asset) != AssetClass.Prefab) return AssetReferences.None;
+
+        PrefabDocument document;
+        try
+        {
+            document = PrefabDocumentSerializer.Load(context.FileSystem, asset);
+        }
+        catch (PrefabDocumentException error)
+        {
+            return AssetReferences.Unreadable(error.Message);
+        }
+
+        var sites = DocumentReferences.Enumerate(document)
+            .Select(found => new ReferenceSite(found.Where, found.Reference, found.Reference.Path, found.Reference.Path))
+            .ToList();
+        return new AssetReferences(sites);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        // A document's paths ARE its bytes; a build-time reconcile leaves them for --fix.
+        return context.RewriteSources ? ReferenceRepair.FixDocument(context.FileSystem, context.Index, asset) : null;
+    }
+
     /// <inheritdoc />
     public string Name => "prefab";
 
@@ -269,6 +371,9 @@ public sealed class PrefabImporter : IAssetImporter
 /// <summary>Authored config documents, compiled to the profile's document format.</summary>
 public sealed class ConfigImporter : IAssetImporter
 {
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".toml") && !candidate.IsManifest;
+
     /// <inheritdoc />
     public string Name => "config";
 

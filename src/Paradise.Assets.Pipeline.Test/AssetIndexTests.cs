@@ -117,6 +117,7 @@ public class AssetIndexTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var meta = SidecarMeta.Mint();
+        meta.Importer = "config";
         fileSystem.CreateDirectory("/game/assets/materials");
         fileSystem.WriteAllText("/game/assets/materials/a.toml", "a = 1\n");
         fileSystem.WriteAllText("/game/assets/materials/b.toml", "a = 2\n");

@@ -14,7 +14,7 @@ public sealed class SidecarMeta
 
     public const string Suffix = ".meta";
 
-    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "hash"];
+    private static readonly string[] s_structuralKeys = ["schema_version", "guid", "importer"];
 
     private readonly List<KeyValuePair<string, CanonicalTomlTable>> _settings = [];
 
@@ -26,11 +26,12 @@ public sealed class SidecarMeta
     public Guid Guid { get; }
 
     /// <summary>
-    /// A legacy recorded hash: read for migration, never written, because line endings, smudge
-    /// filters and BOMs make one committed text file hash differently per machine, turning the
-    /// sidecar into a permanent dirty file. Move re-linking keeps hashes in memory instead.
+    /// The importer that handles this asset, by <c>Name</c>: decided by the chain when the sidecar
+    /// was minted and honoured as written from then on, so an author can pick a different one for
+    /// one asset by editing this line. Null on a sidecar from before the field existed — the
+    /// tooling records one on its next pass — never empty.
     /// </summary>
-    public string? Hash { get; set; }
+    public string? Importer { get; set; }
 
     /// <summary>Import-settings tables in document order, one per domain.</summary>
     public IReadOnlyList<KeyValuePair<string, CanonicalTomlTable>> Settings => _settings;
@@ -59,6 +60,15 @@ public sealed class SidecarMeta
         var entry = new KeyValuePair<string, CanonicalTomlTable>(domain, settings);
         if (index >= 0) _settings[index] = entry;
         else _settings.Add(entry);
+    }
+
+    public bool RemoveSetting(string domain)
+    {
+        ArgumentNullException.ThrowIfNull(domain);
+        var index = _settings.FindIndex(pair => string.Equals(pair.Key, domain, StringComparison.Ordinal));
+        if (index < 0) return false;
+        _settings.RemoveAt(index);
+        return true;
     }
 
     public static string ComputeHash(ReadOnlySpan<byte> bytes)
@@ -134,15 +144,10 @@ public sealed class SidecarMeta
 
         var meta = new SidecarMeta(guid);
 
-        if (TomlDocumentReader.OptionalString(root, "hash", "at the document root", Fail) is { } hash)
+        if (TomlDocumentReader.OptionalString(root, "importer", "at the document root", Fail) is { } importer)
         {
-            // A truncated or upper-case hash would silently never match.
-            if (hash.Length != 64 || !hash.All(static c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f')))
-            {
-                throw Fail($"holds '{hash}' where 'hash' must be a 64-character lowercase hex SHA-256");
-            }
-
-            meta.Hash = hash;
+            if (importer.Length == 0) throw Fail("holds an empty 'importer'; name one, or delete the line and let the tooling record it");
+            meta.Importer = importer;
         }
 
         // A scalar here is a typo'd structural key; failing beats the next rewrite dropping it.
@@ -177,6 +182,7 @@ public sealed class SidecarMeta
             { "schema_version", (long)SupportedSchemaVersion },
             { "guid", DocumentGuid.Format(Guid) },
         };
+        if (Importer is { Length: > 0 } importer) root.Add("importer", importer);
 
         foreach (var (domain, settings) in _settings) root.Add(domain, settings);
 

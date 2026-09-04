@@ -46,7 +46,7 @@ public class ProjectVerifierTests
     public async Task an_orphaned_sidecar_is_an_error()
     {
         using var fileSystem = CreateProject();
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/gone.glb.meta");
+        Mint(fileSystem, "/game/assets/models/gone.glb");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -59,6 +59,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         var meta = SidecarMeta.Mint();
+        meta.Importer = "mesh";
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/b.glb", [2]);
         meta.Save(fileSystem, "/game/assets/models/a.glb.meta");
@@ -79,6 +80,7 @@ public class ProjectVerifierTests
         using var fileSystem = CreateProject();
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
         var meta = SidecarMeta.Mint();
+        meta.Importer = "texture";
         meta.SetSetting("texure", new CanonicalTomlTable { { "preset", "normal" } });
         meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
 
@@ -95,6 +97,7 @@ public class ProjectVerifierTests
         using var fileSystem = CreateProject();
         fileSystem.WriteAllBytes("/game/assets/textures/fire.png", [1]);
         var meta = SidecarMeta.Mint();
+        meta.Importer = "texture";
         meta.SetSetting("texture", new CanonicalTomlTable { { "preset", "shiny" } });
         meta.Save(fileSystem, "/game/assets/textures/fire.png.meta");
 
@@ -261,7 +264,7 @@ public class ProjectVerifierTests
         // reports an orphan and the machine that made it reports nothing.
         using var fileSystem = CreateProject(ignore: [".DS_Store"]);
         fileSystem.WriteAllBytes("/game/assets/models/.DS_Store", [0]);
-        SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/.DS_Store.meta");
+        Mint(fileSystem, "/game/assets/models/.DS_Store");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -418,6 +421,67 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task an_unrecorded_glb_image_naming_an_identified_texture_is_a_warning()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("no identity recorded");
+    }
+
+    [Test]
+    public async Task a_glb_image_whose_uri_names_nothing_is_an_error()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/gone.png"}]}"""));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("does not exist under assets/");
+    }
+
+    [Test]
+    public async Task a_recorded_glb_image_whose_texture_moved_is_a_warning_naming_where_it_went()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(findings[0].Message).Contains("textures/metal/rust.png");
+    }
+
+    [Test]
+    public async Task a_recorded_glb_image_whose_guid_nobody_carries_is_an_error()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(Guid.NewGuid(), "textures/rust.png"));
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("no asset under assets/ carries");
+    }
+
+    [Test]
     public async Task a_reference_into_an_asset_whose_own_sidecar_is_missing_is_reported_once()
     {
         // The asset has no identity to match, so the finding belongs to the asset — repeating it
@@ -480,9 +544,46 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_leftover_hash_is_not_a_finding()
+    public async Task a_sidecar_naming_an_importer_the_chain_lacks_is_an_error()
     {
-        // Hash is read for migration and ignored. Line-ending drift after a pull must not warn.
+        using var fileSystem = CreateProject();
+        AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
+        var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
+        meta.Importer = "mine";
+        meta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("names importer 'mine'");
+    }
+
+    [Test]
+    public async Task a_sidecar_naming_no_importer_is_a_warning_that_fix_records()
+    {
+        using var fileSystem = CreateProject();
+        fileSystem.CreateDirectory("/game/assets/models");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1]);
+        new SidecarMeta(Guid.NewGuid()).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+
+        var before = ProjectVerifier.Verify(fileSystem, s_layout);
+        await Assert.That(before.Count).IsEqualTo(1);
+        await Assert.That(before[0].Severity).IsEqualTo(VerifySeverity.Warning);
+        await Assert.That(before[0].Message).Contains("'mesh' claims it");
+
+        var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
+
+        await Assert.That(repaired.Select(r => r.Path)).Contains(new UPath("/game/assets/models/crate.glb.meta"));
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("mesh");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_leftover_hash_is_an_error_naming_the_sidecar()
+    {
+        // The field is gone from the format; a sidecar from before that is refused rather than
+        // silently rewritten, so a stale branch learns what to run.
         using var fileSystem = CreateProject();
         fileSystem.CreateDirectory("/game/assets/models");
         fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [1, 2, 3]);
@@ -491,11 +592,16 @@ public class ProjectVerifierTests
             """
             schema_version = 1
             guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
+            importer = "mesh"
             hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
             """);
 
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Count).IsEqualTo(0);
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("hash");
     }
 
     [Test]
@@ -519,6 +625,7 @@ public class ProjectVerifierTests
         // by severity is the only thing that can put it behind the error below.
         fileSystem.WriteAllBytes("/game/assets/textures/zz-fire.png", [1]);
         var meta = SidecarMeta.Mint();
+        meta.Importer = "texture";
         meta.SetSetting("texure", new CanonicalTomlTable { { "preset", "normal" } });
         meta.Save(fileSystem, "/game/assets/textures/zz-fire.png.meta");
 
@@ -571,11 +678,12 @@ public class ProjectVerifierTests
         return fileSystem;
     }
 
-    internal static void AddAssetWithSidecar(MemoryFileSystem fileSystem, UPath asset)
+    /// <param name="importers">The chain the sidecar records its importer from; the built-ins when omitted. A test that builds with its own chain mints with it, as a watcher running that chain would have.</param>
+    internal static void AddAssetWithSidecar(MemoryFileSystem fileSystem, UPath asset, IReadOnlyList<IAssetImporter>? importers = null)
     {
         fileSystem.CreateDirectory(asset.GetDirectory());
         fileSystem.WriteAllBytes(asset, [1, 2, 3]);
-        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(asset));
+        Mint(fileSystem, asset, importers: importers);
     }
 
     internal static void WriteCanonicalDocument(MemoryFileSystem fileSystem, UPath path)
@@ -602,8 +710,16 @@ public class ProjectVerifierTests
         MintDocumentSidecar(fileSystem, path);
     }
 
-    internal static void MintDocumentSidecar(MemoryFileSystem fileSystem, UPath path)
-        => SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+    internal static void MintDocumentSidecar(MemoryFileSystem fileSystem, UPath path) => Mint(fileSystem, path);
+
+    /// <summary>A sidecar the way the maintainer mints one: identity plus the importer the built-in chain claims, so a fixture is what verify expects of a real tree.</summary>
+    internal static Guid Mint(MemoryFileSystem fileSystem, UPath asset, Guid? guid = null, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        var meta = guid is { } identity ? new SidecarMeta(identity) : SidecarMeta.Mint();
+        meta.Importer = ImporterChain.Claim(importers ?? AssetImporters.All, new ImportCandidate(fileSystem, s_layout, asset, null))?.Name;
+        meta.Save(fileSystem, SidecarMeta.PathFor(asset));
+        return meta.Guid;
+    }
 
     /// <summary>
     /// Writes a file the pipeline has no opinion about, plus its sidecar.
@@ -617,6 +733,6 @@ public class ProjectVerifierTests
     {
         fileSystem.CreateDirectory(path.GetDirectory());
         fileSystem.WriteAllText(path, text);
-        SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(path));
+        Mint(fileSystem, path);
     }
 }

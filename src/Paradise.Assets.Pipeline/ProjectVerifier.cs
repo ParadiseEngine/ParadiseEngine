@@ -45,7 +45,8 @@ public static class ProjectVerifier
     }
 
     /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources)
+    public static IReadOnlyList<VerifyFinding> Verify(
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -60,6 +61,8 @@ public static class ProjectVerifier
 
         var ignore = VerifyManifest(fileSystem, layout, findings)?.Ignore ?? AssetIgnoreRules.None;
 
+        var context = new ReferenceContext(fileSystem, layout, sources, ignore);
+        var chain = importers ?? AssetImporters.All;
         var guids = new Dictionary<Guid, UPath>();
         foreach (var path in sources.Files)
         {
@@ -77,7 +80,7 @@ public static class ProjectVerifier
             switch (assetClass)
             {
                 case AssetClass.Sidecar:
-                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings);
+                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings, chain);
                     break;
 
                 case AssetClass.Prefab:
@@ -86,6 +89,15 @@ public static class ProjectVerifier
 
                 // No "nothing handles this file" warning: only an importer, during a build, can
                 // answer that, and a decline may mean "not for this tree" (issue #208).
+            }
+
+            // References through the chain, whatever the asset: the importer that claims it reads
+            // them, and the findings follow the one rule (the guid decides, the path is a hint). A
+            // parse problem is not repeated here — the document's own check already said it.
+            if (assetClass != AssetClass.Sidecar
+                && ReferenceChain.Claim(chain, context, path) is { References.Problem: null } claimed)
+            {
+                findings.AddRange(ReferenceChain.Verify(context, path, claimed.References));
             }
         }
 
@@ -108,7 +120,9 @@ public static class ProjectVerifier
         }
     }
 
-    private static void VerifySidecar(IFileSystem fileSystem, UPath assetsRoot, AssetIgnoreRules ignore, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings)
+    private static void VerifySidecar(
+        IFileSystem fileSystem, UPath assetsRoot, AssetIgnoreRules ignore, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings,
+        IReadOnlyList<IAssetImporter> importers)
     {
         var asset = SidecarMeta.AssetPathFor(path);
         if (ignore.Matches(assetsRoot, asset))
@@ -139,6 +153,9 @@ public static class ProjectVerifier
             return;
         }
 
+        var sidecar = AssetSidecar.Resolve(asset, path, meta, importers);
+        VerifyImporter(fileSystem, assetsRoot, sidecar, importers, findings);
+
         if (guids.TryGetValue(meta.Guid, out var first))
         {
             findings.Add(new VerifyFinding(
@@ -151,10 +168,13 @@ public static class ProjectVerifier
         }
 
         // Unknown domain: warning (a typo, or a newer pipeline's sidecar). Malformed known domain:
-        // error, because the build would refuse it with less context.
+        // error, because the build would refuse it with less context. The recorded importer's own
+        // domains first; then the chain's, since a domain another importer reads is not a typo.
         foreach (var (name, settings) in meta.Settings)
         {
-            if (ImportSettings.Find(name) is not { } domain)
+            var domain = sidecar.Importer?.SettingsDomains.FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.Ordinal))
+                ?? ImportSettings.Find(name, importers);
+            if (domain is null)
             {
                 findings.Add(new VerifyFinding(
                     VerifySeverity.Warning, path,
@@ -166,6 +186,31 @@ public static class ProjectVerifier
             {
                 findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
             }
+        }
+    }
+
+    /// <summary>The sidecar names its importer; a name the chain lacks is an error (a game's importer missing from the list, or a typo), and no name is a warning the tooling clears.</summary>
+    private static void VerifyImporter(
+        IFileSystem fileSystem, UPath assetsRoot, AssetSidecar sidecar, IReadOnlyList<IAssetImporter> importers, List<VerifyFinding> findings)
+    {
+        if (!fileSystem.FileExists(sidecar.Asset)) return;   // the orphan finding already covers it
+
+        if (sidecar.ImporterUnknown)
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Error, sidecar.Path,
+                $"names importer '{sidecar.ImporterName}', which this chain does not have (it has: {ImporterChain.Resolution.Known(importers)}) — a game's own importer missing from the list, or a typo"));
+            return;
+        }
+
+        if (sidecar.Importer is not null) return;
+
+        var candidate = new ImportCandidate(fileSystem, new AssetProjectLayout(assetsRoot.GetDirectory()), sidecar.Asset, sidecar);
+        if (ImporterChain.Claim(importers, candidate) is { } claimant)
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Warning, sidecar.Path,
+                $"names no importer; '{claimant.Name}' claims it — run `paradise assets verify --fix` (or `watch`) to record that"));
         }
     }
 
@@ -193,102 +238,12 @@ public static class ProjectVerifier
                 "is valid but not in canonical form; rewrite it (prefab-check --fix) so machine edits stay out of your diffs"));
         }
 
-        VerifyReferences(sources, path, document, findings);
-        VerifyInstances(fileSystem, sources, path, document, findings);
-    }
-
-    private static void VerifyReferences(
-        AssetIndex sources, UPath path, PrefabDocument document, List<VerifyFinding> findings)
-    {
-        foreach (var (reference, where) in DocumentReferences.Enumerate(document))
-        {
-            Check(reference, where);
-        }
-
         foreach (var problem in MalformedReferences(path, document))
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, path, problem));
         }
 
-        void Check(Paradise.Authoring.AssetReference reference, string where)
-        {
-            var resolution = sources.Resolve(reference);
-            var guid = DocumentGuid.Format(reference.Guid);
-
-            switch (resolution.Status)
-            {
-                // The path half names an asset whose own identity could not be read; that sidecar
-                // carries its own finding, and repeating it per reference buries it.
-                case ReferenceStatus.Resolved or ReferenceStatus.Undetermined:
-                    return;
-
-                // Not an error: the guid resolved it, so the build is correct and only the text is
-                // out of date — a rename in Finder, or a sidecar the maintainer relinked by hash.
-                case ReferenceStatus.Stale:
-                    findings.Add(new VerifyFinding(VerifySeverity.Warning, path, Stale(resolution, guid, where)));
-                    return;
-
-                default:
-                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, Unresolved(sources, resolution, guid, where)));
-                    return;
-            }
-        }
-    }
-
-    /// <summary>
-    /// The guid resolved the reference and only its path text is out of date. A path that names
-    /// a DIFFERENT real asset is called out by that asset's guid: a Finder rename and a hand edit
-    /// that changed only the path look identical here, and <c>--fix</c> reverts the second one,
-    /// so the message has to say which guid to change if the path was the intended half.
-    /// </summary>
-    private static string Stale(ReferenceResolution resolution, string guid, string where)
-    {
-        var reference = resolution.Reference;
-        var message = $"in {where}, the path half says '{reference.Path}' but guid '{guid}' names " +
-            $"'{resolution.Path}'; the guid resolves it, so this builds — run " +
-            "`paradise assets verify --fix` to catch the path up";
-
-        if (resolution.HintIdentity is { } other && other != reference.Guid)
-        {
-            message += $". Note '{reference.Path}' exists and is '{DocumentGuid.Format(other)}': " +
-                "if THAT is the asset meant here, change the guid instead, since --fix keeps the guid";
-        }
-
-        return message;
-    }
-
-    /// <summary>The guid names no asset in the tree, so the reference resolves to nothing; what the PATH half names decides how to say so.</summary>
-    private static string Unresolved(AssetIndex sources, ReferenceResolution resolution, string guid, string where)
-    {
-        var reference = resolution.Reference;
-
-        if (resolution.Asset.IsNull)
-        {
-            return $"in {where}, references guid '{guid}', which no asset under assets/ carries, and " +
-                $"'{reference.Path}' does not name a place under assets/ either";
-        }
-
-        if (sources.IsIgnored(resolution.Asset))
-        {
-            return $"in {where}, references guid '{guid}', which no asset under assets/ carries; " +
-                $"'{reference.Path}' exists but is ignored by the manifest, so it has no identity to " +
-                "reference. Un-ignore it, or point the reference at an asset the build owns";
-        }
-
-        if (resolution.HintIdentity is { } other)
-        {
-            return $"in {where}, references guid '{guid}', which no asset under assets/ carries; " +
-                $"'{reference.Path}' exists but is '{DocumentGuid.Format(other)}'. Re-point the " +
-                "reference, or restore the asset whose identity this is";
-        }
-
-        if (sources.Problem(resolution.Asset, reference.Path) is { } problem)
-        {
-            return $"in {where}, {problem}, and no asset under assets/ carries its guid '{guid}'";
-        }
-
-        return $"in {where}, references guid '{guid}', which no asset under assets/ carries " +
-            $"('{reference.Path}' exists but has no readable identity)";
+        VerifyInstances(fileSystem, sources, path, document, findings);
     }
 
     /// <summary>References the walk could not read: the shape is reserved, so a table wearing it and failing to BE one must name the field rather than being skipped.</summary>
