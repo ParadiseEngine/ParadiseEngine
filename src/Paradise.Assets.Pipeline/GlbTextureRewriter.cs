@@ -131,6 +131,58 @@ public static class GlbTextureRewriter
         return true;
     }
 
+    /// <summary>
+    /// Moves each listed embedded image out of the BIN chunk to the uri <paramref name="uris"/> gives
+    /// it, keeping its own format: what <c>extract</c> does, so the file beside the GLB IS the
+    /// texture the DCC re-imports. A KTX2 image keeps its <c>KHR_texture_basisu</c> declaration.
+    /// </summary>
+    public static bool TryExternalizeSources(
+        byte[] glb,
+        IReadOnlyList<EmbeddedImage> images,
+        IReadOnlyDictionary<int, string> uris,
+        out byte[] rewritten,
+        out string error)
+    {
+        ArgumentNullException.ThrowIfNull(glb);
+        ArgumentNullException.ThrowIfNull(images);
+        ArgumentNullException.ThrowIfNull(uris);
+
+        rewritten = glb;
+        error = "";
+        if (images.Count == 0) return true;
+
+        if (!GlbBinary.TryRead(glb, out var gltf, out var bin)
+            || gltf["images"] is not JsonArray imageNodes
+            || gltf["bufferViews"] is not JsonArray bufferViews)
+        {
+            error = "is not a readable GLB";
+            return false;
+        }
+
+        var dropped = new HashSet<int>();
+        var ktx2 = new HashSet<int>();
+        foreach (var embedded in images)
+        {
+            var image = (JsonObject)imageNodes[embedded.Index]!;
+            dropped.Add(image["bufferView"]!.GetValue<int>());
+            image.Remove("bufferView");
+            image["uri"] = uris[embedded.Index];
+            image["mimeType"] = embedded.SourceExtension switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                _ => Ktx2MimeType,
+            };
+            if (embedded.IsKtx2) ktx2.Add(embedded.Index);
+        }
+
+        if (ktx2.Count > 0) DeclareBasisu(gltf, ktx2);
+        if (!TryRepackDropping(gltf, bufferViews, bin, dropped, out bin, out error)) return false;
+        SetFirstBufferLength(gltf, bin.Length);
+        rewritten = GlbBinary.Write(gltf, bin);
+        return true;
+    }
+
     /// <summary>Replaces each listed image's BIN bytes with its KTX2 and declares <c>KHR_texture_basisu</c> on the textures that use it; the Godot host's in-place form.</summary>
     public static bool TryEmbedKtx2(
         byte[] glb,

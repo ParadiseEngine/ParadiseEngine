@@ -74,6 +74,14 @@ public static class MeshContainer
         return string.Join('/', parts);
     }
 
+    /// <summary>Whether the container declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
+    public static bool HasGeometry(UPath path, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (!IsMesh(path) || !GlbBinary.TryRead(bytes, out var gltf, out _)) return false;
+        return gltf["meshes"] is JsonArray meshes && meshes.Count > 0;
+    }
+
     /// <summary>Whether two uris name the same file: a DCC may write <c>a b.png</c> where glTF says <c>a%20b.png</c>, and that is not a move.</summary>
     public static bool SameUri(string left, string right)
         => string.Equals(Uri.UnescapeDataString(left), Uri.UnescapeDataString(right), StringComparison.Ordinal);

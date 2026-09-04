@@ -17,8 +17,9 @@ public sealed class ProjectManifest
 
     private readonly Dictionary<string, BuildProfile> _profiles;
 
-    private ProjectManifest(string name, int schemaVersion, AssetIgnoreRules ignore, Dictionary<string, BuildProfile> profiles)
+    private ProjectManifest(string name, int schemaVersion, AssetIgnoreRules ignore, Dictionary<string, BuildProfile> profiles, ExtractSettings extract)
     {
+        Extract = extract;
         Name = name;
         SchemaVersion = schemaVersion;
         Ignore = ignore;
@@ -31,6 +32,9 @@ public sealed class ProjectManifest
 
     /// <summary><c>[assets] ignore</c>: files under <c>assets/</c> no verb looks at.</summary>
     public AssetIgnoreRules Ignore { get; }
+
+    /// <summary>Where <c>paradise assets extract</c> puts what it extracts, and which components it wires a mesh into; every member optional.</summary>
+    public ExtractSettings Extract { get; }
 
     /// <summary>Case-sensitive, as TOML keys are.</summary>
     public IReadOnlyDictionary<string, BuildProfile> Profiles => _profiles;
@@ -78,6 +82,7 @@ public sealed class ProjectManifest
         RejectUnknown(sourceName, document.Unknown, "at the document root");
         RejectUnknown(sourceName, document.Assets?.Unknown, "in [assets]");
         RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
+        RejectUnknown(sourceName, document.Extract?.Unknown, "in [extract]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
         {
@@ -122,7 +127,11 @@ public sealed class ProjectManifest
             }
         }
 
-        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles);
+        var extract = new ExtractSettings(
+            string.IsNullOrWhiteSpace(document.Extract?.Directory) ? null : document.Extract.Directory.Trim().TrimEnd('/'),
+            string.IsNullOrWhiteSpace(document.Extract?.StaticMeshComponent) ? null : document.Extract.StaticMeshComponent,
+            string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent);
+        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract);
     }
 
     private static BuildProfile ReadProfile(string sourceName, string profileName, BuildProfileDocument? document)
@@ -186,4 +195,10 @@ public sealed class ProjectManifestException : Exception
     }
 
     public string SourceName { get; }
+}
+
+/// <summary>The <c>[extract]</c> section: an assets-relative directory (null = beside the GLB) and the component type names a generated prefab authors a mesh into (null = the schema decides by name).</summary>
+public sealed record ExtractSettings(string? Directory, string? StaticMeshComponent, string? SkinnedMeshComponent)
+{
+    public static ExtractSettings None { get; } = new(null, null, null);
 }

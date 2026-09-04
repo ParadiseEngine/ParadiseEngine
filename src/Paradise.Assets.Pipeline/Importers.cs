@@ -109,7 +109,12 @@ public sealed class GlbImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Ships NOTHING: a GLB is interchange, and what the runtime draws is what <c>extract</c> made
+    /// of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures), each
+    /// through its own importer. A GLB nobody extracted is <c>verify</c>'s warning, not a build
+    /// error: the build is correct, there is just nothing of it to build.
+    /// </summary>
     public bool Import(ImportContext context, List<string> errors)
     {
         if (!context.HasExtension(".glb", ".gltf")) return false;
@@ -117,100 +122,11 @@ public sealed class GlbImporter : IAssetImporter
         // Claimed and refused, not declined: declining would let the mesh vanish silently.
         if (context.HasExtension(".gltf"))
         {
-            errors.Add(
-                $"{context.Source}: is JSON glTF, which this step cannot repoint (it keeps textures and " +
-                "buffers as separate files); export it as .glb");
+            errors.Add($"{context.Source}: is JSON glTF, which extract cannot read (it keeps textures and buffers as separate files); export it as .glb");
             return true;
         }
 
-        var bytes = context.FileSystem.ReadAllBytes(context.Asset);
-        var stem = Path.GetFileNameWithoutExtension(context.Asset.GetName());
-        IReadOnlyList<EmbeddedImage> embedded = [];
-        // A file the container reader cannot open copies through unchanged, as its references
-        // do: what a mesh IS is the runtime's call, this step only follows the textures.
-        if (GlbBinary.TryRead(bytes, out _, out _) && !GlbTextureRewriter.TryListEmbedded(bytes, stem, out embedded, out var problem))
-        {
-            errors.Add($"{context.Source}: {problem}");
-            return true;
-        }
-
-        // By identity first: a texture renamed outside `mv` still carries the guid the sidecar
-        // recorded for it, and the uri the DCC wrote is only a hint. Through Resolve, so the move
-        // is a recorded input of this output.
-        // Only where the container still spells the uri the entry was recorded from: a
-        // re-export that changed a slot's uri has outrun its record, and following the old guid
-        // there would bake the wrong texture (review of #244). That slot keeps the container's
-        // own text, which the path check below validates or fails loudly.
-        var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, context.Asset));
-        var uris = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var named in MeshContainer.Read(context.Asset, bytes))
-        {
-            if (!recorded.TryGetValue(named.Slot, out var entry) || !MeshContainer.SameUri(entry.Uri, named.Uri)) continue;
-            var resolution = context.Resolve(entry.Reference);
-            if (resolution.Found) uris[named.Slot] = MeshContainer.UriFor(context.Source, resolution.Path);
-        }
-
-        bytes = MeshContainer.RewriteUris(context.Asset, bytes, uris);
-
-        var rewrite = MeshTextureReferences.Rewrite(bytes);
-
-        // Against the SOURCE tree: Models/ builds before textures/, so the KTX2 does not exist yet.
-        var missing = false;
-        foreach (var reference in rewrite.Sources)
-        {
-            if (context.CheckReference(reference, out _) is not { } referenceProblem) continue;
-
-            missing = true;
-            errors.Add(referenceProblem);
-        }
-
-        if (missing) return true;
-
-        UPath destination = "/" + context.Source;
-        var glb = rewrite.Glb;
-        if (embedded.Count > 0 && !TryExternalize(context, destination.GetDirectory(), glb, embedded, errors, out glb)) return true;
-
-        context.Output.WriteAllBytes(destination, glb);
         return true;
-    }
-
-    /// <summary>Each embedded image becomes a sidecar under the mesh's own output directory, referenced like an authored texture: uri, mime and <c>KHR_texture_basisu</c> (issue #207: one contract for the built tree).</summary>
-    private static bool TryExternalize(
-        ImportContext context,
-        UPath directory,
-        byte[] glb,
-        IReadOnlyList<EmbeddedImage> embedded,
-        List<string> errors,
-        out byte[] rewritten)
-    {
-        rewritten = glb;
-        var before = errors.Count;
-        if (context.Encoder is null && embedded.Any(image => !image.IsKtx2))
-        {
-            errors.Add(TextureStep.NoEncoder(context));
-            return false;
-        }
-
-        foreach (var image in embedded)
-        {
-            var sidecar = directory / image.SidecarName;
-            if (image.IsKtx2)
-            {
-                Ktx2Header.ForceLinearTransfer(image.Bytes);
-                context.Output.WriteAllBytes(sidecar, image.Bytes);
-                continue;
-            }
-
-            if (image.PresetNote is { } note) ImporterLog.PresetNote(context.Log, context.Source, note);
-            TextureStep.Encode(context, image.Bytes, image.SourceExtension!, KtxTextureEncoder.FromKtxPreset(image.Preset), sidecar, errors);
-        }
-
-        if (errors.Count > before) return false;
-
-        if (GlbTextureRewriter.TryExternalize(glb, embedded, out rewritten, out var problem)) return true;
-
-        errors.Add($"{context.Source}: {problem}");
-        return false;
     }
 }
 

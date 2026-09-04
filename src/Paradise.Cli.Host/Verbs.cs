@@ -278,6 +278,41 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
+    /// <summary>One GLB, or every GLB under a directory with <paramref name="all"/>.</summary>
+    public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        var targets = new List<UPath>();
+        if (fileSystem.DirectoryExists(target))
+        {
+            if (!all)
+            {
+                Console.Error.WriteLine($"extract: '{Display(fileSystem, target)}' is a directory; pass --all to extract every GLB under it");
+                return 1;
+            }
+
+            targets.AddRange(fileSystem.EnumerateFiles(target, "*", SearchOption.AllDirectories).Where(MeshContainer.IsMesh).OrderBy(p => p.FullName, StringComparer.Ordinal));
+        }
+        else
+        {
+            targets.Add(target);
+        }
+
+        var failed = 0;
+        var log = PipelineLog.For(fileSystem, layout);
+        foreach (var glb in targets)
+        {
+            var result = AssetExtractor.Extract(fileSystem, layout, glb, importers, resolution, log);
+            foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+            foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
+            foreach (var written in result.Written) Console.WriteLine($"wrote: {written}");
+            foreach (var kept in result.Kept) Console.WriteLine($"kept: {kept}");
+            if (!result.Succeeded) failed++;
+        }
+
+        Console.WriteLine($"extract: {targets.Count} glb(s), {failed} failed");
+        return failed == 0 ? 0 : 1;
+    }
+
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)
     {
         foreach (var removed in ProjectCleaner.Clean(fileSystem, layout, keepEditor))
