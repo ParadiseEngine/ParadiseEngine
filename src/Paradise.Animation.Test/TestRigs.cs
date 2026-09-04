@@ -1,6 +1,7 @@
 using System.Numerics;
 
 using Paradise.Animation.Offline;
+using Paradise.BLOB;
 
 namespace Paradise.Animation.Test;
 
@@ -10,7 +11,7 @@ internal static class TestRigs
     public static readonly Quaternion QuarterTurnZ = new(0f, 0f, 0.7071068f, 0.7071068f);
 
     /// <summary>hip at (0,1,0) with child knee turned a quarter turn about Z, plus an unparented "prop" node.</summary>
-    public static Skeleton Chain()
+    public static NativeBlobAssetReference<SkeletonBlob> Chain()
     {
         var raw = new RawSkeleton();
         var hip = new RawJoint("hip") { Transform = new JointPose(new Vector3(0, 1, 0), Quaternion.Identity, Vector3.One) };
@@ -21,7 +22,7 @@ internal static class TestRigs
     }
 
     /// <summary>The generator behind <c>Fixtures/ozz-*.ozz</c>: the same LCG, the same call order as the C++ program that wrote them, so the raw input is bit-identical.</summary>
-    public static (RawSkeleton Skeleton, Func<Skeleton, RawAnimation> Clip) Parity(int joints = 37, int keys = 12)
+    public static (RawSkeleton Skeleton, Func<int, RawAnimation> Clip) Parity(int joints = 37, int keys = 12)
     {
         var lcg = new Lcg(12345u);
         var children = new List<int>[joints];
@@ -33,10 +34,10 @@ internal static class TestRigs
         raw.Roots.Add(root);
         Fill(root, 0, children, lcg);
 
-        return (raw, skeleton =>
+        return (raw, jointCount =>
         {
             var clip = new RawAnimation { Name = "parity", Duration = 2.5f };
-            for (var i = 0; i < skeleton.JointCount; i++)
+            for (var i = 0; i < jointCount; i++)
             {
                 var track = new RawTrack();
                 var count = i % 5 == 0 ? 0 : i % 7 == 0 ? 1 : keys;

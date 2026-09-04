@@ -20,28 +20,28 @@ public static class ClipConverter
     public const float MaxArcRadians = 15f * MathF.PI / 180f;
 
     /// <exception cref="ArgumentException">A channel names a joint the skeleton lacks, or its keys are not strictly ascending.</exception>
-    public static RawAnimation ToRaw(ClipData clip, Skeleton skeleton)
+    public static RawAnimation ToRaw(ClipData clip, ref SkeletonBlob skeleton)
     {
         ArgumentNullException.ThrowIfNull(clip);
-        ArgumentNullException.ThrowIfNull(skeleton);
 
         var duration = MathF.Max(clip.Duration, MinimumDuration);
         var raw = new RawAnimation { Name = clip.Name, Duration = duration };
-        var rest = skeleton.RestPoses;
-        for (var joint = 0; joint < skeleton.JointCount; joint++)
+        var jointCount = skeleton.JointCount;
+        for (var joint = 0; joint < jointCount; joint++)
         {
+            var rest = skeleton.RestPoses[joint];
             var track = new RawTrack();
-            track.Translations.Add(new TranslationKey(0f, rest[joint].Translation));
-            track.Rotations.Add(new RotationKey(0f, rest[joint].Rotation));
-            track.Scales.Add(new ScaleKey(0f, rest[joint].Scale));
+            track.Translations.Add(new TranslationKey(0f, rest.Translation));
+            track.Rotations.Add(new RotationKey(0f, rest.Rotation));
+            track.Scales.Add(new ScaleKey(0f, rest.Scale));
             raw.Tracks.Add(track);
         }
 
         foreach (var channel in clip.Channels)
         {
-            if (channel.Joint < 0 || channel.Joint >= skeleton.JointCount)
+            if (channel.Joint < 0 || channel.Joint >= jointCount)
             {
-                throw new ArgumentException($"Clip '{clip.Name}' animates joint {channel.Joint}; the skeleton has {skeleton.JointCount}.", nameof(clip));
+                throw new ArgumentException($"Clip '{clip.Name}' animates joint {channel.Joint}; the skeleton has {jointCount}.", nameof(clip));
             }
 
             if (channel.Values.Length != channel.Times.Length * channel.FloatsPerKey)

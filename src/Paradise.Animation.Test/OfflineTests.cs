@@ -10,10 +10,10 @@ public class OfflineTests
     [Test]
     public async Task the_converter_fills_rest_pose_and_bakes_step_holds()
     {
-        var skeleton = TestRigs.Chain();
+        using var skeleton = TestRigs.Chain();
         var clip = new ClipData("hop", [new ClipChannelData(0, ChannelPath.Translation, true, [0f, 0.5f, 1f], [0, 1, 0, 0, 2, 0, 0, 3, 0])]);
 
-        var raw = ClipConverter.ToRaw(clip, skeleton);
+        var raw = ClipConverter.ToRaw(clip, ref skeleton.Value);
 
         await Assert.That(raw.Duration).IsEqualTo(1f);
         await Assert.That(raw.Tracks.Count).IsEqualTo(3);
@@ -27,21 +27,21 @@ public class OfflineTests
     [Test]
     public async Task a_pose_clip_gets_the_minimum_duration_and_a_stray_joint_is_refused()
     {
-        var skeleton = TestRigs.Chain();
+        using var skeleton = TestRigs.Chain();
         var pose = new ClipData("pose", [new ClipChannelData(1, ChannelPath.Rotation, false, [0f], [0, 0, 0, 1])]);
         var stray = new ClipData("stray", [new ClipChannelData(9, ChannelPath.Rotation, false, [0f], [0, 0, 0, 1])]);
 
-        await Assert.That(ClipConverter.ToRaw(pose, skeleton).Duration).IsEqualTo(ClipConverter.MinimumDuration);
-        var error = await Assert.That(() => ClipConverter.ToRaw(stray, skeleton)).Throws<ArgumentException>();
+        await Assert.That(ClipConverter.ToRaw(pose, ref skeleton.Value).Duration).IsEqualTo(ClipConverter.MinimumDuration);
+        var error = await Assert.That(() => ClipConverter.ToRaw(stray, ref skeleton.Value)).Throws<ArgumentException>();
         await Assert.That(error!.Message).Contains("joint 9");
     }
 
     [Test]
     public async Task the_optimizer_drops_keys_a_lerp_reproduces_and_keeps_the_rest()
     {
-        var skeleton = TestRigs.Chain();
+        using var skeleton = TestRigs.Chain();
         var raw = new RawAnimation { Name = "walk", Duration = 1f };
-        for (var i = 0; i < skeleton.JointCount; i++) raw.Tracks.Add(new RawTrack());
+        for (var i = 0; i < skeleton.Value.JointCount; i++) raw.Tracks.Add(new RawTrack());
         for (var k = 0; k <= 10; k++)
         {
             var t = k / 10f;
@@ -50,8 +50,8 @@ public class OfflineTests
             raw.Tracks[1].Rotations.Add(new RotationKey(t, Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.05f * t * t)));
         }
 
-        var optimized = AnimationOptimizer.Optimize(raw, skeleton, AnimationOptimizer.Setting.Default);
-        var strict = AnimationOptimizer.Optimize(raw, skeleton, AnimationOptimizer.Setting.Default, new Dictionary<int, AnimationOptimizer.Setting> { [1] = new(1e-6f, 1f) });
+        var optimized = AnimationOptimizer.Optimize(raw, ref skeleton.Value, AnimationOptimizer.Setting.Default);
+        var strict = AnimationOptimizer.Optimize(raw, ref skeleton.Value, AnimationOptimizer.Setting.Default, new Dictionary<int, AnimationOptimizer.Setting> { [1] = new(1e-6f, 1f) });
 
         await Assert.That(optimized.Tracks[0].Translations.Count).IsEqualTo(2);
         await Assert.That(optimized.Tracks[0].Rotations).IsEmpty();
@@ -67,8 +67,9 @@ public class OfflineTests
     public async Task the_optimizer_refuses_a_clip_that_does_not_fit_the_skeleton()
     {
         var raw = new RawAnimation { Duration = 1f };
+        using var skeleton = TestRigs.Chain();
 
-        await Assert.That(() => AnimationOptimizer.Optimize(raw, TestRigs.Chain(), AnimationOptimizer.Setting.Default)).Throws<ArgumentException>();
+        await Assert.That(() => AnimationOptimizer.Optimize(raw, ref skeleton.Value, AnimationOptimizer.Setting.Default)).Throws<ArgumentException>();
         await Assert.That(() => AnimationBuilder.Build(new RawAnimation { Duration = 0f })).Throws<ArgumentException>();
     }
 
@@ -79,7 +80,7 @@ public class OfflineTests
         // sit every other track's keys whose predecessor lies in that half: 1023 × 70 of them,
         // past the 16-bit back-link — the builder must insert a midpoint key on track 0.
         var raw = new RawAnimation { Name = "wide", Duration = 1f };
-        for (var i = 0; i < Skeleton.MaxJoints; i++)
+        for (var i = 0; i < SkeletonBlob.MaxJoints; i++)
         {
             var track = new RawTrack();
             if (i == 0)
@@ -96,13 +97,13 @@ public class OfflineTests
             raw.Tracks.Add(track);
         }
 
-        var built = AnimationBuilder.Build(raw);
-        var read = AnimationClip.Load(built.Save());
-        var context = new SamplingContext(read.TrackCount);
-        var poses = new JointPose[read.TrackCount];
-        context.Sample(read, 0.75f, poses);
+        using var built = AnimationBuilder.Build(raw);
+        using var read = OzzArchive.ReadAnimation(OzzArchive.WriteAnimation(ref built.Value));
+        using var context = SamplingContext.Create(read.Value.TrackCount);
+        var poses = new JointPose[read.Value.TrackCount];
+        context.Value.Sample(ref read.Value, 0.75f, poses);
 
-        await Assert.That(read.Translations.KeyCount).IsGreaterThan(1023 * 140 + 3);
+        await Assert.That(read.Value.Translations.KeyCount).IsGreaterThan(1023 * 140 + 3);
         await Assert.That(MathF.Abs(poses[0].Translation.X - 2f)).IsLessThan(0.01f);
         await Assert.That(MathF.Abs(poses[5].Translation.X - 104.25f)).IsLessThan(0.1f);
     }

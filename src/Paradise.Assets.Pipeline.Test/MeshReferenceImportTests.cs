@@ -39,6 +39,12 @@ public class MeshReferenceImportTests
         return (fileSystem, new AssetReference(guid, "models/crate.glb"));
     }
 
+    private static string ClipName(byte[] archive)
+    {
+        using var clip = Paradise.Animation.OzzArchive.ReadAnimation(archive);
+        return clip.Value.Name.ToString();
+    }
+
     private static void Reference(MemoryFileSystem fileSystem, UPath path, MeshReferenceDocument document)
     {
         fileSystem.WriteAllBytes(path, document.WriteBytes());
@@ -76,9 +82,9 @@ public class MeshReferenceImportTests
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim")).Name).IsEqualTo("Run");
-        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Idle");
-        await Assert.That(Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Jog.anim")).Name).IsEqualTo("Idle");
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim"))).IsEqualTo("Run");
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim"))).IsEqualTo("Idle");
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Jog.anim"))).IsEqualTo("Idle");
     }
 
     [Test]
@@ -91,8 +97,8 @@ public class MeshReferenceImportTests
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
-        var skeleton = Paradise.Animation.Skeleton.Load(fileSystem.ReadAllBytes("/game/build/models/crate.skeleton"));
-        await Assert.That(skeleton.FindJoint("Crate")).IsEqualTo(0);
+        using var skeleton = Paradise.Animation.OzzArchive.ReadSkeleton(fileSystem.ReadAllBytes("/game/build/models/crate.skeleton"));
+        await Assert.That(skeleton.Value.FindJoint("Crate")).IsEqualTo(0);
     }
 
     [Test]
@@ -111,17 +117,17 @@ public class MeshReferenceImportTests
 
         var lossless = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
         await Assert.That(lossless.Errors).IsEmpty();
-        var every = Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
+        using var every = Paradise.Animation.OzzArchive.ReadAnimation(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
 
         var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
         GlbImportSettings.WriteOptimization(meta, Paradise.Animation.Offline.AnimationOptimizer.Setting.Default);
         meta.Save(fileSystem, Glb + ".meta");
         var decimated = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
         await Assert.That(decimated.Errors).IsEmpty();
-        var fewer = Paradise.Animation.AnimationClip.Load(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
+        using var fewer = Paradise.Animation.OzzArchive.ReadAnimation(fileSystem.ReadAllBytes("/game/build/models/crate.Rise.anim"));
 
-        await Assert.That(every.Timepoints.Length).IsEqualTo(3);
-        await Assert.That(fewer.Timepoints.Length).IsEqualTo(2);
+        await Assert.That(every.Value.Timepoints.Length).IsEqualTo(3);
+        await Assert.That(fewer.Value.Timepoints.Length).IsEqualTo(2);
         await Assert.That(GlbImportSettings.ReadOptimization(SidecarMeta.Load(fileSystem, Glb + ".meta"))).IsEqualTo(Paradise.Animation.Offline.AnimationOptimizer.Setting.Default);
     }
 

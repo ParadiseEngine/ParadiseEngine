@@ -1,6 +1,11 @@
 using System.Text;
 
-namespace Paradise.Animation;
+// Frozen copy of the managed-class runtime as committed in e4fa124, kept ONLY so the benchmark
+// can measure it against the blob runtime that replaced it. Do not fix or extend; delete when the
+// comparison stops being interesting.
+namespace Paradise.Animation.Benchmarks.Managed;
+
+using Paradise.Animation;
 
 /// <summary>
 /// An ozz-animation runtime clip: three keyframe streams (translation, rotation, scale), each sorted

@@ -78,7 +78,8 @@ public class AnimationGoldenTests
         // A sanity check on the test itself: a clip cooked over a different skeleton order cannot pass.
         var asset = GltfSceneReader.ReadGeometry(RigGlb());
         var cooked = GltfCook.Cook(asset);
-        var wrong = new ClipData(cooked.Clips[0].Name, cooked.Clips[0].Channels.Select(c => c with { Joint = (c.Joint + 1) % cooked.Skeleton!.JointCount }).ToList());
+        using var skeleton = OzzArchive.ReadSkeleton(cooked.Skeleton!);
+        var wrong = new ClipData(cooked.Clips[0].Name, cooked.Clips[0].Channels.Select(c => c with { Joint = (c.Joint + 1) % skeleton.Value.JointCount }).ToList());
 
         var worst = WorstPaletteError(asset, cooked, GltfCook.BuildClip(wrong, cooked.Skeleton!));
 
@@ -93,16 +94,20 @@ public class AnimationGoldenTests
         return WorstPaletteError(asset, cooked, animation);
     }
 
-    private static float WorstPaletteError(GltfAsset asset, CookedGlb cooked, AnimationClip animation)
+    private static float WorstPaletteError(GltfAsset asset, CookedGlb cooked, byte[] animationArchive)
     {
-        var skeleton = cooked.Skeleton!;
+        using var skeletonBlob = OzzArchive.ReadSkeleton(cooked.Skeleton!);
+        using var animationBlob = OzzArchive.ReadAnimation(animationArchive);
+        ref var skeleton = ref skeletonBlob.Value;
+        ref var animation = ref animationBlob.Value;
         var draw = cooked.Mesh.Draws[0];
         var skin = cooked.Mesh.Skin!;
         var rig = new GltfAnimationRig(asset);
         var clip = asset.Animations[0];
         var meshNode = asset.Instances[0].NodeIndex;
 
-        var context = new SamplingContext(animation.TrackCount);
+        using var contextBlob = SamplingContext.Create(animation.TrackCount);
+        ref var context = ref contextBlob.Value;
         var locals = new JointPose[animation.TrackCount];
         var models = new Matrix4x4[skeleton.JointCount];
         var reference = new Matrix4x4[skin.Joints.Length];
@@ -112,8 +117,8 @@ public class AnimationGoldenTests
             rig.EvaluatePose(clip, ratio * clip.Duration);
             rig.ComputeJointPalette(0, meshNode, reference);
 
-            context.Sample(animation, ratio, locals);
-            LocalToModel.Compute(skeleton, locals, models);
+            context.Sample(ref animation, ratio, locals);
+            LocalToModel.Compute(ref skeleton, locals, models);
             if (!Matrix4x4.Invert(models[draw.NodeIndex], out var inverseMeshWorld)) inverseMeshWorld = Matrix4x4.Identity;
             for (var i = 0; i < skin.Joints.Length; i++)
             {

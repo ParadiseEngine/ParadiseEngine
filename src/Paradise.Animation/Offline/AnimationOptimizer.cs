@@ -19,22 +19,21 @@ public static class AnimationOptimizer
     }
 
     /// <exception cref="ArgumentException">The clip is invalid or has a different track count than the skeleton has joints.</exception>
-    public static RawAnimation Optimize(RawAnimation raw, Skeleton skeleton, Setting setting, IReadOnlyDictionary<int, Setting>? jointOverrides = null)
+    public static RawAnimation Optimize(RawAnimation raw, ref SkeletonBlob skeleton, Setting setting, IReadOnlyDictionary<int, Setting>? jointOverrides = null)
     {
         ArgumentNullException.ThrowIfNull(raw);
-        ArgumentNullException.ThrowIfNull(skeleton);
         if (!raw.IsValid) throw new ArgumentException("The raw clip is invalid.", nameof(raw));
         if (raw.TrackCount != skeleton.JointCount) throw new ArgumentException($"The clip has {raw.TrackCount} tracks and the skeleton {skeleton.JointCount} joints.", nameof(raw));
 
-        var specs = BuildHierarchy(raw, skeleton, setting, jointOverrides);
+        var parents = skeleton.Parents.ToArray();
+        var specs = BuildHierarchy(raw, parents, setting, jointOverrides);
         var output = new RawAnimation { Name = raw.Name, Duration = raw.Duration };
-        var parents = skeleton.Parents;
         for (var i = 0; i < raw.TrackCount; i++)
         {
             var input = raw.Tracks[i];
             var track = new RawTrack();
             var jointLength = specs[i].Length;
-            var parentScale = parents[i] != Skeleton.NoParent ? specs[parents[i]].Scale : 1f;
+            var parentScale = parents[i] != SkeletonBlob.NoParent ? specs[parents[i]].Scale : 1f;
             var tolerance = specs[i].Tolerance;
 
             track.Translations.AddRange(Decimate(input.Translations, k => k.Time, k => k.Value,
@@ -60,11 +59,10 @@ public static class AnimationOptimizer
     }
 
     /// <summary>Forward: accumulate scale down the tree. Backward: the reach of each joint is the longest child chain, and its tolerance the tightest below it.</summary>
-    private static Spec[] BuildHierarchy(RawAnimation raw, Skeleton skeleton, Setting setting, IReadOnlyDictionary<int, Setting>? overrides)
+    private static Spec[] BuildHierarchy(RawAnimation raw, short[] parents, Setting setting, IReadOnlyDictionary<int, Setting>? overrides)
     {
-        var count = skeleton.JointCount;
+        var count = parents.Length;
         var specs = new Spec[count];
-        var parents = skeleton.Parents;
         for (var joint = 0; joint < count; joint++)
         {
             var track = raw.Tracks[joint];
@@ -82,7 +80,7 @@ public static class AnimationOptimizer
             }
 
             specs[joint].Scale = maxScale;
-            if (parents[joint] != Skeleton.NoParent) specs[joint].Scale *= specs[parents[joint]].Scale;
+            if (parents[joint] != SkeletonBlob.NoParent) specs[joint].Scale *= specs[parents[joint]].Scale;
             var jointSetting = overrides is not null && overrides.TryGetValue(joint, out var found) ? found : setting;
             specs[joint].Length = jointSetting.Distance * specs[joint].Scale;
             specs[joint].Tolerance = jointSetting.Tolerance;
@@ -91,7 +89,7 @@ public static class AnimationOptimizer
         for (var joint = count - 1; joint >= 0; joint--)
         {
             var parent = parents[joint];
-            if (parent == Skeleton.NoParent) continue;
+            if (parent == SkeletonBlob.NoParent) continue;
             var maxLengthSquared = 0f;
             foreach (var key in raw.Tracks[joint].Translations) maxLengthSquared = MathF.Max(maxLengthSquared, key.Value.LengthSquared());
             var maxLength = MathF.Sqrt(maxLengthSquared);

@@ -1,248 +1,207 @@
-using System.Buffers.Binary;
+using System.Numerics;
 using System.Text;
+
+using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
 /// <summary>
-/// The byte layout ozz-animation archives use: one endianness byte, a null-terminated type tag, a
-/// uint32 version, then the payload. Little-endian only — the archives this engine cooks and reads
-/// are its own, and a big-endian file is refused rather than byte-swapped.
+/// The persisted form of a skeleton or clip: ozz-animation's archive (one endianness byte, a
+/// null-terminated type tag, a uint32 version, then the payload), read into a native blob and
+/// written back from one. Little-endian only — the archives this engine cooks and reads are its
+/// own, and a big-endian file is refused rather than byte-swapped.
 /// </summary>
 /// <remarks>
-/// Cross-language contract with ozz-animation 0.17 (<c>ozz/base/io/archive.h</c>): a file written
-/// by <c>gltf2ozz</c> loads here, and a file written here loads in ozz's C++ runtime. Keep the
-/// tags and versions in <see cref="Skeleton"/> and <see cref="AnimationClip"/> pinned to that release.
+/// Cross-language contract with ozz-animation 0.17 (<c>ozz/base/io/archive.h</c>,
+/// <c>skeleton.cc</c>, <c>animation.cc</c>): a file written by <c>gltf2ozz</c> loads here, and a
+/// file written here loads in ozz's C++ runtime. The archive stores rest poses in
+/// structure-of-arrays groups of four; the blob holds one pose per joint because the sampler in
+/// this assembly is scalar.
 /// </remarks>
-internal ref struct OzzReader
+public static class OzzArchive
 {
-    private const byte LittleEndian = 1;
+    public const string SkeletonTag = "ozz-skeleton";
 
-    private readonly ReadOnlySpan<byte> _bytes;
-    private int _at;
+    public const uint SkeletonVersion = 2;
 
-    private OzzReader(ReadOnlySpan<byte> bytes)
+    public const string AnimationTag = "ozz-animation";
+
+    public const uint AnimationVersion = 7;
+
+    // translation xyz, rotation xyzw, scale xyz: ten SIMD lanes of four floats.
+    private const int SoaFloatsPerGroup = 40;
+
+    public static bool IsSkeleton(ReadOnlySpan<byte> bytes) => OzzReader.HasTag(bytes, SkeletonTag);
+
+    public static bool IsAnimation(ReadOnlySpan<byte> bytes) => OzzReader.HasTag(bytes, AnimationTag);
+
+    /// <exception cref="InvalidDataException">Not a version-2 ozz skeleton archive, or one whose joints do not form a depth-first tree.</exception>
+    public static NativeBlobAssetReference<SkeletonBlob> ReadSkeleton(ReadOnlySpan<byte> archive)
     {
-        _bytes = bytes;
-        _at = 0;
-    }
-
-    /// <summary>Opens the archive and checks the tag and version; the returned reader sits at the payload.</summary>
-    /// <exception cref="InvalidDataException">Not an ozz archive of that tag, big-endian, or another version.</exception>
-    public static OzzReader Open(ReadOnlySpan<byte> bytes, string tag, uint version)
-    {
-        var reader = new OzzReader(bytes);
-        var tagBytes = Encoding.ASCII.GetBytes(tag + '\0');
-        if (bytes.Length < 1 + tagBytes.Length + 4 || !bytes.Slice(1, tagBytes.Length).SequenceEqual(tagBytes))
+        var reader = OzzReader.Open(archive, SkeletonTag, SkeletonVersion);
+        var count = reader.ReadInt32();
+        if (count == 0)
         {
-            throw new InvalidDataException($"Not an ozz '{tag}' archive.");
+            reader.ExpectEnd("skeleton");
+            return SkeletonBlob.Create([], [], []);
         }
 
-        if (bytes[0] != LittleEndian) throw new InvalidDataException($"The ozz '{tag}' archive is big-endian; only little-endian archives are read.");
-        reader._at = 1 + tagBytes.Length;
-        var found = reader.ReadUInt32();
-        if (found != version) throw new InvalidDataException($"The ozz '{tag}' archive is version {found}; this build reads version {version}.");
-        return reader;
-    }
-
-    /// <summary>Whether the bytes begin as an archive of that tag, without reading further.</summary>
-    public static bool HasTag(ReadOnlySpan<byte> bytes, string tag)
-    {
-        var tagBytes = Encoding.ASCII.GetBytes(tag + '\0');
-        return bytes.Length >= 1 + tagBytes.Length && bytes.Slice(1, tagBytes.Length).SequenceEqual(tagBytes);
-    }
-
-    public readonly int Remaining => _bytes.Length - _at;
-
-    public float ReadSingle() => BitConverter.Int32BitsToSingle((int)ReadUInt32());
-
-    public int ReadInt32() => (int)ReadUInt32();
-
-    public uint ReadUInt32()
-    {
-        var value = BinaryPrimitives.ReadUInt32LittleEndian(Take(4));
-        return value;
-    }
-
-    public ushort ReadUInt16() => BinaryPrimitives.ReadUInt16LittleEndian(Take(2));
-
-    public short ReadInt16() => BinaryPrimitives.ReadInt16LittleEndian(Take(2));
-
-    public ReadOnlySpan<byte> ReadBytes(int count) => Take(count);
-
-    public float[] ReadSingles(int count)
-    {
-        var values = new float[count];
-        for (var i = 0; i < count; i++) values[i] = ReadSingle();
-        return values;
-    }
-
-    public ushort[] ReadUInt16s(int count)
-    {
-        var values = new ushort[count];
-        for (var i = 0; i < count; i++) values[i] = ReadUInt16();
-        return values;
-    }
-
-    public uint[] ReadUInt32s(int count)
-    {
-        var values = new uint[count];
-        for (var i = 0; i < count; i++) values[i] = ReadUInt32();
-        return values;
-    }
-
-    public void ExpectEnd(string what)
-    {
-        if (Remaining != 0) throw new InvalidDataException($"The ozz {what} archive has {Remaining} bytes past its payload.");
-    }
-
-    private ReadOnlySpan<byte> Take(int count)
-    {
-        if (count < 0 || _at + count > _bytes.Length) throw new InvalidDataException("The ozz archive ends inside a field.");
-        var slice = _bytes.Slice(_at, count);
-        _at += count;
-        return slice;
-    }
-}
-
-/// <summary>Writes the archive layout <see cref="OzzReader"/> reads; little-endian, one type per file.</summary>
-internal sealed class OzzWriter
-{
-    private const byte LittleEndian = 1;
-
-    private readonly MemoryStream _stream = new();
-
-    public OzzWriter(string tag, uint version)
-    {
-        _stream.WriteByte(LittleEndian);
-        var tagBytes = Encoding.ASCII.GetBytes(tag + '\0');
-        _stream.Write(tagBytes);
-        Write(version);
-    }
-
-    public void Write(uint value)
-    {
-        Span<byte> buffer = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
-        _stream.Write(buffer);
-    }
-
-    public void Write(int value) => Write((uint)value);
-
-    public void Write(float value) => Write((uint)BitConverter.SingleToInt32Bits(value));
-
-    public void Write(ushort value)
-    {
-        Span<byte> buffer = stackalloc byte[2];
-        BinaryPrimitives.WriteUInt16LittleEndian(buffer, value);
-        _stream.Write(buffer);
-    }
-
-    public void Write(short value) => Write((ushort)value);
-
-    public void Write(ReadOnlySpan<byte> bytes) => _stream.Write(bytes);
-
-    public void Write(ReadOnlySpan<float> values)
-    {
-        foreach (var value in values) Write(value);
-    }
-
-    public void Write(ReadOnlySpan<ushort> values)
-    {
-        foreach (var value in values) Write(value);
-    }
-
-    public void Write(ReadOnlySpan<short> values)
-    {
-        foreach (var value in values) Write(value);
-    }
-
-    public void Write(ReadOnlySpan<uint> values)
-    {
-        foreach (var value in values) Write(value);
-    }
-
-    public byte[] ToArray() => _stream.ToArray();
-}
-
-/// <summary>ozz's group-varint coding of uint32 quadruples (<c>ozz/base/encode/group_varint.h</c>): one prefix byte holding four 2-bit lengths, then 1–4 bytes per value.</summary>
-internal static class GroupVarint
-{
-    public static int WorstEncodedSize(int count) => count * 4 + count / 4;
-
-    /// <summary>Encodes a stream whose length is a multiple of four; returns the bytes actually used.</summary>
-    public static byte[] Encode(ReadOnlySpan<uint> values)
-    {
-        if (values.Length % 4 != 0) throw new ArgumentException("A group-varint stream holds a multiple of four values.", nameof(values));
-        var buffer = new byte[WorstEncodedSize(values.Length)];
+        if (count < 0 || count > SkeletonBlob.MaxJoints) throw new InvalidDataException($"The ozz skeleton names {count} joints; the limit is {SkeletonBlob.MaxJoints}.");
+        var charCount = reader.ReadInt32();
+        if (charCount < count) throw new InvalidDataException("The ozz skeleton's name block is shorter than one terminator per joint.");
+        var chars = reader.ReadBytes(charCount);
+        var names = new string[count];
         var at = 0;
-        for (var i = 0; i < values.Length; i += 4)
+        for (var i = 0; i < count; i++)
         {
-            var tags = new byte[4];
-            for (var k = 0; k < 4; k++) tags[k] = Tag(values[i + k]);
-            buffer[at++] = (byte)((tags[3] << 6) | (tags[2] << 4) | (tags[1] << 2) | tags[0]);
-            for (var k = 0; k < 4; k++)
+            var end = chars[at..].IndexOf((byte)0);
+            if (end < 0) throw new InvalidDataException($"The ozz skeleton's name {i} is not terminated.");
+            names[i] = Encoding.UTF8.GetString(chars.Slice(at, end));
+            at += end + 1;
+        }
+
+        var parents = new short[count];
+        for (var i = 0; i < count; i++)
+        {
+            parents[i] = reader.ReadInt16();
+            if (parents[i] != SkeletonBlob.NoParent && (parents[i] < 0 || parents[i] >= i))
             {
-                var value = values[i + k];
-                for (var b = 0; b <= tags[k]; b++) buffer[at++] = (byte)(value >> (8 * b));
+                throw new InvalidDataException($"The ozz skeleton's joint {i} has parent {parents[i]}, which does not precede it.");
             }
         }
 
-        return buffer[..at];
+        var groups = (count + 3) / 4;
+        var soa = reader.ReadSingles(groups * SoaFloatsPerGroup);
+        reader.ExpectEnd("skeleton");
+        var poses = new JointPose[count];
+        for (var i = 0; i < count; i++)
+        {
+            var g = (i / 4) * SoaFloatsPerGroup;
+            var lane = i % 4;
+            poses[i] = new JointPose(
+                new Vector3(soa[g + lane], soa[g + 4 + lane], soa[g + 8 + lane]),
+                new Quaternion(soa[g + 12 + lane], soa[g + 16 + lane], soa[g + 20 + lane], soa[g + 24 + lane]),
+                new Vector3(soa[g + 28 + lane], soa[g + 32 + lane], soa[g + 36 + lane]));
+        }
+
+        return SkeletonBlob.Create(names, parents, poses);
     }
 
-    /// <summary>Decodes <paramref name="output"/>.Length values (a multiple of four) starting at <paramref name="offset"/>.</summary>
-    public static void Decode(ReadOnlySpan<byte> encoded, int offset, Span<uint> output)
+    public static byte[] WriteSkeleton(ref SkeletonBlob skeleton)
     {
-        if (output.Length % 4 != 0) throw new ArgumentException("A group-varint stream holds a multiple of four values.", nameof(output));
-        var at = offset;
-        for (var i = 0; i < output.Length; i += 4)
+        var writer = new OzzWriter(SkeletonTag, SkeletonVersion);
+        var count = skeleton.JointCount;
+        writer.Write(count);
+        if (count == 0) return writer.ToArray();
+
+        var chars = new MemoryStream();
+        for (var i = 0; i < count; i++)
         {
-            if (at >= encoded.Length) throw new InvalidDataException("The group-varint stream ends inside a group.");
-            var prefix = encoded[at++];
-            for (var k = 0; k < 4; k++)
-            {
-                var length = ((prefix >> (2 * k)) & 0x3) + 1;
-                if (at + length > encoded.Length) throw new InvalidDataException("The group-varint stream ends inside a value.");
-                uint value = 0;
-                for (var b = 0; b < length; b++) value |= (uint)encoded[at + b] << (8 * b);
-                output[i + k] = value;
-                at += length;
-            }
+            chars.Write(skeleton.Names[i].ToSpan());
+            chars.WriteByte(0);
+        }
+
+        writer.Write((int)chars.Length);
+        writer.Write(chars.ToArray());
+        writer.Write(skeleton.Parents.ToSpan());
+        var groups = (count + 3) / 4;
+        var soa = new float[groups * SoaFloatsPerGroup];
+        for (var i = 0; i < groups * 4; i++)
+        {
+            var pose = i < count ? skeleton.RestPoses[i] : JointPose.Identity;
+            var g = (i / 4) * SoaFloatsPerGroup;
+            var lane = i % 4;
+            soa[g + lane] = pose.Translation.X; soa[g + 4 + lane] = pose.Translation.Y; soa[g + 8 + lane] = pose.Translation.Z;
+            soa[g + 12 + lane] = pose.Rotation.X; soa[g + 16 + lane] = pose.Rotation.Y; soa[g + 20 + lane] = pose.Rotation.Z; soa[g + 24 + lane] = pose.Rotation.W;
+            soa[g + 28 + lane] = pose.Scale.X; soa[g + 32 + lane] = pose.Scale.Y; soa[g + 36 + lane] = pose.Scale.Z;
+        }
+
+        writer.Write(soa);
+        return writer.ToArray();
+    }
+
+    /// <exception cref="InvalidDataException">Not a version-7 ozz animation archive, or one whose streams are inconsistent.</exception>
+    public static NativeBlobAssetReference<AnimationBlob> ReadAnimation(ReadOnlySpan<byte> archive)
+    {
+        var reader = OzzReader.Open(archive, AnimationTag, AnimationVersion);
+        var duration = reader.ReadSingle();
+        var trackCount = reader.ReadInt32();
+        var nameLength = reader.ReadInt32();
+        var timepointCount = reader.ReadInt32();
+        var translationCount = reader.ReadInt32();
+        var rotationCount = reader.ReadInt32();
+        var scaleCount = reader.ReadInt32();
+        var tEntries = reader.ReadInt32();
+        var tDesc = reader.ReadInt32();
+        var rEntries = reader.ReadInt32();
+        var rDesc = reader.ReadInt32();
+        var sEntries = reader.ReadInt32();
+        var sDesc = reader.ReadInt32();
+        if (nameLength < 0 || timepointCount < 0 || translationCount < 0 || rotationCount < 0 || scaleCount < 0
+            || tEntries < 0 || tDesc < 0 || rEntries < 0 || rDesc < 0 || sEntries < 0 || sDesc < 0)
+        {
+            throw new InvalidDataException("The ozz animation header carries a negative count.");
+        }
+
+        var name = Encoding.UTF8.GetString(reader.ReadBytes(nameLength));
+        var timepoints = reader.ReadSingles(timepointCount);
+        var ratioBytes = timepointCount <= byte.MaxValue ? 1 : 2;
+        var translations = ReadStream(ref reader, translationCount, ratioBytes, tEntries, tDesc);
+        var rotations = ReadStream(ref reader, rotationCount, ratioBytes, rEntries, rDesc);
+        var scales = ReadStream(ref reader, scaleCount, ratioBytes, sEntries, sDesc);
+        reader.ExpectEnd("animation");
+        try
+        {
+            return AnimationBlob.Create(name, duration, trackCount, timepoints, translations, rotations, scales);
+        }
+        catch (ArgumentException failure)
+        {
+            throw new InvalidDataException($"The ozz animation is inconsistent: {failure.Message}");
         }
     }
 
-    private static byte Tag(uint value) => (byte)((value >= 1u << 24 ? 1 : 0) + (value >= 1u << 16 ? 1 : 0) + (value >= 1u << 8 ? 1 : 0));
-}
-
-/// <summary>
-/// ozz's float↔half conversion, bit for bit (<c>simd_math_ref-inl.h</c>): it rounds half-way cases
-/// up, where <see cref="System.Half"/> rounds them to even, and a cooked key must hold the bytes
-/// ozz's own builder would write.
-/// </summary>
-internal static class HalfFloat
-{
-    public static ushort FromSingle(float value)
+    public static byte[] WriteAnimation(ref AnimationBlob clip)
     {
-        const uint f32Infinity = 255u << 23;
-        const uint f16Infinity = 31u << 23;
-        const uint magic = 15u << 23;
-        const uint signMask = 0x80000000u;
-        const uint roundMask = ~0x00000fffu;
-
-        var bits = (uint)BitConverter.SingleToInt32Bits(value);
-        var sign = bits & signMask;
-        var unsigned = bits & ~signMask;
-        if (unsigned >= f32Infinity)
-        {
-            return (ushort)((unsigned > f32Infinity ? 0x7e00u : 0x7c00u) | (sign >> 16));
-        }
-
-        var rounded = BitConverter.UInt32BitsToSingle(unsigned & roundMask);
-        var scaled = (uint)BitConverter.SingleToInt32Bits(rounded * BitConverter.UInt32BitsToSingle(magic));
-        var reRounded = scaled - roundMask;
-        return (ushort)(((reRounded > f16Infinity ? f16Infinity : reRounded) >> 13) | (sign >> 16));
+        var writer = new OzzWriter(AnimationTag, AnimationVersion);
+        writer.Write(clip.Duration);
+        writer.Write(clip.TrackCount);
+        writer.Write(clip.Name.Length);
+        writer.Write(clip.Timepoints.Length);
+        writer.Write(clip.Translations.KeyCount);
+        writer.Write(clip.Rotations.KeyCount);
+        writer.Write(clip.Scales.KeyCount);
+        writer.Write(clip.Translations.IframeEntries.Length);
+        writer.Write(clip.Translations.IframeDesc.Length);
+        writer.Write(clip.Rotations.IframeEntries.Length);
+        writer.Write(clip.Rotations.IframeDesc.Length);
+        writer.Write(clip.Scales.IframeEntries.Length);
+        writer.Write(clip.Scales.IframeDesc.Length);
+        writer.Write(clip.Name.ToSpan());
+        writer.Write(clip.Timepoints.ToSpan());
+        WriteStream(writer, ref clip.Translations);
+        WriteStream(writer, ref clip.Rotations);
+        WriteStream(writer, ref clip.Scales);
+        return writer.ToArray();
     }
 
-    /// <summary>Every half is exactly representable as a float, so the framework conversion is the same bits ozz's is.</summary>
-    public static float ToSingle(ushort half) => (float)BitConverter.UInt16BitsToHalf(half);
+    private static KeyframeStreamData ReadStream(ref OzzReader reader, int keyCount, int ratioBytes, int iframeEntryCount, int iframeDescCount)
+    {
+        var ratios = reader.ReadBytes(keyCount * ratioBytes).ToArray();
+        var previouses = reader.ReadUInt16s(keyCount);
+        var iframeEntries = reader.ReadBytes(iframeEntryCount).ToArray();
+        var iframeDesc = reader.ReadUInt32s(iframeDescCount);
+        var interval = reader.ReadSingle();
+        var values = reader.ReadUInt16s(keyCount * 3);
+        return new KeyframeStreamData(ratios, previouses, values, iframeEntries, iframeDesc, interval);
+    }
+
+    private static void WriteStream(OzzWriter writer, ref KeyframeStreamBlob stream)
+    {
+        writer.Write(stream.Ratios.ToSpan());
+        writer.Write(stream.Previouses.ToSpan());
+        writer.Write(stream.IframeEntries.ToSpan());
+        writer.Write(stream.IframeDesc.ToSpan());
+        writer.Write(stream.IframeInterval);
+        writer.Write(stream.Values.ToSpan());
+    }
 }

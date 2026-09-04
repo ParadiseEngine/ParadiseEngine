@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Paradise.Animation.Offline;
 
-/// <summary>The authoring-side skeleton: a tree of named joints with rest-pose transforms, what <see cref="SkeletonBuilder"/> flattens into a runtime <see cref="Skeleton"/>.</summary>
+/// <summary>The authoring-side skeleton: a tree of named joints with rest-pose transforms, what <see cref="SkeletonBuilder"/> flattens into a runtime <see cref="SkeletonBlob"/>.</summary>
 public sealed class RawSkeleton
 {
     public List<RawJoint> Roots { get; } = [];
@@ -17,8 +17,8 @@ public sealed class RawSkeleton
         }
     }
 
-    /// <summary>At most <see cref="Skeleton.MaxJoints"/> joints; nothing else can be wrong with a tree.</summary>
-    public bool IsValid => JointCount <= Skeleton.MaxJoints;
+    /// <summary>At most <see cref="SkeletonBlob.MaxJoints"/> joints; nothing else can be wrong with a tree.</summary>
+    public bool IsValid => JointCount <= SkeletonBlob.MaxJoints;
 
     /// <summary>Visits joints depth-first, parents before children, siblings in order — the runtime joint order.</summary>
     public void VisitDepthFirst(Action<RawJoint, RawJoint?> visit)

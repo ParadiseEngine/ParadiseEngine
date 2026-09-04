@@ -18,7 +18,7 @@ public sealed class RawAnimation
     {
         get
         {
-            if (Duration <= 0f || Tracks.Count > Skeleton.MaxJoints) return false;
+            if (Duration <= 0f || Tracks.Count > SkeletonBlob.MaxJoints) return false;
             foreach (var track in Tracks)
             {
                 if (!track.IsValid(Duration)) return false;

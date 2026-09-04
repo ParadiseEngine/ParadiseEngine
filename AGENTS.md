@@ -211,10 +211,22 @@ the skeleton and clips to **ozz-animation archives**. A clip is found by name, t
 of its channels, then by index.
 
 **Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
-`Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives and
-carries both halves in C#: the runtime (`SamplingContext`, `LocalToModel`) and the offline side
-(`SkeletonBuilder`, `AnimationBuilder`, `AnimationOptimizer`, `ClipConverter`). No native code
-anywhere, so NativeAOT and browser hosts get it for free. The contract is held as bytes:
+`Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives
+(`OzzArchive.ReadSkeleton/WriteSkeleton/ReadAnimation/WriteAnimation`) and carries both halves in
+C#: the runtime and the offline side (`SkeletonBuilder`, `AnimationBuilder`, `AnimationOptimizer`,
+`ClipConverter`). No native code anywhere, so NativeAOT and browser hosts get it for free. The
+RUNTIME is unmanaged: `SkeletonBlob`, `AnimationBlob` and `SamplingContext` are `Paradise.BLOB`
+layouts opened as `NativeBlobAssetReference<T>` (one native allocation each, at load), and
+`SamplingContext.Sample(ref clip, ratio, poses)` plus `LocalToModel.Compute(ref skeleton, ...)`
+allocate nothing — reach every blob through a `ref`, never a copy (see the BLOB README). The
+archive is the only persisted format; blobs exist in memory only. The offline builders are
+managed (lists, sorting) because they run in the cook, not the player, and hand back native blobs.
+Inside a blob's hot loop take `field.ToSpan()` ONCE and index the span: the `BlobArray` indexer
+re-derives its pointer and bounds-checks on every access, and doing that per key doubled the
+sampler's cost. `src/Paradise.Animation.Benchmarks` (BenchmarkDotNet) measures one frame of one
+character for the blob runtime, the frozen managed-class copy it replaced, the glTF reference
+sampler, and ozz's own C++ when `PARADISE_OZZ_NATIVE` points at the spike's shim library;
+`PARADISE_BENCHMARK_GLB` swaps the procedural rig for a real character. The contract is held as bytes:
 `OzzParityTests` regenerates a procedural rig and checks this builder writes exactly what ozz's
 C++ builder wrote (`Paradise.Animation.Test/Fixtures`), so a change to key sorting, quantization
 or i-frames that still "works" fails there. The skeleton is the GLB's WHOLE node tree in ozz's

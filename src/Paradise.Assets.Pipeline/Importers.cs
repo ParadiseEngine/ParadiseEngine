@@ -397,7 +397,7 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = cooked.Skeleton.Save();
+                blob = cooked.Skeleton;
                 break;
 
             default:
@@ -415,7 +415,7 @@ internal static class MeshReferenceStep
 
                 try
                 {
-                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, Optimization(context, resolution.Asset)).Save();
+                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, Optimization(context, resolution.Asset));
                 }
                 catch (ArgumentException failure)
                 {
@@ -529,7 +529,7 @@ public sealed class MeshImporter : IAssetImporter
     }
 }
 
-/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to ozz archives (<see cref="Paradise.Animation.Skeleton"/>, <see cref="Paradise.Animation.AnimationClip"/>) of the GLB they name.</summary>
+/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to ozz archives (<see cref="Paradise.Animation.OzzArchive"/>) of the GLB they name.</summary>
 public sealed class AnimationImporter : IAssetImporter
 {
     public string Name => "animation";

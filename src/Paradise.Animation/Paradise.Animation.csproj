@@ -19,4 +19,8 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.BLOB\Paradise.BLOB.csproj" />
+  </ItemGroup>
+
 </Project>

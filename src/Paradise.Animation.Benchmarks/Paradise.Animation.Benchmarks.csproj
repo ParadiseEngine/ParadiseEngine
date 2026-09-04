@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CA1707;CA1515;CA1001;IDE0005</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Animation\Paradise.Animation.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Gltf\Paradise.Assets.Gltf.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+  </ItemGroup>
+
+  <!-- The reference glTF sampler and the GLB builder are test code by design; the benchmark
+       borrows them the way Paradise.Assets.Pipeline.Test does, rather than making them ship. -->
+  <ItemGroup>
+    <Compile Include="..\Paradise.Assets.Pipeline.Test\GltfAnimationRig.cs" Link="Borrowed\GltfAnimationRig.cs" />
+    <Compile Include="..\Paradise.Assets.Gltf.Test\GlbTestBuilder.cs" Link="Borrowed\GlbTestBuilder.cs" />
+  </ItemGroup>
+
+</Project>

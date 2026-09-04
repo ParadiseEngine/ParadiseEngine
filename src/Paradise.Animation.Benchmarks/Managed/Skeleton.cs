@@ -1,7 +1,12 @@
 using System.Numerics;
 using System.Text;
 
-namespace Paradise.Animation;
+// Frozen copy of the managed-class runtime as committed in e4fa124, kept ONLY so the benchmark
+// can measure it against the blob runtime that replaced it. Do not fix or extend; delete when the
+// comparison stops being interesting.
+namespace Paradise.Animation.Benchmarks.Managed;
+
+using Paradise.Animation;
 
 /// <summary>
 /// An ozz-animation runtime skeleton: joints in depth-first order, each with its parent index, its
@@ -163,12 +168,3 @@ public sealed class Skeleton
     private const int SoaFloatsPerGroup = 40;
 }
 
-/// <summary>One joint's local transform: what a clip samples to and a rest pose holds.</summary>
-public readonly record struct JointPose(Vector3 Translation, Quaternion Rotation, Vector3 Scale)
-{
-    public static JointPose Identity { get; } = new(Vector3.Zero, Quaternion.Identity, Vector3.One);
-
-    /// <summary>Row-vector convention: scale, then rotate, then translate.</summary>
-    public Matrix4x4 ToMatrix() =>
-        Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Translation);
-}

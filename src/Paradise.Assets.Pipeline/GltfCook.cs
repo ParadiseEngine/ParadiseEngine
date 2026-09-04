@@ -8,9 +8,10 @@ using Paradise.Assets.Mesh;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What one GLB cooks to: the mesh blob, the skeleton when the file has skins or clips, its clips over that skeleton's joints, and which glTF material each draw slot bound (for the material documents).</summary>
+/// <summary>What one GLB cooks to: the mesh blob, the skeleton (as an ozz archive) when the file has skins or clips, its clips over that skeleton's joints, and which glTF material each draw slot bound (for the material documents).</summary>
+/// <param name="Skeleton">The <c>ozz-skeleton</c> archive, what the build writes for a <c>.skeleton</c> document; open it with <see cref="OzzArchive.ReadSkeleton(System.ReadOnlySpan{byte})"/>.</param>
 /// <param name="SlotMaterials">Per draw slot, the glTF material index the primitive named, or −1. Slot <c>i</c> is glTF primitive <c>i</c> in scene order — the material-slot contract.</param>
-public sealed record CookedGlb(MeshData Mesh, Skeleton? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
+public sealed record CookedGlb(MeshData Mesh, byte[]? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
 
 /// <summary>
 /// Turns a GLB's default scene into Paradise blobs and ozz archives, once, at build: the runtime
@@ -107,13 +108,16 @@ public static class GltfCook
         return new CookedGlb(mesh, skeleton, clips, [.. slotMaterials]);
     }
 
-    /// <summary>Cooks a clip over the skeleton it was cooked with: rest pose on unanimated joints, STEP baked, optionally decimated, then compressed to an ozz archive.</summary>
+    /// <summary>Cooks a clip over the skeleton it was cooked with: rest pose on unanimated joints, STEP baked, optionally decimated, then compressed to an <c>ozz-animation</c> archive.</summary>
+    /// <param name="skeletonArchive">The <c>ozz-skeleton</c> archive the clip's joints index, <see cref="CookedGlb.Skeleton"/>.</param>
     /// <param name="optimize">Key decimation; null keeps every key, and the clip differs from the source by ozz's quantization alone.</param>
-    public static AnimationClip BuildClip(ClipData clip, Skeleton skeleton, AnimationOptimizer.Setting? optimize = null)
+    public static byte[] BuildClip(ClipData clip, ReadOnlySpan<byte> skeletonArchive, AnimationOptimizer.Setting? optimize = null)
     {
-        var raw = ClipConverter.ToRaw(clip, skeleton);
-        if (optimize is { } setting) raw = AnimationOptimizer.Optimize(raw, skeleton, setting);
-        return AnimationBuilder.Build(raw, IframeInterval);
+        using var skeleton = OzzArchive.ReadSkeleton(skeletonArchive);
+        var raw = ClipConverter.ToRaw(clip, ref skeleton.Value);
+        if (optimize is { } setting) raw = AnimationOptimizer.Optimize(raw, ref skeleton.Value, setting);
+        using var built = AnimationBuilder.Build(raw, IframeInterval);
+        return OzzArchive.WriteAnimation(ref built.Value);
     }
 
     /// <summary>Per glTF node, its joint index: depth-first, parents first, siblings by ascending node index — the order ozz's builder would give the same tree.</summary>
@@ -147,7 +151,7 @@ public static class GltfCook
         return jointOf;
     }
 
-    private static Skeleton BuildSkeleton(GltfNodeData[] nodes, int[] jointOf)
+    private static byte[] BuildSkeleton(GltfNodeData[] nodes, int[] jointOf)
     {
         var count = nodes.Length;
         var names = new string[count];
@@ -157,11 +161,12 @@ public static class GltfCook
         {
             var joint = jointOf[node];
             names[joint] = nodes[node].Name ?? "";
-            parents[joint] = nodes[node].ParentIndex < 0 ? Skeleton.NoParent : (short)jointOf[nodes[node].ParentIndex];
+            parents[joint] = nodes[node].ParentIndex < 0 ? SkeletonBlob.NoParent : (short)jointOf[nodes[node].ParentIndex];
             poses[joint] = new JointPose(nodes[node].RestTranslation, nodes[node].RestRotation, nodes[node].RestScale);
         }
 
-        return new Skeleton(names, parents, poses);
+        using var skeleton = SkeletonBlob.Create(names, parents, poses);
+        return OzzArchive.WriteSkeleton(ref skeleton.Value);
     }
 
     private static ClipData Clip(GltfAnimationData clip, int index, int[] jointOf)
@@ -181,27 +186,11 @@ public static class GltfCook
         return new ClipData(clip.Name ?? $"clip_{index}", channels);
     }
 
-    /// <summary>SHA-256 of the clip's cooked channels, name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
+    /// <summary>SHA-256 of the clip's blob with the name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
     public static string ClipFingerprint(ClipData clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
-        using var stream = new MemoryStream();
-        using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
-        {
-            writer.Write(clip.Channels.Count);
-            foreach (var channel in clip.Channels)
-            {
-                writer.Write(channel.Joint);
-                writer.Write((byte)channel.Path);
-                writer.Write(channel.Step);
-                writer.Write(channel.Times.Length);
-                foreach (var time in channel.Times) writer.Write(time);
-                writer.Write(channel.Values.Length);
-                foreach (var value in channel.Values) writer.Write(value);
-            }
-        }
-
-        return Convert.ToHexStringLower(SHA256.HashData(stream.GetBuffer().AsSpan(0, (int)stream.Length)));
+        return Convert.ToHexStringLower(SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
     }
 
     /// <summary>Positions through the matrix, normals and tangents through its cofactor matrix (non-uniform scale would shear them off the surface otherwise), re-normalized; uv and tangent sign pass through.</summary>

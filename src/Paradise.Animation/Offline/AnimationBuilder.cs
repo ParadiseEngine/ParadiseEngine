@@ -1,9 +1,11 @@
 using System.Numerics;
 
+using Paradise.BLOB;
+
 namespace Paradise.Animation.Offline;
 
 /// <summary>
-/// Compresses a <see cref="RawAnimation"/> into a runtime <see cref="AnimationClip"/>: keys of every
+/// Compresses a <see cref="RawAnimation"/> into a runtime <see cref="AnimationBlob"/>: keys of every
 /// track merged into one time-sorted stream per component with back-links, values quantized,
 /// i-frames for seeking. ozz's <c>AnimationBuilder</c>, producing the same bytes.
 /// </summary>
@@ -21,7 +23,7 @@ public static class AnimationBuilder
 
     /// <param name="iframeInterval">Seconds between i-frames; 0 for none (the sampler then rewinds by walking the stream). A cooked clip uses a few seconds.</param>
     /// <exception cref="ArgumentException">The raw clip is invalid, or has more distinct key times than the format can index.</exception>
-    public static AnimationClip Build(RawAnimation raw, float iframeInterval = 0f)
+    public static NativeBlobAssetReference<AnimationBlob> Build(RawAnimation raw, float iframeInterval = 0f)
     {
         ArgumentNullException.ThrowIfNull(raw);
         if (!raw.IsValid) throw new ArgumentException("The raw clip has a non-positive duration, too many tracks, or keys out of order or outside its duration.", nameof(raw));
@@ -29,7 +31,7 @@ public static class AnimationBuilder
         var duration = raw.Duration;
         var inverseDuration = 1f / duration;
         var trackCount = raw.TrackCount;
-        var padded = AnimationClip.PaddedTrackCount(trackCount);
+        var padded = AnimationBlob.PaddedTrackCount(trackCount);
 
         var translations = new List<SortingKey<Vector3>>();
         var rotations = new List<SortingKey<Quaternion>>();
@@ -68,7 +70,7 @@ public static class AnimationBuilder
         var ratios = new float[timepoints.Length];
         for (var i = 0; i < ratios.Length; i++) ratios[i] = timepoints[i] * inverseDuration;
 
-        return new AnimationClip(raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream);
+        return AnimationBlob.Create(raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream);
     }
 
     private struct SortingKey<T>
@@ -235,7 +237,7 @@ public static class AnimationBuilder
         return [.. unique];
     }
 
-    private static KeyframeStream Compress<T>(float[] timepoints, List<SortingKey<T>> keys, int paddedTracks, float iframeInterval, float duration, Action<T, ushort[], int> compress)
+    private static KeyframeStreamData Compress<T>(float[] timepoints, List<SortingKey<T>> keys, int paddedTracks, float iframeInterval, float duration, Action<T, ushort[], int> compress)
     {
         var ratioBytes = timepoints.Length <= byte.MaxValue ? 1 : 2;
         var ratios = new byte[keys.Count * ratioBytes];
@@ -265,7 +267,7 @@ public static class AnimationBuilder
         }
 
         var (entries, desc, interval) = BuildIframes(keys, paddedTracks, iframeInterval, duration);
-        return new KeyframeStream(ratios, previouses, values, entries, desc, interval);
+        return new KeyframeStreamData(ratios, previouses, values, entries, desc, interval);
     }
 
     private static (byte[] Entries, uint[] Desc, float Interval) BuildIframes<T>(List<SortingKey<T>> keys, int paddedTracks, float interval, float duration)

@@ -17,62 +17,66 @@ public class OzzParityTests
     public async Task the_skeleton_builder_matches_ozz_within_an_ulp()
     {
         var (raw, _) = TestRigs.Parity();
-        var ours = SkeletonBuilder.Build(raw);
-        var theirs = Skeleton.Load(TestRigs.Fixture("ozz-skeleton.ozz"));
+        using var ours = SkeletonBuilder.Build(raw);
+        using var theirs = OzzArchive.ReadSkeleton(TestRigs.Fixture("ozz-skeleton.ozz"));
 
-        await Assert.That(ours.Names.ToArray()).IsEquivalentTo(theirs.Names.ToArray());
-        await Assert.That(ours.Parents.ToArray()).IsEquivalentTo(theirs.Parents.ToArray());
-        for (var i = 0; i < ours.JointCount; i++)
+        await Assert.That(ours.Value.JointCount).IsEqualTo(theirs.Value.JointCount);
+        await Assert.That(ours.Value.Parents.ToArray()).IsEquivalentTo(theirs.Value.Parents.ToArray());
+        for (var i = 0; i < ours.Value.JointCount; i++)
         {
-            await Assert.That(ours.RestPoses[i].Translation).IsEqualTo(theirs.RestPoses[i].Translation);
-            await Assert.That(Vector3.Distance(ours.RestPoses[i].Scale, theirs.RestPoses[i].Scale)).IsLessThanOrEqualTo(2e-7f);
-            var rotation = ours.RestPoses[i].Rotation - theirs.RestPoses[i].Rotation;
+            var mine = ours.Value.RestPoses[i];
+            var reference = theirs.Value.RestPoses[i];
+            await Assert.That(ours.Value.Names[i].ToString()).IsEqualTo(theirs.Value.Names[i].ToString());
+            await Assert.That(mine.Translation).IsEqualTo(reference.Translation);
+            await Assert.That(Vector3.Distance(mine.Scale, reference.Scale)).IsLessThanOrEqualTo(2e-7f);
+            var rotation = mine.Rotation - reference.Rotation;
             await Assert.That(MathF.Max(MathF.Max(MathF.Abs(rotation.X), MathF.Abs(rotation.Y)), MathF.Max(MathF.Abs(rotation.Z), MathF.Abs(rotation.W)))).IsLessThanOrEqualTo(2e-7f);
         }
 
         // Loading ozz's bytes and saving them again is the identity.
-        await Assert.That(theirs.Save()).IsEquivalentTo(TestRigs.Fixture("ozz-skeleton.ozz"));
+        await Assert.That(OzzArchive.WriteSkeleton(ref theirs.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-skeleton.ozz"));
     }
 
     [Test]
     public async Task the_animation_builder_writes_the_bytes_ozz_writes()
     {
-        var (raw, clip) = TestRigs.Parity();
-        var skeleton = Skeleton.Load(TestRigs.Fixture("ozz-skeleton.ozz"));
+        var (_, clip) = TestRigs.Parity();
+        using var built = AnimationBuilder.Build(clip(37), iframeInterval: 0.5f);
 
-        var ours = AnimationBuilder.Build(clip(skeleton), iframeInterval: 0.5f).Save();
+        var ours = OzzArchive.WriteAnimation(ref built.Value);
 
         await Assert.That(ours).IsEquivalentTo(TestRigs.Fixture("ozz-animation.ozz"));
-        await Assert.That(AnimationClip.Load(ours).Save()).IsEquivalentTo(ours);
+        using var reread = OzzArchive.ReadAnimation(ours);
+        await Assert.That(OzzArchive.WriteAnimation(ref reread.Value)).IsEquivalentTo(ours);
     }
 
     [Test]
     public async Task the_optimizer_keeps_the_keys_ozz_keeps()
     {
-        var (raw, clip) = TestRigs.Parity();
-        var skeleton = Skeleton.Load(TestRigs.Fixture("ozz-skeleton.ozz"));
+        var (_, clip) = TestRigs.Parity();
+        using var skeleton = OzzArchive.ReadSkeleton(TestRigs.Fixture("ozz-skeleton.ozz"));
 
-        var optimized = AnimationOptimizer.Optimize(clip(skeleton), skeleton, AnimationOptimizer.Setting.Default);
-        var ours = AnimationBuilder.Build(optimized, iframeInterval: 0.5f).Save();
+        var optimized = AnimationOptimizer.Optimize(clip(37), ref skeleton.Value, AnimationOptimizer.Setting.Default);
+        using var built = AnimationBuilder.Build(optimized, iframeInterval: 0.5f);
 
-        await Assert.That(ours).IsEquivalentTo(TestRigs.Fixture("ozz-animation-optimized.ozz"));
+        await Assert.That(OzzArchive.WriteAnimation(ref built.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-animation-optimized.ozz"));
     }
 
     [Test]
     public async Task an_archive_ozz_wrote_samples_here()
     {
-        var skeleton = Skeleton.Load(TestRigs.Fixture("ozz-skeleton.ozz"));
-        var animation = AnimationClip.Load(TestRigs.Fixture("ozz-animation.ozz"));
-        var context = new SamplingContext(animation.TrackCount);
-        var poses = new JointPose[animation.TrackCount];
+        using var skeleton = OzzArchive.ReadSkeleton(TestRigs.Fixture("ozz-skeleton.ozz"));
+        using var clip = OzzArchive.ReadAnimation(TestRigs.Fixture("ozz-animation.ozz"));
+        using var context = SamplingContext.Create(clip.Value.TrackCount);
+        var poses = new JointPose[clip.Value.TrackCount];
 
-        await Assert.That(animation.Name).IsEqualTo("parity");
-        await Assert.That(animation.Duration).IsEqualTo(2.5f);
-        await Assert.That(animation.TrackCount).IsEqualTo(skeleton.JointCount);
-        await Assert.That(animation.Rotations.IframeDesc.Length).IsEqualTo(2 * 5);
+        await Assert.That(clip.Value.Name.ToString()).IsEqualTo("parity");
+        await Assert.That(clip.Value.Duration).IsEqualTo(2.5f);
+        await Assert.That(clip.Value.TrackCount).IsEqualTo(skeleton.Value.JointCount);
+        await Assert.That(clip.Value.Rotations.IframeDesc.Length).IsEqualTo(2 * 5);
         foreach (var ratio in new[] { 0f, 0.3f, 0.9f, 0.1f, 1f })
         {
-            context.Sample(animation, ratio, poses);
+            context.Value.Sample(ref clip.Value, ratio, poses);
             foreach (var pose in poses) await Assert.That(float.IsFinite(pose.Rotation.Length())).IsTrue();
         }
     }
