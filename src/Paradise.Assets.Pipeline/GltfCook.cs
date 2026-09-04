@@ -1,30 +1,39 @@
 using System.Numerics;
+using System.Security.Cryptography;
 
 using Paradise.Animation;
+using Paradise.Animation.Offline;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Mesh;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What one GLB cooks to: the mesh blob, the skeleton when the file has skins, its clips, and which glTF material each draw slot bound (for the material documents).</summary>
+/// <summary>What one GLB cooks to: the mesh blob, the skeleton (as an ozz archive) when the file has skins or clips, its clips over that skeleton's joints, and which glTF material each draw slot bound (for the material documents).</summary>
+/// <param name="Skeleton">The <c>ozz-skeleton</c> archive, what the build writes for a <c>.skeleton</c> document; open it with <see cref="OzzArchive.ReadSkeleton(System.ReadOnlySpan{byte})"/>.</param>
 /// <param name="SlotMaterials">Per draw slot, the glTF material index the primitive named, or −1. Slot <c>i</c> is glTF primitive <c>i</c> in scene order — the material-slot contract.</param>
-public sealed record CookedGlb(MeshData Mesh, SkeletonData? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
+public sealed record CookedGlb(MeshData Mesh, byte[]? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
 
 /// <summary>
-/// Turns a GLB's default scene into Paradise blobs, once, at extraction: the runtime never sees
-/// glTF. Rigid draws bake their node's world transform into the vertices (one model matrix per
-/// entity is then the whole placement); skinned draws stay in bind space with joints and weights
-/// interleaved, and name the skin and node their palette is computed for.
+/// Turns a GLB's default scene into Paradise blobs and ozz archives, once, at build: the runtime
+/// never sees glTF. Rigid draws bake their node's world transform into the vertices (one model
+/// matrix per entity is then the whole placement); skinned draws stay in bind space with joints
+/// and weights interleaved, and the mesh carries its skin. The skeleton is the WHOLE node tree
+/// in ozz's depth-first order, and skins, clips and draws address joints by that index.
 /// </summary>
 /// <remarks>
 /// This is the same walk the hosts did at load time in <c>SceneAssets.Upload</c>, moved to the
 /// pipeline so it runs once per export instead of once per launch. Order is normative: draws are
 /// the scene's instances in order, each instance's primitives in order — the slot a material
-/// document binds to.
+/// document binds to. The tree is kept whole rather than trimmed to skin joints because a clip
+/// may animate a node that is not a joint (a root-motion carrier, the mesh's own node), and the
+/// palette needs every ancestor. Children follow their parent in ascending glTF node order.
 /// </remarks>
 public static class GltfCook
 {
-    /// <exception cref="InvalidDataException">The GLB is not one this cook can represent: two skins, or a cubic-spline clip.</exception>
+    /// <summary>Seconds between the i-frames a cooked clip carries; a loop restart or a scrub then seeks instead of walking the key stream from the start.</summary>
+    public const float IframeInterval = 1f;
+
+    /// <exception cref="InvalidDataException">The GLB is not one this cook can represent: two skins, more nodes than a skeleton holds, or a cubic-spline clip.</exception>
     public static CookedGlb Cook(GltfAsset asset)
     {
         ArgumentNullException.ThrowIfNull(asset);
@@ -33,10 +42,19 @@ public static class GltfCook
             throw new InvalidDataException($"The GLB has {asset.Skins.Length} skins; a Paradise mesh carries one skeleton. Split the file, one rig per GLB.");
         }
 
+        // The skeleton is the whole node tree, and ozz caps it; a rigid GLB with no skin or clip
+        // builds no skeleton and may have any number of nodes.
+        if ((asset.Skins.Length > 0 || asset.Animations.Length > 0) && asset.Nodes.Length > SkeletonBlob.MaxJoints)
+        {
+            throw new InvalidDataException($"The GLB has {asset.Nodes.Length} nodes; a skeleton holds at most {SkeletonBlob.MaxJoints}. Trim the node tree or split the file.");
+        }
+
         var skinned = asset.Instances.Any(instance =>
             instance.SkinIndex >= 0 && asset.Meshes[instance.MeshIndex].Primitives.Any(p => p.JointsWeights is not null));
         var layout = skinned ? MeshVertexLayout.Skinned : MeshVertexLayout.Static;
         var stride = skinned ? MeshBlob.SkinnedFloatsPerVertex : MeshBlob.StaticFloatsPerVertex;
+
+        var jointOf = asset.Skins.Length == 0 && asset.Animations.Length == 0 ? null : JointOrder(asset.Nodes);
 
         var vertices = new List<float>();
         var indices = new List<uint>();
@@ -75,7 +93,7 @@ public static class GltfCook
 
                 draws.Add(new MeshDrawData(
                     first, (uint)primitive.Indices.Length, draws.Count,
-                    isSkinnedDraw ? instance.NodeIndex : -1,
+                    isSkinnedDraw ? jointOf![instance.NodeIndex] : -1,
                     isSkinnedDraw ? instance.SkinIndex : -1,
                     instance.NodeName));
                 slotMaterials.Add(primitive.MaterialIndex);
@@ -88,28 +106,80 @@ public static class GltfCook
             max = Vector3.Zero;
         }
 
-        var mesh = new MeshData(layout, [.. vertices], [.. indices], draws, min, max);
-        var skeleton = asset.Skins.Length == 0 && asset.Animations.Length == 0 ? null : Skeleton(asset);
-        var clips = asset.Animations.Select((clip, i) => Clip(clip, i)).ToList();
+        var meshSkin = skinned && jointOf is not null
+            ? new MeshSkinData(asset.Skins[0].JointNodes.Select(node => jointOf[node]).ToArray(), asset.Skins[0].InverseBindMatrices)
+            : null;
+        var mesh = new MeshData(layout, [.. vertices], [.. indices], draws, min, max, meshSkin);
+        var skeleton = jointOf is null ? null : BuildSkeleton(asset.Nodes, jointOf);
+        var clips = asset.Animations.Select((clip, i) => Clip(clip, i, jointOf!)).ToList();
         return new CookedGlb(mesh, skeleton, clips, [.. slotMaterials]);
     }
 
-    /// <summary>The node tree with rest pose, plus skins — even for a GLB with clips and no skin, since a clip addresses nodes.</summary>
-    private static SkeletonData Skeleton(GltfAsset asset)
+    /// <summary>Cooks a clip over the skeleton it was cooked with: rest pose on unanimated joints, STEP baked, optionally decimated, then compressed to an <c>ozz-animation</c> archive.</summary>
+    /// <param name="skeletonArchive">The <c>ozz-skeleton</c> archive the clip's joints index, <see cref="CookedGlb.Skeleton"/>.</param>
+    /// <param name="optimize">Key decimation; null keeps every key, and the clip differs from the source by ozz's quantization alone.</param>
+    public static byte[] BuildClip(ClipData clip, ReadOnlySpan<byte> skeletonArchive, AnimationOptimizer.Setting? optimize = null)
     {
-        var nodes = asset.Nodes
-            .Select(node => new SkeletonNodeData(node.Name, node.ParentIndex, node.RestTranslation, node.RestRotation, node.RestScale))
-            .ToList();
-        var skins = asset.Skins
-            .Select(skin => new SkinData(skin.Name, skin.JointNodes, skin.InverseBindMatrices))
-            .ToList();
-        return new SkeletonData(nodes, skins);
+        using var skeleton = OzzArchive.ReadSkeleton(skeletonArchive);
+        var raw = ClipConverter.ToRaw(clip, ref skeleton.Value);
+        if (optimize is { } setting) raw = AnimationOptimizer.Optimize(raw, ref skeleton.Value, setting);
+        using var built = AnimationBuilder.Build(raw, IframeInterval);
+        return OzzArchive.WriteAnimation(ref built.Value);
     }
 
-    private static ClipData Clip(GltfAnimationData clip, int index)
+    /// <summary>Per glTF node, its joint index: depth-first, parents first, siblings by ascending node index — the order ozz's builder would give the same tree.</summary>
+    internal static int[] JointOrder(GltfNodeData[] nodes)
+    {
+        var children = new List<int>[nodes.Length];
+        for (var i = 0; i < nodes.Length; i++) children[i] = [];
+        var roots = new List<int>();
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            var parent = nodes[i].ParentIndex;
+            if (parent < 0) roots.Add(i);
+            else if (parent < nodes.Length) children[parent].Add(i);
+            else throw new InvalidDataException($"Node {i} has parent {parent}, outside the tree.");
+        }
+
+        var jointOf = new int[nodes.Length];
+        Array.Fill(jointOf, -1);
+        var next = 0;
+        var stack = new Stack<int>();
+        for (var r = roots.Count - 1; r >= 0; r--) stack.Push(roots[r]);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (jointOf[node] >= 0) throw new InvalidDataException($"Node {node} is reached twice; the node graph is not a tree.");
+            jointOf[node] = next++;
+            for (var c = children[node].Count - 1; c >= 0; c--) stack.Push(children[node][c]);
+        }
+
+        if (next != nodes.Length) throw new InvalidDataException("A node's parent chain never reaches a scene root.");
+        return jointOf;
+    }
+
+    private static byte[] BuildSkeleton(GltfNodeData[] nodes, int[] jointOf)
+    {
+        var count = nodes.Length;
+        var names = new string[count];
+        var parents = new short[count];
+        var poses = new JointPose[count];
+        for (var node = 0; node < count; node++)
+        {
+            var joint = jointOf[node];
+            names[joint] = nodes[node].Name ?? "";
+            parents[joint] = nodes[node].ParentIndex < 0 ? SkeletonBlob.NoParent : (short)jointOf[nodes[node].ParentIndex];
+            poses[joint] = new JointPose(nodes[node].RestTranslation, nodes[node].RestRotation, nodes[node].RestScale).WithNormalizedRotation();
+        }
+
+        using var skeleton = SkeletonBlob.Create(names, parents, poses);
+        return OzzArchive.WriteSkeleton(ref skeleton.Value);
+    }
+
+    private static ClipData Clip(GltfAnimationData clip, int index, int[] jointOf)
     {
         var channels = clip.Channels.Select(channel => new ClipChannelData(
-            channel.NodeIndex,
+            jointOf[channel.NodeIndex],
             channel.Path switch
             {
                 GltfAnimationPath.Translation => ChannelPath.Translation,
@@ -123,11 +193,11 @@ public static class GltfCook
         return new ClipData(clip.Name ?? $"clip_{index}", channels);
     }
 
-    /// <summary>SHA-256 of the clip's cooked channels, name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
+    /// <summary>SHA-256 of the clip's blob with the name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
     public static string ClipFingerprint(ClipData clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
-        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
+        return Convert.ToHexStringLower(SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
     }
 
     /// <summary>Positions through the matrix, normals and tangents through its cofactor matrix (non-uniform scale would shear them off the surface otherwise), re-normalized; uv and tangent sign pass through.</summary>

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 
 using Paradise.Animation;
+using Paradise.Animation.Offline;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
@@ -396,7 +397,7 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Animation.SkeletonFormat.Write(cooked.Skeleton);
+                blob = cooked.Skeleton;
                 break;
 
             default:
@@ -406,12 +407,43 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Animation.ClipFormat.Write(clip);
+                if (cooked.Skeleton is null)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} has no node tree to cook a clip over");
+                    return true;
+                }
+
+                try
+                {
+                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, Optimization(context, resolution.Asset));
+                }
+                catch (ArgumentException failure)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} {failure.Message}");
+                    return true;
+                }
+
                 break;
         }
 
         context.Output.WriteAllBytes("/" + context.Source, blob);
         return true;
+    }
+
+    /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key. A sidecar that will not parse is <c>verify</c>'s error to report; here it is a warning and a lossless clip, not a silent one.</summary>
+    private static AnimationOptimizer.Setting? Optimization(ImportContext context, UPath glb)
+    {
+        var sidecar = SidecarMeta.PathFor(glb);
+        if (!context.FileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return GlbImportSettings.ReadOptimization(SidecarMeta.Load(context.FileSystem, sidecar));
+        }
+        catch (SidecarMetaException failure)
+        {
+            ImporterLog.SidecarUnreadableForClip(context.Log, context.Source, sidecar.ToString(), failure.Message);
+            return null;
+        }
     }
 
     /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
@@ -498,7 +530,7 @@ public sealed class MeshImporter : IAssetImporter
     }
 }
 
-/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to the animation blobs (<see cref="Paradise.Animation.SkeletonFormat"/>, <see cref="Paradise.Animation.ClipFormat"/>) of the GLB they name.</summary>
+/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: references cooked to ozz archives (<see cref="Paradise.Animation.OzzArchive"/>) of the GLB they name.</summary>
 public sealed class AnimationImporter : IAssetImporter
 {
     public string Name => "animation";
@@ -729,6 +761,9 @@ internal static partial class ImporterLog
 
     [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "texture: {Source} has no preset in its sidecar; {Preset} inferred from the name")]
     public static partial void PresetInferred(ILogger logger, string source, TexturePreset preset);
+
+    [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "clip: {Source} cooked with every key because its GLB's sidecar {Sidecar} does not parse ({Problem}); `paradise assets verify` names the fault")]
+    public static partial void SidecarUnreadableForClip(ILogger logger, string source, string sidecar, string problem);
 
     [LoggerMessage(EventId = 32, Level = LogLevel.Information, Message = "{Source}: {Note}")]
     public static partial void PresetNote(ILogger logger, string source, string note);

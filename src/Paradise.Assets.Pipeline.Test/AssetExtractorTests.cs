@@ -16,6 +16,12 @@ namespace Paradise.Assets.Pipeline.Test;
 /// </summary>
 public class AssetExtractorTests
 {
+    private static string ClipName(byte[] archive)
+    {
+        using var clip = Paradise.Animation.OzzArchive.ReadAnimation(archive);
+        return clip.Value.Name.ToString();
+    }
+
     private static readonly AssetProjectLayout s_layout = new("/game");
 
     private const string Glb = "/game/assets/models/crate.glb";
@@ -213,7 +219,7 @@ public class AssetExtractorTests
         // The build agrees with the documents: Walk's blob is the Walk clip, whatever its index.
         var build = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
         await Assert.That(build.Errors).IsEmpty();
-        await Assert.That(Paradise.Animation.ClipFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim")).Name).IsEqualTo("Walk");
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim"))).IsEqualTo("Walk");
 
         // Renamed in the DCC with the same data: the hash finds it, the document follows the name.
         fileSystem.WriteAllBytes(Glb, CrateGlb(clips: ["Run", "Stride"]));

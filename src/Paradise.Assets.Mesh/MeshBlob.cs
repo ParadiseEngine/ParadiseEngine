@@ -18,10 +18,10 @@ public enum MeshVertexLayout : byte
 /// <summary>One draw inside the blob: a run of indices, the material slot it binds, and where it sits in the skeleton when skinned.</summary>
 /// <remarks>
 /// <c>MaterialSlot</c> <c>i</c> is glTF primitive <c>i</c> — the material-slot contract, frozen
-/// here. <c>NodeIndex</c> is the skeleton node the draw's mesh sat on, or −1: a static draw has
-/// its node transform baked into its vertices and needs none. <c>SkinIndex</c> names the skin
-/// whose palette skins the draw, or −1 for a rigid one. <c>Name</c> is the glTF node's, so a game
-/// can still address a draw by the name its authors know.
+/// here. <c>NodeIndex</c> is the skeleton joint the draw's mesh sat on, or −1: a static draw has
+/// its node transform baked into its vertices and needs none. <c>SkinIndex</c> is 0 for a draw the
+/// blob's <see cref="MeshSkin"/> skins, −1 for a rigid one. <c>Name</c> is the glTF node's, so a
+/// game can still address a draw by the name its authors know.
 /// </remarks>
 public struct MeshDraw
 {
@@ -33,6 +33,21 @@ public struct MeshDraw
     public BlobString<UTF8Encoding> Name;
 
     public readonly bool IsSkinned => SkinIndex >= 0;
+}
+
+/// <summary>
+/// How a skinned mesh binds to its skeleton: palette slot <c>i</c> (what a vertex's joint index
+/// names) is skeleton joint <c>Joints[i]</c> with inverse-bind <c>InverseBindMatrices[i]</c>, so
+/// the palette is <c>invBind[i] × model[Joints[i]] × inverse(model[draw.NodeIndex])</c> in the
+/// row-vector convention. Joint indices are the skeleton's (ozz depth-first order); a skeleton
+/// with more joints than the mesh uses is fine, which is what lets one avatar drive many meshes.
+/// </summary>
+public struct MeshSkin
+{
+    public BlobArray<int> Joints;
+    public BlobArray<Matrix4x4> InverseBindMatrices;
+
+    public int JointCount => Joints.Length;
 }
 
 /// <summary>
@@ -54,7 +69,8 @@ public struct MeshBlob
 {
     public const uint ExpectedMagic = 0x48534D50;   // "PMSH"
 
-    public const uint ExpectedVersion = 1;
+    /// <summary>2: the skin (joints and inverse binds) moved from the skeleton into the mesh, and joint indices became ozz skeleton order.</summary>
+    public const uint ExpectedVersion = 2;
 
     public const int StaticFloatsPerVertex = 12;
 
@@ -68,6 +84,7 @@ public struct MeshBlob
     public BlobArray<float> Vertices;
     public BlobArray<uint> Indices;
     public BlobArray<MeshDraw> Draws;
+    public MeshSkin Skin;
 
     public readonly int FloatsPerVertex => Layout == MeshVertexLayout.Skinned ? SkinnedFloatsPerVertex : StaticFloatsPerVertex;
 
@@ -80,13 +97,15 @@ public struct MeshBlob
 
 /// <summary>The managed shape the pipeline builds a blob from, and a test reads one back into.</summary>
 /// <param name="Draws">Each as (first index, index count, material slot, node index, skin index, name).</param>
+/// <param name="Skin">The binding of a skinned layout; null for a static one.</param>
 public sealed record MeshData(
     MeshVertexLayout Layout,
     float[] Vertices,
     uint[] Indices,
     IReadOnlyList<MeshDrawData> Draws,
     Vector3 BoundsMin,
-    Vector3 BoundsMax)
+    Vector3 BoundsMax,
+    MeshSkinData? Skin = null)
 {
     public int FloatsPerVertex => Layout == MeshVertexLayout.Skinned ? MeshBlob.SkinnedFloatsPerVertex : MeshBlob.StaticFloatsPerVertex;
 
@@ -94,6 +113,9 @@ public sealed record MeshData(
 }
 
 public readonly record struct MeshDrawData(uint FirstIndex, uint IndexCount, int MaterialSlot, int NodeIndex, int SkinIndex, string? Name);
+
+/// <summary>Palette slot → skeleton joint, with the inverse-bind matrix of each; see <see cref="MeshSkin"/>.</summary>
+public sealed record MeshSkinData(int[] Joints, Matrix4x4[] InverseBindMatrices);
 
 /// <summary>Builds and opens mesh blobs. Bytes in, bytes out; the layout itself is <see cref="MeshBlob"/>.</summary>
 public static class MeshBlobFormat
@@ -106,6 +128,11 @@ public static class MeshBlobFormat
             throw new ArgumentException($"{mesh.Vertices.Length} floats is not a whole number of {mesh.FloatsPerVertex}-float vertices.", nameof(mesh));
         }
 
+        if (mesh.Skin is { } skin && skin.Joints.Length != skin.InverseBindMatrices.Length)
+        {
+            throw new ArgumentException($"The skin has {skin.Joints.Length} joints and {skin.InverseBindMatrices.Length} inverse-bind matrices.", nameof(mesh));
+        }
+
         var builder = new StructBuilder<MeshBlob>();
         builder.Value.Magic = MeshBlob.ExpectedMagic;
         builder.Value.Version = MeshBlob.ExpectedVersion;
@@ -115,6 +142,8 @@ public static class MeshBlobFormat
         builder.SetArray(ref builder.Value.Vertices, mesh.Vertices);
         builder.SetArray(ref builder.Value.Indices, mesh.Indices);
         builder.SetArray(ref builder.Value.Draws, mesh.Draws.Select(Draw));
+        builder.SetArray(ref builder.Value.Skin.Joints, mesh.Skin?.Joints ?? []);
+        builder.SetArray(ref builder.Value.Skin.InverseBindMatrices, mesh.Skin?.InverseBindMatrices ?? []);
         return builder.CreateBlob();
     }
 
@@ -153,7 +182,8 @@ public static class MeshBlobFormat
             draws[i] = new MeshDrawData(draw.FirstIndex, draw.IndexCount, draw.MaterialSlot, draw.NodeIndex, draw.SkinIndex, draw.Name.Length == 0 ? null : draw.Name.ToString());
         }
 
-        return new MeshData(blob.Layout, blob.Vertices.ToArray(), blob.Indices.ToArray(), draws, blob.BoundsMin, blob.BoundsMax);
+        var skin = blob.Skin.Joints.Length == 0 ? null : new MeshSkinData(blob.Skin.Joints.ToArray(), blob.Skin.InverseBindMatrices.ToArray());
+        return new MeshData(blob.Layout, blob.Vertices.ToArray(), blob.Indices.ToArray(), draws, blob.BoundsMin, blob.BoundsMax, skin);
     }
 
     private static void Check(ref MeshBlob blob)
@@ -161,20 +191,45 @@ public static class MeshBlobFormat
         if (blob.Version != MeshBlob.ExpectedVersion) throw new InvalidDataException($"Mesh blob version {blob.Version} is not readable by this build (supports {MeshBlob.ExpectedVersion}).");
         if (blob.Layout is not (MeshVertexLayout.Static or MeshVertexLayout.Skinned)) throw new InvalidDataException($"Unknown vertex layout {(int)blob.Layout}.");
         if (blob.Vertices.Length % blob.FloatsPerVertex != 0) throw new InvalidDataException("Vertex floats are not a whole number of vertices.");
+        if (blob.Skin.Joints.Length != blob.Skin.InverseBindMatrices.Length) throw new InvalidDataException($"The skin has {blob.Skin.Joints.Length} joints and {blob.Skin.InverseBindMatrices.Length} inverse-bind matrices.");
         for (var i = 0; i < blob.Draws.Length; i++)
         {
             ref var draw = ref blob.Draws[i];
             if (draw.FirstIndex + (ulong)draw.IndexCount > (ulong)blob.Indices.Length) throw new InvalidDataException($"Draw {i} runs past the index buffer.");
+            if (draw.SkinIndex is not (-1 or 0)) throw new InvalidDataException($"Draw {i} names skin {draw.SkinIndex}; a mesh carries one skin, index 0.");
+            if (draw.SkinIndex == 0 && blob.Skin.Joints.Length == 0) throw new InvalidDataException($"Draw {i} is skinned but the mesh carries no skin.");
         }
 
         // A draw that fits the index buffer can still name a vertex past the end; that is an
         // out-of-range GPU read at upload, so it is refused here where it can be named.
         var vertexCount = (uint)blob.VertexCount;
-        for (var i = 0; i < blob.Indices.Length; i++)
+        var indices = blob.Indices.ToSpan();
+        for (var i = 0; i < indices.Length; i++)
         {
-            if (blob.Indices[i] >= vertexCount) throw new InvalidDataException($"Index {i} names vertex {blob.Indices[i]} of {vertexCount}.");
+            if (indices[i] >= vertexCount) throw new InvalidDataException($"Index {i} names vertex {indices[i]} of {vertexCount}.");
+        }
+
+        // A vertex naming a palette slot the skin lacks is an out-of-range read of the joint
+        // buffer on the GPU; refuse it here where the vertex can be named. Written so that NaN
+        // fails too (both comparisons are false for it) and a fractional index is refused rather
+        // than truncated by the shader.
+        if (blob.IsSkinned && blob.Skin.Joints.Length > 0)
+        {
+            var vertices = blob.Vertices.ToSpan();
+            var slots = blob.Skin.Joints.Length;
+            var stride = blob.FloatsPerVertex;
+            for (var v = 0; v < vertices.Length; v += stride)
+            {
+                for (var j = 0; j < 4; j++)
+                {
+                    var joint = vertices[v + StaticFloatsPerVertexOffsetOfJoints + j];
+                    if (!(joint >= 0f && joint < slots) || joint != MathF.Floor(joint)) throw new InvalidDataException($"Vertex {v / stride} names palette slot {joint} of {slots}.");
+                }
+            }
         }
     }
+
+    private const int StaticFloatsPerVertexOffsetOfJoints = MeshBlob.StaticFloatsPerVertex;
 
     private static IBuilder<MeshDraw> Draw(MeshDrawData data)
     {

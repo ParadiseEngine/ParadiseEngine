@@ -16,4 +16,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Animation\Paradise.Animation.csproj" />
   </ItemGroup>
+
+  <!-- Archives written by ozz-animation 0.17's own SkeletonBuilder/AnimationBuilder from the
+       procedural rig OzzParityTests regenerates: the format contract, as bytes. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\*.ozz" />
+  </ItemGroup>
 </Project>

@@ -7,12 +7,20 @@ public class MeshBlobTests
 {
     private static MeshData Sample(MeshVertexLayout layout = MeshVertexLayout.Static)
     {
-        var floats = layout == MeshVertexLayout.Skinned ? MeshBlob.SkinnedFloatsPerVertex : MeshBlob.StaticFloatsPerVertex;
+        var skinned = layout == MeshVertexLayout.Skinned;
+        var floats = skinned ? MeshBlob.SkinnedFloatsPerVertex : MeshBlob.StaticFloatsPerVertex;
         var vertices = Enumerable.Range(0, 3 * floats).Select(i => i * 0.5f).ToArray();
+        if (skinned)
+        {
+            // Joint slots name the skin's two palette entries, not the running sequence.
+            for (var v = 0; v < 3; v++) for (var j = 0; j < 4; j++) vertices[v * floats + MeshBlob.StaticFloatsPerVertex + j] = j % 2;
+        }
+
         return new MeshData(
             layout, vertices, [0, 1, 2],
-            [new MeshDrawData(0, 3, 0, layout == MeshVertexLayout.Skinned ? 4 : -1, layout == MeshVertexLayout.Skinned ? 0 : -1, "Crate")],
-            new Vector3(-1, -2, -3), new Vector3(1, 2, 3));
+            [new MeshDrawData(0, 3, 0, skinned ? 4 : -1, skinned ? 0 : -1, "Crate")],
+            new Vector3(-1, -2, -3), new Vector3(1, 2, 3),
+            skinned ? new MeshSkinData([3, 7], [Matrix4x4.Identity, Matrix4x4.CreateTranslation(0, -1, 0)]) : null);
     }
 
     [Test]
@@ -39,6 +47,33 @@ public class MeshBlobTests
         await Assert.That(read.VertexCount).IsEqualTo(3);
         await Assert.That(read.Draws[0].SkinIndex).IsEqualTo(0);
         await Assert.That(read.Draws[0].NodeIndex).IsEqualTo(4);
+        await Assert.That(read.Skin!.Joints).IsEquivalentTo(new[] { 3, 7 });
+        await Assert.That(read.Skin.InverseBindMatrices[1]).IsEqualTo(Matrix4x4.CreateTranslation(0, -1, 0));
+        await Assert.That(MeshBlobFormat.Read(MeshBlobFormat.Write(Sample())).Skin).IsNull();
+    }
+
+    [Test]
+    public async Task a_skinned_draw_without_a_skin_and_a_vertex_past_the_palette_are_refused()
+    {
+        var noSkin = Sample(MeshVertexLayout.Skinned) with { Skin = null };
+        var pastPalette = Sample(MeshVertexLayout.Skinned);
+        pastPalette.Vertices[MeshBlob.StaticFloatsPerVertex] = 2f;
+        var mismatched = Sample(MeshVertexLayout.Skinned) with { Skin = new MeshSkinData([3, 7], [Matrix4x4.Identity]) };
+
+        var missing = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(noSkin))).Throws<InvalidDataException>();
+        await Assert.That(missing!.Message).Contains("no skin");
+        var past = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(pastPalette))).Throws<InvalidDataException>();
+        await Assert.That(past!.Message).Contains("palette slot 2 of 2");
+        await Assert.That(() => MeshBlobFormat.Write(mismatched)).Throws<ArgumentException>();
+
+        var notANumber = Sample(MeshVertexLayout.Skinned);
+        notANumber.Vertices[MeshBlob.SkinnedFloatsPerVertex + MeshBlob.StaticFloatsPerVertex + 1] = float.NaN;
+        var fractional = Sample(MeshVertexLayout.Skinned);
+        fractional.Vertices[2 * MeshBlob.SkinnedFloatsPerVertex + MeshBlob.StaticFloatsPerVertex + 3] = 0.5f;
+        var nan = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(notANumber))).Throws<InvalidDataException>();
+        await Assert.That(nan!.Message).Contains("Vertex 1");
+        var half = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(fractional))).Throws<InvalidDataException>();
+        await Assert.That(half!.Message).Contains("Vertex 2 names palette slot 0.5");
     }
 
     [Test]
@@ -69,7 +104,7 @@ public class MeshBlobTests
         BitConverter.TryWriteBytes(newer.AsSpan(4), MeshBlob.ExpectedVersion + 1);
 
         await Assert.That(MeshBlobFormat.IsMeshBlob(bytes)).IsTrue();
-        await Assert.That(MeshBlobFormat.IsMeshBlob("PSKL"u8.ToArray())).IsFalse();
+        await Assert.That(MeshBlobFormat.IsMeshBlob("\u0001ozz-skeleton"u8.ToArray())).IsFalse();
         var foreign = await Assert.That(() => MeshBlobFormat.Read("not a blob at all"u8.ToArray())).Throws<InvalidDataException>();
         await Assert.That(foreign!.Message).Contains("magic");
         var version = await Assert.That(() => MeshBlobFormat.Read(newer)).Throws<InvalidDataException>();

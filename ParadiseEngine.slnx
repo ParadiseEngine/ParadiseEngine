@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/benchmarks/">
+    <Project Path="src/Paradise.Animation.Benchmarks/Paradise.Animation.Benchmarks.csproj" />
     <Project Path="src/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/generators/">

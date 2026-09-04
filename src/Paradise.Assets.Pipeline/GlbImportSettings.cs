@@ -1,3 +1,4 @@
+using Paradise.Animation.Offline;
 using Paradise.Assets.Documents;
 using Paradise.Authoring;
 
@@ -45,6 +46,11 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public const string GlbFingerprintKey = "glb";
     public const string DocumentFingerprintKey = "doc";
 
+    /// <summary><c>optimize = { tolerance = 0.001, distance = 0.1 }</c>: the clip decimation the build applies to this GLB's clips; absent keeps every key.</summary>
+    public const string OptimizeKey = "optimize";
+    public const string ToleranceKey = "tolerance";
+    public const string DistanceKey = "distance";
+
     public static GlbImportSettings Instance { get; } = new();
 
     private GlbImportSettings()
@@ -64,6 +70,8 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             {
                 case ExtractKey when value is string: continue;
                 case ExtractKey: return $"holds a non-string '{ExtractKey}' in [{Domain}]";
+                case OptimizeKey when ReadOptimization(value) is not null: continue;
+                case OptimizeKey: return $"holds '{OptimizeKey}' in [{Domain}] that is not {{ tolerance, distance }} with positive numbers";
                 case MeshKey or SkeletonKey or PrefabKey when ReadReference(value) is not null: continue;
                 case MeshKey or SkeletonKey or PrefabKey: return $"holds '{key}' in [{Domain}] that is not {{ guid, path }}";
                 case ClipsKey when value is IReadOnlyList<object> clips:
@@ -140,8 +148,39 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(references);
-        WriteDomain(meta, ReadExtraction(meta), references);
+        WriteDomain(meta, ReadExtraction(meta), references, ReadOptimization(meta));
     }
+
+    /// <summary>The recorded clip decimation, or null for none.</summary>
+    public static AnimationOptimizer.Setting? ReadOptimization(SidecarMeta meta)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        return ReadOptimization(meta.Setting(Domain)?.Value(OptimizeKey));
+    }
+
+    /// <summary>Records a clip decimation, or removes it with null, keeping the rest of the domain.</summary>
+    public static void WriteOptimization(SidecarMeta meta, AnimationOptimizer.Setting? setting)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        WriteDomain(meta, ReadExtraction(meta), Read(meta), setting);
+    }
+
+    private static AnimationOptimizer.Setting? ReadOptimization(object? value)
+    {
+        if (value is not (CanonicalTomlTable or CanonicalInlineTable)) return null;
+        if (ReadNumber(Lookup(value, ToleranceKey)) is not { } tolerance || tolerance <= 0f) return null;
+        if (ReadNumber(Lookup(value, DistanceKey)) is not { } distance || distance <= 0f) return null;
+        return new AnimationOptimizer.Setting(tolerance, distance);
+    }
+
+    private static float? ReadNumber(object? value) => value switch
+    {
+        double number => (float)number,
+        float number => number,
+        long number => number,
+        int number => number,
+        _ => null,
+    };
 
     /// <summary>What <c>extract</c> recorded, or an empty record for a GLB never extracted.</summary>
     public static GlbExtraction ReadExtraction(SidecarMeta meta)
@@ -165,7 +204,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(extraction);
-        WriteDomain(meta, extraction, Read(meta));
+        WriteDomain(meta, extraction, Read(meta), ReadOptimization(meta));
     }
 
     /// <summary>
@@ -173,10 +212,15 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// half changed: the sidecar reader hands an inline table back as a plain one, and copying
     /// that through verbatim wrote it back as a <c>[glb.mesh]</c> section the next run undid.
     /// </summary>
-    private static void WriteDomain(SidecarMeta meta, GlbExtraction extraction, IReadOnlyList<MeshReference> references)
+    private static void WriteDomain(SidecarMeta meta, GlbExtraction extraction, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
     {
         var table = new CanonicalTomlTable();
         if (extraction.Directory is { } directory) table.Add(ExtractKey, directory);
+        if (optimization is { } setting)
+        {
+            table.Add(OptimizeKey, new CanonicalInlineTable { { ToleranceKey, (double)setting.Tolerance }, { DistanceKey, (double)setting.Distance } });
+        }
+
         if (extraction.Mesh is { } mesh) table.Add(MeshKey, AssetReferenceCodec.Write(mesh));
         if (extraction.Skeleton is { } skeleton) table.Add(SkeletonKey, AssetReferenceCodec.Write(skeleton));
         if (extraction.Prefab is { } prefab) table.Add(PrefabKey, AssetReferenceCodec.Write(prefab));
