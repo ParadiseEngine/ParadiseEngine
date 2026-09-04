@@ -64,18 +64,25 @@ public sealed class FrameGraph
     private const int MaxColorAttachments = RenderPassDesc.MaxColorAttachments;
 
     private readonly List<Resource> _resources = [];
+    private readonly Dictionary<string, int> _owned = new(StringComparer.Ordinal);
     private readonly List<Pass> _passes = [];
     private readonly List<ReadEdge> _reads = [];
     private readonly Stack<int> _liveStack = new();
     private RenderPassDesc[] _descs = [];
     private int[] _order = [];
 
-    public FrameGraph()
+    /// <param name="textures">The targets this graph owns. Null for a graph that only routes
+    /// imported resources.</param>
+    public FrameGraph(GraphTextureRegistry? textures = null)
     {
+        Textures = textures;
         // Index 0 is always the backbuffer, so Reset never has to re-add it and Backbuffer needs
         // no null check at a declaration site.
-        _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default));
+        _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default, null));
     }
+
+    /// <summary>The targets this graph owns, or null.</summary>
+    public GraphTextureRegistry? Textures { get; }
 
     /// <summary>The frame's presentation target. Always <see cref="GraphResourceScope.External"/>:
     /// the whole point of the frame is that somebody sees it.</summary>
@@ -89,13 +96,14 @@ public sealed class FrameGraph
     {
         _passes.Clear();
         _reads.Clear();
+        _owned.Clear();
         _resources.RemoveRange(1, _resources.Count - 1);
     }
 
     /// <summary>Route a color attachment to a texture view the caller owns.</summary>
     public GraphTexture ImportColor(TextureViewHandle view, GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedColor, scope, view, default));
+        _resources.Add(new Resource(ResourceKind.ImportedColor, scope, view, default, null));
         return new GraphTexture(_resources.Count - 1);
     }
 
@@ -104,8 +112,26 @@ public sealed class FrameGraph
     public GraphTexture ImportDepth(TextureHandle texture, TextureViewHandle view = default,
         GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedDepth, scope, view, texture));
+        _resources.Add(new Resource(ResourceKind.ImportedDepth, scope, view, texture, null));
         return new GraphTexture(_resources.Count - 1);
+    }
+
+    /// <summary>A target the graph owns, by its <see cref="GraphTextureRegistry"/> name. One
+    /// resource per name per frame, however many passes ask — which is what lets a read of the
+    /// whole shadow array find the passes that each wrote one layer of it. Its scope is derived:
+    /// private unless the registry exported it.</summary>
+    public GraphTexture Texture(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (_owned.TryGetValue(name, out var index)) return new GraphTexture(index);
+
+        var textures = Textures ?? throw new InvalidOperationException(
+            "This graph owns no textures; import the resource instead.");
+        var scope = textures.IsExported(name) ? GraphResourceScope.External : GraphResourceScope.GraphOnly;
+        _resources.Add(new Resource(ResourceKind.Owned, scope, textures.View(name), textures.Texture(name), name));
+        index = _resources.Count - 1;
+        _owned.Add(name, index);
+        return new GraphTexture(index);
     }
 
     /// <summary>Declare a raster pass. <paramref name="offset"/> shifts it within the event's gap —
@@ -223,13 +249,25 @@ public sealed class FrameGraph
             passes[index].Live = true;
 
             foreach (var edge in _reads)
-            {
-                if (edge.Pass != index) continue;
-                for (var producer = 0; producer < count; producer++)
-                    if (!passes[producer].Live && Writes(in passes[producer], edge.Resource))
-                        _liveStack.Push(producer);
-            }
+                if (edge.Pass == index)
+                    PushProducers(passes, count, edge.Resource);
+
+            // An attachment loaded rather than cleared is a read of whatever wrote it, and the
+            // one kind the declaring code cannot forget to mention: it is in the attachment.
+            ref var live = ref passes[index];
+            for (var c = 0; c < live.ColorCount; c++)
+                if (live.Colors[c].Load == LoadOp.Load)
+                    PushProducers(passes, count, live.Colors[c].Target.Index);
+            if (live.HasDepth && live.Depth.Load == LoadOp.Load)
+                PushProducers(passes, count, live.Depth.Target.Index);
         }
+    }
+
+    private void PushProducers(Span<Pass> passes, int count, int resourceIndex)
+    {
+        for (var producer = 0; producer < count; producer++)
+            if (!passes[producer].Live && Writes(in passes[producer], resourceIndex))
+                _liveStack.Push(producer);
     }
 
     private bool WritesObservable(in Pass pass)
@@ -261,13 +299,21 @@ public sealed class FrameGraph
         if (!pass.HasDepth) return null;
         var a = pass.Depth;
         var resource = _resources[a.Target.Index];
-        return new DepthAttachmentDesc(resource.Texture, a.Load, a.Store, a.ClearDepth, resource.View);
+        // An owned depth target renders through the texture's own default view unless a layer was
+        // chosen; an imported one renders through whatever view it was imported with.
+        var view = resource.Kind switch
+        {
+            ResourceKind.Owned when a.Layer >= 0 => Textures!.SliceView(resource.Name!, (uint)a.Layer),
+            ResourceKind.Owned => default,
+            _ => resource.View,
+        };
+        return new DepthAttachmentDesc(resource.Texture, a.Load, a.Store, a.ClearDepth, view);
     }
 
-    private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth }
+    private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth, Owned }
 
     private readonly record struct Resource(
-        ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture);
+        ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture, string? Name);
 
     private readonly record struct ReadEdge(int Pass, int Resource);
 
@@ -278,6 +324,7 @@ public sealed class FrameGraph
         public StoreOp Store;
         public ColorRgba Clear;
         public float ClearDepth;
+        public int Layer;
     }
 
     [InlineArray(MaxColorAttachments)]
@@ -333,13 +380,25 @@ public sealed class FrameGraph
         }
 
         /// <summary>Bind the depth attachment.</summary>
-        public PassBuilder Depth(GraphTexture target, LoadOp load, StoreOp store, float clear = 1f)
+        public PassBuilder Depth(GraphTexture target, LoadOp load, StoreOp store, float clear = 1f) =>
+            DepthAttachment(target, -1, load, store, clear);
+
+        /// <summary>Bind one layer of an owned depth array as the depth attachment. The pass still
+        /// counts as writing the whole array, so a reader of the array keeps every layer's pass.</summary>
+        public PassBuilder DepthLayer(GraphTexture target, uint layer, LoadOp load, StoreOp store, float clear = 1f)
+        {
+            if (_graph._resources[target.Index].Kind != ResourceKind.Owned)
+                throw new ArgumentException("Only a texture the graph owns can be rendered by layer; import the layer's view instead.", nameof(target));
+            return DepthAttachment(target, (int)layer, load, store, clear);
+        }
+
+        private PassBuilder DepthAttachment(GraphTexture target, int layer, LoadOp load, StoreOp store, float clear)
         {
             if (!target.IsValid) throw new ArgumentException("Attachment target is not a graph resource.", nameof(target));
 
             ref var pass = ref _graph.PassAt(_index);
             pass.HasDepth = true;
-            pass.Depth = new Attachment { Target = target, Load = load, Store = store, ClearDepth = clear };
+            pass.Depth = new Attachment { Target = target, Load = load, Store = store, ClearDepth = clear, Layer = layer };
             return this;
         }
 

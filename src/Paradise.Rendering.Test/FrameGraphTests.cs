@@ -372,4 +372,113 @@ public class FrameGraphTests
                 counts.Add(cmd.Draw.VertexCount);
         return [.. counts];
     }
+
+    private static (FrameGraph Graph, GraphTextureRegistry Textures) OwnedGraph()
+    {
+        var textures = new GraphTextureRegistry(new FakeTextureFactory());
+        return (new FrameGraph(textures), textures);
+    }
+
+    private static TextureDesc DepthArray(uint layers) => new(
+        null, 16, 16, layers, 1, 1, TextureDimension.D2, TextureFormat.Depth32Float,
+        TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
+
+    /// <summary>The reason owned resources are interned: the frame group samples the whole shadow
+    /// array while each shadow pass writes one layer. If each mention minted a resource, the read
+    /// would find no producer and every layer's pass would be culled — which is exactly what the
+    /// baseline caught the first time.</summary>
+    [Test]
+    public async Task a_read_of_an_owned_array_keeps_the_passes_that_wrote_its_layers()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("shadows", DepthArray(2));
+        textures.Ensure("hdr", DepthArray(1));
+        textures.Export("hdr");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        var shadows = graph.Texture("shadows");
+        graph.AddRasterPass("layer0", RenderPassEvent.Shadows)
+            .DepthLayer(shadows, 0, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("layer1", RenderPassEvent.Shadows)
+            .DepthLayer(graph.Texture("shadows"), 1, LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("hdr"), LoadOp.Clear, StoreOp.Store).Reads(shadows).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        var culled = graph.CulledPassCount;
+        var layer1View = graph.Compile(writer).Passes.Span[1].Depth!.Value.DepthView;
+        var expectedLayer1 = textures.SliceView("shadows", 1);
+
+        await Assert.That(passes).IsEqualTo(3);
+        await Assert.That(culled).IsEqualTo(0);
+        await Assert.That(layer1View).IsEqualTo(expectedLayer1);
+    }
+
+    [Test]
+    public async Task an_owned_target_nobody_exported_or_read_culls_its_producer()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("private", DepthArray(1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("dead", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("private"), LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task exporting_a_target_makes_writing_it_observable()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("scene", DepthArray(1));
+        textures.Export("scene");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("capture", RenderPassEvent.SceneColorCapture)
+            .Depth(graph.Texture("scene"), LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(1);
+    }
+
+    /// <summary>Loading an attachment is a read the declaring code cannot forget, because it is
+    /// spelled on the attachment itself.</summary>
+    [Test]
+    public async Task loading_an_attachment_keeps_the_pass_that_wrote_it()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("mip", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("fill", RenderPassEvent.Post)
+            .Depth(graph.Texture("mip"), LoadOp.Clear, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("accumulate", RenderPassEvent.Post, offset: 1)
+            .Depth(graph.Texture("mip"), LoadOp.Load, StoreOp.Store).Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Depth(graph.Texture("out"), LoadOp.Clear, StoreOp.Store).Reads(graph.Texture("mip")).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task rendering_by_layer_needs_an_owned_texture()
+    {
+        var graph = GraphWithOneColorTarget(out var imported);
+
+        await Assert.That(() => graph.AddRasterPass("p", RenderPassEvent.Shadows)
+            .DepthLayer(imported, 0, LoadOp.Clear, StoreOp.Store)).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task a_graph_without_a_registry_refuses_names()
+    {
+        var graph = new FrameGraph();
+
+        await Assert.That(() => graph.Texture("hdr")).Throws<InvalidOperationException>();
+    }
 }
