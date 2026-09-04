@@ -31,6 +31,7 @@ public sealed class EditorShell : IEditorShell
     private readonly IOperatorDispatcher _dispatcher;
     private readonly IRegistry<KeyBinding> _keyBindings;
     private readonly Registry<EditorWindow> _windows = new();
+    private readonly FieldRendererRegistry _fieldRenderers = new();
     private int _panelMenuOrder = PanelMenuOrderBase;
     private readonly MainMenuBar _menuBar;
     private readonly CommandPalette _palette;
@@ -60,6 +61,11 @@ public sealed class EditorShell : IEditorShell
     /// window id.</summary>
     public IRegistry<EditorWindow> Windows => _windows;
 
+    /// <summary>Inspector rows by field type. Owned here rather than by the Inspector panel so an
+    /// extension can contribute one before that panel exists, and so
+    /// <see cref="Unregister(string, EditorRegistries)"/> can take it away again.</summary>
+    public FieldRendererRegistry FieldRenderers => _fieldRenderers;
+
     /// <summary>The next View-menu slot for a panel. Called by <c>ShellRegistrar.AddPanel</c>.</summary>
     public int NextPanelMenuOrder() => _panelMenuOrder++;
 
@@ -69,6 +75,39 @@ public sealed class EditorShell : IEditorShell
         ArgumentNullException.ThrowIfNull(extension);
         ArgumentNullException.ThrowIfNull(registries);
         extension.Register(new ShellRegistrar(this, new EditorRegistrar(registries, new OwnerToken(extension.Id))));
+    }
+
+    /// <summary>Remove everything <paramref name="extensionId"/> registered — operators, windows,
+    /// panels, menu entries, keybindings, workspaces, host kinds and inspector rows.</summary>
+    /// <remarks>
+    /// <para>
+    /// One call, because the state an extension owns is split across two layers by design — Core's
+    /// registries know nothing of drawings — and a caller doing it in two steps will eventually do
+    /// one of them. That is not hypothetical: this method exists because the only code that had
+    /// ever unregistered an extension was a test, and the test had to know both halves.
+    /// </para>
+    /// <para>
+    /// Safe to call from inside a frame, including from an operator the extension itself
+    /// registered: every registry hands out a snapshot rather than a live view, so an enumeration
+    /// already in flight finishes over the array it started on.
+    /// </para>
+    /// </remarks>
+    public void Unregister(string extensionId, EditorRegistries registries)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(extensionId);
+        ArgumentNullException.ThrowIfNull(registries);
+
+        var owner = new OwnerToken(extensionId);
+        registries.RemoveOwner(owner);
+        _windows.RemoveOwner(owner);
+        _fieldRenderers.RemoveOwner(owner);
+    }
+
+    /// <inheritdoc cref="Unregister(string, EditorRegistries)"/>
+    public void Unregister(IShellExtension extension, EditorRegistries registries)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        Unregister(extension.Id, registries);
     }
 
     /// <summary>The active input context, which decides which of two bindings on one chord wins.

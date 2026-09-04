@@ -245,7 +245,8 @@ public class ShellExtensibilityTests
 
         public void Register(ShellRegistrar registrar) => registrar
             .AddPanel(new VendorPanel())
-            .AddOperator(new VendorOperator());
+            .AddOperator(new VendorOperator())
+            .AddFieldRenderer(new FieldRenderer("vendor.duration", _ => { }));
     }
 
     private sealed class VendorOperator : IOperator
@@ -289,25 +290,69 @@ public class ShellExtensibilityTests
         await Assert.That(panel.IsOpen).IsTrue();
     }
 
-    // Owner scoping is what makes an extension removable. It has to cover the UI half too, or
-    // unloading one leaves its panels drawing over an editor that has forgotten about them.
+    // Owner scoping is what makes an extension removable, and the state it owns is split across
+    // three registries in two assemblies. ONE call has to clear all of them, or an unload that
+    // looks complete leaves panels drawing over an editor that has forgotten about them — or, more
+    // quietly, leaves an inspector row still overriding a built-in one.
     [Test]
-    public async Task removing_the_extension_removes_its_panel_and_its_operator()
+    public async Task unregistering_removes_everything_the_extension_added()
     {
         var (shell, layout, registries, dispatcher) = Compose();
         using var _ = layout;
-        var owner = new OwnerToken(VendorExtension.OwnerId);
 
-        registries.RemoveOwner(owner);
-        shell.Windows.RemoveOwner(owner);
+        await Assert.That(shell.FieldRenderers.For("vendor.duration")).IsNotNull();
+
+        shell.Unregister(VendorExtension.OwnerId, registries);
 
         await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == PanelId)).IsFalse();
         await Assert.That(dispatcher.Find("vendor.profile.start")).IsNull();
+        await Assert.That(dispatcher.Find($"{PanelId}.toggle")).IsNull();
         await Assert.That(registries.Menus.Entries.Any(e => e.OperatorId == $"{PanelId}.toggle")).IsFalse();
+        await Assert.That(registries.Windows.Entries.Any(w => w.Id == PanelId)).IsFalse();
+        await Assert.That(shell.FieldRenderers.For("vendor.duration")).IsNull();
 
         // and the built-in shell is untouched
         await Assert.That(dispatcher.Find(UndoOperator.OperatorId)).IsNotNull();
         await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == EditorWindows.Hierarchy)).IsTrue();
+    }
+
+    // The whole point of registering at runtime is doing it again afterwards: an extension that
+    // cannot be re-added after an unload is a one-shot, not a toggle.
+    [Test]
+    public async Task an_extension_can_be_registered_again_after_being_unregistered()
+    {
+        var (shell, layout, registries, dispatcher) = Compose();
+        using var _ = layout;
+
+        shell.Unregister(VendorExtension.OwnerId, registries);
+        shell.Register(new VendorExtension(), registries);
+
+        await Assert.That(shell.Windows.Entries.Count(w => w.Descriptor.Id == PanelId)).IsEqualTo(1);
+        await Assert.That(dispatcher.Find($"{PanelId}.toggle")).IsNotNull();
+        await Assert.That(registries.Menus.Entries.Count(e => e.OperatorId == $"{PanelId}.toggle")).IsEqualTo(1);
+    }
+
+    // Unregistering from inside a frame is the realistic case — an operator the extension itself
+    // registered, run from a menu. Every registry hands out a snapshot, so the in-flight draw
+    // finishes over the array it started on rather than throwing.
+    [Test]
+    public async Task an_extension_can_unregister_itself_mid_frame()
+    {
+        using var context = new EditorImGuiContext();
+        var (shell, layout, registries, _) = Compose();
+        using var __ = layout;
+
+        context.Frame(() =>
+        {
+            shell.Layout.Draw();
+            foreach (var window in shell.Windows.Entries)
+            {
+                window.Draw();
+                if (window.Descriptor.Id == PanelId) shell.Unregister(VendorExtension.OwnerId, registries);
+            }
+        });
+
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == PanelId)).IsFalse();
     }
 
     // A vendor panel is as reachable as a built-in one — same palette, same fuzzy search.

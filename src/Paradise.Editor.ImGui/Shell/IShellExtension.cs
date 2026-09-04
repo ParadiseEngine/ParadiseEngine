@@ -60,6 +60,14 @@ public sealed class ShellRegistrar(EditorShell shell, EditorRegistrar core)
         core.AddKeyBinding(binding);
         return this;
     }
+
+    /// <summary>Contribute an Inspector row for one schema field type. The LAST registration for a
+    /// type wins, so an extension can replace a built-in row.</summary>
+    public ShellRegistrar AddFieldRenderer(FieldRenderer renderer)
+    {
+        shell.FieldRenderers.Add(core.Owner, renderer);
+        return this;
+    }
 }
 
 /// <summary>A unit of contribution to the editor's UI: panels, operators, menu items, keybindings.
