@@ -46,7 +46,7 @@ public sealed partial class PbrRenderer : IDisposable
             var clamped = Math.Clamp(value, 256u, 8192u);
             if (clamped == _shadowMapSize) return;
             _shadowMapSize = clamped;
-            DestroyShadowArray(); // recreated (and the frame group rebuilt) by the next EnsureShadowArray
+            _shadowLayerCapacity = 0; // the next EnsureShadowArray re-declares the array at the new size
         }
     }
 
@@ -82,7 +82,8 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly List<(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry)> _customPrograms = [];
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
-    private readonly FrameGraph _graph = new();
+    private readonly GraphTextureRegistry _targets;
+    private readonly FrameGraph _graph;
     private readonly List<GraphTexture> _bloomResources = [];
 
     // Frame-local encode state: RenderFrame computes it, the pass recorders consume it. Fields
@@ -101,7 +102,7 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly PipelineHandle _skyPipeline;
     private readonly BufferHandle _skyUniformBuffer;
     private readonly BindGroupHandle _skyGroup;
-    // HDR post-process seam: the main pass (PBR + sky) now renders LINEAR HDR into _hdrTexture
+    // HDR post-process seam: the main pass (PBR + sky) now renders LINEAR HDR into the HDR target
     // (Rgba16Float) instead of tonemapping to the swapchain in-shader; a fullscreen composite pass
     // tonemaps it (+ optional bloom) to the surface. This is where future post effects hook in.
     private readonly PipelineHandle _compositePipeline;
@@ -111,19 +112,23 @@ public sealed partial class PbrRenderer : IDisposable
     // texture between the two halves of the split main pass — the screen-space refraction source
     // blend materials bind as a group-2 extra entry (the engine's screen_texture analog).
     private bool _sceneColorCapture;
-    private TextureHandle _sceneColorTexture;
-    private TextureViewHandle _sceneColorView;
     private PipelineHandle _blitPipeline;
     private BindGroupLayoutDesc? _blitGroupLayout;
     private BindGroupHandle _sceneBlitGroup;
-    private TextureViewHandle _depthSampleView;
     private BindGroupLayoutDesc _compositeGroupLayout;
-    private TextureHandle _hdrTexture;
-    private TextureViewHandle _hdrView;
     private BindGroupHandle _compositeGroup;
     private const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
+    // The frame's targets live in _targets under these names; a resize re-declares them and the
+    // registry recreates only what changed. The shadow array is grow-only and sized per frame.
+    private const string HdrTarget = "PbrHdrScene";
+    private const string DepthTarget = "PbrDepth";
+    private const string PositionTarget = "PbrSsaoPosition";
+    private const string PrepassDepthTarget = "PbrSsaoPrepassDepth";
+    private const string SceneColorTarget = "PbrSceneColor";
+    private const string ShadowArrayTarget = "PbrShadowArray";
+    private static readonly string[] BloomTargets = ["PbrBloom0", "PbrBloom1", "PbrBloom2", "PbrBloom3", "PbrBloom4", "PbrBloom5"];
     // Bloom mip chain (progressive dual-filter, COD-style): a half-res base halving to ~BloomMinDim.
-    // bright-pass (threshold) → downsample chain → additive upsample chain; _bloomViews[0] is the
+    // bright-pass (threshold) → downsample chain → additive upsample chain; mip 0 is the
     // result composite adds. Pipelines built once; textures/views/groups rebuilt on resize.
     private const int BloomMaxLevels = 6;
     private const uint BloomMinDim = 8;
@@ -133,20 +138,15 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly BufferHandle _bloomUniformBuffer;
     private BindGroupLayoutDesc _bloomGroupLayout;
     private int _bloomLevels;
-    private TextureHandle[] _bloomTextures = [];
-    private TextureViewHandle[] _bloomViews = [];
-    private BindGroupHandle[] _bloomGroups = []; // _bloomGroups[i] samples _bloomTextures[i]
-    private BindGroupHandle _bloomHdrGroup;        // samples _hdrView (bright pass source)
+    private BindGroupHandle[] _bloomGroups = []; // _bloomGroups[i] samples bloom mip i
+    private BindGroupHandle _bloomHdrGroup;        // samples the HDR scene (bright pass source)
     // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
-    // _positionTexture (Rgba32Float, offscreen color) with its own depth (_prepassDepthAux). The PBR
+    // the position target (Rgba32Float, offscreen color) with its own depth target. The PBR
     // shader (group 3) samples it via textureLoad and darkens ambient. The group is rebuilt on resize.
     private readonly ShaderProgramDesc _positionPrepassProgram;
     private readonly PipelineHandle _positionPrepassPipeline;
     private readonly BufferHandle _ssaoUniformBuffer;
     private BindGroupHandle _ssaoGroup;
-    private TextureHandle _positionTexture;
-    private TextureViewHandle _positionView;
-    private TextureHandle _prepassDepthAux;
     private BindGroupLayoutDesc _ssaoGroupLayout;
     // Sky-reflection specular (Godot reflected_light_source = Sky): the gradient sky GGX-prefiltered
     // on the CPU into a small LUT (u: reflection.y, v: roughness — the gradient is azimuth-symmetric).
@@ -201,11 +201,6 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly BufferHandle _shadowDrawRing;
     private readonly BindGroupHandle _shadowDrawGroup;
     private readonly byte[] _shadowStaging;
-    // The shadow-map array + its views, (re)allocated by EnsureShadowArray (grow-only). The D2Array
-    // view is what the shader samples; each per-layer D2 view is a render target for one shadow pass.
-    private TextureHandle _shadowArray;
-    private TextureViewHandle _shadowArrayView;
-    private TextureViewHandle[] _shadowLayerViews = [];
     private uint _shadowLayerCapacity;
     // Per-frame shadow plan: one render "view" per shadow-casting light face, plus per-light array
     // assignment (base layer / face count; base layer -1 = not shadowed this frame).
@@ -215,7 +210,6 @@ public sealed partial class PbrRenderer : IDisposable
     // shader's normal-offset bias scales with the map's actual texel density instead of assuming one.
     private readonly float[] _shadowTexelWorld = new float[FrameUniformsGpu.MaxSceneLights];
     private readonly int[] _shadowFaceCount = new int[FrameUniformsGpu.MaxSceneLights];
-    private TextureHandle _depthTexture;
     private uint _width;
     private uint _height;
     private float _specularAaVariance;
@@ -230,6 +224,8 @@ public sealed partial class PbrRenderer : IDisposable
         ILogger? logger = null)
     {
         _renderer = renderer;
+        _targets = new GraphTextureRegistry(renderer);
+        _graph = new FrameGraph(_targets);
         _log = logger ?? NullLogger.Instance;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
@@ -342,7 +338,7 @@ public sealed partial class PbrRenderer : IDisposable
         // is occluded by scene geometry. Fragment entry follows the same sRGB decision as the scene.
         var skyProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.sky");
         _skyPipeline = renderer.CreatePipeline(
-            skyProgram, HdrFormat, // linear HDR into _hdrTexture, like the PBR pass; composite tonemaps
+            skyProgram, HdrFormat, // linear HDR into the HDR target, like the PBR pass; composite tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: false,
             depthCompare: CompareFunction.Always,
@@ -356,7 +352,7 @@ public sealed partial class PbrRenderer : IDisposable
 
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _depthTexture = CreateDepthTexture(_width, _height);
+        EnsureFrameTargets();
 
         // SSAO world-position pre-pass program + pipeline. Reuses the main draw ring/group (its group
         // 0 is the same DrawUniforms, made dynamic-offset), renders opaque geometry to an Rgba32Float
@@ -394,8 +390,6 @@ public sealed partial class PbrRenderer : IDisposable
         _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO + sky-specular LUT
         _ssaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        _positionTexture = CreatePositionTexture(_width, _height);
-        _prepassDepthAux = CreateDepthTexture(_width, _height);
         _skySpecLutTexture = renderer.CreateTexture(new TextureDesc(
             "PbrSkySpecularLut", SkySpecLutWidth, SkySpecLutHeight, 1, 1, 1, TextureDimension.D2,
             TextureFormat.Rgba8UnormSrgb, TextureUsage.TextureBinding | TextureUsage.CopyDst));
@@ -434,8 +428,6 @@ public sealed partial class PbrRenderer : IDisposable
         _bloomDownPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, fragmentEntryPoint: "downsampleFragment");
         _bloomUpPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, blend: BlendMode.Additive, fragmentEntryPoint: "upsampleFragment");
 
-        _hdrTexture = CreateHdrTexture(_width, _height);
-        EnsureHdrView();
         EnsureBloomChain(_width, _height);
 
         var compositeProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.composite");
@@ -447,9 +439,25 @@ public sealed partial class PbrRenderer : IDisposable
             "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
         RebuildCompositeGroup();
 
-        // The pass list is (re)built each frame: N per-layer shadow passes, an optional SSAO
-        // position pre-pass, the main pass (LINEAR HDR → _hdrTexture), then the composite pass.
     }
+
+    /// <summary>Declare the target-sized textures at the current size. Idempotent: the registry
+    /// recreates only a target whose shape changed, so bind groups over the others stay valid.</summary>
+    private void EnsureFrameTargets()
+    {
+        // Depth is TextureBinding too, so the capture blit can pack the opaque depth into the scene
+        // color's alpha (read as unfilterable float; never bound while also being written).
+        _targets.Ensure(DepthTarget, FrameTarget(TextureFormat.Depth32Float));
+        _targets.Ensure(PositionTarget, FrameTarget(TextureFormat.Rgba32Float));
+        _targets.Ensure(PrepassDepthTarget, FrameTarget(TextureFormat.Depth32Float));
+        _targets.Ensure(HdrTarget, FrameTarget(HdrFormat));
+    }
+
+    private TextureDesc FrameTarget(TextureFormat format) => RenderTarget(_width, _height, format);
+
+    private static TextureDesc RenderTarget(uint width, uint height, TextureFormat format, uint layers = 1) => new(
+        null, width, height, layers, 1, 1, TextureDimension.D2, format,
+        TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
 
     // (Re)allocate the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
     // full-resolution layers, plus the D2Array sampling view, the per-layer D2 render views, and the
@@ -458,21 +466,9 @@ public sealed partial class PbrRenderer : IDisposable
     private void EnsureShadowArray(uint layerCount)
     {
         layerCount = Math.Max(1, layerCount);
-        if (_shadowArray.IsValid && layerCount <= _shadowLayerCapacity) return;
+        if (layerCount <= _shadowLayerCapacity) return;
 
-        DestroyShadowArray();
-
-        var desc = new TextureDesc(
-            "PbrShadowArray", _shadowMapSize, _shadowMapSize, layerCount, 1, 1,
-            TextureDimension.D2, TextureFormat.Depth32Float,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-        _shadowArray = _renderer.CreateTexture(in desc);
-        _shadowArrayView = _renderer.CreateTextureView(new TextureViewDesc(
-            "PbrShadowArrayView", _shadowArray, TextureViewDimension.D2Array, 0, layerCount));
-        _shadowLayerViews = new TextureViewHandle[layerCount];
-        for (var i = 0u; i < layerCount; i++)
-            _shadowLayerViews[i] = _renderer.CreateTextureView(new TextureViewDesc(
-                $"PbrShadowLayer{i}", _shadowArray, TextureViewDimension.D2, i, 1));
+        _targets.Ensure(ShadowArrayTarget, RenderTarget(_shadowMapSize, _shadowMapSize, TextureFormat.Depth32Float, layerCount));
         _shadowLayerCapacity = layerCount;
 
         RebuildFrameGroup();
@@ -484,24 +480,12 @@ public sealed partial class PbrRenderer : IDisposable
         var frameGroupDesc = new BindGroupDesc("PbrFrameGroup", FindGroup(1), new[]
         {
             BindGroupEntryDesc.ForBuffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
-            BindGroupEntryDesc.ForTextureView(1, _shadowArrayView),
+            BindGroupEntryDesc.ForTextureView(1, _targets.ArrayView(ShadowArrayTarget)),
             BindGroupEntryDesc.ForSampler(2, _shadowSampler),
             BindGroupEntryDesc.ForBuffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
             BindGroupEntryDesc.ForBuffer(4, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
         });
         _frameGroup = _renderer.CreateBindGroup(in frameGroupDesc);
-    }
-
-    private void DestroyShadowArray()
-    {
-        if (_shadowArrayView.IsValid) _renderer.DestroyTextureView(_shadowArrayView);
-        foreach (var v in _shadowLayerViews)
-            if (v.IsValid) _renderer.DestroyTextureView(v);
-        if (_shadowArray.IsValid) _renderer.DestroyTexture(_shadowArray);
-        _shadowArray = default;
-        _shadowArrayView = default;
-        _shadowLayerViews = [];
-        _shadowLayerCapacity = 0;
     }
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
@@ -552,7 +536,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
     /// material extra entries from <see cref="SceneColorViewChanged"/> via
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
-    public TextureViewHandle SceneColorView => _sceneColorView;
+    public TextureViewHandle SceneColorView =>
+        _targets.Contains(SceneColorTarget) ? _targets.View(SceneColorTarget) : default;
 
     /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
     /// capture, or Resize while enabled — rebind material extra entries to the new view) or
@@ -571,12 +556,10 @@ public sealed partial class PbrRenderer : IDisposable
             _blitGroupLayout = FindGroup(blitProgram, 0);
             _blitPipeline = _renderer.CreatePipeline(blitProgram, HdrFormat); // linear HDR, no depth
         }
-        _sceneColorTexture = _renderer.CreateTexture(new TextureDesc(
-            "PbrSceneColor", _width, _height, 1, 1, 1,
-            TextureDimension.D2, HdrFormat,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding));
-        _sceneColorView = _renderer.CreateTextureView(new TextureViewDesc(
-            "PbrSceneColorView", _sceneColorTexture, TextureViewDimension.D2, 0, 1));
+        _targets.Ensure(SceneColorTarget, FrameTarget(HdrFormat));
+        // Public surface: a game's blend material samples it, so the graph must never cull its
+        // producer on the grounds that no pass of its own reads it.
+        _targets.Export(SceneColorTarget);
         RebuildSceneBlitGroup();
         SceneColorViewChanged?.Invoke();
     }
@@ -584,30 +567,19 @@ public sealed partial class PbrRenderer : IDisposable
     private void DestroySceneColorResources()
     {
         if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
-        if (_sceneColorView.IsValid) _renderer.DestroyTextureView(_sceneColorView);
-        if (_sceneColorTexture.IsValid) _renderer.DestroyTexture(_sceneColorTexture);
+        _targets.Release(SceneColorTarget);
         _sceneBlitGroup = default;
-        _sceneColorView = default;
-        _sceneColorTexture = default;
     }
 
     private void RebuildSceneBlitGroup()
     {
         if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
-        EnsureDepthSampleView();
         _sceneBlitGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSceneBlitGroup", _blitGroupLayout!, new[]
         {
-            BindGroupEntryDesc.ForTextureView(0, _hdrView),
+            BindGroupEntryDesc.ForTextureView(0, _targets.View(HdrTarget)),
             BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForTextureView(2, _depthSampleView),
+            BindGroupEntryDesc.ForTextureView(2, _targets.View(DepthTarget)),
         }));
-    }
-
-    private void EnsureDepthSampleView()
-    {
-        if (_depthSampleView.IsValid) _renderer.DestroyTextureView(_depthSampleView);
-        _depthSampleView = _renderer.CreateTextureView(new TextureViewDesc(
-            "PbrDepthSampleView", _depthTexture, TextureViewDimension.D2, 0, 1));
     }
 
     public void Resize(uint width, uint height)
@@ -615,17 +587,9 @@ public sealed partial class PbrRenderer : IDisposable
         width = Math.Max(1, width);
         height = Math.Max(1, height);
         if (width == _width && height == _height) return;
-        _renderer.DestroyTexture(_depthTexture);
-        _renderer.DestroyTexture(_positionTexture);
-        _renderer.DestroyTexture(_prepassDepthAux);
-        _renderer.DestroyTexture(_hdrTexture);
         _width = width;
         _height = height;
-        _depthTexture = CreateDepthTexture(width, height);
-        _positionTexture = CreatePositionTexture(width, height);
-        _prepassDepthAux = CreateDepthTexture(width, height);
-        _hdrTexture = CreateHdrTexture(width, height);
-        EnsureHdrView(); // HDR target changed → new view (bloom + composite groups reference it)
+        EnsureFrameTargets();
         EnsureBloomChain(width, height); // mip sizes + the HDR-sampling group changed
         RebuildSsaoGroup(); // position texture changed → rebind
         RebuildCompositeGroup(); // HDR + bloom result views changed → rebind
@@ -637,7 +601,6 @@ public sealed partial class PbrRenderer : IDisposable
             DestroySceneColorResources();
             CreateSceneColorResources();
         }
-        // The main pass's depth attachment is rebuilt from _depthTexture each frame in RenderFrame.
     }
 
     /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
@@ -934,21 +897,20 @@ public sealed partial class PbrRenderer : IDisposable
         _encodeShadowDrawIndex = 0;
 
         _graph.Reset();
-        // GraphOnly marks the targets whose only consumers are passes in this frame, which is what
-        // lets an unread producer be culled. It is a promise the declaring code has to keep: every
-        // read of these happens through a bind group built at resize, so the graph learns about it
-        // only from the Reads() calls below. _sceneColorView is NOT one of them — it is public
-        // surface (SceneColorView) that a game's blend material samples.
-        var hdr = _graph.ImportColor(_hdrView, GraphResourceScope.GraphOnly);
-        var sceneDepth = _graph.ImportDepth(_depthTexture);
-        var position = _graph.ImportColor(_positionView, GraphResourceScope.GraphOnly);
-        var prepassDepth = _graph.ImportDepth(_prepassDepthAux, scope: GraphResourceScope.GraphOnly);
+        // The graph owns these, so it knows they are private to the frame unless exported (the
+        // scene color is; a game's blend material samples it). Every read of a private target
+        // still happens through a bind group built at resize, so the graph learns of it only from
+        // the Reads() calls below.
+        var hdr = _graph.Texture(HdrTarget);
+        var sceneDepth = _graph.Texture(DepthTarget);
+        var position = _graph.Texture(PositionTarget);
+        var prepassDepth = _graph.Texture(PrepassDepthTarget);
+        var shadows = _graph.Texture(ShadowArrayTarget);
 
         for (var k = 0; k < _shadowViews.Count; k++)
         {
             _graph.AddRasterPass("Shadow.Layer", RenderPassEvent.Shadows)
-                .Depth(_graph.ImportDepth(_shadowArray, _shadowLayerViews[_shadowViews[k].Layer]),
-                    LoadOp.Clear, StoreOp.Store, clear: 1f)
+                .DepthLayer(shadows, _shadowViews[k].Layer, LoadOp.Clear, StoreOp.Store, clear: 1f)
                 .Record(this, RecordShadowLayer, k);
         }
 
@@ -966,11 +928,13 @@ public sealed partial class PbrRenderer : IDisposable
         // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
         // produces them is unreachable.
         if (ssaoEnabled) main.Reads(position);
+        // The frame group samples the whole array; without this read every shadow layer is dead.
+        main.Reads(shadows);
         main.Record(this, RecordMain);
 
         if (_sceneColorCapture)
         {
-            var sceneColor = _graph.ImportColor(_sceneColorView);
+            var sceneColor = _graph.Texture(SceneColorTarget);
             _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
                 .Color(0, sceneColor, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
                 .Reads(hdr)
@@ -991,7 +955,7 @@ public sealed partial class PbrRenderer : IDisposable
         // off there culls all 2L−1 of these.
         _bloomResources.Clear();
         for (var i = 0; i < _bloomLevels; i++)
-            _bloomResources.Add(_graph.ImportColor(_bloomViews[i], GraphResourceScope.GraphOnly));
+            _bloomResources.Add(_graph.Texture(BloomTargets[i]));
 
         var black = new ColorRgba(0f, 0f, 0f, 1f);
         _graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
@@ -1090,8 +1054,8 @@ public sealed partial class PbrRenderer : IDisposable
         }
     }
 
-    // SSAO position pre-pass: render opaque world positions into _positionTexture (offscreen color) +
-    // _prepassDepthAux. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
+    // SSAO position pre-pass: render opaque world positions into the position target (offscreen color) +
+    // its own depth. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
     // EncodeBucket fills for it, so no extra ring space or upload is needed.
     private static void RecordSsaoPrepass(object context, ref RenderCommandEncoder encoder, int _)
     {
@@ -1187,7 +1151,7 @@ public sealed partial class PbrRenderer : IDisposable
     // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off, or no prepass this frame) makes the
     // shader skip position sampling — gated on the same condition RenderFrame uses to decide
     // whether the prepass actually runs (Enabled && _opaque.Count > 0), so a zero-opaque-instance
-    // frame never samples an unwritten/stale _positionTexture.
+    // frame never samples an unwritten/stale position target.
     private void UploadSsaoUniforms(PbrScene scene)
     {
         var s = scene.Ssao;
@@ -1730,7 +1694,7 @@ public sealed partial class PbrRenderer : IDisposable
             : _customPrograms[programId - 1];
         pipeline = _renderer.CreatePipeline(
             program,
-            HdrFormat, // main pass now emits LINEAR HDR into _hdrTexture; the composite pass tonemaps
+            HdrFormat, // main pass now emits LINEAR HDR into the HDR target; the composite pass tonemaps
             depthStencilFormat: TextureFormat.Depth32Float,
             blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque, // blended surfaces read but don't write depth
@@ -1793,52 +1757,15 @@ public sealed partial class PbrRenderer : IDisposable
     private static bool IsSrgbFormat(TextureFormat format) =>
         format is TextureFormat.Rgba8UnormSrgb or TextureFormat.Bgra8UnormSrgb;
 
-    private TextureHandle CreateDepthTexture(uint width, uint height)
-    {
-        // TextureBinding so the capture blit can pack the opaque depth into SceneColorView's
-        // alpha (read as unfilterable float; never bound while also being written).
-        var desc = new TextureDesc(
-            "PbrDepth", width, height, 1, 1, 1,
-            TextureDimension.D2, TextureFormat.Depth32Float,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-        return _renderer.CreateTexture(in desc);
-    }
-
-    // SSAO world-position pre-pass target: Rgba32Float, both a render target and sampled (textureLoad).
-    private TextureHandle CreatePositionTexture(uint width, uint height)
-    {
-        var desc = new TextureDesc(
-            "PbrSsaoPosition", width, height, 1, 1, 1,
-            TextureDimension.D2, TextureFormat.Rgba32Float,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-        return _renderer.CreateTexture(in desc);
-    }
-
-    private TextureHandle CreateHdrTexture(uint width, uint height)
-    {
-        var desc = new TextureDesc(
-            "PbrHdrScene", width, height, 1, 1, 1,
-            TextureDimension.D2, HdrFormat,
-            TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-        return _renderer.CreateTexture(in desc);
-    }
-
-    private void EnsureHdrView()
-    {
-        if (_hdrView.IsValid) _renderer.DestroyTextureView(_hdrView);
-        _hdrView = _renderer.CreateTextureView(new TextureViewDesc(
-            "PbrHdrSceneView", _hdrTexture, TextureViewDimension.D2, 0, 1));
-    }
-
-    // (Re)build the composite bind group; binds the HDR scene + the bloom result (_bloomViews[0]).
+    // (Re)build the composite bind group; binds the HDR scene + the bloom result (mip 0).
     private void RebuildCompositeGroup()
     {
         if (_compositeGroup.IsValid) _renderer.DestroyBindGroup(_compositeGroup);
         _compositeGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrCompositeGroup", _compositeGroupLayout, new[]
         {
-            BindGroupEntryDesc.ForTextureView(0, _hdrView),
+            BindGroupEntryDesc.ForTextureView(0, _targets.View(HdrTarget)),
             BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForTextureView(2, _bloomViews[0]),
+            BindGroupEntryDesc.ForTextureView(2, _targets.View(BloomTargets[0])),
             BindGroupEntryDesc.ForBuffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
         }));
     }
@@ -1859,20 +1786,14 @@ public sealed partial class PbrRenderer : IDisposable
             h = Math.Max(1, h / 2);
         }
         _bloomLevels = sizes.Count;
-        _bloomTextures = new TextureHandle[_bloomLevels];
-        _bloomViews = new TextureViewHandle[_bloomLevels];
+        for (var i = 0; i < _bloomLevels; i++)
+            _targets.Ensure(BloomTargets[i], RenderTarget(sizes[i].W, sizes[i].H, HdrFormat));
+        for (var i = _bloomLevels; i < BloomMaxLevels; i++)
+            _targets.Release(BloomTargets[i]);
         _bloomGroups = new BindGroupHandle[_bloomLevels];
         for (var i = 0; i < _bloomLevels; i++)
-        {
-            _bloomTextures[i] = _renderer.CreateTexture(new TextureDesc(
-                $"PbrBloom{i}", sizes[i].W, sizes[i].H, 1, 1, 1, TextureDimension.D2, HdrFormat,
-                TextureUsage.RenderAttachment | TextureUsage.TextureBinding));
-            _bloomViews[i] = _renderer.CreateTextureView(new TextureViewDesc(
-                $"PbrBloomView{i}", _bloomTextures[i], TextureViewDimension.D2, 0, 1));
-        }
-        for (var i = 0; i < _bloomLevels; i++)
-            _bloomGroups[i] = CreateBloomGroup(_bloomViews[i]);
-        _bloomHdrGroup = CreateBloomGroup(_hdrView);
+            _bloomGroups[i] = CreateBloomGroup(_targets.View(BloomTargets[i]));
+        _bloomHdrGroup = CreateBloomGroup(_targets.View(HdrTarget));
     }
 
     private BindGroupHandle CreateBloomGroup(TextureViewHandle source) =>
@@ -1887,11 +1808,7 @@ public sealed partial class PbrRenderer : IDisposable
     {
         if (_bloomHdrGroup.IsValid) _renderer.DestroyBindGroup(_bloomHdrGroup);
         foreach (var g in _bloomGroups) if (g.IsValid) _renderer.DestroyBindGroup(g);
-        foreach (var v in _bloomViews) if (v.IsValid) _renderer.DestroyTextureView(v);
-        foreach (var t in _bloomTextures) if (t.IsValid) _renderer.DestroyTexture(t);
         _bloomGroups = [];
-        _bloomViews = [];
-        _bloomTextures = [];
     }
 
     // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
@@ -2072,13 +1989,10 @@ public sealed partial class PbrRenderer : IDisposable
     private void RebuildSsaoGroup()
     {
         if (_ssaoGroup.IsValid) _renderer.DestroyBindGroup(_ssaoGroup);
-        if (_positionView.IsValid) _renderer.DestroyTextureView(_positionView);
-        _positionView = _renderer.CreateTextureView(new TextureViewDesc(
-            "PbrSsaoPositionView", _positionTexture, TextureViewDimension.D2, 0, 1));
         _ssaoGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSsaoGroup", _ssaoGroupLayout, new[]
         {
             BindGroupEntryDesc.ForBuffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
-            BindGroupEntryDesc.ForTextureView(1, _positionView),
+            BindGroupEntryDesc.ForTextureView(1, _targets.View(PositionTarget)),
             BindGroupEntryDesc.ForTextureView(2, _skySpecLutView),
             BindGroupEntryDesc.ForSampler(3, _skySpecSampler),
             BindGroupEntryDesc.ForTextureView(4, _dfgLutView),
@@ -2111,7 +2025,6 @@ public sealed partial class PbrRenderer : IDisposable
         _disposed = true;
         Materials.Dispose();
         DestroySceneColorResources();
-        if (_depthSampleView.IsValid) _renderer.DestroyTextureView(_depthSampleView);
         if (_blitPipeline.IsValid) _renderer.DestroyPipeline(_blitPipeline);
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
@@ -2122,16 +2035,12 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.DestroyBindGroup(_shadowDrawGroup);
         _renderer.DestroyBuffer(_shadowDrawRing);
         _renderer.DestroySampler(_shadowSampler);
-        DestroyShadowArray();
         _renderer.DestroyPipeline(_skyPipeline);
         _renderer.DestroyBindGroup(_skyGroup);
         _renderer.DestroyBuffer(_skyUniformBuffer);
         _renderer.DestroyPipeline(_positionPrepassPipeline);
         _renderer.DestroyBindGroup(_ssaoGroup);
-        if (_positionView.IsValid) _renderer.DestroyTextureView(_positionView);
         _renderer.DestroyBuffer(_ssaoUniformBuffer);
-        _renderer.DestroyTexture(_positionTexture);
-        _renderer.DestroyTexture(_prepassDepthAux);
         _renderer.DestroyBindGroup(_drawGroup);
         _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);
@@ -2139,11 +2048,8 @@ public sealed partial class PbrRenderer : IDisposable
         if (_jointBuffer.IsValid) _renderer.DestroyBuffer(_jointBuffer);
         if (_shadowJointGroup.IsValid) _renderer.DestroyBindGroup(_shadowJointGroup);
         if (_prepassJointGroup.IsValid) _renderer.DestroyBindGroup(_prepassJointGroup);
-        _renderer.DestroyTexture(_depthTexture);
         _renderer.DestroyPipeline(_compositePipeline);
         _renderer.DestroyBindGroup(_compositeGroup);
-        if (_hdrView.IsValid) _renderer.DestroyTextureView(_hdrView);
-        _renderer.DestroyTexture(_hdrTexture);
         _renderer.DestroyBuffer(_compositeUniformBuffer);
         _renderer.DestroySampler(_compositeSampler);
         DestroyBloomChain();
@@ -2151,6 +2057,7 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.DestroyPipeline(_bloomDownPipeline);
         _renderer.DestroyPipeline(_bloomUpPipeline);
         _renderer.DestroyBuffer(_bloomUniformBuffer);
+        _targets.Dispose();
     }
 
     [LoggerMessage(

@@ -28,7 +28,7 @@ namespace Paradise.Rendering;
 /// invalidates the handle synchronously, and any later use of it throws rather than silently
 /// resolving to a recycled resource.</para>
 /// </remarks>
-public interface IRenderer
+public interface IRenderer : ITextureFactory
 {
     /// <summary>The backend's color-target format — the swapchain format when presenting to a
     /// surface, or the offscreen target's format when headless. Pipeline color targets must match
@@ -63,27 +63,6 @@ public interface IRenderer
     /// <summary>Destroy a buffer. In-flight GPU work referencing it finishes first; the handle
     /// stops resolving immediately.</summary>
     void DestroyBuffer(BufferHandle handle);
-
-    /// <summary>Create a texture. Requesting a <c>Bc*</c> format without
-    /// <see cref="SupportsBcTextureCompression"/> throws.</summary>
-    TextureHandle CreateTexture(in TextureDesc desc);
-
-    /// <summary>Upload one mip level. <paramref name="bytesPerRow"/> is the source row pitch in
-    /// bytes (for BC formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
-    /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
-    /// the mip's texel dimensions. Block-size math stays in the asset layer.</summary>
-    void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height);
-
-    /// <summary>Destroy a texture. Views created from it must be destroyed separately.</summary>
-    void DestroyTexture(TextureHandle handle);
-
-    /// <summary>Create an explicit view into a texture (a chosen dimension / array-layer range) —
-    /// e.g. a single layer of the shadow-map array as a render target, or the whole array as a
-    /// D2Array sampling view.</summary>
-    TextureViewHandle CreateTextureView(in TextureViewDesc desc);
-
-    /// <summary>Destroy a texture view.</summary>
-    void DestroyTextureView(TextureViewHandle handle);
 
     /// <summary>Create a sampler.</summary>
     SamplerHandle CreateSampler(in SamplerDesc desc);
