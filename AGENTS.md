@@ -203,15 +203,18 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 `reference.Guid`, and carry the path only to phrase the message).
 
 **"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus the
-prefab documents and the GLBs' `images[i].extras.paradise` stamps; never persisted, never put in
-a sidecar (a reference list there is a second copy of the document, kept in sync by a watcher that
-may not be running, dirtying two files per edit). Nodes are guids; an edge into an identity nothing
+prefab documents and the meshes' `[mesh]` sidecar entries; never persisted, and a DOCUMENT's
+reference list never goes in a sidecar (a second copy of the document, kept in sync by a watcher that
+may not be running, dirtying two files per edit). A mesh container's references DO live in its
+sidecar (`MeshImportSettings`), because that is derived data the tooling resolves from bytes it
+cannot author — the container is read, never written, so FBX and GLB get one mechanism; the uri
+is rewritten only where the format allows, and only for the DCC's benefit. Nodes are guids; an edge into an identity nothing
 carries is KEPT with its path, because that is the moment someone asks who pointed there. `mv`
 rewrites `DependentsOf` the moved guids (plus what the graph lists as `Unreadable`, walked the old
 way), `rm` refuses on non-empty dependents unless forced and never nulls a slot, and the watcher
 follows a carried identity's dependents after a rename — skipping one still inside its debounce
-and retrying it next drain. GLB uris are the one path-only reference left: an unstamped one is in
-`Unstamped`, and a move can only warn about it.
+and retrying it next drain. A container uri with no entry recorded is the one path-only reference
+left: it is in `Unstamped`, and a move can only warn about it.
 
 ## Code Style
 

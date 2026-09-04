@@ -174,39 +174,41 @@ public static class ProjectVerifier
     }
 
     /// <summary>
-    /// A GLB's external images, by the same rule as a document's references: the stamp's guid
-    /// decides, the uri is a hint. An unstamped image whose uri names an identified texture is a
-    /// warning (<c>--fix</c> stamps it); one whose uri names nothing is an error, since the build
-    /// cannot follow it either.
+    /// A mesh's external files, by the same rule as a document's references: the sidecar's
+    /// recorded guid decides, the container's uri is a hint. A uri with no entry is a warning when
+    /// it names an identified texture (<c>--fix</c> records it) and an error when it names nothing;
+    /// a uri that changed since it was recorded is a re-export to re-resolve.
     /// </summary>
     private static void VerifyMesh(IFileSystem fileSystem, AssetIndex sources, UPath path, List<VerifyFinding> findings)
     {
         var relative = sources.Relative(path);
-        foreach (var image in GlbTextureReferences.Read(fileSystem.ReadAllBytes(path)))
+        var recorded = MeshReferences.Recorded(fileSystem, path).ToDictionary(entry => entry.Slot, StringComparer.Ordinal);
+        foreach (var named in MeshContainer.Read(path, fileSystem.ReadAllBytes(path)))
         {
-            var where = $"images[{image.ImageIndex}]";
-            var hinted = GlbTextureReferences.AssetPathFor(relative, image.Uri);
+            var where = named.Slot;
+            var hinted = MeshContainer.AssetPathFor(relative, named.Uri);
 
-            if (image.Reference is not { } reference)
+            if (!recorded.TryGetValue(named.Slot, out var entry) || entry.Uri != named.Uri)
             {
                 if (hinted is null || sources.IdentityOf(sources.Root / hinted) is null)
                 {
                     var problem = hinted is null
-                        ? $"references '{image.Uri}', which resolves outside assets/"
-                        : sources.Problem(sources.Root / hinted, image.Uri) ?? $"references '{image.Uri}', which has no identity to stamp";
+                        ? $"references '{named.Uri}', which resolves outside assets/"
+                        : sources.Problem(sources.Root / hinted, named.Uri) ?? $"references '{named.Uri}', which has no identity to record";
                     findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"in {where}, {problem}"));
                     continue;
                 }
 
                 findings.Add(new VerifyFinding(
                     VerifySeverity.Warning, path,
-                    $"in {where}, '{image.Uri}' is not stamped with the texture's identity, so a rename would " +
-                    "break it — run `paradise assets verify --fix` (or `watch`) to stamp it"));
+                    recorded.ContainsKey(named.Slot)
+                        ? $"in {where}, the uri changed to '{named.Uri}' since its identity was recorded (a re-export) — run `paradise assets verify --fix` to re-resolve it"
+                        : $"in {where}, '{named.Uri}' has no identity recorded in the sidecar, so a rename would break it — run `paradise assets verify --fix` (or `watch`) to record it"));
                 continue;
             }
 
-            var resolution = sources.Resolve(reference);
-            var guid = DocumentGuid.Format(reference.Guid);
+            var resolution = sources.Resolve(entry.Reference);
+            var guid = DocumentGuid.Format(entry.Reference.Guid);
             switch (resolution.Status)
             {
                 case ReferenceStatus.Resolved when hinted == resolution.Path:
@@ -215,7 +217,7 @@ public static class ProjectVerifier
                 case ReferenceStatus.Resolved or ReferenceStatus.Stale:
                     findings.Add(new VerifyFinding(
                         VerifySeverity.Warning, path,
-                        $"in {where}, the uri says '{image.Uri}' but guid '{guid}' names '{resolution.Path}'; " +
+                        $"in {where}, the uri says '{named.Uri}' but guid '{guid}' names '{resolution.Path}'; " +
                         "the guid resolves it, so this builds — run `paradise assets verify --fix` to catch the uri up"));
                     break;
 

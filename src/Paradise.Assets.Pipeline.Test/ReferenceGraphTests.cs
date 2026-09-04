@@ -49,17 +49,16 @@ public class ReferenceGraphTests
     }
 
     [Test]
-    public async Task a_stamped_glb_image_is_an_edge_from_the_mesh_to_the_texture()
+    public async Task a_recorded_glb_image_is_an_edge_from_the_mesh_to_the_texture()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var rust = Asset(fileSystem, "/game/assets/textures/rust.png");
-        var crate = Asset(fileSystem, "/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"},{"uri":"../textures/other.png"}]}"""),
-            uri => uri.EndsWith("rust.png", StringComparison.Ordinal) ? new AssetReference(rust, "textures/rust.png") : null));
+        var crate = Asset(fileSystem, "/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"},{"uri":"../textures/other.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
 
         var graph = Graph(fileSystem);
 
-        // Only the stamped image: an unstamped uri names no identity to draw an edge to.
+        // Only the recorded image: a uri with no entry names no identity to draw an edge to.
         await Assert.That(graph.Edges.Count).IsEqualTo(1);
         await Assert.That(graph.Edges[0].Referrer).IsEqualTo(crate);
         await Assert.That(graph.Edges[0].Target).IsEqualTo(rust);
@@ -71,9 +70,8 @@ public class ReferenceGraphTests
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         var rust = Asset(fileSystem, "/game/assets/textures/rust.png");
-        var crate = Asset(fileSystem, "/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
-            _ => new AssetReference(rust, "textures/rust.png")));
+        var crate = Asset(fileSystem, "/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
         var box = Level(fileSystem, "/game/assets/prefabs/box.prefab", new AssetReference(crate, "models/crate.glb"));
         var level = Level(fileSystem, "/game/assets/levels/district.prefab", new AssetReference(box, "prefabs/box.prefab"));
 

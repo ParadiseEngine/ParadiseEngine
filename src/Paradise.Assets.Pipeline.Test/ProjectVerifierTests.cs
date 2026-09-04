@@ -418,18 +418,18 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task an_unstamped_glb_image_naming_an_identified_texture_is_a_warning()
+    public async Task an_unrecorded_glb_image_naming_an_identified_texture_is_a_warning()
     {
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Warning);
-        await Assert.That(findings[0].Message).Contains("not stamped");
+        await Assert.That(findings[0].Message).Contains("no identity recorded");
     }
 
     [Test]
@@ -437,7 +437,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/gone.png"}]}"""));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/gone.png"}]}"""));
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -447,15 +447,14 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_stamped_glb_image_whose_texture_moved_is_a_warning_naming_where_it_went()
+    public async Task a_recorded_glb_image_whose_texture_moved_is_a_warning_naming_where_it_went()
     {
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
         WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
-            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
@@ -465,13 +464,12 @@ public class ProjectVerifierTests
     }
 
     [Test]
-    public async Task a_stamped_glb_image_whose_guid_nobody_carries_is_an_error()
+    public async Task a_recorded_glb_image_whose_guid_nobody_carries_is_an_error()
     {
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/models/crate.glb", "");
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
-            _ => new Paradise.Authoring.AssetReference(Guid.NewGuid(), "textures/rust.png")));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(Guid.NewGuid(), "textures/rust.png"));
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 

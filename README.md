@@ -172,11 +172,14 @@ committing. It is the tidy path, not the load-bearing one. `watch` does the same
 sees, so a Finder rename leaves the tree as tidy as `mv` would — and when a delete outlives the
 30 s the identity is held for, it names every reference left dangling.
 
-**A GLB names its textures the same way.** Each external image carries
-`images[i].extras.paradise = { guid, path }` beside its `uri`; the uri is what Blender follows, the
-stamp is what the pipeline follows. `verify --fix` and `watch` stamp a GLB that lacks it (a re-export
-from a tool that does not know the block drops it; the next pass puts it back from the uri), and a
-texture rename catches the uri up instead of forcing a re-export.
+**A mesh names its textures the same way, in its sidecar.** A container's external uris are
+resolved once and recorded under `[mesh]` in the mesh's `.meta` as `{ slot, uri, guid, path }`
+entries; the uri is what the DCC follows, the recorded guid is what the pipeline follows. The
+container is only ever READ, so an FBX gets the same story as a GLB — the resolution lives in
+tooling-owned import settings, the way an FBX importer records its texture remaps. `verify --fix`
+and `watch` record what is missing, a texture rename catches the entry (and, for a format that
+can be written, the uri) up instead of forcing a re-export, and a uri that changed since it was
+recorded is a re-export and is re-resolved from scratch.
 
 **Who references what** is answered by `ReferenceGraph`, built per run from the sidecars and the
 documents — never stored in a sidecar, which would be a second copy of the document kept in sync

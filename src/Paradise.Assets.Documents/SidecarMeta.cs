@@ -61,6 +61,15 @@ public sealed class SidecarMeta
         else _settings.Add(entry);
     }
 
+    public bool RemoveSetting(string domain)
+    {
+        ArgumentNullException.ThrowIfNull(domain);
+        var index = _settings.FindIndex(pair => string.Equals(pair.Key, domain, StringComparison.Ordinal));
+        if (index < 0) return false;
+        _settings.RemoveAt(index);
+        return true;
+    }
+
     public static string ComputeHash(ReadOnlySpan<byte> bytes)
         => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
 

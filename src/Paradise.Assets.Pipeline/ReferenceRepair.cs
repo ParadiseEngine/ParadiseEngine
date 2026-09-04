@@ -106,47 +106,18 @@ public static class ReferenceRepair
     }
 
     /// <summary>
-    /// A GLB's texture references: stamps <c>extras.paradise</c> onto every external image that
-    /// lacks one and whose uri names an identified texture, then catches the uri (and the stamp's
-    /// path) up to wherever each guid lives now. Null when the bytes did not change.
+    /// A mesh's external references, reconciled into its sidecar (<see cref="MeshImportSettings"/>)
+    /// and its uris caught up where the format can be written. Null when nothing changed.
     /// </summary>
-    /// <remarks>
-    /// Stamping mutates a source file the DCC wrote. That is the contract (the reference lives in
-    /// the file the DCC round-trips), and it is idempotent: a re-export that drops the block gets
-    /// it back on the next pass, from the same uri, with the same guid.
-    /// </remarks>
-    public static RepairedDocument? FixMesh(IFileSystem fileSystem, AssetIndex index, UPath glb)
+    public static RepairedDocument? FixMesh(IFileSystem fileSystem, AssetIndex index, UPath mesh)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(index);
 
-        var relative = index.Relative(glb);
-        var bytes = fileSystem.ReadAllBytes(glb);
-        var repointed = new List<string>();
-
-        var stamped = GlbTextureReferences.Stamp(bytes, uri =>
-        {
-            if (GlbTextureReferences.AssetPathFor(relative, uri) is not { } assetPath) return null;
-            if (index.IdentityOf(index.Root / assetPath) is not { } guid) return null;
-            repointed.Add($"{uri} stamped as {assetPath}");
-            return new AssetReference(guid, assetPath);
-        });
-
-        var followed = GlbTextureReferences.FollowUris(stamped, relative, reference =>
-        {
-            var resolution = index.Resolve(reference);
-            if (resolution.Status != ReferenceStatus.Stale) return null;
-            repointed.Add($"{reference.Path} -> {resolution.Path}");
-            return resolution.Path;
-        });
-
-        if (ReferenceEquals(followed, bytes)) return null;
-
-        fileSystem.WriteAllBytes(glb, followed);
-        return new RepairedDocument(glb, repointed);
+        return MeshReferences.Apply(fileSystem, mesh, MeshReferences.Reconcile(fileSystem, index, mesh), rewriteContainer: true);
     }
 
-    /// <summary>Only the stamping half of <see cref="FixMesh"/>, over every GLB: what a reconcile does, since a build must not silently move uris the author is looking at.</summary>
+    /// <summary>The sidecar half of <see cref="FixMesh"/> over every mesh: what a reconcile does, since a build must not move uris under an author's feet.</summary>
     public static IReadOnlyList<RepairedDocument> StampMeshes(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
@@ -155,31 +126,19 @@ public static class ReferenceRepair
 
         var ignore = IgnoreRules(fileSystem, layout);
         var stamped = new List<RepairedDocument>();
-        foreach (var glb in index.Files)
+        foreach (var mesh in index.Files)
         {
-            if (!IsGlb(glb) || AssetClassifier.Classify(layout.Assets, glb, ignore) != AssetClass.Foreign) continue;
-
-            var relative = index.Relative(glb);
-            var bytes = fileSystem.ReadAllBytes(glb);
-            var marks = new List<string>();
-            var after = GlbTextureReferences.Stamp(bytes, uri =>
+            if (!IsGlb(mesh) || AssetClassifier.Classify(layout.Assets, mesh, ignore) != AssetClass.Foreign) continue;
+            if (MeshReferences.Apply(fileSystem, mesh, MeshReferences.Reconcile(fileSystem, index, mesh), rewriteContainer: false) is { } repaired)
             {
-                if (GlbTextureReferences.AssetPathFor(relative, uri) is not { } assetPath) return null;
-                if (index.IdentityOf(index.Root / assetPath) is not { } guid) return null;
-                marks.Add($"{uri} stamped as {assetPath}");
-                return new AssetReference(guid, assetPath);
-            });
-            if (ReferenceEquals(after, bytes)) continue;
-
-            fileSystem.WriteAllBytes(glb, after);
-            stamped.Add(new RepairedDocument(glb, marks));
+                stamped.Add(repaired);
+            }
         }
 
         return stamped;
     }
 
-    internal static bool IsGlb(UPath path)
-        => string.Equals(path.GetExtensionWithDot(), ".glb", StringComparison.OrdinalIgnoreCase);
+    internal static bool IsGlb(UPath path) => MeshContainer.IsMesh(path);
 
     /// <summary>An unreadable manifest is verify's finding, not this pass's; nothing is ignored until it reads.</summary>
     private static AssetIgnoreRules IgnoreRules(IFileSystem fileSystem, AssetProjectLayout layout)

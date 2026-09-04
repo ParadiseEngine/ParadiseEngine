@@ -1031,22 +1031,21 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task a_stamped_glb_builds_after_its_texture_moved_in_finder()
+    public async Task a_recorded_glb_builds_after_its_texture_moved_in_finder()
     {
         // The uri still says the old place; the stamp's guid says the new one. The build follows
         // the guid and repoints the built mesh at the KTX2 where the texture now lives.
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}],"textures":[{"source":0}]}"""),
-            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MakeGlb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"}],"textures":[{"source":0}]}"""));
         SidecarMeta.Mint().Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
-        var built = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/build/models/crate.glb"));
+        var built = MeshContainer.Read("/game/build/models/crate.glb", fileSystem.ReadAllBytes("/game/build/models/crate.glb"));
         await Assert.That(built[0].Uri).IsEqualTo("../textures/metal/rust.ktx2");
     }
 

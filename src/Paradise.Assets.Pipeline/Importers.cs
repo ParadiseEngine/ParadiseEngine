@@ -86,13 +86,17 @@ public sealed class MeshImporter : IAssetImporter
             return true;
         }
 
-        // By identity first: a texture renamed outside `mv` still carries the stamp's guid, and
-        // the uri the DCC wrote is only a hint. Through Resolve, so the move is a recorded input.
-        bytes = GlbTextureReferences.FollowUris(bytes, context.Source, reference =>
+        // By identity first: a texture renamed outside `mv` still carries the guid the sidecar
+        // recorded for it, and the uri the DCC wrote is only a hint. Through Resolve, so the move
+        // is a recorded input of this output.
+        var uris = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in MeshReferences.Recorded(context.FileSystem, context.Asset))
         {
-            var resolution = context.Resolve(reference);
-            return resolution.Status == ReferenceStatus.Stale ? resolution.Path : null;
-        });
+            var resolution = context.Resolve(entry.Reference);
+            if (resolution.Found) uris[entry.Slot] = MeshContainer.UriFor(context.Source, resolution.Path);
+        }
+
+        bytes = MeshContainer.RewriteUris(context.Asset, bytes, uris);
 
         var rewrite = MeshTextureReferences.Rewrite(bytes);
 

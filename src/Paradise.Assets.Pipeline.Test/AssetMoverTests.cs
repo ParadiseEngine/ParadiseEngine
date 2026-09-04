@@ -170,21 +170,20 @@ public class AssetMoverTests
     }
 
     [Test]
-    public async Task a_stamped_mesh_uri_follows_its_moved_texture()
+    public async Task a_recorded_mesh_uri_follows_its_moved_texture()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
-            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
         new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
         await Assert.That(result.Warnings).IsEmpty();
         await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" });
-        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/models/crate.glb"))[0];
+        var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
         await Assert.That(image.Reference!.Path).IsEqualTo("textures/metal/rust.png");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
@@ -197,15 +196,14 @@ public class AssetMoverTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", GlbTextureReferences.Stamp(
-            GlbTextureReferencesTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""),
-            _ => new Paradise.Authoring.AssetReference(rust, "textures/rust.png")));
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
         new SidecarMeta(s_crate).Save(fileSystem, "/game/assets/models/crate.glb.meta");
+        MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
 
         await Assert.That(result.Warnings).IsEmpty();
-        var image = GlbTextureReferences.Read(fileSystem.ReadAllBytes("/game/assets/props/box/crate.glb"))[0];
+        var image = MeshReferencesTests.Image(fileSystem, "/game/assets/props/box/crate.glb");
         await Assert.That(image.Uri).IsEqualTo("../../textures/rust.png");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }

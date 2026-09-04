@@ -28,7 +28,7 @@ public readonly record struct ReferenceEdge(Guid Referrer, UPath ReferrerPath, G
 /// is gone — which is exactly the moment someone asks who pointed there.
 /// </para>
 /// <para>
-/// Referrers are prefab documents and GLBs (<see cref="GlbTextureReferences"/>); a file without an
+/// Referrers are prefab documents and meshes (their sidecars' <see cref="MeshImportSettings"/> entries); a file without an
 /// identity of its own can reference but cannot be referenced, and is listed in
 /// <see cref="Unreadable"/> along with anything that would not parse, so a verb that acts on the
 /// graph can say "and N files could not be checked" rather than silently miss them.
@@ -52,7 +52,7 @@ public sealed class ReferenceGraph
     /// <summary>Files whose references could not be taken: no identity of their own, or a document that would not parse. A consumer acting on the graph walks these itself or says it could not check them.</summary>
     public IReadOnlyList<UPath> Unreadable => _unreadable;
 
-    /// <summary>GLB image uris with no identity stamped: not edges, since they name nothing by guid, but the one kind of reference a move can only warn about.</summary>
+    /// <summary>Container uris with no identity recorded: not edges, since they name nothing by guid, but the one kind of reference a move can only warn about.</summary>
     public IReadOnlyList<(UPath Glb, string Uri)> Unstamped => _unstamped;
 
     /// <summary>Reads every prefab document and GLB under <paramref name="index"/>.</summary>
@@ -111,24 +111,24 @@ public sealed class ReferenceGraph
             .ToList();
     }
 
-    /// <summary>The edges one GLB holds: its stamped images. An unstamped image is not an edge, since it names no identity; it is listed in <paramref name="unstamped"/> when given.</summary>
+    /// <summary>The edges one mesh holds: its sidecar's recorded references. A uri with no entry is not an edge, since it names no identity; it is listed in <paramref name="unstamped"/> when given.</summary>
     public static IReadOnlyList<ReferenceEdge> MeshEdges(IFileSystem fileSystem, Guid referrer, UPath path, List<(UPath Glb, string Uri)>? unstamped = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
 
-        var edges = new List<ReferenceEdge>();
-        foreach (var image in GlbTextureReferences.Read(fileSystem.ReadAllBytes(path)))
+        var recorded = MeshReferences.Recorded(fileSystem, path);
+        if (unstamped is not null)
         {
-            if (image.Reference is not { } reference)
+            var slots = recorded.Select(entry => entry.Slot).ToHashSet(StringComparer.Ordinal);
+            foreach (var named in MeshContainer.Read(path, fileSystem.ReadAllBytes(path)))
             {
-                unstamped?.Add((path, image.Uri));
-                continue;
+                if (!slots.Contains(named.Slot)) unstamped.Add((path, named.Uri));
             }
-
-            edges.Add(new ReferenceEdge(referrer, path, reference.Guid, $"images[{image.ImageIndex}]", reference.Path));
         }
 
-        return edges;
+        return recorded
+            .Select(entry => new ReferenceEdge(referrer, path, entry.Reference.Guid, entry.Slot, entry.Reference.Path))
+            .ToList();
     }
 
     /// <summary>Every reference INTO <paramref name="asset"/>: what a move must follow and a delete would break.</summary>

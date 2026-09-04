@@ -225,36 +225,32 @@ public static partial class AssetMover
         => mapping.TryGetValue(reference.Path, out var moved) ? reference with { Path = moved } : reference;
 
     /// <summary>
-    /// A mesh's stamped uris follow the move like a document's references; an UNSTAMPED uri this
-    /// move broke is reported, since without an identity there is nothing to follow it by — the
-    /// texture moved away, or the mesh moved away from it. A uri that was already broken belongs
-    /// to verify.
+    /// A mesh's recorded references follow the move like a document's; a uri with NO identity
+    /// recorded that this move broke is reported, since there is nothing to follow it by — the
+    /// texture moved away, or the mesh moved away from it. One already broken belongs to verify.
     /// </summary>
     private static void FollowMesh(
-        IFileSystem fileSystem, AssetIndex sources, UPath glb, IReadOnlyDictionary<string, string> mapping,
+        IFileSystem fileSystem, AssetIndex sources, UPath mesh, IReadOnlyDictionary<string, string> mapping,
         List<string> rewritten, List<string> warnings, ILogger log)
     {
-        var relative = sources.Relative(glb);
-        var bytes = fileSystem.ReadAllBytes(glb);
-        var followed = GlbTextureReferences.FollowUris(bytes, relative, reference => Follow(reference, mapping).Path);
-        if (!ReferenceEquals(followed, bytes))
+        var relative = sources.Relative(mesh);
+        var reconciliation = MeshReferences.Reconcile(fileSystem, sources, mesh);
+        if (MeshReferences.Apply(fileSystem, mesh, reconciliation, rewriteContainer: true) is not null)
         {
-            fileSystem.WriteAllBytes(glb, followed);
             rewritten.Add(relative);
             LogRewrote(log, relative);
         }
 
         var meshMoved = mapping.Values.Contains(relative, StringComparer.Ordinal);
-        foreach (var image in GlbTextureReferences.Read(followed))
+        foreach (var named in reconciliation.Unresolved)
         {
-            if (image.Reference is not null) continue;
-            var resolved = (glb.GetDirectory() / Uri.UnescapeDataString(image.Uri)).ToAbsolute();
+            var resolved = (mesh.GetDirectory() / Uri.UnescapeDataString(named.Uri)).ToAbsolute();
             if (sources.Contains(resolved)) continue;
             if (!meshMoved && !(sources.IsUnderRoot(resolved) && mapping.ContainsKey(sources.Relative(resolved)))) continue;
 
             warnings.Add(
-                $"{relative}: references '{image.Uri}' inside the GLB with no identity stamped, so the move could not " +
-                "follow it — run `paradise assets verify --fix` to stamp the mesh, then move again, or re-export it");
+                $"{relative}: references '{named.Uri}' in {named.Slot} with no identity recorded, so the move could not " +
+                "follow it — run `paradise assets verify --fix` to record the mesh's references, then move again, or re-export it");
         }
     }
 

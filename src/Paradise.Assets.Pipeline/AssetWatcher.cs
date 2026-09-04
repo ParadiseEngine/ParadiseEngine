@@ -266,7 +266,7 @@ public sealed partial class AssetWatcher : IDisposable
             .Run(profile, target);
     }
 
-    /// <summary>Puts <c>extras.paradise</c> onto every GLB image that lacks it — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Stamps only; uris are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
+    /// <summary>Records every mesh's external references in its sidecar (<see cref="MeshImportSettings"/>) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; a container's uris are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
     public int StampMeshes()
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
@@ -298,7 +298,7 @@ public sealed partial class AssetWatcher : IDisposable
     [LoggerMessage(EventId = 12, Level = LogLevel.Warning, Message = "watch: the filesystem watcher faulted — {Reason}")]
     private static partial void LogWatcherFaulted(ILogger logger, string reason);
 
-    [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "stamped: {Relative} ({Images} image reference(s) by identity)")]
+    [LoggerMessage(EventId = 13, Level = LogLevel.Information, Message = "recorded: {Relative} ({Images} mesh reference(s) by identity)")]
     private static partial void LogStamped(ILogger logger, string relative, int images);
 
     [LoggerMessage(EventId = 14, Level = LogLevel.Information, Message = "rewrote: {Relative} ({Count} reference(s) caught up after a rename)")]
