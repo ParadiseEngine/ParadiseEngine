@@ -36,13 +36,16 @@ public readonly record struct ReferenceSite(string Where, AssetReference? Refere
 /// <param name="Problem">Non-null when the asset would not parse; the sites are then empty and the message is what <c>verify</c> already reports against the asset.</param>
 public sealed record AssetReferences(IReadOnlyList<ReferenceSite> Sites, string? Problem = null)
 {
+    /// <summary>No references: what an importer answers for an asset kind that holds none. Empty, not null — a consumer iterates it like any other.</summary>
+    public static AssetReferences None { get; } = new([]);
+
     public static AssetReferences Unreadable(string problem) => new([], problem);
 }
 
 /// <summary>The importer chain asked about references, walked the way a build walks it: last appended wins.</summary>
 public static class ReferenceChain
 {
-    /// <summary>The asset's importer (the one its sidecar names, else the claim) and what it read; null when there is none, or it has no references to give.</summary>
+    /// <summary>The asset's importer (the one its sidecar names, else the claim) and what it read; null only when the asset has no importer at all.</summary>
     public static (IAssetImporter Importer, AssetReferences References)? Claim(
         IReadOnlyList<IAssetImporter> importers, ReferenceContext context, UPath asset)
     {
@@ -50,37 +53,22 @@ public static class ReferenceChain
         ArgumentNullException.ThrowIfNull(context);
 
         if (ImporterFor(importers, context, asset) is not { } importer) return null;
-        return importer.References(context, asset) is { } references ? (importer, references) : null;
+        return (importer, importer.References(context, asset));
     }
 
-    /// <summary>Brings <paramref name="asset"/>'s references in line with the tree through its importer; null when it has none, or nothing changed.</summary>
+    /// <summary>Brings <paramref name="asset"/>'s references in line with the tree through its importer; null when it has no importer, or nothing changed.</summary>
     public static RepairedDocument? Rewrite(IReadOnlyList<IAssetImporter> importers, ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(context);
 
-        if (ImporterFor(importers, context, asset) is not { } importer) return null;
-        if (importer.References(context, asset) is null) return null;
-        return importer.Rewrite(context, asset);
+        return ImporterFor(importers, context, asset)?.Rewrite(context, asset);
     }
 
     /// <summary>An unknown recorded name yields nothing here: verify reports it, and guessing would follow the wrong importer's idea of the asset.</summary>
     private static IAssetImporter? ImporterFor(IReadOnlyList<IAssetImporter> importers, ReferenceContext context, UPath asset)
     {
-        var sidecar = SidecarMeta.PathFor(asset);
-        SidecarMeta? meta = null;
-        if (context.FileSystem.FileExists(sidecar))
-        {
-            try
-            {
-                meta = SidecarMeta.Load(context.FileSystem, sidecar);
-            }
-            catch (SidecarMetaException)
-            {
-                meta = null;
-            }
-        }
-
+        var meta = AssetSidecar.TryLoad(context.FileSystem, asset, importers);
         return ImporterChain.For(importers, new ImportCandidate(context.FileSystem, context.Layout, asset, meta)).Importer;
     }
 

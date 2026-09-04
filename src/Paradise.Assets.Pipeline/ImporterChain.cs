@@ -6,7 +6,7 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>What a claim may look at: the asset, its sidecar, and its bytes. Nothing to write into, and no profile — a claim is "is this mine?", not an import.</summary>
-public sealed record ImportCandidate(IFileSystem FileSystem, AssetProjectLayout Layout, UPath Asset, SidecarMeta? Meta)
+public sealed record ImportCandidate(IFileSystem FileSystem, AssetProjectLayout Layout, UPath Asset, AssetSidecar? Meta)
 {
     /// <summary>Assets-relative, '/'-separated.</summary>
     public string Source => Asset.FullName[(Layout.Assets.FullName.Length + 1)..];
@@ -78,11 +78,10 @@ public static class ImporterChain
         ArgumentNullException.ThrowIfNull(importers);
         ArgumentNullException.ThrowIfNull(candidate);
 
-        if (candidate.Meta?.Importer is { } recorded)
+        if (candidate.Meta?.ImporterName is { } recorded)
         {
-            return Named(importers, recorded) is { } named
-                ? new Resolution(named, recorded, Recorded: true)
-                : new Resolution(null, recorded, Recorded: true);
+            // Resolved once, at load; an unknown name stays unknown rather than falling to a claim.
+            return new Resolution(candidate.Meta.Importer, recorded, Recorded: true);
         }
 
         var claimed = Claim(importers, candidate);

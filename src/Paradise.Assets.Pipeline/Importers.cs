@@ -68,10 +68,10 @@ public sealed class MeshImporter : IAssetImporter
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [MeshImportSettings.Instance];
 
     /// <inheritdoc />
-    public AssetReferences? References(ReferenceContext context, UPath asset)
+    public AssetReferences References(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return null;
+        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
 
         var relative = context.Relative(asset);
         var recorded = MeshReferences.Recorded(context.FileSystem, asset).ToDictionary(entry => entry.Slot, StringComparer.Ordinal);
@@ -271,10 +271,10 @@ public sealed class PrefabImporter : IAssetImporter
     public bool Claims(ImportCandidate candidate) => candidate.HasExtension(AssetClassifier.PrefabSuffix);
 
     /// <inheritdoc />
-    public AssetReferences? References(ReferenceContext context, UPath asset)
+    public AssetReferences References(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.Classify(asset) != AssetClass.Prefab) return null;
+        if (context.Classify(asset) != AssetClass.Prefab) return AssetReferences.None;
 
         PrefabDocument document;
         try

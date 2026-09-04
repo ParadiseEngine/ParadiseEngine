@@ -165,7 +165,7 @@ public sealed partial class AssetWatcher : IDisposable
 
         var rewritten = carried.Count > 0 ? FollowRenames(carried) : 0;
         rewritten += RetryDeferred();
-        var dangling = expired.Count > 0 ? ReportDangling(expired) : [];
+        IReadOnlyList<string> dangling = expired.Count > 0 ? ReportDangling(expired) : [];
         return new DrainResult(deletes.Count + renames.Count + touched.Count, actions, rewritten, dangling);
     }
 
@@ -323,4 +323,4 @@ public sealed partial class AssetWatcher : IDisposable
 /// <param name="SidecarActions">Sidecars minted, carried, quarantined, relinked or refreshed.</param>
 /// <param name="Rewritten">Files whose references were caught up after an identity moved.</param>
 /// <param name="Dangling">One line per reference left pointing at an identity whose delete just became final.</param>
-public readonly record struct DrainResult(int Changes, int SidecarActions, int Rewritten = 0, IReadOnlyList<string>? Dangling = null);
+public readonly record struct DrainResult(int Changes, int SidecarActions, int Rewritten, IReadOnlyList<string> Dangling);

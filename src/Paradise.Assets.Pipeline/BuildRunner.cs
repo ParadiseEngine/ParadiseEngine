@@ -184,7 +184,7 @@ public sealed partial class BuildRunner
         List<string> errors)
     {
         using var observed = new ObservedSources(_fileSystem, sources);
-        var meta = SidecarMeta.Load(observed, SidecarMeta.PathFor(path));
+        var meta = AssetSidecar.Load(observed, path, _importers);
 
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(

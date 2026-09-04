@@ -276,7 +276,7 @@ public static class ProjectScaffold
         var path = SidecarMeta.PathFor(asset);
         var meta = SidecarMeta.Mint();
         meta.Importer = ImporterChain.Claim(
-            AssetImporters.All, new ImportCandidate(fileSystem, new AssetProjectLayout(assets.GetDirectory()), asset, meta))?.Name;
+            AssetImporters.All, new ImportCandidate(fileSystem, new AssetProjectLayout(assets.GetDirectory()), asset, null))?.Name;
         meta.Save(fileSystem, path);
         written.Add(new ScaffoldedFile(path, "identity"));
     }

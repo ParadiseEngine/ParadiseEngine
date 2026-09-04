@@ -273,7 +273,7 @@ public sealed partial class SidecarMaintainer
 
     /// <summary>The chain's answer for <paramref name="asset"/>, or null when nothing claims it — a sidecar without an importer is legal, and verify says which files those are.</summary>
     private string? ClaimantFor(UPath asset, SidecarMeta meta)
-        => ImporterChain.Claim(_importers, new ImportCandidate(_fileSystem, _layout, asset, meta))?.Name;
+        => ImporterChain.Claim(_importers, new ImportCandidate(_fileSystem, _layout, asset, AssetSidecar.Resolve(asset, SidecarMeta.PathFor(asset), meta, _importers)))?.Name;
 
     private void Save(SidecarMeta meta, UPath path)
     {

@@ -23,7 +23,7 @@ public sealed record ImportContext(
     AssetIndex Sources,
     UPath Asset,
     string Source,
-    SidecarMeta? Meta,
+    AssetSidecar? Meta,
     BuildProfile Profile,
     ProjectOutputTarget Target,
     IFileSystem Output,
@@ -124,12 +124,12 @@ public interface IAssetImporter
     bool Import(ImportContext context, List<string> errors);
 
     /// <summary>
-    /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar — or
-    /// null to decline, which is how an importer claims an asset for the reference verbs (graph,
-    /// <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c>, the watcher). Decline inside, as
-    /// <see cref="Import"/> does; there is no extension table anywhere else.
+    /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar.
+    /// <see cref="AssetReferences.None"/> for a kind that holds none (the default), never null:
+    /// the graph, <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c> and the watcher iterate what
+    /// comes back. Which importer is asked is the sidecar's to say, not this method's.
     /// </summary>
-    AssetReferences? References(ReferenceContext context, UPath asset) => null;
+    AssetReferences References(ReferenceContext context, UPath asset) => AssetReferences.None;
 
     /// <summary>
     /// Brings the asset's references in line with the tree — its sidecar's entries, and its own

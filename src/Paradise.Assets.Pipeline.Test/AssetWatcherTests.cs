@@ -253,10 +253,10 @@ public class AssetWatcherTests
         clock.Now += AssetWatcher.QuarantineWindow + TimeSpan.FromSeconds(1);
         var expired = watcher.Drain();
 
-        await Assert.That(quarantined.Dangling ?? []).IsEmpty();
-        await Assert.That(expired.Dangling!.Count).IsEqualTo(1);
-        await Assert.That(expired.Dangling![0]).Contains("levels/district.prefab");
-        await Assert.That(expired.Dangling![0]).Contains("models/crate.glb");
+        await Assert.That(quarantined.Dangling).IsEmpty();
+        await Assert.That(expired.Dangling.Count).IsEqualTo(1);
+        await Assert.That(expired.Dangling[0]).Contains("levels/district.prefab");
+        await Assert.That(expired.Dangling[0]).Contains("models/crate.glb");
     }
 
     private static void Level(MemoryFileSystem fileSystem, UPath path, Paradise.Authoring.AssetReference reference)

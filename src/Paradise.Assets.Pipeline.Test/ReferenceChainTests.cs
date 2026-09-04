@@ -36,9 +36,9 @@ public class ReferenceChainTests
                 => settings.Value("ingredient") is CanonicalInlineTable ? null : "holds no ingredient in [recipe]";
         }
 
-        public AssetReferences? References(ReferenceContext context, UPath asset)
+        public AssetReferences References(ReferenceContext context, UPath asset)
         {
-            if (!string.Equals(asset.GetExtensionWithDot(), ".recipe", StringComparison.Ordinal)) return null;
+            if (!string.Equals(asset.GetExtensionWithDot(), ".recipe", StringComparison.Ordinal)) return AssetReferences.None;
 
             var spelled = context.FileSystem.ReadAllText(asset).Trim();
             var recorded = Recorded(context.FileSystem, asset);

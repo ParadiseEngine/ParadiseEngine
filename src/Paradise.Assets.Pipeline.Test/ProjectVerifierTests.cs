@@ -716,7 +716,7 @@ public class ProjectVerifierTests
     internal static Guid Mint(MemoryFileSystem fileSystem, UPath asset, Guid? guid = null, IReadOnlyList<IAssetImporter>? importers = null)
     {
         var meta = guid is { } identity ? new SidecarMeta(identity) : SidecarMeta.Mint();
-        meta.Importer = ImporterChain.Claim(importers ?? AssetImporters.All, new ImportCandidate(fileSystem, s_layout, asset, meta))?.Name;
+        meta.Importer = ImporterChain.Claim(importers ?? AssetImporters.All, new ImportCandidate(fileSystem, s_layout, asset, null))?.Name;
         meta.Save(fileSystem, SidecarMeta.PathFor(asset));
         return meta.Guid;
     }
