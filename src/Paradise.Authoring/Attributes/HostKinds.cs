@@ -346,19 +346,23 @@ public record struct HostSpriteSheet : IHostKind
     /// <summary>The <c>authoredBy</c> string this kind publishes.</summary>
     public const string Kind = AuthoredBySources.SpriteSheet;
 
-    /// <summary>The sheet the host resolved, as the runtime resolves it.</summary>
-    /// <remarks>A path rather than a GUID, following the same allowance
-    /// <see cref="HostMesh"/>, <see cref="HostSprite"/> and <see cref="HostAsset"/> live under
-    /// until bake emits identities and the loader resolves them. It moves with them, not before.</remarks>
-    [AuthorDefault("")]
-    public string Sheet { get; set; } = "";
+    /// <summary>Which sheet, by the asset's identity.</summary>
+    /// <remarks>Typed as <see cref="HostSprite"/> rather than restating a GUID, so this reference
+    /// is the same thing as a standalone one: the schema publishes it <c>authoredBy: sprite</c> and
+    /// an editor draws its sprite picker instead of a text box. A host that still bakes a runtime
+    /// PATH says so on its own record, where PAUT010's baked-path allowance covers mesh, sprite and
+    /// asset; a field inside this kind is not that case and does not get the hatch.</remarks>
+    public HostSprite Sheet { get; set; }
 
     /// <summary>Frame columns across the sheet.</summary>
-    [AuthorDefault(1)]
+    /// <remarks>The LOWER bound is the real one: this divides the sheet, so a zero reaches whatever
+    /// computes a frame rectangle. The ceiling is a sanity check — a sheet cut finer than this has
+    /// frames of a few pixels on the largest texture a GPU will hold.</remarks>
+    [AuthorDefault(1), AuthorRange(1, 4096)]
     public int Columns { get; set; } = 1;
 
     /// <summary>Frame rows down the sheet.</summary>
-    [AuthorDefault(1)]
+    [AuthorDefault(1), AuthorRange(1, 4096)]
     public int Rows { get; set; } = 1;
 
     /// <summary>World size of ONE frame's quad, in metres.</summary>
@@ -404,13 +408,20 @@ public enum HostTonemapMode
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What a sky IS, never one renderer's fit to it.</b> The gradient below (four colours and two
-/// curve exponents) is the procedural-sky model every host has some form of; the cosine thresholds
-/// and curve constants of a particular sky SHADER are not, and are deliberately absent. A host that
-/// integrates its own sky more accurately than a gradient can express publishes the RESULT through
-/// <see cref="AmbientSh"/> — which is why that field exists — and a runtime that wants a sun disk
-/// derives it from the directional light's own <see cref="HostLight.Size"/> rather than from
-/// constants only one editor knows how to produce.
+/// <b>What a sky IS, never one renderer's fit to it.</b> The gradient below — four colours and two
+/// curves — is the procedural-sky model every host has some form of. The cosine thresholds and
+/// shader constants of a PARTICULAR sky are not, and are deliberately absent: a runtime that wants
+/// a sun disk derives it from the directional light's own <see cref="HostLight.Size"/> rather than
+/// from constants only one editor knows how to produce.
+/// </para>
+/// <para>
+/// Spherical-harmonic ambient is absent for the same reason, and it is the closest call here. A
+/// host that integrates its own sky more accurately than a gradient can express has a real result
+/// to publish — but SH has several mutually incompatible conventions (band count, coefficient
+/// order, whether the band factors are premultiplied, whether the normalization is E or E/π), and a
+/// kind that named one of them would be publishing a renderer's agreement as though it were a
+/// property of skies. A game that wants it declares it on its OWN record, where the convention it
+/// means is the convention its own runtime reads.
 /// </para>
 /// <para>
 /// The alternative, rejected: carrying the host's shader constants verbatim. It would have kept one
@@ -441,14 +452,6 @@ public record struct HostEnvironment : IHostKind
     [AuthorDefault(1f)]
     public float AmbientEnergy { get; set; } = 1f;
 
-    /// <summary>
-    /// Cosine-weighted sky irradiance as spherical harmonics, when the host integrated its own sky
-    /// rather than leaving a gradient to be sampled. Absent means "use the three zone colours".
-    /// </summary>
-    /// <remarks>A representation, not a host's vocabulary: any host that can integrate a sky can
-    /// project it onto SH, and any renderer that wants more than three zones can read it.</remarks>
-    public float[]? AmbientSh { get; set; }
-
     /// <summary>Whether the sky contributes ambient SPECULAR as well as diffuse.</summary>
     public bool SkyReflections { get; set; }
 
@@ -476,15 +479,23 @@ public record struct HostEnvironment : IHostKind
     /// <summary>Gradient nadir. Linear.</summary>
     public Vector4 GroundBottom { get; set; } = new(0.03f, 0.024f, 0.016f, 1f);
 
-    /// <summary>How fast the sky half of the gradient falls from zenith to horizon; larger is
-    /// tighter to the horizon. An exponent, so a host with a differently parameterized curve
-    /// converts rather than adding a second spelling.</summary>
-    [AuthorDefault(4f)]
-    public float SkyCurve { get; set; } = 4f;
+    /// <summary>
+    /// How fast the sky half of the gradient falls from zenith to horizon. SMALLER is tighter to
+    /// the horizon.
+    /// </summary>
+    /// <remarks>
+    /// The curve a sky HAS, not an exponent fitted to any one shader. A renderer that wants a
+    /// <c>pow()</c> exponent inverts this itself, which is the same division it would already be
+    /// doing — and putting the inverted form here instead would be exactly the renderer's-fit
+    /// problem this kind exists to keep out, with the added trap that the field would then share a
+    /// name with a host property holding its reciprocal.
+    /// </remarks>
+    [AuthorDefault(0.15f)]
+    public float SkyCurve { get; set; } = 0.15f;
 
     /// <summary>The same, for the ground half.</summary>
-    [AuthorDefault(30f)]
-    public float GroundCurve { get; set; } = 30f;
+    [AuthorDefault(0.02f)]
+    public float GroundCurve { get; set; } = 0.02f;
 
     /// <summary>Which operator maps HDR to display.</summary>
     [AuthorDefault(HostTonemapMode.Linear)]
@@ -534,8 +545,10 @@ public record struct HostEnvironment : IHostKind
     public float GlowThreshold { get; set; } = 1f;
 
     /// <summary>Per-layer shadow map resolution the scene asks for, in texels. Absent leaves the
-    /// renderer's own — it sizes a GPU resource, which is why it sits beside the mood rather than
-    /// inside it.</summary>
+    /// renderer's own.</summary>
+    /// <remarks>The odd member of this kind: it sizes a GPU resource rather than describing how the
+    /// scene LOOKS. It stays because a scene is where an author decides how much shadow detail to
+    /// pay for, and there is no other authored thing for it to hang on.</remarks>
     public int? ShadowMapSize { get; set; }
 
     /// <summary>Soft-shadow PCF disk radius in shadow texels — the penumbra width of every shadow
