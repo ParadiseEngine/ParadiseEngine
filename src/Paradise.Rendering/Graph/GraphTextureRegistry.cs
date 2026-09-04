@@ -53,6 +53,24 @@ public sealed class GraphTextureRegistry : IDisposable
 
     public bool Contains(string name) => _entries.ContainsKey(name);
 
+    /// <summary>A 1×1 opaque black texture, for a binding a shader declares but this frame does
+    /// not use. Binding the real target would make the pass read it, and the read would keep the
+    /// producer alive; binding this reads nothing, and a sample of it contributes zero.</summary>
+    public string Black
+    {
+        get
+        {
+            if (Ensure(BlackName, new TextureDesc(null, 1, 1, 1, 1, 1, TextureDimension.D2,
+                    TextureFormat.Rgba8Unorm, TextureUsage.TextureBinding | TextureUsage.CopyDst)))
+            {
+                _factory.WriteTexture(Texture(BlackName), 0, [0, 0, 0, 255], 4, 1, 1, 1);
+            }
+            return BlackName;
+        }
+    }
+
+    private const string BlackName = "Paradise.Black";
+
     /// <summary>The declared shape of <paramref name="name"/>.</summary>
     public TextureDesc DescriptorOf(string name) => Get(name).Desc;
 

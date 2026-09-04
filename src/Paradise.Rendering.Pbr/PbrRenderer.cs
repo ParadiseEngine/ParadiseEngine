@@ -73,7 +73,7 @@ public sealed partial class PbrRenderer : IDisposable
     public float DirectionalShadowRadius { get; set; } = 50f;
     private readonly BufferHandle _frameUniformBuffer;
     private readonly BufferHandle _drawUniformRing;
-    private BindGroupHandle _frameGroup; // rebuilt whenever the shadow array is (re)allocated
+    private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupHandle _drawGroup;
     private readonly Dictionary<(int ProgramId, BlendMode Blend), PipelineHandle> _pipelines = new();
     // Game-registered material programs (RegisterMaterialProgram): index + 1 = programId; 0 is the
@@ -83,6 +83,7 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
     private readonly GraphTextureRegistry _targets;
+    private readonly BindGroupCache _bindGroups;
     private readonly FrameGraph _graph;
     private readonly List<GraphTexture> _bloomResources = [];
 
@@ -114,9 +115,7 @@ public sealed partial class PbrRenderer : IDisposable
     private bool _sceneColorCapture;
     private PipelineHandle _blitPipeline;
     private BindGroupLayoutDesc? _blitGroupLayout;
-    private BindGroupHandle _sceneBlitGroup;
     private BindGroupLayoutDesc _compositeGroupLayout;
-    private BindGroupHandle _compositeGroup;
     private const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
     // The frame's targets live in _targets under these names; a resize re-declares them and the
     // registry recreates only what changed. The shadow array is grow-only and sized per frame.
@@ -129,7 +128,7 @@ public sealed partial class PbrRenderer : IDisposable
     private static readonly string[] BloomTargets = ["PbrBloom0", "PbrBloom1", "PbrBloom2", "PbrBloom3", "PbrBloom4", "PbrBloom5"];
     // Bloom mip chain (progressive dual-filter, COD-style): a half-res base halving to ~BloomMinDim.
     // bright-pass (threshold) → downsample chain → additive upsample chain; mip 0 is the
-    // result composite adds. Pipelines built once; textures/views/groups rebuilt on resize.
+    // result composite adds. Pipelines built once; the mips are re-declared on resize.
     private const int BloomMaxLevels = 6;
     private const uint BloomMinDim = 8;
     private readonly PipelineHandle _bloomBrightPipeline;
@@ -138,15 +137,12 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly BufferHandle _bloomUniformBuffer;
     private BindGroupLayoutDesc _bloomGroupLayout;
     private int _bloomLevels;
-    private BindGroupHandle[] _bloomGroups = []; // _bloomGroups[i] samples bloom mip i
-    private BindGroupHandle _bloomHdrGroup;        // samples the HDR scene (bright pass source)
     // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
     // the position target (Rgba32Float, offscreen color) with its own depth target. The PBR
-    // shader (group 3) samples it via textureLoad and darkens ambient. The group is rebuilt on resize.
+    // shader (group 3) samples it via textureLoad and darkens ambient.
     private readonly ShaderProgramDesc _positionPrepassProgram;
     private readonly PipelineHandle _positionPrepassPipeline;
     private readonly BufferHandle _ssaoUniformBuffer;
-    private BindGroupHandle _ssaoGroup;
     private BindGroupLayoutDesc _ssaoGroupLayout;
     // Sky-reflection specular (Godot reflected_light_source = Sky): the gradient sky GGX-prefiltered
     // on the CPU into a small LUT (u: reflection.y, v: roughness — the gradient is azimuth-symmetric).
@@ -225,7 +221,8 @@ public sealed partial class PbrRenderer : IDisposable
     {
         _renderer = renderer;
         _targets = new GraphTextureRegistry(renderer);
-        _graph = new FrameGraph(_targets);
+        _bindGroups = new BindGroupCache(renderer);
+        _graph = new FrameGraph(_targets, _bindGroups);
         _log = logger ?? NullLogger.Instance;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
@@ -264,16 +261,16 @@ public sealed partial class PbrRenderer : IDisposable
         _drawUniformRing = renderer.CreateBuffer(in ringDesc);
 
         // Shadow-map array comparison sampler (clamp so a PCF tap near a layer edge reads that
-        // layer's border, never wraps). The array texture + views + frame bind group are built by
-        // EnsureShadowArray below and re-sized each frame to the layers actually in use.
+        // layer's border, never wraps). The array texture itself is declared by EnsureShadowArray
+        // below and re-sized each frame to the layers actually in use.
         _shadowSampler = renderer.CreateSampler(new SamplerDesc(
             "PbrShadowSampler",
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest,
             MaxAnisotropy: 1, Compare: CompareFunction.LessEqual));
 
-        // Froxel mask buffer must exist before the frame bind group references it (binding 3).
-        // _width/_height are set later in the ctor, so size from the ctor parameters directly.
+        // _width/_height are set later in the ctor, so size the froxel mask buffer from the ctor
+        // parameters directly.
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         // Before the cluster buffer, because the first frame-group build needs BOTH storage
@@ -281,10 +278,11 @@ public sealed partial class PbrRenderer : IDisposable
         EnsureJointBuffer();
         EnsureClusterBuffer();
 
-        // Allocate the initial single-layer array + frame bind group (binding 1 = D2Array shadow
-        // view, binding 2 = comparison sampler; matches pbr.slang's reserved group-1 slots). A valid
-        // array must always be bound even when nothing casts, hence the minimum of one layer.
+        // Allocate the initial single-layer array. The frame group (pbr.slang's reserved group-1
+        // slots) binds it as a D2Array, so a valid array must always exist even when nothing casts,
+        // hence the minimum of one layer.
         EnsureShadowArray(1);
+        _frameGroupLayout = FindGroup(1);
 
         var drawGroupDesc = new BindGroupDesc("PbrDrawGroup", FindGroup(0), new[]
         {
@@ -408,7 +406,6 @@ public sealed partial class PbrRenderer : IDisposable
         _dfgLutView = renderer.CreateTextureView(new TextureViewDesc(
             "PbrDfgLutView", _dfgLutTexture, TextureViewDimension.D2, 0, 1));
         BakeDfgLut();
-        RebuildSsaoGroup();
 
         // HDR scene target + composite pass. The main pass renders LINEAR HDR here; the composite
         // fullscreen pass tonemaps it (using the tone operators moved out of pbr/sky) to the
@@ -437,7 +434,6 @@ public sealed partial class PbrRenderer : IDisposable
             fragmentEntryPoint: _useSrgbEntryPoint ? "compositeFragmentSrgb" : "compositeFragment");
         _compositeUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        RebuildCompositeGroup();
 
     }
 
@@ -459,10 +455,9 @@ public sealed partial class PbrRenderer : IDisposable
         null, width, height, layers, 1, 1, TextureDimension.D2, format,
         TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
 
-    // (Re)allocate the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
-    // full-resolution layers, plus the D2Array sampling view, the per-layer D2 render views, and the
-    // frame bind group that references the sampling view. A single shared texture across all shadow
-    // views keeps the frame group stable between frames of equal (or smaller) shadow-layer count.
+    // (Re)declare the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
+    // full-resolution layers. A single shared texture across all shadow views keeps the frame group
+    // stable between frames of equal (or smaller) shadow-layer count.
     private void EnsureShadowArray(uint layerCount)
     {
         layerCount = Math.Max(1, layerCount);
@@ -470,22 +465,6 @@ public sealed partial class PbrRenderer : IDisposable
 
         _targets.Ensure(ShadowArrayTarget, RenderTarget(_shadowMapSize, _shadowMapSize, TextureFormat.Depth32Float, layerCount));
         _shadowLayerCapacity = layerCount;
-
-        RebuildFrameGroup();
-    }
-
-    private void RebuildFrameGroup()
-    {
-        if (_frameGroup.IsValid) _renderer.DestroyBindGroup(_frameGroup);
-        var frameGroupDesc = new BindGroupDesc("PbrFrameGroup", FindGroup(1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
-            BindGroupEntryDesc.ForTextureView(1, _targets.ArrayView(ShadowArrayTarget)),
-            BindGroupEntryDesc.ForSampler(2, _shadowSampler),
-            BindGroupEntryDesc.ForBuffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
-            BindGroupEntryDesc.ForBuffer(4, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
-        });
-        _frameGroup = _renderer.CreateBindGroup(in frameGroupDesc);
     }
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
@@ -560,26 +539,12 @@ public sealed partial class PbrRenderer : IDisposable
         // Public surface: a game's blend material samples it, so the graph must never cull its
         // producer on the grounds that no pass of its own reads it.
         _targets.Export(SceneColorTarget);
-        RebuildSceneBlitGroup();
         SceneColorViewChanged?.Invoke();
     }
 
     private void DestroySceneColorResources()
     {
-        if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
         _targets.Release(SceneColorTarget);
-        _sceneBlitGroup = default;
-    }
-
-    private void RebuildSceneBlitGroup()
-    {
-        if (_sceneBlitGroup.IsValid) _renderer.DestroyBindGroup(_sceneBlitGroup);
-        _sceneBlitGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSceneBlitGroup", _blitGroupLayout!, new[]
-        {
-            BindGroupEntryDesc.ForTextureView(0, _targets.View(HdrTarget)),
-            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForTextureView(2, _targets.View(DepthTarget)),
-        }));
     }
 
     public void Resize(uint width, uint height)
@@ -590,10 +555,8 @@ public sealed partial class PbrRenderer : IDisposable
         _width = width;
         _height = height;
         EnsureFrameTargets();
-        EnsureBloomChain(width, height); // mip sizes + the HDR-sampling group changed
-        RebuildSsaoGroup(); // position texture changed → rebind
-        RebuildCompositeGroup(); // HDR + bloom result views changed → rebind
-        EnsureClusterBuffer(); // tile counts changed → new mask buffer + frame group rebind
+        EnsureBloomChain(width, height);
+        EnsureClusterBuffer(); // tile counts changed → new mask buffer
         if (_sceneColorCapture)
         {
             // Recreate LAST, after every engine-side rebind, so SceneColorViewChanged subscribers
@@ -642,7 +605,7 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.UpdateBuffer<Matrix4x4>(_jointBuffer, 0, _jointPalettes);
     }
 
-    // (Re)allocate the froxel mask buffer for the current resolution and rebind the frame group.
+    // (Re)allocate the froxel mask buffer for the current resolution.
     private void EnsureClusterBuffer()
     {
         var tilesX = (int)((_width + ClusterTileSize - 1) / ClusterTileSize);
@@ -655,7 +618,6 @@ public sealed partial class PbrRenderer : IDisposable
         _clusterBuffer = _renderer.CreateBuffer(new BufferDesc(
             "PbrClusterMasks", (ulong)(_clusterMasks.Length * sizeof(uint)),
             BufferUsage.Storage | BufferUsage.CopyDst));
-        if (_frameGroup.IsValid) RebuildFrameGroup();
     }
 
     public float AspectRatio => _width / (float)_height;
@@ -906,6 +868,7 @@ public sealed partial class PbrRenderer : IDisposable
         var position = _graph.Texture(PositionTarget);
         var prepassDepth = _graph.Texture(PrepassDepthTarget);
         var shadows = _graph.Texture(ShadowArrayTarget);
+        var black = _graph.Texture(_targets.Black);
 
         for (var k = 0; k < _shadowViews.Count; k++)
         {
@@ -927,9 +890,7 @@ public sealed partial class PbrRenderer : IDisposable
             .Depth(sceneDepth, LoadOp.Clear, StoreOp.Store, clear: 1f);
         // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
         // produces them is unreachable.
-        if (ssaoEnabled) main.Reads(position);
-        // The frame group samples the whole array; without this read every shadow layer is dead.
-        main.Reads(shadows);
+        DeclareSceneGroups(main, shadows, ssaoEnabled ? position : black);
         main.Record(this, RecordMain);
 
         if (_sceneColorCapture)
@@ -937,16 +898,24 @@ public sealed partial class PbrRenderer : IDisposable
             var sceneColor = _graph.Texture(SceneColorTarget);
             _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
                 .Color(0, sceneColor, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
-                .Reads(hdr)
+                .BindGroup(0, "PbrSceneBlitGroup", _blitGroupLayout!,
+                [
+                    GraphBinding.Texture(0, hdr),
+                    GraphBinding.Sampler(1, _compositeSampler),
+                    GraphBinding.Texture(2, sceneDepth),
+                ])
                 .Record(this, RecordSceneColorBlit);
 
             // Load/Load back onto the same HDR + depth: blend pipelines already read-not-write
             // depth, so this is exactly the state they expect mid-pass today.
-            _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
+            var blend = _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
                 .Color(0, hdr, LoadOp.Load, StoreOp.Store, scene.ClearColor)
                 .Depth(sceneDepth, LoadOp.Load, StoreOp.Store, clear: 1f)
-                .Reads(sceneColor)
-                .Record(this, RecordBlendBucket);
+                // Sampled through the material's own group 2, which the graph does not build: the
+                // one read here that has to be said rather than derived.
+                .Reads(sceneColor);
+            DeclareSceneGroups(blend, shadows, ssaoEnabled ? position : black);
+            blend.Record(this, RecordBlendBucket);
         }
 
         // bright → mip 0; downsample i → mip i+1 (Clear); additive upsample j → mip L-2-j (Load, so
@@ -957,24 +926,21 @@ public sealed partial class PbrRenderer : IDisposable
         for (var i = 0; i < _bloomLevels; i++)
             _bloomResources.Add(_graph.Texture(BloomTargets[i]));
 
-        var black = new ColorRgba(0f, 0f, 0f, 1f);
-        _graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
-            .Color(0, _bloomResources[0], LoadOp.Clear, StoreOp.Store, black)
-            .Reads(hdr)
+        var opaqueBlack = new ColorRgba(0f, 0f, 0f, 1f);
+        DeclareBloomGroup(_graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
+            .Color(0, _bloomResources[0], LoadOp.Clear, StoreOp.Store, opaqueBlack), hdr)
             .Record(this, RecordBloomBright);
         for (var i = 0; i < _bloomLevels - 1; i++)
         {
-            _graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
-                .Color(0, _bloomResources[i + 1], LoadOp.Clear, StoreOp.Store, black)
-                .Reads(_bloomResources[i])
-                .Record(this, RecordBloomDown, i);
+            DeclareBloomGroup(_graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
+                .Color(0, _bloomResources[i + 1], LoadOp.Clear, StoreOp.Store, opaqueBlack), _bloomResources[i])
+                .Record(this, RecordBloomDown);
         }
         for (var j = 0; j < _bloomLevels - 1; j++)
         {
-            _graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
-                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, StoreOp.Store, black)
-                .Reads(_bloomResources[_bloomLevels - 1 - j])
-                .Record(this, RecordBloomUp, j);
+            DeclareBloomGroup(_graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
+                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, StoreOp.Store, opaqueBlack), _bloomResources[_bloomLevels - 1 - j])
+                .Record(this, RecordBloomUp);
         }
         if (bloomEnabled)
         {
@@ -982,13 +948,18 @@ public sealed partial class PbrRenderer : IDisposable
             _renderer.UpdateBuffer<CompositeUniformsGpu>(_bloomUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref bloomUniforms, 1));
         }
 
-        var composite = _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
-            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f))
-            .Reads(hdr);
-        // The one place bloom is switched off. Its bind group samples mip 0 either way; with the
-        // chain culled the sample reads whatever the mip last held, scaled by an intensity of zero.
-        if (bloomEnabled) composite.Reads(_bloomResources[0]);
-        composite.Record(this, RecordComposite);
+        // The one place bloom is switched off: bind black instead of mip 0 and the whole chain is
+        // unreachable. The shader still samples the binding, scaled by an intensity of zero.
+        _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store, opaqueBlack)
+            .BindGroup(0, "PbrCompositeGroup", _compositeGroupLayout,
+            [
+                GraphBinding.Texture(0, hdr),
+                GraphBinding.Sampler(1, _compositeSampler),
+                GraphBinding.Texture(2, bloomEnabled ? _bloomResources[0] : black),
+                GraphBinding.Buffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
+            ])
+            .Record(this, RecordComposite);
 
         var compositeUniforms = new CompositeUniformsGpu
         {
@@ -999,6 +970,7 @@ public sealed partial class PbrRenderer : IDisposable
 
         _commandWriter.ResetWrittenCount();
         var stream = _graph.Compile(_commandWriter);
+        _bindGroups.EndFrame();
 
         if (_encodeShadowDrawIndex > 0)
             _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, _encodeShadowDrawIndex * (int)_drawStride));
@@ -1016,13 +988,46 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.Submit(in stream);
     }
 
+    /// <summary>Groups 1 and 3 of the main program, shared by every pass that draws scene geometry.
+    /// The position binding is what switches SSAO off: bound to black, nothing reads the pre-pass
+    /// and it is culled. The frame group's buffers grow, so their sizes are read here each frame
+    /// and a grown buffer is a different group by content.</summary>
+    private void DeclareSceneGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture position)
+    {
+        pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
+        [
+            GraphBinding.Buffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
+            GraphBinding.TextureArray(1, shadows),
+            GraphBinding.Sampler(2, _shadowSampler),
+            GraphBinding.Buffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
+            GraphBinding.Buffer(4, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
+        ]);
+        pass.BindGroup(3, "PbrSsaoGroup", _ssaoGroupLayout,
+        [
+            GraphBinding.Buffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
+            GraphBinding.Texture(1, position),
+            GraphBinding.View(2, _skySpecLutView),
+            GraphBinding.Sampler(3, _skySpecSampler),
+            GraphBinding.View(4, _dfgLutView),
+        ]);
+    }
+
+    private FrameGraph.PassBuilder DeclareBloomGroup(FrameGraph.PassBuilder pass, GraphTexture source) =>
+        pass.BindGroup(0, "PbrBloomGroup", _bloomGroupLayout,
+        [
+            GraphBinding.Texture(0, source),
+            GraphBinding.Sampler(1, _compositeSampler),
+            GraphBinding.Buffer(2, _bloomUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
+        ]);
+
     // Depth-only fill of ONE shadow layer. Every opaque caster is drawn with
     // lightMvp = model × faceViewProjection (mirrors the main Mvp = model × viewProjection so the
     // shadow shader matches pbr.slang). No viewport math — each layer owns the whole [0,1] and the
     // default viewport covers it.
-    private static void RecordShadowLayer(object context, ref RenderCommandEncoder encoder, int layer)
+    private static void RecordShadowLayer(object context, ref PassRecording pass, int layer)
     {
         var self = (PbrRenderer)context;
+        ref var encoder = ref pass.Encoder;
         {
             var vp = self._shadowViews[layer].Vp;
             encoder.SetBindGroup(1, self._shadowJointGroup);
@@ -1057,9 +1062,10 @@ public sealed partial class PbrRenderer : IDisposable
     // SSAO position pre-pass: render opaque world positions into the position target (offscreen color) +
     // its own depth. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
     // EncodeBucket fills for it, so no extra ring space or upload is needed.
-    private static void RecordSsaoPrepass(object context, ref RenderCommandEncoder encoder, int _)
+    private static void RecordSsaoPrepass(object context, ref PassRecording pass, int _)
     {
         var self = (PbrRenderer)context;
+        ref var encoder = ref pass.Encoder;
         encoder.SetBindGroup(1, self._prepassJointGroup);
         var prepassSkinned = (bool?)null;
         for (var i = 0; i < self._opaque.Count; i++)
@@ -1083,69 +1089,52 @@ public sealed partial class PbrRenderer : IDisposable
     // The remaining recorders. Each is a static method group, so the delegate the declaration site
     // passes is created once by the compiler rather than per pass per frame.
 
-    private static void RecordMain(object context, ref RenderCommandEncoder encoder, int _)
+    private static void RecordMain(object context, ref PassRecording pass, int _)
     {
         var self = (PbrRenderer)context;
         // Gradient-sky background first (fullscreen, no depth write) so geometry draws over it.
         if (self._encodeScene!.HasSkyBackground)
         {
-            encoder.SetPipeline(self._skyPipeline);
-            encoder.SetBindGroup(0, self._skyGroup);
-            encoder.Draw(new DrawCommand(3, 1, 0, 0));
+            pass.Encoder.SetPipeline(self._skyPipeline);
+            pass.Encoder.SetBindGroup(0, self._skyGroup);
+            pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
         }
-        self.EncodeBucket(ref encoder, self._opaque, BlendMode.Opaque, self._encodeViewProjection, ref self._encodeDrawIndex);
+        self.EncodeBucket(ref pass, self._opaque, BlendMode.Opaque, self._encodeViewProjection, ref self._encodeDrawIndex);
         // Capture moves the blend bucket to its own pass after the blit; without it, the bucket
         // stays here and the frame is one pass shorter.
         if (!self._sceneColorCapture)
-            self.EncodeBucket(ref encoder, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
+            self.EncodeBucket(ref pass, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
     }
 
     // The blend bucket continues the SAME draw ring the opaque bucket filled — the ring does not
     // care which pass consumes an offset, only that no two draws claim the same slot.
-    private static void RecordBlendBucket(object context, ref RenderCommandEncoder encoder, int _)
+    private static void RecordBlendBucket(object context, ref PassRecording pass, int _)
     {
         var self = (PbrRenderer)context;
-        self.EncodeBucket(ref encoder, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
+        self.EncodeBucket(ref pass, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
     }
 
-    private static void RecordSceneColorBlit(object context, ref RenderCommandEncoder encoder, int _)
-    {
-        var self = (PbrRenderer)context;
-        encoder.SetPipeline(self._blitPipeline);
-        encoder.SetBindGroup(0, self._sceneBlitGroup);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
-    }
+    private static void RecordSceneColorBlit(object context, ref PassRecording pass, int _) =>
+        RecordFullscreen(ref pass, ((PbrRenderer)context)._blitPipeline);
 
-    private static void RecordBloomBright(object context, ref RenderCommandEncoder encoder, int _)
-    {
-        var self = (PbrRenderer)context;
-        encoder.SetPipeline(self._bloomBrightPipeline);
-        encoder.SetBindGroup(0, self._bloomHdrGroup);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
-    }
+    private static void RecordBloomBright(object context, ref PassRecording pass, int _) =>
+        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomBrightPipeline);
 
-    private static void RecordBloomDown(object context, ref RenderCommandEncoder encoder, int level)
-    {
-        var self = (PbrRenderer)context;
-        encoder.SetPipeline(self._bloomDownPipeline);
-        encoder.SetBindGroup(0, self._bloomGroups[level]);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
-    }
+    private static void RecordBloomDown(object context, ref PassRecording pass, int _) =>
+        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomDownPipeline);
 
-    private static void RecordBloomUp(object context, ref RenderCommandEncoder encoder, int step)
-    {
-        var self = (PbrRenderer)context;
-        encoder.SetPipeline(self._bloomUpPipeline);
-        encoder.SetBindGroup(0, self._bloomGroups[self._bloomLevels - 1 - step]);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
-    }
+    private static void RecordBloomUp(object context, ref PassRecording pass, int _) =>
+        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomUpPipeline);
 
-    private static void RecordComposite(object context, ref RenderCommandEncoder encoder, int _)
+    private static void RecordComposite(object context, ref PassRecording pass, int _) =>
+        RecordFullscreen(ref pass, ((PbrRenderer)context)._compositePipeline);
+
+    // A fullscreen triangle with the pass's declared group 0: what every post pass is.
+    private static void RecordFullscreen(ref PassRecording pass, PipelineHandle pipeline)
     {
-        var self = (PbrRenderer)context;
-        encoder.SetPipeline(self._compositePipeline);
-        encoder.SetBindGroup(0, self._compositeGroup);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+        pass.Encoder.SetPipeline(pipeline);
+        pass.SetBindGroup(0);
+        pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
     }
 
     // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off, or no prepass this frame) makes the
@@ -1334,7 +1323,7 @@ public sealed partial class PbrRenderer : IDisposable
     }
 
     private void EncodeBucket(
-        ref RenderCommandEncoder encoder,
+        ref PassRecording pass,
         List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
         BlendMode blend,
         in Matrix4x4 viewProjection,
@@ -1348,8 +1337,9 @@ public sealed partial class PbrRenderer : IDisposable
         // SetPipeline within a pass — every pipeline shares the built-in groups 0/1/3.
         var skinnedActive = (bool?)null;
         var programActive = -1;
-        encoder.SetBindGroup(1, _frameGroup);
-        encoder.SetBindGroup(3, _ssaoGroup); // SSAO uniforms + position pre-pass (group 3)
+        ref var encoder = ref pass.Encoder;
+        pass.SetBindGroup(1);
+        pass.SetBindGroup(3);
 
         foreach (var (instance, primitive, _) in bucket)
         {
@@ -1757,25 +1747,11 @@ public sealed partial class PbrRenderer : IDisposable
     private static bool IsSrgbFormat(TextureFormat format) =>
         format is TextureFormat.Rgba8UnormSrgb or TextureFormat.Bgra8UnormSrgb;
 
-    // (Re)build the composite bind group; binds the HDR scene + the bloom result (mip 0).
-    private void RebuildCompositeGroup()
-    {
-        if (_compositeGroup.IsValid) _renderer.DestroyBindGroup(_compositeGroup);
-        _compositeGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrCompositeGroup", _compositeGroupLayout, new[]
-        {
-            BindGroupEntryDesc.ForTextureView(0, _targets.View(HdrTarget)),
-            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForTextureView(2, _targets.View(BloomTargets[0])),
-            BindGroupEntryDesc.ForBuffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
-        }));
-    }
-
     // (Re)allocate the bloom mip chain sized to the current target: a half-res base halving down to
     // ~BloomMinDim (≤ BloomMaxLevels levels). Each level is an Rgba16Float render target sampled by
-    // the next pass; per-level bind groups (source = that level) + one group sampling the HDR scene.
+    // the next pass.
     private void EnsureBloomChain(uint width, uint height)
     {
-        DestroyBloomChain();
         var sizes = new List<(uint W, uint H)>();
         uint w = Math.Max(1, width / 2), h = Math.Max(1, height / 2);
         for (var i = 0; i < BloomMaxLevels; i++)
@@ -1790,29 +1766,8 @@ public sealed partial class PbrRenderer : IDisposable
             _targets.Ensure(BloomTargets[i], RenderTarget(sizes[i].W, sizes[i].H, HdrFormat));
         for (var i = _bloomLevels; i < BloomMaxLevels; i++)
             _targets.Release(BloomTargets[i]);
-        _bloomGroups = new BindGroupHandle[_bloomLevels];
-        for (var i = 0; i < _bloomLevels; i++)
-            _bloomGroups[i] = CreateBloomGroup(_targets.View(BloomTargets[i]));
-        _bloomHdrGroup = CreateBloomGroup(_targets.View(HdrTarget));
     }
 
-    private BindGroupHandle CreateBloomGroup(TextureViewHandle source) =>
-        _renderer.CreateBindGroup(new BindGroupDesc("PbrBloomGroup", _bloomGroupLayout, new[]
-        {
-            BindGroupEntryDesc.ForTextureView(0, source),
-            BindGroupEntryDesc.ForSampler(1, _compositeSampler),
-            BindGroupEntryDesc.ForBuffer(2, _bloomUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
-        }));
-
-    private void DestroyBloomChain()
-    {
-        if (_bloomHdrGroup.IsValid) _renderer.DestroyBindGroup(_bloomHdrGroup);
-        foreach (var g in _bloomGroups) if (g.IsValid) _renderer.DestroyBindGroup(g);
-        _bloomGroups = [];
-    }
-
-    // (Re)build the group-3 bind group: SSAO uniform buffer + the (resized) position texture. The
-    // sampled binding uses an explicit view, distinct from the default view the pre-pass renders into.
     private const int DfgLutSize = 128;
 
     /// <summary>Bake the environment-BRDF (DFG) table: an exact port of Godot's
@@ -1986,19 +1941,6 @@ public sealed partial class PbrRenderer : IDisposable
             SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
     }
 
-    private void RebuildSsaoGroup()
-    {
-        if (_ssaoGroup.IsValid) _renderer.DestroyBindGroup(_ssaoGroup);
-        _ssaoGroup = _renderer.CreateBindGroup(new BindGroupDesc("PbrSsaoGroup", _ssaoGroupLayout, new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
-            BindGroupEntryDesc.ForTextureView(1, _targets.View(PositionTarget)),
-            BindGroupEntryDesc.ForTextureView(2, _skySpecLutView),
-            BindGroupEntryDesc.ForSampler(3, _skySpecSampler),
-            BindGroupEntryDesc.ForTextureView(4, _dfgLutView),
-        }));
-    }
-
     private BindGroupLayoutDesc FindGroup(uint groupIndex) => FindGroup(_program, groupIndex);
 
     private static BindGroupLayoutDesc? FindGroupOrNull(ShaderProgramDesc program, uint groupIndex)
@@ -2039,24 +1981,21 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.DestroyBindGroup(_skyGroup);
         _renderer.DestroyBuffer(_skyUniformBuffer);
         _renderer.DestroyPipeline(_positionPrepassPipeline);
-        _renderer.DestroyBindGroup(_ssaoGroup);
         _renderer.DestroyBuffer(_ssaoUniformBuffer);
         _renderer.DestroyBindGroup(_drawGroup);
-        _renderer.DestroyBindGroup(_frameGroup);
         _renderer.DestroyBuffer(_drawUniformRing);
         _renderer.DestroyBuffer(_frameUniformBuffer);
         if (_jointBuffer.IsValid) _renderer.DestroyBuffer(_jointBuffer);
         if (_shadowJointGroup.IsValid) _renderer.DestroyBindGroup(_shadowJointGroup);
         if (_prepassJointGroup.IsValid) _renderer.DestroyBindGroup(_prepassJointGroup);
         _renderer.DestroyPipeline(_compositePipeline);
-        _renderer.DestroyBindGroup(_compositeGroup);
         _renderer.DestroyBuffer(_compositeUniformBuffer);
         _renderer.DestroySampler(_compositeSampler);
-        DestroyBloomChain();
         _renderer.DestroyPipeline(_bloomBrightPipeline);
         _renderer.DestroyPipeline(_bloomDownPipeline);
         _renderer.DestroyPipeline(_bloomUpPipeline);
         _renderer.DestroyBuffer(_bloomUniformBuffer);
+        _bindGroups.Dispose();
         _targets.Dispose();
     }
 
