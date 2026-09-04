@@ -12,7 +12,18 @@
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <!--
+      Packs as a dotnet tool, the same way Paradise.Cli does: `dotnet tool install -g
+      Paradise.Editor.Host` then `paradise-editor`. Framework-dependent and RID-agnostic, so one
+      package serves every desktop — the Dawn, SDL and cimgui natives ride along in runtimes/ and
+      the host resolves the right ones from deps.json at startup.
+    -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>paradise-editor</ToolCommandName>
+    <PackageId>Paradise.Editor.Host</PackageId>
+    <Title>Paradise.Editor.Host</Title>
+    <Description>The standalone Paradise editor: an SDL window, a WebGPU device and the editor shell drawn into it. Installs as a dotnet tool and runs as `paradise-editor`; `--frames N --screenshot PATH` renders offscreen instead, for a machine with no display.</Description>
+    <PackageTags>editor;tooling;dotnet-tool;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,5 +41,24 @@
     <!-- Fonts and the layout ini come out of a mount the host chooses. -->
     <PackageReference Include="Zio" />
   </ItemGroup>
+
+  <!--
+    Mobile natives are dead weight in a desktop editor's package. SDL3 and cimgui ship
+    android-arm64/x64/x86 and iOS builds, and Dawn ships more besides; together they were ~57 MB of
+    a 231 MB package for platforms this executable cannot run on — it needs a desktop window and a
+    desktop GPU. Removed from what gets published rather than from the PackageReferences, because
+    the packages are right to carry them and other consumers may want them.
+  -->
+  <Target Name="TrimNonDesktopRuntimes" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/android')) Or
+                   $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/ios')) Or
+                   $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/maccatalyst')) Or
+                   $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/browser')) Or
+                   $([System.String]::Copy('%(ResolvedFileToPublish.RelativePath)').Replace('\', '/').StartsWith('runtimes/tvos'))" />
+    </ItemGroup>
+  </Target>
 
 </Project>

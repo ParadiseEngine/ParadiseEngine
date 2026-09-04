@@ -80,9 +80,12 @@ jobs:
       # inside Paradise.ECS, Paradise.Authoring.Generators inside Paradise.Authoring
       # (analyzers/dotnet/cs).
       #
-      # Paradise.Cli is the one non-library here: it packs as a dotnet tool (PackAsTool), so it
-      # still produces a .nupkg and pushes on the same run, but consumers take it through a tool
-      # manifest rather than a PackageReference.
+      # Paradise.Cli and Paradise.Editor.Host are the non-libraries here: both pack as dotnet
+      # tools (PackAsTool), so they still produce a .nupkg and push on the same run, but consumers
+      # take them through a tool manifest rather than a PackageReference — `paradise` and
+      # `paradise-editor` respectively. The editor's package is the largest thing published (~54 MB,
+      # mostly Dawn) because a RID-agnostic tool carries every desktop native; its csproj strips the
+      # mobile ones, which are dead weight for something that needs a desktop window and GPU.
       - name: Pack all packages
         shell: bash
         run: |
@@ -116,6 +119,7 @@ jobs:
             Paradise.Ui.Noesis
             Paradise.Editor.Core
             Paradise.Editor.ImGui
+            Paradise.Editor.Host
             Paradise.Cli.Host
             Paradise.Cli
           )
