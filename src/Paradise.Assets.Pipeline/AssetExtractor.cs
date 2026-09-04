@@ -295,12 +295,105 @@ public static partial class AssetExtractor
                 var document = MaterialDocumentFrom(material, name, TextureAt, out var unresolved);
                 foreach (var missing in unresolved) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
 
-                var fresh = CanonicalTomlWriter.WriteBytes(document);
                 var previous = recorded.Materials.FirstOrDefault(m => m.Name == name)?.Entry;
-                result.Add(new GlbExtraction.NamedEntry(name, Blob(index, path, fresh, previous, "material")));
+                result.Add(new GlbExtraction.NamedEntry(name, Material(index, path, i, document, previous)));
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// A material under the sync rule, both ways: the GLB side is the document the GLB would
+        /// extract to now, the document side is the file — both fingerprinted over the
+        /// glTF-expressible subset, so a Paradise-only edit is never a divergence. An edited
+        /// document is written back into the GLB's material; a re-exported material is re-extracted
+        /// (keeping the document's Paradise-only fields); both changed is a conflict.
+        /// </summary>
+        private GlbExtraction.Entry Material(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable fromGlb, GlbExtraction.Entry? recorded)
+        {
+            var relative = index.Relative(path);
+            var glbSide = Fingerprint(CanonicalTomlWriter.WriteBytes(GlbMaterialWriter.Subset(fromGlb)));
+
+            if (!fileSystem.FileExists(path))
+            {
+                Write(index, path, CanonicalTomlWriter.WriteBytes(fromGlb));
+                return new GlbExtraction.Entry(Reference(index, path), glbSide, glbSide);
+            }
+
+            CanonicalTomlTable onDisk;
+            try
+            {
+                onDisk = MaterialDocument.Load(fileSystem, path);
+            }
+            catch (FormatException error)
+            {
+                _warnings.Add($"{relative}: {error.Message}; left alone");
+                return recorded ?? new GlbExtraction.Entry(Reference(index, path), glbSide, "");
+            }
+
+            var documentSide = Fingerprint(CanonicalTomlWriter.WriteBytes(GlbMaterialWriter.Subset(onDisk)));
+            if (recorded is null)
+            {
+                _kept.Add($"{relative} (exists and was not extracted by this tool; delete it to re-extract)");
+                return new GlbExtraction.Entry(Reference(index, path), glbSide, documentSide);
+            }
+
+            var glbChanged = recorded.GlbFingerprint != glbSide;
+            var documentChanged = recorded.DocumentFingerprint != documentSide;
+            switch (glbChanged, documentChanged)
+            {
+                case (false, false):
+                    return recorded;
+
+                case (true, false):
+                    return TakeGlb(index, path, fromGlb, onDisk, recorded, glbSide, "re-extracted: the GLB changed");
+
+                case (false, true):
+                    return TakeDocument(index, path, materialIndex, onDisk, recorded, documentSide, "written back into the GLB");
+
+                default:
+                    return resolution switch
+                    {
+                        ConflictResolution.TakeGlb => TakeGlb(index, path, fromGlb, onDisk, recorded, glbSide, "conflict: took the GLB's"),
+                        ConflictResolution.TakeDocument => TakeDocument(index, path, materialIndex, onDisk, recorded, documentSide, "conflict: kept the document's, written into the GLB"),
+                        _ => Refuse(relative, recorded),
+                    };
+            }
+        }
+
+        /// <summary>The GLB's values over the document's, keeping every field glTF cannot express.</summary>
+        private GlbExtraction.Entry TakeGlb(AssetIndex index, UPath path, CanonicalTomlTable fromGlb, CanonicalTomlTable onDisk, GlbExtraction.Entry recorded, string glbSide, string why)
+        {
+            var merged = new CanonicalTomlTable();
+            foreach (var (key, value) in fromGlb) merged.Add(key, value);
+            foreach (var (key, value) in onDisk)
+            {
+                if (!merged.ContainsKey(key)) merged.Add(key, value);
+            }
+
+            fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(merged));
+            _written.Add($"{index.Relative(path)} ({why})");
+            return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
+        }
+
+        /// <summary>The document's expressible half into the GLB's material; the GLB side then reads as the document.</summary>
+        private GlbExtraction.Entry TakeDocument(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable onDisk, GlbExtraction.Entry recorded, string documentSide, string why)
+        {
+            var bytes = fileSystem.ReadAllBytes(glb);
+            var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk);
+            if (!ReferenceEquals(rewritten, bytes))
+            {
+                fileSystem.WriteAllBytes(glb, rewritten);
+                _written.Add($"{index.Relative(glb)} (material '{path.GetName()}' {why})");
+            }
+
+            return recorded with { GlbFingerprint = documentSide, DocumentFingerprint = documentSide };
+        }
+
+        private GlbExtraction.Entry Refuse(string relative, GlbExtraction.Entry recorded)
+        {
+            _errors.Add($"{relative}: both the GLB's material and the document changed since they were last in step; re-run with `--take-glb` or `--take-document`");
+            return recorded;
         }
 
         private static CanonicalTomlTable MaterialDocumentFrom(GltfMaterialData material, string name, Func<int, AssetReference?> textureAt, out List<string> unresolved)
@@ -309,17 +402,17 @@ public static partial class AssetExtractor
             var table = new CanonicalTomlTable
             {
                 { "Name", name },
-                { "MetallicFactor", (double)material.MetallicFactor },
-                { "RoughnessFactor", (double)material.RoughnessFactor },
-                { "NormalScale", (double)material.NormalScale },
-                { "OcclusionStrength", (double)material.OcclusionStrength },
+                { "MetallicFactor", Widen(material.MetallicFactor) },
+                { "RoughnessFactor", Widen(material.RoughnessFactor) },
+                { "NormalScale", Widen(material.NormalScale) },
+                { "OcclusionStrength", Widen(material.OcclusionStrength) },
                 { "AlphaMode", material.AlphaMode.ToString() },
-                { "AlphaCutoff", (double)material.AlphaCutoff },
+                { "AlphaCutoff", Widen(material.AlphaCutoff) },
                 { "DoubleSided", material.DoubleSided },
-                { "TransmissionFactor", (double)material.TransmissionFactor },
-                { "BaseColorUvOffset", new List<object> { (double)material.BaseColorUvTransform.Offset.X, (double)material.BaseColorUvTransform.Offset.Y } },
-                { "BaseColorUvScale", new List<object> { (double)material.BaseColorUvTransform.Scale.X, (double)material.BaseColorUvTransform.Scale.Y } },
-                { "BaseColorUvRotation", (double)material.BaseColorUvTransform.Rotation },
+                { "TransmissionFactor", Widen(material.TransmissionFactor) },
+                { "BaseColorUvOffset", new List<object> { Widen(material.BaseColorUvTransform.Offset.X), Widen(material.BaseColorUvTransform.Offset.Y) } },
+                { "BaseColorUvScale", new List<object> { Widen(material.BaseColorUvTransform.Scale.X), Widen(material.BaseColorUvTransform.Scale.Y) } },
+                { "BaseColorUvRotation", Widen(material.BaseColorUvTransform.Rotation) },
             };
 
             foreach (var (key, image) in new[]
@@ -342,7 +435,10 @@ public static partial class AssetExtractor
         }
 
         private static CanonicalTomlTable Colour(float r, float g, float b, float a)
-            => new() { { "r", (double)r }, { "g", (double)g }, { "b", (double)b }, { "a", (double)a } };
+            => new() { { "r", Widen(r) }, { "g", Widen(g) }, { "b", Widen(b) }, { "a", Widen(a) } };
+
+        /// <summary>A GLB float as the document's double: the float's shortest round-trip form, so <c>0.1f</c> is written <c>0.1</c> and not <c>0.10000000149011612</c>, and a hand-typed <c>0.1</c> fingerprints the same.</summary>
+        private static double Widen(float value) => double.Parse(value.ToString("R", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>The prefab wiring the extracted assets: written once, the author's from then on.</summary>
         private GlbExtraction.Entry? Prefab(AssetIndex index, AssetProjectLayout layout, UPath path, string stem, Guid glbGuid, GlbExtraction extraction, CookedGlb cooked, GltfAsset asset)

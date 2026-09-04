@@ -428,6 +428,23 @@
 ### [hits: 1] TUnit 1.65: `HasCount()` is obsolete and warnings-as-errors turns it into CS0618; use `.Count().IsEqualTo(n)`
 - 2026-09-03, editor skeleton tests.
 
+- `[hits: 1]` **A `Paradise.BLOB` array reached through a readonly reference is a copy whose
+  offset points nowhere.** `in MeshBlob blob` and `readonly` members calling `blob.Draws[i]` read
+  garbage (or threw "runs past the index buffer" on a valid blob): the C# compiler makes a
+  defensive copy of the `BlobArray` header for a non-readonly member call on a readonly ref, and
+  the copy's RELATIVE offset is then relative to the stack. Take `ref`, never `in`, and do not
+  mark members that touch a BlobArray/BlobString `readonly`, and never pass a BlobString or a
+  BlobArray BY VALUE to a helper (`NameOf(node.Name)` read stack garbage and passed in isolation
+  by luck — it failed only in the full-solution run). **Why it matters:** the bytes are right, so
+  a debugger print of the data looks fine — only the pointer math is wrong.
+
+- `[hits: 1]` **A root-level inline table in a sidecar domain reads back as a plain table.**
+  `mesh = { guid = … }` under `[glb]` comes out of `TomlDocumentReader.ToCanonical` as a
+  `CanonicalTomlTable`; only tables INSIDE arrays become `CanonicalInlineTable`. A reader that
+  pattern-matches the inline type refuses its own output, and a writer that copies the plain
+  table through emits a `[glb.mesh]` section the next run rewrites inline — two spellings of one
+  record. Read both shapes, and re-serialize from parsed values in one writer.
+
 - `[hits: 1]` **A field the tooling derives goes into the sidecar at MINT, never at first build.**
   Recording the importer after the first successful `Import` would have been the smaller change,
   but a build that edits committed sidecars is the dirty-tree failure the recorded hash already

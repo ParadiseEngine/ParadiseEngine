@@ -173,6 +173,67 @@ public class AssetExtractorTests
     }
 
     [Test]
+    public async Task an_edited_material_document_is_written_back_into_the_glb()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
+        var metal = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
+        var edited = new CanonicalTomlTable();
+        foreach (var (key, value) in metal)
+        {
+            edited.Add(key, key switch
+            {
+                "MetallicFactor" => 0.25,
+                "BaseColorTexture" => AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(rust, "textures/rust.png")),
+                _ => value,
+            });
+        }
+
+        edited.Add("MaterialKind", "lava");   // Paradise-only: the document's alone, never a divergence
+        fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(edited));
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Written.Any(w => w.Contains("crate.glb") && w.Contains("written back"))).IsTrue();
+        var asset = Paradise.Assets.Gltf.GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(Glb));
+        await Assert.That(asset.Materials[1].MetallicFactor).IsEqualTo(0.25f);
+        await Assert.That(asset.Materials[1].BaseColorImage).IsGreaterThanOrEqualTo(0);
+        var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
+        await Assert.That(images.Any(i => i.Uri == "../textures/rust.png")).IsTrue();
+        // Settled: the next run has nothing to do, and the Paradise-only field is still there.
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(again.Written).IsEmpty();
+        await Assert.That(MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material").Value("MaterialKind")).IsEqualTo("lava");
+    }
+
+    [Test]
+    public async Task a_re_exported_material_updates_the_document_and_keeps_its_paradise_only_fields()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var metal = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
+        var withKind = new CanonicalTomlTable();
+        foreach (var (key, value) in metal) withKind.Add(key, value);
+        withKind.Add("MaterialKind", "lava");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(withKind));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);   // settles the Paradise-only edit as no divergence
+
+        // The artist re-exports with a different roughness on 'metal'.
+        var glb = GlbMaterialWriter.Write(fileSystem.ReadAllBytes(Glb), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } });
+        fileSystem.WriteAllBytes(Glb, glb);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        var updated = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
+        await Assert.That(updated.Value("RoughnessFactor")).IsEqualTo(0.1);
+        await Assert.That(updated.Value("MaterialKind")).IsEqualTo("lava");
+    }
+
+    [Test]
     public async Task the_project_default_directory_and_the_sidecar_override_place_the_output()
     {
         using var fileSystem = Project(manifest: "name = \"x\"\nschema_version = 1\n\n[extract]\ndirectory = \"extracted\"\n");

@@ -195,20 +195,20 @@ public static class SkeletonFormat
         for (var i = 0; i < nodes.Length; i++)
         {
             ref var node = ref blob.Nodes[i];
-            nodes[i] = new SkeletonNodeData(NameOf(node.Name), node.Parent, node.RestTranslation, node.RestRotation, node.RestScale);
+            // In place, never through a copy: a BlobString passed by value carries a relative
+            // offset that no longer points into the blob.
+            nodes[i] = new SkeletonNodeData(node.Name.Length == 0 ? null : node.Name.ToString(), node.Parent, node.RestTranslation, node.RestRotation, node.RestScale);
         }
 
         var skins = new SkinData[blob.Skins.Length];
         for (var i = 0; i < skins.Length; i++)
         {
             ref var skin = ref blob.Skins[i];
-            skins[i] = new SkinData(NameOf(skin.Name), skin.JointNodes.ToArray(), skin.InverseBindMatrices.ToArray());
+            skins[i] = new SkinData(skin.Name.Length == 0 ? null : skin.Name.ToString(), skin.JointNodes.ToArray(), skin.InverseBindMatrices.ToArray());
         }
 
         return new SkeletonData(nodes, skins);
     }
-
-    internal static string? NameOf(BlobString<UTF8Encoding> name) => name.Length == 0 ? null : name.ToString();
 
     private static IBuilder<SkeletonNode> Node(SkeletonNodeData data)
     {
