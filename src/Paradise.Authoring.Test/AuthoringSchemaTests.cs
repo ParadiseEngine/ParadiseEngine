@@ -109,12 +109,84 @@ public class AuthoringSchemaTests
         await Assert.That(lamp.Fields!.Single(f => f.Name == "Intensity").Default!.Value.GetSingle()).IsEqualTo(1f);
     }
 
+    /// <summary>The sheet's GEOMETRY nests; its clock does not, because no sprite object holds a
+    /// frame rate.</summary>
+    [Test]
+    public async Task a_sprite_sheet_kind_publishes_the_geometry_a_host_reads_off_a_sprite()
+    {
+        var flipbook = Field(HostBound(), "Flipbook");
+        await Assert.That(flipbook.AuthoredBy).IsEqualTo(AuthoredBySources.SpriteSheet);
+        await Assert.That(flipbook.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(flipbook.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Sheet", "Columns", "Rows", "QuadSize", "Billboard" });
+        await Assert.That(flipbook.Fields!.Single(f => f.Name == "Columns").Default!.Value.GetInt32()).IsEqualTo(1);
+        await Assert.That(flipbook.Fields!.Single(f => f.Name == "Billboard").Default!.Value.GetBoolean()).IsTrue();
+
+        // The sheet is a REFERENCE, not a name an author types: typed as the value kind, it
+        // publishes that kind's authoredBy so an editor draws its sprite picker. The wire type is
+        // string because that is how a Guid travels, exactly as HostId's does.
+        var sheet = flipbook.Fields!.Single(f => f.Name == "Sheet");
+        await Assert.That(sheet.AuthoredBy).IsEqualTo(AuthoredBySources.Sprite);
+        await Assert.That(sheet.Type).IsEqualTo(AuthoredFieldTypes.String);
+    }
+
+    /// <summary>What a sky IS, not one renderer's fit to it: the gradient and its two curve
+    /// exponents are here, and a shader's cosine thresholds are deliberately not — a host that
+    /// integrates its own sky publishes the result through <c>AmbientSh</c> instead.</summary>
+    [Test]
+    public async Task an_environment_kind_publishes_a_gradient_and_no_host_shader_constants()
+    {
+        var mood = Field(HostBound(), "Mood");
+        await Assert.That(mood.AuthoredBy).IsEqualTo(AuthoredBySources.Environment);
+        await Assert.That(mood.Type).IsEqualTo(AuthoredFieldTypes.Object);
+
+        var fields = mood.Fields!.Select(f => f.Name).ToList();
+        await Assert.That(fields).Contains("SkyTop");
+        await Assert.That(fields).Contains("SkyCurve");
+        // SH ambient is deliberately NOT here: several mutually incompatible conventions exist
+        // (band count, coefficient order, premultiplied band factors, E versus E/pi), and naming
+        // one of them would publish a renderer's agreement as a property of skies. A game that
+        // wants it declares it on its own record.
+        await Assert.That(fields).DoesNotContain("AmbientSh");
+        await Assert.That(fields.Where(name => name.Contains("Cos", StringComparison.Ordinal))).IsEmpty();
+
+        // The CURVE, not its reciprocal. Godot's sky_curve default is 0.15 and its renderer wants
+        // 0.6/curve = 4; publishing the 4 here would share a name with a host property holding the
+        // other number, which is a copy-paste nobody can see go wrong.
+        await Assert.That(mood.Fields!.Single(f => f.Name == "SkyCurve").Default!.Value.GetSingle())
+            .IsEqualTo(0.15f);
+        await Assert.That(mood.Fields!.Single(f => f.Name == "GroundCurve").Default!.Value.GetSingle())
+            .IsEqualTo(0.02f);
+
+        await Assert.That(mood.Fields!.Single(f => f.Name == "AmbientMode").Default!.Value.GetString())
+            .IsEqualTo("Color");
+        await Assert.That(mood.Fields!.Single(f => f.Name == "TonemapMode").Default!.Value.GetString())
+            .IsEqualTo("Linear");
+    }
+
+    /// <summary>A nullable leaf publishes its underlying type, because "absent" is expressed by
+    /// omitting the key rather than by a distinct schema type — this is what lets a scene say
+    /// "leave the renderer's own" about a shadow map it never sized.</summary>
+    [Test]
+    public async Task an_environment_kinds_optional_leaves_publish_their_underlying_type()
+    {
+        var mood = Field(HostBound(), "Mood");
+        await Assert.That(mood.Fields!.Single(f => f.Name == "ShadowMapSize").Type)
+            .IsEqualTo(AuthoredFieldTypes.Int);
+        await Assert.That(mood.Fields!.Single(f => f.Name == "ShadowBlur").Type)
+            .IsEqualTo(AuthoredFieldTypes.Float);
+    }
+
     /// <summary>[AuthorDefault] exists because the kinds reach a game's generator as metadata; it
     /// is a second copy of the initializer, so this is what stops the two from drifting.</summary>
     [Test]
     public async Task composed_kind_attribute_defaults_match_their_initializers()
     {
-        foreach (var kind in new[] { typeof(HostShape), typeof(HostLight), typeof(HostCamera) })
+        foreach (var kind in new[]
+                 {
+                     typeof(HostShape), typeof(HostLight), typeof(HostCamera),
+                     typeof(HostSpriteSheet), typeof(HostEnvironment),
+                 })
         {
             var fresh = Activator.CreateInstance(kind)!;
             foreach (var property in kind.GetProperties())

@@ -129,6 +129,8 @@ public class AuthoredReaderTests
             public int Count { get; set; } = 7;
             public bool Armed { get; set; } = true;
             public string Label { get; set; } = "untouched";
+            public int? Budget { get; set; }
+            public float? Bias { get; set; } = 0.25f;
         }
         """;
 
@@ -222,6 +224,35 @@ public class AuthoredReaderTests
         var thing = ReadComponent(registry!, ThingId, """{"Label": null}""");
 
         await Assert.That((string?)Prop(thing, "Label")).IsNull();
+    }
+
+    /// <summary>
+    /// A nullable VALUE leaf reads its number, rather than materializing null.
+    /// </summary>
+    /// <remarks>The first nullable value types to reach the schema arrived with HostEnvironment's
+    /// ShadowMapSize and ShadowBlur, and the model names the unwrap they depend on as a path where
+    /// a value once came through null. The schema half was pinned when they landed; this is the
+    /// generated READER half, which nothing covered.</remarks>
+    [Test]
+    public async Task a_nullable_value_leaf_reads_its_number()
+    {
+        var (registry, _) = Run(PrimitivesSource);
+        var thing = ReadComponent(registry!, ThingId, """{"Budget": 4, "Bias": 0.5}""");
+
+        await Assert.That((int?)Prop(thing, "Budget")).IsEqualTo(4);
+        await Assert.That((float?)Prop(thing, "Bias")).IsEqualTo(0.5f);
+    }
+
+    /// <summary>An omitted nullable leaf keeps the record's own initializer — absent means "the
+    /// declaration decides", which for these two is what "leave the renderer's own" rests on.</summary>
+    [Test]
+    public async Task an_omitted_nullable_value_leaf_keeps_its_initializer()
+    {
+        var (registry, _) = Run(PrimitivesSource);
+        var thing = ReadComponent(registry!, ThingId, """{"Speed": 1.0}""");
+
+        await Assert.That((int?)Prop(thing, "Budget")).IsNull();
+        await Assert.That((float?)Prop(thing, "Bias")).IsEqualTo(0.25f);
     }
 
     /// <summary>

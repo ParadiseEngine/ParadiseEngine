@@ -235,6 +235,15 @@ public static class AuthoredBySources
     /// camera rather than by typing a vector.</summary>
     public const string Camera = "camera";
 
+    /// <summary>A spritesheet animation's geometry — which sheet, how it divides, how big a frame
+    /// is — read off the host's own sprite object (<see cref="HostSpriteSheet"/>). Distinct from
+    /// <see cref="Sprite"/>, which is the sheet reference alone.</summary>
+    public const string SpriteSheet = "sprite-sheet";
+
+    /// <summary>The scene's lighting mood — ambient, background, fog, tone mapping
+    /// (<see cref="HostEnvironment"/>).</summary>
+    public const string Environment = "environment";
+
     /// <summary>A file on disk, baked as the asset's GUID; see
     /// <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";
