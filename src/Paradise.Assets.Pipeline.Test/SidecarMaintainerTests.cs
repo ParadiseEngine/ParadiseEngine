@@ -47,7 +47,7 @@ public class SidecarMaintainerTests
 
         Maintainer(fileSystem).Reconcile();
 
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("mesh");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("glb");
         // Nothing claims a .txt: it has an identity and no importer, and verify says nothing about it.
         await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/notes.txt.meta").Importer).IsNull();
     }
@@ -63,7 +63,7 @@ public class SidecarMaintainerTests
 
         var meta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
         await Assert.That(touched).IsEqualTo(1);
-        await Assert.That(meta.Importer).IsEqualTo("mesh");
+        await Assert.That(meta.Importer).IsEqualTo("glb");
         await Assert.That(meta.Guid).IsEqualTo(Guid.Parse("11111111-2222-4333-8444-555555555555"));
     }
 
@@ -92,7 +92,7 @@ public class SidecarMaintainerTests
 
         maintainer.Carry("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
 
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Importer).IsEqualTo("mesh");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Importer).IsEqualTo("glb");
     }
 
     [Test]

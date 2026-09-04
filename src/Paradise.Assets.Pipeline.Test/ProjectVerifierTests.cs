@@ -59,7 +59,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         var meta = SidecarMeta.Mint();
-        meta.Importer = "mesh";
+        meta.Importer = "glb";
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/b.glb", [2]);
         meta.Save(fileSystem, "/game/assets/models/a.glb.meta");
@@ -570,12 +570,12 @@ public class ProjectVerifierTests
         var before = ProjectVerifier.Verify(fileSystem, s_layout);
         await Assert.That(before.Count).IsEqualTo(1);
         await Assert.That(before[0].Severity).IsEqualTo(VerifySeverity.Warning);
-        await Assert.That(before[0].Message).Contains("'mesh' claims it");
+        await Assert.That(before[0].Message).Contains("'glb' claims it");
 
         var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
 
         await Assert.That(repaired.Select(r => r.Path)).Contains(new UPath("/game/assets/models/crate.glb.meta"));
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("mesh");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("glb");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 
@@ -608,7 +608,7 @@ public class ProjectVerifierTests
             """
             schema_version = 1
             guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
-            importer = "mesh"
+            importer = "glb"
             hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
             """);

@@ -59,13 +59,13 @@ public sealed class TextureImporter : IAssetImporter
 }
 
 /// <summary>GLB copy-through with texture references repointed to KTX2; embedded PNG/JPEG is externalised to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> beside the mesh through the same cache the texture step uses.</summary>
-public sealed class MeshImporter : IAssetImporter
+public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
     public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf");
 
     /// <inheritdoc />
-    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [MeshImportSettings.Instance];
+    public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [GlbImportSettings.Instance];
 
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
@@ -74,7 +74,7 @@ public sealed class MeshImporter : IAssetImporter
         if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
 
         var relative = context.Relative(asset);
-        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
+        var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
         var sites = new List<ReferenceSite>();
         foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
         {
@@ -104,7 +104,7 @@ public sealed class MeshImporter : IAssetImporter
     }
 
     /// <inheritdoc />
-    public string Name => "mesh";
+    public string Name => "glb";
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
@@ -141,7 +141,7 @@ public sealed class MeshImporter : IAssetImporter
         // re-export that changed a slot's uri has outrun its record, and following the old guid
         // there would bake the wrong texture (review of #244). That slot keeps the container's
         // own text, which the path check below validates or fails loudly.
-        var recorded = MeshImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, context.Asset));
+        var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, context.Asset));
         var uris = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var named in MeshContainer.Read(context.Asset, bytes))
         {
@@ -369,6 +369,57 @@ public sealed class PrefabImporter : IAssetImporter
 }
 
 /// <summary>Authored config documents, compiled to the profile's document format.</summary>
+/// <summary>A blob the pipeline extracted (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>) ships as it is: the step checks the magic and copies the bytes, so an unrelated file with the extension is refused by name rather than shipped.</summary>
+internal static class BlobStep
+{
+    public static bool Copy(ImportContext context, Func<ReadOnlySpan<byte>, bool> isBlob, string kind, List<string> errors)
+    {
+        var bytes = context.FileSystem.ReadAllBytes(context.Asset);
+        if (!isBlob(bytes))
+        {
+            errors.Add($"{context.Source}: is not a Paradise {kind} blob (bad magic) — run `paradise assets extract` on its GLB to regenerate it");
+            return true;
+        }
+
+        context.Output.WriteAllBytes("/" + context.Source, bytes);
+        return true;
+    }
+}
+
+/// <summary>The <c>*.mesh</c> step: a mesh blob (<see cref="Paradise.Assets.Mesh.MeshBlobFormat"/>) extracted from a GLB ships verbatim.</summary>
+public sealed class MeshImporter : IAssetImporter
+{
+    public string Name => "mesh";
+
+    public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".mesh");
+
+    /// <inheritdoc />
+    public bool Import(ImportContext context, List<string> errors)
+        => context.HasExtension(".mesh") && BlobStep.Copy(context, Paradise.Assets.Mesh.MeshBlobFormat.IsMeshBlob, "mesh", errors);
+}
+
+/// <summary>The <c>*.skeleton</c> and <c>*.anim</c> step: animation blobs (<see cref="Paradise.Animation.SkeletonFormat"/>, <see cref="Paradise.Animation.ClipFormat"/>) extracted from a GLB ship verbatim.</summary>
+public sealed class AnimationImporter : IAssetImporter
+{
+    public string Name => "animation";
+
+    public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".skeleton", ".anim");
+
+    /// <inheritdoc />
+    public bool Import(ImportContext context, List<string> errors)
+    {
+        if (context.HasExtension(".skeleton")) return BlobStep.Copy(context, Paradise.Animation.SkeletonFormat.IsSkeleton, "skeleton", errors);
+        if (context.HasExtension(".anim")) return BlobStep.Copy(context, Paradise.Animation.ClipFormat.IsClip, "clip", errors);
+        return false;
+    }
+}
+
 /// <summary>
 /// The <c>*.material</c> step: a config that references textures. Bakes each texture slot to the
 /// KTX2 the texture step writes for it — by the reference's guid, through <see cref="ImportContext.Resolve"/>,

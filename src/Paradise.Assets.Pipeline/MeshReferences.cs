@@ -22,7 +22,7 @@ public sealed record MeshReconciliation(
 }
 
 /// <summary>
-/// Keeps a mesh's <c>[mesh]</c> sidecar entries in step with the container and the tree: the
+/// Keeps a mesh's <c>[glb]</c> sidecar entries in step with the container and the tree: the
 /// one rule for "the container says this uri, the sidecar says this guid — which wins?".
 /// </summary>
 /// <remarks>
@@ -41,7 +41,7 @@ public static class MeshReferences
 
         var relative = index.Relative(container);
         var recorded = Recorded(fileSystem, container);
-        var bySlot = MeshImportSettings.BySlot(recorded);
+        var bySlot = GlbImportSettings.BySlot(recorded);
 
         var references = new List<MeshReference>();
         var uris = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -117,7 +117,7 @@ public static class MeshReferences
         if (!entries.SequenceEqual(reconciliation.Recorded) && fileSystem.FileExists(SidecarMeta.PathFor(container)))
         {
             var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
-            MeshImportSettings.Write(meta, entries);
+            GlbImportSettings.Write(meta, entries);
             meta.Save(fileSystem, SidecarMeta.PathFor(container));
             written = true;
         }
@@ -134,7 +134,7 @@ public static class MeshReferences
         if (!fileSystem.FileExists(sidecar)) return [];
         try
         {
-            return MeshImportSettings.Read(SidecarMeta.Load(fileSystem, sidecar));
+            return GlbImportSettings.Read(SidecarMeta.Load(fileSystem, sidecar));
         }
         catch (SidecarMetaException)
         {

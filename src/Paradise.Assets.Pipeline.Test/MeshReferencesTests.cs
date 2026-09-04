@@ -29,7 +29,7 @@ public class MeshReferencesTests
         Record(fileSystem, Mesh, "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
 
         var text = fileSystem.ReadAllText(Mesh + ".meta");
-        await Assert.That(text).Contains("[mesh]");
+        await Assert.That(text).Contains("[glb]");
         await Assert.That(text).Contains("references = [{ slot = \"images[0]\", uri = \"../textures/rust.png\", guid = \"");
         await Assert.That(MeshReferences.Recorded(fileSystem, Mesh)).IsEquivalentTo(new[]
         {
@@ -124,7 +124,7 @@ public class MeshReferencesTests
         {
             { "slot", "images[0]" }, { "uri", "../textures/rust.png" }, { "guid", DocumentGuid.Format(rust) }, { "path", "textures/rust.png" },
         };
-        meta.SetSetting(MeshImportSettings.Domain, new CanonicalTomlTable { { "references", new List<object> { entry, entry } } });
+        meta.SetSetting(GlbImportSettings.Domain, new CanonicalTomlTable { { "references", new List<object> { entry, entry } } });
         meta.Save(fileSystem, Mesh + ".meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
@@ -175,7 +175,7 @@ public class MeshReferencesTests
         MeshReferences.Apply(fileSystem, Mesh, MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh), rewriteContainer: false);
 
         await Assert.That(MeshReferences.Recorded(fileSystem, Mesh)).IsEmpty();
-        await Assert.That(fileSystem.ReadAllText(Mesh + ".meta")).DoesNotContain("[mesh]");
+        await Assert.That(fileSystem.ReadAllText(Mesh + ".meta")).DoesNotContain("[glb]");
     }
 
     [Test]
@@ -184,14 +184,14 @@ public class MeshReferencesTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         WriteMesh(fileSystem, Mesh, """{"images":[]}""");
         var meta = SidecarMeta.Load(fileSystem, Mesh + ".meta");
-        meta.SetSetting(MeshImportSettings.Domain, new CanonicalTomlTable { { "references", new List<object> { new CanonicalInlineTable { { "slot", "images[0]" } } } } });
+        meta.SetSetting(GlbImportSettings.Domain, new CanonicalTomlTable { { "references", new List<object> { new CanonicalInlineTable { { "slot", "images[0]" } } } } });
         meta.Save(fileSystem, Mesh + ".meta");
 
         var findings = ProjectVerifier.Verify(fileSystem, s_layout);
 
         await Assert.That(findings.Count).IsEqualTo(1);
         await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
-        await Assert.That(findings[0].Message).Contains("[mesh]");
+        await Assert.That(findings[0].Message).Contains("[glb]");
     }
 
     private static AssetIndex Index(MemoryFileSystem fileSystem) => AssetIndex.Scan(fileSystem, s_layout.Assets);
@@ -215,9 +215,9 @@ public class MeshReferencesTests
     {
         var sidecar = SidecarMeta.PathFor(mesh);
         var meta = fileSystem.FileExists(sidecar) ? SidecarMeta.Load(fileSystem, sidecar) : SidecarMeta.Mint();
-        var entries = MeshImportSettings.Read(meta).Where(entry => entry.Slot != slot).ToList();
+        var entries = GlbImportSettings.Read(meta).Where(entry => entry.Slot != slot).ToList();
         entries.Add(new MeshReference(slot, uri, reference));
-        MeshImportSettings.Write(meta, entries);
+        GlbImportSettings.Write(meta, entries);
         meta.Save(fileSystem, sidecar);
     }
 

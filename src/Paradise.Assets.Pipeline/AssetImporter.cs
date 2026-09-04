@@ -152,7 +152,9 @@ public static class AssetImporters
         new MaterialImporter(),
         new PrefabImporter(),
         new AudioImporter(),
+        new GlbImporter(),
         new MeshImporter(),
+        new AnimationImporter(),
         new TextureImporter(),
     ];
 }

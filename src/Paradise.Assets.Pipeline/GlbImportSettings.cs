@@ -10,7 +10,7 @@ namespace Paradise.Assets.Pipeline;
 public readonly record struct MeshReference(string Slot, string Uri, AssetReference Reference);
 
 /// <summary>
-/// The <c>[mesh]</c> domain: a mesh container's external references, resolved to identities and
+/// The <c>[glb]</c> domain: a GLB's external references, resolved to identities and
 /// kept in the SIDECAR rather than in the container.
 /// </summary>
 /// <remarks>
@@ -23,9 +23,9 @@ public readonly record struct MeshReference(string Slot, string Uri, AssetRefere
 /// list does not. It changes only when the container's uris change, so an ordinary edit never
 /// dirties it.
 /// </remarks>
-public sealed class MeshImportSettings : IImportSettingsDomain
+public sealed class GlbImportSettings : IImportSettingsDomain
 {
-    public const string Domain = "mesh";
+    public const string Domain = "glb";
 
     public const string ReferencesKey = "references";
 
@@ -33,9 +33,9 @@ public sealed class MeshImportSettings : IImportSettingsDomain
 
     public const string UriKey = "uri";
 
-    public static MeshImportSettings Instance { get; } = new();
+    public static GlbImportSettings Instance { get; } = new();
 
-    private MeshImportSettings()
+    private GlbImportSettings()
     {
     }
 

@@ -277,7 +277,7 @@ public class AssetMoverTests
             using var physical = new Zio.FileSystems.PhysicalFileSystem();
             var layout = new AssetProjectLayout(physical.ConvertPathFromInternal(root));
             physical.WriteAllBytes(layout.Assets / "models/crate.glb", [1]);
-            new SidecarMeta(s_crate) { Importer = "mesh" }.Save(physical, layout.Assets / "models/crate.glb.meta");
+            new SidecarMeta(s_crate) { Importer = "glb" }.Save(physical, layout.Assets / "models/crate.glb.meta");
             var level = new PrefabDocument();
             var top = PrefabObject.WithMeta(s_root, "crate_01");
             top.Components.Add(new PrefabComponent(new Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc"), "Renderable",
@@ -315,7 +315,7 @@ public class AssetMoverTests
             using var physical = new Zio.FileSystems.PhysicalFileSystem();
             var layout = new AssetProjectLayout(physical.ConvertPathFromInternal(root));
             physical.WriteAllBytes(layout.Assets / "Models/crate.glb", [1]);
-            new SidecarMeta(s_crate) { Importer = "mesh" }.Save(physical, layout.Assets / "Models/crate.glb.meta");
+            new SidecarMeta(s_crate) { Importer = "glb" }.Save(physical, layout.Assets / "Models/crate.glb.meta");
             var level = new PrefabDocument();
             var top = PrefabObject.WithMeta(s_root, "crate_01");
             top.Components.Add(new PrefabComponent(new Guid("bdc4fc87-d7b4-41f1-bc90-fc827005adfc"), "Renderable",

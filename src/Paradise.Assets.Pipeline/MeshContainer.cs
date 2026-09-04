@@ -10,7 +10,7 @@ public readonly record struct ContainerReference(string Slot, string Uri);
 /// <summary>
 /// What the pipeline asks of a mesh container's bytes: which external files it names, and —
 /// where the format allows it — spelling a new uri for one. Identity is never in here; that is
-/// the sidecar's (<see cref="MeshImportSettings"/>), so a format that cannot be edited (FBX)
+/// the sidecar's (<see cref="GlbImportSettings"/>), so a format that cannot be edited (FBX)
 /// needs only the reading half.
 /// </summary>
 public static class MeshContainer
