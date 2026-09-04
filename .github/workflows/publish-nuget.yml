@@ -80,12 +80,25 @@ jobs:
       # inside Paradise.ECS, Paradise.Authoring.Generators inside Paradise.Authoring
       # (analyzers/dotnet/cs).
       #
-      # Paradise.Cli and Paradise.Editor.Host are the non-libraries here: both pack as dotnet
-      # tools (PackAsTool), so they still produce a .nupkg and push on the same run, but consumers
-      # take them through a tool manifest rather than a PackageReference — `paradise` and
-      # `paradise-editor` respectively. The editor's package is the largest thing published (~54 MB,
-      # mostly Dawn) because a RID-agnostic tool carries every desktop native; its csproj strips the
-      # mobile ones, which are dead weight for something that needs a desktop window and GPU.
+      # Paradise.Cli is the one non-library here: it packs as a dotnet tool (PackAsTool), so it
+      # still produces a .nupkg and pushes on the same run, but consumers take it through a tool
+      # manifest rather than a PackageReference.
+      #
+      # Paradise.Editor.Host is DELIBERATELY ABSENT, though it is configured to pack as a tool and
+      # verified to install and run. Two reasons, and the second is the one that matters:
+      #
+      #   - This repo tags about every three days. Republishing a ~54 MB GUI application because the
+      #     physics package changed would put gigabytes a year of identical packages on nuget.org,
+      #     and NuGet is append-only — unlisting is the most you can undo.
+      #   - `dotnet tool install -g` with no --version takes the NEWEST stable. Every engine tag
+      #     would silently redefine what "the editor" is, including tags cut for an unrelated fix
+      #     where nobody was thinking about the editor. A library consumer pins a version and
+      #     upgrades when they choose; a tool user gets whatever shipped last. Lockstep versioning
+      #     is right for the first and wrong for the second.
+      #
+      # Paradise.Editor.Core and .ImGui DO ship on every tag: they are libraries, pinned by
+      # consumers, and a studio building its own editor needs them in lockstep with the engine.
+      # The host gets its own trigger when there is an editor worth installing (E3+, #224).
       - name: Pack all packages
         shell: bash
         run: |
@@ -119,7 +132,6 @@ jobs:
             Paradise.Ui.Noesis
             Paradise.Editor.Core
             Paradise.Editor.ImGui
-            Paradise.Editor.Host
             Paradise.Cli.Host
             Paradise.Cli
           )
