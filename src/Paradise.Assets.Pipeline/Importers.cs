@@ -430,7 +430,7 @@ internal static class MeshReferenceStep
         return true;
     }
 
-    /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key.</summary>
+    /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key. A sidecar that will not parse is <c>verify</c>'s error to report; here it is a warning and a lossless clip, not a silent one.</summary>
     private static AnimationOptimizer.Setting? Optimization(ImportContext context, UPath glb)
     {
         var sidecar = SidecarMeta.PathFor(glb);
@@ -439,8 +439,9 @@ internal static class MeshReferenceStep
         {
             return GlbImportSettings.ReadOptimization(SidecarMeta.Load(context.FileSystem, sidecar));
         }
-        catch (SidecarMetaException)
+        catch (SidecarMetaException failure)
         {
+            ImporterLog.SidecarUnreadableForClip(context.Log, context.Source, sidecar.ToString(), failure.Message);
             return null;
         }
     }
@@ -760,6 +761,9 @@ internal static partial class ImporterLog
 
     [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "texture: {Source} has no preset in its sidecar; {Preset} inferred from the name")]
     public static partial void PresetInferred(ILogger logger, string source, TexturePreset preset);
+
+    [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "clip: {Source} cooked with every key because its GLB's sidecar {Sidecar} does not parse ({Problem}); `paradise assets verify` names the fault")]
+    public static partial void SidecarUnreadableForClip(ILogger logger, string source, string sidecar, string problem);
 
     [LoggerMessage(EventId = 32, Level = LogLevel.Information, Message = "{Source}: {Note}")]
     public static partial void PresetNote(ILogger logger, string source, string note);

@@ -37,9 +37,9 @@ public struct AnimationBlob
         if (trackCount < 0 || trackCount > SkeletonBlob.MaxJoints) throw new ArgumentException($"{trackCount} tracks is outside 0..{SkeletonBlob.MaxJoints}.", nameof(trackCount));
         if (timepoints.Length > ushort.MaxValue) throw new ArgumentException("A clip holds at most 65535 distinct key times.", nameof(timepoints));
         var padded = PaddedTrackCount(trackCount);
-        translations.Check("translation", padded, timepoints.Length);
-        rotations.Check("rotation", padded, timepoints.Length);
-        scales.Check("scale", padded, timepoints.Length);
+        translations.Check("translation", padded, timepoints);
+        rotations.Check("rotation", padded, timepoints);
+        scales.Check("scale", padded, timepoints);
 
         var builder = new StructBuilder<AnimationBlob>();
         builder.Value.Duration = duration;
@@ -88,18 +88,31 @@ internal sealed record KeyframeStreamData(byte[] Ratios, ushort[] Previouses, us
 
     public int TimepointOf(int key, int ratioBytes) => ratioBytes == 1 ? Ratios[key] : Ratios[key * 2] | (Ratios[key * 2 + 1] << 8);
 
-    public void Check(string component, int paddedTracks, int timepointCount)
+    /// <summary>Everything the sampler indexes with or divides by, so a bad archive fails here by name and never inside <see cref="SamplingContext.Sample"/>.</summary>
+    public void Check(string component, int paddedTracks, float[] timepoints)
     {
+        var timepointCount = timepoints.Length;
         var ratioBytes = timepointCount <= byte.MaxValue ? 1 : 2;
         if (Ratios.Length != KeyCount * ratioBytes) throw new ArgumentException($"The {component} stream has {KeyCount} keys and {Ratios.Length} ratio bytes.");
         if (Values.Length != KeyCount * 3) throw new ArgumentException($"The {component} stream has {KeyCount} keys and {Values.Length} value words.");
         if (paddedTracks > 0 && KeyCount < paddedTracks * 2) throw new ArgumentException($"The {component} stream has {KeyCount} keys; every one of {paddedTracks} tracks needs a first and a last key.");
         if (IframeDesc.Length % 2 != 0) throw new ArgumentException($"The {component} stream's i-frame table has an odd length.");
+        if (IframeDesc.Length > 0 && !(IframeInterval > 0f)) throw new ArgumentException($"The {component} stream has i-frames at an interval of {IframeInterval}; it must be positive.");
+        for (var i = 0; i < IframeDesc.Length; i += 2)
+        {
+            if (IframeDesc[i] >= (uint)IframeEntries.Length) throw new ArgumentException($"The {component} stream's i-frame {i / 2} starts at byte {IframeDesc[i]} of {IframeEntries.Length}.");
+            if (IframeDesc[i + 1] >= (uint)KeyCount) throw new ArgumentException($"The {component} stream's i-frame {i / 2} covers key {IframeDesc[i + 1]} of {KeyCount}.");
+        }
+
         for (var i = 0; i < KeyCount; i++)
         {
             if (TimepointOf(i, ratioBytes) >= timepointCount) throw new ArgumentException($"The {component} key {i} names timepoint {TimepointOf(i, ratioBytes)} of {timepointCount}.");
             if (Previouses[i] > i) throw new ArgumentException($"The {component} key {i} links {Previouses[i]} keys back, before the stream's start.");
         }
+
+        // The backward walk stops at the first key whose ratio is not past the target; a first key
+        // after the clip's start would walk it off the front of the stream.
+        if (KeyCount > 0 && timepoints[TimepointOf(0, ratioBytes)] != 0f) throw new ArgumentException($"The {component} stream's first key sits at ratio {timepoints[TimepointOf(0, ratioBytes)]}, not at the clip's start.");
     }
 
     public void Set(StructBuilder<AnimationBlob> builder, ref KeyframeStreamBlob stream)

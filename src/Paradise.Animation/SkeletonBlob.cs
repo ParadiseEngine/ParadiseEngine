@@ -32,6 +32,16 @@ public readonly struct JointPose : IEquatable<JointPose>
     public Matrix4x4 ToMatrix() =>
         Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Translation);
 
+    /// <summary>The same pose with a unit rotation, a zero one becoming identity — ozz's <c>NormalizeSafe</c> in its operation order, so a built skeleton's bytes still match ozz's. Every authoring path applies it; a non-unit rest rotation would otherwise scale every unanimated joint below it.</summary>
+    public JointPose WithNormalizedRotation()
+    {
+        var q = Rotation;
+        var lengthSquared = q.X * q.X + q.Y * q.Y + q.Z * q.Z + q.W * q.W;
+        if (lengthSquared == 0f) return new JointPose(Translation, Quaternion.Identity, Scale);
+        var inverse = 1f / MathF.Sqrt(lengthSquared);
+        return new JointPose(Translation, new Quaternion(q.X * inverse, q.Y * inverse, q.Z * inverse, q.W * inverse), Scale);
+    }
+
     public bool Equals(JointPose other) => Translation == other.Translation && Rotation == other.Rotation && Scale == other.Scale;
 
     public override bool Equals(object? obj) => obj is JointPose other && Equals(other);
@@ -95,7 +105,7 @@ public struct SkeletonBlob
         return true;
     }
 
-    /// <summary>Builds the blob from flat depth-first arrays; what the archive reader, the offline builder and the GLB cook all go through.</summary>
+    /// <summary>Builds the blob from flat depth-first arrays; what the archive reader, the offline builder and the GLB cook all go through. Rest rotations are taken as given: the reader must reproduce an archive's bytes, so the authoring paths normalize (<see cref="JointPose.WithNormalizedRotation"/>) before they get here.</summary>
     /// <exception cref="ArgumentException">Mismatched lengths, too many joints, or a parent that does not precede its child.</exception>
     public static NativeBlobAssetReference<SkeletonBlob> Create(string[] names, short[] parents, JointPose[] restPoses)
     {

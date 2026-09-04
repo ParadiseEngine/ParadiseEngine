@@ -85,6 +85,45 @@ public class OzzArchiveTests
     }
 
     [Test]
+    public async Task a_clip_whose_iframes_or_first_key_would_break_the_sampler_is_refused_on_read()
+    {
+        using var skeleton = TestRigs.Chain();
+        var raw = new RawAnimation { Name = "Walk", Duration = 2f };
+        for (var i = 0; i < skeleton.Value.JointCount; i++) raw.Tracks.Add(new RawTrack());
+        raw.Tracks[1].Rotations.Add(new RotationKey(0f, Quaternion.Identity));
+        raw.Tracks[1].Rotations.Add(new RotationKey(1f, TestRigs.QuarterTurnZ));
+        raw.Tracks[1].Rotations.Add(new RotationKey(2f, Quaternion.Identity));
+        using var built = AnimationBuilder.Build(raw, iframeInterval: 0.5f);
+        var bytes = OzzArchive.WriteAnimation(ref built.Value);
+
+        // Each stream's block is ratios, back-links, i-frame entries, i-frame table, interval, values; the
+        // translation stream (rest keys only) has no i-frames, the rotation stream after it does.
+        var header = 1 + OzzArchive.AnimationTag.Length + 1 + 4 + 13 * 4;
+        var stream = header + built.Value.Name.Length + built.Value.Timepoints.Length * 4;
+        var translationBlock = built.Value.Translations.Ratios.Length + built.Value.Translations.Previouses.Length * 2 + built.Value.Translations.IframeEntries.Length
+            + built.Value.Translations.IframeDesc.Length * 4 + 4 + built.Value.Translations.Values.Length * 2;
+        var rotationStream = stream + translationBlock;
+        var iframeTable = rotationStream + built.Value.Rotations.Ratios.Length + built.Value.Rotations.Previouses.Length * 2 + built.Value.Rotations.IframeEntries.Length;
+        var interval = iframeTable + built.Value.Rotations.IframeDesc.Length * 4;
+        var timepointCount = built.Value.Timepoints.Length;
+        await Assert.That(built.Value.Rotations.IframeDesc.Length).IsGreaterThan(0);
+
+        var zeroInterval = (byte[])bytes.Clone();
+        BitConverter.TryWriteBytes(zeroInterval.AsSpan(interval), 0f);
+        var offsetPastEntries = (byte[])bytes.Clone();
+        BitConverter.TryWriteBytes(offsetPastEntries.AsSpan(iframeTable), 1_000_000u);
+        var lateFirstKey = (byte[])bytes.Clone();
+        lateFirstKey[stream] = (byte)(timepointCount - 1);
+
+        var a = await Assert.That(() => OzzArchive.ReadAnimation(zeroInterval)).Throws<InvalidDataException>();
+        await Assert.That(a!.Message).Contains("interval of 0");
+        var b = await Assert.That(() => OzzArchive.ReadAnimation(offsetPastEntries)).Throws<InvalidDataException>();
+        await Assert.That(b!.Message).Contains("starts at byte 1000000");
+        var c = await Assert.That(() => OzzArchive.ReadAnimation(lateFirstKey)).Throws<InvalidDataException>();
+        await Assert.That(c!.Message).Contains("not at the clip's start");
+    }
+
+    [Test]
     public async Task a_skeleton_whose_parent_follows_its_child_is_refused()
     {
         var error = await Assert.That(() => SkeletonBlob.Create(["a", "b"], [1, -1], [JointPose.Identity, JointPose.Identity])).Throws<ArgumentException>();

@@ -65,6 +65,15 @@ public class MeshBlobTests
         var past = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(pastPalette))).Throws<InvalidDataException>();
         await Assert.That(past!.Message).Contains("palette slot 2 of 2");
         await Assert.That(() => MeshBlobFormat.Write(mismatched)).Throws<ArgumentException>();
+
+        var notANumber = Sample(MeshVertexLayout.Skinned);
+        notANumber.Vertices[MeshBlob.SkinnedFloatsPerVertex + MeshBlob.StaticFloatsPerVertex + 1] = float.NaN;
+        var fractional = Sample(MeshVertexLayout.Skinned);
+        fractional.Vertices[2 * MeshBlob.SkinnedFloatsPerVertex + MeshBlob.StaticFloatsPerVertex + 3] = 0.5f;
+        var nan = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(notANumber))).Throws<InvalidDataException>();
+        await Assert.That(nan!.Message).Contains("Vertex 1");
+        var half = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(fractional))).Throws<InvalidDataException>();
+        await Assert.That(half!.Message).Contains("Vertex 2 names palette slot 0.5");
     }
 
     [Test]

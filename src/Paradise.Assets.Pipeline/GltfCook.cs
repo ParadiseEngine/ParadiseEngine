@@ -33,13 +33,20 @@ public static class GltfCook
     /// <summary>Seconds between the i-frames a cooked clip carries; a loop restart or a scrub then seeks instead of walking the key stream from the start.</summary>
     public const float IframeInterval = 1f;
 
-    /// <exception cref="InvalidDataException">The GLB is not one this cook can represent: two skins, or a cubic-spline clip.</exception>
+    /// <exception cref="InvalidDataException">The GLB is not one this cook can represent: two skins, more nodes than a skeleton holds, or a cubic-spline clip.</exception>
     public static CookedGlb Cook(GltfAsset asset)
     {
         ArgumentNullException.ThrowIfNull(asset);
         if (asset.Skins.Length > 1)
         {
             throw new InvalidDataException($"The GLB has {asset.Skins.Length} skins; a Paradise mesh carries one skeleton. Split the file, one rig per GLB.");
+        }
+
+        // The skeleton is the whole node tree, and ozz caps it; a rigid GLB with no skin or clip
+        // builds no skeleton and may have any number of nodes.
+        if ((asset.Skins.Length > 0 || asset.Animations.Length > 0) && asset.Nodes.Length > SkeletonBlob.MaxJoints)
+        {
+            throw new InvalidDataException($"The GLB has {asset.Nodes.Length} nodes; a skeleton holds at most {SkeletonBlob.MaxJoints}. Trim the node tree or split the file.");
         }
 
         var skinned = asset.Instances.Any(instance =>
@@ -162,7 +169,7 @@ public static class GltfCook
             var joint = jointOf[node];
             names[joint] = nodes[node].Name ?? "";
             parents[joint] = nodes[node].ParentIndex < 0 ? SkeletonBlob.NoParent : (short)jointOf[nodes[node].ParentIndex];
-            poses[joint] = new JointPose(nodes[node].RestTranslation, nodes[node].RestRotation, nodes[node].RestScale);
+            poses[joint] = new JointPose(nodes[node].RestTranslation, nodes[node].RestRotation, nodes[node].RestScale).WithNormalizedRotation();
         }
 
         using var skeleton = SkeletonBlob.Create(names, parents, poses);

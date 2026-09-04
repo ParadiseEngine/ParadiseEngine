@@ -197,5 +197,45 @@ public class GltfCookTests
         await Assert.That(error!.Message).Contains("one skeleton");
     }
 
+    [Test]
+    public async Task a_node_tree_past_ozz_s_joint_limit_is_refused_only_when_it_would_become_a_skeleton()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        var roots = new int[SkeletonBlob.MaxJoints + 1];
+        for (var i = 0; i < roots.Length; i++) roots[i] = b.AddNode(mesh: i == 0 ? mesh : null, name: $"n{i}");
+        b.SetSceneRoots(roots);
+        var rigid = b.Build();
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        b.AddAnimation("nudge", (roots[1], "translation", times, values, null));
+        var animated = b.Build();
+
+        await Assert.That(GltfCook.Cook(GltfSceneReader.ReadGeometry(rigid)).Skeleton).IsNull();
+        var error = await Assert.That(() => GltfCook.Cook(GltfSceneReader.ReadGeometry(animated))).Throws<InvalidDataException>();
+        await Assert.That(error!.Message).Contains($"at most {SkeletonBlob.MaxJoints}");
+    }
+
+    [Test]
+    public async Task a_rest_rotation_the_exporter_left_unnormalized_is_normalized_in_the_skeleton()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
+        var node = b.AddNode(mesh: mesh, rotation: [0f, 0f, 1.4142135f, 1.4142135f], name: "Crate");   // length 2
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        b.AddAnimation("nudge", (node, "translation", times, values, null));
+        b.SetSceneRoots(node);
+
+        var cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(b.Build()));
+        using var skeleton = OzzArchive.ReadSkeleton(cooked.Skeleton!);
+
+        var rest = skeleton.Value.RestPoses[0].Rotation;
+        await Assert.That(rest.Length()).IsEqualTo(1f).Within(1e-6f);
+        await Assert.That(rest.Z).IsEqualTo(0.7071068f).Within(1e-6f);
+    }
+
     private static float[] Identity() => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 }

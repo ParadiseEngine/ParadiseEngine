@@ -1,5 +1,3 @@
-using System.Numerics;
-
 using Paradise.BLOB;
 
 namespace Paradise.Animation.Offline;
@@ -22,16 +20,9 @@ public static class SkeletonBuilder
             indexOf[joint] = (short)names.Count;
             names.Add(joint.Name);
             parents.Add(parent is null ? SkeletonBlob.NoParent : indexOf[parent]);
-            poses.Add(new JointPose(joint.Transform.Translation, NormalizeOrIdentity(joint.Transform.Rotation), joint.Transform.Scale));
+            poses.Add(joint.Transform.WithNormalizedRotation());
         });
         return SkeletonBlob.Create([.. names], [.. parents], [.. poses]);
     }
 
-    private static Quaternion NormalizeOrIdentity(Quaternion q)
-    {
-        var lengthSquared = q.LengthSquared();
-        if (lengthSquared == 0f) return Quaternion.Identity;
-        var inverse = 1f / MathF.Sqrt(lengthSquared);
-        return new Quaternion(q.X * inverse, q.Y * inverse, q.Z * inverse, q.W * inverse);
-    }
 }

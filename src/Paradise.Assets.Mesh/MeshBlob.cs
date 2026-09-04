@@ -200,27 +200,32 @@ public static class MeshBlobFormat
             if (draw.SkinIndex == 0 && blob.Skin.Joints.Length == 0) throw new InvalidDataException($"Draw {i} is skinned but the mesh carries no skin.");
         }
 
-        // A vertex naming a palette slot the skin lacks is an out-of-range read of the joint
-        // buffer on the GPU; refuse it here where the vertex can be named.
-        if (blob.IsSkinned && blob.Skin.Joints.Length > 0)
-        {
-            var stride = blob.FloatsPerVertex;
-            for (var v = 0; v < blob.Vertices.Length; v += stride)
-            {
-                for (var j = 0; j < 4; j++)
-                {
-                    var joint = blob.Vertices[v + StaticFloatsPerVertexOffsetOfJoints + j];
-                    if (joint < 0 || joint >= blob.Skin.Joints.Length) throw new InvalidDataException($"Vertex {v / stride} names palette slot {joint} of {blob.Skin.Joints.Length}.");
-                }
-            }
-        }
-
         // A draw that fits the index buffer can still name a vertex past the end; that is an
         // out-of-range GPU read at upload, so it is refused here where it can be named.
         var vertexCount = (uint)blob.VertexCount;
-        for (var i = 0; i < blob.Indices.Length; i++)
+        var indices = blob.Indices.ToSpan();
+        for (var i = 0; i < indices.Length; i++)
         {
-            if (blob.Indices[i] >= vertexCount) throw new InvalidDataException($"Index {i} names vertex {blob.Indices[i]} of {vertexCount}.");
+            if (indices[i] >= vertexCount) throw new InvalidDataException($"Index {i} names vertex {indices[i]} of {vertexCount}.");
+        }
+
+        // A vertex naming a palette slot the skin lacks is an out-of-range read of the joint
+        // buffer on the GPU; refuse it here where the vertex can be named. Written so that NaN
+        // fails too (both comparisons are false for it) and a fractional index is refused rather
+        // than truncated by the shader.
+        if (blob.IsSkinned && blob.Skin.Joints.Length > 0)
+        {
+            var vertices = blob.Vertices.ToSpan();
+            var slots = blob.Skin.Joints.Length;
+            var stride = blob.FloatsPerVertex;
+            for (var v = 0; v < vertices.Length; v += stride)
+            {
+                for (var j = 0; j < 4; j++)
+                {
+                    var joint = vertices[v + StaticFloatsPerVertexOffsetOfJoints + j];
+                    if (!(joint >= 0f && joint < slots) || joint != MathF.Floor(joint)) throw new InvalidDataException($"Vertex {v / stride} names palette slot {joint} of {slots}.");
+                }
+            }
         }
     }
 
