@@ -230,7 +230,9 @@ public sealed class PrefabImporter : IAssetImporter
         var failures = new List<string>();
         var prefabExtension = DocumentOutput.PrefabExtension(context.Profile, context.Target);
         var configExtension = DocumentOutput.Extension(context.Profile);
-        var level = PrefabBake.Bake(document, Referenced, prefabExtension, configExtension, failures);
+        var level = PrefabBake.Bake(
+            document, Referenced, prefabExtension, configExtension, failures,
+            reference => context.Resolve(reference).Path);
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");
@@ -250,7 +252,11 @@ public sealed class PrefabImporter : IAssetImporter
         {
             try
             {
-                return PrefabDocumentSerializer.Load(context.FileSystem, context.AssetsRoot / reference.Path);
+                // By guid: a prefab renamed outside `mv` still carries this instance's identity,
+                // and the path half of the reference is only a hint. An unfound reference has no
+                // file to open; verify already reported it, and the resolver reports the instance.
+                var resolution = context.Resolve(reference);
+                return resolution.Found ? PrefabDocumentSerializer.Load(context.FileSystem, resolution.Asset) : null;
             }
             catch (PrefabDocumentException)
             {

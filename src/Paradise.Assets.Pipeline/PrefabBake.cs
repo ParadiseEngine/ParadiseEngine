@@ -18,20 +18,28 @@ public static class PrefabBake
         PrefabDocument document,
         Func<AssetReference, PrefabDocument?> prefabs,
         string documentExtension,
-        List<string> errors)
-        => Bake(document, prefabs, documentExtension, documentExtension, errors);
+        List<string> errors,
+        Func<AssetReference, string>? currentPath = null)
+        => Bake(document, prefabs, documentExtension, documentExtension, errors, currentPath);
 
+    /// <param name="currentPath">
+    /// Where a reference's asset lives NOW, by guid. Null keeps the authored path half, which is
+    /// only a hint: a build that skipped this would flatten a stale path into the contract and
+    /// ship a reference the runtime cannot open.
+    /// </param>
     public static LevelData Bake(
         PrefabDocument document,
         Func<AssetReference, PrefabDocument?> prefabs,
         string prefabExtension,
         string configExtension,
-        List<string> errors)
+        List<string> errors,
+        Func<AssetReference, string>? currentPath = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(errors);
 
         var extensions = new DocumentExtensions(prefabExtension, configExtension);
+        var resolvePath = currentPath ?? (reference => reference.Path);
         var resolved = PrefabResolver.Resolve(document, prefabs);
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 
@@ -44,7 +52,7 @@ public static class PrefabBake
                 JsonElement data;
                 try
                 {
-                    data = ToElement(ToNode(component.Data, extensions));
+                    data = ToElement(ToNode(component.Data, extensions, resolvePath));
                 }
                 catch (FormatException failure)
                 {
@@ -77,8 +85,14 @@ public static class PrefabBake
 
     // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
     // shift every material after it onto the wrong primitive.
-    private static JsonNode? ToNode(IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions)
-        => CanonicalJson.ToNode(table, reference => BuiltPath(reference.Value("path") as string, extensions));
+    private static JsonNode? ToNode(
+        IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> currentPath)
+        => CanonicalJson.ToNode(table, inline => BuiltPath(AuthoringPath(inline, currentPath), extensions));
+
+    private static string? AuthoringPath(CanonicalInlineTable table, Func<AssetReference, string> currentPath)
+        => AssetReferenceCodec.TryRead(table, out var reference)
+            ? currentPath(reference)
+            : table.Value(AssetReferenceCodec.PathKey) as string;
 
     private static JsonNode? BuiltPath(string? path, DocumentExtensions extensions)
     {

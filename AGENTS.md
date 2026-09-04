@@ -185,6 +185,23 @@ Two things a wrapper must respect, both learned the hard way (see `.claude/lesso
 a subclass's `OpenFileImpl`, and a Coyote spec over `MemoryFileSystem` can pass against a missing
 lock because memory tolerates what the OS refuses.
 
+### An asset reference resolves by GUID, never by path
+
+**An `AssetReference` is `{ guid, path }`, and only the guid names the asset.** Resolution goes
+through `AssetIndex` — the one ordinal scan of `assets/`, holding both what exists and which
+asset carries which guid — which every consumer (build, bake, prefab resolution, verify, `--fix`)
+shares. It is deliberately ONE object: the file set and the guid map come from the same walk, so
+splitting them only invites passing a mismatched pair. Pass an `AssetReference` wherever a
+reference travels; a raw path string as a parameter is the shape this rule exists to keep out.
+
+The path half is carried for the diff and the grep, and it is allowed to be wrong. A rename in
+Finder or with `git mv` leaves it stale while the identity is intact, so `verify` reports that as
+a **warning** (with `--fix` to catch it up) and only a guid no asset carries is an error.
+`paradise assets mv` still rewrites eagerly; that keeps the tree tidy, it is not what keeps it
+working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot / reference.Path`
+(use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
+`reference.Guid`, and carry the path only to phrase the message).
+
 ## Code Style
 
 Enforced via `.editorconfig` with warnings-as-errors:

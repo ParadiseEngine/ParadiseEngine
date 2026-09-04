@@ -54,6 +54,24 @@ public static class AssetReferenceCodec
         return table;
     }
 
+    /// <summary>
+    /// Reads a reference from a table already known to be reference-SHAPED, without throwing: a
+    /// rewrite walks every inline table in a document and must leave a malformed one for
+    /// <c>verify</c> to name rather than failing the walk.
+    /// </summary>
+    /// <returns><see langword="false"/> for the empty table (an absent reference) and for a malformed one alike; both mean "nothing to rewrite here".</returns>
+    public static bool TryRead(CanonicalInlineTable table, out AssetReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        reference = null!;
+
+        if (table.Value(GuidKey) is not string guidText || table.Value(PathKey) is not string path) return false;
+        if (!DocumentGuid.TryParse(guidText, out var guid) || guid == Guid.Empty || path.Length == 0) return false;
+
+        reference = new AssetReference(guid, path);
+        return true;
+    }
+
     public static AssetReference? Read(object? value, string context, Func<string, Exception> fail)
     {
         if (value is not CanonicalInlineTable table)

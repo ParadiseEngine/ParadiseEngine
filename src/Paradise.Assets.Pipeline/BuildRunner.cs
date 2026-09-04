@@ -87,7 +87,7 @@ public sealed partial class BuildRunner
                 0, output);
         }
 
-        var sources = AssetPaths.Scan(_fileSystem, _layout.Assets);
+        var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
         var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
@@ -180,7 +180,7 @@ public sealed partial class BuildRunner
         ArtifactCache cache,
         UPath output,
         BuildManifest manifest,
-        AssetPaths sources,
+        AssetIndex sources,
         List<string> errors)
     {
         using var observed = new ObservedSources(_fileSystem, sources);

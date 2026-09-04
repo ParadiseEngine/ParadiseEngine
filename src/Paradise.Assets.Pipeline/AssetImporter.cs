@@ -15,11 +15,12 @@ namespace Paradise.Assets.Pipeline;
 /// output depends on that is NOT read through it — a tool's version, the profile's settings — is
 /// the runner's to fold into the index environment; the built-ins have nothing else.
 /// <paramref name="Meta"/> is the asset's sidecar, which verify guarantees exists before a build
-/// runs.
+/// runs. <paramref name="Sources"/> also resolves an <see cref="Paradise.Authoring.AssetReference"/>
+/// the asset makes: the guid decides, the path half is a hint a rename can leave stale.
 /// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
-    AssetPaths Sources,
+    AssetIndex Sources,
     UPath Asset,
     string Source,
     SidecarMeta? Meta,
@@ -46,7 +47,36 @@ public sealed record ImportContext(
 
     public bool IsManifest => Source == AssetProjectLayout.ManifestFileName;
 
-    /// <summary>Resolves a reference the asset makes, checks it against the real tree, and records the dependency; returns the error to report, or null when it resolves.</summary>
+    /// <summary>Resolves an authored reference — the guid decides — and records the dependency it creates.</summary>
+    /// <remarks>
+    /// The recorded input is the referenced asset's SIDECAR, not the asset. What this output
+    /// depends on is WHERE that guid lives, and the sidecar beside the asset is the record of
+    /// that: reading it here is what makes a rename of the referenced asset rebuild this one.
+    /// Depending on the asset's own bytes instead would miss a move (the bytes are identical at
+    /// the new path) and rebuild on every unrelated edit to it.
+    /// </remarks>
+    public ReferenceResolution Resolve(Paradise.Authoring.AssetReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+
+        var resolution = Sources.Resolve(reference);
+        if (!resolution.Found) return resolution;
+
+        var sidecar = SidecarMeta.PathFor(resolution.Asset);
+        if (FileSystem.FileExists(sidecar)) FileSystem.ReadAllBytes(sidecar);
+
+        return resolution;
+    }
+
+    /// <summary>
+    /// Resolves a path a FILE FORMAT carries — a GLB's image uri — against the real tree and
+    /// records the dependency; returns the error to report, or null when it resolves.
+    /// </summary>
+    /// <remarks>
+    /// Path-only on purpose, and the one place that is right: these live inside a container the
+    /// DCC wrote and carry no identity, so there is no guid to prefer. An authored reference goes
+    /// through <see cref="Resolve"/> instead.
+    /// </remarks>
     public string? CheckReference(string reference, out UPath resolved)
     {
         ArgumentNullException.ThrowIfNull(reference);

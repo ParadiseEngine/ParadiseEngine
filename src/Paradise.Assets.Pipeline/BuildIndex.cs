@@ -76,7 +76,7 @@ public sealed class BuildIndex
     /// <summary>Whether <paramref name="relative"/> can be left alone, and what the last build made from it.</summary>
     public bool TryReuse(
         IFileSystem fileSystem,
-        AssetPaths sources,
+        AssetIndex sources,
         string relative,
         UPath output,
         out IReadOnlyList<BuiltAsset> produced)
@@ -141,7 +141,7 @@ public sealed class BuildIndex
     }
 
     /// <summary>The input as it should be recorded now, or null when the importer would see something different.</summary>
-    private static BuildInput? Unchanged(IFileSystem fileSystem, AssetPaths sources, BuildInput input)
+    private static BuildInput? Unchanged(IFileSystem fileSystem, AssetIndex sources, BuildInput input)
     {
         var path = BuildInput.PathOf(sources.Root, input.Path);
         var exists = sources.IsUnderRoot(path) ? sources.Contains(path) : fileSystem.FileExists(path);
