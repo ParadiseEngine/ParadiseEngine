@@ -10,20 +10,21 @@ namespace Paradise.Editor.ImGui.Shell;
 /// <remarks>This is the claim in #222 that "built-in panels register through the same path an
 /// external extension would" being kept honest rather than asserted: if the shell needed a private
 /// route to add a menu item or a keybinding, so would everyone else.</remarks>
-public sealed class ShellExtension(EditorShell shell) : IEditorExtension
+public sealed class ShellExtension : IShellExtension
 {
     public const string OwnerId = "editor.shell";
 
     public string Id => OwnerId;
 
-    // Gaps, so panels and workspaces can grow without renumbering the fixed entries around them.
-    private const int PanelMenuOrder = 20;
+    // Gaps, so workspaces can grow without renumbering the fixed entries around them. Panel
+    // ordering is the shell's, since panels arrive from every extension rather than only this one.
     private const int WorkspaceMenuOrder = 60;
     private const int ResetMenuOrder = 100;
 
-    public void Register(EditorRegistrar registrar)
+    public void Register(ShellRegistrar registrar)
     {
         ArgumentNullException.ThrowIfNull(registrar);
+        var shell = registrar.Shell;
 
         registrar
             .AddOperator(new UndoOperator())
@@ -31,24 +32,11 @@ public sealed class ShellExtension(EditorShell shell) : IEditorExtension
             .AddOperator(new ResetLayoutOperator(shell.Layout))
             .AddOperator(new OpenPaletteOperator(shell.Palette));
 
-        // A panel closes by its own X, and nothing else can reopen it — so every panel gets a
-        // toggle operator, which is also what puts it in the command palette. Registered here
-        // rather than by the panel so the rule holds for a panel an extension contributes too.
-        var order = PanelMenuOrder;
-        foreach (var window in Windows)
-        {
-            var panel = new PlaceholderPanel(window);
-            registrar.AddWindow(window);
-            shell.Windows.Add(registrar.Owner, panel);
-
-            var toggle = new ToggleWindowOperator(panel);
-            registrar.AddOperator(toggle);
-            registrar.AddMenuEntry(new MenuEntry("View", window.Title, toggle.Id, order++));
-        }
+        foreach (var window in Windows) registrar.AddPanel(new PlaceholderPanel(window));
         var workspaceOrder = WorkspaceMenuOrder;
         foreach (var workspace in shell.Layout.Workspaces)
         {
-            registrar.AddWorkspace(new WorkspaceDescriptor(workspace.Id, workspace.Title));
+            registrar.Core.AddWorkspace(new WorkspaceDescriptor(workspace.Id, workspace.Title));
             var switchTo = new SwitchWorkspaceOperator(shell.Layout, workspace);
             registrar.AddOperator(switchTo);
             registrar.AddMenuEntry(new MenuEntry("View", workspace.Title, switchTo.Id, workspaceOrder++));
@@ -58,7 +46,7 @@ public sealed class ShellExtension(EditorShell shell) : IEditorExtension
             .AddMenuEntry(new MenuEntry("Edit", "Undo", UndoOperator.OperatorId, 0))
             .AddMenuEntry(new MenuEntry("Edit", "Redo", RedoOperator.OperatorId, 1))
             .AddMenuEntry(new MenuEntry("View", "Command palette", OpenPaletteOperator.OperatorId, 0))
-            .AddMenuEntry(new MenuEntry("View", MenuEntry.Separator, string.Empty, PanelMenuOrder - 1))
+            .AddMenuEntry(new MenuEntry("View", MenuEntry.Separator, string.Empty, 10))
             .AddMenuEntry(new MenuEntry("View", MenuEntry.Separator, string.Empty, WorkspaceMenuOrder - 1))
             .AddMenuEntry(new MenuEntry("View", MenuEntry.Separator, string.Empty, ResetMenuOrder - 1))
             .AddMenuEntry(new MenuEntry("View", "Reset layout", ResetLayoutOperator.OperatorId, ResetMenuOrder));
@@ -81,7 +69,7 @@ public sealed class ShellExtension(EditorShell shell) : IEditorExtension
         new(EditorWindows.Stats, $"{EditorIcons.BarChart} Stats", DockArea.Bottom, "Project"),
     ];
 
-    private static void Bind(EditorRegistrar registrar, string chord, string operatorId)
+    private static void Bind(ShellRegistrar registrar, string chord, string operatorId)
     {
         // A shipped binding that does not parse is a programming error, not a user's typo — the
         // keymap FILE tolerates one, this cannot.

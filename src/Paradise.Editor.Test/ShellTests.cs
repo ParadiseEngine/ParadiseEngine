@@ -141,7 +141,7 @@ public class ShellWiringTests
         var dispatcher = new OperatorDispatcher(session, registries.Operators);
         var layout = new EditorLayout();
         var shell = new EditorShell(dispatcher, registries, layout);
-        new ShellExtension(shell).Register(new EditorRegistrar(registries, new OwnerToken(ShellExtension.OwnerId)));
+        shell.Register(new ShellExtension(), registries);
         return new Composed(shell, layout, registries, dispatcher);
     }
 
@@ -217,5 +217,128 @@ public class ShellWiringTests
 
         await Assert.That(composed.Dispatcher.IsChecked(active)).IsTrue();
         await Assert.That(composed.Dispatcher.IsAvailable(active)).IsFalse();
+    }
+}
+
+
+/// <summary>What a third party gets: they reference the two packages, implement IShellExtension,
+/// and build their own editor. There is no runtime loading — the editor publishes ahead-of-time and
+/// NativeAOT has no JIT to compile a plugin assembly — so this IS the extension story, and it has to
+/// work through exactly the door the built-in shell uses.</summary>
+[NotInParallel]
+public class ShellExtensibilityTests
+{
+    private const string PanelId = "vendor.window.profiler";
+
+    private sealed class VendorPanel() : EditorWindow(new WindowDescriptor(PanelId, "Profiler", DockArea.Bottom, "Vendor"))
+    {
+        public int Frames { get; private set; }
+
+        protected override void DrawContent() => Frames++;
+    }
+
+    private sealed class VendorExtension : IShellExtension
+    {
+        public const string OwnerId = "vendor.tools";
+
+        public string Id => OwnerId;
+
+        public void Register(ShellRegistrar registrar) => registrar
+            .AddPanel(new VendorPanel())
+            .AddOperator(new VendorOperator());
+    }
+
+    private sealed class VendorOperator : IOperator
+    {
+        public string Id => "vendor.profile.start";
+        public string Label => "Start profiling";
+        public string Description => "Stands in for anything a third party would add.";
+        public bool IsAvailable(IOperatorContext context) => true;
+        public OperatorResult Execute(IOperatorContext context, OperatorArgs args) => OperatorResult.Finished;
+    }
+
+    private static (EditorShell Shell, EditorLayout Layout, EditorRegistries Registries, OperatorDispatcher Dispatcher) Compose()
+    {
+        var session = new EditorSession(new InMemorySceneProvider(), new MemoryFileSystem());
+        var registries = new EditorRegistries();
+        var dispatcher = new OperatorDispatcher(session, registries.Operators);
+        var layout = new EditorLayout();
+        var shell = new EditorShell(dispatcher, registries, layout);
+        shell.Register(new ShellExtension(), registries);
+        shell.Register(new VendorExtension(), registries);
+        return (shell, layout, registries, dispatcher);
+    }
+
+    [Test]
+    public async Task an_extension_adds_a_panel_that_draws_and_can_be_reopened()
+    {
+        using var context = new EditorImGuiContext();
+        var (shell, layout, registries, dispatcher) = Compose();
+        using var _ = layout;
+
+        var panel = shell.Windows.Entries.Single(window => window.Descriptor.Id == PanelId);
+        var toggle = $"{PanelId}.toggle";
+
+        // AddPanel did all four steps, which is the point of it existing.
+        await Assert.That(registries.Windows.Entries.Any(w => w.Id == PanelId)).IsTrue();
+        await Assert.That(dispatcher.Find(toggle)).IsNotNull();
+        await Assert.That(registries.Menus.Entries.Any(e => e.Menu == "View" && e.OperatorId == toggle)).IsTrue();
+
+        panel.IsOpen = false;
+        dispatcher.Dispatch(toggle, OperatorArgs.None);
+        await Assert.That(panel.IsOpen).IsTrue();
+    }
+
+    // Owner scoping is what makes an extension removable. It has to cover the UI half too, or
+    // unloading one leaves its panels drawing over an editor that has forgotten about them.
+    [Test]
+    public async Task removing_the_extension_removes_its_panel_and_its_operator()
+    {
+        var (shell, layout, registries, dispatcher) = Compose();
+        using var _ = layout;
+        var owner = new OwnerToken(VendorExtension.OwnerId);
+
+        registries.RemoveOwner(owner);
+        shell.Windows.RemoveOwner(owner);
+
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == PanelId)).IsFalse();
+        await Assert.That(dispatcher.Find("vendor.profile.start")).IsNull();
+        await Assert.That(registries.Menus.Entries.Any(e => e.OperatorId == $"{PanelId}.toggle")).IsFalse();
+
+        // and the built-in shell is untouched
+        await Assert.That(dispatcher.Find(UndoOperator.OperatorId)).IsNotNull();
+        await Assert.That(shell.Windows.Entries.Any(w => w.Descriptor.Id == EditorWindows.Hierarchy)).IsTrue();
+    }
+
+    // A vendor panel is as reachable as a built-in one — same palette, same fuzzy search.
+    [Test]
+    public async Task an_extension_operator_is_reachable_from_the_palette()
+    {
+        var (_, layout, registries, _) = Compose();
+        using var _unused = layout;
+
+        var matched = registries.Operators.Entries
+            .Where(candidate => FuzzyMatch.TryScore("prof", candidate.Label, out _))
+            .Select(candidate => candidate.Id)
+            .ToArray();
+
+        await Assert.That(matched).Contains("vendor.profile.start");
+        await Assert.That(matched).Contains($"{PanelId}.toggle");
+    }
+
+    // Panels from two extensions interleave in registration order rather than both starting at the
+    // same View-menu slot.
+    [Test]
+    public async Task panel_menu_slots_do_not_collide_between_extensions()
+    {
+        var (_, layout, registries, _) = Compose();
+        using var _unused = layout;
+
+        var panelOrders = registries.Menus.Entries
+            .Where(entry => entry.Menu == "View" && entry.OperatorId.EndsWith(".toggle", StringComparison.Ordinal))
+            .Select(entry => entry.Order)
+            .ToArray();
+
+        await Assert.That(panelOrders.Distinct().Count()).IsEqualTo(panelOrders.Length);
     }
 }

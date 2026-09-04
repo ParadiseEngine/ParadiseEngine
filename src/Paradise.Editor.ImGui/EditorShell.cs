@@ -23,9 +23,15 @@ namespace Paradise.Editor.ImGui;
 /// </remarks>
 public sealed class EditorShell : IEditorShell
 {
+    // Panels sit between the palette and the workspaces in the View menu. A counter on the SHELL
+    // rather than per-extension, so panels from two extensions interleave in registration order
+    // instead of both starting at the same number.
+    private const int PanelMenuOrderBase = 20;
+
     private readonly IOperatorDispatcher _dispatcher;
     private readonly IRegistry<KeyBinding> _keyBindings;
     private readonly Registry<EditorWindow> _windows = new();
+    private int _panelMenuOrder = PanelMenuOrderBase;
     private readonly MainMenuBar _menuBar;
     private readonly CommandPalette _palette;
 
@@ -53,6 +59,17 @@ public sealed class EditorShell : IEditorShell
     /// must not know a drawing exists; the descriptor there and the drawing here are joined by the
     /// window id.</summary>
     public IRegistry<EditorWindow> Windows => _windows;
+
+    /// <summary>The next View-menu slot for a panel. Called by <c>ShellRegistrar.AddPanel</c>.</summary>
+    public int NextPanelMenuOrder() => _panelMenuOrder++;
+
+    /// <summary>Register <paramref name="extension"/> under its own owner token.</summary>
+    public void Register(IShellExtension extension, EditorRegistries registries)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        ArgumentNullException.ThrowIfNull(registries);
+        extension.Register(new ShellRegistrar(this, new EditorRegistrar(registries, new OwnerToken(extension.Id))));
+    }
 
     /// <summary>The active input context, which decides which of two bindings on one chord wins.
     /// E2 sets it from the focused panel.</summary>

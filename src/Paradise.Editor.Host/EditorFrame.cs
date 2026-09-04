@@ -29,7 +29,13 @@ internal sealed class EditorFrame : IDisposable
     private readonly EditorShell _shell;
     private readonly IWorkspaceLayoutStore? _layouts;
 
-    public EditorFrame(IWorkspaceLayoutStore? layouts = null, ILogger? log = null)
+    /// <param name="extensions">Contributed panels, operators, menu items and keybindings. The
+    /// built-in shell registers first so its File/Edit/View menus stay leftmost; everything after
+    /// it layers on, and each gets its own owner token so it can be removed as a unit.</param>
+    public EditorFrame(
+        IWorkspaceLayoutStore? layouts = null,
+        ILogger? log = null,
+        IEnumerable<IShellExtension>? extensions = null)
     {
         _layouts = layouts;
 
@@ -46,7 +52,9 @@ internal sealed class EditorFrame : IDisposable
 
         var layout = new EditorLayout(layouts);
         _shell = new EditorShell(Dispatcher, Registries, layout);
-        new ShellExtension(_shell).Register(new EditorRegistrar(Registries, new OwnerToken(ShellExtension.OwnerId)));
+
+        _shell.Register(new ShellExtension(), Registries);
+        foreach (var extension in extensions ?? []) _shell.Register(extension, Registries);
     }
 
     public EditorSession Session { get; }
