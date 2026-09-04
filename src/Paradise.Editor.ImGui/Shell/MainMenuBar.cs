@@ -47,7 +47,8 @@ public sealed class MainMenuBar(IOperatorDispatcher dispatcher, IRegistry<MenuEn
                 // An item whose operator nothing registered is shown DISABLED rather than hidden:
                 // a menu that silently loses entries when an extension fails to load is a menu
                 // nobody can debug.
-                if (ImGuiApi.MenuItem(entry.Label, string.Empty, false, enabled))
+                var checkedState = dispatcher.IsChecked(entry.OperatorId);
+                if (ImGuiApi.MenuItem(entry.Label, string.Empty, checkedState ?? false, enabled))
                 {
                     dispatcher.Dispatch(entry.OperatorId, OperatorArgs.None);
                 }

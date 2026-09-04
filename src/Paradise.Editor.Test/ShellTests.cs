@@ -1,5 +1,11 @@
 using Hexa.NET.ImGui;
+using Paradise.Editor.Core;
+using Paradise.Editor.Core.Document;
+using Paradise.Editor.Core.Extensibility;
+using Paradise.Editor.Core.Operators;
 using Paradise.Editor.Core.Shell;
+using Paradise.Editor.ImGui.Shell;
+using Zio.FileSystems;
 using Paradise.Editor.ImGui;
 using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
@@ -111,5 +117,105 @@ public class ShellTests
         // Released with the first, so the name is free again.
         using var reused = new EditorDockspace("duplicate-name-probe");
         await Assert.That(reused.NodeId).IsNotEqualTo(0u);
+    }
+}
+
+/// <summary>The shell composed the way a host composes it, so the wiring between registries,
+/// operators and panels is exercised rather than assumed.</summary>
+[NotInParallel]
+public class ShellWiringTests
+{
+    private sealed record Composed(
+        EditorShell Shell,
+        EditorLayout Layout,
+        EditorRegistries Registries,
+        OperatorDispatcher Dispatcher) : IDisposable
+    {
+        public void Dispose() => Layout.Dispose();
+    }
+
+    private static Composed Compose()
+    {
+        var session = new EditorSession(new InMemorySceneProvider(), new MemoryFileSystem());
+        var registries = new EditorRegistries();
+        var dispatcher = new OperatorDispatcher(session, registries.Operators);
+        var layout = new EditorLayout();
+        var shell = new EditorShell(dispatcher, registries, layout);
+        new ShellExtension(shell).Register(new EditorRegistrar(registries, new OwnerToken(ShellExtension.OwnerId)));
+        return new Composed(shell, layout, registries, dispatcher);
+    }
+
+    // The bug this is here for: a panel's close box sets a flag, and before the toggle operator
+    // existed nothing cleared it — the panel was gone until the editor restarted.
+    [Test]
+    public async Task a_closed_panel_can_be_reopened()
+    {
+        using var composed = Compose();
+        var panel = composed.Shell.Windows.Entries.First(window => window.Descriptor.Id == EditorWindows.Hierarchy);
+        var toggle = $"{EditorWindows.Hierarchy}.toggle";
+
+        await Assert.That(panel.IsOpen).IsTrue();
+        await Assert.That(composed.Dispatcher.IsChecked(toggle)).IsTrue();
+
+        panel.IsOpen = false; // what the X does
+        await Assert.That(composed.Dispatcher.IsChecked(toggle)).IsFalse();
+
+        composed.Dispatcher.Dispatch(toggle, OperatorArgs.None);
+        await Assert.That(panel.IsOpen).IsTrue();
+    }
+
+    // Every panel, not just the one that was reported — a panel with no way back is the same bug
+    // whichever panel it is.
+    [Test]
+    public async Task every_panel_has_a_toggle_in_the_view_menu()
+    {
+        using var composed = Compose();
+        var viewLabels = composed.Registries.Menus.Entries
+            .Where(entry => entry.Menu == "View")
+            .Select(entry => entry.OperatorId)
+            .ToHashSet();
+
+        foreach (var panel in composed.Shell.Windows.Entries)
+        {
+            var toggle = $"{panel.Descriptor.Id}.toggle";
+            await Assert.That(composed.Dispatcher.Find(toggle)).IsNotNull()
+                .Because($"'{panel.Descriptor.Id}' has no toggle operator");
+            await Assert.That(viewLabels).Contains(toggle)
+                .Because($"'{panel.Descriptor.Id}' has no View menu entry");
+        }
+    }
+
+    // Reachable from the palette too, which is the point of everything being an operator: a panel
+    // toggle nobody put in a menu is still findable by typing its name.
+    [Test]
+    public async Task panel_toggles_are_reachable_by_name_from_the_palette()
+    {
+        using var composed = Compose();
+        var matched = composed.Registries.Operators.Entries
+            .Where(candidate => FuzzyMatch.TryScore("hier", candidate.Label, out _))
+            .Select(candidate => candidate.Id)
+            .ToArray();
+
+        await Assert.That(matched).Contains($"{EditorWindows.Hierarchy}.toggle");
+    }
+
+    // An ordinary command must not draw an empty tick box beside it; only a toggle reports state.
+    [Test]
+    public async Task an_ordinary_command_reports_no_checked_state()
+    {
+        using var composed = Compose();
+
+        await Assert.That(composed.Dispatcher.IsChecked(ResetLayoutOperator.OperatorId)).IsNull();
+        await Assert.That(composed.Dispatcher.IsChecked(UndoOperator.OperatorId)).IsNull();
+    }
+
+    [Test]
+    public async Task the_active_workspace_is_ticked_and_cannot_be_switched_to()
+    {
+        using var composed = Compose();
+        var active = $"{composed.Layout.ActiveId}.activate";
+
+        await Assert.That(composed.Dispatcher.IsChecked(active)).IsTrue();
+        await Assert.That(composed.Dispatcher.IsAvailable(active)).IsFalse();
     }
 }

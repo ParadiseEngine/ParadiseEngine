@@ -54,3 +54,12 @@ public interface IOperator
 
     OperatorResult Execute(IOperatorContext context, OperatorArgs args);
 }
+
+/// <summary>An operator that toggles something, and can say which way it currently is.</summary>
+/// <remarks>Separate from <see cref="IOperator"/> because most operators DO a thing rather than
+/// being in a state, and a nullable "checked" on every one of them would be a field almost nobody
+/// fills in. A menu renders a tick for these and nothing for the rest.</remarks>
+public interface ICheckableOperator : IOperator
+{
+    bool IsChecked(IOperatorContext context);
+}
