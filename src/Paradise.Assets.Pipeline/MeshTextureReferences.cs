@@ -4,10 +4,11 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>
 /// Repoints a GLB's external PNG/JPEG references to the KTX2 the texture step writes at the same
-/// relative place, and declares every external KTX2 — repointed or authored as such — through
-/// <c>KHR_texture_basisu</c> like every other KTX2 the pipeline writes: <c>image/ktx2</c> is
-/// only valid under that extension, and a second contract for the same output was what issue
-/// #207 found. Policy-free: what a missing source means is the runner's call.
+/// relative place, declared through <c>KHR_texture_basisu</c> like every other KTX2 the pipeline
+/// writes: <c>image/ktx2</c> is only valid under that extension, and a second contract for the
+/// same output was what issue #207 found. A KTX2 is never authored — <c>verify</c> refuses one
+/// under <c>assets/</c> — so a reference that already names one is not this pass's to touch.
+/// Policy-free: what a missing source means is the runner's call.
 /// </summary>
 public static class MeshTextureReferences
 {
@@ -18,7 +19,7 @@ public static class MeshTextureReferences
     /// <summary><paramref name="Glb"/> is the input unchanged when nothing needed repointing.</summary>
     public readonly record struct MeshRewrite(byte[] Glb, IReadOnlyList<string> Sources);
 
-    /// <summary>Idempotent: embedded and uri-less images are left as they are; an authored <c>.ktx2</c> reference keeps its uri and gains the declaration.</summary>
+    /// <summary>Idempotent: embedded and uri-less images are left as they are, and so is a reference this pass already repointed.</summary>
     public static MeshRewrite Rewrite(byte[] glb)
     {
         ArgumentNullException.ThrowIfNull(glb);
@@ -34,12 +35,6 @@ public static class MeshTextureReferences
             if (image["bufferView"] is not null) continue;
             if (image["uri"]?.GetValue<string>() is not { } uri) continue;
             if (uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
-
-            if (IsKtx2Reference(uri, image))
-            {
-                ktx2.Add(index);
-                continue;
-            }
 
             if (!IsEncodedImage(uri)) continue;
 
@@ -57,8 +52,4 @@ public static class MeshTextureReferences
 
     private static bool IsEncodedImage(string uri)
         => s_encodedExtensions.Contains(Path.GetExtension(uri), StringComparer.OrdinalIgnoreCase);
-
-    private static bool IsKtx2Reference(string uri, JsonObject image)
-        => string.Equals(Path.GetExtension(uri), ".ktx2", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(image["mimeType"]?.GetValue<string>(), Ktx2MimeType, StringComparison.OrdinalIgnoreCase);
 }

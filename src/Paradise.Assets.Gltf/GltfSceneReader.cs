@@ -24,13 +24,21 @@ public static class GltfSceneReader
     /// contract. Resolved bytes must still be KTX2.
     /// </summary>
     public static GltfAsset Read(ReadOnlyMemory<byte> glb, Func<string, byte[]>? externalImageResolver)
+        => Read(glb, externalImageResolver, readImages: true);
+
+    /// <summary>Everything but the images, which come back as empty entries: what the asset pipeline cooks from, where textures are documents of their own and the KTX2 contract does not apply to the source GLB.</summary>
+    public static GltfAsset ReadGeometry(ReadOnlyMemory<byte> glb) => Read(glb, null, readImages: false);
+
+    private static GltfAsset Read(ReadOnlyMemory<byte> glb, Func<string, byte[]>? externalImageResolver, bool readImages)
     {
         var container = GlbContainer.Parse(glb);
         var root = JsonSerializer.Deserialize(container.Json.Span, GltfJsonContext.Default.GltfRoot)
             ?? throw new InvalidDataException("GLB JSON chunk deserialized to null.");
         var bin = container.Bin;
 
-        var images = ReadImages(root, bin, externalImageResolver);
+        var images = readImages
+            ? ReadImages(root, bin, externalImageResolver)
+            : Enumerable.Repeat(new GltfImageData([]), (root.Images ?? []).Length).ToArray();
         var materials = ReadMaterials(root);
         var meshes = ReadMeshes(root, bin);
         var instances = BakeInstances(root);

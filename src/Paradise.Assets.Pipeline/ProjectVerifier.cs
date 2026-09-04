@@ -87,6 +87,18 @@ public static class ProjectVerifier
                     VerifyDocument(fileSystem, sources, path, findings);
                     break;
 
+                case AssetClass.Material:
+                    VerifyMaterial(fileSystem, path, findings);
+                    break;
+
+                case AssetClass.Foreign when MeshContainer.IsMesh(path):
+                    VerifyExtracted(fileSystem, path, findings);
+                    break;
+
+                case AssetClass.Foreign when path.GetName().EndsWith(".ktx2", StringComparison.OrdinalIgnoreCase):
+                    findings.Add(new VerifyFinding(VerifySeverity.Error, path, "is KTX2, which is build output; author the PNG or JPEG it was encoded from and let the build write the KTX2"));
+                    break;
+
                 // No "nothing handles this file" warning: only an importer, during a build, can
                 // answer that, and a decline may mean "not for this tree" (issue #208).
             }
@@ -211,6 +223,38 @@ public static class ProjectVerifier
             findings.Add(new VerifyFinding(
                 VerifySeverity.Warning, sidecar.Path,
                 $"names no importer; '{claimant.Name}' claims it — run `paradise assets verify --fix` (or `watch`) to record that"));
+        }
+    }
+
+    /// <summary>A GLB that was never extracted has nothing for the build: the mesh, materials and clips that ship are the extracted ones.</summary>
+    private static void VerifyExtracted(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    {
+        var sidecar = SidecarMeta.PathFor(path);
+        if (!fileSystem.FileExists(sidecar)) return;   // the missing-sidecar finding already covers it
+        if (!MeshContainer.HasGeometry(path, fileSystem.ReadAllBytes(path))) return;
+        try
+        {
+            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecar)).Extracted) return;
+        }
+        catch (SidecarMetaException)
+        {
+            return;   // reported against the sidecar
+        }
+
+        findings.Add(new VerifyFinding(
+            VerifySeverity.Warning, path,
+            "has not been extracted, so nothing of it ships — run `paradise assets extract` on it to produce its mesh, materials and clips"));
+    }
+
+    private static void VerifyMaterial(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    {
+        try
+        {
+            MaterialDocument.Load(fileSystem, path);
+        }
+        catch (FormatException failure)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, failure.Message));
         }
     }
 

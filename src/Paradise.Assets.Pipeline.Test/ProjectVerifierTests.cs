@@ -43,6 +43,19 @@ public class ProjectVerifierTests
     }
 
     [Test]
+    public async Task a_ktx2_under_assets_is_an_error_because_it_is_build_output()
+    {
+        using var fileSystem = CreateProject();
+        WriteCarried(fileSystem, "/game/assets/textures/rust.ktx2", "ktx2");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(1);
+        await Assert.That(findings[0].Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(findings[0].Message).Contains("build output");
+    }
+
+    [Test]
     public async Task an_orphaned_sidecar_is_an_error()
     {
         using var fileSystem = CreateProject();
@@ -59,7 +72,7 @@ public class ProjectVerifierTests
     {
         using var fileSystem = CreateProject();
         var meta = SidecarMeta.Mint();
-        meta.Importer = "mesh";
+        meta.Importer = "glb";
         fileSystem.WriteAllBytes("/game/assets/models/a.glb", [1]);
         fileSystem.WriteAllBytes("/game/assets/models/b.glb", [2]);
         meta.Save(fileSystem, "/game/assets/models/a.glb.meta");
@@ -570,13 +583,29 @@ public class ProjectVerifierTests
         var before = ProjectVerifier.Verify(fileSystem, s_layout);
         await Assert.That(before.Count).IsEqualTo(1);
         await Assert.That(before[0].Severity).IsEqualTo(VerifySeverity.Warning);
-        await Assert.That(before[0].Message).Contains("'mesh' claims it");
+        await Assert.That(before[0].Message).Contains("'glb' claims it");
 
         var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
 
         await Assert.That(repaired.Select(r => r.Path)).Contains(new UPath("/game/assets/models/crate.glb.meta"));
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("mesh");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Importer).IsEqualTo("glb");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_material_sampling_a_texture_nobody_carries_is_an_error_and_a_broken_one_names_the_line()
+    {
+        using var fileSystem = CreateProject();
+        WriteDocument(fileSystem, "/game/assets/materials/grass.material",
+            "BaseColorTexture = { guid = \"11111111-2222-4333-8444-555555555555\", path = \"textures/grass.png\" }\n");
+        WriteDocument(fileSystem, "/game/assets/materials/broken.material", "BaseColorTexture = \"textures/grass.png\"\n");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        await Assert.That(findings.Count).IsEqualTo(2);
+        await Assert.That(findings.All(f => f.Severity == VerifySeverity.Error)).IsTrue();
+        await Assert.That(findings.Any(f => f.Path.FullName.EndsWith("broken.material") && f.Message.Contains("BaseColorTexture"))).IsTrue();
+        await Assert.That(findings.Any(f => f.Path.FullName.EndsWith("grass.material") && f.Message.Contains("no asset under assets/ carries"))).IsTrue();
     }
 
     [Test]
@@ -592,7 +621,7 @@ public class ProjectVerifierTests
             """
             schema_version = 1
             guid = "3e1c4f60-2f5d-4e7c-a081-9c0d1e2f3041"
-            importer = "mesh"
+            importer = "glb"
             hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
             """);

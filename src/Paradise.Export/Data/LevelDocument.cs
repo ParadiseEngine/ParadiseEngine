@@ -213,6 +213,11 @@ namespace Paradise.Export.Data
         public string? NormalTexture { get; set; }
         public float OcclusionStrength { get; set; } = 1f;
         public string? OcclusionTexture { get; set; }
+        // KHR_texture_transform on the base-colour uv set, which until materials were documents
+        // only the glTF material inside a GLB could express.
+        public float[] BaseColorUvOffset { get; set; } = [0f, 0f];
+        public float[] BaseColorUvScale { get; set; } = [1f, 1f];
+        public float BaseColorUvRotation { get; set; }
         public string AlphaMode { get; set; } = "Opaque";
         public int RenderQueue { get; set; } = -1;
         public float TransmissionFactor { get; set; }

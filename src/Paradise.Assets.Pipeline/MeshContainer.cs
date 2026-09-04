@@ -10,7 +10,7 @@ public readonly record struct ContainerReference(string Slot, string Uri);
 /// <summary>
 /// What the pipeline asks of a mesh container's bytes: which external files it names, and —
 /// where the format allows it — spelling a new uri for one. Identity is never in here; that is
-/// the sidecar's (<see cref="MeshImportSettings"/>), so a format that cannot be edited (FBX)
+/// the sidecar's (<see cref="GlbImportSettings"/>), so a format that cannot be edited (FBX)
 /// needs only the reading half.
 /// </summary>
 public static class MeshContainer
@@ -72,6 +72,14 @@ public static class MeshContainer
 
         var parts = Enumerable.Repeat("..", from.Length - shared).Concat(to.Skip(shared).Select(Uri.EscapeDataString));
         return string.Join('/', parts);
+    }
+
+    /// <summary>Whether the container declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
+    public static bool HasGeometry(UPath path, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (!IsMesh(path) || !GlbBinary.TryRead(bytes, out var gltf, out _)) return false;
+        return gltf["meshes"] is JsonArray meshes && meshes.Count > 0;
     }
 
     /// <summary>Whether two uris name the same file: a DCC may write <c>a b.png</c> where glTF says <c>a%20b.png</c>, and that is not a move.</summary>

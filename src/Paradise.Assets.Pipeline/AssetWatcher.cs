@@ -159,6 +159,7 @@ public sealed partial class AssetWatcher : IDisposable
             var action = _maintainer.Ensure(path);
             if (action != SidecarAction.None) actions++;
             if (action == SidecarAction.Relinked) carried.Add(path);
+            OfferExtraction(path);
         }
 
         var expired = _maintainer.Expire(held => now - held.At > QuarantineWindow);
@@ -194,6 +195,27 @@ public sealed partial class AssetWatcher : IDisposable
         }
 
         return CatchUp(index, dependents.Distinct());
+    }
+
+    /// <summary>
+    /// A GLB with geometry that nobody extracted is offered, never extracted: extraction mints
+    /// identities and writes files an author will edit, which is not a watcher's to do on a save.
+    /// </summary>
+    private void OfferExtraction(UPath path)
+    {
+        if (!MeshContainer.IsMesh(path) || !_fileSystem.FileExists(path)) return;
+        var sidecar = SidecarMeta.PathFor(path);
+        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, _fileSystem.ReadAllBytes(path))) return;
+        try
+        {
+            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Extracted) return;
+        }
+        catch (SidecarMetaException)
+        {
+            return;
+        }
+
+        LogOffer(_log, path.FullName[(_layout.Assets.FullName.Length + 1)..]);
     }
 
     /// <summary>Whatever an earlier pass deferred and is quiet now.</summary>
@@ -322,6 +344,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     [LoggerMessage(EventId = 18, Level = LogLevel.Information, Message = "would record references (dry run)")]
     private static partial void LogWouldReconcile(ILogger logger);
+
+    [LoggerMessage(EventId = 19, Level = LogLevel.Information, Message = "not extracted: {Relative} — run `paradise assets extract {Relative}` to make its mesh, materials and clips")]
+    private static partial void LogOffer(ILogger logger, string relative);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

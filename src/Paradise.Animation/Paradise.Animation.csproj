@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Animation</AssemblyName>
+    <RootNamespace>Paradise.Animation</RootNamespace>
+    <PackageId>Paradise.Animation</PackageId>
+    <Title>Paradise.Animation</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Skeletons and animation clips as Paradise.BLOB layouts: the node tree with rest pose and skins, and per-node keyframe channels, read at runtime from bytes the asset pipeline extracted from a GLB.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>animation;skeleton;skinning;nativeaot;game-dev</PackageTags>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.BLOB\Paradise.BLOB.csproj" />
+  </ItemGroup>
+
+</Project>

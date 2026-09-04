@@ -149,9 +149,12 @@ public static class AssetImporters
     public static IReadOnlyList<IAssetImporter> All { get; } =
     [
         new ConfigImporter(),
+        new MaterialImporter(),
         new PrefabImporter(),
         new AudioImporter(),
+        new GlbImporter(),
         new MeshImporter(),
+        new AnimationImporter(),
         new TextureImporter(),
     ];
 }
