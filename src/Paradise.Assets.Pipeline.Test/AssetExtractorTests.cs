@@ -174,6 +174,46 @@ public class AssetExtractorTests
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 
+    /// <summary>
+    /// The seed exists to give a newly imported mesh somewhere to be placed from, so a mesh that is
+    /// already placed does not want one. This is what replaced the prefab back-reference the sidecar
+    /// used to carry (#256): the question is asked of the reference graph, so it covers a prefab
+    /// moved out of the way and a hand-authored document that adopted the mesh, which a recorded
+    /// link only ever answered for the first.
+    /// </summary>
+    [Test]
+    public async Task no_second_prefab_is_seeded_when_the_mesh_is_already_placed()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsTrue();
+
+        // Moved out of the extractor's way, still referencing the mesh — the case a recorded
+        // `[glb] prefab` used to catch.
+        fileSystem.CreateDirectory("/game/assets/props");
+        fileSystem.MoveFile("/game/assets/models/crate.prefab", "/game/assets/props/crate.prefab");
+        fileSystem.MoveFile("/game/assets/models/crate.prefab.meta", "/game/assets/props/crate.prefab.meta");
+
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/props/crate.prefab")).IsTrue();
+    }
+
+    /// <summary>Deleting the seed and every reference to the mesh puts the model back where it started, so the next extract seeds it again — the flip side of the test above.</summary>
+    [Test]
+    public async Task the_seed_returns_once_nothing_references_the_mesh()
+    {
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        fileSystem.DeleteFile("/game/assets/models/crate.prefab");
+        fileSystem.DeleteFile("/game/assets/models/crate.prefab.meta");
+
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsTrue();
+    }
+
     [Test]
     public async Task the_prefab_names_the_mesh_component_and_binds_slots_in_primitive_order()
     {
@@ -184,7 +224,8 @@ public class AssetExtractorTests
         var prefab = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/models/crate.prefab");
         var root = prefab.Root;
         await Assert.That(root.Name).IsEqualTo("crate");
-        await Assert.That(root.Meta!.Data.Value(GlbExtraction.GeneratedFrom)).IsEqualTo(DocumentGuid.Format(SidecarMeta.Load(fileSystem, Glb + ".meta").Guid));
+        // A seed, not a projection: nothing on the root records the GLB it came from (#256).
+        await Assert.That(root.Meta!.Data.Select(entry => entry.Key)).IsEquivalentTo(new[] { "Guid", "Name" });
         var meshComponent = root.Component(Guid.Parse("edee8bd8-9321-47db-819d-9bdadf010be4"))!;
         await Assert.That(meshComponent.Type).IsEqualTo("Game.StaticMesh");
         var meshReference = (CanonicalInlineTable)meshComponent.Data.Value("Mesh")!;
