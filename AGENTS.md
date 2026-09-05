@@ -208,7 +208,18 @@ writes no output. A `.mesh`, `.skeleton` or `.anim` under `assets/` is a `MeshRe
 cook the named part of the GLB (`GltfCook`) to the file at the document's own path: the mesh to
 a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`, one aligned native copy, magic and version first),
 the skeleton and clips to **ozz-animation archives**. A clip is found by name, then by the hash
-of its channels, then by index.
+of its channels, then by index. **A built document names assets where the build PUT them.**
+`ImportContext.BuiltPath` resolves a reference and asks the referenced asset's own importer
+(`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture
+as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, prefabs and
+configs to the profile's extension, and mesh, skeleton, clip, material, audio and binary references
+to their own path (a built `.material` keeps its suffix and carries TOML or JSON by profile;
+`ExportDocumentReader.ReadMaterial` tells them apart by the first character). A GLB ships nothing,
+so a reference to one is a build ERROR naming the `.mesh` document to reference instead: an authored
+document references the document the watcher minted, the way it references a `.skeleton` or an
+`.anim`, and the GLB is source the way a `.png` is source to its `.ktx2`. Both the prefab bake and
+the material bake go through it, so a runtime opens the path a built document spells and never
+derives one by convention, and a game's own importer answers for its own kinds.
 
 **Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
 `Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives
@@ -225,8 +236,9 @@ so a vectorized `IndexOf` costs more than it saves), and lanes leave a vector th
 store, never `GetElement` with a variable index (a software path). On Enemy it matches native
 ozz per frame. `AnimationPlayer` is the per-character layer on top: current and outgoing clip,
 time, rate, loop or clamp, cross-fade, `Advance(dt)` then `Evaluate()` into `LocalPose` and
-`ModelMatrices`; `SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the
-GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
+`ModelMatrices`; its cursors, pose sets and matrices are ONE blob (`AnimationPlayerState`), so a
+character is one native allocation and the class only holds the clip and skeleton references.
+`SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
 nothing more. Poses travel as `JointPoses`, a native blob in ozz's structure-of-arrays layout
 (groups of four joints, one `Vector128` per component with a joint per lane): the sampler writes
 it without a transpose, `JointPoses.Blend` and the hierarchy walk take four joints per

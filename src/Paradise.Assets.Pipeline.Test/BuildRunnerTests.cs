@@ -235,7 +235,7 @@ public class BuildRunnerTests
 
         // Written as the contract, not as the authoring document: a baked level, readable by the
         // runtime's own reader.
-        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadPrefab(
             fileSystem.ReadAllText("/game/build/levels/district.toml"));
         await Assert.That(level.Entities.Count).IsEqualTo(1);
     }
@@ -371,7 +371,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.toml")).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.json")).IsFalse();
 
-        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadPrefab(
             fileSystem.ReadAllText("/game/.editor/play/levels/district.prefab"));
         await Assert.That(level.Entities.Count).IsEqualTo(1);
     }
@@ -986,9 +986,8 @@ public class BuildRunnerTests
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.toml")).IsTrue();
-        await Assert.That(fileSystem.ReadAllText("/game/build/materials/grass.toml")).Contains("BaseColorTexture = \"textures/ground/grass.ktx2\"");
-        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.material")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.material")).IsTrue();
+        await Assert.That(fileSystem.ReadAllText("/game/build/materials/grass.material")).Contains("BaseColorTexture = \"textures/ground/grass.ktx2\"");
     }
 
     [Test]

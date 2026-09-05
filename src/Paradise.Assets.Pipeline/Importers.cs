@@ -27,6 +27,13 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
+    /// <summary>A texture ships as the KTX2 encoded from it, never as the PNG.</summary>
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, ".ktx2");
+    }
+
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
@@ -157,6 +164,34 @@ public sealed class GlbImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <summary>
+    /// A GLB ships nothing, so nothing can be built FOR a reference to it: a document that wants
+    /// the mesh references the <c>.mesh</c> document the watcher minted, the way it references a
+    /// <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message names
+    /// the document to point at when the sidecar knows it.
+    /// </summary>
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        var sidecar = SidecarMeta.PathFor(asset.Asset);
+        AssetReference? document = null;
+        try
+        {
+            if (context.FileSystem.FileExists(sidecar))
+            {
+                document = GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar)).Mesh;
+            }
+        }
+        catch (SidecarMetaException)
+        {
+            // The reference is wrong either way; verify reports the sidecar on its own.
+        }
+
+        problem = document is { } mesh
+            ? $"references GLB '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
+            : $"references GLB '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
+        return null;
+    }
+
+    /// <summary>
     /// Ships NOTHING: a GLB is interchange, and what the runtime draws is what <c>extract</c> made
     /// of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures), each
     /// through its own importer. A GLB nobody extracted is <c>verify</c>'s warning, not a build
@@ -275,6 +310,12 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.PrefabExtension(context.Profile, context.Target));
+    }
+
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
@@ -297,7 +338,13 @@ public sealed class PrefabImporter : IAssetImporter
         var configExtension = DocumentOutput.Extension(context.Profile);
         var level = PrefabBake.Bake(
             document, Referenced, prefabExtension, configExtension, failures,
-            reference => context.Resolve(reference).Path);
+            reference =>
+            {
+                var built = context.BuiltPath(reference, out var problem);
+                // Thrown, not returned: the bake reports it against the object and component that
+                // carry the reference, and never sees the authored path stand in for a built one.
+                return built ?? throw new FormatException(problem);
+            });
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");
@@ -575,6 +622,12 @@ public sealed class MaterialImporter : IAssetImporter
 
     public bool RecordsIdentity => true;
 
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.MaterialExtension(context.Profile));
+    }
+
     /// <inheritdoc />
     public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MaterialDocument.Suffix);
 
@@ -598,15 +651,9 @@ public sealed class MaterialImporter : IAssetImporter
         var before = errors.Count;
         var baked = MaterialDocument.Bake(material, reference =>
         {
-            var resolution = context.Resolve(reference);
-            if (!resolution.Found)
-            {
-                errors.Add($"{context.Source}: references texture '{reference.Path}' (guid {DocumentGuid.Format(reference.Guid)}), which no asset under assets/ carries");
-                return null;
-            }
-
-            // The texture step writes its KTX2 at the source's own place in the tree.
-            return Path.ChangeExtension(resolution.Path, ".ktx2");
+            var built = context.BuiltPath(reference, out var problem);
+            if (problem is not null) errors.Add($"{context.Source}: {problem}");
+            return built;
         });
         if (errors.Count > before) return true;
 
@@ -685,6 +732,12 @@ public sealed class ConfigImporter : IAssetImporter
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;
 
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.Extension(context.Profile));
+    }
+
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
@@ -732,8 +785,13 @@ internal static class DocumentOutput
     public static string PrefabExtension(BuildProfile profile, ProjectOutputTarget target)
         => target == ProjectOutputTarget.Play ? AssetClassifier.PrefabSuffix : Extension(profile);
 
-    /// <summary>A material builds to the same <c>.toml</c>/<c>.json</c> a config does: a host that reads <c>LevelMaterialData</c> by extension is unchanged.</summary>
-    public static string MaterialExtension(BuildProfile profile) => Extension(profile);
+    /// <summary>
+    /// A material keeps its <c>.material</c> name in the build tree; what changes with the profile is
+    /// the text inside (TOML or JSON), which a reader tells apart by its first character. Keeping the
+    /// suffix is what lets a built prefab's slot list say what KIND of document it names, the same
+    /// way <c>.mesh</c> and <c>.anim</c> do, instead of the format the build happened to choose.
+    /// </summary>
+    public static string MaterialExtension(BuildProfile profile) => MaterialDocument.Suffix;
 
     public static bool PrefabAsJson(BuildProfile profile, ProjectOutputTarget target)
         => target != ProjectOutputTarget.Play && profile.DocumentFormat == DocumentFormat.Json;

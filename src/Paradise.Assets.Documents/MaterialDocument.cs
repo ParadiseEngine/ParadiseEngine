@@ -13,9 +13,11 @@ namespace Paradise.Assets.Documents;
 /// </summary>
 /// <remarks>
 /// Its own kind, not a <c>.toml</c>, because a material references other assets and a config
-/// does not: the importer that claims it declares those references. Built, it becomes the same
-/// <c>.toml</c>/<c>.json</c> a config does, so a host that reads <c>LevelMaterialData</c> by
-/// extension is unchanged.
+/// does not: the importer that claims it declares those references. Built, it KEEPS the
+/// <c>.material</c> name — a built prefab's slot list then says what kind of document it names,
+/// as <c>.mesh</c> and <c>.anim</c> do — and carries TOML or JSON by build profile. A host reads
+/// it with <c>ExportDocumentReader.ReadMaterial</c>, which tells the two apart by the first
+/// character, never by extension.
 /// </remarks>
 public static class MaterialDocument
 {

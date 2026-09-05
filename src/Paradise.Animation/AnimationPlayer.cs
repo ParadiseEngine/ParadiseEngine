@@ -9,7 +9,8 @@ namespace Paradise.Animation;
 /// and the clip it is fading out of. <see cref="Advance"/> moves time, <see cref="Evaluate"/>
 /// samples (blending the two clips while a fade runs) into local poses and model-space matrices
 /// the caller reads from <see cref="LocalPose"/> and <see cref="ModelMatrices"/>. Allocates only in
-/// the constructor: one <see cref="SamplingContext"/> per slot and the pose and matrix buffers.
+/// the constructor: one <see cref="AnimationPlayerState"/> blob holding both sampling contexts,
+/// both pose sets and the matrices.
 /// </summary>
 /// <remarks>
 /// Holds the <see cref="NativeBlobAssetReference{T}"/>s it plays rather than raw refs so a clip
@@ -20,11 +21,7 @@ namespace Paradise.Animation;
 public sealed class AnimationPlayer : IDisposable
 {
     private readonly NativeBlobAssetReference<SkeletonBlob> _skeleton;
-    private readonly NativeBlobAssetReference<SamplingContext> _currentContext;
-    private readonly NativeBlobAssetReference<SamplingContext> _outgoingContext;
-    private readonly NativeBlobAssetReference<JointPoses> _pose;
-    private readonly NativeBlobAssetReference<JointPoses> _outgoingPose;
-    private readonly Matrix4x4[] _models;
+    private readonly NativeBlobAssetReference<AnimationPlayerState> _state;
     private Slot _current;
     private Slot _outgoing;
     private float _fadeDuration;
@@ -34,17 +31,12 @@ public sealed class AnimationPlayer : IDisposable
     public AnimationPlayer(NativeBlobAssetReference<SkeletonBlob> skeleton)
     {
         _skeleton = skeleton ?? throw new ArgumentNullException(nameof(skeleton));
-        var joints = skeleton.Value.JointCount;
-        _currentContext = SamplingContext.Create(joints);
-        _outgoingContext = SamplingContext.Create(joints);
-        _pose = JointPoses.Create(joints);
-        _outgoingPose = JointPoses.Create(joints);
-        _models = new Matrix4x4[joints];
+        _state = AnimationPlayerState.Create(skeleton.Value.JointCount);
         _current = Slot.Rest;
         _outgoing = Slot.Rest;
     }
 
-    public int JointCount => _models.Length;
+    public int JointCount => _state.Value.Models.Length;
 
     /// <summary>The clip playing, or null for the rest pose.</summary>
     public NativeBlobAssetReference<AnimationBlob>? Current => _current.Clip;
@@ -69,10 +61,13 @@ public sealed class AnimationPlayer : IDisposable
     public float FadeProgress => _fadeRemaining > 0f ? 1f - _fadeRemaining / _fadeDuration : 1f;
 
     /// <summary>What the last <see cref="Evaluate"/> produced, one local pose per joint; read it through this <c>ref</c>, never a copy.</summary>
-    public ref JointPoses LocalPose => ref _pose.Value;
+    public ref JointPoses LocalPose => ref _state.Value.Pose;
 
     /// <summary>What the last <see cref="Evaluate"/> produced, one model-space matrix per joint (row-vector convention).</summary>
-    public ReadOnlySpan<Matrix4x4> ModelMatrices => _models;
+    public ReadOnlySpan<Matrix4x4> ModelMatrices => _state.Value.Models.ToSpan();
+
+    /// <summary>The whole per-character state as one blob — cursors, poses and matrices in one allocation the player owns — for a host that inspects or copies it.</summary>
+    public ref AnimationPlayerState State => ref _state.Value;
 
     /// <summary>Starts <paramref name="clip"/>; with a positive <paramref name="fadeSeconds"/> the clip playing until now keeps advancing and blends out over that time.</summary>
     /// <exception cref="ArgumentException">The clip has a different track count than the skeleton has joints.</exception>
@@ -98,7 +93,7 @@ public sealed class AnimationPlayer : IDisposable
         }
 
         _current = new Slot(clip, loop, rate, Math.Clamp(startTime, 0f, clip.Value.Duration));
-        _currentContext.Value.Invalidate();
+        _state.Value.Current.Invalidate();
     }
 
     /// <summary>Back to the rest pose, fading the playing clip out over <paramref name="fadeSeconds"/> when positive.</summary>
@@ -140,14 +135,15 @@ public sealed class AnimationPlayer : IDisposable
     public void Evaluate()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        Sample(in _current, ref _currentContext.Value, ref _pose.Value);
+        ref var state = ref _state.Value;
+        Sample(in _current, ref state.Current, ref state.Pose);
         if (_fadeRemaining > 0f)
         {
-            Sample(in _outgoing, ref _outgoingContext.Value, ref _outgoingPose.Value);
-            JointPoses.Blend(ref _outgoingPose.Value, ref _pose.Value, FadeProgress, ref _pose.Value);
+            Sample(in _outgoing, ref state.Outgoing, ref state.OutgoingPose);
+            JointPoses.Blend(ref state.OutgoingPose, ref state.Pose, FadeProgress, ref state.Pose);
         }
 
-        LocalToModel.Compute(ref _skeleton.Value, ref _pose.Value, _models);
+        LocalToModel.Compute(ref _skeleton.Value, ref state.Pose, state.Models.ToSpan());
     }
 
     private void Sample(in Slot slot, ref SamplingContext context, ref JointPoses pose)
@@ -165,10 +161,7 @@ public sealed class AnimationPlayer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _currentContext.Dispose();
-        _outgoingContext.Dispose();
-        _pose.Dispose();
-        _outgoingPose.Dispose();
+        _state.Dispose();
     }
 
     /// <summary>One playing clip: which, where, how fast, and whether it wraps.</summary>
@@ -198,6 +191,33 @@ public sealed class AnimationPlayer : IDisposable
                 Time = Math.Clamp(Time, 0f, duration);
             }
         }
+    }
+}
+
+/// <summary>
+/// Everything an <see cref="AnimationPlayer"/> owns per character, as one native blob: the two
+/// sampling cursors, the two pose sets and the model matrices, sized to one skeleton. One
+/// allocation per character, one region a frame touches; the clip and skeleton it plays are the
+/// player's references, not the blob's, so this stays free of anything the GC must root.
+/// </summary>
+public struct AnimationPlayerState
+{
+    public SamplingContext Current;
+    public SamplingContext Outgoing;
+    public JointPoses Pose;
+    public JointPoses OutgoingPose;
+    public BlobArray<Matrix4x4> Models;
+
+    public static NativeBlobAssetReference<AnimationPlayerState> Create(int jointCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(jointCount);
+        var builder = new StructBuilder<AnimationPlayerState>();
+        SamplingContext.Set(builder, ref builder.Value.Current, jointCount);
+        SamplingContext.Set(builder, ref builder.Value.Outgoing, jointCount);
+        JointPoses.Set(builder, ref builder.Value.Pose, jointCount);
+        JointPoses.Set(builder, ref builder.Value.OutgoingPose, jointCount);
+        builder.SetArray(ref builder.Value.Models, new Matrix4x4[jointCount], alignment: 16);
+        return builder.CreateNativeBlobAssetReference();
     }
 }
 

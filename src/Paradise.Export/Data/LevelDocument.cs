@@ -25,7 +25,7 @@ namespace Paradise.Export.Data
     // Convention: Y-up, right-handed (−Z forward, Godot/glTF-standard), meters. Matrices are
     // column-major float[16]. The Godot exporter writes its values verbatim — no handedness
     // conversion (see CONVENTIONS.md).
-    public sealed record LevelData
+    public sealed record PrefabData
     {
         /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader
         /// would misparse.
@@ -44,7 +44,7 @@ namespace Paradise.Export.Data
         /// moved material slots onto the renderable; v3 replaced named slots with one list. All
         /// below the floor, none shimmed.
         ///
-        /// REJECTED on read — see <see cref="Serialization.ExportJsonReader.ReadLevel"/>.</summary>
+        /// REJECTED on read — see <see cref="Serialization.ExportJsonReader.ReadPrefab"/>.</summary>
         public const int CurrentSchemaVersion = 6;
 
         /// <summary>The oldest document this build still understands. Equal to

@@ -79,7 +79,7 @@ public class AuthoringSchemaMergeTests
     [Test]
     public async Task the_engine_publishes_no_authoring_schema()
     {
-        var export = typeof(Paradise.Export.Data.LevelData).Assembly;
+        var export = typeof(Paradise.Export.Data.PrefabData).Assembly;
         await Assert.That(export.GetType("Paradise.Export.AuthoringSchema")).IsNull();
     }
 

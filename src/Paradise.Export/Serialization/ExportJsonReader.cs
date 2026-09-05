@@ -59,7 +59,7 @@ namespace Paradise.Export.Serialization
             element.Deserialize((JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T)));
 
         /// <summary>
-        /// Read a level document, refusing one this build cannot understand.
+        /// Read a prefab document, refusing one this build cannot understand.
         ///
         /// The gate earns its keep again at v5, and for the reason it was added: the break is
         /// SILENT without it. A v4 document deserializes perfectly here — its entities are
@@ -74,7 +74,7 @@ namespace Paradise.Export.Serialization
         /// objects were switched off, and which of the eighteen entity fields a given host meant,
         /// are not decisions a converter can make. Re-export the scene from its editor.
         /// </summary>
-        public static LevelData ReadLevel(string json)
+        public static PrefabData ReadPrefab(string json)
         {
             // The version is read BEFORE the body, not after. A v2 document does not survive
             // deserialization far enough to be asked its version: its "Components" is an object
@@ -86,19 +86,19 @@ namespace Paradise.Export.Serialization
                 int version = peek.RootElement.TryGetProperty("SchemaVersion", out JsonElement element)
                     && element.TryGetInt32(out int parsed)
                         ? parsed
-                        : LevelData.CurrentSchemaVersion;
-                if (version < LevelData.MinimumSupportedVersion ||
-                    version > LevelData.CurrentSchemaVersion)
+                        : PrefabData.CurrentSchemaVersion;
+                if (version < PrefabData.MinimumSupportedVersion ||
+                    version > PrefabData.CurrentSchemaVersion)
                 {
                     throw new JsonException(
-                        $"Level document is schema version {version}; this build reads "
-                        + $"{LevelData.MinimumSupportedVersion}..{LevelData.CurrentSchemaVersion}. "
+                        $"Prefab document is schema version {version}; this build reads "
+                        + $"{PrefabData.MinimumSupportedVersion}..{PrefabData.CurrentSchemaVersion}. "
                         + "Re-export the scene from its editor: v5 made an object nothing but its "
                         + "authored components, and no earlier document carries enough to be "
                         + "converted into one.");
                 }
             }
-            return Deserialize<LevelData>(json);
+            return Deserialize<PrefabData>(json);
         }
 
         public static LevelMaterialData ReadMaterial(string json) => Deserialize<LevelMaterialData>(json);

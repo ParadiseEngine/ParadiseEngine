@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Security.Cryptography;
 
 using Microsoft.Extensions.Logging;
@@ -165,12 +166,24 @@ public sealed partial class BuildRunner
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 
-    /// <summary>What shapes output without being read from <c>assets/</c> by an importer: the encoder and the manifest (its profile table reaches every importer as <see cref="BuildProfile"/>).</summary>
+    /// <summary>
+    /// What shapes output without being read from <c>assets/</c> by an importer: the encoder, the
+    /// manifest (its profile table reaches every importer as <see cref="BuildProfile"/>), and this
+    /// pipeline's own version. The importers' code decides what a built file is named and holds,
+    /// so an engine upgrade rebuilds everything once rather than replaying outputs an unchanged
+    /// asset produced under the previous rules beside ones its neighbours produced under the new.
+    /// A game's own importers are not covered; a change there still wants a clean tree.
+    /// </summary>
     private string Environment()
     {
         var manifest = Convert.ToHexStringLower(SHA256.HashData(_fileSystem.ReadAllBytes(_layout.Manifest)));
-        return $"encoder={_encoder?.Identity ?? ""};manifest={manifest}";
+        return $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest}";
     }
+
+    private static readonly string PipelineVersion =
+        typeof(BuildRunner).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(BuildRunner).Assembly.GetName().Version?.ToString()
+        ?? "";
 
     private (IAssetImporter? Handler, IReadOnlyList<BuildInput> Inputs) Offer(
         UPath path,
@@ -188,7 +201,7 @@ public sealed partial class BuildRunner
 
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
-            observed, sources, path, relative, meta,
+            observed, sources, _layout, _importers, path, relative, meta,
             profile, target, written, cache, _encoder, _log);
 
         // The importer the sidecar names, not a search: recording it is what lets an author pick

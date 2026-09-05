@@ -16,7 +16,7 @@ public class ExportJsonReaderTests
     [Test]
     public async Task level_document_round_trips_through_write_and_read()
     {
-        var document = new LevelData();
+        var document = new PrefabData();
         document.Entities.Add(new List<AuthoredComponentData>
         {
             Payload(WellKnownEntityComponents.MetaId, WellKnownEntityComponents.MetaType,
@@ -36,9 +36,9 @@ public class ExportJsonReaderTests
                 """{"Kind":"Dynamic","Mass":2.0}"""),
         });
 
-        var parsed = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
+        var parsed = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
 
-        await Assert.That(parsed.SchemaVersion).IsEqualTo(LevelData.CurrentSchemaVersion);
+        await Assert.That(parsed.SchemaVersion).IsEqualTo(PrefabData.CurrentSchemaVersion);
         await Assert.That(parsed.Entities.Count).IsEqualTo(2);
 
         // The well-known payloads cross over untouched: identity and hierarchy SURVIVE.
@@ -79,7 +79,7 @@ public class ExportJsonReaderTests
             {"SchemaVersion":5,"Entities":[[]]}
             """;
 
-        await Assert.That(() => ExportJsonReader.ReadLevel(v5))
+        await Assert.That(() => ExportJsonReader.ReadPrefab(v5))
             .Throws<System.Text.Json.JsonException>();
     }
 }

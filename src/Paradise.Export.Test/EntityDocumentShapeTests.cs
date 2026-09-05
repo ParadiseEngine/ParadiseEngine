@@ -35,7 +35,7 @@ public class EntityDocumentShapeTests
     [Test]
     public async Task entity_serializes_as_a_bare_component_array()
     {
-        var document = new LevelData { Entities = { BuildBoxEntity() } };
+        var document = new PrefabData { Entities = { BuildBoxEntity() } };
         JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(document))!;
 
         JsonNode entity = json["Entities"]![0]!;
@@ -56,7 +56,7 @@ public class EntityDocumentShapeTests
     [Test]
     public async Task transform_is_written_verbatim_right_handed()
     {
-        var document = new LevelData { Entities = { BuildBoxEntity() } };
+        var document = new PrefabData { Entities = { BuildBoxEntity() } };
         JsonNode json = JsonNode.Parse(ExportJsonWriter.SerializeToString(document))!;
         var position = (JsonArray)PayloadOf(
             json["Entities"]![0]!, WellKnownEntityComponents.TransformId)["Position"]!;
@@ -70,8 +70,8 @@ public class EntityDocumentShapeTests
     [Test]
     public async Task an_object_round_trips_through_the_reader()
     {
-        var document = new LevelData { Entities = { BuildBoxEntity() } };
-        LevelData read = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
+        var document = new PrefabData { Entities = { BuildBoxEntity() } };
+        PrefabData read = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(read.Entities.Count).IsEqualTo(1);
         var meta = read.Entities[0].Single(c => c.Id == WellKnownEntityComponents.MetaId).Data;

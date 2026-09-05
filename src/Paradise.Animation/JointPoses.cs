@@ -41,6 +41,14 @@ public struct JointPoses
     /// <summary>Room for <paramref name="jointCount"/> joints, every lane at identity.</summary>
     public static NativeBlobAssetReference<JointPoses> Create(int jointCount)
     {
+        var builder = new StructBuilder<JointPoses>();
+        Set(builder, ref builder.Value, jointCount);
+        return builder.CreateNativeBlobAssetReference();
+    }
+
+    /// <summary>Sizes a pose set that is a field of a larger blob (<see cref="AnimationPlayerState"/>), the same way <see cref="Create"/> sizes a standalone one.</summary>
+    internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref JointPoses poses, int jointCount) where TRoot : unmanaged
+    {
         ArgumentOutOfRangeException.ThrowIfNegative(jointCount);
         var groups = AnimationBlob.PaddedTrackCount(jointCount) / 4;
         var translations = new SoaVector3[groups];
@@ -52,12 +60,10 @@ public struct JointPoses
             scales[g].X = scales[g].Y = scales[g].Z = Vector128<float>.One;
         }
 
-        var builder = new StructBuilder<JointPoses>();
-        builder.Value.JointCount = jointCount;
-        builder.SetArray(ref builder.Value.Translations, translations, alignment: 16);
-        builder.SetArray(ref builder.Value.Rotations, rotations, alignment: 16);
-        builder.SetArray(ref builder.Value.Scales, scales, alignment: 16);
-        return builder.CreateNativeBlobAssetReference();
+        poses.JointCount = jointCount;
+        builder.SetArray(ref poses.Translations, translations, alignment: 16);
+        builder.SetArray(ref poses.Rotations, rotations, alignment: 16);
+        builder.SetArray(ref poses.Scales, scales, alignment: 16);
     }
 
     public JointPose this[int joint]
