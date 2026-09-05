@@ -23,7 +23,7 @@ public class DockspaceTests
         using var context = new EditorImGuiContext();
         var seeds = 0;
         uint dockedInto = 0;
-        var dockspace = new EditorDockspace("TestDockspace", root =>
+        using var dockspace = new EditorDockspace("TestDockspace", root =>
         {
             seeds++;
             EditorDockspace.Dock(PanelTitle, root);
@@ -50,7 +50,7 @@ public class DockspaceTests
     {
         using var context = new EditorImGuiContext();
         var seeds = 0;
-        var dockspace = new EditorDockspace("TestDockspace", _ => seeds++);
+        using var dockspace = new EditorDockspace("TestDockspace", _ => seeds++);
 
         for (var frame = 0; frame < 4; frame++) context.Frame(() => { dockspace.Draw(); DrawPanel(); });
 
@@ -63,7 +63,7 @@ public class DockspaceTests
     {
         using var context = new EditorImGuiContext();
         var seeds = 0;
-        var dockspace = new EditorDockspace("TestDockspace", _ => seeds++);
+        using var dockspace = new EditorDockspace("TestDockspace", _ => seeds++);
 
         context.Frame(() => { dockspace.Draw(); DrawPanel(); });
         dockspace.ResetLayout();
@@ -80,7 +80,7 @@ public class DockspaceTests
     public async Task the_node_id_is_stable_and_readable_outside_a_frame()
     {
         using var context = new EditorImGuiContext();
-        var dockspace = new EditorDockspace("TestDockspace");
+        using var dockspace = new EditorDockspace("TestDockspace");
         var before = dockspace.NodeId;
 
         await Assert.That(dockspace.HasNode).IsFalse();
@@ -96,7 +96,7 @@ public class DockspaceTests
         using var context = new EditorImGuiContext();
         uint left = 0;
         uint centre = 0;
-        var dockspace = new EditorDockspace("TestDockspace", root =>
+        using var dockspace = new EditorDockspace("TestDockspace", root =>
         {
             var side = EditorDockspace.Split(ref root, ImGuiDir.Left, 0.25f);
             EditorDockspace.Dock("Left", side);

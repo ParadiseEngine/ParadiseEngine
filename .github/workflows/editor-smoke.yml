@@ -3,6 +3,10 @@
 # hosted runner has is a software one — keeping it apart means a lavapipe problem reads as a
 # lavapipe problem rather than reddening the whole test job.
 #
+# There is no AOT publish here any more: the editor loads extensions with AssemblyLoadContext,
+# which NativeAOT cannot do. Paradise.Ui.ImGui is still AOT-clean and still analyzer-checked, so a
+# game shipping an AOT launcher with a debug overlay is unaffected.
+#
 # Linux only. macOS runners have no GPU at all and Windows runners have no software Vulkan, so
 # this is the one platform where the check can actually run.
 name: Editor Smoke

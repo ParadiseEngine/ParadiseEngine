@@ -1,3 +1,4 @@
+using System.Numerics;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -17,7 +18,24 @@ namespace Paradise.Ui.ImGui;
 /// system fonts from <see cref="UiFonts.MountSystemFonts"/>, or both overlaid.</param>
 /// <param name="Path">The font file, as a path in <paramref name="Content"/>.</param>
 /// <param name="SizePixels">Rasterization size in pixels.</param>
-public sealed record UiFontConfig(IFileSystem Content, UPath Path, float SizePixels);
+public sealed record UiFontConfig(IFileSystem Content, UPath Path, float SizePixels)
+{
+    /// <summary>Merge this font's glyphs into the one already added instead of starting a new
+    /// font.</summary>
+    /// <remarks>How an icon font joins a text font: one ImGui font ends up covering both ranges,
+    /// so a label and the icon beside it need no font switch and share a baseline. The ranges must
+    /// not overlap — icon fonts live in the Private Use Area for exactly this reason — because a
+    /// merged glyph is only taken where the base font has none.</remarks>
+    public bool Merge { get; init; }
+
+    /// <summary>Nudge every glyph, in pixels. Icons are drawn on a different baseline from text
+    /// and usually need a point or two of Y to sit level with it.</summary>
+    public Vector2 GlyphOffset { get; init; }
+
+    /// <summary>Force a minimum advance width, in pixels. Icons want a uniform one so a column of
+    /// them lines up regardless of which glyph each row uses.</summary>
+    public float GlyphMinAdvanceX { get; init; }
+}
 
 /// <summary>
 /// Font resolution for <see cref="ImGuiUiCore"/>. ImGui's default font is ASCII-only, so any CJK
@@ -239,8 +257,15 @@ public static class UiFonts
 
     /// <summary>Read <paramref name="font"/> out of its mount and add it to the atlas. False =
     /// nothing added and the caller should fall back to ImGui's default font.</summary>
-    internal static unsafe bool TryAddFont(ImGuiIOPtr io, UiFontConfig font)
+    /// <summary>Load <paramref name="font"/> into <paramref name="io"/>'s atlas, returning false
+    /// if it is not a font stb_truetype can read or cannot be read at all.</summary>
+    /// <remarks>Public because merging is a host's job and there is no other way to do it: the
+    /// byte buffer has to be allocated with ImGui's own allocator (see below), and a host that
+    /// hand-rolled that pairing would eventually get it wrong. Add the base font first, then the
+    /// ones with <see cref="UiFontConfig.Merge"/> set.</remarks>
+    public static unsafe bool TryAddFont(ImGuiIOPtr io, UiFontConfig font)
     {
+        ArgumentNullException.ThrowIfNull(font);
         if (!IsStbLoadableTrueType(font.Content, font.Path)) return false;
 
         byte[] bytes;
@@ -263,7 +288,24 @@ public static class UiFonts
         var buffer = Hexa.NET.ImGui.ImGui.MemAlloc((nuint)bytes.Length);
         if (buffer is null) return false;
         bytes.AsSpan().CopyTo(new Span<byte>(buffer, bytes.Length));
-        if (io.Fonts.AddFontFromMemoryTTF(buffer, bytes.Length, font.SizePixels) is not null) return true;
+
+        // A zero-initialised ImFontConfig is NOT a default-constructed one, and the difference is
+        // not subtle: ImFontConfig's C++ constructor sets GlyphMaxAdvanceX to FLT_MAX, so leaving
+        // it zero clamps EVERY glyph's advance to nothing and the whole UI renders as overlapping
+        // marks. The multipliers are the same trap one step quieter. Anything the constructor
+        // leaves at zero is left at zero here.
+        var config = new ImFontConfig
+        {
+            // The atlas frees the buffer above; see the note on the allocation.
+            FontDataOwnedByAtlas = 1,
+            GlyphMaxAdvanceX = float.MaxValue,
+            RasterizerMultiply = 1f,
+            RasterizerDensity = 1f,
+            MergeMode = (byte)(font.Merge ? 1 : 0),
+            GlyphOffset = font.GlyphOffset,
+            GlyphMinAdvanceX = font.GlyphMinAdvanceX,
+        };
+        if (io.Fonts.AddFontFromMemoryTTF(buffer, bytes.Length, font.SizePixels, ref config) is not null) return true;
         // Refused: the atlas never took ownership, so this is the one path where the pairing
         // above is ours to complete.
         Hexa.NET.ImGui.ImGui.MemFree(buffer);

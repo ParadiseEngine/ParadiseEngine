@@ -21,54 +21,21 @@ dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 ```
 
-AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
+AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`.
 
-### Concurrent code gets a Coyote test
+**The editor deliberately does NOT publish ahead-of-time**, and the reason is worth keeping: it
+loads extensions through `AssemblyLoadContext`, which NativeAOT cannot do at all — there is no JIT
+to compile a plugin assembly. Dropping AOT is what buys drop-in extensions and lets an extension
+author use reflection freely in their own code. `Paradise.Editor.Core` and `Paradise.Editor.ImGui`
+therefore carry no `IsAotCompatible`.
 
-**Anything with cross-thread rules — a lock, a shared flag, a queue two threads touch — gets a
-systematic test in the matching `*.CoyoteTest` project, not only a stress loop.** Coyote schedules
-interleavings deliberately; a stress loop reaches the bad one by luck or not at all. This is not
-theoretical: a hand-written race test for the renderer's capture queue passed **three runs out of
-three** against code with a real check-then-enqueue defect, while the Coyote test on the same
-broken build failed inside 200 iterations.
+**`Paradise.Ui.ImGui` still does, and that is not an oversight.** It is an engine package a shipped
+game uses for its debug overlay, and #227 commits to AOT-published launchers, so its analyzers stay
+on. The editor's choice is the editor's; do not let it leak down into the UI package.
 
-```bash
-# Release, because the `coyote rewrite` target only runs there (needs the coyote CLI)
-dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest/... -c Release
-dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
-```
-
-Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
-`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
-`Paradise.Ui.ImGui.CoyoteTest`.
-
-A fourth thing, learned from the asset watcher: **lock on an `object`, not on
-`System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
-`Monitor.Enter`/`Exit` and does not intercept `Lock.EnterScope`, so with the newer type it cannot
-control the lock — every iteration reports the wait as a potential hang, and silencing that would
-only hide the fact that the interleavings around that lock are never explored. The newer type is
-worth having where a lock is hot; it is not worth a suite that cannot see it.
-
-Three things worth knowing before writing one:
-
-- **Extract the managed part first.** Coyote schedules `Task`, `lock` and concurrent collections —
-  it cannot see inside a native call. The renderer's capture path is mostly Dawn
-  (`OnSubmittedWorkSync`, `MapSync`, `RequestAdapterSync`), so the queue, its flag and its drain
-  were pulled into `CaptureQueue`, which has no native calls at all. Testability was the reason,
-  and it is usually the reason such an extraction is worth it.
-- **Await joins; do not block on them.** `Task.WaitAll` parks a thread, which Coyote cannot
-  distinguish from a deadlock — it reports every such test as a potential hang even when the code
-  is correct. Making the tests `async` keeps hang detection ON and meaningful, instead of switching
-  it off with `WithPotentialDeadlocksReportedAsBugs(false)`.
-- **Prove the test fails without the fix.** Reintroduce the defect, watch it fail, restore. A
-  concurrency test that has never failed is a guard nobody has checked the lock on.
-
-These projects are deliberately NOT `IsTestProject` — they are standalone runners with their own
-`Main`, so `dotnet test` skips them and they must be run explicitly.
-
-## Project Overview
-
-Paradise Engine is a .NET behavior tree runtime library inspired by EntitiesBT, with a companion binary blob serialization library. It targets `net10.0`, uses C# 14, and is NativeAOT/trimming compatible.
+If runtime-loaded C# ever has to coexist with an AOT editor, the answer is a second host built from
+the same two packages rather than changing either — the libraries support both, and nothing in them
+requires a JIT.
 
 ### Coordinate convention
 
