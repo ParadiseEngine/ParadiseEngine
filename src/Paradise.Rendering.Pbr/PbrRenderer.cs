@@ -6,6 +6,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paradise.Assets.Gltf;
+using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
@@ -81,9 +82,17 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly List<(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry)> _customPrograms = [];
     private readonly byte[] _drawStaging;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
-    // [0 .. shadowViews.Count-1] = one depth-only shadow pass per layer, [shadowViews.Count] = main.
-    // Grow-only; each frame a length-(shadowViews.Count+1) prefix is submitted.
-    private RenderPassDesc[] _passes = new RenderPassDesc[2];
+    private readonly FrameGraph _graph = new();
+    private readonly List<GraphTexture> _bloomResources = [];
+
+    // Frame-local encode state: RenderFrame computes it, the pass recorders consume it. Fields
+    // rather than parameters because a PassRecorder carries a context object and one int, and
+    // threading four more values through that would only rebuild the closure the signature exists
+    // to avoid. Live only for the duration of one Compile.
+    private PbrScene? _encodeScene;
+    private Matrix4x4 _encodeViewProjection;
+    private int _encodeDrawIndex;
+    private int _encodeShadowDrawIndex;
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _opaque = [];
     private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _blend = [];
     private readonly List<BufferHandle> _ownedBuffers = [];
@@ -907,99 +916,115 @@ public sealed partial class PbrRenderer : IDisposable
             _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
         }
 
-        // Build the pass list: one depth-only pass per shadow layer, then an optional SSAO
-        // position pre-pass, then the main color pass.
-        var hasPrepass = scene.Ssao.Enabled && _opaque.Count > 0;
-        var prepassIndex = hasPrepass ? _shadowViews.Count : -1;
-        var mainPassIndex = _shadowViews.Count + (hasPrepass ? 1 : 0);
-        // Bloom inserts 2·levels−1 passes (1 bright + (L−1) down + (L−1) additive up) between the
-        // main HDR pass and the composite pass; disabled = zero passes, composite reads unused bloom.
+        // Declare the frame. A pass says WHERE it belongs on the event scale rather than at which
+        // running total of the passes before it, so turning a feature off removes its declarations
+        // and shifts nothing. The rejected alternative — computing indices by hand — had to be
+        // edited in two places per pass, and a mismatch between them surfaced as a silently wrong
+        // frame instead of an error.
+        // Whether these RUN is decided below by whether their consumer asks for the result, not
+        // here by whether their passes get declared. UploadSsaoUniforms gates on the identical
+        // condition, so the shader stops sampling positions in exactly the frames the pre-pass
+        // stops writing them.
+        var ssaoEnabled = scene.Ssao.Enabled && _opaque.Count > 0;
         var bloomEnabled = scene.Bloom.Enabled && _bloomLevels > 1;
-        // Scene-color capture splits the main pass in two around a blit: pass A (opaque+sky,
-        // Clear), the capture blit, pass B (blend bucket, Load color+depth).
-        var capturePasses = _sceneColorCapture ? 2 : 0;
-        var captureBlitIndex = mainPassIndex + 1;
-        var mainBlendIndex = mainPassIndex + 2;
-        var bloomStart = mainPassIndex + 1 + capturePasses;
-        var bloomPassCount = bloomEnabled ? 2 * _bloomLevels - 1 : 0;
-        var compositeIndex = bloomStart + bloomPassCount;
-        if (_passes.Length < compositeIndex + 1) _passes = new RenderPassDesc[compositeIndex + 1];
+
+        _encodeScene = scene;
+        _encodeViewProjection = viewProjection;
+        _encodeDrawIndex = 0;
+        _encodeShadowDrawIndex = 0;
+
+        _graph.Reset();
+        // GraphOnly marks the targets whose only consumers are passes in this frame, which is what
+        // lets an unread producer be culled. It is a promise the declaring code has to keep: every
+        // read of these happens through a bind group built at resize, so the graph learns about it
+        // only from the Reads() calls below. _sceneColorView is NOT one of them — it is public
+        // surface (SceneColorView) that a game's blend material samples.
+        var hdr = _graph.ImportColor(_hdrView, GraphResourceScope.GraphOnly);
+        var sceneDepth = _graph.ImportDepth(_depthTexture);
+        var position = _graph.ImportColor(_positionView, GraphResourceScope.GraphOnly);
+        var prepassDepth = _graph.ImportDepth(_prepassDepthAux, scope: GraphResourceScope.GraphOnly);
+
         for (var k = 0; k < _shadowViews.Count; k++)
         {
-            _passes[k] = new RenderPassDesc(colorAttachmentCount: 0)
-            {
-                Depth = new DepthAttachmentDesc(
-                    _shadowArray, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f,
-                    DepthView: _shadowLayerViews[_shadowViews[k].Layer]),
-            };
+            _graph.AddRasterPass("Shadow.Layer", RenderPassEvent.Shadows)
+                .Depth(_graph.ImportDepth(_shadowArray, _shadowLayerViews[_shadowViews[k].Layer]),
+                    LoadOp.Clear, StoreOp.Store, clear: 1f)
+                .Record(this, RecordShadowLayer, k);
         }
-        if (hasPrepass)
-        {
-            _passes[prepassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
-            {
-                Depth = new DepthAttachmentDesc(_prepassDepthAux, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
-            };
-            // Offscreen color: the Rgba32Float position target, cleared to 0 (background w = 0).
-            _passes[prepassIndex].Colors.Slot0 = new ColorAttachmentDesc(
-                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f), ColorView: _positionView);
-        }
-        _passes[mainPassIndex] = new RenderPassDesc(colorAttachmentCount: 1)
-        {
-            Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Clear, StoreOp.Store, ClearDepth: 1f),
-        };
-        // Main color pass → the offscreen HDR scene target (linear), not the swapchain.
-        _passes[mainPassIndex].Colors.Slot0 = new ColorAttachmentDesc(
-            RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+
+        _graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
+            .Color(0, position, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+            .Depth(prepassDepth, LoadOp.Clear, StoreOp.Store, clear: 1f)
+            .Record(this, RecordSsaoPrepass);
+
+        // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
+        // out: a blend material that samples what is behind it needs the opaque half resolved into
+        // a sampleable texture first, which cannot happen mid-pass.
+        var main = _graph.AddRasterPass(_sceneColorCapture ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
+            .Color(0, hdr, LoadOp.Clear, StoreOp.Store, scene.ClearColor)
+            .Depth(sceneDepth, LoadOp.Clear, StoreOp.Store, clear: 1f);
+        // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
+        // produces them is unreachable.
+        if (ssaoEnabled) main.Reads(position);
+        main.Record(this, RecordMain);
 
         if (_sceneColorCapture)
         {
-            // Capture blit: HDR (opaque+sky so far) → the scene-color texture.
-            _passes[captureBlitIndex] = new RenderPassDesc(colorAttachmentCount: 1);
-            _passes[captureBlitIndex].Colors.Slot0 = new ColorAttachmentDesc(
-                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f),
-                ColorView: _sceneColorView);
-            // Pass B: the blend bucket back onto the SAME HDR + depth, loading both — blend
-            // pipelines already read-not-write depth, so the Load/Load pair is exactly the state
-            // they expect mid-pass today.
-            _passes[mainBlendIndex] = new RenderPassDesc(colorAttachmentCount: 1)
-            {
-                Depth = new DepthAttachmentDesc(_depthTexture, LoadOp.Load, StoreOp.Store, ClearDepth: 1f),
-            };
-            _passes[mainBlendIndex].Colors.Slot0 = new ColorAttachmentDesc(
-                RenderViewHandle.Invalid, LoadOp.Load, StoreOp.Store, scene.ClearColor, ColorView: _hdrView);
+            var sceneColor = _graph.ImportColor(_sceneColorView);
+            _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
+                .Color(0, sceneColor, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+                .Reads(hdr)
+                .Record(this, RecordSceneColorBlit);
+
+            // Load/Load back onto the same HDR + depth: blend pipelines already read-not-write
+            // depth, so this is exactly the state they expect mid-pass today.
+            _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
+                .Color(0, hdr, LoadOp.Load, StoreOp.Store, scene.ClearColor)
+                .Depth(sceneDepth, LoadOp.Load, StoreOp.Store, clear: 1f)
+                .Reads(sceneColor)
+                .Record(this, RecordBlendBucket);
         }
 
+        // bright → mip 0; downsample i → mip i+1 (Clear); additive upsample j → mip L-2-j (Load, so
+        // the tent blur accumulates onto the down-mip content). Declared whether or not bloom is
+        // on: the chain is reachable only from the composite's read of mip 0, so switching bloom
+        // off there culls all 2L−1 of these.
+        _bloomResources.Clear();
+        for (var i = 0; i < _bloomLevels; i++)
+            _bloomResources.Add(_graph.ImportColor(_bloomViews[i], GraphResourceScope.GraphOnly));
+
+        var black = new ColorRgba(0f, 0f, 0f, 1f);
+        _graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
+            .Color(0, _bloomResources[0], LoadOp.Clear, StoreOp.Store, black)
+            .Reads(hdr)
+            .Record(this, RecordBloomBright);
+        for (var i = 0; i < _bloomLevels - 1; i++)
+        {
+            _graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
+                .Color(0, _bloomResources[i + 1], LoadOp.Clear, StoreOp.Store, black)
+                .Reads(_bloomResources[i])
+                .Record(this, RecordBloomDown, i);
+        }
+        for (var j = 0; j < _bloomLevels - 1; j++)
+        {
+            _graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
+                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, StoreOp.Store, black)
+                .Reads(_bloomResources[_bloomLevels - 1 - j])
+                .Record(this, RecordBloomUp, j);
+        }
         if (bloomEnabled)
         {
-            // bright → _bloomViews[0]; downsample i → _bloomViews[i+1] (Clear); additive upsample
-            // k+1 → _bloomViews[k] (Load, so the tent blur accumulates onto the down-mip content).
-            var black = new ColorRgba(0f, 0f, 0f, 1f);
-            _passes[bloomStart] = new RenderPassDesc(colorAttachmentCount: 1);
-            _passes[bloomStart].Colors.Slot0 = new ColorAttachmentDesc(
-                RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, black, ColorView: _bloomViews[0]);
-            for (var i = 0; i < _bloomLevels - 1; i++)
-            {
-                var p = bloomStart + 1 + i;
-                _passes[p] = new RenderPassDesc(colorAttachmentCount: 1);
-                _passes[p].Colors.Slot0 = new ColorAttachmentDesc(
-                    RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, black, ColorView: _bloomViews[i + 1]);
-            }
-            for (var j = 0; j < _bloomLevels - 1; j++)
-            {
-                var target = _bloomLevels - 2 - j;
-                var p = bloomStart + _bloomLevels + j;
-                _passes[p] = new RenderPassDesc(colorAttachmentCount: 1);
-                _passes[p].Colors.Slot0 = new ColorAttachmentDesc(
-                    RenderViewHandle.Invalid, LoadOp.Load, StoreOp.Store, black, ColorView: _bloomViews[target]);
-            }
             var bloomUniforms = new CompositeUniformsGpu { Tone = new Vector4(scene.Bloom.Threshold, scene.Bloom.Knee, 0f, 0f) };
             _renderer.UpdateBuffer<CompositeUniformsGpu>(_bloomUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref bloomUniforms, 1));
         }
 
-        // Composite pass → the swapchain: samples the HDR target, tonemaps (+ bloom), no depth.
-        _passes[compositeIndex] = new RenderPassDesc(colorAttachmentCount: 1);
-        _passes[compositeIndex].Colors.Slot0 = new ColorAttachmentDesc(
-            RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f));
+        var composite = _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 1f))
+            .Reads(hdr);
+        // The one place bloom is switched off. Its bind group samples mip 0 either way; with the
+        // chain culled the sample reads whatever the mip last held, scaled by an intensity of zero.
+        if (bloomEnabled) composite.Reads(_bloomResources[0]);
+        composite.Record(this, RecordComposite);
 
         var compositeUniforms = new CompositeUniformsGpu
         {
@@ -1009,91 +1034,12 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.UpdateBuffer<CompositeUniformsGpu>(_compositeUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref compositeUniforms, 1));
 
         _commandWriter.ResetWrittenCount();
-        var encoder = new RenderCommandEncoder(_commandWriter);
+        var stream = _graph.Compile(_commandWriter);
 
-        // One depth-only pass per shadow layer: fill that layer with every opaque caster's depth.
-        var shadowDraws = 0;
-        EncodeShadowLayers(ref encoder, ref shadowDraws);
-
-        // SSAO position pre-pass: render opaque world positions using the SAME main-draw-ring offsets
-        // that EncodeBucket fills for opaque (so no extra ring space is needed).
-        if (hasPrepass)
-            EncodeDepthPrepass(ref encoder, prepassIndex);
-
-        // Main color pass, sampling the shadow array.
-        encoder.BeginPass(mainPassIndex);
-        // Gradient-sky background first (fullscreen, no depth write) so geometry draws over it.
-        if (scene.HasSkyBackground)
-        {
-            encoder.SetPipeline(_skyPipeline);
-            encoder.SetBindGroup(0, _skyGroup);
-            encoder.Draw(new DrawCommand(3, 1, 0, 0));
-        }
-        var drawIndex = 0;
-        EncodeBucket(ref encoder, _opaque, BlendMode.Opaque, viewProjection, ref drawIndex);
-        if (_sceneColorCapture)
-        {
-            // Split: close the opaque half, blit it into the scene-color texture, then render the
-            // blend bucket over the loaded HDR+depth. drawIndex continues across — the draw ring
-            // does not care which pass consumes an offset.
-            encoder.EndPass();
-
-            encoder.BeginPass(captureBlitIndex);
-            encoder.SetPipeline(_blitPipeline);
-            encoder.SetBindGroup(0, _sceneBlitGroup);
-            encoder.Draw(new DrawCommand(3, 1, 0, 0));
-            encoder.EndPass();
-
-            encoder.BeginPass(mainBlendIndex);
-            EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
-            encoder.EndPass();
-        }
-        else
-        {
-            EncodeBucket(ref encoder, _blend, BlendMode.AlphaBlend, viewProjection, ref drawIndex);
-            encoder.EndPass();
-        }
-
-        if (bloomEnabled)
-        {
-            // bright: HDR scene → _bloomViews[0]
-            encoder.BeginPass(bloomStart);
-            encoder.SetPipeline(_bloomBrightPipeline);
-            encoder.SetBindGroup(0, _bloomHdrGroup);
-            encoder.Draw(new DrawCommand(3, 1, 0, 0));
-            encoder.EndPass();
-            // downsample: _bloomViews[i] → _bloomViews[i+1]
-            for (var i = 0; i < _bloomLevels - 1; i++)
-            {
-                encoder.BeginPass(bloomStart + 1 + i);
-                encoder.SetPipeline(_bloomDownPipeline);
-                encoder.SetBindGroup(0, _bloomGroups[i]);
-                encoder.Draw(new DrawCommand(3, 1, 0, 0));
-                encoder.EndPass();
-            }
-            // additive upsample: _bloomViews[k+1] → _bloomViews[k], smallest first
-            for (var j = 0; j < _bloomLevels - 1; j++)
-            {
-                var source = _bloomLevels - 1 - j;
-                encoder.BeginPass(bloomStart + _bloomLevels + j);
-                encoder.SetPipeline(_bloomUpPipeline);
-                encoder.SetBindGroup(0, _bloomGroups[source]);
-                encoder.Draw(new DrawCommand(3, 1, 0, 0));
-                encoder.EndPass();
-            }
-        }
-
-        // Composite: fullscreen triangle sampling the HDR scene target → tonemap (+ bloom) → swapchain.
-        encoder.BeginPass(compositeIndex);
-        encoder.SetPipeline(_compositePipeline);
-        encoder.SetBindGroup(0, _compositeGroup);
-        encoder.Draw(new DrawCommand(3, 1, 0, 0));
-        encoder.EndPass();
-
-        if (shadowDraws > 0)
-            _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, shadowDraws * (int)_drawStride));
-        if (drawIndex > 0)
-            _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, drawIndex * (int)_drawStride));
+        if (_encodeShadowDrawIndex > 0)
+            _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, _encodeShadowDrawIndex * (int)_drawStride));
+        if (_encodeDrawIndex > 0)
+            _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, _encodeDrawIndex * (int)_drawStride));
         // One write for every skinned instance staged this frame — the payload GPU skinning trades
         // for the whole vertex stream. Reset so a frame that skins nothing uploads nothing.
         if (_jointHighWater > 0)
@@ -1102,28 +1048,27 @@ public sealed partial class PbrRenderer : IDisposable
             _jointHighWater = 0;
         }
 
-        var stream = new RenderCommandStream(_commandWriter.WrittenMemory, _passes.AsMemory(0, compositeIndex + 1));
+        _encodeScene = null;
         _renderer.Submit(in stream);
     }
 
-    // Per-layer depth-only fill: each shadow view is its own render pass writing one full array
-    // layer. Every opaque caster is drawn with lightMvp = model × faceViewProjection (mirrors the
-    // main Mvp = model × viewProjection so the shadow shader matches pbr.slang). No viewport math —
-    // each layer owns the whole [0,1] and the default viewport covers it.
-    private void EncodeShadowLayers(ref RenderCommandEncoder encoder, ref int drawIndex)
+    // Depth-only fill of ONE shadow layer. Every opaque caster is drawn with
+    // lightMvp = model × faceViewProjection (mirrors the main Mvp = model × viewProjection so the
+    // shadow shader matches pbr.slang). No viewport math — each layer owns the whole [0,1] and the
+    // default viewport covers it.
+    private static void RecordShadowLayer(object context, ref RenderCommandEncoder encoder, int layer)
     {
-        for (var k = 0; k < _shadowViews.Count; k++)
+        var self = (PbrRenderer)context;
         {
-            var vp = _shadowViews[k].Vp;
-            encoder.BeginPass(k);
-            encoder.SetBindGroup(1, _shadowJointGroup);
+            var vp = self._shadowViews[layer].Vp;
+            encoder.SetBindGroup(1, self._shadowJointGroup);
             var shadowSkinned = (bool?)null;
-            foreach (var (instance, primitive, _) in _opaque)
+            foreach (var (instance, primitive, _) in self._opaque)
             {
                 var skinned = primitive.Skinned && instance.JointOffset >= 0;
                 if (shadowSkinned != skinned)
                 {
-                    encoder.SetPipeline(skinned ? GetShadowSkinnedPipeline() : _shadowPipeline);
+                    encoder.SetPipeline(skinned ? self.GetShadowSkinnedPipeline() : self._shadowPipeline);
                     shadowSkinned = skinned;
                 }
                 // Budget guaranteed by the up-front shadowDrawTotal check in RenderFrame.
@@ -1134,42 +1079,109 @@ public sealed partial class PbrRenderer : IDisposable
                     // tracks the animation instead of staying in bind pose.
                     Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
                 };
-                MemoryMarshal.Write(_shadowStaging.AsSpan(drawIndex * (int)_drawStride), in uniforms);
-                encoder.SetBindGroup(0, _shadowDrawGroup, dynamicOffset: (uint)(drawIndex * _drawStride));
+                var slot = self._encodeShadowDrawIndex;
+                MemoryMarshal.Write(self._shadowStaging.AsSpan(slot * (int)self._drawStride), in uniforms);
+                encoder.SetBindGroup(0, self._shadowDrawGroup, dynamicOffset: (uint)(slot * self._drawStride));
                 encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
                 encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
                 encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-                drawIndex++;
+                self._encodeShadowDrawIndex++;
             }
-            encoder.EndPass();
         }
     }
 
     // SSAO position pre-pass: render opaque world positions into _positionTexture (offscreen color) +
     // _prepassDepthAux. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
     // EncodeBucket fills for it, so no extra ring space or upload is needed.
-    private void EncodeDepthPrepass(ref RenderCommandEncoder encoder, int passIndex)
+    private static void RecordSsaoPrepass(object context, ref RenderCommandEncoder encoder, int _)
     {
-        encoder.BeginPass(passIndex);
-        encoder.SetBindGroup(1, _prepassJointGroup);
+        var self = (PbrRenderer)context;
+        encoder.SetBindGroup(1, self._prepassJointGroup);
         var prepassSkinned = (bool?)null;
-        for (var i = 0; i < _opaque.Count; i++)
+        for (var i = 0; i < self._opaque.Count; i++)
         {
-            var primitive = _opaque[i].Primitive;
+            var primitive = self._opaque[i].Primitive;
             // The prepass reads the SAME draw-ring slot EncodeBucket filled for this instance, so
             // the joint base index rides along with no extra upload.
-            var skinned = primitive.Skinned && _opaque[i].Instance.JointOffset >= 0;
+            var skinned = primitive.Skinned && self._opaque[i].Instance.JointOffset >= 0;
             if (prepassSkinned != skinned)
             {
-                encoder.SetPipeline(skinned ? GetPrepassSkinnedPipeline() : _positionPrepassPipeline);
+                encoder.SetPipeline(skinned ? self.GetPrepassSkinnedPipeline() : self._positionPrepassPipeline);
                 prepassSkinned = skinned;
             }
-            encoder.SetBindGroup(0, _drawGroup, dynamicOffset: (uint)(i * _drawStride));
+            encoder.SetBindGroup(0, self._drawGroup, dynamicOffset: (uint)(i * self._drawStride));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
         }
-        encoder.EndPass();
+    }
+
+    // The remaining recorders. Each is a static method group, so the delegate the declaration site
+    // passes is created once by the compiler rather than per pass per frame.
+
+    private static void RecordMain(object context, ref RenderCommandEncoder encoder, int _)
+    {
+        var self = (PbrRenderer)context;
+        // Gradient-sky background first (fullscreen, no depth write) so geometry draws over it.
+        if (self._encodeScene!.HasSkyBackground)
+        {
+            encoder.SetPipeline(self._skyPipeline);
+            encoder.SetBindGroup(0, self._skyGroup);
+            encoder.Draw(new DrawCommand(3, 1, 0, 0));
+        }
+        self.EncodeBucket(ref encoder, self._opaque, BlendMode.Opaque, self._encodeViewProjection, ref self._encodeDrawIndex);
+        // Capture moves the blend bucket to its own pass after the blit; without it, the bucket
+        // stays here and the frame is one pass shorter.
+        if (!self._sceneColorCapture)
+            self.EncodeBucket(ref encoder, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
+    }
+
+    // The blend bucket continues the SAME draw ring the opaque bucket filled — the ring does not
+    // care which pass consumes an offset, only that no two draws claim the same slot.
+    private static void RecordBlendBucket(object context, ref RenderCommandEncoder encoder, int _)
+    {
+        var self = (PbrRenderer)context;
+        self.EncodeBucket(ref encoder, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
+    }
+
+    private static void RecordSceneColorBlit(object context, ref RenderCommandEncoder encoder, int _)
+    {
+        var self = (PbrRenderer)context;
+        encoder.SetPipeline(self._blitPipeline);
+        encoder.SetBindGroup(0, self._sceneBlitGroup);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+    }
+
+    private static void RecordBloomBright(object context, ref RenderCommandEncoder encoder, int _)
+    {
+        var self = (PbrRenderer)context;
+        encoder.SetPipeline(self._bloomBrightPipeline);
+        encoder.SetBindGroup(0, self._bloomHdrGroup);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+    }
+
+    private static void RecordBloomDown(object context, ref RenderCommandEncoder encoder, int level)
+    {
+        var self = (PbrRenderer)context;
+        encoder.SetPipeline(self._bloomDownPipeline);
+        encoder.SetBindGroup(0, self._bloomGroups[level]);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+    }
+
+    private static void RecordBloomUp(object context, ref RenderCommandEncoder encoder, int step)
+    {
+        var self = (PbrRenderer)context;
+        encoder.SetPipeline(self._bloomUpPipeline);
+        encoder.SetBindGroup(0, self._bloomGroups[self._bloomLevels - 1 - step]);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
+    }
+
+    private static void RecordComposite(object context, ref RenderCommandEncoder encoder, int _)
+    {
+        var self = (PbrRenderer)context;
+        encoder.SetPipeline(self._compositePipeline);
+        encoder.SetBindGroup(0, self._compositeGroup);
+        encoder.Draw(new DrawCommand(3, 1, 0, 0));
     }
 
     // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off, or no prepass this frame) makes the
@@ -1770,6 +1782,10 @@ public sealed partial class PbrRenderer : IDisposable
     }
 
     internal int PipelineVariantCountForTest => _pipelines.Count;
+    // Culling is invisible in the submitted stream — a pass that was declared and dropped and
+    // a pass that was never declared look identical. The baseline asserts on this so that
+    // "the frame is unchanged" cannot be satisfied by culling quietly doing nothing.
+    internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _skinnedPipelines.Count;
     internal int CustomProgramCountForTest => _customPrograms.Count;
     internal bool UsesSrgbEntryPointForTest => _useSrgbEntryPoint;
