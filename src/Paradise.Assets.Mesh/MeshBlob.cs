@@ -47,6 +47,13 @@ public struct MeshSkin
     public BlobArray<int> Joints;
     public BlobArray<Matrix4x4> InverseBindMatrices;
 
+    /// <summary>
+    /// The built path of the skeleton <see cref="Joints"/> index — the file the runtime opens to
+    /// pose this mesh, spelled the way the build wrote it. A skinned mesh is bound to exactly one
+    /// skeleton, so the blob names it rather than leaving a document to; empty for a rigid mesh.
+    /// </summary>
+    public BlobString<UTF8Encoding> Skeleton;
+
     public int JointCount => Joints.Length;
 }
 
@@ -69,8 +76,8 @@ public struct MeshBlob
 {
     public const uint ExpectedMagic = 0x48534D50;   // "PMSH"
 
-    /// <summary>2: the skin (joints and inverse binds) moved from the skeleton into the mesh, and joint indices became ozz skeleton order.</summary>
-    public const uint ExpectedVersion = 2;
+    /// <summary>2: the skin (joints and inverse binds) moved from the skeleton into the mesh, and joint indices became ozz skeleton order. 3: the skin names the built path of the skeleton it is bound to.</summary>
+    public const uint ExpectedVersion = 3;
 
     public const int StaticFloatsPerVertex = 12;
 
@@ -114,8 +121,9 @@ public sealed record MeshData(
 
 public readonly record struct MeshDrawData(uint FirstIndex, uint IndexCount, int MaterialSlot, int NodeIndex, int SkinIndex, string? Name);
 
-/// <summary>Palette slot → skeleton joint, with the inverse-bind matrix of each; see <see cref="MeshSkin"/>.</summary>
-public sealed record MeshSkinData(int[] Joints, Matrix4x4[] InverseBindMatrices);
+/// <summary>Palette slot → skeleton joint, with the inverse-bind matrix of each, and the built path of the skeleton those joints index; see <see cref="MeshSkin"/>.</summary>
+/// <param name="Skeleton">Null while cooking, before the build knows where the skeleton is written; a written blob always names one.</param>
+public sealed record MeshSkinData(int[] Joints, Matrix4x4[] InverseBindMatrices, string? Skeleton = null);
 
 /// <summary>Builds and opens mesh blobs. Bytes in, bytes out; the layout itself is <see cref="MeshBlob"/>.</summary>
 public static class MeshBlobFormat
@@ -133,6 +141,11 @@ public static class MeshBlobFormat
             throw new ArgumentException($"The skin has {skin.Joints.Length} joints and {skin.InverseBindMatrices.Length} inverse-bind matrices.", nameof(mesh));
         }
 
+        if (mesh.Layout == MeshVertexLayout.Skinned && string.IsNullOrEmpty(mesh.Skin?.Skeleton))
+        {
+            throw new ArgumentException("A skinned mesh names the built path of the skeleton it is bound to; the skin's Skeleton is empty.", nameof(mesh));
+        }
+
         var builder = new StructBuilder<MeshBlob>();
         builder.Value.Magic = MeshBlob.ExpectedMagic;
         builder.Value.Version = MeshBlob.ExpectedVersion;
@@ -144,6 +157,7 @@ public static class MeshBlobFormat
         builder.SetArray(ref builder.Value.Draws, mesh.Draws.Select(Draw));
         builder.SetArray(ref builder.Value.Skin.Joints, mesh.Skin?.Joints ?? []);
         builder.SetArray(ref builder.Value.Skin.InverseBindMatrices, mesh.Skin?.InverseBindMatrices ?? []);
+        builder.SetString(ref builder.Value.Skin.Skeleton, mesh.Skin?.Skeleton ?? "");
         return builder.CreateBlob();
     }
 
@@ -182,7 +196,7 @@ public static class MeshBlobFormat
             draws[i] = new MeshDrawData(draw.FirstIndex, draw.IndexCount, draw.MaterialSlot, draw.NodeIndex, draw.SkinIndex, draw.Name.Length == 0 ? null : draw.Name.ToString());
         }
 
-        var skin = blob.Skin.Joints.Length == 0 ? null : new MeshSkinData(blob.Skin.Joints.ToArray(), blob.Skin.InverseBindMatrices.ToArray());
+        var skin = blob.Skin.Joints.Length == 0 ? null : new MeshSkinData(blob.Skin.Joints.ToArray(), blob.Skin.InverseBindMatrices.ToArray(), blob.Skin.Skeleton.ToString());
         return new MeshData(blob.Layout, blob.Vertices.ToArray(), blob.Indices.ToArray(), draws, blob.BoundsMin, blob.BoundsMax, skin);
     }
 
@@ -192,10 +206,12 @@ public static class MeshBlobFormat
         if (blob.Layout is not (MeshVertexLayout.Static or MeshVertexLayout.Skinned)) throw new InvalidDataException($"Unknown vertex layout {(int)blob.Layout}.");
         if (blob.Vertices.Length % blob.FloatsPerVertex != 0) throw new InvalidDataException("Vertex floats are not a whole number of vertices.");
         if (blob.Skin.Joints.Length != blob.Skin.InverseBindMatrices.Length) throw new InvalidDataException($"The skin has {blob.Skin.Joints.Length} joints and {blob.Skin.InverseBindMatrices.Length} inverse-bind matrices.");
+        if (blob.IsSkinned && blob.Skin.Skeleton.Length == 0) throw new InvalidDataException("A skinned mesh names the skeleton it is bound to; this one names none.");
         for (var i = 0; i < blob.Draws.Length; i++)
         {
             ref var draw = ref blob.Draws[i];
             if (draw.FirstIndex + (ulong)draw.IndexCount > (ulong)blob.Indices.Length) throw new InvalidDataException($"Draw {i} runs past the index buffer.");
+            if (draw.MaterialSlot < 0) throw new InvalidDataException($"Draw {i} names material slot {draw.MaterialSlot}; a slot is the draw's glTF primitive index and is never negative — a slot with no material is the slot TABLE's −1, not the draw's.");
             if (draw.SkinIndex is not (-1 or 0)) throw new InvalidDataException($"Draw {i} names skin {draw.SkinIndex}; a mesh carries one skin, index 0.");
             if (draw.SkinIndex == 0 && blob.Skin.Joints.Length == 0) throw new InvalidDataException($"Draw {i} is skinned but the mesh carries no skin.");
         }

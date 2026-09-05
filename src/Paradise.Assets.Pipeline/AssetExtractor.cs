@@ -194,8 +194,8 @@ public static partial class AssetExtractor
 
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(glb));
-            var mesh = Document(index, Target(index, recorded.Mesh, directory / $"{stem}.mesh"), new MeshReferenceDocument(source, MeshSlot.Mesh), recorded.Mesh);
             var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directory / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
+            var mesh = MeshDocument(ref index, Rescan, directory, stem, source, cooked, recorded.Mesh, skeleton);
             var clips = Clips(index, directory, stem, source, cooked, recorded);
             if (referencesOnly)
             {
@@ -302,6 +302,54 @@ public static partial class AssetExtractor
         }
 
         private static string ImageSlot(int imageIndex) => $"images[{imageIndex}]";
+
+        /// <summary>
+        /// The geometry document: a <c>.skinnedmesh</c> naming its skeleton when the GLB has a
+        /// skin, a <c>.mesh</c> otherwise. The GLB decides the kind, so a recorded document of the
+        /// OTHER kind (a rig added or removed in the DCC, or a tree from before skinned meshes were
+        /// their own kind) is replaced under a fresh identity and the stale one removed — a
+        /// reference to it is then a verify finding rather than a silently wrong blob, and the
+        /// referencing prefab has to change anyway, since a rigged mesh is a different component.
+        /// </summary>
+        private AssetReference? MeshDocument(ref AssetIndex index, Func<AssetIndex> rescan, UPath directory, string stem, AssetReference source, CookedGlb cooked, AssetReference? recorded, AssetReference? skeleton)
+        {
+            var skinned = cooked.Mesh.Layout == MeshVertexLayout.Skinned;
+            var slot = skinned ? MeshSlot.SkinnedMesh : MeshSlot.Mesh;
+            var fallback = directory / (stem + MeshReferenceDocument.SuffixOf(slot));
+
+            var target = Target(index, recorded, fallback);
+            if (MeshReferenceDocument.SlotOf(target) != slot)
+            {
+                if (fileSystem.FileExists(target))
+                {
+                    fileSystem.DeleteFile(target);
+                    var meta = SidecarMeta.PathFor(target);
+                    if (fileSystem.FileExists(meta)) fileSystem.DeleteFile(meta);
+                    _written.Add(new ExtractedFile(index.Relative(target), $"removed: the GLB is {(skinned ? "skinned" : "rigid")} now, so its document is a {MeshReferenceDocument.SuffixOf(slot)}"));
+                }
+
+                recorded = null;
+                target = fallback;
+            }
+
+            if (!skinned) return Document(index, target, new MeshReferenceDocument(source, MeshSlot.Mesh), recorded);
+
+            if (skeleton is null)
+            {
+                _errors.Add($"{index.Relative(glb)}: has a skin but no node tree to cook a skeleton from, so no skinned mesh document can name one");
+                return recorded;
+            }
+
+            // The document names the skeleton by GUID, so a skeleton minted a moment ago has to be
+            // identified before the document that names it is written.
+            if (skeleton.Guid == Guid.Empty)
+            {
+                index = rescan();
+                skeleton = Identified(index, skeleton);
+            }
+
+            return Document(index, target, new MeshReferenceDocument(source, MeshSlot.SkinnedMesh, Skeleton: skeleton), recorded);
+        }
 
         /// <summary>Where a recorded entry's document is NOW, by identity — a moved file is re-synced in place, not abandoned for a fresh one beside the GLB; <paramref name="fallback"/> when nothing carries the guid.</summary>
         private static UPath Target(AssetIndex index, AssetReference? recorded, UPath fallback)

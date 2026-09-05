@@ -203,11 +203,19 @@ working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot
 `reference.Guid`, and carry the path only to phrase the message).
 
 **A GLB ships nothing; documents name its parts and the build cooks them.** `GlbImporter.Import`
-writes no output. A `.mesh`, `.skeleton` or `.anim` under `assets/` is a `MeshReferenceDocument`
-— `{ source = { guid, path }, slot, name, index, hash }` — and `MeshImporter`/`AnimationImporter`
-cook the named part of the GLB (`GltfCook`) to the file at the document's own path: the mesh to
-a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`, one aligned native copy, magic and version first),
-the skeleton and clips to **ozz-animation archives**. A clip is found by name, then by the hash
+writes no output. A `.mesh`, `.skinnedmesh`, `.skeleton` or `.anim` under `assets/` is a
+`MeshReferenceDocument` — `{ source = { guid, path }, slot, name, index, hash, skeleton }` — and
+`MeshImporter`/`SkinnedMeshImporter`/`AnimationImporter` cook the named part of the GLB (`GltfCook`)
+to the file at the document's own path: the mesh to a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`,
+one aligned native copy, magic and version first), the skeleton and clips to **ozz-animation
+archives**. **A skinned mesh is its own kind.** The extractor mints a `.skinnedmesh` for a GLB with
+a skin and a `.mesh` otherwise — the GLB decides, never the author — and the skinned document
+names the `.skeleton` minted beside it; MeshBlob v3's skin carries that skeleton's BUILT path, so
+the runtime opens a mesh and reads where its rig is. A game's authoring accepts `.skinnedmesh` where
+a rig is required and `.mesh` where one is not, so the picker cannot offer the wrong kind. A `.mesh`
+over a rigged GLB, or a `.skinnedmesh` over a rigid one, is a build error naming the watcher; a GLB
+that gains or loses its rig has its stale document replaced under a fresh identity.
+A clip is found by name, then by the hash
 of its channels, then by index. **A built document names assets where the build PUT them.**
 `ImportContext.BuiltPath` resolves a reference and asks the referenced asset's own importer
 (`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture

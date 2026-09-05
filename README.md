@@ -160,10 +160,11 @@ paradise assets extract Models/crate.glb          # or a directory with --all
 ```
 
 What a GLB holds becomes authored assets beside it (or under `[extract] directory` in
-`project.toml`, or the sidecar's `[glb] extract`): a `.mesh` document, a `.skeleton` and one
-`.anim` per clip — each a small TOML naming the GLB and the part it stands for, which the build
-cooks at the same path (the mesh to a Paradise blob, the skeleton and clips to ozz-animation
-archives, played by the managed ozz port in `Paradise.Animation`) — a `.material` document per
+`project.toml`, or the sidecar's `[glb] extract`): a `.mesh` document (a `.skinnedmesh` naming its
+skeleton when the GLB has a skin), a `.skeleton` and one `.anim` per clip — each a small TOML naming
+the GLB and the part it stands for, which the build cooks at the same path (the meshes to Paradise
+blobs, the skeleton and clips to ozz-animation archives, played by the managed ozz port in
+`Paradise.Animation`) — a `.material` document per
 glTF material with its textures as references, the embedded images as files the GLB now points
 at, and a `.prefab` wiring them, generated once and the author's from then on. The runtime never
 sees glTF: it reads the cooked files and the built materials. A clip keeps every key unless the

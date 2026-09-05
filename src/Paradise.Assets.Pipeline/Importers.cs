@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Paradise.Animation;
 using Paradise.Animation.Offline;
 using Paradise.Assets.Documents;
+using Paradise.Assets.Mesh;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -434,7 +435,32 @@ internal static class MeshReferenceStep
         switch (slot)
         {
             case MeshSlot.Mesh:
+                if (cooked.Mesh.Layout == MeshVertexLayout.Skinned)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} has a skin, so it is a skinned mesh; its document is a {MeshReferenceDocument.SkinnedMeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
+                    return true;
+                }
+
                 blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh);
+                break;
+
+            case MeshSlot.SkinnedMesh:
+                if (cooked.Mesh.Layout != MeshVertexLayout.Skinned)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} has no skin, so it is a rigid mesh; its document is a {MeshReferenceDocument.MeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
+                    return true;
+                }
+
+                // The blob names the skeleton by its BUILT path: the runtime opens the mesh, reads
+                // where its skeleton is, and opens that, deriving nothing.
+                var skeletonPath = context.BuiltPath(document.Skeleton!, out var skeletonProblem);
+                if (skeletonPath is null)
+                {
+                    errors.Add($"{context.Source}: as its skeleton, {skeletonProblem}");
+                    return true;
+                }
+
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh with { Skin = cooked.Mesh.Skin! with { Skeleton = skeletonPath } });
                 break;
 
             case MeshSlot.Skeleton:
@@ -523,7 +549,9 @@ internal static class MeshReferenceStep
             return AssetReferences.Unreadable(failure.Message);
         }
 
-        return new AssetReferences([new ReferenceSite("source", document.Source, document.Source.Path, document.Source.Path)]);
+        var sites = new List<ReferenceSite> { new("source", document.Source, document.Source.Path, document.Source.Path) };
+        if (document.Skeleton is { } skeleton) sites.Add(new ReferenceSite("skeleton", skeleton, skeleton.Path, skeleton.Path));
+        return new AssetReferences(sites);
     }
 
     public static RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
@@ -540,15 +568,28 @@ internal static class MeshReferenceStep
             return null;   // verify's finding
         }
 
-        var resolution = context.Index.Resolve(document.Source);
-        if (resolution.Status != ReferenceStatus.Stale) return null;
+        var repointed = new List<string>();
+        var repaired = document;
+        var source = context.Index.Resolve(document.Source);
+        if (source.Status == ReferenceStatus.Stale)
+        {
+            repaired = repaired with { Source = source.Current };
+            repointed.Add($"{document.Source.Path} -> {source.Path}");
+        }
 
-        context.FileSystem.WriteAllBytes(asset, (document with { Source = resolution.Current }).WriteBytes());
-        return new RepairedDocument(asset, [$"{document.Source.Path} -> {resolution.Path}"]);
+        if (document.Skeleton is { } skeleton && context.Index.Resolve(skeleton) is { Status: ReferenceStatus.Stale } bound)
+        {
+            repaired = repaired with { Skeleton = bound.Current };
+            repointed.Add($"{skeleton.Path} -> {bound.Path}");
+        }
+
+        if (repointed.Count == 0) return null;
+        context.FileSystem.WriteAllBytes(asset, repaired.WriteBytes());
+        return new RepairedDocument(asset, repointed);
     }
 }
 
-/// <summary>The <c>*.mesh</c> step: a mesh reference cooked to the mesh blob (<see cref="Paradise.Assets.Mesh.MeshBlobFormat"/>) of the GLB it names.</summary>
+/// <summary>The <c>*.mesh</c> step: a rigid mesh reference cooked to the mesh blob (<see cref="Paradise.Assets.Mesh.MeshBlobFormat"/>) of the GLB it names. A GLB with a skin is a <see cref="SkinnedMeshImporter"/>'s, and a <c>.mesh</c> over one is an error saying so.</summary>
 public sealed class MeshImporter : IAssetImporter
 {
     public string Name => "mesh";
@@ -561,6 +602,40 @@ public sealed class MeshImporter : IAssetImporter
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
         => context.HasExtension(MeshReferenceDocument.MeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.Mesh, errors);
+
+    /// <inheritdoc />
+    public AssetReferences References(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.References(context, asset);
+    }
+
+    /// <inheritdoc />
+    public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return MeshReferenceStep.Rewrite(context, asset);
+    }
+}
+
+/// <summary>
+/// The <c>*.skinnedmesh</c> step: a skinned mesh reference cooked to the mesh blob of the GLB it
+/// names, with the built path of the skeleton the document binds it to written into the blob's
+/// skin. Its own kind rather than a flag on <see cref="MeshImporter"/>, so a game's authoring can
+/// accept a <c>.skinnedmesh</c> where a rig is required and nothing else.
+/// </summary>
+public sealed class SkinnedMeshImporter : IAssetImporter
+{
+    public string Name => "skinnedmesh";
+
+    public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MeshReferenceDocument.SkinnedMeshSuffix);
+
+    /// <inheritdoc />
+    public bool Import(ImportContext context, List<string> errors)
+        => context.HasExtension(MeshReferenceDocument.SkinnedMeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.SkinnedMesh, errors);
 
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)

@@ -31,6 +31,24 @@ public class MeshReferenceImportTests
         return b.Build();
     }
 
+    /// <summary>One triangle skinned to a two-joint rig under a "Body" node: the smallest GLB with a skin.</summary>
+    private static byte[] SkinnedGlb()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var jointsView = b.AddBufferView(new byte[] { 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 });
+        var joints = b.AddAccessor(jointsView, GlbTestBuilder.UByte, "VEC4", 3);
+        var weights = b.AddFloatAccessor([0.75f, 0.25f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f], "VEC4");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, joints: joints, weights: weights));
+        var body = b.AddNode(mesh: mesh, skin: 0, name: "Body");
+        var hip = b.AddNode(translation: [0f, 1f, 0f], name: "hip", children: [2]);
+        b.AddNode(name: "knee");
+        float[] identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        b.AddSkin([hip, 2], b.AddFloatAccessor([.. identity, .. identity], "MAT4"), name: "rig");
+        b.SetSceneRoots(body, hip);
+        return b.Build();
+    }
+
     private static (MemoryFileSystem FileSystem, AssetReference Source) Project(byte[]? glb = null)
     {
         var fileSystem = ProjectVerifierTests.CreateProject();
@@ -64,6 +82,40 @@ public class MeshReferenceImportTests
         var blob = Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.mesh"));
         await Assert.That(blob.Vertices[0]).IsEqualTo(5f);
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_skinned_mesh_document_cooks_a_blob_that_names_its_skeletons_built_path()
+    {
+        var (fileSystem, source) = Project(SkinnedGlb());
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.skeleton", new MeshReferenceDocument(source, MeshSlot.Skeleton));
+        var skeleton = new AssetReference(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.skeleton.meta").Guid, "models/crate.skeleton");
+        Reference(fileSystem, "/game/assets/models/crate.skinnedmesh", new MeshReferenceDocument(source, MeshSlot.SkinnedMesh, Skeleton: skeleton));
+
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        var blob = Paradise.Assets.Mesh.MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/build/models/crate.skinnedmesh"));
+        await Assert.That(blob.Layout).IsEqualTo(Paradise.Assets.Mesh.MeshVertexLayout.Skinned);
+        // The runtime opens the mesh, reads where its skeleton was BUILT, and opens that.
+        await Assert.That(blob.Skin!.Skeleton).IsEqualTo("models/crate.skeleton");
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.skeleton")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_mesh_document_over_a_skinned_glb_is_an_error_naming_the_skinned_kind()
+    {
+        // The GLB decides the kind, never the author: a .mesh cannot stand for a rigged model,
+        // because nothing would say which skeleton poses it.
+        var (fileSystem, source) = Project(SkinnedGlb());
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.mesh", new MeshReferenceDocument(source, MeshSlot.Mesh));
+
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Errors.Single()).Contains("models/crate.mesh");
+        await Assert.That(result.Errors.Single()).Contains(".skinnedmesh");
     }
 
     [Test]

@@ -20,7 +20,7 @@ public class MeshBlobTests
             layout, vertices, [0, 1, 2],
             [new MeshDrawData(0, 3, 0, skinned ? 4 : -1, skinned ? 0 : -1, "Crate")],
             new Vector3(-1, -2, -3), new Vector3(1, 2, 3),
-            skinned ? new MeshSkinData([3, 7], [Matrix4x4.Identity, Matrix4x4.CreateTranslation(0, -1, 0)]) : null);
+            skinned ? new MeshSkinData([3, 7], [Matrix4x4.Identity, Matrix4x4.CreateTranslation(0, -1, 0)], "models/rig.skeleton") : null);
     }
 
     [Test]
@@ -49,22 +49,33 @@ public class MeshBlobTests
         await Assert.That(read.Draws[0].NodeIndex).IsEqualTo(4);
         await Assert.That(read.Skin!.Joints).IsEquivalentTo(new[] { 3, 7 });
         await Assert.That(read.Skin.InverseBindMatrices[1]).IsEqualTo(Matrix4x4.CreateTranslation(0, -1, 0));
+        await Assert.That(read.Skin.Skeleton).IsEqualTo("models/rig.skeleton");
         await Assert.That(MeshBlobFormat.Read(MeshBlobFormat.Write(Sample())).Skin).IsNull();
     }
 
     [Test]
     public async Task a_skinned_draw_without_a_skin_and_a_vertex_past_the_palette_are_refused()
     {
-        var noSkin = Sample(MeshVertexLayout.Skinned) with { Skin = null };
+        var noSkin = Sample(MeshVertexLayout.Skinned) with { Skin = new MeshSkinData([], [], "models/rig.skeleton") };
         var pastPalette = Sample(MeshVertexLayout.Skinned);
         pastPalette.Vertices[MeshBlob.StaticFloatsPerVertex] = 2f;
-        var mismatched = Sample(MeshVertexLayout.Skinned) with { Skin = new MeshSkinData([3, 7], [Matrix4x4.Identity]) };
+        var mismatched = Sample(MeshVertexLayout.Skinned) with { Skin = new MeshSkinData([3, 7], [Matrix4x4.Identity], "models/rig.skeleton") };
+        // A skinned mesh is bound to one skeleton and the blob says which; a skin that names none is
+        // a mesh the runtime could not pose, refused before it is written.
+        var unbound = Sample(MeshVertexLayout.Skinned) with { Skin = new MeshSkinData([3, 7], [Matrix4x4.Identity, Matrix4x4.Identity]) };
+        await Assert.That(() => MeshBlobFormat.Write(unbound)).Throws<ArgumentException>();
+        await Assert.That(() => MeshBlobFormat.Write(Sample(MeshVertexLayout.Skinned) with { Skin = null })).Throws<ArgumentException>();
 
         var missing = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(noSkin))).Throws<InvalidDataException>();
         await Assert.That(missing!.Message).Contains("no skin");
         var past = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(pastPalette))).Throws<InvalidDataException>();
         await Assert.That(past!.Message).Contains("palette slot 2 of 2");
         await Assert.That(() => MeshBlobFormat.Write(mismatched)).Throws<ArgumentException>();
+
+        // A host indexes its slot table by the draw's slot; the format promises it is never negative.
+        var negativeSlot = Sample() with { Draws = [Sample().Draws[0] with { MaterialSlot = -1 }] };
+        var slot = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(negativeSlot))).Throws<InvalidDataException>();
+        await Assert.That(slot!.Message).Contains("material slot -1");
 
         var notANumber = Sample(MeshVertexLayout.Skinned);
         notANumber.Vertices[MeshBlob.SkinnedFloatsPerVertex + MeshBlob.StaticFloatsPerVertex + 1] = float.NaN;
