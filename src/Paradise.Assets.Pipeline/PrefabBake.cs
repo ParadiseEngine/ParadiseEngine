@@ -63,8 +63,10 @@ public static class PrefabBake
                 }
                 catch (FormatException failure)
                 {
-                    // A value TOML can spell and JSON cannot (inf, nan). The importer contract is
-                    // an error on the list, never an exception out of Import.
+                    // Two sources: a value TOML can spell and JSON cannot (inf, nan), and a
+                    // reference the built-path delegate has nothing built for. Both are one
+                    // sentence naming the object and component. The importer contract is an
+                    // error on the list, never an exception out of Import.
                     var name = entry.Name is { Length: > 0 } named ? named : DocumentGuid.Format(entry.Guid ?? Guid.Empty);
                     errors.Add($"object {index} ({name}), component {component.Type ?? DocumentGuid.Format(component.Id)}: {failure.Message}");
                     continue;
