@@ -4,7 +4,7 @@ namespace Paradise.ECS.Test;
 /// Stage-1 runtime tests for the deferred event primitive (<see cref="WorldEventStore"/>,
 /// <see cref="SystemEventWriter"/>): schedule-order merge determinism, cross-frame expiry,
 /// snapshot round-trip via <see cref="World{TMask,TConfig}.CopyFrom"/>, and multi-type / fan-out
-/// delivery. The schedule + generator wiring is covered in later stages. See docs/system-events.md.
+/// delivery. The schedule + generator wiring is covered in later stages.
 /// </summary>
 public sealed class SystemEventsTests
 {

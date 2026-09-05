@@ -22,7 +22,7 @@
     <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
     <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
     <!-- A host picks the sink. Engine libraries take an ILogger and name none; this is the one
-         layer entitled to decide where their diagnostics go (docs/logging.md). -->
+         layer entitled to decide where their diagnostics go. -->
     <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
   </ItemGroup>
 

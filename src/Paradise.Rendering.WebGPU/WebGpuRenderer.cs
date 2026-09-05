@@ -95,7 +95,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// hitch. Ignored for a headless target, whose texture is always copyable.</param>
     /// <param name="logger">Where Dawn's uncaptured-error and device-lost reports go, and where a
     /// release callback that threw is reported. Omitted means nowhere. Dawn raises these on its own
-    /// threads, so a sink passed here must be thread-safe (see <c>docs/logging.md</c>).</param>
+    /// threads, so a sink passed here must be thread-safe.</param>
     public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false, ILogger? logger = null)
     {
         var log = logger ?? NullLogger.Instance;

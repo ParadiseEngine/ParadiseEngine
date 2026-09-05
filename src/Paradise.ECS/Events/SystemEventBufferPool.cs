@@ -8,8 +8,7 @@ namespace Paradise.ECS;
 /// rents one writer per work item at dispatch time (on the schedule thread, in schedule order);
 /// each writer runs on one thread and appends sequentially, so it is internally deterministic.
 /// <see cref="CommitTo"/> then merges the writers into the world's event store in rent (= schedule)
-/// order, so the delivered event order is identical under any wave scheduler. See
-/// <c>docs/system-events.md</c>.
+/// order, so the delivered event order is identical under any wave scheduler.
 /// </summary>
 internal sealed class SystemEventBufferPool
 {

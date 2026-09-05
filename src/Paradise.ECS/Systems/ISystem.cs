@@ -186,7 +186,7 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// <param name="layout">The archetype layout describing component offsets.</param>
     /// <param name="entityCount">The number of entities in the chunk.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
-    /// <param name="eventWriter">The per-work-item writer for emitting deferred events (see docs/system-events.md).</param>
+    /// <param name="eventWriter">The per-work-item writer for emitting deferred events.</param>
     static abstract void RunChunk(
         IWorld<TMask, TConfig> world,
         ChunkHandle chunk,
@@ -220,7 +220,7 @@ public interface IWorldSystemRunner<TMask, TConfig> : ISystem
     /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c> — generated
     /// bodies fall back to binding reads to <paramref name="world"/>.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
-    /// <param name="eventWriter">The per-work-item writer for emitting deferred events (see docs/system-events.md).</param>
+    /// <param name="eventWriter">The per-work-item writer for emitting deferred events.</param>
     static abstract void RunWorld(
         IWorld<TMask, TConfig> world,
         IWorld<TMask, TConfig>? readWorld,

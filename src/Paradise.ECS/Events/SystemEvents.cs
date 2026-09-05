@@ -27,8 +27,7 @@ internal interface ISystemEvents
 /// <summary>
 /// World-owned buffer for one unmanaged event type. Holds the INCOMING events (produced last frame,
 /// read-many by systems this frame). Outgoing events are staged during the post-wave commit and
-/// published to incoming atomically, so last frame's events auto-expire. See
-/// <c>docs/system-events.md</c>.
+/// published to incoming atomically, so last frame's events auto-expire.
 /// </summary>
 /// <typeparam name="T">The unmanaged event type.</typeparam>
 internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged

@@ -153,7 +153,7 @@ Three things that are not obvious, all of which the build will teach you the har
   not create, and `ILogger` promises no affinity.
 
 Program output is not a diagnostic: `Verbs` printing `verify: 3 error(s)` and
-`Paradise.Authoring.SchemaDump` writing its dump keep `Console.WriteLine`. See `docs/logging.md`.
+`Paradise.Authoring.SchemaDump` writing its dump keep `Console.WriteLine`.
 
 ### Everything that reads content takes an `IFileSystem`, not a path
 

@@ -58,7 +58,7 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     ChunkManager ChunkManager { get; }
 
     /// <summary>
-    /// Gets the world's deferred event buffers (see <c>docs/system-events.md</c>): each event
+    /// Gets the world's deferred event buffers: each event
     /// type's INCOMING events (produced last frame). Participates in <c>CopyFrom</c>/snapshots.
     /// </summary>
     WorldEventStore Events { get; }
