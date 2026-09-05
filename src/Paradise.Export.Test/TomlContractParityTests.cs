@@ -28,7 +28,7 @@ namespace Paradise.Export.Test;
 /// </remarks>
 public class TomlContractParityTests
 {
-    private static LevelData BuildLevel() =>
+    private static PrefabData BuildLevel() =>
         new() { Entities = { EntityDocumentShapeTests.BuildBoxEntity() } };
 
     [Test]
@@ -83,7 +83,7 @@ public class TomlContractParityTests
                 TestComponentIds.CrateId, "Paradise.Export.Tests.MaterialsFixture",
                 """{"Slots":[{"Path":"materials/rust.json"},null,{"Path":"materials/steel.json"}]}"""),
         ];
-        var document = new LevelData { Entities = { entity } };
+        var document = new PrefabData { Entities = { entity } };
 
         var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
         var json = JsonNode.Parse(ExportJsonWriter.SerializeToString(restored))!;
@@ -173,10 +173,10 @@ public class TomlContractParityTests
     {
         // The degenerate document, which is where an omit-nulls rule is most likely to lose
         // something: every collection is empty and every optional is absent.
-        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(new LevelData()));
+        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(new PrefabData()));
 
         await Assert.That(ExportJsonWriter.SerializeToString(restored))
-            .IsEqualTo(ExportJsonWriter.SerializeToString(new LevelData()));
+            .IsEqualTo(ExportJsonWriter.SerializeToString(new PrefabData()));
     }
 
     [Test]

@@ -61,7 +61,7 @@ namespace Paradise.Export.Serialization
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <c>LevelData.Entities</c> is <c>List&lt;List&lt;AuthoredComponentData&gt;&gt;</c> — an
+        /// <c>PrefabData.Entities</c> is <c>List&lt;List&lt;AuthoredComponentData&gt;&gt;</c> — an
         /// entity has no shape of its own, which is the whole assertion of contract v5. TOML has
         /// no header form for an array of ARRAYS, so mirroring that shape mechanically collapses
         /// every entity in the document onto one enormous inline line, which is worse to read and

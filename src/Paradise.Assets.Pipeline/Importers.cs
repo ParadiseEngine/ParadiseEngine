@@ -297,7 +297,12 @@ public sealed class PrefabImporter : IAssetImporter
         var configExtension = DocumentOutput.Extension(context.Profile);
         var level = PrefabBake.Bake(
             document, Referenced, prefabExtension, configExtension, failures,
-            reference => context.Resolve(reference).Path);
+            reference =>
+            {
+                var built = BuiltPaths.Of(context, reference, out var problem);
+                if (problem is not null) failures.Add(problem);
+                return built ?? reference.Path;
+            });
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");
@@ -598,15 +603,9 @@ public sealed class MaterialImporter : IAssetImporter
         var before = errors.Count;
         var baked = MaterialDocument.Bake(material, reference =>
         {
-            var resolution = context.Resolve(reference);
-            if (!resolution.Found)
-            {
-                errors.Add($"{context.Source}: references texture '{reference.Path}' (guid {DocumentGuid.Format(reference.Guid)}), which no asset under assets/ carries");
-                return null;
-            }
-
-            // The texture step writes its KTX2 at the source's own place in the tree.
-            return Path.ChangeExtension(resolution.Path, ".ktx2");
+            var built = BuiltPaths.Of(context, reference, out var problem);
+            if (problem is not null) errors.Add($"{context.Source}: {problem}");
+            return built;
         });
         if (errors.Count > before) return true;
 

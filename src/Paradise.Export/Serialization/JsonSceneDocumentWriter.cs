@@ -9,7 +9,7 @@ namespace Paradise.Export.Serialization
     /// </summary>
     public sealed class JsonSceneDocumentWriter : ISceneDocumentWriter
     {
-        public void Write(string outputPath, LevelData document)
+        public void Write(string outputPath, PrefabData document)
         {
             ExportJsonWriter.WriteJsonDocument(outputPath, document);
         }

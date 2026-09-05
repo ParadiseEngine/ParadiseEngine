@@ -7,7 +7,7 @@ using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Tests;
 
-// GOLDEN TEST. Reconstructs a small v6 scene as LevelData and asserts our serializer reproduces
+// GOLDEN TEST. Reconstructs a small v6 scene as PrefabData and asserts our serializer reproduces
 // the on-disk JSON byte-for-byte (newline-normalized). This pins the entire serialization stack —
 // property order, float formatting, null inclusion, payload passthrough, guid spelling.
 //
@@ -24,7 +24,7 @@ public class SampleSceneGoldenTests
     [Test]
     public async Task serialized_sample_scene_matches_the_golden_document()
     {
-        LevelData document = BuildSampleScene();
+        PrefabData document = BuildSampleScene();
         string actual = Normalize(ExportJsonWriter.SerializeToString(document));
 
         var fixture = FixturePath("SampleScene.expected.json");
@@ -41,9 +41,9 @@ public class SampleSceneGoldenTests
     /// The scene as v6 states it: two objects, each nothing but its components — identity and
     /// placement riding as the well-known meta/transform payloads, everything else the game's.
     /// </summary>
-    private static LevelData BuildSampleScene()
+    private static PrefabData BuildSampleScene()
     {
-        var document = new LevelData();
+        var document = new PrefabData();
 
         document.Entities.Add(new List<AuthoredComponentData>
         {

@@ -29,7 +29,7 @@ public class PrefabBakeTests
         return document;
     }
 
-    private static LevelData Bake(PrefabDocument document, List<string>? errors = null)
+    private static PrefabData Bake(PrefabDocument document, List<string>? errors = null)
         => PrefabBake.Bake(document, _ => null, ".json", errors ?? new List<string>());
 
     private static JsonElement Payload(IReadOnlyList<AuthoredComponentData> entity, Guid id)

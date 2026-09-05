@@ -24,7 +24,7 @@ namespace Paradise.Export.Serialization
     public static class ExportTomlReader
     {
         /// <summary>Reads a level document.</summary>
-        public static LevelData ReadLevel(string toml) => Read<LevelData>(toml);
+        public static PrefabData ReadLevel(string toml) => Read<PrefabData>(toml);
 
         /// <summary>Reads a material document.</summary>
         public static LevelMaterialData ReadMaterial(string toml) => Read<LevelMaterialData>(toml);

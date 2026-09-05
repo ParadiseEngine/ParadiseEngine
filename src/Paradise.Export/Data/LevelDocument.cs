@@ -25,7 +25,7 @@ namespace Paradise.Export.Data
     // Convention: Y-up, right-handed (−Z forward, Godot/glTF-standard), meters. Matrices are
     // column-major float[16]. The Godot exporter writes its values verbatim — no handedness
     // conversion (see CONVENTIONS.md).
-    public sealed record LevelData
+    public sealed record PrefabData
     {
         /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader
         /// would misparse.
