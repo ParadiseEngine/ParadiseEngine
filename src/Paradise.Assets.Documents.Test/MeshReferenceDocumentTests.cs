@@ -47,9 +47,30 @@ public class MeshReferenceDocumentTests
     }
 
     [Test]
+    public async Task a_skinned_mesh_names_its_skeleton_and_nothing_else_may()
+    {
+        // Its own kind, not a mesh with a flag: the palette indexes one skeleton's joints, so the
+        // document says which, and a game accepts a .skinnedmesh where a rig is required.
+        var skeleton = new AssetReference(Guid.Parse("22222222-2222-4333-8444-555555555555"), "models/crate.skeleton");
+        var skinned = new MeshReferenceDocument(s_source, MeshSlot.SkinnedMesh, Skeleton: skeleton);
+
+        await Assert.That(MeshReferenceDocument.Parse(skinned.Write(), "crate.skinnedmesh")).IsEqualTo(skinned);
+        await Assert.That(skinned.Write()).Contains("slot = \"skinnedmesh\"");
+        await Assert.That(skinned.Write()).Contains("skeleton = { guid = \"22222222-2222-4333-8444-555555555555\", path = \"models/crate.skeleton\" }");
+
+        var unbound = await Assert.That(() => MeshReferenceDocument.Parse(new MeshReferenceDocument(s_source, MeshSlot.SkinnedMesh).Write(), "crate.skinnedmesh")).Throws<FormatException>();
+        await Assert.That(unbound!.Message).Contains("'skeleton'");
+
+        var rigid = await Assert.That(() => MeshReferenceDocument.Parse(new MeshReferenceDocument(s_source, MeshSlot.Mesh, Skeleton: skeleton).Write(), "crate.mesh")).Throws<FormatException>();
+        await Assert.That(rigid!.Message).Contains("carries no 'skeleton'");
+    }
+
+    [Test]
     public async Task the_extension_names_the_slot()
     {
         await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.mesh")).IsEqualTo(MeshSlot.Mesh);
+        await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.skinnedmesh")).IsEqualTo(MeshSlot.SkinnedMesh);
+        await Assert.That(MeshReferenceDocument.SuffixOf(MeshSlot.SkinnedMesh)).IsEqualTo(".skinnedmesh");
         await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.SKELETON")).IsEqualTo(MeshSlot.Skeleton);
         await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.Bob.anim")).IsEqualTo(MeshSlot.Clip);
         await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.glb")).IsNull();

@@ -10,11 +10,13 @@ public enum MeshSlot
     Mesh,
     Skeleton,
     Clip,
+    /// <summary>A mesh with a skin: cooked like <see cref="Mesh"/>, and bound to the skeleton its palette indexes.</summary>
+    SkinnedMesh,
 }
 
 /// <summary>
-/// The authored <c>*.mesh</c>, <c>*.skeleton</c> or <c>*.anim</c> document: a name for one part
-/// of a GLB — its geometry, its rig, or one animation clip — that the build cooks into the blob
+/// The authored <c>*.mesh</c>, <c>*.skinnedmesh</c>, <c>*.skeleton</c> or <c>*.anim</c> document: a
+/// name for one part of a GLB — its geometry, its rig, or one animation clip — that the build cooks into the blob
 /// the runtime reads, at the document's own path. The GLB stays the one source of the geometry;
 /// the document is what a prefab references and what carries the identity, so a re-export in the
 /// DCC changes nothing an author has to keep in step.
@@ -25,17 +27,37 @@ public enum MeshSlot
 /// animation index is the last tiebreak: the name is what an animator means, the hash is what the
 /// data is, the index is what the file guarantees. Tool-written and never hand-edited, which is
 /// why <c>extract</c> may overwrite one that disagrees with the GLB without a conflict rule.
+/// A skinned mesh is its own KIND, not a mesh with a flag: its palette indexes one skeleton's
+/// joints, so the document names that <see cref="Skeleton"/>, and a game's authoring accepts a
+/// <c>.skinnedmesh</c> where a rig is required and a <c>.mesh</c> where one is not — the picker
+/// cannot offer the wrong one and <c>verify</c> refuses it before a build. The GLB decides which
+/// is minted; an author never does.
 /// </remarks>
 /// <param name="Hash">SHA-256 of the part's cooked bytes as of the last extract; a clip renamed in the DCC is found by it.</param>
-public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null, string? Hash = null)
+/// <param name="Skeleton">The <c>.skeleton</c> document a <see cref="MeshSlot.SkinnedMesh"/>'s palette is bound to; required for that slot, absent for every other.</param>
+public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null, string? Hash = null, AssetReference? Skeleton = null)
 {
     public const int SchemaVersion = 1;
 
     public const string MeshSuffix = ".mesh";
+    public const string SkinnedMeshSuffix = ".skinnedmesh";
     public const string SkeletonSuffix = ".skeleton";
     public const string ClipSuffix = ".anim";
 
-    private static readonly string[] s_knownKeys = ["schema_version", "source", "slot", "name", "index", "hash"];
+    /// <summary>The suffix a document of <paramref name="slot"/> is written under.</summary>
+    public static string SuffixOf(MeshSlot slot) => slot switch
+    {
+        MeshSlot.Mesh => MeshSuffix,
+        MeshSlot.SkinnedMesh => SkinnedMeshSuffix,
+        MeshSlot.Skeleton => SkeletonSuffix,
+        MeshSlot.Clip => ClipSuffix,
+        _ => throw new ArgumentOutOfRangeException(nameof(slot)),
+    };
+
+    /// <summary>Whether the slot is geometry the build cooks to a mesh blob — rigid or skinned.</summary>
+    public static bool IsGeometry(MeshSlot slot) => slot is MeshSlot.Mesh or MeshSlot.SkinnedMesh;
+
+    private static readonly string[] s_knownKeys = ["schema_version", "source", "slot", "name", "index", "hash", "skeleton"];
 
     public static bool IsMeshReferencePath(UPath path)
         => SlotOf(path) is not null;
@@ -44,6 +66,7 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
     public static MeshSlot? SlotOf(UPath path) => path.GetExtensionWithDot()?.ToLowerInvariant() switch
     {
         MeshSuffix => MeshSlot.Mesh,
+        SkinnedMeshSuffix => MeshSlot.SkinnedMesh,
         SkeletonSuffix => MeshSlot.Skeleton,
         ClipSuffix => MeshSlot.Clip,
         _ => null,
@@ -53,6 +76,7 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
     public static string Spell(MeshSlot slot) => slot switch
     {
         MeshSlot.Mesh => "mesh",
+        MeshSlot.SkinnedMesh => "skinnedmesh",
         MeshSlot.Skeleton => "skeleton",
         MeshSlot.Clip => "clip",
         _ => throw new ArgumentOutOfRangeException(nameof(slot)),
@@ -80,9 +104,10 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         var slot = slotText switch
         {
             "mesh" => MeshSlot.Mesh,
+            "skinnedmesh" => MeshSlot.SkinnedMesh,
             "skeleton" => MeshSlot.Skeleton,
             "clip" => MeshSlot.Clip,
-            _ => throw Fail($"names slot '{slotText}', which is not one of mesh, skeleton, clip"),
+            _ => throw Fail($"names slot '{slotText}', which is not one of mesh, skinnedmesh, skeleton, clip"),
         };
 
         var name = TomlDocumentReader.OptionalString(table, "name", "at the document root", Fail);
@@ -98,7 +123,17 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         if (slot == MeshSlot.Clip && name is null && index is null) throw Fail("a clip names its animation by 'name' or 'index'");
         if (slot != MeshSlot.Clip && (name is not null || index is not null)) throw Fail($"a {slotText} carries no 'name' or 'index'; a GLB has one of each");
 
-        return new MeshReferenceDocument(reference, slot, name, index, hash);
+        AssetReference? skeleton = null;
+        if (TomlDocumentReader.OptionalTable(table, "skeleton", "at the document root", Fail) is { } skeletonTable)
+        {
+            skeleton = AssetReferenceCodec.Read(TomlDocumentReader.ToCanonicalValue(skeletonTable, "in 'skeleton'", Fail), "'skeleton'", Fail)
+                ?? throw Fail("'skeleton' must be an asset reference { guid, path }");
+        }
+
+        if (slot == MeshSlot.SkinnedMesh && skeleton is null) throw Fail("a skinnedmesh names the 'skeleton' document its palette is bound to, as { guid, path }");
+        if (slot != MeshSlot.SkinnedMesh && skeleton is not null) throw Fail($"a {slotText} carries no 'skeleton'; only a skinnedmesh is bound to one");
+
+        return new MeshReferenceDocument(reference, slot, name, index, hash, skeleton);
     }
 
     public static MeshReferenceDocument Load(IFileSystem fileSystem, UPath path)
@@ -122,6 +157,7 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         if (Name is not null) table.Add("name", Name);
         if (Index is { } index) table.Add("index", (long)index);
         if (Hash is not null) table.Add("hash", Hash);
+        if (Skeleton is not null) table.Add("skeleton", AssetReferenceCodec.Write(Skeleton));
         return table;
     }
 }

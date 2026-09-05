@@ -58,6 +58,24 @@ public class AssetExtractorTests
         return b.Build();
     }
 
+    /// <summary>One triangle skinned to a two-joint rig under a "Body" node: the smallest GLB with a skin.</summary>
+    private static byte[] SkinnedCrateGlb()
+    {
+        var b = new GlbTestBuilder();
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var jointsView = b.AddBufferView(new byte[] { 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 });
+        var joints = b.AddAccessor(jointsView, GlbTestBuilder.UByte, "VEC4", 3);
+        var weights = b.AddFloatAccessor([0.75f, 0.25f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f], "VEC4");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, joints: joints, weights: weights));
+        var body = b.AddNode(mesh: mesh, skin: 0, name: "Body");
+        var hip = b.AddNode(translation: [0f, 1f, 0f], name: "hip", children: [2]);
+        b.AddNode(name: "knee");
+        float[] identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        b.AddSkin([hip, 2], b.AddFloatAccessor([.. identity, .. identity], "MAT4"), name: "rig");
+        b.SetSceneRoots(body, hip);
+        return b.Build();
+    }
+
     private static MemoryFileSystem Project(byte[]? glb = null, string? manifest = null)
     {
         var fileSystem = ProjectVerifierTests.CreateProject();
@@ -68,6 +86,51 @@ public class AssetExtractorTests
         fileSystem.WriteAllBytes(Glb, glb ?? CrateGlb());
         ProjectVerifierTests.Mint(fileSystem, Glb);
         return fileSystem;
+    }
+
+    [Test]
+    public async Task a_skinned_glb_mints_a_skinnedmesh_document_bound_to_its_skeleton()
+    {
+        // The GLB decides the kind. A rigged model's geometry document is a .skinnedmesh naming the
+        // .skeleton minted beside it, by guid, so a prefab that references the mesh has, through
+        // it, the one skeleton that can pose it.
+        using var fileSystem = Project(SkinnedCrateGlb());
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsFalse();
+        var document = MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.skinnedmesh");
+        await Assert.That(document.Slot).IsEqualTo(MeshSlot.SkinnedMesh);
+        await Assert.That(document.Skeleton!.Path).IsEqualTo("models/crate.skeleton");
+        await Assert.That(document.Skeleton.Guid).IsEqualTo(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.skeleton.meta").Guid);
+        var extraction = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(extraction.Mesh!.Path).IsEqualTo("models/crate.skinnedmesh");
+
+        // The generated prefab references the skinned document through the schema's skinned component.
+        await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.prefab")).Contains("models/crate.skinnedmesh");
+
+        var findings = ProjectVerifier.Verify(fileSystem, s_layout);
+        await Assert.That(findings.Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_recorded_mesh_document_of_the_wrong_kind_is_replaced_when_the_glb_gains_a_rig()
+    {
+        // A tree from before skinned meshes were their own kind, or a rig added in the DCC: the
+        // stale .mesh is removed rather than left to cook a blob that says nothing of its skeleton.
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsTrue();
+
+        fileSystem.WriteAllBytes(Glb, SkinnedCrateGlb());
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.mesh.meta")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.skinnedmesh")).IsTrue();
+        await Assert.That(result.Written.Any(w => w.Path.EndsWith("crate.mesh") && w.Note!.Contains("removed"))).IsTrue();
     }
 
     [Test]

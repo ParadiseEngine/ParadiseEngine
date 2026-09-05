@@ -215,6 +215,7 @@ public static class AssetImporters
         new AudioImporter(),
         new GlbImporter(),
         new MeshImporter(),
+        new SkinnedMeshImporter(),
         new AnimationImporter(),
         new TextureImporter(),
     ];
