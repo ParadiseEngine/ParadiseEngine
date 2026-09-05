@@ -213,8 +213,10 @@ of its channels, then by index. **A built document names assets where the build 
 (`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture
 as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, a GLB reference
 to the mesh blob cooked from its `.mesh` document (a GLB ships nothing, and a GLB with no mesh
-document is a build error naming the watcher), prefabs, materials and configs to the profile's
-extension, and mesh, skeleton, clip, audio and binary references to their own path. Both the
+document is a build error naming the watcher), prefabs and configs to the profile's extension, and
+mesh, skeleton, clip, material, audio and binary references to their own path (a built `.material`
+keeps its suffix and carries TOML or JSON by profile; a reader tells them apart by the first
+character). Both the
 prefab bake and the material bake go through it, so a runtime opens the path a built document
 spells and never derives one by convention, and a game's own importer answers for its own kinds.
 

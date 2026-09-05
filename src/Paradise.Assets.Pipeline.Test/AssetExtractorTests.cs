@@ -544,8 +544,8 @@ public class AssetExtractorTests
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.mesh")).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.Bob.anim")).IsTrue();
-        await Assert.That(fileSystem.FileExists("/game/build/models/crate.wood.toml")).IsTrue();
-        await Assert.That(fileSystem.ReadAllText("/game/build/models/crate.wood.toml")).Contains("BaseColorTexture = \"models/crate_0.ktx2\"");
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.wood.material")).IsTrue();
+        await Assert.That(fileSystem.ReadAllText("/game/build/models/crate.wood.material")).Contains("BaseColorTexture = \"models/crate_0.ktx2\"");
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
     }
 }

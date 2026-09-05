@@ -986,9 +986,8 @@ public class BuildRunnerTests
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.toml")).IsTrue();
-        await Assert.That(fileSystem.ReadAllText("/game/build/materials/grass.toml")).Contains("BaseColorTexture = \"textures/ground/grass.ktx2\"");
-        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.material")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/build/materials/grass.material")).IsTrue();
+        await Assert.That(fileSystem.ReadAllText("/game/build/materials/grass.material")).Contains("BaseColorTexture = \"textures/ground/grass.ktx2\"");
     }
 
     [Test]

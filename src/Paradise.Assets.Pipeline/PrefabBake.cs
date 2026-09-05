@@ -110,11 +110,6 @@ public static class PrefabBake
             return string.Concat(path.AsSpan(0, path.Length - ".toml".Length), extensions.Config);
         }
 
-        if (path.EndsWith(MaterialDocument.Suffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return string.Concat(path.AsSpan(0, path.Length - MaterialDocument.Suffix.Length), extensions.Config);
-        }
-
         return path;
     }
 

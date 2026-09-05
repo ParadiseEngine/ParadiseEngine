@@ -10,7 +10,7 @@ namespace Paradise.Assets.Pipeline.Test;
 /// <summary>
 /// A built document names assets where the BUILD put them, so the runtime opens a path and never
 /// derives one: a texture reference bakes to its KTX2, a GLB reference to the mesh blob cooked from
-/// its document, prefabs and materials to the profile's extension, a clip document to itself. Each
+/// its document, prefabs to the profile's extension, a material and a clip document to their own names. Each
 /// answer is the referenced asset's own importer's (<see cref="IAssetImporter.BuiltPath"/>).
 /// </summary>
 public class BuiltPathsTests
@@ -65,12 +65,12 @@ public class BuiltPathsTests
         var baked = fileSystem.ReadAllText("/game/build/levels/scene.toml");
         await Assert.That(baked).Contains("Mesh = \"models/crate.mesh\"");
         await Assert.That(baked).Contains("Clip = \"models/crate.Walk.anim\"");
-        await Assert.That(baked).Contains("Material = \"materials/rust.toml\"");
+        await Assert.That(baked).Contains("Material = \"materials/rust.material\"");
         await Assert.That(baked).Contains("Texture = \"textures/fire.ktx2\"");
         await Assert.That(baked).Contains("Prop = \"prefabs/prop.toml\"");
-        await Assert.That(fileSystem.ReadAllText("/game/build/materials/rust.toml")).Contains("BaseColorTexture = \"textures/fire.ktx2\"");
+        await Assert.That(fileSystem.ReadAllText("/game/build/materials/rust.material")).Contains("BaseColorTexture = \"textures/fire.ktx2\"");
         // Every path a built document names is a file the build wrote.
-        foreach (var built in new[] { "models/crate.mesh", "models/crate.Walk.anim", "materials/rust.toml", "textures/fire.ktx2", "prefabs/prop.toml" })
+        foreach (var built in new[] { "models/crate.mesh", "models/crate.Walk.anim", "materials/rust.material", "textures/fire.ktx2", "prefabs/prop.toml" })
         {
             await Assert.That(fileSystem.FileExists("/game/build/" + built)).IsTrue();
         }

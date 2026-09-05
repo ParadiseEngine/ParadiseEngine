@@ -793,8 +793,13 @@ internal static class DocumentOutput
     public static string PrefabExtension(BuildProfile profile, ProjectOutputTarget target)
         => target == ProjectOutputTarget.Play ? AssetClassifier.PrefabSuffix : Extension(profile);
 
-    /// <summary>A material builds to the same <c>.toml</c>/<c>.json</c> a config does: a host that reads <c>LevelMaterialData</c> by extension is unchanged.</summary>
-    public static string MaterialExtension(BuildProfile profile) => Extension(profile);
+    /// <summary>
+    /// A material keeps its <c>.material</c> name in the build tree; what changes with the profile is
+    /// the text inside (TOML or JSON), which a reader tells apart by its first character. Keeping the
+    /// suffix is what lets a built prefab's slot list say what KIND of document it names, the same
+    /// way <c>.mesh</c> and <c>.anim</c> do, instead of the format the build happened to choose.
+    /// </summary>
+    public static string MaterialExtension(BuildProfile profile) => MaterialDocument.Suffix;
 
     public static bool PrefabAsJson(BuildProfile profile, ProjectOutputTarget target)
         => target != ProjectOutputTarget.Play && profile.DocumentFormat == DocumentFormat.Json;
