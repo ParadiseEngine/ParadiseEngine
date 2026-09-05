@@ -209,12 +209,13 @@ public static partial class AssetExtractor
             var materials = Materials(index, directory, stem, bytes, asset, recorded);
 
             index = Rescan();
-            var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images, recorded.Prefab);
+            var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images);
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
-            var prefabPath = Target(index, recorded.Prefab, directory / $"{stem}.prefab");
-            if (generatePrefab) extraction = extraction with { Prefab = Prefab(index, layout, prefabPath, stem, meta.Guid, Identified(index, extraction), cooked, asset) };
-            if (extraction.Prefab is { } prefab && prefab.Guid == Guid.Empty) index = Rescan();
+            if (generatePrefab && Seed(index, layout, directory / $"{stem}.prefab", stem, Identified(index, extraction), cooked))
+            {
+                index = Rescan();
+            }
 
             Save(index, sidecarPath, extraction);
 
@@ -237,7 +238,7 @@ public static partial class AssetExtractor
         }
 
         private static bool Same(GlbExtraction a, GlbExtraction b)
-            => a.Mesh == b.Mesh && a.Skeleton == b.Skeleton && a.Prefab == b.Prefab && a.Directory == b.Directory
+            => a.Mesh == b.Mesh && a.Skeleton == b.Skeleton && a.Directory == b.Directory
                 && a.Clips.SequenceEqual(b.Clips) && a.Materials.SequenceEqual(b.Materials) && a.Images.SequenceEqual(b.Images);
 
         private void Save(AssetIndex index, UPath sidecarPath, GlbExtraction extraction)
@@ -742,17 +743,54 @@ public static partial class AssetExtractor
         private static double Widen(float value) => double.Parse(value.ToString("R", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>The prefab wiring the extracted assets: written once, the author's from then on.</summary>
-        private AssetReference? Prefab(AssetIndex index, AssetProjectLayout layout, UPath path, string stem, Guid glbGuid, GlbExtraction extraction, CookedGlb cooked, GltfAsset asset)
+        /// <summary>
+        /// Writes a starter prefab for a newly extracted model, and reports whether it wrote one.
+        /// </summary>
+        /// <remarks>
+        /// A SEED, not a projection: nothing records that this prefab came from this GLB, nothing
+        /// updates it when the model changes, and nothing deletes it when the model goes (#256). It
+        /// exists so a dropped-in model is placeable straight away; from the moment it is written it
+        /// is an ordinary document its author owns.
+        /// <para>
+        /// Skipped when anything already references the mesh — the prefab written last time, one
+        /// that was moved somewhere else since, or a hand-authored document that adopted the mesh.
+        /// The question is asked of the reference graph rather than of a link recorded in the
+        /// sidecar, because a query cannot go stale and covers the adopter a recorded link never
+        /// knew about. Only reached when no prefab sits at the target path, so the walk is paid on
+        /// first import rather than on every extract.
+        /// </para>
+        /// </remarks>
+        private bool Seed(AssetIndex index, AssetProjectLayout layout, UPath path, string stem, GlbExtraction extraction, CookedGlb cooked)
         {
             if (fileSystem.FileExists(path))
             {
                 _kept.Add(index.Relative(path));
-                return extraction.Prefab ?? Reference(index, path);
+                return false;
+            }
+
+            // Every referrer BUT the model itself: a GLB's sidecar names the mesh it extracted, and
+            // that is the extraction record, not somebody placing it. One walk per seeded model;
+            // sharing one across the verb's loop would be stale, since each extract writes
+            // documents the next would have to see.
+            if (extraction.Mesh is { } seeded && seeded.Guid != Guid.Empty
+                && ReferenceGraph.Build(fileSystem, layout, index, importers: chain)
+                    .DependentsOf(seeded.Guid)
+                    .Where(edge => edge.ReferrerPath != glb)
+                    .ToList() is { Count: > 0 } dependents)
+            {
+                // Reported as kept like a prefab found at the target path: both are "a prefab for
+                // this model already exists", and which of the two it is depends only on where
+                // the author left the file.
+                var referrer = index.Relative(dependents[0].ReferrerPath);
+                _kept.Add(referrer);
+                log.LogInformation(
+                    "seed: no prefab for {Glb}; {Referrer} already places {Mesh}",
+                    index.Relative(glb), referrer, seeded.Path);
+                return false;
             }
 
             var document = new PrefabDocument();
             var root = PrefabObject.WithMeta(Guid.NewGuid(), stem);
-            root.Meta!.Data.Add(GlbExtraction.GeneratedFrom, DocumentGuid.Format(glbGuid));
 
             var skinned = cooked.Mesh.Layout == MeshVertexLayout.Skinned;
             if (MeshComponent(layout, skinned) is { } component)
@@ -779,7 +817,7 @@ public static partial class AssetExtractor
             PrefabDocumentSerializer.Save(fileSystem, path, document);
             _written.Add(new ExtractedFile(index.Relative(path)));
             _minted.Add(path);
-            return new AssetReference(Guid.Empty, index.Relative(path));
+            return true;
         }
 
         /// <summary>The component the game authors a mesh into: the manifest's choice, else the schema's — a component with a mesh-authored field, "Skinned" in its name deciding the rigged one.</summary>
@@ -844,7 +882,6 @@ public static partial class AssetExtractor
         {
             Mesh = extraction.Mesh is null ? null : Identified(index, extraction.Mesh),
             Skeleton = extraction.Skeleton is null ? null : Identified(index, extraction.Skeleton),
-            Prefab = extraction.Prefab is null ? null : Identified(index, extraction.Prefab),
             Clips = extraction.Clips.Select(clip => clip with { Reference = Identified(index, clip.Reference) }).ToList(),
             Materials = extraction.Materials.Select(material => material with { Entry = Identified(index, material.Entry) }).ToList(),
             Images = extraction.Images.Select(image => image with { Entry = Identified(index, image.Entry) }).ToList(),
