@@ -249,33 +249,33 @@ importer cannot forget one; nothing in the pipeline lists formats.
 Versions are centrally managed in `src/Directory.Packages.props`; see that file for the
 reasoning behind each pin.
 
-| Library | Used for |
-| --- | --- |
-| [Microsoft.CodeAnalysis.CSharp](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp) (Roslyn) | Source generators (ECS, BT, Authoring) and their tests |
-| [Microsoft.Extensions.Logging.Abstractions](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions) | The engine's logging contract; hosts choose the sink |
-| [System.Runtime.CompilerServices.Unsafe](https://www.nuget.org/packages/System.Runtime.CompilerServices.Unsafe) | Low-level unmanaged/blob code |
-| [System.Text.Json](https://www.nuget.org/packages/System.Text.Json) | JSON reading/writing in the asset pipeline |
-| [WebGPUSharp](https://www.nuget.org/packages/WebGPUSharp) | Dawn/WebGPU bindings for `Paradise.Rendering.WebGPU` |
-| [Noesis.GUI](https://www.nuget.org/packages/Noesis.GUI) | NoesisGUI (XAML) player-facing UI, `Paradise.Ui.Noesis` |
-| [Hexa.NET.ImGui](https://www.nuget.org/packages/Hexa.NET.ImGui) | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui` |
-| [Hexa.NET.ImGuizmo](https://www.nuget.org/packages/Hexa.NET.ImGuizmo) | Transform gizmos for the editor's Scene panel |
-| [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
-| [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
-| [Zio](https://www.nuget.org/packages/Zio) | Filesystem abstraction every asset path goes through |
-| [Tomlyn](https://www.nuget.org/packages/Tomlyn) | TOML reading for authored documents and `project.toml` |
-| [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | Navmesh baking in `Paradise.Export` |
-| [TUnit](https://www.nuget.org/packages/TUnit) | Test framework (Microsoft.Testing.Platform) |
-| [Microsoft.Coyote.Test](https://www.nuget.org/packages/Microsoft.Coyote.Test) | Systematic concurrency testing (`*.CoyoteTest` projects) |
-| [BenchmarkDotNet](https://www.nuget.org/packages/BenchmarkDotNet) | Benchmarking (e.g. `Paradise.Animation.Benchmarks`) |
+| Library | License | Used for |
+| --- | --- | --- |
+| [Microsoft.CodeAnalysis.CSharp](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp) (Roslyn) | MIT | Source generators (ECS, BT, Authoring) and their tests |
+| [Microsoft.Extensions.Logging.Abstractions](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions) | MIT | The engine's logging contract; hosts choose the sink |
+| [System.Runtime.CompilerServices.Unsafe](https://www.nuget.org/packages/System.Runtime.CompilerServices.Unsafe) | MIT | Low-level unmanaged/blob code |
+| [System.Text.Json](https://www.nuget.org/packages/System.Text.Json) | MIT | JSON reading/writing in the asset pipeline |
+| [WebGPUSharp](https://www.nuget.org/packages/WebGPUSharp) | MIT | Dawn/WebGPU bindings for `Paradise.Rendering.WebGPU` |
+| [Noesis.GUI](https://www.nuget.org/packages/Noesis.GUI) | Commercial (requires a NoesisGUI licence) | NoesisGUI (XAML) player-facing UI, `Paradise.Ui.Noesis` |
+| [Hexa.NET.ImGui](https://www.nuget.org/packages/Hexa.NET.ImGui) | MIT | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui` |
+| [Hexa.NET.ImGuizmo](https://www.nuget.org/packages/Hexa.NET.ImGuizmo) | MIT | Transform gizmos for the editor's Scene panel |
+| [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | MIT | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
+| [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | Apache-2.0 (wraps libktx) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
+| [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |
+| [Tomlyn](https://www.nuget.org/packages/Tomlyn) | BSD-2-Clause | TOML reading for authored documents and `project.toml` |
+| [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | zlib | Navmesh baking in `Paradise.Export` |
+| [ozz-animation](https://github.com/guillaumeblanc/ozz-animation) archive format | MIT | `Paradise.Animation` is a managed port reading/writing ozz's v2/v7 archives (no native dependency) |
+| [TUnit](https://www.nuget.org/packages/TUnit) | MIT | Test framework (Microsoft.Testing.Platform) |
+| [Microsoft.Coyote.Test](https://www.nuget.org/packages/Microsoft.Coyote.Test) | MIT | Systematic concurrency testing (`*.CoyoteTest` projects) |
+| [BenchmarkDotNet](https://www.nuget.org/packages/BenchmarkDotNet) | MIT | Benchmarking (e.g. `Paradise.Animation.Benchmarks`) |
 
 Not on NuGet, vendored/downloaded by the build itself:
 
-| Tool | Used for |
-| --- | --- |
-| Slang (`slangc`) | Slang → WGSL shader compilation, via `src/Slang.targets` |
-| libktx (`ktx` CLI) | KTX2 texture creation, via `src/Ktx.targets` |
-| [ozz-animation](https://github.com/guillaumeblanc/ozz-animation) archive format | `Paradise.Animation` is a managed port reading/writing ozz's v2/v7 archives (no native dependency) |
-| Audiokinetic Wwise | Native audio engine behind `Paradise.Audio.Wwise` (requires a licensed local SDK) |
+| Tool | License | Used for |
+| --- | --- | --- |
+| Slang (`slangc`) | Apache-2.0 WITH LLVM-exception | Slang → WGSL shader compilation, via `src/Slang.targets` |
+| libktx (`ktx` CLI) | Apache-2.0 | KTX2 texture creation, via `src/Ktx.targets` |
+| Audiokinetic Wwise | Commercial (requires a Wwise licence) | Native audio engine behind `Paradise.Audio.Wwise` (requires a licensed local SDK) |
 
 ## Releasing
 
