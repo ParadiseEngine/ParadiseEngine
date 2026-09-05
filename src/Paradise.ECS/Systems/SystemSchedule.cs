@@ -24,7 +24,7 @@ namespace Paradise.ECS;
 /// shared metadata, so one layout is valid for both worlds' chunks).</param>
 /// <param name="entityCount">The number of entities in the chunk.</param>
 /// <param name="commands">The entity command buffer for deferred structural changes.</param>
-/// <param name="eventWriter">The per-work-item writer for emitting deferred events (see docs/system-events.md).</param>
+/// <param name="eventWriter">The per-work-item writer for emitting deferred events.</param>
 public delegate void SystemRunChunkAction<TMask, TConfig>(
     IWorld<TMask, TConfig> world,
     ChunkHandle chunk,

@@ -20,7 +20,6 @@ internal struct SystemEventRecord
 /// byte stream (no cross-thread contention). After the wave, the schedule commits every writer into
 /// the world's event store in SCHEDULE order, so the merged event order is deterministic regardless
 /// of threading — the same mechanism <see cref="EntityCommandBuffer"/> uses for structural changes.
-/// See <c>docs/system-events.md</c>.
 /// </summary>
 public sealed class SystemEventWriter
 {

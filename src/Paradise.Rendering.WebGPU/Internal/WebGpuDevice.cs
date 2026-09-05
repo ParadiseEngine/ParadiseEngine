@@ -163,7 +163,7 @@ internal sealed partial class WebGpuDevice : IDisposable
         // NOT `static` lambdas any more: they capture the logger, which costs one closure per
         // device — once, at creation — and is what lets a host route Dawn's validation errors
         // anywhere but stderr. Dawn calls both of these on threads the engine did not create, so
-        // whatever sink is behind this logger has to be thread-safe; see docs/logging.md.
+        // whatever sink is behind this logger has to be thread-safe.
         var log = logger ?? NullLogger.Instance;
         var deviceDesc = new WgDeviceDescriptor
         {

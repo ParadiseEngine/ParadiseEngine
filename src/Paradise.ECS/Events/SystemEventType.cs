@@ -10,7 +10,7 @@ namespace Paradise.ECS;
 /// STAGE 1: ids are assigned in first-touch order — stable within a process (so the runtime merge,
 /// snapshot, and their tests are deterministic) but NOT across processes. A later stage replaces
 /// this with generator-assigned stable ids so on-disk save compatibility no longer depends on
-/// touch order (see <c>docs/system-events.md</c> §9).
+/// touch order.
 /// </remarks>
 internal static class SystemEventTypeRegistry
 {
