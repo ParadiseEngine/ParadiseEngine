@@ -59,7 +59,7 @@ namespace Paradise.Export.Serialization
             element.Deserialize((JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T)));
 
         /// <summary>
-        /// Read a level document, refusing one this build cannot understand.
+        /// Read a prefab document, refusing one this build cannot understand.
         ///
         /// The gate earns its keep again at v5, and for the reason it was added: the break is
         /// SILENT without it. A v4 document deserializes perfectly here — its entities are
@@ -91,7 +91,7 @@ namespace Paradise.Export.Serialization
                     version > PrefabData.CurrentSchemaVersion)
                 {
                     throw new JsonException(
-                        $"Level document is schema version {version}; this build reads "
+                        $"Prefab document is schema version {version}; this build reads "
                         + $"{PrefabData.MinimumSupportedVersion}..{PrefabData.CurrentSchemaVersion}. "
                         + "Re-export the scene from its editor: v5 made an object nothing but its "
                         + "authored components, and no earlier document carries enough to be "

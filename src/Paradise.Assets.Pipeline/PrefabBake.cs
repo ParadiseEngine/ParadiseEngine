@@ -19,15 +19,17 @@ public static class PrefabBake
         Func<AssetReference, PrefabDocument?> prefabs,
         string documentExtension,
         List<string> errors,
-        Func<AssetReference, string>? builtPath = null)
+        Func<AssetReference, string?>? builtPath = null)
         => Bake(document, prefabs, documentExtension, documentExtension, errors, builtPath);
 
     /// <param name="builtPath">
     /// Where the BUILD writes a reference's asset, by guid — <c>ImportContext.BuiltPath</c>, which asks
-    /// the referenced asset's importer, so a texture becomes its KTX2 and a GLB its cooked mesh. Authoritative when given. Null
+    /// the referenced asset's importer, so a texture becomes its KTX2. Authoritative when given: a
+    /// null return means nothing is built for the reference and FAILS the bake at that site (throw
+    /// a <see cref="FormatException"/> to say why), so no caller can hand the authored path on as
+    /// if it were built — the authored path is a hint a rename leaves stale. Omitted, the bake
     /// falls back to the authored path with only the document extensions swapped, which is enough
-    /// for a bake outside a build (tests, tools) and never for one the runtime reads: the authored
-    /// path is a hint a rename leaves stale.
+    /// for a bake outside a build (tests, tools) and never for one the runtime reads.
     /// </param>
     public static PrefabData Bake(
         PrefabDocument document,
@@ -35,13 +37,16 @@ public static class PrefabBake
         string prefabExtension,
         string configExtension,
         List<string> errors,
-        Func<AssetReference, string>? builtPath = null)
+        Func<AssetReference, string?>? builtPath = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(errors);
 
         var extensions = new DocumentExtensions(prefabExtension, configExtension);
-        var resolvePath = builtPath ?? (reference => Rebase(reference.Path, extensions));
+        Func<AssetReference, string> resolvePath = builtPath is null
+            ? reference => Rebase(reference.Path, extensions)
+            : reference => builtPath(reference)
+                ?? throw new FormatException($"nothing is built for the reference '{reference.Path}' (guid {DocumentGuid.Format(reference.Guid)})");
         var resolved = PrefabResolver.Resolve(document, prefabs);
         foreach (var error in resolved.Errors) errors.Add(error.Message);
 

@@ -211,14 +211,15 @@ the skeleton and clips to **ozz-animation archives**. A clip is found by name, t
 of its channels, then by index. **A built document names assets where the build PUT them.**
 `ImportContext.BuiltPath` resolves a reference and asks the referenced asset's own importer
 (`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture
-as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, a GLB reference
-to the mesh blob cooked from its `.mesh` document (a GLB ships nothing, and a GLB with no mesh
-document is a build error naming the watcher), prefabs and configs to the profile's extension, and
-mesh, skeleton, clip, material, audio and binary references to their own path (a built `.material`
-keeps its suffix and carries TOML or JSON by profile; a reader tells them apart by the first
-character). Both the
-prefab bake and the material bake go through it, so a runtime opens the path a built document
-spells and never derives one by convention, and a game's own importer answers for its own kinds.
+as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, prefabs and
+configs to the profile's extension, and mesh, skeleton, clip, material, audio and binary references
+to their own path (a built `.material` keeps its suffix and carries TOML or JSON by profile;
+`ExportDocumentReader.ReadMaterial` tells them apart by the first character). A GLB ships nothing,
+so a reference to one is a build ERROR naming the `.mesh` document to reference instead: an authored
+document references the document the watcher minted, the way it references a `.skeleton` or an
+`.anim`, and the GLB is source the way a `.png` is source to its `.ktx2`. Both the prefab bake and
+the material bake go through it, so a runtime opens the path a built document spells and never
+derives one by convention, and a game's own importer answers for its own kinds.
 
 **Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
 `Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives

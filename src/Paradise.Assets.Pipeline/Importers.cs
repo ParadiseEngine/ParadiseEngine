@@ -164,40 +164,31 @@ public sealed class GlbImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <summary>
-    /// A GLB ships nothing; what a reference to it means at runtime is the mesh blob cooked from
-    /// its <c>.mesh</c> document, and the GLB's sidecar records which document that is.
+    /// A GLB ships nothing, so nothing can be built FOR a reference to it: a document that wants
+    /// the mesh references the <c>.mesh</c> document the watcher minted, the way it references a
+    /// <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message names
+    /// the document to point at when the sidecar knows it.
     /// </summary>
     public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
     {
-        problem = null;
         var sidecar = SidecarMeta.PathFor(asset.Asset);
-        GlbExtraction extraction;
+        AssetReference? document = null;
         try
         {
-            extraction = context.FileSystem.FileExists(sidecar)
-                ? GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar))
-                : GlbExtraction.None;
+            if (context.FileSystem.FileExists(sidecar))
+            {
+                document = GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar)).Mesh;
+            }
         }
-        catch (SidecarMetaException failure)
+        catch (SidecarMetaException)
         {
-            problem = $"references GLB '{asset.Path}', whose sidecar does not read: {failure.Message}";
-            return null;
+            // The reference is wrong either way; verify reports the sidecar on its own.
         }
 
-        if (extraction.Mesh is not { } document)
-        {
-            problem = $"references GLB '{asset.Path}', which has no mesh document yet — a GLB ships nothing, its .mesh document is what the build cooks; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint it";
-            return null;
-        }
-
-        var mesh = context.Resolve(document);
-        if (!mesh.Found)
-        {
-            problem = $"references GLB '{asset.Path}', whose sidecar names mesh document '{document.Path}' (guid {DocumentGuid.Format(document.Guid)}), which no asset under assets/ carries";
-            return null;
-        }
-
-        return mesh.Path;
+        problem = document is { } mesh
+            ? $"references GLB '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
+            : $"references GLB '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
+        return null;
     }
 
     /// <summary>
@@ -350,8 +341,9 @@ public sealed class PrefabImporter : IAssetImporter
             reference =>
             {
                 var built = context.BuiltPath(reference, out var problem);
-                if (problem is not null) failures.Add(problem);
-                return built ?? reference.Path;
+                // Thrown, not returned: the bake reports it against the object and component that
+                // carry the reference, and never sees the authored path stand in for a built one.
+                return built ?? throw new FormatException(problem);
             });
         if (failures.Count > 0)
         {

@@ -66,7 +66,7 @@ public sealed class AnimationPlayer : IDisposable
     /// <summary>What the last <see cref="Evaluate"/> produced, one model-space matrix per joint (row-vector convention).</summary>
     public ReadOnlySpan<Matrix4x4> ModelMatrices => _state.Value.Models.ToSpan();
 
-    /// <summary>The whole per-character state as one blob, for a host that wants to place it itself.</summary>
+    /// <summary>The whole per-character state as one blob — cursors, poses and matrices in one allocation the player owns — for a host that inspects or copies it.</summary>
     public ref AnimationPlayerState State => ref _state.Value;
 
     /// <summary>Starts <paramref name="clip"/>; with a positive <paramref name="fadeSeconds"/> the clip playing until now keeps advancing and blends out over that time.</summary>

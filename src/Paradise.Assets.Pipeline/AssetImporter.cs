@@ -97,10 +97,18 @@ public sealed record ImportContext(
         }
 
         var meta = AssetSidecar.TryLoad(FileSystem, resolution.Asset, Importers);
-        var importer = ImporterChain.For(Importers, new ImportCandidate(FileSystem, Layout, resolution.Asset, meta)).Importer;
-        if (importer is null)
+        var chain = ImporterChain.For(Importers, new ImportCandidate(FileSystem, Layout, resolution.Asset, meta));
+        // Verify refuses such a sidecar before a build reaches here; this is for a host that bakes
+        // without verifying first, and it says the same thing verify would.
+        if (chain.Unknown)
         {
-            problem = $"references '{resolution.Path}', which no importer in this chain builds, so nothing will exist for it in the build tree";
+            problem = $"references '{resolution.Path}', whose sidecar names importer '{chain.Name}', which this chain does not have (it has: {ImporterChain.Resolution.Known(Importers)}), so nothing will exist for it in the build tree";
+            return null;
+        }
+
+        if (chain.Importer is not { } importer)
+        {
+            problem = $"references '{resolution.Path}', which no importer in this chain claims, so nothing will exist for it in the build tree";
             return null;
         }
 

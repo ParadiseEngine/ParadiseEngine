@@ -20,7 +20,8 @@ namespace Paradise.Assets.Pipeline;
 public sealed class BuildIndex
 {
     /// <summary>The index format version. A bump invalidates every entry.</summary>
-    public const int CurrentVersion = 2;
+    /// <remarks>3: built materials keep their <c>.material</c> name and built documents spell built paths; an index from 2 would replay outputs under the old names beside new ones (#251).</remarks>
+    public const int CurrentVersion = 3;
 
     /// <summary>The index's file name inside a build tree.</summary>
     public const string FileName = ".build-index.json";

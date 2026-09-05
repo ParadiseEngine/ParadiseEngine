@@ -186,6 +186,32 @@ public class PrefabBakeTests
     }
 
     /// <summary>
+    /// A build-time delegate that has no built path for a reference FAILS the bake at that site.
+    /// The authored path never stands in for a built one: it is a hint a rename leaves stale, and a
+    /// document that shipped it would name a file the build did not write, with no error anywhere.
+    /// </summary>
+    [Test]
+    public async Task a_reference_nothing_is_built_for_fails_the_bake_naming_the_site()
+    {
+        var document = new PrefabDocument();
+        var root = PrefabObject.WithMeta(RootGuid, "spawner");
+        root.Components.Add(new PrefabComponent(
+            new Guid("7c1d2e3f-4a5b-4c6d-8e7f-90a1b2c3d4e5"), "game.Spawner", new CanonicalTomlTable
+            {
+                { "Mesh", AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(ChildGuid, "models/crate.glb")) },
+            }));
+        document.Objects.Add(root);
+        var errors = new List<string>();
+
+        PrefabBake.Bake(document, _ => null, ".json", errors, builtPath: _ => null);
+
+        await Assert.That(errors).Count().IsEqualTo(1);
+        await Assert.That(errors[0]).Contains("spawner");
+        await Assert.That(errors[0]).Contains("game.Spawner");
+        await Assert.That(errors[0]).Contains("models/crate.glb");
+    }
+
+    /// <summary>
     /// Play keeps the <c>.prefab</c> name, so a spawner must keep pointing at one. Configs still
     /// follow the profile format — otherwise they would name a file the config importer did not
     /// write.
