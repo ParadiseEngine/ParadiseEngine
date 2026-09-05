@@ -208,13 +208,15 @@ writes no output. A `.mesh`, `.skeleton` or `.anim` under `assets/` is a `MeshRe
 cook the named part of the GLB (`GltfCook`) to the file at the document's own path: the mesh to
 a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`, one aligned native copy, magic and version first),
 the skeleton and clips to **ozz-animation archives**. A clip is found by name, then by the hash
-of its channels, then by index. **A built document names assets where the build PUT them**
-(`BuiltPaths`, the one table of that knowledge): a texture reference bakes to its `.ktx2`, a GLB
-reference to the mesh blob cooked from its `.mesh` document (a GLB ships nothing, and a GLB with
-no mesh document is a build error naming the watcher), prefabs, materials and configs to the
-profile's extension, and mesh, skeleton, clip, audio and binary references to their own path. Both
-the prefab bake and the material bake go through it, so a runtime opens the path a built document
-spells and never derives one by convention.
+of its channels, then by index. **A built document names assets where the build PUT them.**
+`ImportContext.BuiltPath` resolves a reference and asks the referenced asset's own importer
+(`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture
+as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, a GLB reference
+to the mesh blob cooked from its `.mesh` document (a GLB ships nothing, and a GLB with no mesh
+document is a build error naming the watcher), prefabs, materials and configs to the profile's
+extension, and mesh, skeleton, clip, audio and binary references to their own path. Both the
+prefab bake and the material bake go through it, so a runtime opens the path a built document
+spells and never derives one by convention, and a game's own importer answers for its own kinds.
 
 **Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
 `Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives

@@ -23,8 +23,8 @@ public static class PrefabBake
         => Bake(document, prefabs, documentExtension, documentExtension, errors, builtPath);
 
     /// <param name="builtPath">
-    /// Where the BUILD writes a reference's asset, by guid — the pipeline's <c>BuiltPaths</c>, which
-    /// knows a texture becomes its KTX2 and a GLB its cooked mesh. Authoritative when given. Null
+    /// Where the BUILD writes a reference's asset, by guid — <c>ImportContext.BuiltPath</c>, which asks
+    /// the referenced asset's importer, so a texture becomes its KTX2 and a GLB its cooked mesh. Authoritative when given. Null
     /// falls back to the authored path with only the document extensions swapped, which is enough
     /// for a bake outside a build (tests, tools) and never for one the runtime reads: the authored
     /// path is a hint a rename leaves stale.

@@ -27,6 +27,13 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
+    /// <summary>A texture ships as the KTX2 encoded from it, never as the PNG.</summary>
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, ".ktx2");
+    }
+
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
@@ -157,6 +164,43 @@ public sealed class GlbImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <summary>
+    /// A GLB ships nothing; what a reference to it means at runtime is the mesh blob cooked from
+    /// its <c>.mesh</c> document, and the GLB's sidecar records which document that is.
+    /// </summary>
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        var sidecar = SidecarMeta.PathFor(asset.Asset);
+        GlbExtraction extraction;
+        try
+        {
+            extraction = context.FileSystem.FileExists(sidecar)
+                ? GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar))
+                : GlbExtraction.None;
+        }
+        catch (SidecarMetaException failure)
+        {
+            problem = $"references GLB '{asset.Path}', whose sidecar does not read: {failure.Message}";
+            return null;
+        }
+
+        if (extraction.Mesh is not { } document)
+        {
+            problem = $"references GLB '{asset.Path}', which has no mesh document yet — a GLB ships nothing, its .mesh document is what the build cooks; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint it";
+            return null;
+        }
+
+        var mesh = context.Resolve(document);
+        if (!mesh.Found)
+        {
+            problem = $"references GLB '{asset.Path}', whose sidecar names mesh document '{document.Path}' (guid {DocumentGuid.Format(document.Guid)}), which no asset under assets/ carries";
+            return null;
+        }
+
+        return mesh.Path;
+    }
+
+    /// <summary>
     /// Ships NOTHING: a GLB is interchange, and what the runtime draws is what <c>extract</c> made
     /// of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures), each
     /// through its own importer. A GLB nobody extracted is <c>verify</c>'s warning, not a build
@@ -275,6 +319,12 @@ public sealed class PrefabImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.PrefabExtension(context.Profile, context.Target));
+    }
+
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)
     {
@@ -299,7 +349,7 @@ public sealed class PrefabImporter : IAssetImporter
             document, Referenced, prefabExtension, configExtension, failures,
             reference =>
             {
-                var built = BuiltPaths.Of(context, reference, out var problem);
+                var built = context.BuiltPath(reference, out var problem);
                 if (problem is not null) failures.Add(problem);
                 return built ?? reference.Path;
             });
@@ -580,6 +630,12 @@ public sealed class MaterialImporter : IAssetImporter
 
     public bool RecordsIdentity => true;
 
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.MaterialExtension(context.Profile));
+    }
+
     /// <inheritdoc />
     public bool Claims(ImportCandidate candidate) => candidate.HasExtension(MaterialDocument.Suffix);
 
@@ -603,7 +659,7 @@ public sealed class MaterialImporter : IAssetImporter
         var before = errors.Count;
         var baked = MaterialDocument.Bake(material, reference =>
         {
-            var built = BuiltPaths.Of(context, reference, out var problem);
+            var built = context.BuiltPath(reference, out var problem);
             if (problem is not null) errors.Add($"{context.Source}: {problem}");
             return built;
         });
@@ -683,6 +739,12 @@ public sealed class ConfigImporter : IAssetImporter
 
     /// <summary>A config is addressed by path, not identity — its manifest entry carries no guid.</summary>
     public bool RecordsIdentity => false;
+
+    public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return Path.ChangeExtension(asset.Path, DocumentOutput.Extension(context.Profile));
+    }
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)

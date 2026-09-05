@@ -188,7 +188,7 @@ public sealed partial class BuildRunner
 
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
-            observed, sources, path, relative, meta,
+            observed, sources, _layout, _importers, path, relative, meta,
             profile, target, written, cache, _encoder, _log);
 
         // The importer the sidecar names, not a search: recording it is what lets an author pick

@@ -10,7 +10,8 @@ namespace Paradise.Assets.Pipeline.Test;
 /// <summary>
 /// A built document names assets where the BUILD put them, so the runtime opens a path and never
 /// derives one: a texture reference bakes to its KTX2, a GLB reference to the mesh blob cooked from
-/// its document, prefabs and materials to the profile's extension, a clip document to itself.
+/// its document, prefabs and materials to the profile's extension, a clip document to itself. Each
+/// answer is the referenced asset's own importer's (<see cref="IAssetImporter.BuiltPath"/>).
 /// </summary>
 public class BuiltPathsTests
 {

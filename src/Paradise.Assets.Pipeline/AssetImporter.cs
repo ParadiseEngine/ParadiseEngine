@@ -17,10 +17,14 @@ namespace Paradise.Assets.Pipeline;
 /// <paramref name="Meta"/> is the asset's sidecar, which verify guarantees exists before a build
 /// runs. <paramref name="Sources"/> also resolves an <see cref="Paradise.Authoring.AssetReference"/>
 /// the asset makes: the guid decides, the path half is a hint a rename can leave stale.
+/// <paramref name="Importers"/> is the chain this build runs, so a document being baked can ask
+/// the importer of an asset it references where that asset is built (<see cref="BuiltPath"/>).
 /// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
     AssetIndex Sources,
+    AssetProjectLayout Layout,
+    IReadOnlyList<IAssetImporter> Importers,
     UPath Asset,
     string Source,
     AssetSidecar? Meta,
@@ -66,6 +70,41 @@ public sealed record ImportContext(
         if (FileSystem.FileExists(sidecar)) FileSystem.ReadAllBytes(sidecar);
 
         return resolution;
+    }
+
+    /// <summary>
+    /// Where the build writes the asset <paramref name="reference"/> names, assets-relative, so a
+    /// built document can spell it and the runtime opens a path without knowing how the build
+    /// renames things; null with <paramref name="problem"/> set when nothing will be built for it.
+    /// The answer is the referenced asset's IMPORTER's, through its sidecar: the importer that
+    /// writes a texture as KTX2 is the one that knows it does.
+    /// </summary>
+    /// <remarks>
+    /// Reads through the observed filesystem so the answers are recorded dependencies: a GLB
+    /// whose extraction changes rebuilds the prefabs that name it, the same way a renamed texture
+    /// does.
+    /// </remarks>
+    public string? BuiltPath(Paradise.Authoring.AssetReference reference, out string? problem)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+
+        problem = null;
+        var resolution = Resolve(reference);
+        if (!resolution.Found)
+        {
+            problem = $"references '{reference.Path}' (guid {DocumentGuid.Format(reference.Guid)}), which no asset under assets/ carries";
+            return null;
+        }
+
+        var meta = AssetSidecar.TryLoad(FileSystem, resolution.Asset, Importers);
+        var importer = ImporterChain.For(Importers, new ImportCandidate(FileSystem, Layout, resolution.Asset, meta)).Importer;
+        if (importer is null)
+        {
+            problem = $"references '{resolution.Path}', which no importer in this chain builds, so nothing will exist for it in the build tree";
+            return null;
+        }
+
+        return importer.BuiltPath(this, resolution, out problem);
     }
 
     /// <summary>
@@ -138,6 +177,20 @@ public interface IAssetImporter
     /// <see cref="References"/> claimed the asset.
     /// </summary>
     RepairedDocument? Rewrite(ReferenceContext context, UPath asset) => null;
+
+    /// <summary>
+    /// Where the build writes <paramref name="asset"/>, assets-relative, for a document that
+    /// references it: the path this importer's <see cref="Import"/> writes for it. The default is
+    /// the asset's own path, which is right for every importer that writes an asset at its own
+    /// name (mesh, animation, audio); one that renames (a texture to KTX2, a document to the
+    /// profile's extension) or builds something else in its place (a GLB, whose mesh document is
+    /// what ships) says so here. Null with <paramref name="problem"/> set when nothing will be built.
+    /// </summary>
+    string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
+    {
+        problem = null;
+        return asset.Path;
+    }
 
     /// <summary>The sidecar settings domains this importer reads, so <c>verify</c> knows a table under one is meant and can check its shape. A domain exists exactly when a step reads it.</summary>
     IReadOnlyList<IImportSettingsDomain> SettingsDomains => [];
