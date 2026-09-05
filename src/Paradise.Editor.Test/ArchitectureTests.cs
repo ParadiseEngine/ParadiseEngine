@@ -21,7 +21,7 @@ public partial class ArchitectureTests
         await Assert.That(referenced).DoesNotContain("Paradise.Ui.ImGui");
     }
 
-    // The rule is the engine's (AGENTS.md, docs/logging.md) and the editor is held to it for a
+    // The rule is the engine's (AGENTS.md) and the editor is held to it for a
     // reason of its own: in-game, the editor's diagnostics have to land in the GAME's stack, and a
     // provider referenced here would decide that for every host at once.
     [Test]

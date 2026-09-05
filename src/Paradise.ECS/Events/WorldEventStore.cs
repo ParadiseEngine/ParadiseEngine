@@ -6,8 +6,7 @@ namespace Paradise.ECS;
 /// The set of typed event buffers owned by a <see cref="World{TMask,TConfig}"/>, indexed by event-type
 /// id. Holds each type's INCOMING buffer (events produced last frame). It rides
 /// <see cref="World{TMask,TConfig}.CopyFrom"/>, so events participate in the immutable snapshot — the
-/// property that lets one-frame-deferred events survive a save and replay identically (see
-/// <c>docs/system-events.md</c> §2, §6).
+/// property that lets one-frame-deferred events survive a save and replay identically.
 /// </summary>
 public sealed class WorldEventStore
 {
@@ -38,7 +37,7 @@ public sealed class WorldEventStore
     /// Directly replaces the incoming buffer for event type <typeparamref name="T"/> — used to
     /// RE-SEED events on load (a save taken while an event was in-flight, produced tick N but not yet
     /// consumed until N+1, must restore it here). Call OUTSIDE a schedule run; the next tick's readers
-    /// observe it exactly as if it had been committed by the previous frame. See docs/system-events.md.
+    /// observe it exactly as if it had been committed by the previous frame.
     /// </summary>
     /// <typeparam name="T">The unmanaged event type.</typeparam>
     /// <param name="events">The incoming events to restore (copied in).</param>
@@ -57,7 +56,7 @@ public sealed class WorldEventStore
     /// readers with identical one-frame-deferred, deterministic semantics.
     /// <para>NOT thread-safe: call on the world's owner thread only (the same contract as
     /// <c>world.GetComponent&lt;T&gt;().Value = …</c>), and outside a schedule run so it never races the
-    /// per-work-item writers. See <c>docs/system-events.md</c> §4.2.</para>
+    /// per-work-item writers.</para>
     /// </summary>
     /// <typeparam name="T">The unmanaged event type.</typeparam>
     /// <param name="e">The event value.</param>

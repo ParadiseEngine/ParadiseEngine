@@ -11,7 +11,7 @@ public readonly record struct EditorLogEntry(
 /// </summary>
 /// <remarks>
 /// <para>
-/// The editor reports through the engine's seam (AGENTS.md, <c>docs/logging.md</c>): it takes an
+/// The editor reports through the engine's seam (AGENTS.md): it takes an
 /// <see cref="ILogger"/>, references Abstractions only, and never names a sink. That is what makes
 /// the in-game host work at all — embedded in a game, editor diagnostics land in the game's own
 /// logging stack instead of a second one nobody is watching.

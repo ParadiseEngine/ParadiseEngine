@@ -508,7 +508,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// Used by generated queryable types for direct component access.
     /// </summary>
     /// <summary>
-    /// The world's deferred event buffers (see <c>docs/system-events.md</c>). Holds each event
+    /// The world's deferred event buffers. Holds each event
     /// type's INCOMING events (produced last frame, read-many by systems this frame). Rides
     /// <see cref="CopyFrom"/>, so events participate in the immutable snapshot.
     /// </summary>
