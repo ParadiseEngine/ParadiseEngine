@@ -37,6 +37,9 @@ public unsafe class AnimationBenchmarks
     private Managed.AnimationClip _managedClip = null!;
     private Managed.SamplingContext _managedContext = null!;
 
+    private ManagedSimd.SamplingContext _simdContext = null!;
+    private ManagedSimd.SoaTransforms _simdPoses = null!;
+
     private GltfAnimationRig _gltfRig = null!;
     private Matrix4x4[] _palette = null!;
 
@@ -62,6 +65,9 @@ public unsafe class AnimationBenchmarks
         _managedSkeleton = Managed.Skeleton.Load(_rig.SkeletonArchive);
         _managedClip = Managed.AnimationClip.Load(_rig.ClipArchive);
         _managedContext = new Managed.SamplingContext(_managedClip.TrackCount);
+
+        _simdContext = new ManagedSimd.SamplingContext(_managedClip.TrackCount);
+        _simdPoses = new ManagedSimd.SoaTransforms(_managedClip.TrackCount);
 
         _gltfRig = new GltfAnimationRig(_rig.Asset);
         _palette = new Matrix4x4[_rig.Asset.Skins[_rig.SkinIndex].JointNodes.Length];
@@ -106,6 +112,13 @@ public unsafe class AnimationBenchmarks
     }
 
     [Benchmark, BenchmarkCategory("Advance")]
+    public void ManagedSimd_Advance()
+    {
+        _simdContext.Sample(_managedClip, Advance(), _simdPoses);
+        ManagedSimd.LocalToModel.Compute(_managedSkeleton, _simdPoses, _models);
+    }
+
+    [Benchmark, BenchmarkCategory("Advance")]
     public void GltfRig_Advance()
     {
         _gltfRig.EvaluatePose(_rig.Clip, Advance() * _rig.Clip.Duration);
@@ -131,6 +144,13 @@ public unsafe class AnimationBenchmarks
     {
         _managedContext.Sample(_managedClip, Seek(), _managedPoses);
         Managed.LocalToModel.Compute(_managedSkeleton, _managedPoses, _models);
+    }
+
+    [Benchmark, BenchmarkCategory("Seek")]
+    public void ManagedSimd_Seek()
+    {
+        _simdContext.Sample(_managedClip, Seek(), _simdPoses);
+        ManagedSimd.LocalToModel.Compute(_managedSkeleton, _simdPoses, _models);
     }
 
     [Benchmark, BenchmarkCategory("Seek")]
