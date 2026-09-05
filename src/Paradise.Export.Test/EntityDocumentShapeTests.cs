@@ -71,7 +71,7 @@ public class EntityDocumentShapeTests
     public async Task an_object_round_trips_through_the_reader()
     {
         var document = new PrefabData { Entities = { BuildBoxEntity() } };
-        PrefabData read = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
+        PrefabData read = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(read.Entities.Count).IsEqualTo(1);
         var meta = read.Entities[0].Single(c => c.Id == WellKnownEntityComponents.MetaId).Data;

@@ -235,7 +235,7 @@ public class BuildRunnerTests
 
         // Written as the contract, not as the authoring document: a baked level, readable by the
         // runtime's own reader.
-        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadPrefab(
             fileSystem.ReadAllText("/game/build/levels/district.toml"));
         await Assert.That(level.Entities.Count).IsEqualTo(1);
     }
@@ -371,7 +371,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.toml")).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/district.json")).IsFalse();
 
-        var level = Paradise.Export.Serialization.ExportTomlReader.ReadLevel(
+        var level = Paradise.Export.Serialization.ExportTomlReader.ReadPrefab(
             fileSystem.ReadAllText("/game/.editor/play/levels/district.prefab"));
         await Assert.That(level.Entities.Count).IsEqualTo(1);
     }

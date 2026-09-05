@@ -36,8 +36,8 @@ public class TomlContractParityTests
     {
         var document = BuildLevel();
 
-        var fromJson = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
-        var fromToml = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
+        var fromJson = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
+        var fromToml = ExportTomlReader.ReadPrefab(ExportTomlWriter.SerializeToString(document));
 
         // Compared with nulls stripped from BOTH sides, and that is the honest comparison rather
         // than a weakened one -- see `a_null_payload_member_becomes_an_absent_key` for the
@@ -55,8 +55,8 @@ public class TomlContractParityTests
         // so that stops being an argument and starts being a checked fact.
         var document = BuildLevel();
 
-        var fromJson = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
-        var fromToml = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
+        var fromJson = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
+        var fromToml = ExportTomlReader.ReadPrefab(ExportTomlWriter.SerializeToString(document));
 
         var json = ExportJsonWriter.SerializeToString(fromJson);
         var toml = ExportJsonWriter.SerializeToString(fromToml);
@@ -85,7 +85,7 @@ public class TomlContractParityTests
         ];
         var document = new PrefabData { Entities = { entity } };
 
-        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
+        var restored = ExportTomlReader.ReadPrefab(ExportTomlWriter.SerializeToString(document));
         var json = JsonNode.Parse(ExportJsonWriter.SerializeToString(restored))!;
         var slots = (JsonArray)json["Entities"]![0]![0]!["Data"]!["Slots"]!;
 
@@ -147,7 +147,7 @@ public class TomlContractParityTests
     {
         var document = BuildLevel();
 
-        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(document));
+        var restored = ExportTomlReader.ReadPrefab(ExportTomlWriter.SerializeToString(document));
         var json = JsonNode.Parse(ExportJsonWriter.SerializeToString(restored))!;
         var entity = json["Entities"]![0]!;
 
@@ -173,7 +173,7 @@ public class TomlContractParityTests
     {
         // The degenerate document, which is where an omit-nulls rule is most likely to lose
         // something: every collection is empty and every optional is absent.
-        var restored = ExportTomlReader.ReadLevel(ExportTomlWriter.SerializeToString(new PrefabData()));
+        var restored = ExportTomlReader.ReadPrefab(ExportTomlWriter.SerializeToString(new PrefabData()));
 
         await Assert.That(ExportJsonWriter.SerializeToString(restored))
             .IsEqualTo(ExportJsonWriter.SerializeToString(new PrefabData()));
@@ -182,7 +182,7 @@ public class TomlContractParityTests
     [Test]
     public async Task malformed_toml_is_refused_rather_than_half_read()
     {
-        await Assert.That(() => ExportTomlReader.ReadLevel("this = = not toml"))
+        await Assert.That(() => ExportTomlReader.ReadPrefab("this = = not toml"))
             .Throws<System.IO.InvalidDataException>();
     }
 

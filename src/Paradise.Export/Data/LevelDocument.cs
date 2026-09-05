@@ -44,7 +44,7 @@ namespace Paradise.Export.Data
         /// moved material slots onto the renderable; v3 replaced named slots with one list. All
         /// below the floor, none shimmed.
         ///
-        /// REJECTED on read — see <see cref="Serialization.ExportJsonReader.ReadLevel"/>.</summary>
+        /// REJECTED on read — see <see cref="Serialization.ExportJsonReader.ReadPrefab"/>.</summary>
         public const int CurrentSchemaVersion = 6;
 
         /// <summary>The oldest document this build still understands. Equal to

@@ -36,7 +36,7 @@ public class ExportJsonReaderTests
                 """{"Kind":"Dynamic","Mass":2.0}"""),
         });
 
-        var parsed = ExportJsonReader.ReadLevel(ExportJsonWriter.SerializeToString(document));
+        var parsed = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));
 
         await Assert.That(parsed.SchemaVersion).IsEqualTo(PrefabData.CurrentSchemaVersion);
         await Assert.That(parsed.Entities.Count).IsEqualTo(2);
@@ -79,7 +79,7 @@ public class ExportJsonReaderTests
             {"SchemaVersion":5,"Entities":[[]]}
             """;
 
-        await Assert.That(() => ExportJsonReader.ReadLevel(v5))
+        await Assert.That(() => ExportJsonReader.ReadPrefab(v5))
             .Throws<System.Text.Json.JsonException>();
     }
 }

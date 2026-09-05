@@ -74,7 +74,7 @@ namespace Paradise.Export.Serialization
         /// objects were switched off, and which of the eighteen entity fields a given host meant,
         /// are not decisions a converter can make. Re-export the scene from its editor.
         /// </summary>
-        public static PrefabData ReadLevel(string json)
+        public static PrefabData ReadPrefab(string json)
         {
             // The version is read BEFORE the body, not after. A v2 document does not survive
             // deserialization far enough to be asked its version: its "Components" is an object
