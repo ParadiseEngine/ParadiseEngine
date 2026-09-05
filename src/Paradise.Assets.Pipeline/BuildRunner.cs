@@ -147,7 +147,9 @@ public sealed partial class BuildRunner
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
-        Sweep(output, owners.Keys);
+        var folded = FoldsCase(output);
+        Respell(output, owners.Keys, folded);
+        Sweep(output, owners.Keys, folded);
 
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
@@ -260,10 +262,130 @@ public sealed partial class BuildRunner
         }
     }
 
-    /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
-    private void Sweep(UPath output, IEnumerable<string> produced)
+    /// <summary>
+    /// Whether this filesystem reads two spellings of one name as one path. Probed rather than
+    /// assumed, because it is a property of the MOUNT and not of the OS: macOS and Windows fold by
+    /// default and can be told not to, Linux does not and can be told to. A tree that cannot be
+    /// probed is reported as folding, which at worst leaves the sweep a file it could have taken;
+    /// the opposite mistake deletes what the build just wrote.
+    /// </summary>
+    private bool FoldsCase(UPath output)
     {
-        var keep = new HashSet<string>(produced, StringComparer.Ordinal) { BuildIndex.FileName, BuildManifest.FileName };
+        var probe = output / $"case-probe.{Guid.NewGuid():N}";
+        try
+        {
+            _fileSystem.CreateFile(probe).Dispose();
+            try
+            {
+                return _fileSystem.FileExists(output / probe.GetName().ToUpperInvariant());
+            }
+            finally
+            {
+                _fileSystem.DeleteFile(probe);
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Deliberately every failure, not the IO family: this is a question with a safe answer,
+            // and Run promises never to throw for a bad tree because watch runs it in a loop
+            // (#203). Folding is that safe answer — it only ever leaves the sweep a file it could
+            // have taken, where the opposite deletes what the build just wrote.
+            LogCaseProbeFailed(_log, error.Message);
+            return true;
+        }
+    }
+
+    /// <summary>Renames what the tree misspells into what the build produced, so the manifest names paths the tree actually has.</summary>
+    /// <remarks>
+    /// A case-only rename under <c>assets/</c> (<c>Models/</c> → <c>models/</c>) cannot be carried
+    /// by writing: where the filesystem folds case, creating <c>models/</c> beside an existing
+    /// <c>Models/</c> is a no-op, so every output lands under the OLD spelling while the manifest
+    /// records the new one — and <see cref="Sweep"/> then deletes those files, because what is on
+    /// disk is not among the paths the build says it produced.
+    /// <para>
+    /// Renaming is one move, not a shuffle through a temporary name: <c>rename(2)</c> changes an
+    /// entry's case in place, and Zio reaches it through the STATIC <c>Directory.Move</c>, which
+    /// is the overload whose case-variation check was fixed (dotnet/runtime#30479 — the instance
+    /// <c>DirectoryInfo.MoveTo</c> still refuses, #63287). Where the move is refused anyway,
+    /// nothing has moved: the tree keeps the old spelling, which <see cref="Sweep"/> is separately
+    /// careful not to delete, so a failure here costs a warning rather than the tree.
+    /// </para>
+    /// </remarks>
+    private void Respell(UPath output, IEnumerable<string> produced, bool folded)
+    {
+        if (!folded) return;
+
+        // By directory, so each is READ once rather than once per file in it. Order does not
+        // matter, though it looks as if it should: this runs only where the filesystem folds case,
+        // and there every spelling reaches the same entry, so a child renames through its parent's
+        // new spelling while the parent is still stored under the old one.
+        foreach (var group in Ancestry(produced).GroupBy(path => path.GetDirectory()))
+        {
+            var spellings = Spellings(Under(output, group.Key));
+            foreach (var path in group)
+            {
+                var name = path.GetName();
+                if (!spellings.TryGetValue(name, out var actual) || string.Equals(actual, name, StringComparison.Ordinal)) continue;
+
+                var wanted = Under(output, path);
+                var misspelled = wanted.GetDirectory() / actual;
+                try
+                {
+                    if (_fileSystem.DirectoryExists(misspelled)) _fileSystem.MoveDirectory(misspelled, wanted);
+                    else _fileSystem.MoveFile(misspelled, wanted);
+
+                    LogRespelled(_log, actual, path.FullName[1..]);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    LogRespellFailed(_log, path.FullName[1..], error.Message);
+                }
+            }
+        }
+    }
+
+    /// <summary>What the tree actually calls each entry directly under <paramref name="directory"/>, looked up by any spelling of the name.</summary>
+    private Dictionary<string, string> Spellings(UPath directory)
+    {
+        var spellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!_fileSystem.DirectoryExists(directory)) return spellings;
+
+        foreach (var entry in _fileSystem.EnumeratePaths(directory))
+        {
+            spellings[entry.GetName()] = entry.GetName();
+        }
+
+        return spellings;
+    }
+
+    /// <summary>A produced path, which <see cref="Ancestry"/> roots for the walk, back under the build tree.</summary>
+    private static UPath Under(UPath output, UPath rooted)
+        => rooted == UPath.Root ? output : output / rooted.FullName[1..];
+
+    /// <summary>Every produced path and every directory above one, rooted so the walk has somewhere to stop.</summary>
+    private static HashSet<UPath> Ancestry(IEnumerable<string> produced)
+    {
+        var paths = new HashSet<UPath>();
+        foreach (var produce in produced)
+        {
+            for (var walk = UPath.Root / produce; walk != UPath.Root; walk = walk.GetDirectory())
+            {
+                paths.Add(walk);
+            }
+        }
+
+        return paths;
+    }
+
+    /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
+    private void Sweep(UPath output, IEnumerable<string> produced, bool folded)
+    {
+        // Compared the way the FILESYSTEM compares. Where it folds case, a path differing from a
+        // produced one only in spelling is that same file, and taking it would delete an output of
+        // this build. Respell has normally already put the spelling right; this is what keeps a
+        // respell that could not run from costing the tree anyway.
+        var comparer = folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var keep = new HashSet<string>(produced, comparer) { BuildIndex.FileName, BuildManifest.FileName };
 
         foreach (var file in _fileSystem.EnumerateFiles(output, "*", SearchOption.AllDirectories).ToList())
         {
@@ -300,4 +422,13 @@ public sealed partial class BuildRunner
 
     [LoggerMessage(EventId = 11, Level = LogLevel.Warning, Message = "could not sweep stale output '{Relative}' ({Reason})")]
     private static partial void LogSweepFailed(ILogger logger, string relative, string reason);
+
+    [LoggerMessage(EventId = 12, Level = LogLevel.Information, Message = "respelled: {Actual} -> {Relative}")]
+    private static partial void LogRespelled(ILogger logger, string actual, string relative);
+
+    [LoggerMessage(EventId = 13, Level = LogLevel.Warning, Message = "could not respell '{Relative}' ({Reason})")]
+    private static partial void LogRespellFailed(ILogger logger, string relative, string reason);
+
+    [LoggerMessage(EventId = 14, Level = LogLevel.Warning, Message = "could not probe the build tree for case folding, assuming it folds ({Reason})")]
+    private static partial void LogCaseProbeFailed(ILogger logger, string reason);
 }

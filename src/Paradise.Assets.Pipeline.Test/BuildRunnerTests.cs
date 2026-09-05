@@ -2,6 +2,7 @@ using System.Text;
 
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
+using Paradise.Diagnostics;
 
 namespace Paradise.Assets.Pipeline.Test;
 
@@ -877,6 +878,106 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/box.prefab")).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/.editor/play/levels/box.toml")).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/.editor/play/models/x.glb.0123.partial")).IsFalse();
+    }
+
+    /// <summary>
+    /// ShiningPie renamed <c>assets/Models</c> to <c>assets/models</c>. Where the filesystem folds
+    /// case the rebuild wrote into the directory that already existed, the manifest recorded the
+    /// new spelling, and the sweep then deleted every file that same build had just produced —
+    /// leaving a tree whose manifest named 86 assets that were not there.
+    /// </summary>
+    [Test]
+    public async Task a_case_only_rename_respells_the_tree_instead_of_sweeping_it()
+    {
+        using var memory = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(memory, "/game/assets/Audio/crate.bnk");
+        using var fileSystem = new CaseFoldingFileSystem(memory);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+        await Assert.That(memory.FileExists("/game/build/Audio/crate.bnk")).IsTrue();
+
+        // The rename an author makes in assets/ — which a folding filesystem cannot carry into the
+        // build tree by writing, because the old directory answers to the new name.
+        memory.MoveDirectory("/game/assets/Audio", "/game/assets/audio");
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(memory.FileExists("/game/build/audio/crate.bnk")).IsTrue();
+        await Assert.That(memory.DirectoryExists("/game/build/Audio")).IsFalse();
+        await Assert.That(memory.ReadAllText("/game/build/manifest.json")).Contains("\"path\": \"audio/crate.bnk\"");
+    }
+
+    /// <summary>A file's own spelling folds exactly as a directory's does, and a reused output is never rewritten — so nothing but the rename puts it right.</summary>
+    [Test]
+    public async Task a_case_only_rename_of_a_file_respells_its_output()
+    {
+        using var memory = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(memory, "/game/assets/audio/Crate.bnk");
+        using var fileSystem = new CaseFoldingFileSystem(memory);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        memory.MoveFile("/game/assets/audio/Crate.bnk", "/game/assets/audio/crate.bnk");
+        memory.MoveFile("/game/assets/audio/Crate.bnk.meta", "/game/assets/audio/crate.bnk.meta");
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(memory.FileExists("/game/build/audio/crate.bnk")).IsTrue();
+        await Assert.That(memory.FileExists("/game/build/audio/Crate.bnk")).IsFalse();
+    }
+
+    /// <summary>
+    /// Every other case-rename test here renames at depth one, where respelling the top entry is
+    /// the whole job; this one fails unless every level is walked. It deliberately does NOT pin an
+    /// order — where the filesystem folds case there is nothing to pin, because a child renames
+    /// through its parent's new spelling while the parent still carries the old one.
+    /// </summary>
+    [Test]
+    public async Task a_rename_several_levels_deep_respells_every_level()
+    {
+        using var memory = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(memory, "/game/assets/Kits/Roads/crate.bnk");
+        using var fileSystem = new CaseFoldingFileSystem(memory);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+        await Assert.That(memory.FileExists("/game/build/Kits/Roads/crate.bnk")).IsTrue();
+
+        memory.MoveDirectory("/game/assets/Kits", "/game/assets/kits");
+        memory.MoveDirectory("/game/assets/kits/Roads", "/game/assets/kits/roads");
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(memory.FileExists("/game/build/kits/roads/crate.bnk")).IsTrue();
+        await Assert.That(memory.DirectoryExists("/game/build/Kits")).IsFalse();
+    }
+
+    /// <summary>Respell runs on every build on a folding filesystem, so what it does to a tree that is ALREADY right is the common case, and nothing else here would notice it renaming.</summary>
+    [Test]
+    public async Task a_tree_already_spelled_right_is_left_alone()
+    {
+        using var memory = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(memory, "/game/assets/audio/crate.bnk");
+        using var fileSystem = new CaseFoldingFileSystem(memory);
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        var log = new CollectingLogger();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), log).Run().Succeeded).IsTrue();
+
+        await Assert.That(log.Messages.Any(message => message.StartsWith("respelled:", StringComparison.Ordinal))).IsFalse();
+        await Assert.That(memory.FileExists("/game/build/audio/crate.bnk")).IsTrue();
+    }
+
+    /// <summary>The other half of the claim: where the filesystem tells the spellings apart they are two files, and the one no source produces is stale like any other.</summary>
+    [Test]
+    public async Task a_tree_that_tells_spellings_apart_still_sweeps_the_old_one()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/crate.bnk");
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+        fileSystem.CreateDirectory("/game/build/Audio");
+        fileSystem.WriteAllText("/game/build/Audio/crate.bnk", "left by the old spelling");
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.FileExists("/game/build/Audio/crate.bnk")).IsFalse();
+        await Assert.That(fileSystem.FileExists("/game/build/audio/crate.bnk")).IsTrue();
     }
 
     [Test]
