@@ -34,7 +34,9 @@ public interface IRenderFeature : IDisposable
     /// <see cref="Setup"/>.</summary>
     FrameRequirements Requires { get; }
 
-    /// <summary>The frame's targets changed size; re-declare the ones this feature owns.</summary>
+    /// <summary>Declare the targets this feature owns at this size. Called once when the feature
+    /// is added to a <see cref="RenderPipeline"/> and again whenever the frame changes size, so
+    /// a feature need not create its targets in its constructor.</summary>
     void Resize(uint width, uint height);
 
     /// <summary>Declare this frame's passes and publish what other features may consume.</summary>

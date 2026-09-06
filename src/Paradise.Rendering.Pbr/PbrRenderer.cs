@@ -57,7 +57,7 @@ public sealed partial class PbrRenderer : IDisposable
         _scene = new SceneFeature(_ctx, _shadows, ssao, specularAaVariance, specularAaClamp);
         _capture = new SceneColorCaptureFeature(_ctx);
         _composite = new CompositeFeature(_ctx);
-        Pipeline = new RenderPipeline()
+        Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height)
             .Add(_shadows)
             .Add(ssao)
             .Add(_scene)
@@ -350,7 +350,7 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
         _graph.Reset();
-        Pipeline.Setup(_graph, _ctx.Width, _ctx.Height);
+        Pipeline.Setup(_graph);
 
         _commandWriter.ResetWrittenCount();
         var stream = _graph.Compile(_commandWriter);

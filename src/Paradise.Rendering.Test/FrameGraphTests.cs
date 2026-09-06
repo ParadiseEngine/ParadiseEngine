@@ -841,4 +841,74 @@ public class FrameGraphTests
         var passes = graph.Compile(writer).Passes.Length;
         await Assert.That(passes).IsEqualTo(2);
     }
+
+    [Test]
+    public async Task declaring_a_group_index_twice_on_one_pass_is_refused()
+    {
+        var (graph, textures, _) = BindingGraph();
+        textures.Ensure("a", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+
+        var pass = graph.AddRasterPass("p", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear)
+            .BindGroup(0, "g", SomeLayout, [GraphBinding.Texture(0, graph.Texture("a"))]);
+
+        await Assert.That(() => pass.BindGroup(0, "g2", SomeLayout, [])).Throws<InvalidOperationException>()
+            .WithMessageContaining("p").And.WithMessageContaining("0");
+    }
+
+    [Test]
+    public async Task a_group_with_more_entries_than_the_cache_holds_is_refused_by_name()
+    {
+        var (graph, textures, _) = BindingGraph();
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var entries = new GraphBinding[17];
+        for (var i = 0; i < entries.Length; i++) entries[i] = GraphBinding.Sampler((uint)i, new SamplerHandle(1, 1));
+
+        var pass = graph.AddRasterPass("wide", RenderPassEvent.Opaque).Depth(graph.Texture("out"), LoadOp.Clear);
+
+        await Assert.That(() => pass.BindGroup(0, "g", SomeLayout, entries)).Throws<ArgumentOutOfRangeException>()
+            .WithMessageContaining("wide");
+    }
+
+    /// <summary>Every backend rejects sampling the attachment being rendered into, at draw time
+    /// and with a message about a bind group. The graph names the pass and the resource.</summary>
+    [Test]
+    public async Task reading_what_the_same_pass_renders_into_is_an_error()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("hdr", DepthArray(1));
+        textures.Export("hdr");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("hdr"), LoadOp.Clear).Reads(graph.Texture("hdr")).Record(graph, Nothing);
+
+        await Assert.That(() => graph.Compile(writer)).Throws<InvalidOperationException>()
+            .WithMessageContaining("main").And.WithMessageContaining("hdr");
+    }
+
+    /// <summary>An exported target's writers are all in this graph, so reading it before its
+    /// writer is the same mistake as for a private one — a material on the opaque bucket
+    /// sampling the scene color, say.</summary>
+    [Test]
+    public async Task reading_an_exported_target_before_its_writer_is_still_an_error()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("scene", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("scene");
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("opaque", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("scene")).Record(graph, Nothing);
+        graph.AddRasterPass("capture", RenderPassEvent.SceneColorCapture)
+            .Depth(graph.Texture("scene"), LoadOp.Clear).Record(graph, Nothing);
+
+        await Assert.That(() => graph.Compile(writer)).Throws<InvalidOperationException>()
+            .WithMessageContaining("opaque").And.WithMessageContaining("capture");
+    }
 }

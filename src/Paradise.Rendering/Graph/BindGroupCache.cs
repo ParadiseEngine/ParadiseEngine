@@ -42,10 +42,14 @@ public sealed class BindGroupCache : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var key = new Key(layout, entries);
-        ref var entry = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(_groups, key, out var exists);
-        if (!exists)
+        // Create before inserting: a creation that throws must not leave a default handle behind
+        // that every later frame would hand to the recorder as if it were the group.
+        if (!_groups.TryGetValue(key, out var entry))
+        {
             entry.Handle = _factory.CreateBindGroup(new BindGroupDesc(name, layout, entries.ToArray()));
+        }
         entry.LastUsedFrame = _frame;
+        _groups[key] = entry;
         return entry.Handle;
     }
 

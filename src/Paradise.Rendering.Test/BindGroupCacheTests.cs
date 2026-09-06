@@ -86,4 +86,33 @@ public class BindGroupCacheTests
 
         await Assert.That(factory.Groups.Count).IsEqualTo(0);
     }
+
+    private sealed class ThrowingFactory : IBindGroupFactory
+    {
+        public bool Throw = true;
+        public int Created;
+        public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
+        {
+            if (Throw) throw new InvalidOperationException("backend refused");
+            Created++;
+            return new BindGroupHandle((uint)Created, 1);
+        }
+        public void DestroyBindGroup(BindGroupHandle handle) { }
+    }
+
+    /// <summary>A creation that throws must not leave a default handle behind for every later
+    /// frame to bind.</summary>
+    [Test]
+    public async Task a_failed_creation_leaves_no_entry_behind()
+    {
+        var factory = new ThrowingFactory();
+        using var cache = new BindGroupCache(factory);
+
+        await Assert.That(() => cache.Get("g", Layout, [View(0, 1)])).Throws<InvalidOperationException>();
+        factory.Throw = false;
+        var handle = cache.Get("g", Layout, [View(0, 1)]);
+
+        await Assert.That(cache.Count).IsEqualTo(1);
+        await Assert.That(handle.IsValid).IsTrue();
+    }
 }

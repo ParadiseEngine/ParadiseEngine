@@ -18,13 +18,26 @@ public sealed class RenderPipeline : IDisposable
     private readonly FrameBlackboard _blackboard = new();
     private bool _disposed;
 
+    /// <param name="width">The frame size features are told on <see cref="Add"/>, before any
+    /// resize, so a feature declares its targets once through the same call either way.</param>
+    public RenderPipeline(uint width, uint height)
+    {
+        Width = Math.Max(1, width);
+        Height = Math.Max(1, height);
+    }
+
+    public uint Width { get; private set; }
+    public uint Height { get; private set; }
+
     public IReadOnlyList<IRenderFeature> Features => _features;
 
+    /// <summary>Append a feature and tell it the current frame size.</summary>
     public RenderPipeline Add(IRenderFeature feature)
     {
         ArgumentNullException.ThrowIfNull(feature);
         ObjectDisposedException.ThrowIf(_disposed, this);
         _features.Add(feature);
+        feature.Resize(Width, Height);
         return this;
     }
 
@@ -48,18 +61,20 @@ public sealed class RenderPipeline : IDisposable
 
     public void Resize(uint width, uint height)
     {
-        foreach (var feature in _features) feature.Resize(width, height);
+        Width = Math.Max(1, width);
+        Height = Math.Max(1, height);
+        foreach (var feature in _features) feature.Resize(Width, Height);
     }
 
     /// <summary>Run every enabled feature's setup in order against <paramref name="graph"/>,
     /// which the caller has already reset for this frame.</summary>
-    public void Setup(FrameGraph graph, uint width, uint height)
+    public void Setup(FrameGraph graph)
     {
         ArgumentNullException.ThrowIfNull(graph);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         _blackboard.Clear();
-        var frame = new FrameContext(graph, width, height, Requirements(), _blackboard);
+        var frame = new FrameContext(graph, Width, Height, Requirements(), _blackboard);
         foreach (var feature in _features)
             if (feature.Enabled) feature.Setup(in frame);
     }

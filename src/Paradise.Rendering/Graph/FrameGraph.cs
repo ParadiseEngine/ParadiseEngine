@@ -271,7 +271,7 @@ public sealed partial class FrameGraph
         return BindGroupEntryDesc.ForTextureView(binding.Binding, view);
     }
 
-    private static void Validate(Span<Pass> passes, int count)
+    private void Validate(Span<Pass> passes, int count)
     {
         for (var i = 0; i < count; i++)
         {
@@ -282,6 +282,16 @@ public sealed partial class FrameGraph
             if (pass.Recorder is null)
                 throw new InvalidOperationException(
                     $"Pass '{pass.Name}' was declared but never given a recorder.");
+        }
+
+        // A pass that samples what it is rendering into is rejected by every backend at draw
+        // time with a message about a bind group; name the pass and the resource here instead.
+        foreach (var edge in _reads)
+        {
+            if (edge.History) continue;
+            if (Writes(in passes[edge.Pass], edge.Resource))
+                throw new InvalidOperationException(
+                    $"Pass '{passes[edge.Pass].Name}' reads '{NameOf(edge.Resource)}' while rendering into it.");
         }
     }
 
@@ -378,10 +388,11 @@ public sealed partial class FrameGraph
     /// reads gets last frame's contents, and the event key is the only thing that put it there.
     ///
     /// <para>Three reads are exempt. A resource nothing writes at all may be legitimately bound
-    /// and never sampled — the shadow array in a frame with no shadowed light. An external
-    /// resource may have been written by the host before the frame, so the first pass loading the
-    /// backbuffer is not reading ahead of anyone. And a <see cref="PassBuilder.ReadsHistory"/> read
-    /// wants last frame's contents by definition.</para></summary>
+    /// and never sampled — the shadow array in a frame with no shadowed light. An imported
+    /// resource or the backbuffer may have been written by the host before the frame, so the
+    /// first pass loading it is not reading ahead of anyone; an owned target is checked even when
+    /// exported, because its writers are all in this graph. And a
+    /// <see cref="PassBuilder.ReadsHistory"/> read wants last frame's contents by definition.</para></summary>
     private void CheckReadsFollowWrites(Span<Pass> passes, int count)
     {
         for (var slot = 0; slot < count; slot++)
@@ -402,7 +413,7 @@ public sealed partial class FrameGraph
 
     private void RequireNoLaterWriter(Span<Pass> passes, int slot, int count, int resourceIndex)
     {
-        if (_resources[resourceIndex].Scope == GraphResourceScope.External) return;
+        if (_resources[resourceIndex].Kind != ResourceKind.Owned) return;
         if (WrittenBefore(passes, slot, resourceIndex)) return;
         for (var later = slot + 1; later < count; later++)
         {
@@ -421,7 +432,9 @@ public sealed partial class FrameGraph
     private StoreOp StoreOf(Span<Pass> passes, int slot, int count, in Attachment a)
     {
         var resourceIndex = a.Target.Index;
-        if (a.Load == LoadOp.Load && !WrittenBefore(passes, slot, resourceIndex))
+        // Owned only: a host may well have written an imported target before the frame.
+        if (a.Load == LoadOp.Load && _resources[resourceIndex].Kind == ResourceKind.Owned
+            && !WrittenBefore(passes, slot, resourceIndex))
             LogLoadOfUnwritten(_log, passes[_order[slot]].Name, NameOf(resourceIndex));
 
         if (a.Store is { } declared) return declared;
@@ -622,6 +635,14 @@ public sealed partial class FrameGraph
             ArgumentNullException.ThrowIfNull(layout);
             if (_graph.BindGroups is null)
                 throw new InvalidOperationException("This graph has no bind group cache; bind groups cannot be declared on its passes.");
+            if (bindings.Length > BindGroupCache.MaxEntries)
+                throw new ArgumentOutOfRangeException(nameof(bindings),
+                    $"Pass '{_graph.PassAt(_index).Name}' declares {bindings.Length} entries in group {groupIndex}; the cache holds at most {BindGroupCache.MaxEntries}.");
+            // A second declaration would replace the group but leave the first one's read edges on
+            // the pass — a target swapped for black would keep its producer alive.
+            if (_graph.PassAt(_index).GroupDecls[(int)groupIndex].Layout is not null)
+                throw new InvalidOperationException(
+                    $"Pass '{_graph.PassAt(_index).Name}' already declared bind group {groupIndex}.");
 
             var start = _graph._bindings.Count;
             foreach (var binding in bindings)

@@ -54,9 +54,9 @@ public class RenderPipelineTests
         var a = new Probe("a") { Log = log };
         var b = new Probe("b") { Enabled = false, Log = log };
         var c = new Probe("c") { Log = log };
-        using var pipeline = new RenderPipeline().Add(a).Add(b).Add(c);
+        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(b).Add(c);
 
-        pipeline.Setup(GraphWithTextures(), 8, 8);
+        pipeline.Setup(GraphWithTextures());
 
         await Assert.That(log).IsEquivalentTo(["a", "c"]);
     }
@@ -68,13 +68,13 @@ public class RenderPipelineTests
     {
         var scene = new Probe("scene");
         var capture = new Probe("capture", FrameRequirements.SceneColorCapture);
-        using var pipeline = new RenderPipeline().Add(scene).Add(capture);
+        using var pipeline = new RenderPipeline(8, 8).Add(scene).Add(capture);
 
-        pipeline.Setup(GraphWithTextures(), 8, 8);
+        pipeline.Setup(GraphWithTextures());
         var seenBySceneFirst = scene.SeenRequirements;
 
         capture.Enabled = false;
-        pipeline.Setup(GraphWithTextures(), 8, 8);
+        pipeline.Setup(GraphWithTextures());
         var seenAfterDisable = scene.SeenRequirements;
 
         await Assert.That(seenBySceneFirst).IsEqualTo(FrameRequirements.SceneColorCapture);
@@ -86,15 +86,15 @@ public class RenderPipelineTests
     {
         var producer = new Probe("producer") { Publishes = "result" };
         var consumer = new Probe("consumer") { Consumes = "result" };
-        using var pipeline = new RenderPipeline().Add(producer).Add(consumer);
+        using var pipeline = new RenderPipeline(8, 8).Add(producer).Add(consumer);
         var graph = GraphWithTextures();
 
-        pipeline.Setup(graph, 8, 8);
+        pipeline.Setup(graph);
         var seenWhenOn = consumer.SawTexture;
 
         producer.Enabled = false;
         graph.Reset();
-        pipeline.Setup(graph, 8, 8);
+        pipeline.Setup(graph);
         var seenWhenOff = consumer.SawTexture;
 
         await Assert.That(seenWhenOn).IsTrue();
@@ -117,13 +117,14 @@ public class RenderPipelineTests
         var log = new List<string>();
         var a = new Probe("a") { Log = log };
         var b = new Probe("b") { Log = log };
-        var pipeline = new RenderPipeline().Add(a).Add(b);
+        var pipeline = new RenderPipeline(8, 8).Add(a).Add(b);
 
         pipeline.Resize(16, 16);
         pipeline.Dispose();
 
-        await Assert.That(a.Resized).IsEqualTo(1);
-        await Assert.That(b.Resized).IsEqualTo(1);
+        // Once from Add, once from Resize: a feature declares its targets through one call.
+        await Assert.That(a.Resized).IsEqualTo(2);
+        await Assert.That(b.Resized).IsEqualTo(2);
         await Assert.That(log).IsEquivalentTo(["dispose b", "dispose a"]);
     }
 
@@ -131,7 +132,7 @@ public class RenderPipelineTests
     public async Task find_returns_the_first_feature_of_a_type()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline().Add(a).Add(new Probe("b"));
+        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(new Probe("b"));
 
         await Assert.That(pipeline.Find<Probe>()).IsSameReferenceAs(a);
     }
@@ -162,5 +163,20 @@ public class RenderPipelineTests
 
         await Assert.That(feature.Argument).IsEqualTo(7);
         await Assert.That(commands).IsEqualTo(3);
+    }
+
+    /// <summary>A feature added after construction is told the size it was added at, so it
+    /// need not create targets in its constructor to survive frame one.</summary>
+    [Test]
+    public async Task add_tells_the_feature_the_current_size()
+    {
+        var a = new Probe("a");
+        using var pipeline = new RenderPipeline(320, 200);
+
+        pipeline.Add(a);
+
+        await Assert.That(a.Resized).IsEqualTo(1);
+        await Assert.That(pipeline.Width).IsEqualTo(320u);
+        await Assert.That(pipeline.Height).IsEqualTo(200u);
     }
 }
