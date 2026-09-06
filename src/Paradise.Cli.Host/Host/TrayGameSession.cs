@@ -18,9 +18,11 @@ internal sealed class TrayGameSession : IDisposable
     private readonly string? _profile;
     private readonly string _scene;
     private readonly IReadOnlyList<IAssetImporter> _importers;
-    private readonly object _gate = new();
-    private CancellationTokenSource? _stop;
-    private Thread? _thread;
+    // One reference swapped atomically: the pair is never observed half-replaced, and there is
+    // no lock for a menu click and a watch shutdown to contend on.
+    private Running? _running;
+
+    private sealed record Running(CancellationTokenSource Stop, Thread Thread);
 
     /// <summary>The tray's "restart on scene save" checkbox; on by default, read live by the play-tree watch.</summary>
     public WatchToggle SceneRestart { get; } = new(on: true);
@@ -68,7 +70,6 @@ internal sealed class TrayGameSession : IDisposable
 
     public void Play(bool watch)
     {
-        Stop();
         var stop = new CancellationTokenSource();
         var thread = new Thread(() =>
         {
@@ -96,33 +97,32 @@ internal sealed class TrayGameSession : IDisposable
             Name = "paradise-tray-game",
         };
 
-        lock (_gate)
-        {
-            _stop = stop;
-            _thread = thread;
-        }
-
+        Interlocked.Exchange(ref _running, new Running(stop, thread))?.Stop.Cancel();
         Console.WriteLine(watch ? "watch: playing the game under dotnet watch" : "watch: playing the game");
         thread.Start();
     }
 
+    /// <summary>Cancel and return at once: this runs on the menu thread, and the tree kill that ends the game must not hold AppKit or the Win32 pump hostage.</summary>
     public void Stop()
     {
-        CancellationTokenSource? stop;
-        Thread? thread;
-        lock (_gate)
+        var running = Interlocked.Exchange(ref _running, null);
+        if (running is null) return;
+        running.Stop.Cancel();
+        ThreadPool.QueueUserWorkItem(static state =>
         {
-            stop = _stop;
-            thread = _thread;
-            _stop = null;
-            _thread = null;
-        }
-
-        if (stop is null) return;
-        stop.Cancel();
-        thread?.Join(TimeSpan.FromSeconds(10));
-        stop.Dispose();
+            var (stop, thread) = ((CancellationTokenSource, Thread))state!;
+            thread.Join(TimeSpan.FromSeconds(10));
+            stop.Dispose();
+        }, (running.Stop, running.Thread));
     }
 
-    public void Dispose() => Stop();
+    /// <summary>The watch is shutting down: wait for the game to be gone, bounded.</summary>
+    public void Dispose()
+    {
+        var running = Interlocked.Exchange(ref _running, null);
+        if (running is null) return;
+        running.Stop.Cancel();
+        running.Thread.Join(TimeSpan.FromSeconds(10));
+        running.Stop.Dispose();
+    }
 }
