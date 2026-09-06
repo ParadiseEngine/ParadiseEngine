@@ -4,13 +4,7 @@ using System.Runtime.InteropServices;
 namespace Paradise.Cli;
 
 /// <summary>One child process: what to run, with what, and from where. Output is inherited, never captured — the caller's console (or the log Blender pipes it into) is where a build error and the game's own lines belong.</summary>
-internal sealed record ProcessSpec(string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory)
-{
-    public string CommandLine => FileName + " " + string.Join(' ', Arguments.Select(Quote));
-
-    private static string Quote(string argument) =>
-        argument.Length > 0 && !argument.Any(char.IsWhiteSpace) ? argument : $"\"{argument}\"";
-}
+internal sealed record ProcessSpec(string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory);
 
 /// <summary>The seam <see cref="HostSession"/> is tested through: a fake records the specs, the real one starts them.</summary>
 internal interface IProcessRunner
