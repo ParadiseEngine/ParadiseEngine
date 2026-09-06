@@ -63,6 +63,13 @@ internal sealed class HostSession
         Func<bool>? restartEnabled = null)
     {
         var cwd = Internal(workingDirectory);
+        var targets = HostFreshness.Inspect(_fileSystem, csproj, configuration).Frameworks;
+        if (targets.Count > 1)
+        {
+            _log($"play: {Internal(csproj)} targets {string.Join(" and ", targets)}; a host play needs one target framework");
+            return 1;
+        }
+
         if (watch)
         {
             // dotnet watch builds on its own, so the gate only answers whether a restore is owed:

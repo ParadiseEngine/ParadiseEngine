@@ -30,7 +30,8 @@ internal sealed record HostFreshness(
     bool HasAssets,
     bool SourcesChanged,
     bool ProjectFilesChanged,
-    IReadOnlyList<UPath> ProjectDirectories)
+    IReadOnlyList<UPath> ProjectDirectories,
+    IReadOnlyList<string> Frameworks)
 {
     public const string AssetsFileName = "project.assets.json";
 
@@ -70,13 +71,13 @@ internal sealed record HostFreshness(
         var hasStamp = fileSystem.FileExists(stampPath);
 
         var directories = new List<UPath> { directory };
-        string? framework = null;
+        var frameworks = new List<string>();
         string? runtime = null;
         if (hasAssets)
         {
             try
             {
-                hasAssets = ReadAssets(fileSystem, assetsPath, directory, directories, out framework, out runtime);
+                hasAssets = ReadAssets(fileSystem, assetsPath, directory, directories, frameworks, out runtime);
             }
             catch (Exception error) when (IsUnreadable(error))
             {
@@ -85,7 +86,8 @@ internal sealed record HostFreshness(
             }
         }
 
-        var output = framework is null ? (UPath?)null : FindOutput(fileSystem, directory / "bin" / configuration / framework, runtime, AssemblyName(fileSystem, csproj) + ".dll");
+        // One target framework or none: a multi-targeted host is refused by the session, not guessed at.
+        var output = frameworks.Count == 1 ? FindOutput(fileSystem, directory / "bin" / configuration / frameworks[0], runtime, AssemblyName(fileSystem, csproj) + ".dll") : (UPath?)null;
         var outputExists = output is { } path && fileSystem.FileExists(path);
 
         var outputStamp = hasStamp ? fileSystem.GetLastWriteTime(stampPath) : DateTime.MinValue;
@@ -118,7 +120,7 @@ internal sealed record HostFreshness(
             if (ancestor == UPath.Root) break;
         }
 
-        return new HostFreshness(csproj, output, outputExists, hasStamp, hasAssets, sourcesChanged, projectFilesChanged, directories);
+        return new HostFreshness(csproj, output, outputExists, hasStamp, hasAssets, sourcesChanged, projectFilesChanged, directories, frameworks);
     }
 
     public static UPath StampPath(UPath csproj) => csproj.GetDirectory() / "obj" / StampFileName;
@@ -146,9 +148,8 @@ internal sealed record HostFreshness(
     }
 
     /// <returns>False when the file is not JSON — half-written by a restore in progress — which counts as never restored.</returns>
-    private static bool ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, out string? framework, out string? runtime)
+    private static bool ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, List<string> frameworks, out string? runtime)
     {
-        framework = null;
         runtime = null;
         JsonDocument document;
         try
@@ -178,10 +179,10 @@ internal sealed record HostFreshness(
             }
 
             if (rootElement.TryGetProperty("project", out var project)
-                && project.TryGetProperty("frameworks", out var frameworks)
-                && frameworks.ValueKind == JsonValueKind.Object)
+                && project.TryGetProperty("frameworks", out var declared)
+                && declared.ValueKind == JsonValueKind.Object)
             {
-                framework = frameworks.EnumerateObject().Select(entry => entry.Name).FirstOrDefault();
+                frameworks.AddRange(declared.EnumerateObject().Select(entry => entry.Name));
             }
 
             // Restore records the rid(s) the project was restored for; one means the output moved

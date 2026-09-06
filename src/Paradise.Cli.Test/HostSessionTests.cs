@@ -193,6 +193,21 @@ public class HostSessionTests
     }
 
     [Test]
+    public async Task a_multi_targeted_launcher_is_refused_rather_than_guessed_at()
+    {
+        using var fileSystem = Tree();
+        fileSystem.WriteAllText("/repo/Game.Launcher/obj/project.assets.json", """{ "libraries": {}, "project": { "frameworks": { "net10.0": {}, "net10.0-windows": {} } } }""");
+        var runner = new RecordingRunner();
+        var log = new List<string>();
+
+        var exit = Session(fileSystem, runner, log).Play(s_csproj, "Debug", "/repo", [], watch: false, noBuild: false, CancellationToken.None);
+
+        await Assert.That(exit).IsEqualTo(1);
+        await Assert.That(runner.Specs).IsEmpty();
+        await Assert.That(log.Last()).Contains("net10.0 and net10.0-windows");
+    }
+
+    [Test]
     public async Task build_restores_by_default_and_runs_from_the_project_directory()
     {
         using var fileSystem = Tree();
