@@ -233,41 +233,6 @@ namespace Paradise.Export.Data
         public Color32 ColorB { get; set; } = Color32.FromRgba(0f, 0f, 0f);
     }
 
-    /// <summary>
-    /// One collision shape, AUTHORED by pointing at the host's own shape object and edited with its
-    /// native handles — every field below is baked out of that object at export.
-    /// </summary>
-    [AuthoredByHost<HostShape>]
-    public class ColliderShapeData
-    {
-        public string? Id { get; set; }
-        public string? Path { get; set; }
-        public bool IsStatic { get; set; }
-        public int Layer { get; set; }
-        public string? LayerName { get; set; }
-        public bool IsTrigger { get; set; }
-        public PhysicsShapeType ShapeType { get; set; }
-        public Vector3 LocalCenter { get; set; } = Vector3.Zero;
-        public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
-        public Vector3 Size { get; set; } = Vector3.Zero;
-        public float Radius { get; set; }
-        public float Height { get; set; }
-        public NavObstacleData? NavObstacle { get; set; }
-    }
-
-    public sealed class NavObstacleData
-    {
-        public string Shape { get; set; } = "";
-        public Vector3 Center { get; set; } = Vector3.Zero;
-        public Vector3 Size { get; set; } = Vector3.Zero;
-        public float Radius { get; set; }
-        public float Height { get; set; }
-        public bool Carving { get; set; }
-        public bool CarveOnlyStationary { get; set; }
-        public float CarvingMoveThreshold { get; set; }
-        public float CarvingTimeToStationary { get; set; }
-    }
-
     // Engine-neutral physics enums (mirrors the Paradise Engine runtime contract).
     // Serialized by name via the JSON writer's StringEnumConverter.
     public enum PhysicsBodyType

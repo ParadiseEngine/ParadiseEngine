@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Paradise.Authoring;
 using Paradise.Export.Data;
@@ -48,13 +49,29 @@ public sealed record GlowFixture
     public float? ShadowBlur { get; set; }
 }
 
-/// <summary>A composed LIST whose element is the engine's collider-shape part — the shape the
-/// old engine collider component had, kept as coverage for list-of-composed reading.</summary>
+/// <summary>A composed LIST whose element is a host-baked shape: a GAME's collider-shape record,
+/// as the engine declares none of its own. Kept as coverage for list-of-composed reading.</summary>
 [Guid(TestComponentIds.Crate)]
 [Authored(DisplayName = "Crate")]
 public sealed record CrateFixture
 {
-    public List<ColliderShapeData> Colliders { get; set; } = new();
+    public List<CrateShapeFixture> Colliders { get; set; } = new();
+}
+
+/// <summary>The shape row a game would declare: <see cref="HostShape"/>'s geometry by name, plus
+/// the game's own flags.</summary>
+[AuthoredByHost<HostShape>]
+public sealed record CrateShapeFixture
+{
+    public string? Id { get; set; }
+    public bool IsStatic { get; set; }
+    public bool IsTrigger { get; set; }
+    public PhysicsShapeType ShapeType { get; set; }
+    public Vector3 LocalCenter { get; set; } = Vector3.Zero;
+    public Quaternion LocalRotation { get; set; } = Quaternion.Identity;
+    public Vector3 Size { get; set; } = Vector3.Zero;
+    public float Radius { get; set; }
+    public float Height { get; set; }
 }
 
 /// <summary>The test assembly's own generated registry — the exact mechanism a game uses.</summary>

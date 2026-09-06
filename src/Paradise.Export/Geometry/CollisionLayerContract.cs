@@ -5,7 +5,7 @@ namespace Paradise.Export.Geometry
 {
     /// <summary>
     /// The engine-neutral collision-layer contract. Godot stores collision layers as a bitmask on
-    /// the owning body, but <c>ColliderShapeData.Layer</c> is a Unity-style single layer INDEX:
+    /// the owning body, but a game's collider-shape record carries a Unity-style single layer INDEX:
     /// consumers reconstruct the membership mask as <c>1u &lt;&lt; Layer</c> (see
     /// <c>Paradise.Sample.Runtime.SceneAssembler.AppendCollider</c>). A single int therefore cannot
     /// represent multi-layer membership — this helper collapses a mask to the index of its lowest
