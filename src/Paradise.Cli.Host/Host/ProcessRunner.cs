@@ -56,7 +56,18 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         using var onInterrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, context => { context.Cancel = true; interrupted.Cancel(); });
         using var onTerminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; interrupted.Cancel(); });
         using var killOnStop = linked.Token.Register(() => TryKill(process));
-        started?.Invoke(process.Id);
+        try
+        {
+            started?.Invoke(process.Id);
+        }
+        catch
+        {
+            // A caller that could not take the pid has no way to stop what it started.
+            TryKill(process);
+            process.WaitForExit(5_000);
+            throw;
+        }
+
         process.WaitForExit();
         return linked.IsCancellationRequested ? Interrupted : process.ExitCode;
     }
