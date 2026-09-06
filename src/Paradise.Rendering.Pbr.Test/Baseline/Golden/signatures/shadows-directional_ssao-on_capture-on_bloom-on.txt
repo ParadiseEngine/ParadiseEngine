@@ -4,7 +4,7 @@ pass 00  colors=0
          depth tex#0 view#0 load=Clear store=Store clear=1
 pass 01  colors=1
          color0 view#1 load=Clear store=Store clear=(0,0,0,0)
-         depth tex#1 (default view) load=Clear store=Store clear=1
+         depth tex#1 (default view) load=Clear store=Discard clear=1
 pass 02  colors=1
          color0 view#2 load=Clear store=Store clear=(0.392,0.584,0.929,1)
          depth tex#2 (default view) load=Clear store=Store clear=1
@@ -13,7 +13,7 @@ pass 03  colors=1
          depth none
 pass 04  colors=1
          color0 view#2 load=Load store=Store clear=(0.392,0.584,0.929,1)
-         depth tex#2 (default view) load=Load store=Store clear=1
+         depth tex#2 (default view) load=Load store=Discard clear=1
 pass 05  colors=1
          color0 view#4 load=Clear store=Store clear=(0,0,0,1)
          depth none
