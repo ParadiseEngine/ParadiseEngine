@@ -62,10 +62,14 @@ internal sealed class HostSession
         var cwd = Internal(workingDirectory);
         if (watch)
         {
+            // dotnet watch builds on its own, so the gate only answers whether a restore is owed:
+            // a no-op restore over the closure is seconds the window does not need to wait for.
             var watchArguments = new List<string>
             {
-                "watch", "run", "--non-interactive", "--project", Internal(csproj), "-c", configuration, "--",
+                "watch", "run", "--non-interactive", "--project", Internal(csproj), "-c", configuration,
             };
+            if (!HostFreshness.Inspect(_fileSystem, csproj, configuration).NeedsRestore) watchArguments.Add("--no-restore");
+            watchArguments.Add("--");
             watchArguments.AddRange(arguments);
             _log($"play: dotnet watch run on {Internal(csproj)} (a source change hot-patches or restarts the game)");
             return _runner.Run(new ProcessSpec(_dotnet, watchArguments, cwd), stop);

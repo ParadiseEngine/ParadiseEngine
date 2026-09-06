@@ -159,9 +159,10 @@ public class HostSessionTests
     }
 
     [Test]
-    public async Task watch_hands_the_project_to_dotnet_watch_run_and_never_inspects_freshness()
+    public async Task watch_hands_the_project_to_dotnet_watch_run_without_a_build_of_its_own()
     {
         // dotnet watch builds on its own; a build here would race the one it is about to start.
+        // A never-restored tree keeps the restore.
         using var fileSystem = Tree(built: false, restored: false);
         var runner = new RecordingRunner();
 
@@ -174,6 +175,20 @@ public class HostSessionTests
             "watch", "run", "--non-interactive", "--project", s_csproj.FullName, "-c", "Debug", "--", "--scene", "x",
         });
         await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo("/repo");
+    }
+
+    [Test]
+    public async Task watch_skips_the_restore_when_no_project_file_changed()
+    {
+        using var fileSystem = Tree();
+        var runner = new RecordingRunner();
+
+        Session(fileSystem, runner).Play(s_csproj, "Debug", "/repo", [], watch: true, noBuild: false, CancellationToken.None);
+
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[]
+        {
+            "watch", "run", "--non-interactive", "--project", s_csproj.FullName, "-c", "Debug", "--no-restore", "--",
+        });
     }
 
     [Test]
