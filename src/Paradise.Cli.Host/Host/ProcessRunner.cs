@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Paradise.Cli;
 
@@ -45,12 +46,19 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException($"'{spec.FileName}' did not start.");
 
-        // The whole tree: `dotnet watch` and `dotnet <dll>` both put the game one level below
-        // the process this handle names, and a stop that left it running would be no stop.
-        using var killOnStop = stop.Register(() => TryKill(process));
+        // A stop from outside — Blender terminating its job, Ctrl+C in a shell — must take the
+        // child's whole tree down with this process: `dotnet watch` and `dotnet <dll>` both put
+        // the game one level below the process this handle names, and a stop that left it
+        // running would be no stop. Installed for the child's lifetime only, so outside it the
+        // default handler still ends the process (an asset cook, say) at once.
+        using var interrupted = new CancellationTokenSource();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, interrupted.Token);
+        using var onInterrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, context => { context.Cancel = true; interrupted.Cancel(); });
+        using var onTerminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; interrupted.Cancel(); });
+        using var killOnStop = linked.Token.Register(() => TryKill(process));
         started?.Invoke(process.Id);
         process.WaitForExit();
-        return stop.IsCancellationRequested ? Interrupted : process.ExitCode;
+        return linked.IsCancellationRequested ? Interrupted : process.ExitCode;
     }
 
     private static void TryKill(Process process)

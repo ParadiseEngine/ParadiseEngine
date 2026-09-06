@@ -1,8 +1,6 @@
 using Paradise.Assets.Pipeline;
 using Paradise.Assets.Project;
 
-using System.Runtime.InteropServices;
-
 using Zio;
 using Zio.FileSystems;
 
@@ -195,20 +193,17 @@ public static class BuildHost
             return 1;
         }
 
-        // A stop from outside — Blender terminating its job, Ctrl+C in a shell — must take the
-        // game down with this process, or "Stop" leaves a window the panel no longer knows about.
-        using var stop = new CancellationTokenSource();
-        using var onInterrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, context => { context.Cancel = true; stop.Cancel(); });
-        using var onTerminate = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context => { context.Cancel = true; stop.Cancel(); });
-
+        // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner
+        // installs it for the child's lifetime), and a handler that outlived the child would
+        // swallow the Ctrl+C that should end an asset cook outright.
         return hostVerb switch
         {
-            "build" => Verbs.HostBuild(physical, layout, configuration, stop.Token),
+            "build" => Verbs.HostBuild(physical, layout, configuration, CancellationToken.None),
             "play" => Verbs.HostPlay(
                 physical, layout, profile,
                 scene is null ? (UPath?)null : Absolute(physical, scene),
                 config is null ? (UPath?)null : Absolute(physical, config),
-                watch, noBuild, noAssets, configuration, passthrough, importers, stop.Token),
+                watch, noBuild, noAssets, configuration, passthrough, importers, CancellationToken.None),
             _ => Unknown($"unknown host verb '{hostVerb}'"),
         };
     }

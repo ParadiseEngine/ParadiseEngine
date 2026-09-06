@@ -40,6 +40,7 @@ internal sealed class HostSession
         var arguments = new List<string> { "build", Internal(csproj), "-c", configuration, "-v", "q", "--nologo" };
         if (!restore) arguments.Add("--no-restore");
         var exit = _runner.Run(new ProcessSpec(_dotnet, arguments, Internal(csproj.GetDirectory())), stop);
+        // A build ended by a stop returns non-zero from the runner; only a clean exit is stamped.
         if (exit == 0) HostFreshness.Stamp(_fileSystem, csproj);
         return exit;
     }
@@ -104,6 +105,7 @@ internal sealed class HostSession
                     : "play: no launcher built yet, building");
                 var built = Build(csproj, configuration, freshness.NeedsRestore, stop);
                 if (built != 0) return built;
+                if (stop.IsCancellationRequested) return ConsoleProcessRunner.Interrupted;
                 freshness = HostFreshness.Inspect(_fileSystem, csproj, configuration);
             }
         }
