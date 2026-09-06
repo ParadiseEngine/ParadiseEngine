@@ -196,6 +196,44 @@ public class HostFreshnessTests
         await Assert.That(freshness.IsFresh).IsTrue();
     }
 
+    private sealed class RefusingFileSystem(string refusedDirectory) : MemoryFileSystem
+    {
+        protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
+        {
+            if (path.FullName == refusedDirectory) throw new UnauthorizedAccessException(refusedDirectory);
+            return base.EnumeratePathsImpl(path, searchPattern, searchOption, searchTarget);
+        }
+    }
+
+    [Test]
+    public async Task a_directory_that_cannot_be_listed_reads_as_stale_rather_than_throwing()
+    {
+        using var fileSystem = new RefusingFileSystem("/engine/src/Paradise.ECS");
+        Write(fileSystem, s_csproj, "<Project />", s_restored.AddMinutes(-5));
+        Write(fileSystem, "/engine/src/Paradise.ECS/World.cs", "class World {}", s_restored);
+        Write(fileSystem, s_assets, """{ "libraries": { "Paradise.ECS/1.0.0": { "type": "project", "msbuildProject": "../../engine/src/Paradise.ECS/Paradise.ECS.csproj" } }, "project": { "frameworks": { "net10.0": { } } } }""", s_restored);
+        Write(fileSystem, s_output, "MZ", s_built);
+        Write(fileSystem, s_stamp, "", s_built);
+
+        var freshness = HostFreshness.Inspect(fileSystem, s_csproj, "Debug");
+
+        await Assert.That(freshness.IsFresh).IsFalse();
+        await Assert.That(freshness.SourcesChanged).IsTrue();
+        await Assert.That(freshness.NeedsRestore).IsFalse();
+    }
+
+    [Test]
+    public async Task a_half_written_assets_file_reads_as_never_restored()
+    {
+        using var fileSystem = Built();
+        fileSystem.WriteAllText(s_assets, "{ \"libraries\": { \"x");
+
+        var freshness = HostFreshness.Inspect(fileSystem, s_csproj, "Debug");
+
+        await Assert.That(freshness.IsFresh).IsFalse();
+        await Assert.That(freshness.NeedsRestore).IsTrue();
+    }
+
     [Test]
     public async Task the_configuration_picks_the_output_directory()
     {

@@ -97,15 +97,16 @@ internal sealed class TrayGameSession : IDisposable
             Name = "paradise-tray-game",
         };
 
-        Interlocked.Exchange(ref _running, new Running(stop, thread))?.Stop.Cancel();
+        Release(Interlocked.Exchange(ref _running, new Running(stop, thread)));
         Console.WriteLine(watch ? "watch: playing the game under dotnet watch" : "watch: playing the game");
         thread.Start();
     }
 
     /// <summary>Cancel and return at once: this runs on the menu thread, and the tree kill that ends the game must not hold AppKit or the Win32 pump hostage.</summary>
-    public void Stop()
+    public void Stop() => Release(Interlocked.Exchange(ref _running, null));
+
+    private static void Release(Running? running)
     {
-        var running = Interlocked.Exchange(ref _running, null);
         if (running is null) return;
         running.Stop.Cancel();
         ThreadPool.QueueUserWorkItem(static state =>

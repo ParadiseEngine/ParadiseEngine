@@ -74,7 +74,15 @@ internal sealed record HostFreshness(
         string? runtime = null;
         if (hasAssets)
         {
-            ReadAssets(fileSystem, assetsPath, directory, directories, out framework, out runtime);
+            try
+            {
+                hasAssets = ReadAssets(fileSystem, assetsPath, directory, directories, out framework, out runtime);
+            }
+            catch (Exception error) when (IsUnreadable(error))
+            {
+                // A restore rewriting it right now: treat as never restored, and MSBuild redoes it.
+                hasAssets = false;
+            }
         }
 
         var output = framework is null ? (UPath?)null : FindOutput(fileSystem, directory / "bin" / configuration / framework, runtime, AssemblyName(fileSystem, csproj) + ".dll");
@@ -94,9 +102,17 @@ internal sealed record HostFreshness(
         // ancestor; the injected ProjectReferences live in one of them.
         for (var ancestor = directory.GetDirectory(); !ancestor.IsNull && !ancestor.IsEmpty; ancestor = ancestor.GetDirectory())
         {
-            foreach (var file in fileSystem.EnumerateFiles(ancestor))
+            try
             {
-                Classify(fileSystem, file, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged, projectOnly: true);
+                foreach (var file in fileSystem.EnumerateFiles(ancestor))
+                {
+                    Classify(fileSystem, file, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged, projectOnly: true);
+                }
+            }
+            catch (Exception error) when (IsUnreadable(error))
+            {
+                // A directory that cannot be listed might hold a newer file: stale, not a crash.
+                sourcesChanged = true;
             }
 
             if (ancestor == UPath.Root) break;
@@ -129,7 +145,8 @@ internal sealed record HostFreshness(
         return fileSystem.FileExists(flat) && !fileSystem.FileExists(withRuntime) ? flat : withRuntime;
     }
 
-    private static void ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, out string? framework, out string? runtime)
+    /// <returns>False when the file is not JSON — half-written by a restore in progress — which counts as never restored.</returns>
+    private static bool ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, out string? framework, out string? runtime)
     {
         framework = null;
         runtime = null;
@@ -140,7 +157,7 @@ internal sealed record HostFreshness(
         }
         catch (JsonException)
         {
-            return;
+            return false;
         }
 
         using (document)
@@ -177,6 +194,8 @@ internal sealed record HostFreshness(
                 if (names.Count == 1) runtime = names[0];
             }
         }
+
+        return true;
     }
 
     private static string AssemblyName(IFileSystem fileSystem, UPath csproj)
@@ -201,12 +220,24 @@ internal sealed record HostFreshness(
     {
         if (!fileSystem.DirectoryExists(directory)) return;
 
-        foreach (var file in fileSystem.EnumerateFiles(directory))
+        List<UPath> children;
+        try
         {
-            Classify(fileSystem, file, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged, projectOnly: false);
+            foreach (var file in fileSystem.EnumerateFiles(directory))
+            {
+                Classify(fileSystem, file, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged, projectOnly: false);
+            }
+
+            children = fileSystem.EnumerateDirectories(directory).ToList();
+        }
+        catch (Exception error) when (IsUnreadable(error))
+        {
+            // A directory that cannot be listed might hold a newer file: stale, not a crash.
+            sourcesChanged = true;
+            return;
         }
 
-        foreach (var child in fileSystem.EnumerateDirectories(directory))
+        foreach (var child in children)
         {
             var name = child.GetName();
             // bin/ and obj/ are outputs of the thing being checked; a dot-directory is an IDE's.
@@ -214,6 +245,8 @@ internal sealed record HostFreshness(
             Scan(fileSystem, child, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged);
         }
     }
+
+    private static bool IsUnreadable(Exception error) => error is IOException or UnauthorizedAccessException;
 
     private static void Classify(IFileSystem fileSystem, UPath file, DateTime outputStamp, DateTime assetsStamp, ref bool sourcesChanged, ref bool projectFilesChanged, bool projectOnly)
     {
