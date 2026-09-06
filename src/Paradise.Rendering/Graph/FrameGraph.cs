@@ -17,6 +17,12 @@ namespace Paradise.Rendering.Graph;
 /// second.</para></summary>
 public delegate void PassRecorder(object context, ref PassRecording pass, int argument);
 
+/// <summary>The typed form of <see cref="PassRecorder"/>: the feature that declared the pass
+/// arrives as itself, so a recorder reads its own fields instead of opening with a cast. The
+/// integer stays for the one thing it is genuinely the argument of — a shadow layer, a bloom mip.</summary>
+public delegate void PassRecorder<TFeature>(TFeature feature, ref PassRecording pass, int argument)
+    where TFeature : class;
+
 /// <summary>Who can observe a resource, which is what decides whether writing it is worth
 /// doing.</summary>
 public enum GraphResourceScope
@@ -230,7 +236,7 @@ public sealed partial class FrameGraph
             ref var pass = ref passes[_order[slot]];
             encoder.BeginPass(slot);
             var recording = new PassRecording(encoder, pass.Groups, pass.Name);
-            pass.Recorder!.Invoke(pass.Context!, ref recording, pass.Argument);
+            pass.Invoke!(pass.Recorder!, pass.Context!, ref recording, pass.Argument);
             encoder.EndPass();
         }
 
@@ -462,12 +468,29 @@ public sealed partial class FrameGraph
         private BindGroupHandle _slot0;
     }
 
+    /// <summary>How a stored recorder is called. Typed and untyped recorders are both kept as a
+    /// <see cref="Delegate"/> plus one of these, cached per feature type, so declaring a pass
+    /// allocates nothing however it was declared.</summary>
+    private delegate void PassInvoker(Delegate recorder, object context, ref PassRecording pass, int argument);
+
+    private static readonly PassInvoker s_invokeUntyped =
+        static (Delegate recorder, object context, ref PassRecording pass, int argument) =>
+            ((PassRecorder)recorder)(context, ref pass, argument);
+
+    private static class Typed<TFeature> where TFeature : class
+    {
+        public static readonly PassInvoker Invoke =
+            static (Delegate recorder, object context, ref PassRecording pass, int argument) =>
+                ((PassRecorder<TFeature>)recorder)((TFeature)context, ref pass, argument);
+    }
+
     private struct Pass
     {
         public string Name;
         public int SortKey;
         public object? Context;
-        public PassRecorder? Recorder;
+        public Delegate? Recorder;
+        public PassInvoker? Invoke;
         public int Argument;
         public int ColorCount;
         public ColorSlots Colors;
@@ -587,10 +610,24 @@ public sealed partial class FrameGraph
         {
             ArgumentNullException.ThrowIfNull(context);
             ArgumentNullException.ThrowIfNull(recorder);
+            return Record(context, recorder, s_invokeUntyped, argument);
+        }
 
+        /// <summary>Supply the recorder as a method of the declaring feature's own type.</summary>
+        public PassBuilder Record<TFeature>(TFeature feature, PassRecorder<TFeature> recorder, int argument = 0)
+            where TFeature : class
+        {
+            ArgumentNullException.ThrowIfNull(feature);
+            ArgumentNullException.ThrowIfNull(recorder);
+            return Record(feature, recorder, Typed<TFeature>.Invoke, argument);
+        }
+
+        private PassBuilder Record(object context, Delegate recorder, PassInvoker invoke, int argument)
+        {
             ref var pass = ref _graph.PassAt(_index);
             pass.Context = context;
             pass.Recorder = recorder;
+            pass.Invoke = invoke;
             pass.Argument = argument;
             return this;
         }
