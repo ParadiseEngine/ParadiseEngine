@@ -22,6 +22,16 @@ internal static class HostPlayArguments
             : scene;
     }
 
+    /// <summary>The caller's document, else the manifest's <c>[host] scene</c>, else nothing (the launcher's own default).</summary>
+    public static UPath? ChooseScene(AssetProjectLayout layout, UPath? requested, HostSettings host)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(host);
+
+        if (requested is { } scene) return scene;
+        return host.Scene is { } declared ? layout.Assets / declared : (UPath?)null;
+    }
+
     /// <summary>
     /// <c>&lt;play&gt;/&lt;project name&gt;/config.toml|json</c> when it exists; the same convention
     /// <c>paradise new</c> lays down, so a project that follows it passes nothing.

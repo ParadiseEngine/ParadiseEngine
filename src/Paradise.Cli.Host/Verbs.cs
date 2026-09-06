@@ -536,7 +536,9 @@ internal static class Verbs
             if (assets != 0) return assets;
         }
 
-        var builtScene = scene is { } document ? HostPlayArguments.ResolveScene(layout, document) : (UPath?)null;
+        var builtScene = HostPlayArguments.ChooseScene(layout, scene, manifest.Host) is { } document
+            ? HostPlayArguments.ResolveScene(layout, document)
+            : (UPath?)null;
         if (builtScene is { } expected && !fileSystem.FileExists(expected))
         {
             Console.Error.WriteLine($"play: the build succeeded but {Display(fileSystem, expected)} is not there");

@@ -26,6 +26,16 @@ public class HostPlayArgumentsTests
     }
 
     [Test]
+    public async Task the_manifests_scene_is_the_default_and_the_callers_wins()
+    {
+        var host = new HostSettings("G/G.csproj", [], "levels/arena.prefab");
+
+        await Assert.That(HostPlayArguments.ChooseScene(s_layout, null, host)).IsEqualTo((UPath)"/game/assets/levels/arena.prefab");
+        await Assert.That(HostPlayArguments.ChooseScene(s_layout, "/game/assets/levels/other.prefab", host)).IsEqualTo((UPath)"/game/assets/levels/other.prefab");
+        await Assert.That(HostPlayArguments.ChooseScene(s_layout, null, HostSettings.None)).IsNull();
+    }
+
+    [Test]
     public async Task the_config_is_the_projects_when_the_play_tree_has_one()
     {
         using var fileSystem = new MemoryFileSystem();
