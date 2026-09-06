@@ -71,14 +71,13 @@ internal sealed record HostFreshness(
 
         var directories = new List<UPath> { directory };
         string? framework = null;
+        string? runtime = null;
         if (hasAssets)
         {
-            ReadAssets(fileSystem, assetsPath, directory, directories, out framework);
+            ReadAssets(fileSystem, assetsPath, directory, directories, out framework, out runtime);
         }
 
-        UPath? output = framework is null
-            ? (UPath?)null
-            : directory / "bin" / configuration / framework / (AssemblyName(fileSystem, csproj) + ".dll");
+        var output = framework is null ? (UPath?)null : FindOutput(fileSystem, directory / "bin" / configuration / framework, runtime, AssemblyName(fileSystem, csproj) + ".dll");
         var outputExists = output is { } path && fileSystem.FileExists(path);
 
         var outputStamp = hasStamp ? fileSystem.GetLastWriteTime(stampPath) : DateTime.MinValue;
@@ -117,9 +116,23 @@ internal sealed record HostFreshness(
         fileSystem.WriteAllText(path, DateTime.UtcNow.ToString("O") + "\n");
     }
 
-    private static void ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, out string? framework)
+    /// <summary>
+    /// <c>bin/&lt;cfg&gt;/&lt;tfm&gt;/&lt;name&gt;.dll</c>, or one directory deeper when the project restored
+    /// for a runtime identifier (the SDK appends <c>&lt;rid&gt;/</c> by default). When neither is
+    /// there, the rid path is what the message names and what a build is expected to produce.
+    /// </summary>
+    private static UPath FindOutput(IFileSystem fileSystem, UPath frameworkDirectory, string? runtime, string fileName)
+    {
+        var flat = frameworkDirectory / fileName;
+        if (runtime is null) return flat;
+        var withRuntime = frameworkDirectory / runtime / fileName;
+        return fileSystem.FileExists(flat) && !fileSystem.FileExists(withRuntime) ? flat : withRuntime;
+    }
+
+    private static void ReadAssets(IFileSystem fileSystem, UPath assetsPath, UPath directory, List<UPath> directories, out string? framework, out string? runtime)
     {
         framework = null;
+        runtime = null;
         JsonDocument document;
         try
         {
@@ -152,6 +165,16 @@ internal sealed record HostFreshness(
                 && frameworks.ValueKind == JsonValueKind.Object)
             {
                 framework = frameworks.EnumerateObject().Select(entry => entry.Name).FirstOrDefault();
+            }
+
+            // Restore records the rid(s) the project was restored for; one means the output moved
+            // under it. Several (a RuntimeIdentifiers list) leave the flat layout alone.
+            if (rootElement.TryGetProperty("project", out var project2)
+                && project2.TryGetProperty("runtimes", out var runtimes)
+                && runtimes.ValueKind == JsonValueKind.Object)
+            {
+                var names = runtimes.EnumerateObject().Select(entry => entry.Name).ToList();
+                if (names.Count == 1) runtime = names[0];
             }
         }
     }

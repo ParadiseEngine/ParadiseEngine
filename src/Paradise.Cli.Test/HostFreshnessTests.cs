@@ -175,6 +175,28 @@ public class HostFreshnessTests
     }
 
     [Test]
+    public async Task a_restored_runtime_identifier_moves_the_output_one_directory_down()
+    {
+        // The SDK appends <rid>/ to the output path when a RuntimeIdentifier is set; a flat
+        // probe would report the launcher never built and rebuild on every Play.
+        using var fileSystem = Built();
+        fileSystem.WriteAllText(s_assets, """
+            {
+              "libraries": {},
+              "project": { "frameworks": { "net10.0": { } }, "runtimes": { "osx-arm64": { "#import": [] } } }
+            }
+            """);
+        fileSystem.SetLastWriteTime(s_assets, s_restored);
+        fileSystem.DeleteFile(s_output);
+        Write(fileSystem, "/repo/Game.Launcher/bin/Debug/net10.0/osx-arm64/Game.Launcher.dll", "MZ", s_built.AddMinutes(-30));
+
+        var freshness = HostFreshness.Inspect(fileSystem, s_csproj, "Debug");
+
+        await Assert.That(freshness.Output).IsEqualTo((UPath)"/repo/Game.Launcher/bin/Debug/net10.0/osx-arm64/Game.Launcher.dll");
+        await Assert.That(freshness.IsFresh).IsTrue();
+    }
+
+    [Test]
     public async Task the_configuration_picks_the_output_directory()
     {
         using var fileSystem = Built();
