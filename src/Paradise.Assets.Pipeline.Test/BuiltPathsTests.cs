@@ -36,7 +36,7 @@ public class BuiltPathsTests
         var mesh = Document(fileSystem, "/game/assets/models/crate.mesh", new MeshReferenceDocument(new AssetReference(crate, "models/crate.glb"), MeshSlot.Mesh));
         var clip = Document(fileSystem, "/game/assets/models/crate.Walk.anim", new MeshReferenceDocument(new AssetReference(crate, "models/crate.glb"), MeshSlot.Clip, "Walk", 0));
         var glbMeta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        GlbImportSettings.WriteExtraction(glbMeta, new GlbExtraction(null, new AssetReference(mesh, "models/crate.mesh"), null, [], [], [], null));
+        GlbImportSettings.WriteExtraction(glbMeta, new GlbExtraction(null, new AssetReference(mesh, "models/crate.mesh"), null, [], [], []));
         glbMeta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
         fileSystem.WriteAllText("/game/assets/materials/rust.material",
@@ -116,7 +116,7 @@ public class BuiltPathsTests
         var crate = ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb");
         var mesh = Document(fileSystem, "/game/assets/models/crate.mesh", new MeshReferenceDocument(new AssetReference(crate, "models/crate.glb"), MeshSlot.Mesh));
         var glbMeta = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta");
-        GlbImportSettings.WriteExtraction(glbMeta, new GlbExtraction(null, new AssetReference(mesh, "models/crate.mesh"), null, [], [], [], null));
+        GlbImportSettings.WriteExtraction(glbMeta, new GlbExtraction(null, new AssetReference(mesh, "models/crate.mesh"), null, [], [], []));
         glbMeta.Save(fileSystem, "/game/assets/models/crate.glb.meta");
 
         var scene = new PrefabDocument();
