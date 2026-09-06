@@ -39,6 +39,7 @@ internal sealed class MacWatchTray : IWatchTray
     private nint _editorItem;
     private nint _rebuildItem;
     private nint _openItem;
+    private nint _sceneRestartItem;
     private nint _selSetTitle;
     private nint _selSetState;
     private nint _selSetToolTip;
@@ -177,6 +178,10 @@ internal sealed class MacWatchTray : IWatchTray
             var selOpen = Sel("openClicked:");
             var selQuit = Sel("stopClicked:");
             var selEditor = Sel("editorClicked:");
+            var selPlay = Sel("playClicked:");
+            var selPlayWatch = Sel("playWatchClicked:");
+            var selStopGame = Sel("stopGameClicked:");
+            var selSceneRestart = Sel("sceneRestartClicked:");
 
             var pool = Native.objc_autoreleasePoolPush();
             try
@@ -207,6 +212,7 @@ internal sealed class MacWatchTray : IWatchTray
                         AddMethod(targetClass, selOpen, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&OpenImp, "v@:@");
                         AddMethod(targetClass, selQuit, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopClickedImp, "v@:@");
                         AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
+                        AddGameMethods(targetClass, selPlay, selPlayWatch, selStopGame, selSceneRestart);
                         AddMethod(targetClass, _selApplyPendingState, (nint)(delegate* unmanaged[Cdecl]<nint, nint, void>)&ApplyImp, "v@:");
                         AddMethod(targetClass, _selStopApp, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopAppImp, "v@:@");
                     }
@@ -220,6 +226,7 @@ internal sealed class MacWatchTray : IWatchTray
                     unsafe
                     {
                         AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
+                        AddGameMethods(targetClass, selPlay, selPlayWatch, selStopGame, selSceneRestart);
                     }
                 }
 
@@ -267,6 +274,18 @@ internal sealed class MacWatchTray : IWatchTray
                 _openItem = AddMenuItem(
                     nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
                     WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn), selOpen);
+                if (_hooks.Game is not null)
+                {
+                    Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
+                    AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, WatchPresentation.PlayMenu, selPlay);
+                    AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, WatchPresentation.PlayWatchMenu, selPlayWatch);
+                    AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, WatchPresentation.StopGameMenu, selStopGame);
+                    _sceneRestartItem = AddMenuItem(
+                        nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem,
+                        WatchPresentation.SceneRestartToggleMenu, selSceneRestart);
+                    Native.MsgSend(_sceneRestartItem, _selSetState, _hooks.Game.SceneRestart.IsOn ? 1 : 0);
+                }
+
                 Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
                 AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Stop", selQuit);
                 Native.MsgSend(_statusItem, selSetMenu, _menu);
@@ -312,6 +331,14 @@ internal sealed class MacWatchTray : IWatchTray
 
     private static void AddMethod(nint cls, nint selector, nint imp, string types)
         => Native.class_addMethod(cls, selector, imp, types);
+
+    private static unsafe void AddGameMethods(nint cls, nint selPlay, nint selPlayWatch, nint selStopGame, nint selSceneRestart)
+    {
+        AddMethod(cls, selPlay, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&PlayImp, "v@:@");
+        AddMethod(cls, selPlayWatch, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&PlayWatchImp, "v@:@");
+        AddMethod(cls, selStopGame, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopGameImp, "v@:@");
+        AddMethod(cls, selSceneRestart, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&SceneRestartImp, "v@:@");
+    }
 
     /// <summary>
     /// <c>statusItemWithLength:</c> takes a <c>CGFloat</c>. arm64 <c>objc_msgSend</c> is
@@ -402,6 +429,11 @@ internal sealed class MacWatchTray : IWatchTray
             if (_openItem != 0)
             {
                 Native.MsgSend(_openItem, _selSetTitle, ToNSString(WatchPresentation.OpenOutputMenu(editor)));
+            }
+
+            if (_sceneRestartItem != 0 && _hooks.Game is not null)
+            {
+                Native.MsgSend(_sceneRestartItem, _selSetState, _hooks.Game.SceneRestart.IsOn ? 1 : 0);
             }
         }
         finally
@@ -572,6 +604,59 @@ internal sealed class MacWatchTray : IWatchTray
         }
         catch
         {
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void PlayImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Game?.Play();
+        }
+        catch
+        {
+            // Menu IMPs must not throw back into AppKit.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void PlayWatchImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Game?.PlayWatch();
+        }
+        catch
+        {
+            // Menu IMPs must not throw back into AppKit.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void SceneRestartImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Game?.ToggleSceneRestart();
+            s_current?.HopApply();
+        }
+        catch
+        {
+            // Menu IMPs must not throw back into AppKit.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void StopGameImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            s_current?._hooks.Game?.StopGame();
+        }
+        catch
+        {
+            // Menu IMPs must not throw back into AppKit.
         }
     }
 

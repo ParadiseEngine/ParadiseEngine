@@ -192,6 +192,54 @@ public class ProjectManifestTests
             .Throws<ProjectManifestException>();
     }
 
+    [Test]
+    public async Task a_manifest_without_a_host_section_launches_nothing()
+    {
+        var manifest = ProjectManifest.Parse(Minimal, "project.toml");
+
+        await Assert.That(manifest.Host.Project).IsNull();
+        await Assert.That(manifest.Host.Arguments).IsEmpty();
+    }
+
+    [Test]
+    public async Task the_host_section_names_the_launcher_and_its_arguments()
+    {
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"Game.Launcher/Game.Launcher.csproj\"\narguments = [\"--ui\", \"ui/Shell.xaml\"]\n", "project.toml");
+
+        await Assert.That(manifest.Host.Project).IsEqualTo("Game.Launcher/Game.Launcher.csproj");
+        await Assert.That(manifest.Host.Arguments).IsEquivalentTo(new[] { "--ui", "ui/Shell.xaml" });
+    }
+
+    [Test]
+    public async Task the_host_scene_is_assets_relative_and_optional()
+    {
+        var bare = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"G/G.csproj\"\n", "project.toml");
+        await Assert.That(bare.Host.Scene).IsNull();
+
+        var declared = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"G/G.csproj\"\nscene = \"levels/arena.prefab\"\n", "project.toml");
+        await Assert.That(declared.Host.Scene).IsEqualTo("levels/arena.prefab");
+    }
+
+    [Test]
+    public async Task a_host_project_that_is_not_a_csproj_is_refused()
+    {
+        // A prebuilt executable has no build to run and no reference closure to check, so the
+        // freshness gate and `dotnet watch run` would both be lies about it.
+        var error = Rejects($"{Minimal}\n\n[host]\nproject = \"bin/Game\"\n");
+
+        await Assert.That(error.Message).Contains("bin/Game");
+        await Assert.That(error.Message).Contains(".csproj");
+    }
+
+    [Test]
+    public async Task an_unknown_host_key_is_refused()
+    {
+        var error = Rejects($"{Minimal}\n\n[host]\nargs = [\"--seed\"]\n");
+
+        await Assert.That(error.Message).Contains("args");
+        await Assert.That(error.Message).Contains("[host]");
+    }
+
     private static ProjectManifestException Rejects(string toml)
     {
         try

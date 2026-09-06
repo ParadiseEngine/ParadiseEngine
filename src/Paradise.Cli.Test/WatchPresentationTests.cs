@@ -46,5 +46,9 @@ public class WatchPresentationTests
         await Assert.That(WatchPresentation.OpenOutputMenu(editor: false)).IsEqualTo("Open the build folder");
         await Assert.That(WatchPresentation.OpenOutputMenu(editor: true)).IsEqualTo("Open the play folder");
         await Assert.That(WatchPresentation.EditorToggleMenu).IsEqualTo("Play mode");
+        await Assert.That(WatchPresentation.PlayMenu).IsEqualTo("Play the game");
+        await Assert.That(WatchPresentation.PlayWatchMenu).IsEqualTo("Play the game (watch code)");
+        await Assert.That(WatchPresentation.StopGameMenu).IsEqualTo("Stop the game");
+        await Assert.That(WatchPresentation.SceneRestartToggleMenu).IsEqualTo("Restart the game on scene save");
     }
 }

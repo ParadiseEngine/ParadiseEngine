@@ -28,6 +28,9 @@ internal sealed class ProjectManifestDocument
     [JsonPropertyName("extract")]
     public ExtractSectionDocument? Extract { get; set; }
 
+    [JsonPropertyName("host")]
+    public HostSectionDocument? Host { get; set; }
+
     /// <summary>Anything Tomlyn could not map. Non-empty is an error: a typo'd key that a lenient read ignored is a setting that never applied.</summary>
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
@@ -52,6 +55,21 @@ internal sealed class ExtractSectionDocument
 
     [JsonPropertyName("skinned_mesh_component")]
     public string? SkinnedMeshComponent { get; set; }
+
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
+}
+
+internal sealed class HostSectionDocument
+{
+    [JsonPropertyName("project")]
+    public string? Project { get; set; }
+
+    [JsonPropertyName("arguments")]
+    public List<string>? Arguments { get; set; }
+
+    [JsonPropertyName("scene")]
+    public string? Scene { get; set; }
 
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }

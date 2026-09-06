@@ -36,6 +36,7 @@ public static class BuildHost
             "new" => New(physical, args.Skip(1).ToArray()),
             "assets" => Assets(physical, chain, verb, rest),
             "tools" => Tools(physical, verb, rest),
+            "host" => Host(physical, chain, verb, rest),
             "--help" or "-h" or "help" => Usage(),
             _ => Unknown($"unknown command '{group}'"),
         };
@@ -145,6 +146,70 @@ public static class BuildHost
         };
     }
 
+    private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? hostVerb, string[] arguments)
+    {
+        if (hostVerb is null) return Unknown("'host' needs a verb (build, play)");
+
+        string? projectDirectory = null;
+        string? profile = null;
+        string? scene = null;
+        string? config = null;
+        var configuration = "Debug";
+        var watch = false;
+        var noBuild = false;
+        var noAssets = false;
+        var passthrough = new List<string>();
+
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            switch (arguments[i])
+            {
+                case "--project" when i + 1 < arguments.Length: projectDirectory = arguments[++i]; break;
+                case "--profile" when i + 1 < arguments.Length: profile = arguments[++i]; break;
+                case "--scene" when i + 1 < arguments.Length: scene = arguments[++i]; break;
+                case "--config" when i + 1 < arguments.Length: config = arguments[++i]; break;
+                case "--configuration" or "-c" when i + 1 < arguments.Length: configuration = arguments[++i]; break;
+                case "--watch": watch = true; break;
+                case "--no-build": noBuild = true; break;
+                case "--no-assets": noAssets = true; break;
+                case "--":
+                    passthrough.AddRange(arguments.Skip(i + 1));
+                    i = arguments.Length;
+                    break;
+                default:
+                    return Unknown($"unknown argument '{arguments[i]}'");
+            }
+        }
+
+        if (watch && noBuild) return Unknown("--no-build has no meaning with --watch: dotnet watch builds on its own");
+
+        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        AssetProjectLayout layout;
+        try
+        {
+            layout = AssetProjectLayout.Locate(physical, start);
+        }
+        catch (DirectoryNotFoundException error)
+        {
+            Console.Error.WriteLine($"paradise: {error.Message}");
+            return 1;
+        }
+
+        // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner
+        // installs it for the child's lifetime), and a handler that outlived the child would
+        // swallow the Ctrl+C that should end an asset cook outright.
+        return hostVerb switch
+        {
+            "build" => Verbs.HostBuild(physical, layout, configuration, CancellationToken.None),
+            "play" => Verbs.HostPlay(
+                physical, layout, profile,
+                scene is null ? (UPath?)null : Absolute(physical, scene),
+                config is null ? (UPath?)null : Absolute(physical, config),
+                watch, noBuild, noAssets, configuration, passthrough, importers, CancellationToken.None),
+            _ => Unknown($"unknown host verb '{hostVerb}'"),
+        };
+    }
+
     private static UPath Absolute(PhysicalFileSystem physical, string path)
         => physical.ConvertPathFromInternal(Path.GetFullPath(path));
 
@@ -225,6 +290,14 @@ public static class BuildHost
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
+
+            host build                    build the launcher [host] names in assets/project.toml
+            host play [--scene <doc>]     build assets into .editor/play, build the launcher if a source
+                                            changed, run it on the document and wait for it to exit
+                                            --watch runs it under `dotnet watch run` instead: an edit
+                                            hot-patches or rebuilds and restarts the game
+                                            --no-build runs what is built; --no-assets skips the asset build
+                                            -c <configuration> (default Debug); arguments after -- go to the game
 
             tools doctor                  report every build tool: found, version, and how to fix
                                             probes the same root `assets build` does (--project applies)
