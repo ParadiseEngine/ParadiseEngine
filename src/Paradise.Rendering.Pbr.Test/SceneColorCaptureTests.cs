@@ -153,6 +153,133 @@ public class SceneColorCaptureTests
         }
     }
 
+    /// <summary>The target-following path: no view handle, no event, no rebind. The material
+    /// names the target and the cache keeps the binding current.</summary>
+    [Test]
+    public async Task a_material_that_follows_the_scene_color_target_samples_it_without_an_event()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            pbr.SceneColorCapture = true;
+
+            var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
+            var programId = pbr.RegisterMaterialProgram(program);
+            var material = BlendMaterial(64, 64);
+            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
+                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+
+            var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
+            var (vertices, indices) = Procedural.UnitCube();
+            scene.Instances.Add(new PbrInstance
+            {
+                Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]),
+                Model = Matrix4x4.CreateScale(new Vector3(1.2f, 1.2f, 0.02f)) * Matrix4x4.CreateTranslation(0f, 0.4f, 1.2f),
+            });
+
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+            var pixels = renderer.ReadbackColor(out var w, out var h);
+            var idx = (int)((h / 2) * w + (w / 2)) * 4;
+            var b = pixels[idx + 0];
+            var r = pixels[idx + 2];
+
+            await Assert.That(pbr.Materials.TargetsOf(materialId).ToArray()).IsEquivalentTo([PbrTargets.SceneColor]);
+            await Assert.That((int)r).IsGreaterThan(120);
+            await Assert.That((int)r).IsGreaterThan(b + 40);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    /// <summary>What used to need SceneColorViewChanged: the resize retires the view, and the
+    /// next frame binds the new one with nobody subscribed to anything. The scene turns green
+    /// after the resize, because the OLD texture still holds the red capture and a group left
+    /// pointing at it would keep sampling red — which is exactly what the old event guarded.</summary>
+    [Test]
+    public async Task a_followed_target_survives_resize_with_no_rebind()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+            pbr.SceneColorCapture = true;
+            var oldView = pbr.SceneColorView;
+
+            var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
+            var programId = pbr.RegisterMaterialProgram(program);
+            var material = BlendMaterial(96, 96);
+            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
+                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+            var (vertices, indices) = Procedural.UnitCube();
+            var quad = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]);
+            var quadModel = Matrix4x4.CreateScale(new Vector3(1.2f, 1.2f, 0.02f)) * Matrix4x4.CreateTranslation(0f, 0.4f, 1.2f);
+
+            var red = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
+            red.Instances.Add(new PbrInstance { Mesh = quad, Model = quadModel });
+            for (var i = 0; i < 2; i++) pbr.RenderFrame(red);
+
+            renderer.Resize(96, 96);
+            pbr.Resize(96, 96);
+            var green = BuildScene(pbr, new Vector4(0.05f, 0.9f, 0.05f, 1f));
+            green.Instances.Add(new PbrInstance { Mesh = quad, Model = quadModel });
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(green);
+            var pixels = renderer.ReadbackColor(out var w, out var h);
+            var idx = (int)((h / 2) * w + (w / 2)) * 4;
+            var g = pixels[idx + 1];
+            var r = pixels[idx + 2];
+
+            await Assert.That(pbr.SceneColorView).IsNotEqualTo(oldView);
+            await Assert.That((int)g).IsGreaterThan(120);
+            await Assert.That((int)g).IsGreaterThan(r + 40);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
+    /// <summary>With capture off the target does not exist; the binding is black, never
+    /// dangling, and the fixture that emits the captured color emits nothing.</summary>
+    [Test]
+    public async Task a_followed_target_reads_black_while_capture_is_off()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, 64, 64);
+
+            var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
+            var programId = pbr.RegisterMaterialProgram(program);
+            var material = BlendMaterial(64, 64);
+            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
+                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+            var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
+            var (vertices, indices) = Procedural.UnitCube();
+            scene.Instances.Add(new PbrInstance
+            {
+                Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]),
+                Model = Matrix4x4.CreateScale(new Vector3(1.2f, 1.2f, 0.02f)) * Matrix4x4.CreateTranslation(0f, 0.4f, 1.2f),
+            });
+
+            for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
+            var pixels = renderer.ReadbackColor(out var w, out var h);
+            var idx = (int)((h / 2) * w + (w / 2)) * 4;
+            var r = pixels[idx + 2];
+
+            await Assert.That((int)r).IsLessThan(60);
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
     [Test]
     public async Task resize_recreates_the_view_raises_the_event_and_update_extra_entry_rebinds()
     {

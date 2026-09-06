@@ -21,6 +21,7 @@ public sealed partial class SceneFeature : IRenderFeature
     private readonly BufferHandle _frameUniformBuffer;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
+    private readonly HashSet<int> _materialsSeen = [];
     private float _specularAaVariance;
     private float _specularAaClamp;
 
@@ -92,6 +93,8 @@ public sealed partial class SceneFeature : IRenderFeature
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
         DeclareGroups(main, shadows, position);
+        DeclareMaterialReads(graph, main, _ctx.Opaque);
+        if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
         main.Record(this, split ? RecordOpaque : RecordAll);
 
         if (split)
@@ -100,12 +103,29 @@ public sealed partial class SceneFeature : IRenderFeature
             // depth, so this is exactly the state they expect mid-pass.
             var blend = graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
                 .Color(0, hdr, LoadOp.Load, clear: scene.ClearColor)
-                .Depth(depth, LoadOp.Load, clear: 1f)
-                // Sampled through the material's own group 2, which the graph does not build: the
-                // one read here that has to be said rather than derived.
-                .Reads(graph.Texture(PbrTargets.SceneColor));
+                .Depth(depth, LoadOp.Load, clear: 1f);
             DeclareGroups(blend, shadows, position);
+            DeclareMaterialReads(graph, blend, _ctx.Blend);
             blend.Record(this, RecordBlend);
+        }
+    }
+
+    /// <summary>The frame targets the bucket's materials follow, declared as reads of the pass
+    /// that draws them. Group 2 is the material's own, which the graph does not build, so these
+    /// are the reads that cannot be derived from a binding — but they are derived from the
+    /// material cache's records rather than written by hand, so a material that follows a target
+    /// nobody thought about is still an edge. A target that does not exist this frame is bound as
+    /// black and reads nothing.</summary>
+    private void DeclareMaterialReads(FrameGraph graph, FrameGraph.PassBuilder pass, List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket)
+    {
+        _materialsSeen.Clear();
+        var materials = _ctx.Materials;
+        var targets = _ctx.Targets;
+        foreach (var (_, primitive, _) in bucket)
+        {
+            if (!_materialsSeen.Add(primitive.MaterialId)) continue;
+            foreach (var target in materials.TargetsOf(primitive.MaterialId))
+                if (targets.Contains(target)) pass.Reads(graph.Texture(target));
         }
     }
 

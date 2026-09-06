@@ -47,7 +47,7 @@ public sealed partial class PbrRenderer : IDisposable
         _programs = new MaterialPrograms(renderer);
         _ctx = new PbrContext(renderer, _log, _programs, width, height);
         _graph = new FrameGraph(_ctx.Targets, _ctx.BindGroups, _log);
-        Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy);
+        Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
         _ctx.Materials = Materials;
 
         // List order is dependency order: the scene reads the shadow plan and the SSAO result,
@@ -348,6 +348,7 @@ public sealed partial class PbrRenderer : IDisposable
                 $"{totalDraws} draws exceed the {PbrContext.MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
 
         _ctx.BeginFrame(scene, in view, in viewProjection);
+        Materials.ResolveTargets();
         _graph.Reset();
         Pipeline.Setup(_graph, _ctx.Width, _ctx.Height);
 
