@@ -91,7 +91,7 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
 /// <c>dotnet watch</c> alive and parked on "waiting for a file to change", which is what makes a
 /// restart without a rebuild possible.
 /// </summary>
-/// <remarks>Unix only, through <c>ps</c>: .NET exposes no parent-pid API, and the Windows way (a job object or WMI) is a different tool. On Windows nothing is killed and the caller's touch is a no-op for a running game.</remarks>
+/// <remarks>.NET exposes no parent-pid API: <c>ps</c> on Unix, a Toolhelp snapshot on Windows.</remarks>
 internal static class ProcessTree
 {
     public sealed record Leaf(int Pid, string Command)
@@ -105,8 +105,16 @@ internal static class ProcessTree
 
     public static IReadOnlyList<Leaf> Leaves(int root)
     {
-        if (OperatingSystem.IsWindows()) return [];
+        var children = OperatingSystem.IsWindows() ? WindowsChildren() : UnixChildren();
+        if (children is null) return [];
 
+        var leaves = new List<Leaf>();
+        Collect(new Leaf(root, "dotnet"), children, leaves);
+        return leaves;
+    }
+
+    private static Dictionary<int, List<Leaf>>? UnixChildren()
+    {
         var children = new Dictionary<int, List<Leaf>>();
         try
         {
@@ -123,12 +131,79 @@ internal static class ProcessTree
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            return [];
+            return null;
         }
 
-        var leaves = new List<Leaf>();
-        Collect(new Leaf(root, "dotnet"), children, leaves);
-        return leaves;
+        return children;
+    }
+
+    /// <summary>Every process's parent from one Toolhelp snapshot; the Windows counterpart of <c>ps -o pid,ppid,comm</c>.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static Dictionary<int, List<Leaf>>? WindowsChildren()
+    {
+        var snapshot = Toolhelp.CreateToolhelp32Snapshot(Toolhelp.Th32csSnapProcess, 0);
+        if (snapshot == Toolhelp.InvalidHandle) return null;
+
+        var children = new Dictionary<int, List<Leaf>>();
+        try
+        {
+            var entry = new Toolhelp.ProcessEntry32 { dwSize = (uint)Marshal.SizeOf<Toolhelp.ProcessEntry32>() };
+            if (!Toolhelp.Process32FirstW(snapshot, ref entry)) return null;
+            do
+            {
+                var parent = (int)entry.th32ParentProcessID;
+                if (!children.TryGetValue(parent, out var list)) children[parent] = list = [];
+                list.Add(new Leaf((int)entry.th32ProcessID, entry.szExeFile));
+            }
+            while (Toolhelp.Process32NextW(snapshot, ref entry));
+        }
+        finally
+        {
+            Toolhelp.CloseHandle(snapshot);
+        }
+
+        return children;
+    }
+
+    private static class Toolhelp
+    {
+        public const uint Th32csSnapProcess = 0x2;
+        public static readonly nint InvalidHandle = -1;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct ProcessEntry32
+        {
+            public uint dwSize;
+            public uint cntUsage;
+            public uint th32ProcessID;
+            public nuint th32DefaultHeapID;
+            public uint th32ModuleID;
+            public uint cntThreads;
+            public uint th32ParentProcessID;
+            public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szExeFile;
+        }
+
+        // DllImport rather than LibraryImport: the struct's inline string is not a shape the
+        // source generator marshals, and this is three calls on a menu click.
+#pragma warning disable SYSLIB1054
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern nint CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool Process32FirstW(nint hSnapshot, ref ProcessEntry32 lppe);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool Process32NextW(nint hSnapshot, ref ProcessEntry32 lppe);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(nint hObject);
+#pragma warning restore SYSLIB1054
     }
 
     private static void Collect(Leaf node, Dictionary<int, List<Leaf>> children, List<Leaf> leaves)
