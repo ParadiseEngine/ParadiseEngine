@@ -231,7 +231,6 @@ public sealed class ProjectManifestException : Exception
     public string SourceName { get; }
 }
 
-/// <summary>The <c>[extract]</c> section: an assets-relative directory (null = beside the GLB) and the component type names a generated prefab authors a mesh into (null = the schema decides by name).</summary>
 /// <summary>
 /// The <c>[host]</c> section: the launcher's csproj, RELATIVE TO THE PROJECT ROOT (the directory
 /// holding <c>assets/</c>) rather than to <c>assets/</c> like <c>[extract]</c>, because a launcher
@@ -244,6 +243,7 @@ public sealed record HostSettings(string? Project, IReadOnlyList<string> Argumen
     public static HostSettings None { get; } = new(null, []);
 }
 
+/// <summary>The <c>[extract]</c> section: an assets-relative directory (null = beside the GLB) and the component type names a generated prefab authors a mesh into (null = the schema decides by name).</summary>
 public sealed record ExtractSettings(string? Directory, string? StaticMeshComponent, string? SkinnedMeshComponent)
 {
     public static ExtractSettings None { get; } = new(null, null, null);
