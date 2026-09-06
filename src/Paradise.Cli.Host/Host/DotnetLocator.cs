@@ -28,7 +28,14 @@ internal static class DotnetLocator
         candidates.Add("/opt/homebrew/bin/dotnet");
         candidates.Add("/usr/share/dotnet/dotnet");
         candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet", s_executable));
-        candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", s_executable));
+        if (OperatingSystem.IsWindows())
+        {
+            // The installer's machine-wide location, then the per-user one dotnet-install.ps1 uses.
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", s_executable));
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet", s_executable));
+            candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "dotnet", s_executable));
+        }
+
         return candidates.FirstOrDefault(File.Exists);
     }
 }
