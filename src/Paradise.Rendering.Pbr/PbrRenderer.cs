@@ -3,216 +3,39 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using System.Buffers;
 using System.Numerics;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Paradise.Assets.Gltf;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The PBR scene renderer: owns the Slang-compiled program (reflection-validated at
-/// construction), ≤4 lazily-built pipeline variants (opaque/blend × linear/sRGB fragment entry
-/// selected ONCE by the surface format — never double-encoded), a Depth32Float depth buffer,
-/// a dynamic-offset draw-UBO ring, and the per-frame command-stream emission: opaque first,
-/// then blend back-to-front. All geometry/material upload goes through
-/// <see cref="UploadMesh"/>/<see cref="MaterialResourceCache"/>.</summary>
+/// <summary>The PBR scene renderer: a <see cref="RenderPipeline"/> of features over one shared
+/// context, driven once per frame through a <see cref="FrameGraph"/>. Owns geometry upload, the
+/// material cache and the draw ring; the passes themselves belong to the features in
+/// <see cref="Pipeline"/>, which a host may extend.</summary>
 public sealed partial class PbrRenderer : IDisposable
 {
-    private const int MaxDrawsPerFrame = 4096;
     private const int FloatsPerVertex = 12;         // pos3/normal3/uv2/tan4 interleave
     private const int SkinFloatsPerVertex = 8;      // joint4 (indices as floats) + weight4
     private const int SkinnedFloatsPerVertex = FloatsPerVertex + SkinFloatsPerVertex; // vertexMainSkinned's stride
-    private const uint DefaultShadowMapSize = 1024; // per-layer shadow map resolution (Depth32Float)
-    // One array layer per shadow view: dir/spot = 1 layer, point = 6 cube-face layers. Cap = every
-    // scene light casting a 6-face point shadow. The array is sized dynamically each frame (grow-only)
-    // to the layers actually in use, so a scene with one directional light allocates a single layer.
-    private const int MaxShadowLayers = FrameUniformsGpu.MaxSceneLights * 6; // 48
 
-    private readonly IRenderer _renderer;
-    private readonly ILogger _log;
-    private readonly ShaderProgramDesc _program;
-    private readonly bool _useSrgbEntryPoint;
-    private readonly uint _drawStride;
-    private uint _shadowMapSize = DefaultShadowMapSize;
-
-    /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
-    /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
-    /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
-    public uint ShadowMapSize
-    {
-        get => _shadowMapSize;
-        set
-        {
-            var clamped = Math.Clamp(value, 256u, 8192u);
-            if (clamped == _shadowMapSize) return;
-            _shadowMapSize = clamped;
-            _shadowLayerCapacity = 0; // the next EnsureShadowArray re-declares the array at the new size
-        }
-    }
-
-    /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
-    /// shadow edge). Scenes author this through the export contract's <c>Lighting.ShadowBlur</c>;
-    /// hosts apply it here. Clamped to [0.5, 8] — below ~2 the map's texel staircase shows
-    /// through the 8-tap Vogel filter, far above it contact shadows detach into mush.</summary>
-    public float ShadowBlurTexels
-    {
-        get => _shadowBlurTexels;
-        set => _shadowBlurTexels = Math.Clamp(value, 0.5f, 8f);
-    }
-
-    private float _shadowBlurTexels = 3f;
-
-    /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
-    /// shadow map covers. The fit used to be the whole scene AABB, which on a large world
-    /// stretches the map until shadows blur into mush (and, before the bias scaled with texel
-    /// size, flat ground self-shadowed in diagonal bands). A camera-centred fit keeps texel
-    /// density constant no matter how big the scene grows; the box is snapped to whole texels so it does not shimmer
-    /// as the camera moves, and the depth range still spans the scene AABB so tall casters
-    /// outside the circle keep casting in. When the scene is smaller than the radius (or the
-    /// radius is 0) the legacy whole-scene fit applies — small scenes keep their tighter box.</summary>
-    public float DirectionalShadowRadius { get; set; } = 50f;
-    private readonly BufferHandle _frameUniformBuffer;
-    private readonly BufferHandle _drawUniformRing;
-    private readonly BindGroupLayoutDesc _frameGroupLayout;
-    private readonly BindGroupHandle _drawGroup;
-    private readonly Dictionary<(int ProgramId, BlendMode Blend), PipelineHandle> _pipelines = new();
-    // Game-registered material programs (RegisterMaterialProgram): index + 1 = programId; 0 is the
-    // built-in PBR program. Each entry stores the MERGED desc (custom modules over the built-in
-    // pipeline layout, see RegisterMaterialProgram) plus its entry-point names.
-    private readonly List<(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry)> _customPrograms = [];
-    private readonly byte[] _drawStaging;
-    private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
-    private readonly GraphTextureRegistry _targets;
-    private readonly BindGroupCache _bindGroups;
-    private readonly FrameGraph _graph;
-    private readonly List<GraphTexture> _bloomResources = [];
-
-    // Frame-local encode state: RenderFrame computes it, the pass recorders consume it. Fields
-    // rather than parameters because a PassRecorder carries a context object and one int, and
-    // threading four more values through that would only rebuild the closure the signature exists
-    // to avoid. Live only for the duration of one Compile.
-    private PbrScene? _encodeScene;
-    private Matrix4x4 _encodeViewProjection;
-    private int _encodeDrawIndex;
-    private int _encodeShadowDrawIndex;
-    private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _opaque = [];
-    private readonly List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> _blend = [];
-    private readonly List<BufferHandle> _ownedBuffers = [];
-    // Gradient-sky background: a fullscreen triangle (no vertex buffer) drawn first in the main pass
-    // with depth-write off / compare Always, so geometry overdraws it. Colours come from a tiny UBO.
-    private readonly PipelineHandle _skyPipeline;
-    private readonly BufferHandle _skyUniformBuffer;
-    private readonly BindGroupHandle _skyGroup;
-    // HDR post-process seam: the main pass (PBR + sky) now renders LINEAR HDR into the HDR target
-    // (Rgba16Float) instead of tonemapping to the swapchain in-shader; a fullscreen composite pass
-    // tonemaps it (+ optional bloom) to the surface. This is where future post effects hook in.
-    private readonly PipelineHandle _compositePipeline;
-    private readonly BufferHandle _compositeUniformBuffer;
-    private readonly SamplerHandle _compositeSampler;
-    // Scene-color capture (opt-in, SceneColorCapture): opaque+sky blitted into a sampleable
-    // texture between the two halves of the split main pass — the screen-space refraction source
-    // blend materials bind as a group-2 extra entry (the engine's screen_texture analog).
-    private bool _sceneColorCapture;
-    private PipelineHandle _blitPipeline;
-    private BindGroupLayoutDesc? _blitGroupLayout;
-    private BindGroupLayoutDesc _compositeGroupLayout;
-    private const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
-    // The frame's targets live in _targets under these names; a resize re-declares them and the
-    // registry recreates only what changed. The shadow array is grow-only and sized per frame.
-    private const string HdrTarget = "PbrHdrScene";
-    private const string DepthTarget = "PbrDepth";
-    private const string PositionTarget = "PbrSsaoPosition";
-    private const string PrepassDepthTarget = "PbrSsaoPrepassDepth";
-    private const string SceneColorTarget = "PbrSceneColor";
-    private const string ShadowArrayTarget = "PbrShadowArray";
-    private static readonly string[] BloomTargets = ["PbrBloom0", "PbrBloom1", "PbrBloom2", "PbrBloom3", "PbrBloom4", "PbrBloom5"];
-    // Bloom mip chain (progressive dual-filter, COD-style): a half-res base halving to ~BloomMinDim.
-    // bright-pass (threshold) → downsample chain → additive upsample chain; mip 0 is the
-    // result composite adds. Pipelines built once; the mips are re-declared on resize.
-    private const int BloomMaxLevels = 6;
-    private const uint BloomMinDim = 8;
-    private readonly PipelineHandle _bloomBrightPipeline;
-    private readonly PipelineHandle _bloomDownPipeline;
-    private readonly PipelineHandle _bloomUpPipeline;
-    private readonly BufferHandle _bloomUniformBuffer;
-    private BindGroupLayoutDesc _bloomGroupLayout;
-    private int _bloomLevels;
-    // SSAO: a world-position pre-pass (reuses the main draw ring/group + a dedicated pipeline) writes
-    // the position target (Rgba32Float, offscreen color) with its own depth target. The PBR
-    // shader (group 3) samples it via textureLoad and darkens ambient.
-    private readonly ShaderProgramDesc _positionPrepassProgram;
-    private readonly PipelineHandle _positionPrepassPipeline;
-    private readonly BufferHandle _ssaoUniformBuffer;
-    private BindGroupLayoutDesc _ssaoGroupLayout;
-    // Sky-reflection specular (Godot reflected_light_source = Sky): the gradient sky GGX-prefiltered
-    // on the CPU into a small LUT (u: reflection.y, v: roughness — the gradient is azimuth-symmetric).
-    // Rgba8UnormSrgb: radiance ∈ [0,1] on the standard hardware-decoded color path. Rebaked only
-    // when the sky colours/curves change; group 3 binds it alongside the SSAO resources.
-    private readonly TextureHandle _skySpecLutTexture;
-    private readonly TextureViewHandle _skySpecLutView;
-    private readonly SamplerHandle _skySpecSampler;
-    // The environment-BRDF (DFG) table: the real GGX pre-integral, baked once at startup —
-    // Godot's integrate_dfg.glsl integrand (Schlick-GGX, IBL k = α²/2, 1024 Hammersley samples).
-    private readonly TextureHandle _dfgLutTexture;
-    private readonly TextureViewHandle _dfgLutView;
-    private (Vector3, Vector3, Vector3, Vector3, float, float, Vector3, float, float, float)? _skySpecKey;
-    // Forward+ froxel clustering: one uint bitmask per froxel (bit i = sceneLights[i] overlaps),
-    // CPU-binned each frame from conservative view-space sphere bounds. 32x32 px tiles x 32
-    // logarithmic Z slices, matching Godot's cluster shape (Godot bins on the GPU with a compute
-    // rasterizer; the CPU route produces the same conservative result at our light counts).
-    private BufferHandle _clusterBuffer;
-    private uint[] _clusterMasks = [];
-    private int _clusterTilesX;
-    private int _clusterTilesY;
-    private const int ClusterTileSize = 32;
-    private const int ClusterZSlices = 32;
-    // Joint palettes for skinned instances, packed end to end and indexed by
-    // PbrInstance.JointOffset. Bound to set 1 unconditionally: WebGPU requires every declared
-    // binding to be present, so a scene with no skinned mesh still binds this at its minimum size
-    // (leave it unbound and EVERY draw fails, not just skinned ones).
-    private BufferHandle _jointBuffer;
-    private Matrix4x4[] _jointPalettes = [];
-    private int _jointCapacity;
-    // The same palette buffer bound into the shadow and position-prepass programs, which declare
-    // it in their own group 1. Every group a pipeline layout declares must be bound on every draw,
-    // so these exist even in scenes with nothing skinned.
-    private BindGroupHandle _shadowJointGroup;
-    private BindGroupHandle _prepassJointGroup;
-    private int _jointHighWater;          // staged range to upload this frame
-    private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
-    // Skinned twins of the three pipelines, built lazily so a scene with nothing skinned never
-    // compiles them.
-    private readonly Dictionary<BlendMode, PipelineHandle> _skinnedPipelines = new();
-    private PipelineHandle _shadowSkinnedPipeline;
-    private PipelineHandle _prepassSkinnedPipeline;
     /// <summary>Palette slots allocated up front. 64 characters at 65 joints, or any mix — one
     /// 16 KB storage buffer. Overflowing is reported once rather than silently dropping a palette,
     /// which would draw the mesh collapsed at the origin and read as a rigging bug.</summary>
     public const int MaxSkinnedJoints = 4096;
-    // Shadow mapping: a Depth32Float 2D-array (one layer per shadow view) filled by per-layer
-    // depth-only caster passes, sampled as texture_depth_2d_array by the main pass.
-    private readonly ShaderProgramDesc _shadowProgram;
-    private readonly PipelineHandle _shadowPipeline;
-    private readonly SamplerHandle _shadowSampler;
-    private readonly BufferHandle _shadowDrawRing;
-    private readonly BindGroupHandle _shadowDrawGroup;
-    private readonly byte[] _shadowStaging;
-    private uint _shadowLayerCapacity;
-    // Per-frame shadow plan: one render "view" per shadow-casting light face, plus per-light array
-    // assignment (base layer / face count; base layer -1 = not shadowed this frame).
-    private readonly List<(int LightIndex, int Face, uint Layer, Matrix4x4 Vp)> _shadowViews = [];
-    private readonly int[] _shadowBaseLayer = new int[FrameUniformsGpu.MaxSceneLights];
-    // Shadow texel world size per light (see ComputeLightMatrix), uploaded as sizeParams.y so the
-    // shader's normal-offset bias scales with the map's actual texel density instead of assuming one.
-    private readonly float[] _shadowTexelWorld = new float[FrameUniformsGpu.MaxSceneLights];
-    private readonly int[] _shadowFaceCount = new int[FrameUniformsGpu.MaxSceneLights];
-    private uint _width;
-    private uint _height;
-    private float _specularAaVariance;
-    private float _specularAaClamp;
-    private bool _disposed;
 
-    public MaterialResourceCache Materials { get; }
+    private readonly IRenderer _renderer;
+    private readonly ILogger _log;
+    private readonly PbrContext _ctx;
+    private readonly MaterialPrograms _programs;
+    private readonly FrameGraph _graph;
+    private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
+    private readonly List<BufferHandle> _ownedBuffers = [];
+    private readonly ShadowFeature _shadows;
+    private readonly SceneFeature _scene;
+    private readonly SceneColorCaptureFeature _capture;
+    private readonly CompositeFeature _composite;
+    private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
+    private bool _disposed;
 
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
@@ -220,259 +43,68 @@ public sealed partial class PbrRenderer : IDisposable
         ILogger? logger = null)
     {
         _renderer = renderer;
-        _targets = new GraphTextureRegistry(renderer);
-        _bindGroups = new BindGroupCache(renderer);
-        _graph = new FrameGraph(_targets, _bindGroups);
         _log = logger ?? NullLogger.Instance;
-        _specularAaVariance = specularAaVariance;
-        _specularAaClamp = specularAaClamp;
+        _programs = new MaterialPrograms(renderer);
+        _ctx = new PbrContext(renderer, _log, _programs, width, height);
+        _graph = new FrameGraph(_ctx.Targets, _ctx.BindGroups, _log);
+        Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy);
+        _ctx.Materials = Materials;
 
-        var program = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.pbr");
-        UniformLayoutValidator.Validate(program);
-
-        // Group 0 (draw UBO) becomes a dynamic-offset ring: a LAYOUT property, so the program's
-        // layout is rebuilt with the flag and both the pipelines and the bind group are created
-        // from the modified layout (content-keyed layout cache keeps them Dawn-compatible).
-        var groups = (BindGroupLayoutDesc[])program.Layout.Groups.Clone();
-        for (var i = 0; i < groups.Length; i++)
-        {
-            if (groups[i].GroupIndex != 0) continue;
-            groups[i] = new BindGroupLayoutDesc(0, [groups[i].Entries[0] with { HasDynamicOffset = true }]);
-        }
-        var dynamicLayout = new PipelineLayoutDesc(groups, program.Layout.PushConstants);
-        _program = new ShaderProgramDesc(program.Modules, dynamicLayout, program.VertexBuffers)
-        {
-            UniformBlocks = program.UniformBlocks,
-            // Must be carried across the rebuild: dropping it silently falls the skinned pipeline
-            // back to the rigid 12-float layout, which draws nothing at all.
-            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
-        };
-
-        // One sRGB decision for the renderer's lifetime, driven by the surface format: sRGB
-        // formats let the hardware encode (linear entry); everything else encodes in-shader.
-        _useSrgbEntryPoint = !IsSrgbFormat(renderer.ColorFormat);
-
-        _drawStride = renderer.UniformBufferOffsetAlignment;
-        _drawStaging = new byte[_drawStride * MaxDrawsPerFrame];
-
-        var frameDesc = new BufferDesc("PbrFrameUniforms", (ulong)Unsafe.SizeOf<FrameUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst);
-        _frameUniformBuffer = renderer.CreateBuffer(in frameDesc);
-        var ringDesc = new BufferDesc("PbrDrawRing", (ulong)_drawStride * MaxDrawsPerFrame, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _drawUniformRing = renderer.CreateBuffer(in ringDesc);
-
-        // Shadow-map array comparison sampler (clamp so a PCF tap near a layer edge reads that
-        // layer's border, never wraps). The array texture itself is declared by EnsureShadowArray
-        // below and re-sized each frame to the layers actually in use.
-        _shadowSampler = renderer.CreateSampler(new SamplerDesc(
-            "PbrShadowSampler",
-            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
-            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest,
-            MaxAnisotropy: 1, Compare: CompareFunction.LessEqual));
-
-        // _width/_height are set later in the ctor, so size the froxel mask buffer from the ctor
-        // parameters directly.
-        _width = Math.Max(1, width);
-        _height = Math.Max(1, height);
-        // Before the cluster buffer, because the first frame-group build needs BOTH storage
-        // buffers to exist — group 1 declares bindings 3 and 4 and WebGPU rejects a partial group.
-        EnsureJointBuffer();
-        EnsureClusterBuffer();
-
-        // Allocate the initial single-layer array. The frame group (pbr.slang's reserved group-1
-        // slots) binds it as a D2Array, so a valid array must always exist even when nothing casts,
-        // hence the minimum of one layer.
-        EnsureShadowArray(1);
-        _frameGroupLayout = FindGroup(1);
-
-        var drawGroupDesc = new BindGroupDesc("PbrDrawGroup", FindGroup(0), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _drawUniformRing, 0, (ulong)Unsafe.SizeOf<DrawUniformsGpu>()),
-        });
-        _drawGroup = renderer.CreateBindGroup(in drawGroupDesc);
-
-        Materials = new MaterialResourceCache(renderer, _program, maxAnisotropy);
-
-        // Shadow caster program + depth-only pipeline. Its group-0 draw UBO is a dynamic-offset ring
-        // like the main one; the vertex layout reads position from the full interleaved mesh stride
-        // (shadow.slang declares only location 0).
-        var shadowProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.shadow");
-        var shadowGroups = (BindGroupLayoutDesc[])shadowProgram.Layout.Groups.Clone();
-        for (var i = 0; i < shadowGroups.Length; i++)
-        {
-            if (shadowGroups[i].GroupIndex != 0) continue;
-            shadowGroups[i] = new BindGroupLayoutDesc(0, [shadowGroups[i].Entries[0] with { HasDynamicOffset = true }]);
-        }
-        _shadowProgram = new ShaderProgramDesc(
-            shadowProgram.Modules,
-            new PipelineLayoutDesc(shadowGroups, shadowProgram.Layout.PushConstants),
-            shadowProgram.VertexBuffers)
-        {
-            UniformBlocks = shadowProgram.UniformBlocks,
-            VertexBuffersByEntryPoint = shadowProgram.VertexBuffersByEntryPoint,
-        };
-        var meshStride = _program.VertexBuffers[0].Stride;
-        var shadowVertexLayout = new[]
-        {
-            new VertexBufferLayoutDesc(meshStride, VertexStepMode.Vertex,
-                new[] { new VertexAttributeDesc(0, VertexFormat.Float32x3, 0) }),
-        };
-        _shadowPipeline = renderer.CreateDepthOnlyPipeline(_shadowProgram, TextureFormat.Depth32Float, shadowVertexLayout);
-
-        var shadowRingDesc = new BufferDesc("PbrShadowDrawRing", (ulong)_drawStride * MaxDrawsPerFrame, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _shadowDrawRing = renderer.CreateBuffer(in shadowRingDesc);
-        _shadowStaging = new byte[_drawStride * MaxDrawsPerFrame];
-        var shadowDrawGroupDesc = new BindGroupDesc("PbrShadowDrawGroup", FindGroup(_shadowProgram, 0), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _shadowDrawRing, 0, (ulong)Unsafe.SizeOf<ShadowDrawUniformsGpu>()),
-        });
-        _shadowDrawGroup = renderer.CreateBindGroup(in shadowDrawGroupDesc);
-        _shadowJointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrShadowJointGroup", FindGroup(_shadowProgram, 1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
-        }));
-
-        // Gradient-sky background program + pipeline. Fullscreen triangle (no vertex buffer — the
-        // vertex shader uses SV_VertexID), depth-write off + compare Always so it never occludes or
-        // is occluded by scene geometry. Fragment entry follows the same sRGB decision as the scene.
-        var skyProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.sky");
-        _skyPipeline = renderer.CreatePipeline(
-            skyProgram, HdrFormat, // linear HDR into the HDR target, like the PBR pass; composite tonemaps
-            depthStencilFormat: TextureFormat.Depth32Float,
-            depthWriteEnabled: false,
-            depthCompare: CompareFunction.Always,
-            fragmentEntryPoint: "skyFragment"); // always linear
-        var skyUniformDesc = new BufferDesc("PbrSkyUniforms", (ulong)Unsafe.SizeOf<SkyUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst);
-        _skyUniformBuffer = renderer.CreateBuffer(in skyUniformDesc);
-        _skyGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrSkyGroup", FindGroup(skyProgram, 0), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _skyUniformBuffer, 0, (ulong)Unsafe.SizeOf<SkyUniformsGpu>()),
-        }));
-
-        _width = Math.Max(1, width);
-        _height = Math.Max(1, height);
-        EnsureFrameTargets();
-
-        // SSAO world-position pre-pass program + pipeline. Reuses the main draw ring/group (its group
-        // 0 is the same DrawUniforms, made dynamic-offset), renders opaque geometry to an Rgba32Float
-        // position target with its own depth. Vertex layout is position-only over the mesh stride.
-        var positionProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.positionPrepass");
-        var positionGroups = (BindGroupLayoutDesc[])positionProgram.Layout.Groups.Clone();
-        for (var i = 0; i < positionGroups.Length; i++)
-        {
-            if (positionGroups[i].GroupIndex != 0) continue;
-            positionGroups[i] = new BindGroupLayoutDesc(0, [positionGroups[i].Entries[0] with { HasDynamicOffset = true }]);
-        }
-        _positionPrepassProgram = new ShaderProgramDesc(
-            positionProgram.Modules,
-            new PipelineLayoutDesc(positionGroups, positionProgram.Layout.PushConstants),
-            positionProgram.VertexBuffers)
-        {
-            UniformBlocks = positionProgram.UniformBlocks,
-            VertexBuffersByEntryPoint = positionProgram.VertexBuffersByEntryPoint,
-        };
-        var positionVertexLayout = new[]
-        {
-            new VertexBufferLayoutDesc(meshStride, VertexStepMode.Vertex,
-                new[] { new VertexAttributeDesc(0, VertexFormat.Float32x3, 0) }),
-        };
-        _positionPrepassPipeline = renderer.CreatePipeline(
-            _positionPrepassProgram, TextureFormat.Rgba32Float,
-            depthStencilFormat: TextureFormat.Depth32Float,
-            depthWriteEnabled: true,
-            depthCompare: CompareFunction.Less);
-        _prepassJointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrPrepassJointGroup", FindGroup(_positionPrepassProgram, 1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
-        }));
-
-        _ssaoGroupLayout = FindGroup(3); // group 3 of the main PBR program: SSAO + sky-specular LUT
-        _ssaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
-            "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        _skySpecLutTexture = renderer.CreateTexture(new TextureDesc(
-            "PbrSkySpecularLut", SkySpecLutWidth, SkySpecLutHeight, 1, 1, 1, TextureDimension.D2,
-            TextureFormat.Rgba8UnormSrgb, TextureUsage.TextureBinding | TextureUsage.CopyDst));
-        _skySpecLutView = renderer.CreateTextureView(new TextureViewDesc(
-            "PbrSkySpecularLutView", _skySpecLutTexture, TextureViewDimension.D2, 0, 1));
-        _skySpecSampler = renderer.CreateSampler(new SamplerDesc(
-            "PbrSkySpecularSampler",
-            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
-            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
-        // The LUT starts black (no reflections until a sky is provided); baked on first use.
-        _renderer.WriteTexture(_skySpecLutTexture, 0, new byte[SkySpecLutWidth * SkySpecLutHeight * 4],
-            SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
-        _dfgLutTexture = renderer.CreateTexture(new TextureDesc(
-            "PbrDfgLut", DfgLutSize, DfgLutSize, 1, 1, 1, TextureDimension.D2,
-            TextureFormat.Rgba16Float, TextureUsage.TextureBinding | TextureUsage.CopyDst));
-        _dfgLutView = renderer.CreateTextureView(new TextureViewDesc(
-            "PbrDfgLutView", _dfgLutTexture, TextureViewDimension.D2, 0, 1));
-        BakeDfgLut();
-
-        // HDR scene target + composite pass. The main pass renders LINEAR HDR here; the composite
-        // fullscreen pass tonemaps it (using the tone operators moved out of pbr/sky) to the
-        // swapchain, so the whole frame composites in linear HDR (enabling bloom). The composite
-        // pipeline targets the surface format (sRGB decision applies HERE now, not the main pass).
-        _compositeSampler = renderer.CreateSampler(new SamplerDesc(
-            "PbrCompositeSampler",
-            SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
-            SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
-
-        // Bloom pipelines (built once; share one bind-group layout: source texture + sampler + params).
-        var bloomProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.bloom");
-        _bloomGroupLayout = FindGroup(bloomProgram, 0);
-        _bloomUniformBuffer = renderer.CreateBuffer(new BufferDesc(
-            "PbrBloomUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        _bloomBrightPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, fragmentEntryPoint: "brightFragment");
-        _bloomDownPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, fragmentEntryPoint: "downsampleFragment");
-        _bloomUpPipeline = renderer.CreatePipeline(bloomProgram, HdrFormat, blend: BlendMode.Additive, fragmentEntryPoint: "upsampleFragment");
-
-        EnsureBloomChain(_width, _height);
-
-        var compositeProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.composite");
-        _compositeGroupLayout = FindGroup(compositeProgram, 0);
-        _compositePipeline = renderer.CreatePipeline(
-            compositeProgram, renderer.ColorFormat,
-            fragmentEntryPoint: _useSrgbEntryPoint ? "compositeFragmentSrgb" : "compositeFragment");
-        _compositeUniformBuffer = renderer.CreateBuffer(new BufferDesc(
-            "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-
+        // List order is dependency order: the scene reads the shadow plan and the SSAO result,
+        // the capture reads the scene's targets, the composite reads bloom's.
+        _shadows = new ShadowFeature(_ctx);
+        var ssao = new SsaoFeature(_ctx);
+        _scene = new SceneFeature(_ctx, _shadows, ssao, specularAaVariance, specularAaClamp);
+        _capture = new SceneColorCaptureFeature(_ctx);
+        _composite = new CompositeFeature(_ctx);
+        Pipeline = new RenderPipeline()
+            .Add(_shadows)
+            .Add(ssao)
+            .Add(_scene)
+            .Add(_capture)
+            .Add(new BloomFeature(_ctx))
+            .Add(_composite);
     }
 
-    /// <summary>Declare the target-sized textures at the current size. Idempotent: the registry
-    /// recreates only a target whose shape changed, so bind groups over the others stay valid.</summary>
-    private void EnsureFrameTargets()
+    public MaterialResourceCache Materials { get; }
+
+    /// <summary>The features that make up a frame, in the order they set up. A host adds its own
+    /// after these; they see the engine's targets by the names in <see cref="PbrTargets"/> and
+    /// its results by those in <see cref="PbrResults"/>.</summary>
+    public RenderPipeline Pipeline { get; }
+
+    /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
+    /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
+    /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
+    public uint ShadowMapSize
     {
-        // Depth is TextureBinding too, so the capture blit can pack the opaque depth into the scene
-        // color's alpha (read as unfilterable float; never bound while also being written).
-        _targets.Ensure(DepthTarget, FrameTarget(TextureFormat.Depth32Float));
-        _targets.Ensure(PositionTarget, FrameTarget(TextureFormat.Rgba32Float));
-        _targets.Ensure(PrepassDepthTarget, FrameTarget(TextureFormat.Depth32Float));
-        _targets.Ensure(HdrTarget, FrameTarget(HdrFormat));
+        get => _shadows.MapSize;
+        set => _shadows.MapSize = value;
     }
 
-    private TextureDesc FrameTarget(TextureFormat format) => RenderTarget(_width, _height, format);
-
-    private static TextureDesc RenderTarget(uint width, uint height, TextureFormat format, uint layers = 1) => new(
-        null, width, height, layers, 1, 1, TextureDimension.D2, format,
-        TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
-
-    // (Re)declare the shadow-map array (grow-only) to hold at least <paramref name="layerCount"/>
-    // full-resolution layers. A single shared texture across all shadow views keeps the frame group
-    // stable between frames of equal (or smaller) shadow-layer count.
-    private void EnsureShadowArray(uint layerCount)
+    /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
+    /// shadow edge). Scenes author this through the export contract's <c>Lighting.ShadowBlur</c>;
+    /// hosts apply it here. Clamped to [0.5, 8].</summary>
+    public float ShadowBlurTexels
     {
-        layerCount = Math.Max(1, layerCount);
-        if (layerCount <= _shadowLayerCapacity) return;
+        get => _shadows.BlurTexels;
+        set => _shadows.BlurTexels = value;
+    }
 
-        _targets.Ensure(ShadowArrayTarget, RenderTarget(_shadowMapSize, _shadowMapSize, TextureFormat.Depth32Float, layerCount));
-        _shadowLayerCapacity = layerCount;
+    /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
+    /// shadow map covers. A camera-centred fit keeps texel density constant no matter how big the
+    /// scene grows; the box is snapped to whole texels so it does not shimmer as the camera moves,
+    /// and the depth range still spans the scene AABB so tall casters outside the circle keep
+    /// casting in. When the scene is smaller than the radius (or the radius is 0) the whole-scene
+    /// fit applies — small scenes keep their tighter box.</summary>
+    public float DirectionalShadowRadius
+    {
+        get => _shadows.DirectionalRadius;
+        set => _shadows.DirectionalRadius = value;
     }
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
-    public void SetSpecularAa(float variance, float clamp)
-    {
-        _specularAaVariance = variance;
-        _specularAaClamp = clamp;
-    }
+    public void SetSpecularAa(float variance, float clamp) => _scene.SetSpecularAa(variance, clamp);
 
     /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
     /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
@@ -482,25 +114,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// per frame while enabled.</summary>
     public bool SceneColorCapture
     {
-        get => _sceneColorCapture;
-        set
-        {
-            if (_sceneColorCapture == value) return;
-            _sceneColorCapture = value;
-            if (value)
-            {
-                CreateSceneColorResources();
-            }
-            else
-            {
-                // The disable path fires the event too — SceneColorView is INVALID inside the
-                // handler, and any material still bound to the old view must unbind or repoint
-                // (a bind group referencing the destroyed view is a Dawn validation error on its
-                // next SetBindGroup).
-                DestroySceneColorResources();
-                SceneColorViewChanged?.Invoke();
-            }
-        }
+        get => _capture.Enabled;
+        set => _capture.Enabled = value;
     }
 
     /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
@@ -515,56 +130,56 @@ public sealed partial class PbrRenderer : IDisposable
     /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
     /// material extra entries from <see cref="SceneColorViewChanged"/> via
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
-    public TextureViewHandle SceneColorView =>
-        _targets.Contains(SceneColorTarget) ? _targets.View(SceneColorTarget) : default;
+    public TextureViewHandle SceneColorView => _capture.View;
 
     /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
     /// capture, or Resize while enabled — rebind material extra entries to the new view) or
     /// destroyed (disabling capture — the view is INVALID in the handler; unbind or repoint
     /// affected materials, never re-bind the stale view). Always fires after every engine-side
     /// rebind, so subscribers see a consistent renderer.</summary>
-    public event Action? SceneColorViewChanged;
-
-    private void CreateSceneColorResources()
+    public event Action? SceneColorViewChanged
     {
-        if (!_blitPipeline.IsValid)
-        {
-            // One-time: the blit program/pipeline survive capture toggles (pipelines are cheap
-            // to keep, expensive to churn).
-            var blitProgram = ShaderProgramLoader.Load(typeof(PbrRenderer).Assembly, "Shaders.blit");
-            _blitGroupLayout = FindGroup(blitProgram, 0);
-            _blitPipeline = _renderer.CreatePipeline(blitProgram, HdrFormat); // linear HDR, no depth
-        }
-        _targets.Ensure(SceneColorTarget, FrameTarget(HdrFormat));
-        // Public surface: a game's blend material samples it, so the graph must never cull its
-        // producer on the grounds that no pass of its own reads it.
-        _targets.Export(SceneColorTarget);
-        SceneColorViewChanged?.Invoke();
+        add => _capture.ViewChanged += value;
+        remove => _capture.ViewChanged -= value;
     }
 
-    private void DestroySceneColorResources()
-    {
-        _targets.Release(SceneColorTarget);
-    }
+    public float AspectRatio => _ctx.Width / (float)_ctx.Height;
 
     public void Resize(uint width, uint height)
     {
         width = Math.Max(1, width);
         height = Math.Max(1, height);
-        if (width == _width && height == _height) return;
-        _width = width;
-        _height = height;
-        EnsureFrameTargets();
-        EnsureBloomChain(width, height);
-        EnsureClusterBuffer(); // tile counts changed → new mask buffer
-        if (_sceneColorCapture)
-        {
-            // Recreate LAST, after every engine-side rebind, so SceneColorViewChanged subscribers
-            // observe a fully consistent renderer when they rebind their material entries.
-            DestroySceneColorResources();
-            CreateSceneColorResources();
-        }
+        if (width == _ctx.Width && height == _ctx.Height) return;
+        _ctx.Resize(width, height);
+        // Features re-declare their targets in list order, so the capture — whose ViewChanged
+        // subscribers rebind materials — sees a consistent scene before it fires.
+        Pipeline.Resize(width, height);
     }
+
+    /// <summary>Register a game-supplied shader program for use by materials. The program is
+    /// typically an extension shader that <c>#include</c>s <c>Common/pbrCore.slang</c>, compiled
+    /// by the game's build (the NuGet ships the sources and the Slang targets) and loaded via
+    /// <see cref="ShaderProgramLoader"/> from the game assembly. It must consume the standard
+    /// rigid vertex stream and may declare extra group-2 bindings from slot
+    /// <see cref="MaterialResourceCache.StandardMaterialEntryCount"/> up (bind them per material
+    /// via the extraEntries overload of <see cref="MaterialResourceCache.AddMaterial(in GltfMaterialData, GltfImageData[], int, ReadOnlySpan{BindGroupEntryDesc})"/>).
+    /// Returns a programId (&gt; 0; 0 is the built-in PBR program).
+    ///
+    /// The pipeline is created with the BUILT-IN layout for groups 0/1/3 so the engine's draw-ring,
+    /// frame and SSAO bind groups stay compatible — WebGPU permits a pipeline layout to declare
+    /// bindings the shader never uses, and slangc dead-code-eliminates unreferenced globals from
+    /// the extension's reflection (e.g. jointMatrices when it has no skinned entry point).
+    /// Validation is therefore a subset check, and it throws here — at registration, not at first
+    /// draw, where a mismatch would only surface as an async pipeline error that silently drops
+    /// draws. Custom programs are rigid-only; shadow and SSAO-prepass passes always run the
+    /// built-in vertex shaders — for a BLEND material that is moot (excluded from both), but an
+    /// OPAQUE custom material casts shadows and writes prepass positions from its UNDISPLACED
+    /// geometry, so a vertex-displaced opaque surface will self-shadow as if flat.</summary>
+    public int RegisterMaterialProgram(
+        ShaderProgramDesc program,
+        string vertexEntryPoint = "vertexMain",
+        string fragmentEntryPoint = "fragmentMain") =>
+        _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint);
 
     /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
     /// buffer. Call for every skinned instance each frame before <see cref="RenderFrame"/>, which
@@ -575,7 +190,7 @@ public sealed partial class PbrRenderer : IDisposable
     public void SetJointPalette(int offset, ReadOnlySpan<Matrix4x4> matrices)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (offset < 0 || offset + matrices.Length > _jointCapacity)
+        if (offset < 0 || offset + matrices.Length > _ctx.JointCapacity)
         {
             // Loud, and once per frame rather than per instance: silently skipping would draw the
             // character folded into the origin, which looks like a broken rig rather than a full
@@ -587,40 +202,9 @@ public sealed partial class PbrRenderer : IDisposable
             }
             return;
         }
-        matrices.CopyTo(_jointPalettes.AsSpan(offset));
-        _jointHighWater = Math.Max(_jointHighWater, offset + matrices.Length);
+        matrices.CopyTo(_ctx.JointPalettes.AsSpan(offset));
+        _ctx.JointHighWater = Math.Max(_ctx.JointHighWater, offset + matrices.Length);
     }
-
-    // Allocate the joint palette storage once. Unlike the cluster buffer this is resolution
-    // independent, so it never needs reallocating.
-    private void EnsureJointBuffer()
-    {
-        if (_jointBuffer.IsValid) return;
-        _jointCapacity = MaxSkinnedJoints;
-        _jointPalettes = new Matrix4x4[_jointCapacity];
-        for (var i = 0; i < _jointCapacity; i++) _jointPalettes[i] = Matrix4x4.Identity;
-        _jointBuffer = _renderer.CreateBuffer(new BufferDesc(
-            "PbrJointPalettes", (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>()),
-            BufferUsage.Storage | BufferUsage.CopyDst));
-        _renderer.UpdateBuffer<Matrix4x4>(_jointBuffer, 0, _jointPalettes);
-    }
-
-    // (Re)allocate the froxel mask buffer for the current resolution.
-    private void EnsureClusterBuffer()
-    {
-        var tilesX = (int)((_width + ClusterTileSize - 1) / ClusterTileSize);
-        var tilesY = (int)((_height + ClusterTileSize - 1) / ClusterTileSize);
-        if (tilesX == _clusterTilesX && tilesY == _clusterTilesY && _clusterBuffer.IsValid) return;
-        if (_clusterBuffer.IsValid) _renderer.DestroyBuffer(_clusterBuffer);
-        _clusterTilesX = tilesX;
-        _clusterTilesY = tilesY;
-        _clusterMasks = new uint[tilesX * tilesY * ClusterZSlices * 2]; // two mask words per froxel (64 lights)
-        _clusterBuffer = _renderer.CreateBuffer(new BufferDesc(
-            "PbrClusterMasks", (ulong)(_clusterMasks.Length * sizeof(uint)),
-            BufferUsage.Storage | BufferUsage.CopyDst));
-    }
-
-    public float AspectRatio => _width / (float)_height;
 
     /// <summary>Upload a decoded GLB: registers every material (slot order preserved) and every
     /// primitive's interleaved vertex/index buffers. The returned meshes parallel
@@ -697,8 +281,8 @@ public sealed partial class PbrRenderer : IDisposable
         _ownedBuffers.Add(vb);
         _ownedBuffers.Add(ib);
 
-        // Object-space AABB from position (floats 0..2 of each 12-float vertex) — feeds the
-        // directional shadow frustum fit.
+        // Object-space AABB from position (floats 0..2 of each vertex) — feeds the directional
+        // shadow frustum fit.
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
         for (var v = 0; v + 2 < vertices.Length; v += stride)
@@ -718,8 +302,7 @@ public sealed partial class PbrRenderer : IDisposable
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
     /// have been uploaded with <c>dynamic: true</c>; the float count must match the upload.
     /// NOTE: the shadow frustum fit uses the UPLOAD-time AABB — poses that swing far outside
-    /// the bind-pose bounds can clip at the directional shadow edge (bank-heist has the same
-    /// property).</summary>
+    /// the bind-pose bounds can clip at the directional shadow edge.</summary>
     public void UpdatePrimitiveVertices(in PbrPrimitive primitive, ReadOnlySpan<float> vertices)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -730,8 +313,8 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.UpdateBuffer(primitive.VertexBuffer, 0, vertices);
     }
 
-    /// <summary>Render one frame: frame UBO upload, draw-ring fill, opaque-then-blend command
-    /// stream (blend back-to-front by view depth), one Submit.</summary>
+    /// <summary>Render one frame: partition the scene, let every feature declare its passes,
+    /// compile, upload what recording staged, submit.</summary>
     public void RenderFrame(PbrScene scene)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -742,1261 +325,76 @@ public sealed partial class PbrRenderer : IDisposable
         // Partition + sort. View-space depth of the instance origin orders blended draws
         // back-to-front (larger distance first). Opaque stays in submission order (depth
         // buffer resolves it) and doubles as the shadow-caster set.
-        _opaque.Clear();
-        _blend.Clear();
+        var opaque = _ctx.Opaque;
+        var blend = _ctx.Blend;
+        opaque.Clear();
+        blend.Clear();
         foreach (var instance in scene.Instances)
         {
             var world = instance.Model.Translation;
             var viewPos = Vector3.Transform(world, view);
             foreach (var primitive in instance.Mesh.Primitives)
             {
-                if (Materials.IsBlend(primitive.MaterialId)) _blend.Add((instance, primitive, viewPos.Z));
-                else _opaque.Add((instance, primitive, viewPos.Z));
+                if (Materials.IsBlend(primitive.MaterialId)) blend.Add((instance, primitive, viewPos.Z));
+                else opaque.Add((instance, primitive, viewPos.Z));
             }
         }
         // RH view space looks down −Z: more negative Z = farther. Ascending Z sort = far first.
-        _blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
+        blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
 
-        var totalDraws = _opaque.Count + _blend.Count;
-        if (totalDraws > MaxDrawsPerFrame)
+        var totalDraws = opaque.Count + blend.Count;
+        if (totalDraws > PbrContext.MaxDrawsPerFrame)
             throw new InvalidOperationException(
-                $"{totalDraws} draws exceed the {MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
+                $"{totalDraws} draws exceed the {PbrContext.MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
 
-        // Shadows: assign one array layer per shadow view to every shadow-casting light —
-        // directional/spot take one layer, point takes six cube-face layers — and compute each
-        // face's light-space matrix, fit to the opaque casters' world AABB. When none, the shadow
-        // passes are skipped entirely (nothing samples an unwritten layer; base layer stays -1).
-        _shadowViews.Clear();
-        Array.Fill(_shadowBaseLayer, -1);
-        Array.Clear(_shadowFaceCount);
-        var shadowLayerCount = 0;
-        if (_opaque.Count > 0)
-        {
-            ComputeWorldBounds(out var center, out var extent);
-            // The camera's world position anchors the directional fit (see
-            // ComputeDirectionalLightMatrix); a non-invertible view falls back to the scene centre,
-            // which degrades to the legacy whole-scene fit rather than anything wrong.
-            var cameraPosition = Matrix4x4.Invert(view, out var viewInverse)
-                ? viewInverse.Translation
-                : center;
-            for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
-            {
-                var light = scene.Lights[i];
-                if (!light.CastsShadows) continue;
-                var faceCount = light.Type == PbrLightType.Point ? 6 : 1;
-                if (shadowLayerCount + faceCount > MaxShadowLayers) continue; // won't fit; a smaller later light still can
-                _shadowBaseLayer[i] = shadowLayerCount;
-                _shadowFaceCount[i] = faceCount;
-                for (var f = 0; f < faceCount; f++)
-                {
-                    _shadowViews.Add((i, f, (uint)(shadowLayerCount + f),
-                        ComputeLightMatrix(light, f, center, extent, cameraPosition, out var texelWorld)));
-                    // Same for every cube face (the six 90° frusta share one texel density).
-                    _shadowTexelWorld[i] = texelWorld;
-                }
-                shadowLayerCount += faceCount;
-            }
-        }
-
-        // Size the shadow-map array to the layers actually in use (grow-only; min one so the frame
-        // bind group always has a valid depth array bound). This is the runtime "create shadowmap
-        // based on light+shadow count" — a single directional light allocates exactly one layer.
-        EnsureShadowArray((uint)shadowLayerCount);
-
-        // Shadow ring budget (separate from the main ring): views × casters. Hard-fail up front —
-        // like the main-pass check — so a partial fill (silently missing shadows) can't ship.
-        var shadowDrawTotal = _shadowViews.Count * _opaque.Count;
-        if (shadowDrawTotal > MaxDrawsPerFrame)
-            throw new InvalidOperationException(
-                $"{shadowDrawTotal} shadow-caster draws ({_shadowViews.Count} views × {_opaque.Count} casters) exceed the {MaxDrawsPerFrame}-slot shadow ring.");
-
-        BuildClusters(scene);
-        UploadFrameUniforms(scene);
-        UploadSsaoUniforms(scene);
-
-        if (scene.HasSkyBackground)
-        {
-            if (scene.SkyReflections) EnsureSkySpecularLut(scene);
-            // Inverse of the same view-projection used for MVP, so the sky shader can unproject each
-            // background pixel's NDC to a world-space eye ray (uploaded raw-bytes, like MVP). Falls
-            // back to identity on a singular VP (degenerate camera) rather than uploading NaN — same
-            // precedent as PbrMath.NormalMatrix/TryScreenPointToRay.
-            if (!Matrix4x4.Invert(viewProjection, out var invViewProj))
-                invViewProj = Matrix4x4.Identity;
-            var skyUniforms = new SkyUniformsGpu
-            {
-                // skyTop.w / skyHorizon.w carry the sun halo thresholds (see sky.slang).
-                SkyTop = new Vector4(scene.SkyTopColor, scene.SkySunAngleMaxCos),
-                SkyHorizon = new Vector4(scene.SkyHorizonColor, scene.SkySunInvCurve),
-                GroundBottom = new Vector4(scene.SkyGroundBottom, 1f),
-                GroundHorizon = new Vector4(scene.SkyGroundHorizon, 1f),
-                // zw + CameraPos.w carry the tone operator so the sky shader can blend the LINEAR
-                // gradient first and tonemap per-pixel (Godot's order; see sky.slang header).
-                Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, (float)scene.Tonemap.Mode, scene.Tonemap.Exposure),
-                CameraPos = new Vector4(scene.Camera.Position, scene.Tonemap.White),
-                SunDirection = new Vector4(scene.SkySunDirection, scene.SkySunEnabled ? 1f : 0f),
-                SunColor = new Vector4(scene.SkySunColorEnergy, scene.SkySunSizeCos),
-                InvViewProj = invViewProj,
-            };
-            _renderer.UpdateBuffer<SkyUniformsGpu>(_skyUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref skyUniforms, 1));
-        }
-
-        // Declare the frame. A pass says WHERE it belongs on the event scale rather than at which
-        // running total of the passes before it, so turning a feature off removes its declarations
-        // and shifts nothing. The rejected alternative — computing indices by hand — had to be
-        // edited in two places per pass, and a mismatch between them surfaced as a silently wrong
-        // frame instead of an error.
-        // Whether these RUN is decided below by whether their consumer asks for the result, not
-        // here by whether their passes get declared. UploadSsaoUniforms gates on the identical
-        // condition, so the shader stops sampling positions in exactly the frames the pre-pass
-        // stops writing them.
-        var ssaoEnabled = scene.Ssao.Enabled && _opaque.Count > 0;
-        var bloomEnabled = scene.Bloom.Enabled && _bloomLevels > 1;
-
-        _encodeScene = scene;
-        _encodeViewProjection = viewProjection;
-        _encodeDrawIndex = 0;
-        _encodeShadowDrawIndex = 0;
-
+        _ctx.BeginFrame(scene, in view, in viewProjection);
         _graph.Reset();
-        // The graph owns these, so it knows they are private to the frame unless exported (the
-        // scene color is; a game's blend material samples it). Every read of a private target
-        // still happens through a bind group built at resize, so the graph learns of it only from
-        // the Reads() calls below.
-        var hdr = _graph.Texture(HdrTarget);
-        var sceneDepth = _graph.Texture(DepthTarget);
-        var position = _graph.Texture(PositionTarget);
-        var prepassDepth = _graph.Texture(PrepassDepthTarget);
-        var shadows = _graph.Texture(ShadowArrayTarget);
-        var black = _graph.Texture(_targets.Black);
-
-        for (var k = 0; k < _shadowViews.Count; k++)
-        {
-            _graph.AddRasterPass("Shadow.Layer", RenderPassEvent.Shadows)
-                .DepthLayer(shadows, _shadowViews[k].Layer, LoadOp.Clear, clear: 1f)
-                .Record(this, RecordShadowLayer, k);
-        }
-
-        _graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
-            .Color(0, position, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
-            .Depth(prepassDepth, LoadOp.Clear, clear: 1f)
-            .Record(this, RecordSsaoPrepass);
-
-        // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
-        // out: a blend material that samples what is behind it needs the opaque half resolved into
-        // a sampleable texture first, which cannot happen mid-pass.
-        var main = _graph.AddRasterPass(_sceneColorCapture ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
-            .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
-            .Depth(sceneDepth, LoadOp.Clear, clear: 1f);
-        // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
-        // produces them is unreachable.
-        DeclareSceneGroups(main, shadows, ssaoEnabled ? position : black);
-        main.Record(this, RecordMain);
-
-        if (_sceneColorCapture)
-        {
-            var sceneColor = _graph.Texture(SceneColorTarget);
-            _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
-                .Color(0, sceneColor, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
-                .BindGroup(0, "PbrSceneBlitGroup", _blitGroupLayout!,
-                [
-                    GraphBinding.Texture(0, hdr),
-                    GraphBinding.Sampler(1, _compositeSampler),
-                    GraphBinding.Texture(2, sceneDepth),
-                ])
-                .Record(this, RecordSceneColorBlit);
-
-            // Load/Load back onto the same HDR + depth: blend pipelines already read-not-write
-            // depth, so this is exactly the state they expect mid-pass today.
-            var blend = _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
-                .Color(0, hdr, LoadOp.Load, clear: scene.ClearColor)
-                .Depth(sceneDepth, LoadOp.Load, clear: 1f)
-                // Sampled through the material's own group 2, which the graph does not build: the
-                // one read here that has to be said rather than derived.
-                .Reads(sceneColor);
-            DeclareSceneGroups(blend, shadows, ssaoEnabled ? position : black);
-            blend.Record(this, RecordBlendBucket);
-        }
-
-        // bright → mip 0; downsample i → mip i+1 (Clear); additive upsample j → mip L-2-j (Load, so
-        // the tent blur accumulates onto the down-mip content). Declared whether or not bloom is
-        // on: the chain is reachable only from the composite's read of mip 0, so switching bloom
-        // off there culls all 2L−1 of these.
-        _bloomResources.Clear();
-        for (var i = 0; i < _bloomLevels; i++)
-            _bloomResources.Add(_graph.Texture(BloomTargets[i]));
-
-        var opaqueBlack = new ColorRgba(0f, 0f, 0f, 1f);
-        DeclareBloomGroup(_graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
-            .Color(0, _bloomResources[0], LoadOp.Clear, clear: opaqueBlack), hdr)
-            .Record(this, RecordBloomBright);
-        for (var i = 0; i < _bloomLevels - 1; i++)
-        {
-            DeclareBloomGroup(_graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
-                .Color(0, _bloomResources[i + 1], LoadOp.Clear, clear: opaqueBlack), _bloomResources[i])
-                .Record(this, RecordBloomDown);
-        }
-        for (var j = 0; j < _bloomLevels - 1; j++)
-        {
-            DeclareBloomGroup(_graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
-                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, clear: opaqueBlack), _bloomResources[_bloomLevels - 1 - j])
-                .Record(this, RecordBloomUp);
-        }
-        if (bloomEnabled)
-        {
-            var bloomUniforms = new CompositeUniformsGpu { Tone = new Vector4(scene.Bloom.Threshold, scene.Bloom.Knee, 0f, 0f) };
-            _renderer.UpdateBuffer<CompositeUniformsGpu>(_bloomUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref bloomUniforms, 1));
-        }
-
-        // The one place bloom is switched off: bind black instead of mip 0 and the whole chain is
-        // unreachable. The shader still samples the binding, scaled by an intensity of zero.
-        _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
-            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: opaqueBlack)
-            .BindGroup(0, "PbrCompositeGroup", _compositeGroupLayout,
-            [
-                GraphBinding.Texture(0, hdr),
-                GraphBinding.Sampler(1, _compositeSampler),
-                GraphBinding.Texture(2, bloomEnabled ? _bloomResources[0] : black),
-                GraphBinding.Buffer(3, _compositeUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
-            ])
-            .Record(this, RecordComposite);
-
-        var compositeUniforms = new CompositeUniformsGpu
-        {
-            Tone = new Vector4((float)scene.Tonemap.Mode, scene.Tonemap.Exposure, scene.Tonemap.White,
-                bloomEnabled ? scene.Bloom.Intensity : 0f),
-        };
-        _renderer.UpdateBuffer<CompositeUniformsGpu>(_compositeUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref compositeUniforms, 1));
+        Pipeline.Setup(_graph, _ctx.Width, _ctx.Height);
 
         _commandWriter.ResetWrittenCount();
         var stream = _graph.Compile(_commandWriter);
-        _bindGroups.EndFrame();
+        _ctx.BindGroups.EndFrame();
 
-        if (_encodeShadowDrawIndex > 0)
-            _renderer.UpdateBuffer<byte>(_shadowDrawRing, 0, _shadowStaging.AsSpan(0, _encodeShadowDrawIndex * (int)_drawStride));
-        if (_encodeDrawIndex > 0)
-            _renderer.UpdateBuffer<byte>(_drawUniformRing, 0, _drawStaging.AsSpan(0, _encodeDrawIndex * (int)_drawStride));
+        // Recording staged the draw uniforms; upload them now, before the stream that reads them.
+        _shadows.UploadStagedDraws();
+        if (_ctx.DrawIndex > 0)
+            _renderer.UpdateBuffer<byte>(_ctx.DrawUniformRing, 0, _ctx.DrawStaging.AsSpan(0, _ctx.DrawIndex * (int)_ctx.DrawStride));
         // One write for every skinned instance staged this frame — the payload GPU skinning trades
         // for the whole vertex stream. Reset so a frame that skins nothing uploads nothing.
-        if (_jointHighWater > 0)
+        if (_ctx.JointHighWater > 0)
         {
-            _renderer.UpdateBuffer<Matrix4x4>(_jointBuffer, 0, _jointPalettes.AsSpan(0, _jointHighWater));
-            _jointHighWater = 0;
+            _renderer.UpdateBuffer<Matrix4x4>(_ctx.JointBuffer, 0, _ctx.JointPalettes.AsSpan(0, _ctx.JointHighWater));
+            _ctx.JointHighWater = 0;
         }
 
-        _encodeScene = null;
         _renderer.Submit(in stream);
     }
 
-    /// <summary>Groups 1 and 3 of the main program, shared by every pass that draws scene geometry.
-    /// The position binding is what switches SSAO off: bound to black, nothing reads the pre-pass
-    /// and it is culled. The frame group's buffers grow, so their sizes are read here each frame
-    /// and a grown buffer is a different group by content.</summary>
-    private void DeclareSceneGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture position)
-    {
-        pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
-        [
-            GraphBinding.Buffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
-            GraphBinding.TextureArray(1, shadows),
-            GraphBinding.Sampler(2, _shadowSampler),
-            GraphBinding.Buffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
-            GraphBinding.Buffer(4, _jointBuffer, 0, (ulong)(_jointCapacity * Unsafe.SizeOf<Matrix4x4>())),
-        ]);
-        pass.BindGroup(3, "PbrSsaoGroup", _ssaoGroupLayout,
-        [
-            GraphBinding.Buffer(0, _ssaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
-            GraphBinding.Texture(1, position),
-            GraphBinding.View(2, _skySpecLutView),
-            GraphBinding.Sampler(3, _skySpecSampler),
-            GraphBinding.View(4, _dfgLutView),
-        ]);
-    }
-
-    private FrameGraph.PassBuilder DeclareBloomGroup(FrameGraph.PassBuilder pass, GraphTexture source) =>
-        pass.BindGroup(0, "PbrBloomGroup", _bloomGroupLayout,
-        [
-            GraphBinding.Texture(0, source),
-            GraphBinding.Sampler(1, _compositeSampler),
-            GraphBinding.Buffer(2, _bloomUniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
-        ]);
-
-    // Depth-only fill of ONE shadow layer. Every opaque caster is drawn with
-    // lightMvp = model × faceViewProjection (mirrors the main Mvp = model × viewProjection so the
-    // shadow shader matches pbr.slang). No viewport math — each layer owns the whole [0,1] and the
-    // default viewport covers it.
-    private static void RecordShadowLayer(object context, ref PassRecording pass, int layer)
-    {
-        var self = (PbrRenderer)context;
-        ref var encoder = ref pass.Encoder;
-        {
-            var vp = self._shadowViews[layer].Vp;
-            encoder.SetBindGroup(1, self._shadowJointGroup);
-            var shadowSkinned = (bool?)null;
-            foreach (var (instance, primitive, _) in self._opaque)
-            {
-                var skinned = primitive.Skinned && instance.JointOffset >= 0;
-                if (shadowSkinned != skinned)
-                {
-                    encoder.SetPipeline(skinned ? self.GetShadowSkinnedPipeline() : self._shadowPipeline);
-                    shadowSkinned = skinned;
-                }
-                // Budget guaranteed by the up-front shadowDrawTotal check in RenderFrame.
-                var uniforms = new ShadowDrawUniformsGpu
-                {
-                    LightMvp = instance.Model * vp,
-                    // The caster poses from the same palette slice its mesh does, so the shadow
-                    // tracks the animation instead of staying in bind pose.
-                    Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
-                };
-                var slot = self._encodeShadowDrawIndex;
-                MemoryMarshal.Write(self._shadowStaging.AsSpan(slot * (int)self._drawStride), in uniforms);
-                encoder.SetBindGroup(0, self._shadowDrawGroup, dynamicOffset: (uint)(slot * self._drawStride));
-                encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
-                encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-                encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-                self._encodeShadowDrawIndex++;
-            }
-        }
-    }
-
-    // SSAO position pre-pass: render opaque world positions into the position target (offscreen color) +
-    // its own depth. Reuses the MAIN draw ring/group — opaque[i] uses the same dynamic offset that
-    // EncodeBucket fills for it, so no extra ring space or upload is needed.
-    private static void RecordSsaoPrepass(object context, ref PassRecording pass, int _)
-    {
-        var self = (PbrRenderer)context;
-        ref var encoder = ref pass.Encoder;
-        encoder.SetBindGroup(1, self._prepassJointGroup);
-        var prepassSkinned = (bool?)null;
-        for (var i = 0; i < self._opaque.Count; i++)
-        {
-            var primitive = self._opaque[i].Primitive;
-            // The prepass reads the SAME draw-ring slot EncodeBucket filled for this instance, so
-            // the joint base index rides along with no extra upload.
-            var skinned = primitive.Skinned && self._opaque[i].Instance.JointOffset >= 0;
-            if (prepassSkinned != skinned)
-            {
-                encoder.SetPipeline(skinned ? self.GetPrepassSkinnedPipeline() : self._positionPrepassPipeline);
-                prepassSkinned = skinned;
-            }
-            encoder.SetBindGroup(0, self._drawGroup, dynamicOffset: (uint)(i * self._drawStride));
-            encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
-            encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-        }
-    }
-
-    // The remaining recorders. Each is a static method group, so the delegate the declaration site
-    // passes is created once by the compiler rather than per pass per frame.
-
-    private static void RecordMain(object context, ref PassRecording pass, int _)
-    {
-        var self = (PbrRenderer)context;
-        // Gradient-sky background first (fullscreen, no depth write) so geometry draws over it.
-        if (self._encodeScene!.HasSkyBackground)
-        {
-            pass.Encoder.SetPipeline(self._skyPipeline);
-            pass.Encoder.SetBindGroup(0, self._skyGroup);
-            pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
-        }
-        self.EncodeBucket(ref pass, self._opaque, BlendMode.Opaque, self._encodeViewProjection, ref self._encodeDrawIndex);
-        // Capture moves the blend bucket to its own pass after the blit; without it, the bucket
-        // stays here and the frame is one pass shorter.
-        if (!self._sceneColorCapture)
-            self.EncodeBucket(ref pass, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
-    }
-
-    // The blend bucket continues the SAME draw ring the opaque bucket filled — the ring does not
-    // care which pass consumes an offset, only that no two draws claim the same slot.
-    private static void RecordBlendBucket(object context, ref PassRecording pass, int _)
-    {
-        var self = (PbrRenderer)context;
-        self.EncodeBucket(ref pass, self._blend, BlendMode.AlphaBlend, self._encodeViewProjection, ref self._encodeDrawIndex);
-    }
-
-    private static void RecordSceneColorBlit(object context, ref PassRecording pass, int _) =>
-        RecordFullscreen(ref pass, ((PbrRenderer)context)._blitPipeline);
-
-    private static void RecordBloomBright(object context, ref PassRecording pass, int _) =>
-        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomBrightPipeline);
-
-    private static void RecordBloomDown(object context, ref PassRecording pass, int _) =>
-        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomDownPipeline);
-
-    private static void RecordBloomUp(object context, ref PassRecording pass, int _) =>
-        RecordFullscreen(ref pass, ((PbrRenderer)context)._bloomUpPipeline);
-
-    private static void RecordComposite(object context, ref PassRecording pass, int _) =>
-        RecordFullscreen(ref pass, ((PbrRenderer)context)._compositePipeline);
-
-    // A fullscreen triangle with the pass's declared group 0: what every post pass is.
-    private static void RecordFullscreen(ref PassRecording pass, PipelineHandle pipeline)
-    {
-        pass.Encoder.SetPipeline(pipeline);
-        pass.SetBindGroup(0);
-        pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
-    }
-
-    // Upload group-3 SSAO uniforms. Intensity 0 (SSAO off, or no prepass this frame) makes the
-    // shader skip position sampling — gated on the same condition RenderFrame uses to decide
-    // whether the prepass actually runs (Enabled && _opaque.Count > 0), so a zero-opaque-instance
-    // frame never samples an unwritten/stale position target.
-    private void UploadSsaoUniforms(PbrScene scene)
-    {
-        var s = scene.Ssao;
-        var hasPrepass = s.Enabled && _opaque.Count > 0;
-        var u = new SsaoUniformsGpu
-        {
-            Params = new Vector4(hasPrepass ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
-            Screen = new Vector4(1f / _width, 1f / _height, _width, _height),
-        };
-        _renderer.UpdateBuffer<SsaoUniformsGpu>(_ssaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref u, 1));
-    }
-
-    // Light-space view-projection for one shadow face: directional = ortho fit to a camera-centred
-    // circle (falling back to the scene AABB for small scenes); spot = perspective down the cone;
-    // point = one of six 90°-FOV cube faces.
-    //
-    // texelWorld is the shadow texel's WORLD size, the quantity the shader scales its normal-offset
-    // bias by (SceneLight.sizeParams.y): a fixed world-space bias is only ever tuned for one texel
-    // size, and any coarser map (smaller texture, larger footprint) outgrows it and self-shadows in
-    // diagonal bands. Ortho (directional) texels have one world size; perspective (spot/point)
-    // texels grow with distance, so those report metres PER METRE of receiver distance and the
-    // shader multiplies by its own distance to the light.
-    private Matrix4x4 ComputeLightMatrix(
-        PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition,
-        out float texelWorld)
-    {
-        switch (light.Type)
-        {
-            case PbrLightType.Spot:
-            {
-                var aim = light.Direction.LengthSquared() > 1e-6f ? Vector3.Normalize(-light.Direction) : -Vector3.UnitY;
-                var up = MathF.Abs(aim.Y) > 0.95f ? Vector3.UnitZ : Vector3.UnitY;
-                var view = PbrMath.LookAt(light.Position, light.Position + aim, up);
-                var fov = Math.Clamp(light.SpotOuterDegrees * (MathF.PI / 180f) * 1.05f, 0.1f, 3.0f);
-                var proj = PbrMath.Perspective(fov, 1f, 0.05f, MathF.Max(light.Range, 1f));
-                texelWorld = 2f * MathF.Tan(fov * 0.5f) / _shadowMapSize; // per metre of distance
-                return PbrMath.ViewProjection(view, proj);
-            }
-            case PbrLightType.Point:
-            {
-                var (dir, up) = CubeFace(face);
-                var view = PbrMath.LookAt(light.Position, light.Position + dir, up);
-                var proj = PbrMath.Perspective(MathF.PI / 2f, 1f, 0.05f, MathF.Max(light.Range, 1f));
-                texelWorld = 2f / _shadowMapSize; // tan(90°/2) = 1; per metre of distance
-                return PbrMath.ViewProjection(view, proj);
-            }
-            default: // Directional
-                return ComputeDirectionalLightMatrix(
-                    light.Direction, center, extent, cameraPosition,
-                    DirectionalShadowRadius, _shadowMapSize, out texelWorld);
-        }
-    }
-
-    // Standard cube-face direction/up (RH), indexed to match the shader's getPointShadowFace:
-    // +X, -X, +Y, -Y, +Z, -Z.
-    private static (Vector3 Dir, Vector3 Up) CubeFace(int face) => face switch
-    {
-        0 => (Vector3.UnitX, -Vector3.UnitY),
-        1 => (-Vector3.UnitX, -Vector3.UnitY),
-        2 => (Vector3.UnitY, Vector3.UnitZ),
-        3 => (-Vector3.UnitY, -Vector3.UnitZ),
-        4 => (Vector3.UnitZ, -Vector3.UnitY),
-        _ => (-Vector3.UnitZ, -Vector3.UnitY),
-    };
-
-    // World-space AABB over the opaque casters (their object-space bounds transformed by Model).
-    private void ComputeWorldBounds(out Vector3 center, out Vector3 extent)
-    {
-        var min = new Vector3(float.MaxValue);
-        var max = new Vector3(float.MinValue);
-        foreach (var (instance, primitive, _) in _opaque)
-        {
-            for (var c = 0; c < 8; c++)
-            {
-                var corner = new Vector3(
-                    (c & 1) == 0 ? primitive.LocalMin.X : primitive.LocalMax.X,
-                    (c & 2) == 0 ? primitive.LocalMin.Y : primitive.LocalMax.Y,
-                    (c & 4) == 0 ? primitive.LocalMin.Z : primitive.LocalMax.Z);
-                var wp = Vector3.Transform(corner, instance.Model);
-                min = Vector3.Min(min, wp);
-                max = Vector3.Max(max, wp);
-            }
-        }
-        if (min.X > max.X) { min = max = Vector3.Zero; }
-        center = (min + max) * 0.5f;
-        extent = (max - min) * 0.5f;
-    }
-
-    // Directional light view-projection (RH, clip-Z [0,1]).
-    //
-    // The XY footprint is a SQUARE of side 2·min(shadowRadius, sceneRadius), centred on the
-    // camera (clamped into the scene AABB) — not the scene AABB itself. Fitting the whole scene
-    // is what made a growing world quietly destroy its own shadow quality: texel size scales with
-    // the AABB, blurring every shadow edge (the acne this once caused is gone — the bias now
-    // scales with texelWorld — but the resolution loss is inherent).
-    // A camera-centred fit keeps metres-per-texel constant forever. Two details carry it:
-    //
-    // * The centre is SNAPPED to whole shadow texels in the light's plane basis, so the box
-    //   translates in texel steps as the camera glides and shadow edges do not shimmer. The basis
-    //   is derived from the light direction alone, so it is stable frame to frame.
-    // * The DEPTH range still spans the scene AABB along the light, so a tall caster outside the
-    //   circle (a skyline tower, the highway deck) still lays its shadow across it.
-    //
-    // When the scene fits inside the radius anyway (or the radius is disabled with <= 0), the
-    // legacy whole-AABB fit applies — a small scene keeps its tighter, non-square box.
-    private static Matrix4x4 ComputeDirectionalLightMatrix(
-        Vector3 surfaceToLight, Vector3 center, Vector3 extent, Vector3 cameraPosition,
-        float shadowRadius, uint shadowMapSize, out float texelWorld)
-    {
-        var lightDir = surfaceToLight.LengthSquared() > 1e-6f ? Vector3.Normalize(surfaceToLight) : Vector3.UnitY;
-        const float depthPad = 32f;
-        const float xyPad = 1f;
-        var sceneRadius = MathF.Max(4f, 0.5f * extent.Length());
-        var up = MathF.Abs(lightDir.Y) > 0.95f ? Vector3.UnitZ : Vector3.UnitY;
-
-        if (shadowRadius > 0f && shadowRadius < sceneRadius)
-        {
-            var radius = shadowRadius + xyPad;
-            var focus = Vector3.Clamp(cameraPosition, center - extent, center + extent);
-
-            // Snap the focus to the shadow-texel grid in the light's own plane basis.
-            var right = Vector3.Normalize(Vector3.Cross(up, lightDir));
-            var planeUp = Vector3.Cross(lightDir, right);
-            var texel = 2f * radius / shadowMapSize;
-            var focusRight = Vector3.Dot(focus, right);
-            var focusUp = Vector3.Dot(focus, planeUp);
-            focus += right * (MathF.Floor(focusRight / texel) * texel - focusRight)
-                   + planeUp * (MathF.Floor(focusUp / texel) * texel - focusUp);
-
-            var eye = focus + lightDir * (sceneRadius + depthPad);
-            var lightView = PbrMath.LookAt(eye, focus, up);
-
-            // Depth range from the scene AABB so out-of-circle casters still cast in.
-            float minZ = float.MaxValue, maxZ = float.MinValue;
-            for (var c = 0; c < 8; c++)
-            {
-                var corner = center + new Vector3(
-                    (c & 1) == 0 ? -extent.X : extent.X,
-                    (c & 2) == 0 ? -extent.Y : extent.Y,
-                    (c & 4) == 0 ? -extent.Z : extent.Z);
-                var lz = Vector3.Transform(corner, lightView).Z;
-                minZ = MathF.Min(minZ, lz); maxZ = MathF.Max(maxZ, lz);
-            }
-            // RH light space: the scene sits at negative Z. near/far are positive distances.
-            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
-            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
-            var proj = PbrMath.OrthographicOffCenter(-radius, radius, -radius, radius, nearPlane, farPlane);
-            texelWorld = texel; // the snap grid IS the texel size: 2·radius / mapSize
-            return PbrMath.ViewProjection(lightView, proj);
-        }
-
-        // Legacy whole-scene fit. Matches bank-heist (up-vector guard, XY/Z padding).
-        {
-            var eye = center + lightDir * (sceneRadius + depthPad);
-            var lightView = PbrMath.LookAt(eye, center, up);
-
-            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-            for (var c = 0; c < 8; c++)
-            {
-                var corner = center + new Vector3(
-                    (c & 1) == 0 ? -extent.X : extent.X,
-                    (c & 2) == 0 ? -extent.Y : extent.Y,
-                    (c & 4) == 0 ? -extent.Z : extent.Z);
-                var lp = Vector3.Transform(corner, lightView);
-                minX = MathF.Min(minX, lp.X); maxX = MathF.Max(maxX, lp.X);
-                minY = MathF.Min(minY, lp.Y); maxY = MathF.Max(maxY, lp.Y);
-                minZ = MathF.Min(minZ, lp.Z); maxZ = MathF.Max(maxZ, lp.Z);
-            }
-            // RH light space: the scene sits at negative Z. near/far are positive distances.
-            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
-            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
-            var proj = PbrMath.OrthographicOffCenter(
-                minX - xyPad, maxX + xyPad, minY - xyPad, maxY + xyPad, nearPlane, farPlane);
-            // The map is square but the fit is not; the wider axis has the coarser texels, and the
-            // bias must cover the worst case.
-            texelWorld = MathF.Max(maxX - minX + 2f * xyPad, maxY - minY + 2f * xyPad) / shadowMapSize;
-            return PbrMath.ViewProjection(lightView, proj);
-        }
-    }
-
-    private void EncodeBucket(
-        ref PassRecording pass,
-        List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
-        BlendMode blend,
-        in Matrix4x4 viewProjection,
-        ref int drawIndex)
-    {
-        if (bucket.Count == 0) return;
-
-        // Pipeline is chosen per draw (rigid vs skinned need different vertex layouts, and a
-        // material may select a custom program) but only re-set on a change, so an all-rigid
-        // stock-material bucket still issues exactly one SetPipeline. Bind groups persist across
-        // SetPipeline within a pass — every pipeline shares the built-in groups 0/1/3.
-        var skinnedActive = (bool?)null;
-        var programActive = -1;
-        ref var encoder = ref pass.Encoder;
-        pass.SetBindGroup(1);
-        pass.SetBindGroup(3);
-
-        foreach (var (instance, primitive, _) in bucket)
-        {
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
-            var programId = Materials.GetProgramId(primitive.MaterialId);
-            if (skinned && programId != 0)
-                throw new InvalidOperationException(
-                    $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
-                    "Custom material programs do not support the skinned vertex path (v1).");
-            if (skinnedActive != skinned || programActive != programId)
-            {
-                encoder.SetPipeline(skinned ? GetSkinnedPipeline(blend) : GetPipeline(programId, blend));
-                skinnedActive = skinned;
-                programActive = programId;
-            }
-
-            var uniforms = new DrawUniformsGpu
-            {
-                Mvp = instance.Model * viewProjection,
-                Model = instance.Model,
-                NormalMatrix = PbrMath.NormalMatrix(instance.Model),
-                // y carries the joint palette base for skinned draws; the lanes beside the
-                // highlight weight were already spare, so this needs no uniform layout change.
-                Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f, 0f, 0f),
-            };
-            MemoryMarshal.Write(_drawStaging.AsSpan(drawIndex * (int)_drawStride), in uniforms);
-
-            encoder.SetBindGroup(0, _drawGroup, dynamicOffset: (uint)(drawIndex * _drawStride));
-            encoder.SetBindGroup(2, Materials.GetBindGroup(primitive.MaterialId));
-            encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
-            encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-            drawIndex++;
-        }
-    }
-
-    // Cluster depth range for the CURRENT frame (extracted from the projection; the shader must
-    // slice with the same values, so they ride the frame UBO).
-    private float _clusterNear = 0.05f;
-    private float _clusterFar = 100f;
-
-    // World-space camera forward from the row-vector view matrix (third column is -forward).
-    private static Vector3 CameraForward(in Matrix4x4 view) =>
-        Vector3.Normalize(new Vector3(-view.M13, -view.M23, -view.M33));
-
-    private static int ClusterSlice(float viewZ, float near, float far) =>
-        Math.Clamp((int)(MathF.Log(Math.Max(viewZ, near) / near) / MathF.Log(far / near) * ClusterZSlices),
-            0, ClusterZSlices - 1);
-
-    /// <summary>Forward+ CPU binning: for every point/spot light, mark the froxels its bounding
-    /// sphere (position, range) can touch. Conservative on purpose — tile/slice ranges from a
-    /// projected view-space AABB, padded ±1 froxel against CPU/GPU float divergence at cell
-    /// boundaries. A false-positive bit costs a near-zero shading add; a false negative would
-    /// change pixels, so inclusion always wins. Directional lights are never clustered.</summary>
-    private void BuildClusters(PbrScene scene)
-    {
-        Array.Clear(_clusterMasks);
-        var view = scene.Camera.View;
-        var proj = scene.Camera.Projection;
-        // Near/far from the row-vector perspective projection (M33 = f/(n-f), M43 = n·f/(n-f)).
-        // Degenerate extraction (orthographic/custom) keeps the previous values.
-        if (MathF.Abs(proj.M33) > 1e-6f && MathF.Abs(proj.M33 + 1f) > 1e-6f)
-        {
-            var n = proj.M43 / proj.M33;
-            var f = proj.M43 / (proj.M33 + 1f);
-            if (n > 0f && f > n) { _clusterNear = n; _clusterFar = f; }
-        }
-
-        var count = Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights);
-        for (var i = 0; i < count; i++)
-        {
-            var light = scene.Lights[i];
-            if (light.Type == PbrLightType.Directional) continue;
-            var radius = Math.Max(light.Range, 0.01f);
-            var centerView = Vector3.Transform(light.Position, view);
-            var viewZ = -centerView.Z; // row-vector look-at: -Z is forward
-            if (viewZ + radius <= _clusterNear || viewZ - radius >= _clusterFar) continue;
-
-            var slice0 = Math.Max(ClusterSlice(viewZ - radius, _clusterNear, _clusterFar) - 1, 0);
-            var slice1 = Math.Min(ClusterSlice(viewZ + radius, _clusterNear, _clusterFar) + 1, ClusterZSlices - 1);
-
-            // Screen rect from the 8 corners of the view-space AABB around the sphere. Any corner
-            // at or in front of the near plane → the sphere may wrap the camera → full screen.
-            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-            var fullScreen = false;
-            for (var c = 0; c < 8 && !fullScreen; c++)
-            {
-                var corner = centerView + new Vector3(
-                    (c & 1) == 0 ? -radius : radius,
-                    (c & 2) == 0 ? -radius : radius,
-                    (c & 4) == 0 ? -radius : radius);
-                if (corner.Z >= -_clusterNear) { fullScreen = true; break; }
-                var clip = Vector4.Transform(new Vector4(corner, 1f), proj);
-                var ndcX = clip.X / clip.W;
-                var ndcY = clip.Y / clip.W;
-                var sx = (ndcX * 0.5f + 0.5f) * _width;
-                var sy = (1f - (ndcY * 0.5f + 0.5f)) * _height;
-                minX = Math.Min(minX, sx); maxX = Math.Max(maxX, sx);
-                minY = Math.Min(minY, sy); maxY = Math.Max(maxY, sy);
-            }
-
-            int tx0 = 0, tx1 = _clusterTilesX - 1, ty0 = 0, ty1 = _clusterTilesY - 1;
-            if (!fullScreen)
-            {
-                tx0 = Math.Clamp((int)(minX / ClusterTileSize) - 1, 0, _clusterTilesX - 1);
-                tx1 = Math.Clamp((int)(maxX / ClusterTileSize) + 1, 0, _clusterTilesX - 1);
-                ty0 = Math.Clamp((int)(minY / ClusterTileSize) - 1, 0, _clusterTilesY - 1);
-                ty1 = Math.Clamp((int)(maxY / ClusterTileSize) + 1, 0, _clusterTilesY - 1);
-                if (tx1 < tx0 || ty1 < ty0) continue; // fully off-screen
-            }
-
-            var word = i >> 5;
-            var bit = 1u << (i & 31);
-            for (var sz = slice0; sz <= slice1; sz++)
-                for (var ty = ty0; ty <= ty1; ty++)
-                {
-                    var row = (sz * _clusterTilesY + ty) * _clusterTilesX;
-                    for (var tx = tx0; tx <= tx1; tx++)
-                        _clusterMasks[(row + tx) * 2 + word] |= bit;
-                }
-        }
-        _renderer.UpdateBuffer<uint>(_clusterBuffer, 0, _clusterMasks);
-        // A LEVEL, not PARADISE_CLUSTER_DEBUG=1 as this used to be. Two things improve: the froxel
-        // dump stops being the same volume as a device-lost report (issue #232), and the per-frame
-        // Environment.GetEnvironmentVariable call is gone. IsEnabled is checked explicitly because
-        // the counting loop below is the cost here — [LoggerMessage] would guard the formatting
-        // but this walks every froxel word first.
-        if (_log.IsEnabled(LogLevel.Debug))
-        {
-            var empty = 0; var bits = 0L;
-            foreach (var m in _clusterMasks)
-            {
-                if (m == 0) empty++;
-                bits += System.Numerics.BitOperations.PopCount(m);
-            }
-            var froxels = _clusterMasks.Length / 2;
-            LogClusterStats(_log, froxels, empty, (double)bits / froxels);
-        }
-    }
-
-    private void UploadFrameUniforms(PbrScene scene)
-    {
-        // Filled IN PLACE through a ref to the field — never `var frame = new FrameUniformsGpu {…}`.
-        // See _frameUniforms: a 31 KB local kills the wasm runtime at tier-up time.
-        ref var frame = ref _frameUniforms;
-        // The field persists between frames, so start from zero to keep the semantics of the fresh
-        // struct this used to allocate. AmbientSh is the one that would actually bite: it is written
-        // only when the scene carries SH coefficients, and its [0].w is the flag that switches the
-        // shader onto the SH ambient path — a stale one keeps that path on after a scene drops it.
-        frame = default;
-        frame.Time = new Vector4(scene.ElapsedSeconds, 0f, 0f, 0f);
-        frame.CameraPos = new Vector4(scene.Camera.Position, 0f);
-        frame.Ambient = new Vector4(scene.Ambient.Sky, scene.Ambient.Exposure);
-        frame.AmbientEquator = new Vector4(scene.Ambient.Equator, Math.Min(scene.Lights.Count, FrameUniformsGpu.MaxSceneLights));
-        frame.AmbientGround = new Vector4(scene.Ambient.Ground, scene.Ambient.Flat ? 1f : 0f);
-        // x: sky-reflection specular enabled (Godot reflected_light_source = Sky).
-        frame.AaSettings = new Vector4(
-            scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
-            _specularAaVariance, _specularAaClamp, 0f);
-        frame.CameraForward = new Vector4(CameraForward(scene.Camera.View), _clusterNear);
-        frame.ClusterParams = new Vector4(_clusterTilesX, _clusterTilesY, ClusterZSlices, _clusterFar);
-        // x: 1/shadowMapSize (per-layer texel). yzw: tone mapping — mode, exposure, white point.
-        frame.ShadowSettings = new Vector4(
-            1f / _shadowMapSize,
-            (float)scene.Tonemap.Mode,
-            scene.Tonemap.Exposure,
-            scene.Tonemap.White);
-        frame.ShadowFilter = new Vector4(_shadowBlurTexels, 0f, 0f, 0f);
-        // L2 sky-SH ambient: coefficients pass through verbatim; [0].w flags the SH path on.
-        if (scene.Ambient.Sh is { Length: 9 } sh)
-        {
-            frame.AmbientSh[0] = new Vector4(sh[0], 1f);
-            for (var i = 1; i < 9; i++)
-            {
-                frame.AmbientSh[i] = new Vector4(sh[i], 0f);
-            }
-        }
-        for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
-        {
-            frame.Lights[i] = scene.Lights[i].ToGpu();
-        }
-
-        // Per-face light-space matrices from the shadow plan.
-        foreach (var (lightIndex, face, _, vp) in _shadowViews)
-        {
-            frame.SceneLightShadowMatrices[lightIndex * 6 + face] = vp;
-        }
-        // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
-        // face count (shadowAtlas.y), soft-shadow flag (shadowAtlas.w) and shadow texel world
-        // size (sizeParams.y — the bias scale, see ComputeLightMatrix). shadowAtlas.x carries
-        // the distance-attenuation decay, .z the LIGHT_PARAM_SPECULAR amount and sizeParams.x
-        // the light's angular/world size (all set by ToGpu) and must be preserved here.
-        for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
-        {
-            if (_shadowBaseLayer[i] < 0) continue;
-            var light = frame.Lights[i];
-            light.SpotAngles.Z = _shadowBaseLayer[i];
-            light.SpotAngles.W = Math.Clamp(scene.Lights[i].ShadowStrength, 0f, 1f);
-            light.ShadowAtlas = new Vector4(light.ShadowAtlas.X, _shadowFaceCount[i], light.ShadowAtlas.Z, scene.Lights[i].SoftShadows ? 1f : 0f);
-            light.SizeParams.Y = _shadowTexelWorld[i];
-            frame.Lights[i] = light;
-        }
-        _renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
-        if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
-    }
-
-    // The frame UBO's CPU mirror lives in a FIELD, never in a local. FrameUniformsGpu is 31 KB (64
-    // lights + 384 shadow matrices), and Mono's wasm interpreter aborts the ENTIRE runtime when it
-    // tiers up a method whose locals exceed its frame budget: "Unable to run method
-    // UploadFrameUniforms: locals size too big". The abort lands a couple of seconds into steady
-    // rendering — long after the method has been interpreting happily, and long after any short
-    // smoke test has reported success — so it reads as a random browser crash rather than a struct
-    // size problem. Filling this in place also saves a 31 KB stack copy per frame on every backend.
-    private FrameUniformsGpu _frameUniforms;
-
-    // Test-only readback of the per-frame packed light array (e.g. to assert ShadowAtlas.X survives the
-    // shadow-caster rebuild). Off by default so production frames never pay the array copy on the hot path.
-    internal bool CaptureFrameLightsForTest;
-    private SceneLightArray _lastFrameLightsForTest;
-    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].ShadowAtlas;
-    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => _lastFrameLightsForTest[lightIndex].SizeParams;
-
-    /// <summary>Register a game-supplied shader program for use by materials. The program is
-    /// typically an extension shader that <c>#include</c>s <c>Common/pbrCore.slang</c>, compiled
-    /// by the game's build (the NuGet ships the sources and the Slang targets) and loaded via
-    /// <see cref="ShaderProgramLoader"/> from the game assembly. It must consume the standard
-    /// rigid vertex stream and may declare extra group-2 bindings from slot
-    /// <see cref="MaterialResourceCache.StandardMaterialEntryCount"/> up (bind them per material
-    /// via the extraEntries overload of <see cref="MaterialResourceCache.AddMaterial(in GltfMaterialData, GltfImageData[], int, ReadOnlySpan{BindGroupEntryDesc})"/>).
-    /// Returns a programId (&gt; 0; 0 is the built-in PBR program).
-    ///
-    /// The pipeline is created with the BUILT-IN layout for groups 0/1/3 so the engine's draw-ring,
-    /// frame and SSAO bind groups stay compatible — WebGPU permits a pipeline layout to declare
-    /// bindings the shader never uses, and slangc dead-code-eliminates unreferenced globals from
-    /// the extension's reflection (e.g. jointMatrices when it has no skinned entry point).
-    /// Validation is therefore a subset check, and it throws here — at registration, not at first
-    /// draw, where a mismatch would only surface as an async pipeline error that silently drops
-    /// draws. Custom programs are rigid-only; shadow and SSAO-prepass passes always run the
-    /// built-in vertex shaders — for a BLEND material that is moot (excluded from both), but an
-    /// OPAQUE custom material casts shadows and writes prepass positions from its UNDISPLACED
-    /// geometry, so a vertex-displaced opaque surface will self-shadow as if flat.</summary>
-    public int RegisterMaterialProgram(
-        ShaderProgramDesc program,
-        string vertexEntryPoint = "vertexMain",
-        string fragmentEntryPoint = "fragmentMain")
-    {
-        UniformLayoutValidator.Validate(program);
-
-        var hasFragmentEntry = false;
-        foreach (var module in program.Modules)
-        {
-            hasFragmentEntry |= module.Stage == ShaderStage.Fragment && module.EntryPoint == fragmentEntryPoint;
-        }
-        if (!hasFragmentEntry)
-            throw new InvalidOperationException($"Custom material program has no fragment entry point '{fragmentEntryPoint}'.");
-
-        // Subset compatibility: every binding the custom program reflects in groups 0/1/3, and in
-        // group 2 below the extension slots, must exist in the built-in program with an identical
-        // entry. Group 0 is compared with the dynamic-offset ring flag applied, since the raw
-        // reflection cannot know about that renderer-side rewrite.
-        foreach (var group in program.Layout.Groups)
-        {
-            var builtIn = FindGroupOrNull(_program, group.GroupIndex);
-            foreach (var entry in group.Entries)
-            {
-                if (group.GroupIndex == 2 && entry.Binding >= MaterialResourceCache.StandardMaterialEntryCount)
-                    continue; // the extension's own bindings
-                var actual = group.GroupIndex == 0 ? entry with { HasDynamicOffset = true } : entry;
-                BindGroupLayoutEntryDesc? expected = null;
-                if (builtIn is not null)
-                {
-                    foreach (var candidate in builtIn.Entries)
-                    {
-                        if (candidate.Binding == entry.Binding) { expected = candidate; break; }
-                    }
-                }
-                if (expected is null || expected != actual)
-                    throw new InvalidOperationException(
-                        $"Custom material program is not layout-compatible with the PBR frame: group {group.GroupIndex} " +
-                        $"binding {entry.Binding} reflects [{actual}] but the built-in program expects " +
-                        $"[{expected?.ToString() ?? "no such binding"}]. Extension shaders must #include Common/pbrCore.slang " +
-                        "unmodified and add their own bindings only in group 2 at binding " +
-                        $"{MaterialResourceCache.StandardMaterialEntryCount}+.");
-            }
-        }
-
-        // The custom vertex entry must consume the standard rigid stream — primitives are uploaded
-        // once and shared across programs.
-        var vertexLayout = program.VertexBuffersByEntryPoint.TryGetValue(vertexEntryPoint, out var byEntry)
-            ? byEntry
-            : program.VertexBuffers;
-        if (vertexLayout.Length == 0)
-            throw new InvalidOperationException($"Custom material program reflects no vertex layout for entry point '{vertexEntryPoint}'.");
-        if (vertexLayout[0].Stride != _program.VertexBuffers[0].Stride)
-            throw new InvalidOperationException(
-                $"Custom material program's '{vertexEntryPoint}' consumes a {vertexLayout[0].Stride}-byte vertex, " +
-                $"but PBR primitives are {_program.VertexBuffers[0].Stride}-byte (pos3/normal3/uv2/tangent4). " +
-                "Custom programs are rigid-only.");
-
-        // Merge: built-in groups 0/1/3 verbatim (dynamic draw ring included); group 2 = the seven
-        // standard entries plus the extension's extras, sorted by binding.
-        var extras = new List<BindGroupLayoutEntryDesc>();
-        foreach (var group in program.Layout.Groups)
-        {
-            if (group.GroupIndex != 2) continue;
-            foreach (var entry in group.Entries)
-            {
-                if (entry.Binding >= MaterialResourceCache.StandardMaterialEntryCount) extras.Add(entry);
-            }
-        }
-        extras.Sort(static (a, b) => a.Binding.CompareTo(b.Binding));
-
-        var mergedGroups = (BindGroupLayoutDesc[])_program.Layout.Groups.Clone();
-        for (var i = 0; i < mergedGroups.Length; i++)
-        {
-            if (mergedGroups[i].GroupIndex != 2) continue;
-            var entries = new BindGroupLayoutEntryDesc[mergedGroups[i].Entries.Length + extras.Count];
-            mergedGroups[i].Entries.CopyTo(entries, 0);
-            extras.CopyTo(entries, mergedGroups[i].Entries.Length);
-            mergedGroups[i] = new BindGroupLayoutDesc(2, entries);
-        }
-        var merged = new ShaderProgramDesc(
-            program.Modules,
-            new PipelineLayoutDesc(mergedGroups, _program.Layout.PushConstants),
-            program.VertexBuffers)
-        {
-            UniformBlocks = program.UniformBlocks,
-            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
-        };
-
-        _customPrograms.Add((merged, vertexEntryPoint, fragmentEntryPoint));
-        var programId = _customPrograms.Count;
-        Materials.RegisterProgramLayout(programId, FindGroup(merged, 2));
-        return programId;
-    }
-
-    private PipelineHandle GetPipeline(int programId, BlendMode blend)
-    {
-        if (_pipelines.TryGetValue((programId, blend), out var pipeline)) return pipeline;
-        var (program, vertexEntry, fragmentEntry) = programId == 0
-            ? (_program, "vertexMain", "fragmentMain")
-            : _customPrograms[programId - 1];
-        pipeline = _renderer.CreatePipeline(
-            program,
-            HdrFormat, // main pass now emits LINEAR HDR into the HDR target; the composite pass tonemaps
-            depthStencilFormat: TextureFormat.Depth32Float,
-            blend: blend,
-            depthWriteEnabled: blend == BlendMode.Opaque, // blended surfaces read but don't write depth
-            fragmentEntryPoint: fragmentEntry, // always linear (the sRGB decision moved to composite)
-            vertexEntryPoint: vertexEntry);
-        _pipelines[(programId, blend)] = pipeline;
-        return pipeline;
-    }
-
-    /// <summary>The skinned twin of <see cref="GetPipeline"/>. Identical except for the vertex
-    /// entry point — which also selects its 20-float vertex layout, since the two are reflected
-    /// together.</summary>
-    private PipelineHandle GetSkinnedPipeline(BlendMode blend)
-    {
-        if (_skinnedPipelines.TryGetValue(blend, out var pipeline)) return pipeline;
-        pipeline = _renderer.CreatePipeline(
-            _program,
-            HdrFormat,
-            depthStencilFormat: TextureFormat.Depth32Float,
-            blend: blend,
-            depthWriteEnabled: blend == BlendMode.Opaque,
-            fragmentEntryPoint: "fragmentMain",
-            vertexEntryPoint: "vertexMainSkinned");
-        _skinnedPipelines[blend] = pipeline;
-        return pipeline;
-    }
-
-    private PipelineHandle GetShadowSkinnedPipeline()
-    {
-        if (_shadowSkinnedPipeline.IsValid) return _shadowSkinnedPipeline;
-        var layout = _shadowProgram.VertexBuffersByEntryPoint.TryGetValue("vertexMainSkinned", out var vb)
-            ? vb
-            : throw new InvalidOperationException("shadow.slang reflects no vertexMainSkinned layout.");
-        _shadowSkinnedPipeline = _renderer.CreateDepthOnlyPipeline(
-            _shadowProgram, TextureFormat.Depth32Float, layout, vertexEntryPoint: "vertexMainSkinned");
-        return _shadowSkinnedPipeline;
-    }
-
-    private PipelineHandle GetPrepassSkinnedPipeline()
-    {
-        if (_prepassSkinnedPipeline.IsValid) return _prepassSkinnedPipeline;
-        _prepassSkinnedPipeline = _renderer.CreatePipeline(
-            _positionPrepassProgram, TextureFormat.Rgba32Float,
-            depthStencilFormat: TextureFormat.Depth32Float,
-            depthWriteEnabled: true,
-            depthCompare: CompareFunction.Less,
-            vertexEntryPoint: "vertexMainSkinned");
-        return _prepassSkinnedPipeline;
-    }
-
-    internal int PipelineVariantCountForTest => _pipelines.Count;
+    internal int PipelineVariantCountForTest => _programs.PipelineCount;
     // Culling is invisible in the submitted stream — a pass that was declared and dropped and
     // a pass that was never declared look identical. The baseline asserts on this so that
     // "the frame is unchanged" cannot be satisfied by culling quietly doing nothing.
     internal int CulledPassCountForTest => _graph.CulledPassCount;
-    internal int SkinnedPipelineVariantCountForTest => _skinnedPipelines.Count;
-    internal int CustomProgramCountForTest => _customPrograms.Count;
-    internal bool UsesSrgbEntryPointForTest => _useSrgbEntryPoint;
-
-    private static bool IsSrgbFormat(TextureFormat format) =>
-        format is TextureFormat.Rgba8UnormSrgb or TextureFormat.Bgra8UnormSrgb;
-
-    // (Re)allocate the bloom mip chain sized to the current target: a half-res base halving down to
-    // ~BloomMinDim (≤ BloomMaxLevels levels). Each level is an Rgba16Float render target sampled by
-    // the next pass.
-    private void EnsureBloomChain(uint width, uint height)
+    internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
+    internal int CustomProgramCountForTest => _programs.CustomProgramCount;
+    internal bool UsesSrgbEntryPointForTest => _composite.UsesSrgbEntryPoint;
+    internal bool CaptureFrameLightsForTest
     {
-        var sizes = new List<(uint W, uint H)>();
-        uint w = Math.Max(1, width / 2), h = Math.Max(1, height / 2);
-        for (var i = 0; i < BloomMaxLevels; i++)
-        {
-            sizes.Add((w, h));
-            if (w <= BloomMinDim || h <= BloomMinDim) break;
-            w = Math.Max(1, w / 2);
-            h = Math.Max(1, h / 2);
-        }
-        _bloomLevels = sizes.Count;
-        for (var i = 0; i < _bloomLevels; i++)
-            _targets.Ensure(BloomTargets[i], RenderTarget(sizes[i].W, sizes[i].H, HdrFormat));
-        for (var i = _bloomLevels; i < BloomMaxLevels; i++)
-            _targets.Release(BloomTargets[i]);
+        get => _scene.CaptureFrameLightsForTest;
+        set => _scene.CaptureFrameLightsForTest = value;
     }
-
-    private const int DfgLutSize = 128;
-
-    /// <summary>Bake the environment-BRDF (DFG) table: an exact port of Godot's
-    /// integrate_dfg.glsl (GGX importance sampling, Schlick-GGX with the IBL k = α²/2,
-    /// 1024 Hammersley samples). Stored as (scale = ∫(1−Fc)·G_Vis, bias = ∫Fc·G_Vis) so the
-    /// shader computes specular = F0·scale + f90·bias and the multiscatter energy compensation
-    /// uses scale + bias; u = NdotV, v = roughness. ~130 ms once at startup.</summary>
-    private void BakeDfgLut()
-    {
-        const int samples = 1024;
-        var data = new byte[DfgLutSize * DfgLutSize * 8]; // 4 × 16-bit half channels
-        for (var row = 0; row < DfgLutSize; row++)
-        {
-            var roughness = (row + 0.5f) / DfgLutSize;
-            var alpha2 = roughness * roughness * roughness * roughness;
-            var k = roughness * roughness / 2f; // Schlick-GGX IBL k
-            for (var col = 0; col < DfgLutSize; col++)
-            {
-                var ndv = (col + 0.5f) / DfgLutSize;
-                var v = new Vector3(MathF.Sqrt(1f - ndv * ndv), 0f, ndv); // N = +Z tangent frame
-                float a = 0f, b = 0f;
-                for (var i = 0; i < samples; i++)
-                {
-                    var u1 = (float)i / samples;
-                    uint bits = (uint)i;
-                    bits = (bits << 16) | (bits >> 16);
-                    bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
-                    bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
-                    bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
-                    bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
-                    var u2 = bits * 2.3283064365386963e-10f;
-                    var phi = 2f * MathF.PI * u1;
-                    var cosTheta = MathF.Sqrt((1f - u2) / (1f + (alpha2 - 1f) * u2));
-                    var sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
-                    var h = new Vector3(MathF.Cos(phi) * sinTheta, MathF.Sin(phi) * sinTheta, cosTheta);
-                    var l = 2f * Vector3.Dot(v, h) * h - v;
-                    var ndl = Math.Clamp(l.Z, 0f, 1f);
-                    if (ndl <= 0f) continue;
-                    var ndh = Math.Clamp(h.Z, 0f, 1f);
-                    var vdh = Math.Clamp(Vector3.Dot(v, h), 0f, 1f);
-                    var g = (ndv / (ndv * (1f - k) + k)) * (ndl / (ndl * (1f - k) + k));
-                    var gVis = g * vdh / MathF.Max(ndh * ndv, 1e-6f);
-                    var fc = MathF.Pow(1f - vdh, 5f);
-                    a += fc * gVis;
-                    b += gVis;
-                }
-                a /= samples;
-                b /= samples;
-                var idx = (row * DfgLutSize + col) * 8;
-                WriteHalf(data, idx + 0, b - a); // r = scale (∫(1−Fc)·G_Vis)
-                WriteHalf(data, idx + 2, a);     // g = bias  (∫Fc·G_Vis)
-                WriteHalf(data, idx + 4, 0f);
-                WriteHalf(data, idx + 6, 1f);
-            }
-        }
-        _renderer.WriteTexture(_dfgLutTexture, 0, data, DfgLutSize * 8, DfgLutSize, DfgLutSize, DfgLutSize);
-
-        static void WriteHalf(byte[] dest, int offset, float value)
-        {
-            var bits = BitConverter.HalfToUInt16Bits((Half)value);
-            dest[offset] = (byte)bits;
-            dest[offset + 1] = (byte)(bits >> 8);
-        }
-    }
-
-    private const int SkySpecLutWidth = 64;
-    private const int SkySpecLutHeight = 16; // rows 0..7 gradient half, 8..15 sun half
-    internal const float SkySpecSunScale = 4f; // HDR headroom for the sun half in 8-bit sRGB texels
-
-    // GGX-prefilter the sky into the specular LUT (split-sum first term, N=V=R convention),
-    // split into two row halves:
-    //   rows 0..7  — the GRADIENT (azimuth-symmetric → depends only on reflection.y = u).
-    //   rows 8..15 — the SUN disk/halo, which is radially symmetric around the sun direction →
-    //                depends only on dot(reflection, sunDir) = u. Exact, no cubemap needed.
-    // The sun half is stored ÷SkySpecSunScale for HDR headroom in the 8-bit sRGB texel (the
-    // disk radiance is colour × energy, typically > 1); the shader multiplies it back.
-    // CPU cost ~64×16×64 evaluations, re-run only when the sky or sun changes.
-    private void EnsureSkySpecularLut(PbrScene scene)
-    {
-        var key = (scene.SkyTopColor, scene.SkyHorizonColor, scene.SkyGroundBottom, scene.SkyGroundHorizon,
-            scene.SkySkyCurveInv, scene.SkyGroundCurveInv,
-            scene.SkySunEnabled ? scene.SkySunColorEnergy : Vector3.Zero,
-            scene.SkySunSizeCos, scene.SkySunAngleMaxCos, scene.SkySunInvCurve);
-        if (_skySpecKey == key) return;
-        _skySpecKey = key;
-
-        Vector3 Radiance(float y)
-        {
-            y = Math.Clamp(y, -1f, 1f);
-            return y >= 0f
-                ? Vector3.Lerp(scene.SkyTopColor, scene.SkyHorizonColor,
-                    Math.Clamp(MathF.Pow(1f - y, scene.SkySkyCurveInv), 0f, 1f))
-                : Vector3.Lerp(scene.SkyGroundBottom, scene.SkyGroundHorizon,
-                    Math.Clamp(MathF.Pow(1f + y, scene.SkyGroundCurveInv), 0f, 1f));
-        }
-
-        // Godot's sun disk/halo weight (sky_material.cpp) as a function of the cosine to the sun.
-        Vector3 SunRadiance(float cosToSun)
-        {
-            if (!scene.SkySunEnabled) return Vector3.Zero;
-            float w;
-            if (cosToSun > scene.SkySunSizeCos) w = 1f;
-            else if (cosToSun > scene.SkySunAngleMaxCos)
-            {
-                float c2 = (scene.SkySunSizeCos - cosToSun) / (scene.SkySunSizeCos - scene.SkySunAngleMaxCos);
-                w = Math.Clamp(MathF.Pow(1f - c2, scene.SkySunInvCurve), 0f, 1f);
-            }
-            else return Vector3.Zero;
-            return scene.SkySunColorEnergy * (w / SkySpecSunScale);
-        }
-
-        static float SrgbEncode(float c)
-        {
-            c = Math.Clamp(c, 0f, 1f);
-            return c <= 0.0031308f ? c * 12.92f : 1.055f * MathF.Pow(c, 1f / 2.4f) - 0.055f;
-        }
-
-        const int samples = 64;
-        const int halfRows = SkySpecLutHeight / 2;
-        var data = new byte[SkySpecLutWidth * SkySpecLutHeight * 4];
-        for (var row = 0; row < SkySpecLutHeight; row++)
-        {
-            bool sunHalf = row >= halfRows;
-            float roughness = (row % halfRows + 0.5f) / halfRows;
-            float alpha = roughness * roughness;
-            float alpha2 = alpha * alpha;
-            for (var col = 0; col < SkySpecLutWidth; col++)
-            {
-                // For the gradient half, u = reflection.y; for the sun half, u = cos(angle to
-                // sun) — either way the radiance is symmetric around the Y axis of this frame.
-                float ry = col / (SkySpecLutWidth - 1f) * 2f - 1f;
-                var r = new Vector3(MathF.Sqrt(MathF.Max(0f, 1f - ry * ry)), ry, 0f);
-                // Tangent frame around R for GGX importance sampling.
-                var up = MathF.Abs(r.Y) > 0.999f ? Vector3.UnitX : Vector3.UnitY;
-                var tangent = Vector3.Normalize(Vector3.Cross(up, r));
-                var bitangent = Vector3.Cross(r, tangent);
-                Vector3 acc = default;
-                float wSum = 0f;
-                for (var s = 0; s < samples; s++)
-                {
-                    // Hammersley: (i+0.5)/N and the radical inverse of i.
-                    float u1 = (s + 0.5f) / samples;
-                    uint bits = (uint)s;
-                    bits = (bits << 16) | (bits >> 16);
-                    bits = ((bits & 0x55555555u) << 1) | ((bits & 0xAAAAAAAAu) >> 1);
-                    bits = ((bits & 0x33333333u) << 2) | ((bits & 0xCCCCCCCCu) >> 2);
-                    bits = ((bits & 0x0F0F0F0Fu) << 4) | ((bits & 0xF0F0F0F0u) >> 4);
-                    bits = ((bits & 0x00FF00FFu) << 8) | ((bits & 0xFF00FF00u) >> 8);
-                    float u2 = bits * 2.3283064365386963e-10f;
-                    float phi = 2f * MathF.PI * u1;
-                    float cosTheta = MathF.Sqrt((1f - u2) / (1f + (alpha2 - 1f) * u2));
-                    float sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
-                    var h = tangent * (MathF.Cos(phi) * sinTheta)
-                        + bitangent * (MathF.Sin(phi) * sinTheta)
-                        + r * cosTheta;
-                    var l = 2f * Vector3.Dot(r, h) * h - r;
-                    float ndl = Vector3.Dot(r, l);
-                    if (ndl <= 0f) continue;
-                    acc += (sunHalf ? SunRadiance(l.Y) : Radiance(l.Y)) * ndl;
-                    wSum += ndl;
-                }
-                var c = wSum > 0f ? acc / wSum : (sunHalf ? SunRadiance(ry) : Radiance(ry));
-                var i = (row * SkySpecLutWidth + col) * 4;
-                data[i + 0] = (byte)MathF.Round(SrgbEncode(c.X) * 255f);
-                data[i + 1] = (byte)MathF.Round(SrgbEncode(c.Y) * 255f);
-                data[i + 2] = (byte)MathF.Round(SrgbEncode(c.Z) * 255f);
-                data[i + 3] = 255;
-            }
-        }
-        _renderer.WriteTexture(_skySpecLutTexture, 0, data,
-            SkySpecLutWidth * 4, SkySpecLutHeight, SkySpecLutWidth, SkySpecLutHeight);
-    }
-
-    private BindGroupLayoutDesc FindGroup(uint groupIndex) => FindGroup(_program, groupIndex);
-
-    private static BindGroupLayoutDesc? FindGroupOrNull(ShaderProgramDesc program, uint groupIndex)
-    {
-        foreach (var group in program.Layout.Groups)
-        {
-            if (group.GroupIndex == groupIndex) return group;
-        }
-        return null;
-    }
-
-    private static BindGroupLayoutDesc FindGroup(ShaderProgramDesc program, uint groupIndex)
-    {
-        foreach (var group in program.Layout.Groups)
-        {
-            if (group.GroupIndex == groupIndex) return group;
-        }
-        throw new InvalidOperationException($"Program reflects no bind group {groupIndex}.");
-    }
+    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _scene.GetLightShadowAtlasForTest(lightIndex);
+    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => _scene.GetLightSizeParamsForTest(lightIndex);
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         Materials.Dispose();
-        DestroySceneColorResources();
-        if (_blitPipeline.IsValid) _renderer.DestroyPipeline(_blitPipeline);
-        foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
-        foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
-        if (_shadowSkinnedPipeline.IsValid) _renderer.DestroyPipeline(_shadowSkinnedPipeline);
-        if (_prepassSkinnedPipeline.IsValid) _renderer.DestroyPipeline(_prepassSkinnedPipeline);
+        Pipeline.Dispose();
+        _programs.Dispose();
         foreach (var buffer in _ownedBuffers) _renderer.DestroyBuffer(buffer);
-        _renderer.DestroyPipeline(_shadowPipeline);
-        _renderer.DestroyBindGroup(_shadowDrawGroup);
-        _renderer.DestroyBuffer(_shadowDrawRing);
-        _renderer.DestroySampler(_shadowSampler);
-        _renderer.DestroyPipeline(_skyPipeline);
-        _renderer.DestroyBindGroup(_skyGroup);
-        _renderer.DestroyBuffer(_skyUniformBuffer);
-        _renderer.DestroyPipeline(_positionPrepassPipeline);
-        _renderer.DestroyBuffer(_ssaoUniformBuffer);
-        _renderer.DestroyBindGroup(_drawGroup);
-        _renderer.DestroyBuffer(_drawUniformRing);
-        _renderer.DestroyBuffer(_frameUniformBuffer);
-        if (_jointBuffer.IsValid) _renderer.DestroyBuffer(_jointBuffer);
-        if (_shadowJointGroup.IsValid) _renderer.DestroyBindGroup(_shadowJointGroup);
-        if (_prepassJointGroup.IsValid) _renderer.DestroyBindGroup(_prepassJointGroup);
-        _renderer.DestroyPipeline(_compositePipeline);
-        _renderer.DestroyBuffer(_compositeUniformBuffer);
-        _renderer.DestroySampler(_compositeSampler);
-        _renderer.DestroyPipeline(_bloomBrightPipeline);
-        _renderer.DestroyPipeline(_bloomDownPipeline);
-        _renderer.DestroyPipeline(_bloomUpPipeline);
-        _renderer.DestroyBuffer(_bloomUniformBuffer);
-        _bindGroups.Dispose();
-        _targets.Dispose();
+        _ctx.Dispose();
     }
 
     [LoggerMessage(
@@ -2004,7 +402,4 @@ public sealed partial class PbrRenderer : IDisposable
         Level = LogLevel.Error,
         Message = "Joint palette overflow: {Offset}+{Count} exceeds MaxSkinnedJoints ({Max}). Skinned meshes past this point render in bind pose.")]
     private static partial void LogJointPaletteOverflow(ILogger logger, int offset, int count, int max);
-
-    [LoggerMessage(EventId = 91, Level = LogLevel.Debug, Message = "froxels={Froxels} emptyWords={EmptyWords} avgBits={AverageBits:F2}")]
-    private static partial void LogClusterStats(ILogger logger, int froxels, int emptyWords, double averageBits);
 }
