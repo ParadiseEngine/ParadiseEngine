@@ -97,6 +97,15 @@
 
 ## Paradise.Rendering
 
+- [hits: 1] **A mutation the pass-matrix baseline covers twice cannot make it fail — pick the
+  path the matrix actually depends on before calling a golden "proven" (frame graph step 6,
+  2026-09-04).** Removing load-aware store inference left all 24 cases green, because every
+  attachment a later pass LOADS (bloom mips, the HDR/depth the blend pass continues) is also
+  sampled through a declared bind group, so the edge path kept it stored. Removing edge-aware
+  inference went red at once (shadow layers, SSAO position, HDR all flipped to Discard). The
+  unit test in `FrameGraphTests` is the only guard for the load path; do not read a green matrix
+  after a mutation as "the matrix guards this".
+
 - [hits: 1] **Dropping `Paradise.Rendering.Pbr`'s ProjectReference to `Paradise.Rendering.WebGPU`
   (the IRenderer extraction, 2026-08-13) breaks whoever was getting the backend TRANSITIVELY, and
   the only in-repo casualty is `Paradise.Rendering.Pbr.Test`** — its GPU tests call

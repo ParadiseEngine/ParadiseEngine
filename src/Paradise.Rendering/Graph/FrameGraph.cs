@@ -3,6 +3,8 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Paradise.Rendering.Graph;
 
@@ -57,9 +59,15 @@ public readonly record struct GraphTexture(int Index)
 /// decision to switch a feature off from the producer — which had to know how many passes to skip —
 /// to the consumer, which only has to stop asking for the result.</para>
 ///
+/// <para>An attachment declared without a store op gets one inferred: stored if anything after
+/// the pass reads the resource or the resource is visible outside the graph, discarded otherwise.
+/// On a tile GPU a discarded attachment is a tile flush that never happens, and it is the one
+/// decision the declaring code is worst placed to make, since it depends on every pass that
+/// follows.</para>
+///
 /// <para>One instance per renderer, reused every frame: <see cref="Reset"/> clears without
 /// releasing, so a steady-state frame allocates nothing.</para></summary>
-public sealed class FrameGraph
+public sealed partial class FrameGraph
 {
     private const int MaxColorAttachments = RenderPassDesc.MaxColorAttachments;
     private const int MaxBindGroups = 4;
@@ -70,6 +78,7 @@ public sealed class FrameGraph
     private readonly List<ReadEdge> _reads = [];
     private readonly List<GraphBinding> _bindings = [];
     private readonly Stack<int> _liveStack = new();
+    private readonly ILogger _log;
     private RenderPassDesc[] _descs = [];
     private int[] _order = [];
 
@@ -77,10 +86,12 @@ public sealed class FrameGraph
     /// imported resources.</param>
     /// <param name="bindGroups">Where a pass's declared bind groups are resolved. Null for a
     /// graph whose passes bind nothing through it.</param>
-    public FrameGraph(GraphTextureRegistry? textures = null, BindGroupCache? bindGroups = null)
+    /// <param name="logger">Where compile-time findings go. Null discards them.</param>
+    public FrameGraph(GraphTextureRegistry? textures = null, BindGroupCache? bindGroups = null, ILogger? logger = null)
     {
         Textures = textures;
         BindGroups = bindGroups;
+        _log = logger ?? NullLogger.Instance;
         // Index 0 is always the backbuffer, so Reset never has to re-add it and Backbuffer needs
         // no null check at a declaration site.
         _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default, null));
@@ -203,9 +214,9 @@ public sealed class FrameGraph
         {
             ref var pass = ref passes[_order[slot]];
             ref var desc = ref _descs[slot];
-            desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(in pass));
+            desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(passes, slot, count));
             for (var c = 0; c < pass.ColorCount; c++)
-                desc[c] = ResolveColor(pass.Colors[c]);
+                desc[c] = ResolveColor(passes, slot, count, c);
         }
 
         // Bind groups resolve only for passes that survived culling: a culled feature's groups
@@ -328,19 +339,23 @@ public sealed class FrameGraph
         return pass.HasDepth && pass.Depth.Target.Index == resourceIndex;
     }
 
-    private ColorAttachmentDesc ResolveColor(in Attachment a)
+    private ColorAttachmentDesc ResolveColor(Span<Pass> passes, int slot, int count, int color)
     {
+        ref var a = ref passes[_order[slot]].Colors[color];
         var resource = _resources[a.Target.Index];
+        var store = StoreOf(passes, slot, count, in a);
         return resource.Kind == ResourceKind.Backbuffer
-            ? new ColorAttachmentDesc(RenderViewHandle.Invalid, a.Load, a.Store, a.Clear)
-            : new ColorAttachmentDesc(RenderViewHandle.Invalid, a.Load, a.Store, a.Clear, resource.View);
+            ? new ColorAttachmentDesc(RenderViewHandle.Invalid, a.Load, store, a.Clear)
+            : new ColorAttachmentDesc(RenderViewHandle.Invalid, a.Load, store, a.Clear, resource.View);
     }
 
-    private DepthAttachmentDesc? ResolveDepth(in Pass pass)
+    private DepthAttachmentDesc? ResolveDepth(Span<Pass> passes, int slot, int count)
     {
+        ref var pass = ref passes[_order[slot]];
         if (!pass.HasDepth) return null;
-        var a = pass.Depth;
+        ref var a = ref pass.Depth;
         var resource = _resources[a.Target.Index];
+        var store = StoreOf(passes, slot, count, in a);
         // An owned depth target renders through the texture's own default view unless a layer was
         // chosen; an imported one renders through whatever view it was imported with.
         var view = resource.Kind switch
@@ -349,8 +364,60 @@ public sealed class FrameGraph
             ResourceKind.Owned => default,
             _ => resource.View,
         };
-        return new DepthAttachmentDesc(resource.Texture, a.Load, a.Store, a.ClearDepth, view);
+        return new DepthAttachmentDesc(resource.Texture, a.Load, store, a.ClearDepth, view);
     }
+
+    /// <summary>The declared store op, or the inferred one: keep the contents if anything after
+    /// this pass consumes them or something outside the graph might, else discard.</summary>
+    private StoreOp StoreOf(Span<Pass> passes, int slot, int count, in Attachment a)
+    {
+        var resourceIndex = a.Target.Index;
+        if (a.Load == LoadOp.Load && !WrittenBefore(passes, slot, resourceIndex))
+            LogLoadOfUnwritten(_log, passes[_order[slot]].Name, NameOf(resourceIndex));
+
+        if (a.Store is { } declared) return declared;
+        if (_resources[resourceIndex].Scope == GraphResourceScope.External) return StoreOp.Store;
+        return ReadAfter(passes, slot, count, resourceIndex) ? StoreOp.Store : StoreOp.Discard;
+    }
+
+    private bool ReadAfter(Span<Pass> passes, int slot, int count, int resourceIndex)
+    {
+        for (var later = slot + 1; later < count; later++)
+        {
+            var index = _order[later];
+            if (Loads(in passes[index], resourceIndex)) return true;
+            foreach (var edge in _reads)
+                if (edge.Pass == index && edge.Resource == resourceIndex) return true;
+        }
+        return false;
+    }
+
+    private bool WrittenBefore(Span<Pass> passes, int slot, int resourceIndex)
+    {
+        for (var earlier = 0; earlier < slot; earlier++)
+            if (Writes(in passes[_order[earlier]], resourceIndex)) return true;
+        return false;
+    }
+
+    private static bool Loads(in Pass pass, int resourceIndex)
+    {
+        for (var c = 0; c < pass.ColorCount; c++)
+            if (pass.Colors[c].Target.Index == resourceIndex && pass.Colors[c].Load == LoadOp.Load)
+                return true;
+        return pass.HasDepth && pass.Depth.Target.Index == resourceIndex && pass.Depth.Load == LoadOp.Load;
+    }
+
+    private string NameOf(int resourceIndex)
+    {
+        var resource = _resources[resourceIndex];
+        return resource.Name ?? (resource.Kind == ResourceKind.Backbuffer ? "backbuffer" : $"imported#{resourceIndex}");
+    }
+
+    /// <summary>Loading what nothing wrote reads last frame's contents — or, after a resize,
+    /// whatever the new allocation holds. Sometimes intended (a history buffer), never silent.</summary>
+    [LoggerMessage(EventId = 1, Level = LogLevel.Debug,
+        Message = "Pass '{Pass}' loads '{Resource}', which no earlier pass wrote this frame.")]
+    private static partial void LogLoadOfUnwritten(ILogger logger, string pass, string resource);
 
     private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth, Owned }
 
@@ -363,7 +430,7 @@ public sealed class FrameGraph
     {
         public GraphTexture Target;
         public LoadOp Load;
-        public StoreOp Store;
+        public StoreOp? Store;
         public ColorRgba Clear;
         public float ClearDepth;
         public int Layer;
@@ -427,8 +494,9 @@ public sealed class FrameGraph
             _index = index;
         }
 
-        /// <summary>Bind a color attachment. Slots must be filled from 0 upward.</summary>
-        public PassBuilder Color(int slot, GraphTexture target, LoadOp load, StoreOp store, ColorRgba clear = default)
+        /// <summary>Bind a color attachment. Slots must be filled from 0 upward. A null
+        /// <paramref name="store"/> lets the graph infer it.</summary>
+        public PassBuilder Color(int slot, GraphTexture target, LoadOp load, StoreOp? store = null, ColorRgba clear = default)
         {
             ArgumentOutOfRangeException.ThrowIfNegative(slot);
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(slot, MaxColorAttachments);
@@ -443,20 +511,21 @@ public sealed class FrameGraph
             return this;
         }
 
-        /// <summary>Bind the depth attachment.</summary>
-        public PassBuilder Depth(GraphTexture target, LoadOp load, StoreOp store, float clear = 1f) =>
+        /// <summary>Bind the depth attachment. A null <paramref name="store"/> lets the graph
+        /// infer it.</summary>
+        public PassBuilder Depth(GraphTexture target, LoadOp load, StoreOp? store = null, float clear = 1f) =>
             DepthAttachment(target, -1, load, store, clear);
 
         /// <summary>Bind one layer of an owned depth array as the depth attachment. The pass still
         /// counts as writing the whole array, so a reader of the array keeps every layer's pass.</summary>
-        public PassBuilder DepthLayer(GraphTexture target, uint layer, LoadOp load, StoreOp store, float clear = 1f)
+        public PassBuilder DepthLayer(GraphTexture target, uint layer, LoadOp load, StoreOp? store = null, float clear = 1f)
         {
             if (_graph._resources[target.Index].Kind != ResourceKind.Owned)
                 throw new ArgumentException("Only a texture the graph owns can be rendered by layer; import the layer's view instead.", nameof(target));
             return DepthAttachment(target, (int)layer, load, store, clear);
         }
 
-        private PassBuilder DepthAttachment(GraphTexture target, int layer, LoadOp load, StoreOp store, float clear)
+        private PassBuilder DepthAttachment(GraphTexture target, int layer, LoadOp load, StoreOp? store, float clear)
         {
             if (!target.IsValid) throw new ArgumentException("Attachment target is not a graph resource.", nameof(target));
 

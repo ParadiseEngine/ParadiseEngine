@@ -873,21 +873,21 @@ public sealed partial class PbrRenderer : IDisposable
         for (var k = 0; k < _shadowViews.Count; k++)
         {
             _graph.AddRasterPass("Shadow.Layer", RenderPassEvent.Shadows)
-                .DepthLayer(shadows, _shadowViews[k].Layer, LoadOp.Clear, StoreOp.Store, clear: 1f)
+                .DepthLayer(shadows, _shadowViews[k].Layer, LoadOp.Clear, clear: 1f)
                 .Record(this, RecordShadowLayer, k);
         }
 
         _graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
-            .Color(0, position, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
-            .Depth(prepassDepth, LoadOp.Clear, StoreOp.Store, clear: 1f)
+            .Color(0, position, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
+            .Depth(prepassDepth, LoadOp.Clear, clear: 1f)
             .Record(this, RecordSsaoPrepass);
 
         // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
         // out: a blend material that samples what is behind it needs the opaque half resolved into
         // a sampleable texture first, which cannot happen mid-pass.
         var main = _graph.AddRasterPass(_sceneColorCapture ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
-            .Color(0, hdr, LoadOp.Clear, StoreOp.Store, scene.ClearColor)
-            .Depth(sceneDepth, LoadOp.Clear, StoreOp.Store, clear: 1f);
+            .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
+            .Depth(sceneDepth, LoadOp.Clear, clear: 1f);
         // The one place SSAO is switched off: stop asking for the positions and the pre-pass that
         // produces them is unreachable.
         DeclareSceneGroups(main, shadows, ssaoEnabled ? position : black);
@@ -897,7 +897,7 @@ public sealed partial class PbrRenderer : IDisposable
         {
             var sceneColor = _graph.Texture(SceneColorTarget);
             _graph.AddRasterPass("SceneColor.Blit", RenderPassEvent.SceneColorCapture)
-                .Color(0, sceneColor, LoadOp.Clear, StoreOp.Store, new ColorRgba(0f, 0f, 0f, 0f))
+                .Color(0, sceneColor, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
                 .BindGroup(0, "PbrSceneBlitGroup", _blitGroupLayout!,
                 [
                     GraphBinding.Texture(0, hdr),
@@ -909,8 +909,8 @@ public sealed partial class PbrRenderer : IDisposable
             // Load/Load back onto the same HDR + depth: blend pipelines already read-not-write
             // depth, so this is exactly the state they expect mid-pass today.
             var blend = _graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
-                .Color(0, hdr, LoadOp.Load, StoreOp.Store, scene.ClearColor)
-                .Depth(sceneDepth, LoadOp.Load, StoreOp.Store, clear: 1f)
+                .Color(0, hdr, LoadOp.Load, clear: scene.ClearColor)
+                .Depth(sceneDepth, LoadOp.Load, clear: 1f)
                 // Sampled through the material's own group 2, which the graph does not build: the
                 // one read here that has to be said rather than derived.
                 .Reads(sceneColor);
@@ -928,18 +928,18 @@ public sealed partial class PbrRenderer : IDisposable
 
         var opaqueBlack = new ColorRgba(0f, 0f, 0f, 1f);
         DeclareBloomGroup(_graph.AddRasterPass("Bloom.Bright", RenderPassEvent.Post)
-            .Color(0, _bloomResources[0], LoadOp.Clear, StoreOp.Store, opaqueBlack), hdr)
+            .Color(0, _bloomResources[0], LoadOp.Clear, clear: opaqueBlack), hdr)
             .Record(this, RecordBloomBright);
         for (var i = 0; i < _bloomLevels - 1; i++)
         {
             DeclareBloomGroup(_graph.AddRasterPass("Bloom.Down", RenderPassEvent.Post)
-                .Color(0, _bloomResources[i + 1], LoadOp.Clear, StoreOp.Store, opaqueBlack), _bloomResources[i])
+                .Color(0, _bloomResources[i + 1], LoadOp.Clear, clear: opaqueBlack), _bloomResources[i])
                 .Record(this, RecordBloomDown);
         }
         for (var j = 0; j < _bloomLevels - 1; j++)
         {
             DeclareBloomGroup(_graph.AddRasterPass("Bloom.Up", RenderPassEvent.Post)
-                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, StoreOp.Store, opaqueBlack), _bloomResources[_bloomLevels - 1 - j])
+                .Color(0, _bloomResources[_bloomLevels - 2 - j], LoadOp.Load, clear: opaqueBlack), _bloomResources[_bloomLevels - 1 - j])
                 .Record(this, RecordBloomUp);
         }
         if (bloomEnabled)
@@ -951,7 +951,7 @@ public sealed partial class PbrRenderer : IDisposable
         // The one place bloom is switched off: bind black instead of mip 0 and the whole chain is
         // unreachable. The shader still samples the binding, scaled by an intensity of zero.
         _graph.AddRasterPass("Composite", RenderPassEvent.Composite)
-            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, StoreOp.Store, opaqueBlack)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: opaqueBlack)
             .BindGroup(0, "PbrCompositeGroup", _compositeGroupLayout,
             [
                 GraphBinding.Texture(0, hdr),

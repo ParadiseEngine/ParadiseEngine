@@ -613,4 +613,157 @@ public class FrameGraphTests
             .Color(0, target, LoadOp.Load, StoreOp.Store)
             .BindGroup(0, "g", SomeLayout, [])).Throws<InvalidOperationException>();
     }
+
+    private static StoreOp DepthStoreOf(FrameGraph graph, ArrayBufferWriter<RenderCommand> writer, int slot) =>
+        graph.Compile(writer).Passes.Span[slot].Depth!.Value.DepthStore;
+
+    /// <summary>The inference: an owned attachment nothing after the pass reads is discarded.</summary>
+    [Test]
+    public async Task an_attachment_nothing_reads_afterwards_is_discarded()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("aux", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("prepass", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("aux"), LoadOp.Clear).NeverCull().Record(graph, Nothing);
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Record(graph, Nothing);
+
+        var store = DepthStoreOf(graph, writer, 0);
+        await Assert.That(store).IsEqualTo(StoreOp.Discard);
+    }
+
+    [Test]
+    public async Task an_attachment_a_later_pass_reads_is_stored()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("aux", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("prepass", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("aux"), LoadOp.Clear).Record(graph, Nothing);
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("aux")).Record(graph, Nothing);
+
+        var store = DepthStoreOf(graph, writer, 0);
+        await Assert.That(store).IsEqualTo(StoreOp.Store);
+    }
+
+    [Test]
+    public async Task an_attachment_a_later_pass_loads_is_stored_and_the_last_write_is_not()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("hdr", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("opaque", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("hdr"), LoadOp.Clear).Record(graph, Nothing);
+        graph.AddRasterPass("blend", RenderPassEvent.Transparent)
+            .Depth(graph.Texture("hdr"), LoadOp.Load).Record(graph, Nothing);
+        graph.AddRasterPass("present", RenderPassEvent.Composite)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("hdr")).Record(graph, Nothing);
+
+        var opaqueStore = DepthStoreOf(graph, writer, 0);
+        var blendStore = DepthStoreOf(graph, writer, 1);
+        await Assert.That(opaqueStore).IsEqualTo(StoreOp.Store);
+        await Assert.That(blendStore).IsEqualTo(StoreOp.Store);
+    }
+
+    /// <summary>Order is what inference is about: a read that happens BEFORE the write is not a
+    /// reason to keep the write.</summary>
+    [Test]
+    public async Task a_read_before_the_pass_does_not_keep_its_output()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("history", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("reader", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("history")).Record(graph, Nothing);
+        graph.AddRasterPass("writer", RenderPassEvent.Post)
+            .Depth(graph.Texture("history"), LoadOp.Clear).Record(graph, Nothing);
+
+        var store = DepthStoreOf(graph, writer, 1);
+        await Assert.That(store).IsEqualTo(StoreOp.Discard);
+    }
+
+    [Test]
+    public async Task an_exported_or_imported_attachment_is_always_stored()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("scene", DepthArray(1));
+        textures.Export("scene");
+        var imported = graph.ImportDepth(new TextureHandle(5, 1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("capture", RenderPassEvent.SceneColorCapture)
+            .Depth(graph.Texture("scene"), LoadOp.Clear).Record(graph, Nothing);
+        graph.AddRasterPass("host", RenderPassEvent.Overlay)
+            .Depth(imported, LoadOp.Clear).Record(graph, Nothing);
+
+        var exportedStore = DepthStoreOf(graph, writer, 0);
+        var importedStore = DepthStoreOf(graph, writer, 1);
+        await Assert.That(exportedStore).IsEqualTo(StoreOp.Store);
+        await Assert.That(importedStore).IsEqualTo(StoreOp.Store);
+    }
+
+    [Test]
+    public async Task a_declared_store_op_is_not_second_guessed()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("aux", DepthArray(1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("kept", RenderPassEvent.Prepass)
+            .Depth(graph.Texture("aux"), LoadOp.Clear, StoreOp.Store).NeverCull().Record(graph, Nothing);
+
+        var store = DepthStoreOf(graph, writer, 0);
+        await Assert.That(store).IsEqualTo(StoreOp.Store);
+    }
+
+    [Test]
+    public async Task loading_what_nothing_wrote_this_frame_is_reported_by_pass_and_resource()
+    {
+        var textures = new GraphTextureRegistry(new FakeTextureFactory());
+        var log = new CapturingLogger();
+        var graph = new FrameGraph(textures, logger: log);
+        textures.Ensure("history", DepthArray(1));
+        textures.Export("history");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("accumulate", RenderPassEvent.Post)
+            .Depth(graph.Texture("history"), LoadOp.Load).Record(graph, Nothing);
+        graph.Compile(writer);
+
+        await Assert.That(log.Messages).HasSingleItem();
+        await Assert.That(log.Messages[0]).Contains("accumulate").And.Contains("history");
+    }
+
+    [Test]
+    public async Task loading_what_an_earlier_pass_wrote_is_not_reported()
+    {
+        var textures = new GraphTextureRegistry(new FakeTextureFactory());
+        var log = new CapturingLogger();
+        var graph = new FrameGraph(textures, logger: log);
+        textures.Ensure("hdr", DepthArray(1));
+        textures.Export("hdr");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("opaque", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("hdr"), LoadOp.Clear).Record(graph, Nothing);
+        graph.AddRasterPass("blend", RenderPassEvent.Transparent)
+            .Depth(graph.Texture("hdr"), LoadOp.Load).Record(graph, Nothing);
+        graph.Compile(writer);
+
+        await Assert.That(log.Messages).IsEmpty();
+    }
 }
