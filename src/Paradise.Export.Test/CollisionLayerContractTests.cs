@@ -3,7 +3,7 @@ using Paradise.Export.Geometry;
 namespace Paradise.Export.Tests;
 
 // The collision-layer contract: a Godot collision_layer mask collapses to the Unity-style single
-// layer INDEX that ColliderShapeData.Layer carries (consumers reconstruct 1u << Layer). Guards the
+// layer INDEX a game's collider-shape record carries (consumers reconstruct 1u << Layer). Guards the
 // mask→index decision the Godot exporter (SceneDataExporter.ResolveLayerIndex) can't unit-test
 // directly because it lives behind #if TOOLS / Godot node types.
 public class CollisionLayerContractTests
