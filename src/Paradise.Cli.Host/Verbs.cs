@@ -545,7 +545,7 @@ internal static class Verbs
             manifest.Host.Arguments,
             callerArguments);
 
-        return session.Play(csproj, configuration, layout.Root, arguments, watch, noBuild, stop);
+        return session.Play(csproj, configuration, layout.Root, arguments, watch, noBuild, stop, restartOnChangesUnder: layout.EditorPlay);
     }
 
     private static bool TryHostSession(IFileSystem fileSystem, AssetProjectLayout layout, out HostSession session, out UPath csproj, out ProjectManifest manifest)

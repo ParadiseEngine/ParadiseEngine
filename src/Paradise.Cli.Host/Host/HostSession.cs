@@ -57,7 +57,8 @@ internal sealed class HostSession
         IReadOnlyList<string> arguments,
         bool watch,
         bool noBuild,
-        CancellationToken stop)
+        CancellationToken stop,
+        UPath? restartOnChangesUnder = null)
     {
         var cwd = Internal(workingDirectory);
         if (watch)
@@ -72,7 +73,21 @@ internal sealed class HostSession
             watchArguments.Add("--");
             watchArguments.AddRange(arguments);
             _log($"play: dotnet watch run on {Internal(csproj)} (a source change hot-patches or restarts the game)");
-            return _runner.Run(new ProcessSpec(_dotnet, watchArguments, cwd), stop);
+            if (restartOnChangesUnder is not { } tree) return _runner.Run(new ProcessSpec(_dotnet, watchArguments, cwd), stop);
+
+            var treeDirectory = Internal(tree);
+            PlayTreeWatch? playTree = null;
+            try
+            {
+                return _runner.Run(
+                    new ProcessSpec(_dotnet, watchArguments, cwd),
+                    stop,
+                    started: pid => playTree = new PlayTreeWatch(treeDirectory, pid, _log));
+            }
+            finally
+            {
+                playTree?.Dispose();
+            }
         }
 
         var freshness = HostFreshness.Inspect(_fileSystem, csproj, configuration);

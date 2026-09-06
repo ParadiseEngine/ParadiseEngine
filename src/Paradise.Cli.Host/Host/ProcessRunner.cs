@@ -14,8 +14,8 @@ internal sealed record ProcessSpec(string FileName, IReadOnlyList<string> Argume
 /// <summary>The seam <see cref="HostSession"/> is tested through: a fake records the specs, the real one starts them.</summary>
 internal interface IProcessRunner
 {
-    /// <summary>Runs to exit and returns the exit code; a <paramref name="stop"/> request kills the process tree and returns non-zero.</summary>
-    int Run(ProcessSpec spec, CancellationToken stop);
+    /// <summary>Runs to exit and returns the exit code; a <paramref name="stop"/> request kills the process tree and returns non-zero. <paramref name="started"/> gets the pid once it is running.</summary>
+    int Run(ProcessSpec spec, CancellationToken stop, Action<int>? started = null);
 }
 
 internal sealed class ConsoleProcessRunner : IProcessRunner
@@ -23,7 +23,7 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
     /// <summary>The exit code reported when <c>stop</c> ended the child; 130 is the shell's own code for an interrupted command.</summary>
     public const int Interrupted = 130;
 
-    public int Run(ProcessSpec spec, CancellationToken stop)
+    public int Run(ProcessSpec spec, CancellationToken stop, Action<int>? started = null)
     {
         if (stop.IsCancellationRequested) return Interrupted;
 
@@ -48,6 +48,7 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         // The whole tree: `dotnet watch` and `dotnet <dll>` both put the game one level below
         // the process this handle names, and a stop that left it running would be no stop.
         using var killOnStop = stop.Register(() => TryKill(process));
+        started?.Invoke(process.Id);
         process.WaitForExit();
         return stop.IsCancellationRequested ? Interrupted : process.ExitCode;
     }
@@ -61,6 +62,72 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // Already gone; the wait below observes that.
+        }
+    }
+}
+
+/// <summary>
+/// The processes at the bottom of a tree: under <c>dotnet watch</c> that is the game itself, two
+/// <c>dotnet</c> hosts below the one this process started. Killing only the leaves leaves
+/// <c>dotnet watch</c> alive and parked on "waiting for a file to change", which is what makes a
+/// restart without a rebuild possible.
+/// </summary>
+/// <remarks>Unix only, through <c>ps</c>: .NET exposes no parent-pid API, and the Windows way (a job object or WMI) is a different tool. On Windows nothing is killed and the caller's touch is a no-op for a running game.</remarks>
+internal static class ProcessTree
+{
+    public static IReadOnlyList<int> Leaves(int root)
+    {
+        if (OperatingSystem.IsWindows()) return [];
+
+        var children = new Dictionary<int, List<int>>();
+        try
+        {
+            var ps = new ProcessStartInfo("ps", "-axo pid=,ppid=") { RedirectStandardOutput = true, UseShellExecute = false };
+            using var process = Process.Start(ps);
+            if (process is null) return [];
+            while (process.StandardOutput.ReadLine() is { } line)
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2 || !int.TryParse(parts[0], out var pid) || !int.TryParse(parts[1], out var parent)) continue;
+                if (!children.TryGetValue(parent, out var list)) children[parent] = list = [];
+                list.Add(pid);
+            }
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            return [];
+        }
+
+        var leaves = new List<int>();
+        Collect(root, children, leaves);
+        return leaves;
+    }
+
+    private static void Collect(int pid, Dictionary<int, List<int>> children, List<int> leaves)
+    {
+        if (!children.TryGetValue(pid, out var below) || below.Count == 0)
+        {
+            leaves.Add(pid);
+            return;
+        }
+
+        foreach (var child in below) Collect(child, children, leaves);
+    }
+
+    public static void KillLeaves(int root)
+    {
+        foreach (var pid in Leaves(root))
+        {
+            if (pid == root) continue;
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                process.Kill();
+            }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Gone already.
+            }
         }
     }
 }

@@ -19,9 +19,10 @@ public class HostSessionTests
 
         public List<ProcessSpec> Specs { get; } = [];
 
-        public int Run(ProcessSpec spec, CancellationToken stop)
+        public int Run(ProcessSpec spec, CancellationToken stop, Action<int>? started = null)
         {
             Specs.Add(spec);
+            started?.Invoke(4242);
             return _exit(spec);
         }
     }
