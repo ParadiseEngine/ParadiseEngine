@@ -242,7 +242,6 @@ namespace Paradise.Export.Data
     {
         public string? Id { get; set; }
         public string? Path { get; set; }
-        public bool IsStatic { get; set; }
         public int Layer { get; set; }
         public string? LayerName { get; set; }
         public bool IsTrigger { get; set; }
@@ -252,20 +251,6 @@ namespace Paradise.Export.Data
         public Vector3 Size { get; set; } = Vector3.Zero;
         public float Radius { get; set; }
         public float Height { get; set; }
-        public NavObstacleData? NavObstacle { get; set; }
-    }
-
-    public sealed class NavObstacleData
-    {
-        public string Shape { get; set; } = "";
-        public Vector3 Center { get; set; } = Vector3.Zero;
-        public Vector3 Size { get; set; } = Vector3.Zero;
-        public float Radius { get; set; }
-        public float Height { get; set; }
-        public bool Carving { get; set; }
-        public bool CarveOnlyStationary { get; set; }
-        public float CarvingMoveThreshold { get; set; }
-        public float CarvingTimeToStationary { get; set; }
     }
 
     // Engine-neutral physics enums (mirrors the Paradise Engine runtime contract).
