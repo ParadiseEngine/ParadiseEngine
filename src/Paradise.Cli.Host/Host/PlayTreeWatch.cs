@@ -24,18 +24,22 @@ internal sealed class PlayTreeWatch : IDisposable
     private readonly string _directory;
     private readonly int _watchPid;
     private readonly Action<string> _log;
+    private readonly Func<bool> _enabled;
     private readonly Timer _timer;
-    // Half of MinValue: "long ago" without the subtraction in OnChanged overflowing.
-    private long _lastRestartTicks = long.MinValue / 2;
+    // Construction counts as a restart: dotnet watch is starting, and its leaves are MSBuild nodes.
+    private long _lastRestartTicks = Environment.TickCount64;
 
-    public PlayTreeWatch(string directory, int watchPid, Action<string> log)
+    /// <param name="enabled">Read on every change; the tray's checkbox. Off means a change is ignored, not queued.</param>
+    public PlayTreeWatch(string directory, int watchPid, Action<string> log, Func<bool> enabled)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(enabled);
 
         _directory = directory;
         _watchPid = watchPid;
         _log = log;
+        _enabled = enabled;
         _timer = new Timer(_ => Restart(), null, Timeout.Infinite, Timeout.Infinite);
         Directory.CreateDirectory(directory);
         _watcher = new FileSystemWatcher(directory)
@@ -55,6 +59,7 @@ internal sealed class PlayTreeWatch : IDisposable
 
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
+        if (!_enabled()) return;
         var sinceRestart = Environment.TickCount64 - Interlocked.Read(ref _lastRestartTicks);
         if (sinceRestart < Grace.TotalMilliseconds) return;
         _timer.Change(Quiet, Timeout.InfiniteTimeSpan);
@@ -63,6 +68,14 @@ internal sealed class PlayTreeWatch : IDisposable
     /// <summary>Kill the game leaves under the watch, then bump the marker so <c>dotnet watch</c> starts it again.</summary>
     private void Restart()
     {
+        if (!ProcessTree.HasGameLeaf(_watchPid))
+        {
+            // dotnet watch is still building or loading: the leaves are its workers, and killing
+            // them fails the build. Nothing is lost either — the game that is about to start
+            // reads the tree as it is now.
+            return;
+        }
+
         Interlocked.Exchange(ref _lastRestartTicks, Environment.TickCount64);
         _log("play: the play tree changed, restarting the game");
         ProcessTree.KillLeaves(_watchPid);

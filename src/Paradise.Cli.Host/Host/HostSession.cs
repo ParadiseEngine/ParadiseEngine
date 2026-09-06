@@ -59,7 +59,8 @@ internal sealed class HostSession
         bool watch,
         bool noBuild,
         CancellationToken stop,
-        UPath? restartOnChangesUnder = null)
+        UPath? restartOnChangesUnder = null,
+        Func<bool>? restartEnabled = null)
     {
         var cwd = Internal(workingDirectory);
         if (watch)
@@ -83,7 +84,7 @@ internal sealed class HostSession
                 return _runner.Run(
                     new ProcessSpec(_dotnet, watchArguments, cwd),
                     stop,
-                    started: pid => playTree = new PlayTreeWatch(treeDirectory, pid, _log));
+                    started: pid => playTree = new PlayTreeWatch(treeDirectory, pid, _log, restartEnabled ?? (static () => true)));
             }
             finally
             {

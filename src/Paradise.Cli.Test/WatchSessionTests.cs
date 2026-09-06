@@ -248,7 +248,7 @@ public class WatchSessionTests
     [Test]
     public async Task toggling_play_mode_is_visible_on_the_next_rebuild()
     {
-        var mode = new WatchEditorMode(true);
+        var mode = new WatchToggle(true);
         var seen = new List<bool>();
         using var signals = new WatchSignals();
         var log = new List<string>();

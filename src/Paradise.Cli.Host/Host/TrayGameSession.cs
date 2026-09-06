@@ -22,6 +22,9 @@ internal sealed class TrayGameSession : IDisposable
     private CancellationTokenSource? _stop;
     private Thread? _thread;
 
+    /// <summary>The tray's "restart on scene save" checkbox; on by default, read live by the play-tree watch.</summary>
+    public WatchToggle SceneRestart { get; } = new(on: true);
+
     private TrayGameSession(IFileSystem fileSystem, AssetProjectLayout layout, string? profile, string scene, IReadOnlyList<IAssetImporter> importers)
     {
         _fileSystem = fileSystem;
@@ -56,7 +59,11 @@ internal sealed class TrayGameSession : IDisposable
         return new WatchTrayGameHooks(
             Play: () => owned.Play(watch: false),
             PlayWatch: () => owned.Play(watch: true),
-            StopGame: owned.Stop);
+            StopGame: owned.Stop,
+            SceneRestart: owned.SceneRestart,
+            ToggleSceneRestart: () => Console.WriteLine(owned.SceneRestart.Toggle()
+                ? "watch: a scene save restarts the game"
+                : "watch: a scene save leaves the game running"));
     }
 
     public void Play(bool watch)
@@ -75,7 +82,8 @@ internal sealed class TrayGameSession : IDisposable
                     configuration: "Debug",
                     callerArguments: [],
                     _importers,
-                    stop.Token);
+                    stop.Token,
+                    SceneRestart);
                 if (!stop.IsCancellationRequested) Console.WriteLine($"watch: the game exited with code {exit}");
             }
             catch (Exception error)

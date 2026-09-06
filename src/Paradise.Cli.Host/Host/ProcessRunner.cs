@@ -83,22 +83,31 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
 /// <remarks>Unix only, through <c>ps</c>: .NET exposes no parent-pid API, and the Windows way (a job object or WMI) is a different tool. On Windows nothing is killed and the caller's touch is a no-op for a running game.</remarks>
 internal static class ProcessTree
 {
-    public static IReadOnlyList<int> Leaves(int root)
+    public sealed record Leaf(int Pid, string Command)
+    {
+        /// <summary>Under <c>dotnet watch</c> every process but the game is a <c>dotnet</c> host (the watch, its MSBuild nodes, <c>dotnet run</c>); the game is the one apphost.</summary>
+        public bool IsGame => !string.Equals(Path.GetFileNameWithoutExtension(Command), "dotnet", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Whether the game itself is up under <paramref name="root"/>; false while <c>dotnet watch</c> is still building or loading.</summary>
+    public static bool HasGameLeaf(int root) => Leaves(root).Any(leaf => leaf.IsGame);
+
+    public static IReadOnlyList<Leaf> Leaves(int root)
     {
         if (OperatingSystem.IsWindows()) return [];
 
-        var children = new Dictionary<int, List<int>>();
+        var children = new Dictionary<int, List<Leaf>>();
         try
         {
-            var ps = new ProcessStartInfo("ps", "-axo pid=,ppid=") { RedirectStandardOutput = true, UseShellExecute = false };
+            var ps = new ProcessStartInfo("ps", "-axo pid=,ppid=,comm=") { RedirectStandardOutput = true, UseShellExecute = false };
             using var process = Process.Start(ps);
             if (process is null) return [];
             while (process.StandardOutput.ReadLine() is { } line)
             {
-                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length != 2 || !int.TryParse(parts[0], out var pid) || !int.TryParse(parts[1], out var parent)) continue;
+                var parts = line.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 3 || !int.TryParse(parts[0], out var pid) || !int.TryParse(parts[1], out var parent)) continue;
                 if (!children.TryGetValue(parent, out var list)) children[parent] = list = [];
-                list.Add(pid);
+                list.Add(new Leaf(pid, parts[2].Trim()));
             }
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
@@ -106,16 +115,16 @@ internal static class ProcessTree
             return [];
         }
 
-        var leaves = new List<int>();
-        Collect(root, children, leaves);
+        var leaves = new List<Leaf>();
+        Collect(new Leaf(root, "dotnet"), children, leaves);
         return leaves;
     }
 
-    private static void Collect(int pid, Dictionary<int, List<int>> children, List<int> leaves)
+    private static void Collect(Leaf node, Dictionary<int, List<Leaf>> children, List<Leaf> leaves)
     {
-        if (!children.TryGetValue(pid, out var below) || below.Count == 0)
+        if (!children.TryGetValue(node.Pid, out var below) || below.Count == 0)
         {
-            leaves.Add(pid);
+            leaves.Add(node);
             return;
         }
 
@@ -124,7 +133,7 @@ internal static class ProcessTree
 
     public static void KillLeaves(int root)
     {
-        foreach (var pid in Leaves(root))
+        foreach (var (pid, _) in Leaves(root))
         {
             if (pid == root) continue;
             try

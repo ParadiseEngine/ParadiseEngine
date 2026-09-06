@@ -11,7 +11,7 @@ public class WatchTrayTests
         Stop: static () => { },
         Rebuild: static () => { },
         OpenOutput: static () => { },
-        Editor: new WatchEditorMode(true));
+        Editor: new WatchToggle(true));
 
     [Test]
     public async Task disabled_tray_is_the_no_op()

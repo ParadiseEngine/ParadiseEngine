@@ -100,7 +100,7 @@ internal static class Verbs
             Console.Error.WriteLine($"warning: {ktxProblem}");
         }
 
-        var editorMode = new WatchEditorMode(editor);
+        var editorMode = new WatchToggle(editor);
         ProjectOutputTarget Target() => editorMode.IsOn ? ProjectOutputTarget.Play : ProjectOutputTarget.Build;
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
@@ -525,7 +525,8 @@ internal static class Verbs
         string configuration,
         IReadOnlyList<string> callerArguments,
         IReadOnlyList<IAssetImporter> importers,
-        CancellationToken stop)
+        CancellationToken stop,
+        WatchToggle? sceneRestart = null)
     {
         if (!TryHostSession(fileSystem, layout, out var session, out var csproj, out var manifest)) return 1;
 
@@ -549,7 +550,10 @@ internal static class Verbs
             manifest.Host.Arguments,
             callerArguments);
 
-        return session.Play(csproj, configuration, layout.Root, arguments, watch, noBuild, stop, restartOnChangesUnder: layout.EditorPlay);
+        return session.Play(
+            csproj, configuration, layout.Root, arguments, watch, noBuild, stop,
+            restartOnChangesUnder: layout.EditorPlay,
+            restartEnabled: sceneRestart is null ? null : () => sceneRestart.IsOn);
     }
 
     private static bool TryHostSession(IFileSystem fileSystem, AssetProjectLayout layout, out HostSession session, out UPath csproj, out ProjectManifest manifest)

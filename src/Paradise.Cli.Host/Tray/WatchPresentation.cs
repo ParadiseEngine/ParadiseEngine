@@ -58,6 +58,9 @@ internal static class WatchPresentation
 
     public static string StopGameMenu => "Stop the game";
 
+    /// <summary>Checkbox: under "watch code", a play-tree change (a scene save) restarts the game.</summary>
+    public static string SceneRestartToggleMenu => "Restart the game on scene save";
+
     private static string FormatFailed(int errorCount) => errorCount == 1
         ? "paradise watch — failed (1 error)"
         : $"paradise watch — failed ({errorCount} errors)";

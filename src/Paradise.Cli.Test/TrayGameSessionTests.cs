@@ -41,7 +41,10 @@ public class TrayGameSessionTests
         await Assert.That(session).IsNotNull();
         // Nothing runs yet, so a Stop is a no-op rather than a fault.
         hooks!.StopGame();
-        session!.Dispose();
+        await Assert.That(hooks.SceneRestart.IsOn).IsTrue();
+        hooks.ToggleSceneRestart();
+        await Assert.That(session!.SceneRestart.IsOn).IsFalse();
+        session.Dispose();
     }
 
     [Test]

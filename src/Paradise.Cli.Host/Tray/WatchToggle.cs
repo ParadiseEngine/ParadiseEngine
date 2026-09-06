@@ -1,16 +1,15 @@
 namespace Paradise.Cli;
 
 /// <summary>
-/// Live <c>--editor</c> for a watch session. The tray checkbox flips this; the loop reads it
-/// on each rebuild so a click takes effect on the next change without restarting the watch.
+/// A live flag for a watch session (<c>--editor</c>, restart-on-scene-save). The tray checkbox
+/// flips it; the loop reads it on each change so a click takes effect without restarting the watch.
 /// </summary>
-internal sealed class WatchEditorMode
+internal sealed class WatchToggle
 {
     private int _on;
 
-    public WatchEditorMode(bool on) => _on = on ? 1 : 0;
+    public WatchToggle(bool on) => _on = on ? 1 : 0;
 
-    /// <summary>Whether this watch writes <c>.editor/play</c> rather than <c>build/</c>.</summary>
     public bool IsOn => Volatile.Read(ref _on) != 0;
 
     /// <summary>Flip and return the new value.</summary>
