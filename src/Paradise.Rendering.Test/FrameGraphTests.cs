@@ -676,10 +676,10 @@ public class FrameGraphTests
         await Assert.That(blendStore).IsEqualTo(StoreOp.Store);
     }
 
-    /// <summary>Order is what inference is about: a read that happens BEFORE the write is not a
-    /// reason to keep the write.</summary>
+    /// <summary>A history read runs before its writer on purpose and still consumes the write —
+    /// next frame — so the writer stays stored however the two are ordered.</summary>
     [Test]
-    public async Task a_read_before_the_pass_does_not_keep_its_output()
+    public async Task a_history_read_keeps_the_writer_stored_even_though_the_reader_runs_first()
     {
         var (graph, textures) = OwnedGraph();
         textures.Ensure("history", DepthArray(1));
@@ -688,12 +688,14 @@ public class FrameGraphTests
         var writer = new ArrayBufferWriter<RenderCommand>(64);
 
         graph.AddRasterPass("reader", RenderPassEvent.Prepass)
-            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("history")).Record(graph, Nothing);
+            .Depth(graph.Texture("out"), LoadOp.Clear).ReadsHistory(graph.Texture("history")).Record(graph, Nothing);
         graph.AddRasterPass("writer", RenderPassEvent.Post)
             .Depth(graph.Texture("history"), LoadOp.Clear).Record(graph, Nothing);
 
+        var passes = graph.Compile(writer).Passes.Length;
         var store = DepthStoreOf(graph, writer, 1);
-        await Assert.That(store).IsEqualTo(StoreOp.Discard);
+        await Assert.That(passes).IsEqualTo(2);
+        await Assert.That(store).IsEqualTo(StoreOp.Store);
     }
 
     [Test]
@@ -765,5 +767,78 @@ public class FrameGraphTests
         graph.Compile(writer);
 
         await Assert.That(log.Messages).IsEmpty();
+    }
+
+    /// <summary>The edges checking the events. The event key decides order and nothing else
+    /// does; this is what catches a key that put a reader ahead of its writer.</summary>
+    [Test]
+    public async Task reading_what_a_later_pass_writes_is_an_error_naming_both()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("mips", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("composite", RenderPassEvent.Composite)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("mips")).Record(graph, Nothing);
+        graph.AddRasterPass("bloom", RenderPassEvent.AfterComposite)
+            .Depth(graph.Texture("mips"), LoadOp.Clear).Record(graph, Nothing);
+
+        await Assert.That(() => graph.Compile(writer)).Throws<InvalidOperationException>()
+            .WithMessageContaining("composite").And.WithMessageContaining("bloom").And.WithMessageContaining("mips");
+    }
+
+    [Test]
+    public async Task loading_what_a_later_pass_writes_is_the_same_error()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("hdr", DepthArray(1));
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        // Private target, so the check applies; NeverCull keeps the reader (and through its
+        // load, the writer) alive without exporting anything.
+        graph.AddRasterPass("blend", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("hdr"), LoadOp.Load).NeverCull().Record(graph, Nothing);
+        graph.AddRasterPass("opaque", RenderPassEvent.Transparent)
+            .Depth(graph.Texture("hdr"), LoadOp.Clear).Record(graph, Nothing);
+
+        await Assert.That(() => graph.Compile(writer)).Throws<InvalidOperationException>()
+            .WithMessageContaining("blend").And.WithMessageContaining("opaque");
+    }
+
+    /// <summary>A bound resource nothing writes this frame is allowed: the shadow array in a
+    /// frame with no shadowed light is bound and never sampled.</summary>
+    [Test]
+    public async Task reading_what_nothing_writes_this_frame_is_allowed()
+    {
+        var (graph, textures) = OwnedGraph();
+        textures.Ensure("shadows", DepthArray(1));
+        textures.Ensure("out", DepthArray(1));
+        textures.Export("out");
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("main", RenderPassEvent.Opaque)
+            .Depth(graph.Texture("out"), LoadOp.Clear).Reads(graph.Texture("shadows")).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(1);
+    }
+
+    /// <summary>The host may have written an imported or exported target before the frame, so
+    /// the first pass loading it is not reading ahead of anyone.</summary>
+    [Test]
+    public async Task loading_an_external_target_before_any_writer_is_allowed()
+    {
+        var graph = GraphWithOneColorTarget(out var imported);
+        var writer = new ArrayBufferWriter<RenderCommand>(64);
+
+        graph.AddRasterPass("first", RenderPassEvent.Opaque)
+            .Color(0, imported, LoadOp.Load).Record(graph, Nothing);
+        graph.AddRasterPass("second", RenderPassEvent.Post)
+            .Color(0, imported, LoadOp.Clear).Record(graph, Nothing);
+
+        var passes = graph.Compile(writer).Passes.Length;
+        await Assert.That(passes).IsEqualTo(2);
     }
 }
