@@ -2,8 +2,15 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Paradise.Assets.Gltf;
 using Paradise.Assets.Textures;
+using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
+
+/// <summary>An extra material binding that follows a frame target by name — the scene color a
+/// refracting material samples, say — instead of holding a view handle that a resize retires.
+/// The cache re-resolves it every frame and rebuilds the group only when the view changed;
+/// while the target does not exist the binding is black, never dangling.</summary>
+public readonly record struct MaterialTarget(uint Binding, string Target);
 
 /// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
 /// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
@@ -22,6 +29,9 @@ public sealed class MaterialResourceCache : IDisposable
     // dedupes byte-identical images across assets.
     private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
     private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
+    // Materials with target-following entries, and the view each entry was last built with.
+    private readonly Dictionary<int, TargetSet> _targets = new();
+    private readonly GraphTextureRegistry? _registry;
     private readonly List<TextureHandle> _ownedTextures = [];
     // Group-2 layouts of registered custom programs (PbrRenderer.RegisterMaterialProgram): the
     // standard seven entries plus that program's extras, in binding order.
@@ -38,8 +48,15 @@ public sealed class MaterialResourceCache : IDisposable
     public int MaterialCount => _materials.Count;
 
     public MaterialResourceCache(IRenderer renderer, ShaderProgramDesc program, ushort maxAnisotropy = 16)
+        : this(renderer, program, maxAnisotropy, registry: null)
+    {
+    }
+
+    /// <param name="registry">Where <see cref="MaterialTarget"/> bindings resolve. Null forbids them.</param>
+    internal MaterialResourceCache(IRenderer renderer, ShaderProgramDesc program, ushort maxAnisotropy, GraphTextureRegistry? registry)
     {
         _renderer = renderer;
+        _registry = registry;
         _materialGroupLayout = FindGroup(program, 2);
 
         var samplerDesc = new SamplerDesc(
@@ -70,8 +87,18 @@ public sealed class MaterialResourceCache : IDisposable
     /// immutable after creation.</summary>
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
         int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
+        => AddMaterial(in material, images, programId, extraEntries, targets: default);
+
+    /// <summary>As above, with some extra bindings following frame targets by name. A
+    /// <see cref="MaterialTarget"/> for <see cref="PbrTargets.SceneColor"/> replaces holding
+    /// <c>PbrRenderer.SceneColorView</c> and rebinding on <c>SceneColorViewChanged</c>: the cache
+    /// re-resolves it each frame, and it reads black while capture is off.</summary>
+    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
+        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries, ReadOnlySpan<MaterialTarget> targets)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (targets.Length > 0 && _registry is null)
+            throw new InvalidOperationException("This material cache has no target registry; only a PbrRenderer's can bind targets.");
 
         var layout = _materialGroupLayout;
         if (programId != 0)
@@ -81,27 +108,51 @@ public sealed class MaterialResourceCache : IDisposable
                     $"Unknown material program {programId}; register it via PbrRenderer.RegisterMaterialProgram first.",
                     nameof(programId));
         }
-        if (layout.Entries.Length != StandardMaterialEntryCount + extraEntries.Length)
+        var extraCount = extraEntries.Length + targets.Length;
+        if (layout.Entries.Length != StandardMaterialEntryCount + extraCount)
             throw new ArgumentException(
                 $"Material program {programId} declares {layout.Entries.Length - StandardMaterialEntryCount} extra " +
-                $"group-2 binding(s), but {extraEntries.Length} extra entr{(extraEntries.Length == 1 ? "y was" : "ies were")} supplied.",
+                $"group-2 binding(s), but {extraCount} extra entr{(extraCount == 1 ? "y was" : "ies were")} supplied.",
                 nameof(extraEntries));
-        for (var i = 0; i < extraEntries.Length; i++)
+
+        // Extras in the layout's binding order, each taken from whichever list names its binding.
+        var extras = new BindGroupEntryDesc[extraCount];
+        var bound = new (MaterialTarget Target, TextureViewHandle Bound)[targets.Length];
+        for (var i = 0; i < extraCount; i++)
         {
             var expected = layout.Entries[StandardMaterialEntryCount + i];
-            if (extraEntries[i].Binding != expected.Binding)
+            var found = false;
+            foreach (var entry in extraEntries)
+            {
+                if (entry.Binding != expected.Binding) continue;
+                // Kind-vs-type check here turns what would be a native CreateBindGroup validation
+                // error (e.g. a sampler supplied where the shader declares a texture) into the
+                // same clear ArgumentException the slot checks raise.
+                if (!EntryKindMatches(entry.Kind, expected.Type))
+                    throw new ArgumentException(
+                        $"Extra entry at binding {expected.Binding} supplies a {entry.Kind}, " +
+                        $"but material program {programId} declares a {expected.Type} there.",
+                        nameof(extraEntries));
+                extras[i] = entry;
+                found = true;
+                break;
+            }
+            for (var t = 0; t < targets.Length && !found; t++)
+            {
+                if (targets[t].Binding != expected.Binding) continue;
+                if (!EntryKindMatches(BindGroupEntryKind.TextureView, expected.Type))
+                    throw new ArgumentException(
+                        $"Target '{targets[t].Target}' binds slot {expected.Binding}, but material program {programId} " +
+                        $"declares a {expected.Type} there, not a texture.", nameof(targets));
+                var view = ResolveTarget(targets[t].Target);
+                extras[i] = BindGroupEntryDesc.ForTextureView(expected.Binding, view);
+                bound[t] = (targets[t], view);
+                found = true;
+            }
+            if (!found)
                 throw new ArgumentException(
-                    $"Extra entry {i} binds slot {extraEntries[i].Binding}, but material program {programId} " +
-                    $"declares binding {expected.Binding} at that position.",
-                    nameof(extraEntries));
-            // Kind-vs-type check here turns what would be a native CreateBindGroup validation
-            // error (e.g. a sampler supplied where the shader declares a texture) into the same
-            // clear ArgumentException the slot checks raise.
-            if (!EntryKindMatches(extraEntries[i].Kind, expected.Type))
-                throw new ArgumentException(
-                    $"Extra entry {i} (binding {expected.Binding}) supplies a {extraEntries[i].Kind}, " +
-                    $"but material program {programId} declares a {expected.Type} there.",
-                    nameof(extraEntries));
+                    $"Material program {programId} declares binding {expected.Binding} in group 2, but no extra entry " +
+                    "or target supplies it.", nameof(extraEntries));
         }
 
         var uniforms = new MaterialUniformsGpu
@@ -130,7 +181,7 @@ public sealed class MaterialResourceCache : IDisposable
         var occlusion = ResolveTexture(material.OcclusionImage, images, CompressedTextureUsage.LinearData, _defaultWhite);
         var emissive = ResolveTexture(material.EmissiveImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite);
 
-        var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraEntries.Length];
+        var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
         entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
         entries[1] = BindGroupEntryDesc.ForTexture(1, baseColor);
         entries[2] = BindGroupEntryDesc.ForSampler(2, _sampler);
@@ -138,27 +189,71 @@ public sealed class MaterialResourceCache : IDisposable
         entries[4] = BindGroupEntryDesc.ForTexture(4, normal);
         entries[5] = BindGroupEntryDesc.ForTexture(5, occlusion);
         entries[6] = BindGroupEntryDesc.ForTexture(6, emissive);
-        for (var i = 0; i < extraEntries.Length; i++)
-        {
-            entries[StandardMaterialEntryCount + i] = extraEntries[i];
-        }
+        extras.CopyTo(entries, StandardMaterialEntryCount);
         var groupDesc = new BindGroupDesc($"PbrMaterialGroup[{_materials.Count}]", layout, entries);
         var group = _renderer.CreateBindGroup(in groupDesc);
 
         // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
-        // Entries + layout are retained so UpdateExtraEntry can rebuild the group when an
-        // engine-owned view a material bound (PbrRenderer.SceneColorView) is recreated on Resize.
+        // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
-        return _materials.Count - 1;
+        var materialId = _materials.Count - 1;
+        if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
+        return materialId;
     }
 
+    /// <summary>The frame targets <paramref name="materialId"/> follows, by name. What a pass
+    /// drawing the material reads.</summary>
+    public ReadOnlySpan<string> TargetsOf(int materialId) =>
+        _targets.TryGetValue(materialId, out var set) ? set.Names : default;
+
+    private sealed class TargetSet((MaterialTarget Target, TextureViewHandle Bound)[] bound)
+    {
+        public readonly (MaterialTarget Target, TextureViewHandle Bound)[] Bound = bound;
+        public readonly string[] Names = Array.ConvertAll(bound, static b => b.Target.Target);
+    }
+
+    /// <summary>Re-resolve every target-following entry and rebuild the groups whose view changed:
+    /// a resize recreated the target, or capture was switched on or off. Once per frame, before
+    /// recording.</summary>
+    internal void ResolveTargets()
+    {
+        foreach (var (materialId, set) in _targets)
+        {
+            var bound = set.Bound;
+            var changed = false;
+            for (var t = 0; t < bound.Length; t++)
+            {
+                var view = ResolveTarget(bound[t].Target.Target);
+                if (view == bound[t].Bound) continue;
+                bound[t].Bound = view;
+                changed = true;
+            }
+            if (!changed) continue;
+
+            var (ubo, group, blend, programId, entries, layout) = _materials[materialId];
+            for (var t = 0; t < bound.Length; t++)
+                for (var i = StandardMaterialEntryCount; i < entries.Length; i++)
+                    if (entries[i].Binding == bound[t].Target.Binding)
+                        entries[i] = BindGroupEntryDesc.ForTextureView(entries[i].Binding, bound[t].Bound);
+            _renderer.DestroyBindGroup(group);
+            var rebuilt = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
+            _materials[materialId] = (ubo, rebuilt, blend, programId, entries, layout);
+        }
+    }
+
+    // Black while the target does not exist, so a binding never dangles and a shader that
+    // samples it anyway reads zero.
+    private TextureViewHandle ResolveTarget(string name) =>
+        _registry!.Contains(name) ? _registry.View(name) : _registry.View(_registry.Black);
+
     /// <summary>Replace one EXTRA entry (binding >= <see cref="StandardMaterialEntryCount"/>) of a
-    /// material and rebuild its bind group — the resize path for engine-owned views like
-    /// <c>PbrRenderer.SceneColorView</c>: subscribe <c>SceneColorViewChanged</c> and rebind here.
-    /// The old group is destroyed synchronously (in-flight GPU work stays valid, the same contract
-    /// every engine-side rebuild relies on); <see cref="GetBindGroup"/> returns the new group from
-    /// the next frame.</summary>
+    /// material and rebuild its bind group. For a caller-owned resource that changed. An
+    /// engine-owned target is better bound as a <see cref="MaterialTarget"/>, which the cache
+    /// keeps current itself; this remains the path for a view handle bound by hand, rebound from
+    /// <c>PbrRenderer.SceneColorViewChanged</c>. The old group is destroyed synchronously (in-flight
+    /// GPU work stays valid, the same contract every engine-side rebuild relies on);
+    /// <see cref="GetBindGroup"/> returns the new group from the next frame.</summary>
     public void UpdateExtraEntry(int materialId, in BindGroupEntryDesc entry)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
