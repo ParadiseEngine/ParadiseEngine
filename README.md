@@ -147,11 +147,44 @@ paradise assets mv <from> <to> # move a file or directory; sidecars and every re
 paradise assets rm <path>      # delete an asset; refused while anything references it (--force to leave them dangling)
 paradise assets refs <path>    # who references it, and what it references (--transitive)
 paradise assets extract <glb>  # materials, textures and a prefab beside it, plus the mesh/clip documents watch mints (--all on a dir)
+paradise host play --scene assets/levels/arena.prefab   # build assets, build the launcher if a source changed, run it, wait
+paradise host play --watch ... # the same under `dotnet watch run`: an edit hot-patches or restarts the game
+paradise host build            # build the launcher (and whatever its post-build targets dump)
 paradise tools doctor          # every build tool: found, version, how to fix
 ```
 
 Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
 them all with the shared `--project` and `--profile` options.
+
+### `host play` is how an editor runs the game
+
+`[host]` in `project.toml` names the game's launcher, relative to the project root (the directory
+holding `assets/`), plus the arguments every launch gets before the caller's own:
+
+```toml
+[host]
+project = "Game.Launcher/Game.Launcher.csproj"
+arguments = ["--ui", "ui/Shell.xaml"]
+```
+
+`paradise host play --scene <document>` then builds `assets/` into `.editor/play/`, brings the
+launcher up to date, runs it on the document's built twin and waits for it to exit — so a front-end
+(the Blender addon, a script) holds ONE process whose exit is the game's exit and whose SIGTERM or
+Ctrl+C takes the whole tree down. "Up to date" is decided from the filesystem, not by MSBuild: the
+reference closure comes from `obj/project.assets.json` (which includes ProjectReferences a
+`Directory.Build.targets` injected, i.e. a workspace building against engine source), and any
+source or project file newer than the stamp the CLI wrote after its last successful build means
+`dotnet build` runs — with `--no-restore` unless a project file changed. Nothing changed costs
+no MSBuild at all; a build made elsewhere (an IDE) costs one no-op pass. `--no-build` runs what
+is built regardless, `--no-assets` skips the asset build, `-c Release` picks the configuration, and
+everything after `--` goes to the game.
+
+`--watch` hands the project to `dotnet watch run --non-interactive` instead: it builds, runs, and
+on every source change hot-patches the running game (method bodies) or rebuilds and restarts it
+(anything else). Hot Reload does not re-run static initialisers or constructors, so an edit to a
+constant or a world-build path shows only after a restart — save a signature to force one. A
+launcher with `PublishAot` on must also set `StartupHookSupport` to `true` (Debug only), or
+`dotnet watch` cannot inject its agent and every edit becomes a restart.
 
 ### A GLB is interchange; `extract` makes the assets
 

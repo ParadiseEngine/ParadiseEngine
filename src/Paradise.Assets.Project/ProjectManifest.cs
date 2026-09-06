@@ -17,9 +17,10 @@ public sealed class ProjectManifest
 
     private readonly Dictionary<string, BuildProfile> _profiles;
 
-    private ProjectManifest(string name, int schemaVersion, AssetIgnoreRules ignore, Dictionary<string, BuildProfile> profiles, ExtractSettings extract)
+    private ProjectManifest(string name, int schemaVersion, AssetIgnoreRules ignore, Dictionary<string, BuildProfile> profiles, ExtractSettings extract, HostSettings host)
     {
         Extract = extract;
+        Host = host;
         Name = name;
         SchemaVersion = schemaVersion;
         Ignore = ignore;
@@ -35,6 +36,9 @@ public sealed class ProjectManifest
 
     /// <summary>Where <c>paradise assets extract</c> puts what it extracts, and which components it wires a mesh into; every member optional.</summary>
     public ExtractSettings Extract { get; }
+
+    /// <summary>The game's launcher for <c>paradise host</c>; <see cref="HostSettings.None"/> when the project declares none.</summary>
+    public HostSettings Host { get; }
 
     /// <summary>Case-sensitive, as TOML keys are.</summary>
     public IReadOnlyDictionary<string, BuildProfile> Profiles => _profiles;
@@ -83,6 +87,7 @@ public sealed class ProjectManifest
         RejectUnknown(sourceName, document.Assets?.Unknown, "in [assets]");
         RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
         RejectUnknown(sourceName, document.Extract?.Unknown, "in [extract]");
+        RejectUnknown(sourceName, document.Host?.Unknown, "in [host]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
         {
@@ -131,7 +136,30 @@ public sealed class ProjectManifest
             string.IsNullOrWhiteSpace(document.Extract?.Directory) ? null : document.Extract.Directory.Trim().TrimEnd('/'),
             string.IsNullOrWhiteSpace(document.Extract?.StaticMeshComponent) ? null : document.Extract.StaticMeshComponent,
             string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent);
-        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract);
+        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host));
+    }
+
+    private static HostSettings ReadHost(string sourceName, HostSectionDocument? document)
+    {
+        if (document is null) return HostSettings.None;
+
+        var project = document.Project?.Trim();
+        if (project is not null && project.Length == 0)
+        {
+            throw new ProjectManifestException(sourceName, "sets an empty [host] project; omit the key when there is no launcher");
+        }
+
+        if (project is not null && !project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ProjectManifestException(sourceName, $"sets [host] project = \"{project}\", which is not a .csproj; the host is built and run through MSBuild");
+        }
+
+        if (document.Arguments is { } arguments && arguments.Any(string.IsNullOrEmpty))
+        {
+            throw new ProjectManifestException(sourceName, "lists an empty string in [host] arguments");
+        }
+
+        return new HostSettings(project, document.Arguments ?? []);
     }
 
     private static BuildProfile ReadProfile(string sourceName, string profileName, BuildProfileDocument? document)
@@ -198,6 +226,17 @@ public sealed class ProjectManifestException : Exception
 }
 
 /// <summary>The <c>[extract]</c> section: an assets-relative directory (null = beside the GLB) and the component type names a generated prefab authors a mesh into (null = the schema decides by name).</summary>
+/// <summary>
+/// The <c>[host]</c> section: the launcher's csproj, RELATIVE TO THE PROJECT ROOT (the directory
+/// holding <c>assets/</c>) rather than to <c>assets/</c> like <c>[extract]</c>, because a launcher
+/// is a sibling of the asset tree, never inside it; and the arguments every launch gets before the
+/// caller's own. Null project means the game is not launched by the CLI.
+/// </summary>
+public sealed record HostSettings(string? Project, IReadOnlyList<string> Arguments)
+{
+    public static HostSettings None { get; } = new(null, []);
+}
+
 public sealed record ExtractSettings(string? Directory, string? StaticMeshComponent, string? SkinnedMeshComponent)
 {
     public static ExtractSettings None { get; } = new(null, null, null);

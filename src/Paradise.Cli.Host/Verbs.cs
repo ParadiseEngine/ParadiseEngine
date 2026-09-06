@@ -497,5 +497,96 @@ internal static class Verbs
         }
     }
 
+    /// <summary>Build the launcher <c>[host]</c> names, restore included. Its post-build targets (a game's authoring-schema dump) are the reason to have a verb for what is otherwise one <c>dotnet build</c>.</summary>
+    public static int HostBuild(IFileSystem fileSystem, AssetProjectLayout layout, string configuration, CancellationToken stop)
+    {
+        if (!TryHostSession(fileSystem, layout, out var session, out var csproj, out _)) return 1;
+        return session.Build(csproj, configuration, restore: true, stop);
+    }
+
+    /// <summary>
+    /// Build the assets into the play tree, bring the launcher up to date, run it on
+    /// <paramref name="scene"/> and wait for it — or, with <paramref name="watch"/>, hand it to
+    /// <c>dotnet watch run</c> so a source edit reaches the running game.
+    /// </summary>
+    public static int HostPlay(
+        IFileSystem fileSystem,
+        AssetProjectLayout layout,
+        string? profile,
+        UPath? scene,
+        UPath? config,
+        bool watch,
+        bool noBuild,
+        bool noAssets,
+        string configuration,
+        IReadOnlyList<string> callerArguments,
+        IReadOnlyList<IAssetImporter> importers,
+        CancellationToken stop)
+    {
+        if (!TryHostSession(fileSystem, layout, out var session, out var csproj, out var manifest)) return 1;
+
+        if (!noAssets)
+        {
+            var assets = Build(fileSystem, layout, profile, editor: true, importers);
+            if (assets != 0) return assets;
+        }
+
+        var builtScene = scene is { } document ? HostPlayArguments.ResolveScene(layout, document) : (UPath?)null;
+        if (builtScene is { } expected && !fileSystem.FileExists(expected))
+        {
+            Console.Error.WriteLine($"play: the build succeeded but {Display(fileSystem, expected)} is not there");
+            return 1;
+        }
+
+        var arguments = HostPlayArguments.Compose(
+            path => Display(fileSystem, path),
+            builtScene,
+            config ?? HostPlayArguments.FindConfig(fileSystem, layout, manifest.Name),
+            manifest.Host.Arguments,
+            callerArguments);
+
+        return session.Play(csproj, configuration, layout.Root, arguments, watch, noBuild, stop);
+    }
+
+    private static bool TryHostSession(IFileSystem fileSystem, AssetProjectLayout layout, out HostSession session, out UPath csproj, out ProjectManifest manifest)
+    {
+        session = null!;
+        csproj = default;
+        manifest = null!;
+
+        try
+        {
+            manifest = ProjectManifest.Load(fileSystem, layout.Manifest);
+        }
+        catch (ProjectManifestException error)
+        {
+            Console.Error.WriteLine($"paradise: {error.Message}");
+            return false;
+        }
+
+        if (manifest.Host.Project is not { } project)
+        {
+            Console.Error.WriteLine($"paradise: {Display(fileSystem, layout.Manifest)} declares no [host] project; add one naming the game's launcher csproj, relative to {Display(fileSystem, layout.Root)}");
+            return false;
+        }
+
+        csproj = layout.Root / project;
+        if (!fileSystem.FileExists(csproj))
+        {
+            Console.Error.WriteLine($"paradise: [host] project {Display(fileSystem, csproj)} does not exist");
+            return false;
+        }
+
+        var dotnet = DotnetLocator.Find();
+        if (dotnet is null)
+        {
+            Console.Error.WriteLine("paradise: no dotnet SDK found on PATH, DOTNET_ROOT, or in the installer's directories");
+            return false;
+        }
+
+        session = new HostSession(fileSystem, new ConsoleProcessRunner(), dotnet, Console.WriteLine);
+        return true;
+    }
+
     private static string Display(IFileSystem fileSystem, UPath path) => fileSystem.ConvertPathToInternal(path);
 }
