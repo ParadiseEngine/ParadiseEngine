@@ -18,9 +18,17 @@ namespace Paradise.Cli;
 /// <param name="ToggleEditor">
 /// Flip <see cref="Editor"/>. <see langword="null"/> hides the checkbox (tests, the no-op tray).
 /// </param>
+/// <param name="Game">
+/// The game the tray can run, or <see langword="null"/> when the manifest names no
+/// <c>[host]</c> scene — the three items are then omitted, not disabled.
+/// </param>
 internal sealed record WatchTrayHooks(
     Action Stop,
     Action? Rebuild,
     Action OpenOutput,
     WatchEditorMode Editor,
-    Action? ToggleEditor = null);
+    Action? ToggleEditor = null,
+    WatchTrayGameHooks? Game = null);
+
+/// <summary>Play (plain), Play under <c>dotnet watch</c>, and Stop for the game a watch runs on the manifest's <c>[host]</c> scene. Each Play replaces whatever is running.</summary>
+internal sealed record WatchTrayGameHooks(Action Play, Action PlayWatch, Action StopGame);

@@ -159,7 +159,13 @@ public sealed class ProjectManifest
             throw new ProjectManifestException(sourceName, "lists an empty string in [host] arguments");
         }
 
-        return new HostSettings(project, document.Arguments ?? []);
+        var scene = document.Scene?.Trim();
+        if (scene is not null && scene.Length == 0)
+        {
+            throw new ProjectManifestException(sourceName, "sets an empty [host] scene; omit the key when there is no default document");
+        }
+
+        return new HostSettings(project, document.Arguments ?? [], scene?.TrimStart('/'));
     }
 
     private static BuildProfile ReadProfile(string sourceName, string profileName, BuildProfileDocument? document)
@@ -230,9 +236,10 @@ public sealed class ProjectManifestException : Exception
 /// The <c>[host]</c> section: the launcher's csproj, RELATIVE TO THE PROJECT ROOT (the directory
 /// holding <c>assets/</c>) rather than to <c>assets/</c> like <c>[extract]</c>, because a launcher
 /// is a sibling of the asset tree, never inside it; and the arguments every launch gets before the
-/// caller's own. Null project means the game is not launched by the CLI.
+/// caller's own. Null project means the game is not launched by the CLI. <paramref name="Scene"/>
+/// is the document a Play with no <c>--scene</c> runs (the tray's Play), assets-relative.
 /// </summary>
-public sealed record HostSettings(string? Project, IReadOnlyList<string> Arguments)
+public sealed record HostSettings(string? Project, IReadOnlyList<string> Arguments, string? Scene = null)
 {
     public static HostSettings None { get; } = new(null, []);
 }

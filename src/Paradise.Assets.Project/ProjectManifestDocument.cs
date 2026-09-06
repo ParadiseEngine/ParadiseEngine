@@ -68,6 +68,9 @@ internal sealed class HostSectionDocument
     [JsonPropertyName("arguments")]
     public List<string>? Arguments { get; set; }
 
+    [JsonPropertyName("scene")]
+    public string? Scene { get; set; }
+
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
 }

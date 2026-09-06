@@ -211,6 +211,16 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task the_host_scene_is_assets_relative_and_optional()
+    {
+        var bare = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"G/G.csproj\"\n", "project.toml");
+        await Assert.That(bare.Host.Scene).IsNull();
+
+        var declared = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"G/G.csproj\"\nscene = \"levels/arena.prefab\"\n", "project.toml");
+        await Assert.That(declared.Host.Scene).IsEqualTo("levels/arena.prefab");
+    }
+
+    [Test]
     public async Task a_host_project_that_is_not_a_csproj_is_refused()
     {
         // A prebuilt executable has no build to run and no reference closure to check, so the

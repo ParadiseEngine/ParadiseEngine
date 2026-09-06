@@ -50,6 +50,14 @@ internal static class WatchPresentation
     /// </summary>
     public static string EditorToggleMenu => "Play mode";
 
+    /// <summary>Run the game on the manifest's <c>[host]</c> scene from the play tree the watch keeps fresh.</summary>
+    public static string PlayMenu => "Play the game";
+
+    /// <summary>The same under <c>dotnet watch</c>: code edits reach the running game, a scene save restarts it.</summary>
+    public static string PlayWatchMenu => "Play the game (watch code)";
+
+    public static string StopGameMenu => "Stop the game";
+
     private static string FormatFailed(int errorCount) => errorCount == 1
         ? "paradise watch — failed (1 error)"
         : $"paradise watch — failed ({errorCount} errors)";

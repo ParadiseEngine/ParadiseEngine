@@ -52,6 +52,9 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const int IdOpen = 3;
     private const int IdStop = 4;
     private const int IdEditor = 5;
+    private const int IdPlay = 6;
+    private const int IdPlayWatch = 7;
+    private const int IdStopGame = 8;
     private const int IconSize = 16;
     private const uint NotifyId = 1;
 
@@ -301,6 +304,14 @@ internal sealed class WindowsWatchTray : IWatchTray
             }
 
             Native.AppendMenu(menu, MfString, IdOpen, WatchPresentation.OpenOutputMenu(editor));
+            if (_hooks.Game is not null)
+            {
+                Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
+                Native.AppendMenu(menu, MfString, IdPlay, WatchPresentation.PlayMenu);
+                Native.AppendMenu(menu, MfString, IdPlayWatch, WatchPresentation.PlayWatchMenu);
+                Native.AppendMenu(menu, MfString, IdStopGame, WatchPresentation.StopGameMenu);
+            }
+
             Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
             Native.AppendMenu(menu, MfString, IdStop, "Stop");
 
@@ -319,6 +330,15 @@ internal sealed class WindowsWatchTray : IWatchTray
                     break;
                 case IdOpen:
                     _hooks.OpenOutput();
+                    break;
+                case IdPlay:
+                    _hooks.Game?.Play();
+                    break;
+                case IdPlayWatch:
+                    _hooks.Game?.PlayWatch();
+                    break;
+                case IdStopGame:
+                    _hooks.Game?.StopGame();
                     break;
                 case IdStop:
                     _hooks.Stop();

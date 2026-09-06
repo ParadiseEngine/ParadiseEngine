@@ -108,6 +108,9 @@ internal static class Verbs
         using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers);
         var minted = watcher.MintReferences();
         if (minted > 0) Console.WriteLine($"watch: {minted} mesh, skeleton and clip document(s) minted");
+        TrayGameSession? game = null;
+        var gameHooks = tray ? TrayGameSession.Create(fileSystem, layout, profile, importers, out game) : null;
+        using var gameSession = game;
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
@@ -120,7 +123,8 @@ internal static class Verbs
                     Console.WriteLine(on
                         ? "watch: play mode on — asset changes rebuild .editor/play"
                         : "watch: play mode off — asset changes rebuild build/");
-                }),
+                },
+                Game: gameHooks),
             enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
