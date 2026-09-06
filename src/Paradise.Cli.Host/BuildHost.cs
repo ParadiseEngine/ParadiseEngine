@@ -181,6 +181,8 @@ public static class BuildHost
             }
         }
 
+        if (watch && noBuild) return Unknown("--no-build has no meaning with --watch: dotnet watch builds on its own");
+
         var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
         AssetProjectLayout layout;
         try

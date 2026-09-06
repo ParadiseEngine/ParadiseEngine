@@ -50,7 +50,7 @@ internal sealed class HostSession
     /// <paramref name="workingDirectory"/>; or, with <paramref name="watch"/>, hand the project to
     /// <c>dotnet watch run</c>, which builds, runs, and rebuilds or hot-patches on every source change.
     /// </summary>
-    /// <param name="noBuild">Run whatever is built, stale or not — a rebuild is the caller's to refuse, never silently skipped.</param>
+    /// <param name="noBuild">Run whatever is built, stale or not — a rebuild is the caller's to refuse, never silently skipped. Meaningless with <paramref name="watch"/>, which the verb refuses up front.</param>
     public int Play(
         UPath csproj,
         string configuration,
