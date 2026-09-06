@@ -215,6 +215,7 @@ public sealed partial class FrameGraph
             }
             _order[j + 1] = current;
         }
+        CheckReadsFollowWrites(passes, count);
 
         for (var slot = 0; slot < count; slot++)
         {
@@ -373,6 +374,48 @@ public sealed partial class FrameGraph
         return new DepthAttachmentDesc(resource.Texture, a.Load, store, a.ClearDepth, view);
     }
 
+    /// <summary>The edges checking the events: a pass placed before the pass that writes what it
+    /// reads gets last frame's contents, and the event key is the only thing that put it there.
+    ///
+    /// <para>Three reads are exempt. A resource nothing writes at all may be legitimately bound
+    /// and never sampled — the shadow array in a frame with no shadowed light. An external
+    /// resource may have been written by the host before the frame, so the first pass loading the
+    /// backbuffer is not reading ahead of anyone. And a <see cref="PassBuilder.ReadsHistory"/> read
+    /// wants last frame's contents by definition.</para></summary>
+    private void CheckReadsFollowWrites(Span<Pass> passes, int count)
+    {
+        for (var slot = 0; slot < count; slot++)
+        {
+            var index = _order[slot];
+            foreach (var edge in _reads)
+                if (edge.Pass == index && !edge.History)
+                    RequireNoLaterWriter(passes, slot, count, edge.Resource);
+
+            ref var pass = ref passes[index];
+            for (var c = 0; c < pass.ColorCount; c++)
+                if (pass.Colors[c].Load == LoadOp.Load)
+                    RequireNoLaterWriter(passes, slot, count, pass.Colors[c].Target.Index);
+            if (pass.HasDepth && pass.Depth.Load == LoadOp.Load)
+                RequireNoLaterWriter(passes, slot, count, pass.Depth.Target.Index);
+        }
+    }
+
+    private void RequireNoLaterWriter(Span<Pass> passes, int slot, int count, int resourceIndex)
+    {
+        if (_resources[resourceIndex].Scope == GraphResourceScope.External) return;
+        if (WrittenBefore(passes, slot, resourceIndex)) return;
+        for (var later = slot + 1; later < count; later++)
+        {
+            ref var writer = ref passes[_order[later]];
+            if (!Writes(in writer, resourceIndex)) continue;
+            ref var reader = ref passes[_order[slot]];
+            throw new InvalidOperationException(
+                $"Pass '{reader.Name}' (event {reader.SortKey}) reads '{NameOf(resourceIndex)}' before " +
+                $"'{writer.Name}' (event {writer.SortKey}) writes it this frame. Move the reader after the " +
+                "writer's event, or the writer before the reader's.");
+        }
+    }
+
     /// <summary>The declared store op, or the inferred one: keep the contents if anything after
     /// this pass consumes them or something outside the graph might, else discard.</summary>
     private StoreOp StoreOf(Span<Pass> passes, int slot, int count, in Attachment a)
@@ -383,7 +426,17 @@ public sealed partial class FrameGraph
 
         if (a.Store is { } declared) return declared;
         if (_resources[resourceIndex].Scope == GraphResourceScope.External) return StoreOp.Store;
-        return ReadAfter(passes, slot, count, resourceIndex) ? StoreOp.Store : StoreOp.Discard;
+        return ReadAfter(passes, slot, count, resourceIndex) || ReadAsHistory(resourceIndex)
+            ? StoreOp.Store
+            : StoreOp.Discard;
+    }
+
+    // A history reader consumes the write next frame, wherever it sits in this one.
+    private bool ReadAsHistory(int resourceIndex)
+    {
+        foreach (var edge in _reads)
+            if (edge.History && edge.Resource == resourceIndex) return true;
+        return false;
     }
 
     private bool ReadAfter(Span<Pass> passes, int slot, int count, int resourceIndex)
@@ -430,7 +483,7 @@ public sealed partial class FrameGraph
     private readonly record struct Resource(
         ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture, string? Name);
 
-    private readonly record struct ReadEdge(int Pass, int Resource);
+    private readonly record struct ReadEdge(int Pass, int Resource, bool History);
 
     private struct Attachment
     {
@@ -592,7 +645,18 @@ public sealed partial class FrameGraph
         public PassBuilder Reads(GraphTexture source)
         {
             if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
-            _graph._reads.Add(new ReadEdge(_index, source.Index));
+            _graph._reads.Add(new ReadEdge(_index, source.Index, History: false));
+            return this;
+        }
+
+        /// <summary>Declare that this pass samples what <paramref name="source"/> held at the END
+        /// of the previous frame — a history buffer. The producer stays live and stored however
+        /// the two are ordered, and reading it before the producer runs is not the mistake it
+        /// would be for a plain read.</summary>
+        public PassBuilder ReadsHistory(GraphTexture source)
+        {
+            if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
+            _graph._reads.Add(new ReadEdge(_index, source.Index, History: true));
             return this;
         }
 
