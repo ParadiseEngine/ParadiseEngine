@@ -25,8 +25,14 @@ namespace Paradise.Editor.ImGui;
 /// real recipe; E0 docks one window so the dockspace is demonstrably load-bearing.
 /// </para>
 /// </remarks>
-public sealed class EditorDockspace(string id = "EditorDockspace", Action<uint>? seedLayout = null)
+public sealed class EditorDockspace(string id = "EditorDockspace", Action<uint>? seedLayout = null) : IDisposable
 {
+    // Seed 0 means the id is a pure function of the NAME, so two dockspaces sharing one silently
+    // share a node — desirable across runs (the saved layout still matches) and a bug within one,
+    // where it presents as "my two workspaces are the same workspace". Debug-only because it is a
+    // programming error, not a runtime condition, and a shipped editor should not pay for it.
+    private static readonly HashSet<uint> s_live = [];
+
     private bool _rebuild;
 
     /// <summary>The root node's id.</summary>
@@ -38,7 +44,42 @@ public sealed class EditorDockspace(string id = "EditorDockspace", Action<uint>?
     /// current window to seed from, so a host or a test asking whether the node exists after the
     /// frame dereferences null. <c>ImHashStr</c> is a pure function of the string.
     /// </remarks>
-    public uint NodeId { get; } = ImGuiP.ImHashStr(id);
+    public uint NodeId { get; } = Claim(id);
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private static void ClaimDebug(uint node, string name)
+    {
+        lock (s_live)
+        {
+            if (!s_live.Add(node))
+            {
+                throw new InvalidOperationException(
+                    $"A dockspace named '{name}' already exists. Dockspace ids are hashed from the "
+                    + "name, so two with the same name share one node and one saved layout.");
+            }
+        }
+    }
+
+    private static uint Claim(string name)
+    {
+        var node = ImGuiP.ImHashStr(name);
+        ClaimDebug(node, name);
+        return node;
+    }
+
+    /// <summary>Release the name so another dockspace may take it.</summary>
+    /// <remarks>A dockspace OWNS its name for its lifetime, which is what makes the duplicate
+    /// check meaningful — without release it would be a check on how many were ever created
+    /// rather than on how many exist.</remarks>
+    public void Dispose()
+    {
+        lock (s_live) s_live.Remove(NodeId);
+    }
+
+    /// <summary>The label to dock a window by: title-INDEPENDENT, because ImGui hashes a window's
+    /// id from the part after <c>###</c>. A recipe written against the visible title would lose
+    /// every panel's position the day somebody renames or localises one.</summary>
+    public static string LabelFor(string windowId) => $"###{windowId}";
 
     /// <summary>Drop the current layout and re-seed on the next <see cref="Draw"/>.</summary>
     /// <remarks>Deferred rather than immediate because the builder may not run while the frame it

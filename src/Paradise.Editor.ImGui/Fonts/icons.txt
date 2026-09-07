@@ -1,0 +1,8 @@
+folder folder_open description image texture view_in_ar lightbulb videocam category audio_file
+visibility visibility_off lock lock_open
+undo redo save add delete content_copy content_paste edit
+play_arrow pause stop refresh
+search filter_alt settings close check expand_more chevron_right more_vert
+warning error info bug_report
+dashboard view_quilt terminal bar_chart account_tree tune
+open_with rotate_right open_in_full grid_on

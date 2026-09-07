@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Paradise.Diagnostics;
+using Paradise.Editor.Core.Persistence;
 using Paradise.Editor.ImGui;
+using Paradise.Editor.ImGui.Shell;
+using System.IO;
 using Paradise.Rendering;
 using Paradise.Rendering.WebGPU;
 using Paradise.Ui.ImGui;
@@ -30,7 +33,7 @@ internal static class Program
 {
     private const uint Width = 1600;
     private const uint Height = 1000;
-    private const float FontSize = 16f;
+    private const float FontSize = EditorFonts.DefaultSizePixels;
     private static readonly ColorRgba Background = new(0.08f, 0.09f, 0.11f, 1f);
 
     private static ILoggerFactory s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions());
@@ -42,6 +45,7 @@ internal static class Program
 
         if (ParseScreenshot(args) is not { } screenshot) return 1;
         if (ParseFrames(args) is not { } frames) return 1;
+        s_extensionDirectory = ValueAfter(args, "--extensions");
 
         try
         {
@@ -60,6 +64,7 @@ internal static class Program
 
     private static int RunWindowed()
     {
+        var log = s_log.CreateLogger("Paradise.Editor.Host");
         using var platform = new SdlWindowPlatform(s_log.CreateLogger<SdlWindowPlatform>());
         using var window = platform.CreateWindow(new WindowOptions("Paradise Editor", Width, Height));
         using var renderer = new WebGpuRenderer(
@@ -68,7 +73,11 @@ internal static class Program
         using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
         using var core = CreateCore(window.Width, window.Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
-        var editor = new EditorFrame();
+        using var userMount = UserMount();
+        using var plugins = LoadExtensions(s_log.CreateLogger<ExtensionCatalog>(), includeDefault: true);
+        using var editor = new EditorFrame(
+            new WorkspaceLayoutStore(core, userMount), s_log.CreateLogger("Paradise.Editor"), plugins.Extensions);
+        foreach (var problem in plugins.Problems) log.LogWarning("{Problem}", problem);
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -99,8 +108,12 @@ internal static class Program
                 if (snapshot is not null) overlay.Render(encoder, view, window.Width, window.Height, snapshot);
             };
             renderer.Submit(scene.Record());
+            editor.SaveLayoutIfChanged(core.WantSaveLayout);
         }
 
+        // The arrangement at the moment of closing is the one to restore, not the one from the
+        // last time ImGui's save timer happened to fire.
+        editor.Layout.Save();
         return 0;
     }
 
@@ -117,7 +130,10 @@ internal static class Program
         using var fonts = UiFonts.MountSystemFonts(new PhysicalFileSystem());
         using var core = CreateCore(Width, Height, fonts);
         using var overlay = new ImGuiWebGpuRenderer(renderer.NativeDevice, renderer.NativeColorFormat);
-        var editor = new EditorFrame();
+        // No layout store: a smoke run must not read a developer's arrangement or leave one behind.
+        using var plugins = LoadExtensions(s_log.CreateLogger<ExtensionCatalog>(), includeDefault: false);
+        using var editor = new EditorFrame(log: log, extensions: plugins.Extensions);
+        foreach (var problem in plugins.Problems) log.LogWarning("{Problem}", problem);
         core.AddDraw(editor.Draw);
 
         var pending = new List<ImGuiTextureOp>();
@@ -145,7 +161,7 @@ internal static class Program
         // drew nothing still produces a valid PNG of the clear colour, and a UI that drew
         // everything still writes nothing if the capture path is broken. Both are checked.
         if (commands == 0) throw new InvalidOperationException("The editor frame produced no draw commands.");
-        if (!editor.Dockspace.HasNode) throw new InvalidOperationException("The dockspace node was never built.");
+        if (editor.Layout.ActiveNode == 0) throw new InvalidOperationException("The dockspace node was never built.");
 
         var readback = capture!.GetAwaiter().GetResult();
         using (var file = File.Create(screenshot))
@@ -159,22 +175,70 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Build the core over the best CJK-capable system font in <paramref name="fonts"/>,
-    /// falling back to ImGui's ASCII-only default.</summary>
-    /// <remarks>The mount is the caller's so it can be a <c>using</c> and therefore survive an
-    /// exception — the core reads bytes out of it during construction and holds none afterwards,
-    /// but the two still have to be torn down in order.</remarks>
-    private static ImGuiUiCore CreateCore(uint width, uint height, IFileSystem fonts)
+    /// <summary>Build the core over the editor's embedded faces, merging a CJK face out of
+    /// <paramref name="systemFonts"/> when the machine has one.</summary>
+    /// <remarks>The system mount is the caller's so it can be a <c>using</c> and therefore survive
+    /// an exception. The embedded mount is not: it only has to outlive the calls that read bytes
+    /// out of it, since ImGui copies them into its own allocation.</remarks>
+    private static ImGuiUiCore CreateCore(uint width, uint height, IFileSystem systemFonts)
     {
-        var font = UiFonts.FindCjkFont(fonts, FontSize);
-        var core = new ImGuiUiCore(width, height, font);
+        // The editor's own faces, embedded. Inter goes in as the BASE font because ImGui treats
+        // the first in the atlas as the default; the icons and a system CJK face merge onto it, so
+        // one font covers text, icons and CJK and no panel ever switches fonts mid-line.
+        using var embedded = EditorFonts.Mount();
+        var core = new ImGuiUiCore(width, height, EditorFonts.Base(embedded, FontSize));
+        EditorFonts.MergeIcons(embedded, FontSize);
+        EditorFonts.MergeSystemCjk(systemFonts, FontSize);
 
         // E1 owns layout persistence through the /user mount. Until then the ini is off rather
         // than left at ImGui's default, which writes into the process's working directory — for a
         // `dotnet run` from the repo, into the repo.
         core.DisableIniFile();
         EditorDockspace.EnableDocking();
+        EditorTheme.Apply();
         return core;
+    }
+
+    /// <summary>Extensions dropped beside the executable.</summary>
+    /// <remarks>
+    /// <para>
+    /// A host PATH, not a mount: the runtime's assembly loader opens the file itself, so no Zio
+    /// filesystem can back it — the same exception <c>Paradise.Audio.Wwise</c> makes for the same
+    /// reason.
+    /// </para>
+    /// <para>
+    /// Beside the executable rather than in the user's config directory, because an extension is
+    /// code: putting the load path somewhere a stray download lands would make "open the editor" a
+    /// way to run it. Somebody deploying extensions centrally can point <c>--extensions</c>
+    /// wherever they like.
+    /// </para>
+    /// </remarks>
+    /// <param name="includeDefault">False in headless mode. A smoke run must not pick up whatever
+    /// happens to be in a folder beside the binary: the captured frame is compared byte for byte,
+    /// and a machine with an extension installed would produce a different one. An explicit
+    /// <c>--extensions</c> still loads, so the path stays testable from the command line.</param>
+    private static ExtensionCatalog LoadExtensions(ILogger logger, bool includeDefault)
+    {
+        var directory = s_extensionDirectory
+            ?? (includeDefault ? Path.Combine(AppContext.BaseDirectory, "extensions") : null);
+        return directory is null ? ExtensionCatalog.Empty : ExtensionCatalog.Discover(directory, logger);
+    }
+
+    private static string? s_extensionDirectory;
+
+    /// <summary>The <c>/user</c> mount: this machine's config directory, and nothing above it.</summary>
+    /// <remarks>A <c>SubFileSystem</c> rather than a physical root, so a path that climbs out of
+    /// the editor's own directory throws instead of resolving somewhere in the user's home. The
+    /// containment is the mount's job, not a check written at each call site.</remarks>
+    private static SubFileSystem UserMount()
+    {
+        var physical = new PhysicalFileSystem();
+        var root = physical.ConvertPathFromInternal(
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.Create),
+                "ParadiseEditor"));
+        if (!physical.DirectoryExists(root)) physical.CreateDirectory(root);
+        return new SubFileSystem(physical, root, owned: true);
     }
 
     private static string? ValueAfter(string[] args, string flag)

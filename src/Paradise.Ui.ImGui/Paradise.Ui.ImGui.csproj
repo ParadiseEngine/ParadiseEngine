@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
     <Title>Paradise.Ui.ImGui</Title>
     <PackageId>Paradise.Ui.ImGui</PackageId>
     <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through the WebGPU backend. Built on Hexa.NET.ImGui.</Description>

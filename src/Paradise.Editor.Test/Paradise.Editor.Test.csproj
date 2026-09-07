@@ -20,5 +20,18 @@
     <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
     <ProjectReference Include="../Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
+    <!-- ReferenceOutputAssembly=false: the plugin's types must NOT be visible to these tests. They
+         have to arrive through ExtensionCatalog or not at all, which is the only way the test can
+         tell a working loader from a compile-time reference. The reference exists solely to order
+         the build; the target below puts the output where the loader will look. -->
+    <ProjectReference Include="../Paradise.Editor.TestPlugin/Paradise.Editor.TestPlugin.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+  <Target Name="StageTestPlugin" AfterTargets="Build">
+    <ItemGroup>
+      <TestPluginOutput Include="$(MSBuildThisFileDirectory)../Paradise.Editor.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Paradise.Editor.TestPlugin.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TestPluginOutput)" DestinationFolder="$(OutDir)plugins" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

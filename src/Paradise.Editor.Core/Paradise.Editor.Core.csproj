@@ -15,7 +15,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <IsPackable>false</IsPackable>
+    <Title>Paradise.Editor.Core</Title>
+    <PackageId>Paradise.Editor.Core</PackageId>
+    <Description>The Paradise editor's model, with no UI framework in it: the immutable scene document, the scene provider seam, selection, operators and their dispatcher, owner-scoped extension registries, snapshot history with a file-operation journal, chords and keymaps, and the editor's persisted user and project state. Everything reads and writes through a Zio mount the host chooses.</Description>
+    <PackageTags>editor;tooling;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,5 +33,10 @@
     <ProjectReference Include="../Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
     <ProjectReference Include="../Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
     <ProjectReference Include="../Paradise.Authoring/Paradise.Authoring.csproj" />
+    <!-- KeyboardKey and the WindowEvent vocabulary a keymap binds over. A contract package with
+         no dependencies of its own — the SDL implementation lives in Paradise.Windowing.Sdl and
+         is the standalone host's business, not Core's. The in-game host forwards this same event
+         stream, which is what lets one keymap serve both. -->
+    <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
   </ItemGroup>
 </Project>

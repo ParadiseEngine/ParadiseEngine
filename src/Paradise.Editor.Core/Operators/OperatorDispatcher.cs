@@ -38,6 +38,11 @@ public sealed partial class OperatorDispatcher(
     public IOperator? Find(string id) =>
         operators.Entries.LastOrDefault(candidate => candidate.Id == id);
 
+    public bool IsAvailable(string id) => Find(id) is { } candidate && candidate.IsAvailable(_context);
+
+    public bool? IsChecked(string id) =>
+        Find(id) is ICheckableOperator checkable ? checkable.IsChecked(_context) : null;
+
     public OperatorResult Dispatch(string id, OperatorArgs args)
     {
         if (Find(id) is not { } operatorInstance)

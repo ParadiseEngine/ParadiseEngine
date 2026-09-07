@@ -12,7 +12,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <IsPackable>false</IsPackable>
+    <Title>Paradise.Editor.ImGui</Title>
+    <PackageId>Paradise.Editor.ImGui</PackageId>
+    <Description>The Paradise editor's shell and panels as a draw-into-your-frame library: dockspace and workspace layouts, main menu bar, fuzzy command palette, dark theme, and the embedded Inter and Material Symbols faces. It never calls NewFrame or Render, never owns a window and never pumps input, so the same shell serves a standalone editor and an editor embedded in a running game.</Description>
+    <PackageTags>editor;imgui;tooling;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,5 +30,28 @@
 
   <ItemGroup>
     <ProjectReference Include="../Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
+    <!-- UiFonts and the font-loading path. NOT the frame, the window or the renderer: the guard
+         in Paradise.Editor.Test checks the runtime types stay out of this assembly's references,
+         and Paradise.Ui.ImGui is not among them because a font loader is not a frame. -->
+    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The font licences travel WITH the package, not just the repo. Both faces are embedded in
+         the assembly, so a consumer who never sees this source tree is still redistributing them
+         and the OFL and Apache texts have to reach them. -->
+    <None Include="Fonts/Inter-OFL.txt" Pack="true" PackagePath="fonts/" />
+    <None Include="Fonts/MaterialSymbols-LICENSE.txt" Pack="true" PackagePath="fonts/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded rather than files beside the executable: an editor that will not start because
+         somebody moved the binary is shipping a dependency, not a font. See Fonts/README.md for
+         the licences and for how these were instanced and subset. -->
+    <EmbeddedResource Include="Fonts/Inter-Regular.ttf" />
+    <EmbeddedResource Include="Fonts/MaterialSymbolsRounded-Editor.ttf" />
+    <!-- The name-to-codepoint map EditorIcons was generated from. Embedded so a test can check the
+         two have not drifted from anywhere, rather than only from a checkout. -->
+    <EmbeddedResource Include="Fonts/icon-map.txt" />
   </ItemGroup>
 </Project>
