@@ -787,6 +787,12 @@ public class AssetExtractorTests
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors.Any(e => e.Contains("extract.prefabs") && e.Contains("hidden/crate.prefab"))).IsTrue();
 
+        // And again on a SECOND run, where Seed declines because the file is already there. Keying
+        // the check on "this run wrote it" let an unindexed prefab from an earlier run pass.
+        var second = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(second.Succeeded).IsFalse();
+        await Assert.That(second.Errors.Any(e => e.Contains("extract.prefabs") && e.Contains("hidden/crate.prefab"))).IsTrue();
+
         // Routed somewhere the scan DOES see, the same project is clean.
         using var visible = Project(manifest: """
             name = "x"
@@ -798,6 +804,30 @@ public class AssetExtractorTests
         var fine = AssetExtractor.Extract(visible, s_layout, Glb);
         await Assert.That(fine.Errors).IsEmpty();
         await Assert.That(visible.FileExists("/game/assets/prefabs/crate.prefab")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_prefab_placed_elsewhere_is_not_reported_as_a_missing_route()
+    {
+        // Seed declines for two reasons, and only one of them is a problem. Here a prefab somewhere
+        // else already places the mesh, so nothing is written at the extract path and there is
+        // nothing to be unindexed — the run must stay clean.
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        // Move the generated prefab out of the way, into a folder the scan DOES see, and re-run:
+        // the reference graph finds it placing the mesh, so Seed writes nothing at the old path.
+        fileSystem.CreateDirectory("/game/assets/levels");
+        foreach (var suffix in new[] { "", ".meta" })
+        {
+            fileSystem.MoveFile($"/game/assets/models/crate.prefab{suffix}", $"/game/assets/levels/placed.prefab{suffix}");
+        }
+
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(again.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsFalse();
+        await Assert.That(again.Kept.Any(kept => kept.Contains("placed.prefab"))).IsTrue();
     }
 
     [Test]

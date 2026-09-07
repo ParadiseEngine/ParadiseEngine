@@ -222,16 +222,24 @@ public static partial class AssetExtractor
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
             var prefab = directories.Prefabs / $"{stem}.prefab";
-            if (generatePrefab && Seed(index, layout, prefab, stem, Identified(index, extraction), cooked))
+            if (generatePrefab)
             {
-                index = Rescan();
+                if (Seed(index, layout, prefab, stem, Identified(index, extraction), cooked)) index = Rescan();
 
                 // The prefab is the one kind the record does not carry, so nothing downstream would
                 // notice it landed where the scan cannot see it — an ignored folder, or one spelled
                 // with another case. It would have no identity, so nothing could ever reference it,
-                // and the run would report success. Checked here instead, in the same terms as
-                // every recorded kind.
-                if (index.IdentityOf(prefab) is null) Unresolved(index, "extract.prefabs", index.Relative(prefab));
+                // and the run would report success.
+                //
+                // Keyed on the FILE being there, not on this run having written it: a prefab an
+                // earlier run left in a folder the scan ignores is exactly as unusable, and Seed
+                // declines for it. Seed also declines when a prefab ELSEWHERE already places the
+                // mesh — that leaves nothing at this path, which is why the file test is the one
+                // that tells the two apart.
+                if (fileSystem.FileExists(prefab) && index.IdentityOf(prefab) is null)
+                {
+                    Unresolved(index, "extract.prefabs", index.Relative(prefab));
+                }
             }
 
             Save(index, sidecarPath, extraction);
