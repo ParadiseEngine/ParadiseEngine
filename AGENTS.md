@@ -246,7 +246,7 @@ because a namespace of the latter name is in scope for every file under `Paradis
 an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
 meaning Microsoft.Coyote's, and all six stopped compiling.
 
-Eleven things that are not obvious:
+Twelve things that are not obvious:
 
 - **A switch and a scene setting are different questions, and both have to say yes.** The switch is
   the platform's answer ("this build does not do probe GI"), applied once from configuration; a
@@ -270,9 +270,18 @@ Eleven things that are not obvious:
   features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
   reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
-  cannot say so with a list position when the engine does all the adding. `PbrRenderer` holds no
-  feature reference at all: what its own API forwards to it looks up through `Pipeline.Find<T>()`,
-  on cold paths only.
+  cannot say so with a list position when the engine does all the adding.
+- **A feature's settings belong to the feature, not to a shortcut on the renderer.**
+  `PbrRenderer` used to publish `ShadowMapSize`, `ShadowBlurTexels`, `DirectionalShadowRadius`
+  and `SetSpecularAa`, forwarding each into the built-in that owns it. That is the renderer
+  saying three of its nine features are special, when the only thing making them so was the
+  shortcut — a game's feature could never have one. They are gone; a host writes
+  `pipeline.Find<ShadowFeature>()!.MapSize = …`, which is what it already writes for a feature
+  it added itself. The same went for the internal `…ForTest` forwarders: a test asks the
+  pipeline for the feature like everybody else. What is left on the renderer is the frame and
+  what the frame produced — `RenderFrame`, `LastPassNames`, `Materials`, `Pipeline`,
+  `Switches` — plus `SceneColorView`, which is a frame OUTPUT rather than a feature's setting
+  and is already slated to be retired by the material-registry follow-up in #242.
 - **A feature that fills a buffer while RECORDING uploads it in `BeforeSubmit`.** A recorder runs
   inside the compile, so the shadow pass's caster ring has nothing in it when `Setup` returns and
   no moment left after the submit. That upload used to be a line in `PbrRenderer.RenderFrame`

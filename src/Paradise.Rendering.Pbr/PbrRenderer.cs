@@ -72,17 +72,13 @@ public sealed partial class PbrRenderer : IDisposable
         PbrBuiltInFeatures.AddTo(Pipeline, _ctx, specularAaVariance, specularAaClamp);
     }
 
-    // The features the renderer's own API forwards to, looked up rather than held.
+    // The ONE feature this renderer still reaches for, and only for SceneColorView below.
     //
-    // A field would be a second place the pipeline's contents are recorded, captured once at
-    // construction and silently stale if the pipeline ever changed; and it would say that these
-    // four are special, when the only thing that makes them so is that PbrRenderer publishes a
-    // shortcut to them. Every one of these is a cold path — a level applying its render settings,
-    // a host binding a material to the captured scene — so the scan over nine features is free
-    // where it happens. The frame loop needs none of them: what used to be a field lived there
-    // for the shadow ring's upload, which the feature now does itself in BeforeSubmit.
-    private ShadowFeature Shadows => Pipeline.Find<ShadowFeature>()!;
-    private SceneFeature Scene => Pipeline.Find<SceneFeature>()!;
+    // A renderer that publishes a shortcut to a built-in says that built-in is special, and the
+    // only thing that made the others so was that the shortcut existed: a feature's settings
+    // belong to the feature, which is public and reachable through Pipeline.Find<T>() by anyone,
+    // including for a feature a game wrote. The shadow map's size and the scene's specular-AA
+    // used to be forwarded here and are not any more.
     private SceneColorCaptureFeature Capture => Pipeline.Find<SceneColorCaptureFeature>()!;
 
     public MaterialResourceCache Materials { get; }
@@ -105,39 +101,6 @@ public sealed partial class PbrRenderer : IDisposable
     /// Flipping a switch here changes the next frame — see <see cref="PbrFeatures"/> for the
     /// names, and note that a scene's own <c>Enabled</c> flags still have to agree.</summary>
     public FeatureSwitches Switches => Pipeline.Switches;
-
-    /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
-    /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
-    /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
-    public uint ShadowMapSize
-    {
-        get => Shadows.MapSize;
-        set => Shadows.MapSize = value;
-    }
-
-    /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
-    /// shadow edge). Scenes author this through the export contract's <c>Lighting.ShadowBlur</c>;
-    /// hosts apply it here. Clamped to [0.5, 8].</summary>
-    public float ShadowBlurTexels
-    {
-        get => Shadows.BlurTexels;
-        set => Shadows.BlurTexels = value;
-    }
-
-    /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
-    /// shadow map covers. A camera-centred fit keeps texel density constant no matter how big the
-    /// scene grows; the box is snapped to whole texels so it does not shimmer as the camera moves,
-    /// and the depth range still spans the scene AABB so tall casters outside the circle keep
-    /// casting in. When the scene is smaller than the radius (or the radius is 0) the whole-scene
-    /// fit applies — small scenes keep their tighter box.</summary>
-    public float DirectionalShadowRadius
-    {
-        get => Shadows.DirectionalRadius;
-        set => Shadows.DirectionalRadius = value;
-    }
-
-    /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
-    public void SetSpecularAa(float variance, float clamp) => Scene.SetSpecularAa(variance, clamp);
 
     /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
     /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
@@ -444,14 +407,6 @@ public sealed partial class PbrRenderer : IDisposable
     internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
     internal int CustomProgramCountForTest => _programs.CustomProgramCount;
-    internal bool UsesSrgbEntryPointForTest => Pipeline.Find<CompositeFeature>()!.UsesSrgbEntryPoint;
-    internal bool CaptureFrameLightsForTest
-    {
-        get => Scene.CaptureFrameLightsForTest;
-        set => Scene.CaptureFrameLightsForTest = value;
-    }
-    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => Scene.GetLightShadowAtlasForTest(lightIndex);
-    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => Scene.GetLightSizeParamsForTest(lightIndex);
 
     public void Dispose()
     {

@@ -282,14 +282,14 @@ public class PbrRendererGpuTests
             });
             scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
 
-            pbr.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
             // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
             // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
             // detaching). Point light: perspective texels are metres PER METRE of distance,
             // 2·tan(45°)/mapSize at the default 1024 map.
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
         }
         finally
         {
@@ -339,17 +339,17 @@ public class PbrRendererGpuTests
                 CastsShadows = true,
             });
             scene.Instances.Add(instance);
-            pbr.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
 
             // Unit cube → sceneRadius clamps to 4 < DirectionalShadowRadius (50) → legacy fit.
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(3f / 1024f).Within(1e-7f);
 
             // 300 m cube → sceneRadius ≈ 130 > 50 → camera-centred fit at radius + xyPad = 51.
             instance.Model = Matrix4x4.CreateScale(300f);
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(2f * 51f / 1024f).Within(1e-7f);
         }
         finally
@@ -500,7 +500,7 @@ public class PbrRendererGpuTests
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             // The headless target is Bgra8Unorm (non-sRGB) → the shader must encode.
             await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
-            await Assert.That(pbr.UsesSrgbEntryPointForTest).IsTrue();
+            await Assert.That(pbr.Pipeline.Find<CompositeFeature>()!.UsesSrgbEntryPoint).IsTrue();
         }
         finally
         {
