@@ -50,6 +50,21 @@ internal sealed class ExtractSectionDocument
     [JsonPropertyName("directory")]
     public string? Directory { get; set; }
 
+    [JsonPropertyName("meshes")]
+    public string? Meshes { get; set; }
+
+    [JsonPropertyName("animations")]
+    public string? Animations { get; set; }
+
+    [JsonPropertyName("materials")]
+    public string? Materials { get; set; }
+
+    [JsonPropertyName("textures")]
+    public string? Textures { get; set; }
+
+    [JsonPropertyName("prefabs")]
+    public string? Prefabs { get; set; }
+
     [JsonPropertyName("static_mesh_component")]
     public string? StaticMeshComponent { get; set; }
 

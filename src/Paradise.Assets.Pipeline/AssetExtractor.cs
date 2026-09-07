@@ -123,6 +123,9 @@ public static partial class AssetExtractor
         return run.Execute();
     }
 
+    /// <summary>Where one GLB's extraction writes each kind, resolved once per run.</summary>
+    private sealed record ExtractDirectories(UPath Meshes, UPath Animations, UPath Materials, UPath Textures, UPath Prefabs);
+
     private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
     {
         private readonly List<string> _errors = [];
@@ -155,7 +158,7 @@ public static partial class AssetExtractor
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
             var settings = GlbImportSettings.ReadExtraction(meta);
 
-            var directory = Directory(index, settings, manifest);
+            var directories = Directories(settings, manifest);
             var stem = Path.GetFileNameWithoutExtension(glb.GetName());
 
             // Sidecars for what is written are minted as it is written: the materials name the
@@ -173,7 +176,7 @@ public static partial class AssetExtractor
             var images = settings.Images.ToList();
             if (!referencesOnly)
             {
-                bytes = Textures(index, directory, stem, bytes, settings, out images);
+                bytes = Textures(index, directories.Textures, stem, bytes, settings, out images);
                 index = Rescan();
                 if (_errors.Count > 0) return Abort(index, sidecarPath, settings with { Images = images });
             }
@@ -194,25 +197,27 @@ public static partial class AssetExtractor
 
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(glb));
-            var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directory / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
-            var mesh = MeshDocument(ref index, Rescan, directory, stem, source, cooked, recorded.Mesh, skeleton);
-            var clips = Clips(index, directory, stem, source, cooked, recorded);
+            var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Meshes / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
+            var mesh = MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton);
+            var clips = Clips(index, directories.Animations, stem, source, cooked, recorded);
             if (referencesOnly)
             {
                 index = Rescan();
                 var minted = Identified(index, recorded with { Mesh = mesh, Skeleton = skeleton, Clips = clips });
+                ReportUnresolved(index, minted);
                 // Every drain of a GLB comes through here; the steady state must not touch the sidecar.
                 if (!Same(minted, recorded)) Save(index, sidecarPath, minted);
                 return Finish();
             }
 
-            var materials = Materials(index, directory, stem, bytes, asset, recorded);
+            var materials = Materials(index, directories.Materials, stem, bytes, asset, recorded);
 
             index = Rescan();
             var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images);
+            ReportUnresolved(index, extraction);
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
-            if (generatePrefab && Seed(index, layout, directory / $"{stem}.prefab", stem, Identified(index, extraction), cooked))
+            if (generatePrefab && Seed(index, layout, directories.Prefabs / $"{stem}.prefab", stem, Identified(index, extraction), cooked))
             {
                 index = Rescan();
             }
@@ -243,15 +248,51 @@ public static partial class AssetExtractor
 
         private void Save(AssetIndex index, UPath sidecarPath, GlbExtraction extraction)
         {
+            var identified = Identified(index, extraction);
+
+            // ReportUnresolved has already named these; writing them would throw out of the codec.
+            if (identified.Entries().Any(entry => entry.Reference.Guid == Guid.Empty)) return;
+
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
-            GlbImportSettings.WriteExtraction(meta, Identified(index, extraction));
+            GlbImportSettings.WriteExtraction(meta, identified);
             meta.Save(fileSystem, sidecarPath);
         }
 
-        private UPath Directory(AssetIndex index, GlbExtraction settings, ProjectManifest manifest)
+        /// <summary>
+        /// Errors for every extracted file the scan cannot give a guid, and whether there were any.
+        /// The file was written where the index does not carry it, and both the prefab's slots and
+        /// the sidecar's record need the identity — so this is said plainly here rather than thrown
+        /// out of the reference codec further down. The usual cause is an <c>[extract]</c> directory
+        /// the tree does not spell that way: on a case-insensitive filesystem <c>models</c> and
+        /// <c>Models</c> are one folder but two index keys.
+        /// </summary>
+        private bool ReportUnresolved(AssetIndex index, GlbExtraction extraction)
         {
-            var relative = settings.Directory ?? manifest.Extract.Directory;
-            return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
+            var unresolved = Identified(index, extraction).Entries().Where(entry => entry.Reference.Guid == Guid.Empty).ToList();
+            foreach (var (where, reference) in unresolved)
+            {
+                _errors.Add($"{index.Relative(glb)}: {where} wrote '{reference.Path}', which no asset under assets/ carries; check the directory `[extract]` names for it — the spelling, its case included, has to match the tree");
+            }
+
+            return unresolved.Count > 0;
+        }
+
+        private ExtractDirectories Directories(GlbExtraction settings, ProjectManifest manifest)
+        {
+            // The sidecar's own `extract` names ONE folder for everything this GLB writes and
+            // outranks the manifest's per-kind keys: it is the more specific directive of the two.
+            UPath For(ExtractKind kind)
+            {
+                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind);
+                return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
+            }
+
+            return new ExtractDirectories(
+                For(ExtractKind.Mesh),
+                For(ExtractKind.Animation),
+                For(ExtractKind.Material),
+                For(ExtractKind.Texture),
+                For(ExtractKind.Prefab));
         }
 
         /// <summary>
@@ -813,6 +854,10 @@ public static partial class AssetExtractor
 
             root.Components.Add(new PrefabComponent(GlbExtraction.MaterialsComponentId, GlbExtraction.MaterialsComponentType, new CanonicalTomlTable { { "Slots", slots } }));
             document.Objects.Add(root);
+
+            // Save writes bytes, not directories, and the prefab is the one output that can be the
+            // first thing to land in its folder — every other kind goes through Write.
+            fileSystem.CreateDirectory(path.GetDirectory());
             PrefabDocumentSerializer.Save(fileSystem, path, document);
             _written.Add(new ExtractedFile(index.Relative(path)));
             _minted.Add(path);

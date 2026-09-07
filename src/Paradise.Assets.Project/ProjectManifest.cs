@@ -132,10 +132,19 @@ public sealed class ProjectManifest
             }
         }
 
+        static string? Folder(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim().TrimEnd('/');
+
         var extract = new ExtractSettings(
-            string.IsNullOrWhiteSpace(document.Extract?.Directory) ? null : document.Extract.Directory.Trim().TrimEnd('/'),
+            Folder(document.Extract?.Directory),
             string.IsNullOrWhiteSpace(document.Extract?.StaticMeshComponent) ? null : document.Extract.StaticMeshComponent,
-            string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent);
+            string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent)
+        {
+            Meshes = Folder(document.Extract?.Meshes),
+            Animations = Folder(document.Extract?.Animations),
+            Materials = Folder(document.Extract?.Materials),
+            Textures = Folder(document.Extract?.Textures),
+            Prefabs = Folder(document.Extract?.Prefabs),
+        };
         return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host));
     }
 
@@ -243,8 +252,50 @@ public sealed record HostSettings(string? Project, IReadOnlyList<string> Argumen
     public static HostSettings None { get; } = new(null, []);
 }
 
-/// <summary>The <c>[extract]</c> section: an assets-relative directory (null = beside the GLB) and the component type names a generated prefab authors a mesh into (null = the schema decides by name).</summary>
+/// <summary>A file an extraction is about to write, as far as WHERE it goes is concerned.</summary>
+public enum ExtractKind
+{
+    /// <summary>The geometry documents: a <c>.mesh</c> or <c>.skinnedmesh</c>, and the <c>.skeleton</c> the latter names. They travel together because a skinned mesh document is unreadable without its skeleton.</summary>
+    Mesh,
+    Animation,
+    Material,
+    Texture,
+    Prefab,
+}
+
+/// <summary>
+/// The <c>[extract]</c> section: where each kind of extracted asset lands, and the component type
+/// names a generated prefab authors a mesh into (null = the schema decides by name).
+/// </summary>
+/// <remarks>
+/// Every directory is assets-relative. <see cref="Directory"/> is what a kind that names none
+/// falls back to, and a null fallback means beside the GLB — so a project that sets nothing keeps
+/// the original behaviour, and one that sets only <c>directory</c> keeps the single-folder one.
+/// A GLB's own <c>[glb] extract</c> outranks all of it: a per-GLB directive is more specific than
+/// a project default, so it names one folder for everything that GLB extracts to.
+/// </remarks>
 public sealed record ExtractSettings(string? Directory, string? StaticMeshComponent, string? SkinnedMeshComponent)
 {
     public static ExtractSettings None { get; } = new(null, null, null);
+
+    public string? Meshes { get; init; }
+
+    public string? Animations { get; init; }
+
+    public string? Materials { get; init; }
+
+    public string? Textures { get; init; }
+
+    public string? Prefabs { get; init; }
+
+    /// <summary>Where <paramref name="kind"/> goes, or null for beside the GLB.</summary>
+    public string? DirectoryFor(ExtractKind kind) => kind switch
+    {
+        ExtractKind.Mesh => Meshes,
+        ExtractKind.Animation => Animations,
+        ExtractKind.Material => Materials,
+        ExtractKind.Texture => Textures,
+        ExtractKind.Prefab => Prefabs,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    } ?? Directory;
 }

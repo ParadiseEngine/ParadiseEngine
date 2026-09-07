@@ -204,6 +204,25 @@ at, and a `.prefab` wiring them, generated once and the author's from then on. T
 sees glTF: it reads the cooked files and the built materials. A clip keeps every key unless the
 GLB's sidecar sets `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
 
+`[extract]` decides where each kind lands, assets-relative:
+
+```toml
+[extract]
+directory  = "models"          # the fallback for any kind that names none
+meshes     = "models"          # .mesh / .skinnedmesh / .skeleton
+animations = "animations"      # .anim
+materials  = "materials"       # .material
+textures   = "textures"        # images the GLB no longer embeds
+prefabs    = "prefabs/models"  # the generated .prefab
+```
+
+Set nothing and everything lands beside the GLB; set only `directory` and everything lands in that
+one folder. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
+for everything that GLB extracts to. Changing a key never moves what is already extracted: the
+sidecar records each output by guid and a later run re-syncs it where it now lives, so a routing
+change applies to what the GLB has no record of yet, and moving the existing files (`paradise
+assets mv`) is the author's call.
+
 The mesh, skeleton and clip documents carry no author work, so `watch` mints them for a new or
 re-exported GLB on its own; a re-export that changes geometry or adds a clip needs no verb at
 all. Materials, textures and the prefab are the author's from the moment they exist, so `watch`

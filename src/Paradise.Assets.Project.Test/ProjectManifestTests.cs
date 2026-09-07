@@ -91,6 +91,53 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task extract_routes_each_kind_and_falls_back_to_directory()
+    {
+        var manifest = ProjectManifest.Parse("""
+            name = "shiningpie"
+            schema_version = 1
+
+            [extract]
+            directory = "cooked"
+            animations = "animations/"
+            materials = "materials"
+            textures = "textures"
+            prefabs = "prefabs/models"
+            """, "project.toml");
+
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Animation)).IsEqualTo("animations");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Material)).IsEqualTo("materials");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Texture)).IsEqualTo("textures");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Prefab)).IsEqualTo("prefabs/models");
+
+        // `meshes` names nothing, so the geometry documents take the section's fallback.
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Mesh)).IsEqualTo("cooked");
+    }
+
+    [Test]
+    public async Task an_extract_section_that_names_no_directory_leaves_every_kind_beside_the_glb()
+    {
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nstatic_mesh_component = \"Game.StaticMesh\"\n", "project.toml");
+
+        foreach (var kind in Enum.GetValues<ExtractKind>())
+        {
+            await Assert.That(manifest.Extract.DirectoryFor(kind)).IsNull();
+        }
+
+        await Assert.That(manifest.Extract.StaticMeshComponent).IsEqualTo("Game.StaticMesh");
+    }
+
+    [Test]
+    public async Task an_unknown_extract_key_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extract]\nsounds = \"audio\"\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("sounds");
+        await Assert.That(error.Message).Contains("[extract]");
+    }
+
+    [Test]
     public async Task an_unknown_root_key_is_refused()
     {
         var error = Rejects($"{Minimal}\nnmae = \"y\"\n");
