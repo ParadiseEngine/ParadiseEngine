@@ -79,7 +79,9 @@ public class ReferenceGraphTests
         var graph = Graph(fileSystem);
 
         await Assert.That(graph.DependentsOf(rust).Select(e => e.Referrer)).IsEquivalentTo(new[] { crate }, CollectionOrdering.Matching);
-        await Assert.That(graph.TransitiveDependentsOf(rust)).IsEquivalentTo(new[] { crate, box, level }, CollectionOrdering.Matching);
+        // Unordered deliberately: TransitiveDependentsOf returns an IReadOnlySet, built by a
+        // stack walk over a HashSet. It is a set by type and by construction; there is no order.
+        await Assert.That(graph.TransitiveDependentsOf(rust)).IsEquivalentTo(new[] { crate, box, level });
         await Assert.That(graph.TransitiveDependentsOf(level)).IsEmpty();
     }
 

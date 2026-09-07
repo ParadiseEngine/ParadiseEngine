@@ -157,7 +157,9 @@ public class ProjectManifestTests
         await Assert.That(manifest.Extract.DirectoryFor("tilesets", game)).IsEqualTo("tilesets");
         await Assert.That(manifest.Extract.DirectoryFor("tilemaps", game)).IsEqualTo("tilesets");
         await Assert.That(manifest.Extract.DirectoryFor("lods", game)).IsEqualTo("src");
-        await Assert.That(manifest.Extract.Kinds).IsEquivalentTo(new[] { "tilesets" }, CollectionOrdering.Matching);
+        // Unordered deliberately: Kinds is Directories.Keys, and Dictionary enumeration order
+        // is not part of its contract.
+        await Assert.That(manifest.Extract.Kinds).IsEquivalentTo(new[] { "tilesets" });
     }
 
     [Test]

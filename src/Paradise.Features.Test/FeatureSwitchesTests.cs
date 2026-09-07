@@ -93,7 +93,9 @@ public class FeatureSwitchesTests
         switches.Declare(Bloom);
 
         await Assert.That(beforeDeclaring).Contains("rendering.bloom");
-        await Assert.That(switches.Unknown).IsEquivalentTo(["rendering.blom", "rendering/bloom"], CollectionOrdering.Matching);
+        // Unordered deliberately: Unknown concatenates the keys of two ConcurrentDictionary
+        // instances, whose enumeration order is not part of their contract.
+        await Assert.That(switches.Unknown).IsEquivalentTo(["rendering.blom", "rendering/bloom"]);
     }
 
     [Test]

@@ -134,7 +134,9 @@ public class FeatureSettingsTests
             intensity = 1.0
             """));
 
-        await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"], CollectionOrdering.Matching);
+        // Unordered deliberately: Unknown concatenates the keys of two ConcurrentDictionary
+        // instances, whose enumeration order is not part of their contract.
+        await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"]);
     }
 
     /// <summary>Re-reading <c>engine.json</c> is a live change: a feature that read its settings
