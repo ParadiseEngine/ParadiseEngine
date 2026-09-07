@@ -15,23 +15,30 @@ namespace Paradise.Features;
 /// <summary>Reads <c>engine.toml</c> into an <see cref="EngineConfiguration"/>.
 ///
 /// <code>
-/// # engine.toml — the integrated GPU cannot afford the probe trace.
-/// [features]
-/// "rendering.globalIllumination" = false
-/// "game.weather" = true
+/// # engine.toml
+/// [[features]]
+/// name = "rendering.globalIllumination"
+/// enabled = false                      # the integrated GPU cannot afford the probe trace
 ///
-/// [settings."game.weather"]
-/// intensity = 0.6
+/// [[features]]
+/// name = "game.weather"
+/// enabled = true
+/// intensity = 0.6                      # everything else is the feature's own settings
 /// windMetresPerSecond = 3.5
 /// </code>
 ///
-/// <para><b>The feature name is one key, quoted.</b> TOML would otherwise read
-/// <c>rendering.globalIllumination = false</c> as a table <c>rendering</c> holding
-/// <c>globalIllumination</c>, and under <c>[settings]</c> that nesting is genuinely ambiguous —
-/// <c>[settings.game.weather]</c> cannot be told apart from a feature <c>game</c> with a setting
-/// <c>weather</c>. One rule for both sections, so nothing is ambiguous in either: quote the name.
-/// A table where a feature's state belongs is refused with the quoted form in the
-/// message.</para>
+/// <para><b>One entry per feature, holding everything about it.</b> This is the shape an authored
+/// component already has in a <c>*.prefab</c> — reserved keys and a payload
+/// (<c>PrefabComponent.ReservedKeys</c>) — and it is that shape for the same reasons. The name is
+/// a VALUE, not a key, so a dotted name needs no quoting rule and cannot be confused with table
+/// nesting; and the switch sits with the settings, which is where a person looks when they want to
+/// know what a feature is doing.</para>
+///
+/// <para><b><see cref="ReservedKeys"/> are the reader's; every other key is a setting.</b> That is
+/// the cost of the shape, and the same cost a prefab component pays: a game whose settings want a
+/// key called <c>name</c> cannot have one, and a boolean called <c>enabled</c> is read as the
+/// switch. <c>enabled</c> is optional — an entry may configure a feature without saying anything
+/// about whether it runs, and a feature that ships on then needs only its settings.</para>
 ///
 /// <para><b>It reads text, not a path.</b> Every other reader in the engine takes a Zio
 /// <c>IFileSystem</c>; this one takes the stream, because a host that reads its configuration
@@ -42,9 +49,25 @@ public static class TomlEngineConfiguration
     /// <summary>The name a host looks for by convention, next to the game's other data.</summary>
     public const string DefaultFileName = "engine.toml";
 
+    /// <summary>The array of tables every feature entry belongs to.</summary>
+    public const string FeaturesKey = "features";
+
+    /// <summary>The reserved key naming the feature an entry is about.</summary>
+    public const string NameKey = "name";
+
+    /// <summary>The reserved key saying whether that feature runs. Optional.</summary>
+    public const string EnabledKey = "enabled";
+
+    /// <summary>The keys a feature's settings may not use.</summary>
+    public static readonly string[] ReservedKeys = [NameKey, EnabledKey];
+
+    /// <summary>Whether <paramref name="key"/> is one of <see cref="ReservedKeys"/>.</summary>
+    public static bool IsReserved(string key) => key is NameKey or EnabledKey;
+
     /// <summary>Reads a configuration document.</summary>
-    /// <exception cref="FormatException">The document is not valid TOML, a section is not a
-    /// table, a feature's state is not a boolean, or a feature's settings are not a table.</exception>
+    /// <exception cref="FormatException">The document is not valid TOML, <c>features</c> is not an
+    /// array of tables, an entry has no name or a name that is not a string, an entry's
+    /// <c>enabled</c> is not a boolean, or two entries name one feature.</exception>
     public static EngineConfiguration Read(string toml)
     {
         ArgumentNullException.ThrowIfNull(toml);
@@ -79,71 +102,91 @@ public static class TomlEngineConfiguration
         return Read(reader.ReadToEnd());
     }
 
-    private static EngineConfiguration From(TomlTable root) => new()
+    private static EngineConfiguration From(TomlTable root)
     {
-        Features = ReadFeatures(root),
-        Settings = ReadSettings(root),
-    };
-
-    private static FeatureOverrides ReadFeatures(TomlTable root)
-    {
-        if (!TryGetTable(root, "features", out var features)) return FeatureOverrides.None;
+        if (!root.TryGetValue(FeaturesKey, out var value)) return EngineConfiguration.Empty;
+        if (value is not TomlTableArray entries)
+        {
+            throw new FormatException(
+                $"'{FeaturesKey}' is {Describe(value)}; it is an array of tables — one [[{FeaturesKey}]] " +
+                $"entry per feature, each naming it with {NameKey} = \"...\".");
+        }
 
         var states = new List<KeyValuePair<string, bool>>();
-        foreach (var (name, value) in features)
-        {
-            var enabled = value switch
-            {
-                bool state => state,
-                TomlTable => throw new FormatException(
-                    $"'{name}' is a table; a feature is true or false and its name is one key — write " +
-                    $"\"{name}.<feature>\" = false, and put what a feature is configured with under " +
-                    "[settings.\"<feature>\"]."),
-                _ => throw new FormatException(
-                    $"'{name}' is {Describe(value)}; a feature is true or false."),
-            };
-            states.Add(new KeyValuePair<string, bool>(name, enabled));
-        }
-        return FeatureOverrides.From(states);
-    }
+        var settings = new List<KeyValuePair<string, FeatureSettings>>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-    private static IReadOnlyDictionary<string, FeatureSettings> ReadSettings(TomlTable root)
-    {
-        if (!TryGetTable(root, "settings", out var settings)) return EngineConfiguration.Empty.Settings;
-
-        var read = new List<KeyValuePair<string, FeatureSettings>>();
-        foreach (var (name, value) in settings)
+        foreach (var entry in entries)
         {
-            if (value is not TomlTable table)
+            var name = ReadName(entry);
+            if (!seen.Add(name))
             {
-                throw new FormatException(
-                    $"The settings for '{name}' are {Describe(value)}; a feature's settings are a table. " +
-                    "Whether the feature is ON belongs under [features].");
+                // Last-wins would drop the first entry in silence, and two blocks for one feature
+                // is a copy-paste rather than an intention worth guessing at.
+                throw new FormatException($"'{name}' has more than one [[{FeaturesKey}]] entry.");
             }
-            // The table serialized back to TOML, not the JSON it used to be converted into: the
-            // keys are the ones the file wrote, so the game's own context binds them.
-            read.Add(new KeyValuePair<string, FeatureSettings>(
-                name, new FeatureSettings(name, TomlSerializer.Serialize(table, UntypedToml.Default))));
+
+            if (entry.TryGetValue(EnabledKey, out var enabled))
+            {
+                states.Add(new KeyValuePair<string, bool>(name, enabled switch
+                {
+                    bool state => state,
+                    string text => throw new FormatException(
+                        $"'{name}' has {EnabledKey} = \"{text}\"; write it unquoted — {EnabledKey} = true."),
+                    _ => throw new FormatException(
+                        $"'{name}' has an {EnabledKey} that is {Describe(enabled)}; it is true or false."),
+                }));
+            }
+
+            if (SettingsOf(name, entry) is { } configured)
+            {
+                settings.Add(new KeyValuePair<string, FeatureSettings>(name, configured));
+            }
         }
-        return EngineConfiguration.FromSettings(read).Settings;
+
+        return new EngineConfiguration
+        {
+            Features = FeatureOverrides.From(states),
+            Settings = EngineConfiguration.FromSettings(settings).Settings,
+        };
     }
 
-    private static bool TryGetTable(TomlTable root, string name, out TomlTable table)
+    private static string ReadName(TomlTable entry)
     {
-        if (!root.TryGetValue(name, out var value))
+        if (!entry.TryGetValue(NameKey, out var name))
         {
-            table = null!;
-            return false;
+            throw new FormatException(
+                $"A [[{FeaturesKey}]] entry has no {NameKey}; every entry names the feature it is " +
+                $"about — {NameKey} = \"rendering.bloom\".");
         }
-        table = value as TomlTable
-            ?? throw new FormatException($"'{name}' must be a table, not {Describe(value)}.");
-        return true;
+        return name as string
+            ?? throw new FormatException(
+                $"A [[{FeaturesKey}]] entry has a {NameKey} that is {Describe(name)}; it is a string.");
+    }
+
+    /// <summary>The entry's own keys, minus the reserved ones, back as the TOML they were written
+    /// in — so the game's context binds what the file says and nothing is converted on the way
+    /// through. Null when the entry configures nothing, so a feature carrying only a switch keeps
+    /// the shared <see cref="FeatureSettings.None"/> rather than an entry holding an empty
+    /// table.</summary>
+    private static FeatureSettings? SettingsOf(string name, TomlTable entry)
+    {
+        var configured = new TomlTable();
+        foreach (var (key, value) in entry)
+        {
+            if (!IsReserved(key)) configured[key] = value!;
+        }
+        return configured.Count == 0
+            ? null
+            : new FeatureSettings(name, TomlSerializer.Serialize(configured, UntypedToml.Default));
     }
 
     private static string Describe(object? value) => value switch
     {
         null => "nothing",
-        TomlArray or TomlTableArray => "an array",
+        TomlTableArray => "an array of tables",
+        TomlArray => "an array",
+        TomlTable => "a table",
         string => "a string",
         bool => "a boolean",
         long or double => "a number",

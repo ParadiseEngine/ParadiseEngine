@@ -219,13 +219,15 @@ to the caller's own record. Nothing engine-side uses it: an engine feature's par
 scene-authored, and this exists for the game feature the engine has never heard of.
 
 ```toml
-# engine.toml
-[features]
-"rendering.globalIllumination" = false   # the integrated GPU cannot afford the probe trace
-"game.weather" = true
+# engine.toml — one entry per feature, holding everything about it
+[[features]]
+name = "rendering.globalIllumination"
+enabled = false                      # the integrated GPU cannot afford the probe trace
 
-[settings."game.weather"]
-intensity = 0.6
+[[features]]
+name = "game.weather"
+enabled = true
+intensity = 0.6                      # everything but name/enabled is the feature's settings
 windMetresPerSecond = 3.5
 ```
 
@@ -278,11 +280,16 @@ Eleven things that are not obvious:
   and a GAME's feature with the same need could not be uploaded at all. The hook is on the
   interface so both are served by the same call; the pass-matrix baseline goes red if the pipeline
   stops making it.
-- **The feature name is ONE key, quoted.** TOML reads `rendering.bloom = false` as a table
-  `rendering` holding `bloom`, and under `[settings]` that nesting cannot be told from the settings
-  themselves — `[settings.game.weather]` is either the feature `game.weather` or the feature `game`
-  with a setting `weather`. One rule for both sections, so neither is ambiguous: quote the name. A
-  table where a feature's state belongs is refused with the quoted form in the message.
+- **A feature is one `[[features]]` entry, and its name is a VALUE.** `name = "game.weather"`
+  needs no quoting rule and cannot be confused with table nesting, which a key would: TOML reads
+  `rendering.bloom = false` as a table `rendering` holding `bloom`. It is also the shape an
+  authored component already has in a `*.prefab` — reserved keys and a payload
+  (`PrefabComponent.ReservedKeys`) — so `TomlEngineConfiguration.ReservedKeys` follows that
+  vocabulary. `name` and `enabled` are the reader's; every other key is the feature's settings,
+  which costs a game the ability to have a setting called either, exactly as a prefab component
+  cannot have one called `id`. `enabled` is optional: an entry may configure a feature without
+  saying whether it runs. Two entries for one feature are refused rather than last-wins — that
+  silent drop is a failure this repo has already been bitten by in TOML.
 - **The settings payload is carried as text and bound by the reader that produced it.**
   `FeatureSettings` holds `Text`, and `FeatureSettingsToml.Read<T>(context)` binds it through the
   GAME's own source-generated `TomlSerializerContext` — so nothing reflects over a type it was not

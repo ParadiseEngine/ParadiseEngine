@@ -10,9 +10,13 @@ public class EngineConfigurationTests
     public async Task a_document_reads_its_features()
     {
         var config = TomlEngineConfiguration.Read("""
-            [features]
-            "rendering.bloom" = false
-            "rendering.globalIllumination" = true
+            [[features]]
+            name = "rendering.bloom"
+            enabled = false
+
+            [[features]]
+            name = "rendering.globalIllumination"
+            enabled = true
             """);
 
         await Assert.That(config.Features.TryGet("rendering.bloom", out var bloom) && !bloom).IsTrue();
@@ -26,8 +30,9 @@ public class EngineConfigurationTests
     {
         var config = TomlEngineConfiguration.Read("""
             # The integrated GPU cannot afford the probe trace.
-            [features]
-            "rendering.globalIllumination" = false   # measured at 2.3 ms
+            [[features]]
+            name = "rendering.globalIllumination"
+            enabled = false   # measured at 2.3 ms
             """);
 
         await Assert.That(config.Features.Count).IsEqualTo(1);
@@ -36,7 +41,8 @@ public class EngineConfigurationTests
     [Test]
     public async Task a_stream_reads_the_same_document()
     {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("[features]\n\"rendering.bloom\" = false"));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(
+            "[[features]]\nname = \"rendering.bloom\"\nenabled = false"));
 
         var config = TomlEngineConfiguration.Read(stream);
 
@@ -44,7 +50,7 @@ public class EngineConfigurationTests
     }
 
     [Test]
-    public async Task a_document_with_no_sections_configures_nothing()
+    public async Task a_document_with_no_features_configures_nothing()
     {
         var config = TomlEngineConfiguration.Read("somethingElse = 1");
 
@@ -52,40 +58,86 @@ public class EngineConfigurationTests
         await Assert.That(config.Settings.Count).IsEqualTo(0);
     }
 
-    /// <summary>TOML would read an unquoted dotted key as nesting, and under <c>[settings]</c> that
-    /// nesting cannot be told from the settings themselves. One rule for both sections — the name
-    /// is one key — and the refusal says so.</summary>
+    /// <summary>The name is a VALUE, so a dotted name needs no quoting rule and cannot be read as
+    /// table nesting. Writing the old table shape says so.</summary>
     [Test]
-    public async Task an_unquoted_dotted_name_is_refused_with_the_quoted_form()
+    public async Task a_features_table_is_refused_with_the_entry_shape()
     {
         await Assert.That(() => TomlEngineConfiguration.Read("""
             [features]
-            rendering.bloom = false
+            "rendering.bloom" = false
             """))
-            .Throws<FormatException>().WithMessageContaining("\"rendering.<feature>\"");
+            .Throws<FormatException>().WithMessageContaining("[[features]]");
     }
 
     [Test]
-    public async Task a_value_that_is_not_a_boolean_is_refused()
+    public async Task an_entry_with_no_name_is_refused()
     {
         await Assert.That(() => TomlEngineConfiguration.Read("""
-            [features]
-            "rendering.bloom" = "off"
+            [[features]]
+            enabled = false
+            """))
+            .Throws<FormatException>().WithMessageContaining("name");
+    }
+
+    [Test]
+    public async Task an_enabled_that_is_a_quoted_boolean_says_to_unquote_it()
+    {
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [[features]]
+            name = "rendering.bloom"
+            enabled = "true"
+            """))
+            .Throws<FormatException>().WithMessageContaining("enabled = true");
+    }
+
+    [Test]
+    public async Task an_enabled_that_is_not_a_boolean_at_all_is_refused()
+    {
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [[features]]
+            name = "rendering.bloom"
+            enabled = 1
             """))
             .Throws<FormatException>().WithMessageContaining("rendering.bloom");
     }
 
+    /// <summary>Two entries for one feature is a copy-paste; last-wins would drop the first in
+    /// silence, which is the failure this repo has been bitten by in TOML before.</summary>
     [Test]
-    public async Task a_section_that_is_not_a_table_is_refused()
+    public async Task one_feature_may_not_have_two_entries()
     {
-        await Assert.That(() => TomlEngineConfiguration.Read("features = 3"))
-            .Throws<FormatException>().WithMessageContaining("features");
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [[features]]
+            name = "rendering.bloom"
+            enabled = false
+
+            [[features]]
+            name = "rendering.bloom"
+            enabled = true
+            """))
+            .Throws<FormatException>().WithMessageContaining("more than one");
+    }
+
+    /// <summary>An entry may configure a feature without saying whether it runs — a feature that
+    /// ships on needs only its settings.</summary>
+    [Test]
+    public async Task an_entry_may_carry_settings_and_no_switch()
+    {
+        var config = TomlEngineConfiguration.Read("""
+            [[features]]
+            name = "game.weather"
+            intensity = 0.6
+            """);
+
+        await Assert.That(config.Features.Count).IsEqualTo(0);
+        await Assert.That(config.Settings.Count).IsEqualTo(1);
     }
 
     [Test]
     public async Task malformed_toml_names_itself_as_a_configuration_problem()
     {
-        await Assert.That(() => TomlEngineConfiguration.Read("[features"))
+        await Assert.That(() => TomlEngineConfiguration.Read("[[features"))
             .Throws<FormatException>().WithMessageContaining("not valid TOML");
     }
 
@@ -112,9 +164,13 @@ public class EngineConfigurationTests
     public async Task a_later_layer_wins_name_by_name()
     {
         var file = TomlEngineConfiguration.Read("""
-            [features]
-            "rendering.bloom" = false
-            "rendering.shadows" = false
+            [[features]]
+            name = "rendering.bloom"
+            enabled = false
+
+            [[features]]
+            name = "rendering.shadows"
+            enabled = false
             """);
         var command = new EngineConfiguration { Features = FeatureOverrides.Parse("+rendering.bloom") };
 

@@ -149,9 +149,13 @@ public class FeatureSwitchTests
 
         var config = TomlEngineConfiguration.Read("""
             # The integrated GPU cannot afford either.
-            [features]
-            "rendering.shadows" = false
-            "rendering.bloom" = false
+            [[features]]
+            name = "rendering.shadows"
+            enabled = false
+
+            [[features]]
+            name = "rendering.bloom"
+            enabled = false
             """);
         var switches = new FeatureSwitches(config);
 

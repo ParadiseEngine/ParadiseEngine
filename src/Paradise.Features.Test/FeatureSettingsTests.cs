@@ -31,10 +31,9 @@ public class FeatureSettingsTests
     private static readonly FeatureId s_weather = new("game.weather");
 
     private const string Document = """
-        [features]
-        "game.weather" = true
-
-        [settings."game.weather"]
+        [[features]]
+        name = "game.weather"
+        enabled = true
         intensity = 0.6
         windMetresPerSecond = 3.5
         """;
@@ -64,7 +63,8 @@ public class FeatureSettingsTests
     public async Task an_unwritten_property_keeps_its_initializer()
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             kind = "snow"
             """));
 
@@ -95,7 +95,8 @@ public class FeatureSettingsTests
     public async Task settings_without_a_switch_are_kept()
     {
         var config = TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             intensity = 0.25
             """);
 
@@ -127,7 +128,8 @@ public class FeatureSettingsTests
     public async Task settings_for_a_name_nobody_declares_are_reported()
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
-            [settings."game.gone"]
+            [[features]]
+            name = "game.gone"
             intensity = 1.0
             """));
 
@@ -146,12 +148,14 @@ public class FeatureSettingsTests
             announced.Add(settings.Read<WeatherSettings>(GameToml.Default).Intensity);
 
         switches.Apply(TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             intensity = 0.9
             """));
         // The same text again: nothing moved, nothing announced.
         switches.Apply(TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             intensity = 0.9
             """));
 
@@ -167,9 +171,10 @@ public class FeatureSettingsTests
     {
         var merged = TomlEngineConfiguration.Read(Document)
             .Merge(TomlEngineConfiguration.Read("""
-                [settings."game.weather"]
-                kind = "snow"
-                """));
+            [[features]]
+            name = "game.weather"
+            kind = "snow"
+            """));
         var switches = new FeatureSwitches(merged);
 
         var settings = switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default);
@@ -183,9 +188,10 @@ public class FeatureSettingsTests
     {
         var merged = TomlEngineConfiguration.Read(Document)
             .Merge(TomlEngineConfiguration.Read("""
-                [features]
-                "game.weather" = false
-                """));
+            [[features]]
+            name = "game.weather"
+            enabled = false
+            """));
         var switches = new FeatureSwitches(merged);
 
         await Assert.That(switches.IsEnabled(s_weather)).IsFalse();
@@ -193,26 +199,21 @@ public class FeatureSettingsTests
             .IsEqualTo(0.6f);
     }
 
-    /// <summary>The nested-name trap the two sections exist to keep closed, and the message that
-    /// says where the settings actually go.</summary>
+    /// <summary>The cost of one entry per feature: the reader's own keys cannot also be
+    /// settings. A prefab component pays the same price for the same shape
+    /// (<c>PrefabComponent.ReservedKeys</c>), and a game that wants a setting called
+    /// <c>name</c> has to call it something else.</summary>
     [Test]
-    public async Task a_table_under_features_still_points_at_the_settings_section()
+    public async Task the_reserved_keys_are_not_settings()
     {
-        await Assert.That(() => TomlEngineConfiguration.Read("""
-            [features.game]
-            weather = false
-            """))
-            .Throws<FormatException>().WithMessageContaining("[settings.");
-    }
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
 
-    [Test]
-    public async Task a_scalar_under_settings_is_refused_by_name()
-    {
-        await Assert.That(() => TomlEngineConfiguration.Read("""
-            [settings]
-            "game.weather" = true
-            """))
-            .Throws<FormatException>().WithMessageContaining("game.weather");
+        var text = switches.SettingsFor(s_weather).Text;
+
+        await Assert.That(text).Contains("intensity");
+        await Assert.That(text).DoesNotContain("name");
+        await Assert.That(text).DoesNotContain("enabled");
+        await Assert.That(TomlEngineConfiguration.ReservedKeys).IsEquivalentTo(["name", "enabled"]);
     }
 
     /// <summary>A settings object that does not fit the record names the FEATURE, because that is
@@ -221,7 +222,8 @@ public class FeatureSettingsTests
     public async Task settings_that_do_not_fit_the_type_name_the_feature()
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             intensity = "a lot"
             """));
 
@@ -235,7 +237,8 @@ public class FeatureSettingsTests
     public async Task the_text_is_reachable_as_the_file_wrote_it()
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
-            [settings."game.weather"]
+            [[features]]
+            name = "game.weather"
             intensity = 0.5
             """));
 
