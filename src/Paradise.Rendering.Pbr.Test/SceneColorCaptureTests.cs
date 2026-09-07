@@ -84,7 +84,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var scene = BuildScene(pbr, new Vector4(0.2f, 0.7f, 0.3f, 1f));
 
             for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
@@ -115,7 +115,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
@@ -162,7 +162,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
@@ -206,7 +206,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
             var oldView = pbr.SceneColorView;
 
@@ -252,7 +252,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -287,7 +287,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
             var oldView = pbr.SceneColorView;
 
@@ -326,7 +326,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.depthProbeFixture");
@@ -369,7 +369,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
 
             var raised = 0;
@@ -400,7 +400,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             pbr.SceneColorCapture = true;
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);

@@ -29,6 +29,7 @@ public sealed class FeatureSwitches : IFeatureSwitches
 {
     private readonly ConcurrentDictionary<FeatureId, FeatureDefinition> _declared = new();
     private readonly ConcurrentDictionary<string, bool> _overrides = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FeatureSettings> _settings = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Serializes WRITES, and holds while <see cref="Changed"/> is raised. Reads never
     /// take it — a render thread asking per frame must not queue behind a debug panel.
@@ -58,8 +59,15 @@ public sealed class FeatureSwitches : IFeatureSwitches
     /// environment and the command line, already merged.</summary>
     public FeatureSwitches(FeatureOverrides overrides) => Apply(overrides);
 
+    /// <summary>A configuration seeded with a whole document: its switches AND what each feature
+    /// is configured with.</summary>
+    public FeatureSwitches(EngineConfiguration configuration) => Apply(configuration);
+
     /// <inheritdoc/>
     public event Action<FeatureId, bool>? Changed;
+
+    /// <inheritdoc/>
+    public event Action<FeatureId, FeatureSettings>? SettingsChanged;
 
     /// <inheritdoc/>
     public IReadOnlyCollection<FeatureDefinition> Definitions => _declared.Values.ToArray();
@@ -69,7 +77,10 @@ public sealed class FeatureSwitches : IFeatureSwitches
     /// knows whether a stale line in its config file is worth failing over — and reported rather
     /// than logged, so this assembly needs no logging dependency to say it.</summary>
     public IReadOnlyCollection<string> Unknown =>
-        _overrides.Keys.Where(name => !FeatureId.TryParse(name, out var id) || !_declared.ContainsKey(id)).ToArray();
+        _overrides.Keys.Concat(_settings.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(name => !FeatureId.TryParse(name, out var id) || !_declared.ContainsKey(id))
+            .ToArray();
 
     /// <summary>Declares a feature. Idempotent for an identical declaration, so a switchboard
     /// shared by two renderers sees the built-ins declared twice and minds neither.</summary>
@@ -106,6 +117,11 @@ public sealed class FeatureSwitches : IFeatureSwitches
     public bool TryGetDefinition(FeatureId id, out FeatureDefinition definition) =>
         _declared.TryGetValue(id, out definition!);
 
+    /// <inheritdoc/>
+    public FeatureSettings SettingsFor(FeatureId id) =>
+        id.IsEmpty ? FeatureSettings.None
+            : _settings.TryGetValue(id.Value, out var settings) ? settings : FeatureSettings.None;
+
     /// <summary>Turns <paramref name="id"/> on or off now. The next thing that asks sees the new
     /// state — a render feature stops declaring its passes on the next frame, a gated system
     /// stops running on the next schedule run.</summary>
@@ -136,8 +152,49 @@ public sealed class FeatureSwitches : IFeatureSwitches
         }
     }
 
-    /// <summary>Applies a configuration layer over what is already set. Every name it mentions
-    /// takes its value; names it does not mention keep theirs.</summary>
+    /// <summary>Applies a whole configuration layer: its switches and its settings, as one write.
+    /// Every name it mentions takes its value; names it does not mention keep theirs.
+    ///
+    /// <para>Callable at runtime, which is what makes an <c>engine.json</c> re-read a live
+    /// change: <see cref="Changed"/> and <see cref="SettingsChanged"/> both fire for what
+    /// actually moved.</para></summary>
+    public void Apply(EngineConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        lock (_writeLock)
+        {
+            Apply(configuration.Features);
+            foreach (var (name, settings) in configuration.Settings) SetSettings(name, settings);
+        }
+    }
+
+    /// <summary>Replaces what one feature is configured with. The settings object is replaced
+    /// whole — see <see cref="EngineConfiguration.Merge"/> for why there is no deep merge.</summary>
+    public void SetSettings(FeatureId id, FeatureSettings settings)
+    {
+        if (id.IsEmpty) throw new ArgumentException("Settings need a feature name.", nameof(id));
+        SetSettings(id.Value, settings);
+    }
+
+    private void SetSettings(string name, FeatureSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        lock (_writeLock)
+        {
+            var before = _settings.TryGetValue(name, out var existing) ? existing : FeatureSettings.None;
+            _settings[name] = settings;
+            // A malformed name has no id to announce with; it is still kept, so Unknown reports it
+            // rather than a stale line disappearing — the same rule the switches follow.
+            if (!ReferenceEquals(before, settings) && !string.Equals(before.Raw, settings.Raw, StringComparison.Ordinal)
+                && FeatureId.TryParse(name, out var id))
+            {
+                SettingsChanged?.Invoke(id, settings);
+            }
+        }
+    }
+
+    /// <summary>Applies a layer's switches over what is already set. Every name it mentions takes
+    /// its value; names it does not mention keep theirs.</summary>
     public void Apply(FeatureOverrides overrides)
     {
         ArgumentNullException.ThrowIfNull(overrides);

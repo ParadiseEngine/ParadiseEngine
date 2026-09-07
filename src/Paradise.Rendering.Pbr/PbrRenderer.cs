@@ -42,22 +42,28 @@ public sealed partial class PbrRenderer : IDisposable
 #endif
 
     /// <param name="renderer">The backend the frame is submitted to.</param>
+    /// <param name="switches">The engine's feature configuration — the same object the rest of
+    /// the process is switched by. The built-in features declare themselves into it and read it
+    /// every frame, so a config file that says <c>"rendering.bloom": false</c> reaches this
+    /// renderer without the host writing any renderer-specific code.
+    ///
+    /// <para>REQUIRED, and second in the list, because the alternative was a defaulted last
+    /// parameter: a host that forgot it got a private switchboard, every feature at its declared
+    /// default, and a config file that reached nothing — with no error and a frame that still
+    /// renders. A caller that configures nothing writes <c>new FeatureSwitches()</c> and has said
+    /// so.</para></param>
     /// <param name="width">Frame width in pixels.</param>
     /// <param name="height">Frame height in pixels.</param>
     /// <param name="maxAnisotropy">Anisotropic filtering cap for material textures.</param>
     /// <param name="specularAaVariance">Geometric specular-AA strength.</param>
     /// <param name="specularAaClamp">Geometric specular-AA clamp.</param>
     /// <param name="logger">Where engine diagnostics go.</param>
-    /// <param name="switches">The engine's feature configuration — the same object the rest of
-    /// the engine is switched by. The built-in features declare themselves into it and read it
-    /// every frame, so a config file that says <c>"rendering.bloom": false</c> reaches this
-    /// renderer without the host writing any renderer-specific code. Null builds a private one,
-    /// in which every feature runs at its declared default.</param>
     public PbrRenderer(
-        IRenderer renderer, uint width, uint height,
+        IRenderer renderer, FeatureSwitches switches, uint width, uint height,
         ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f,
-        ILogger? logger = null, FeatureSwitches? switches = null)
+        ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(switches);
         _renderer = renderer;
         _log = logger ?? NullLogger.Instance;
         _programs = new MaterialPrograms(renderer);

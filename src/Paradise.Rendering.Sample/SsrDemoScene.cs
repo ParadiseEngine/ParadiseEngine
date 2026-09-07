@@ -35,7 +35,7 @@ internal sealed class SsrDemoScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger, switches: Program.Features);
+        _pbr = new PbrRenderer(renderer, Program.Features, _width, _height, logger: logger);
 
         var (cube, cubeIndices) = Procedural.UnitCube();
         var mirror = _pbr.Materials.AddDefaultMaterial(new Vector4(0.55f, 0.55f, 0.6f, 1f), metallic: 1f, roughness: 0.05f);

@@ -26,6 +26,14 @@ public interface IFeatureSwitches
     /// <summary>What the build declared about <paramref name="id"/>, if anything.</summary>
     bool TryGetDefinition(FeatureId id, [MaybeNullWhen(false)] out FeatureDefinition definition);
 
+    /// <summary>What <paramref name="id"/> is configured with — the object written under its name
+    /// in the config file's <c>settings</c> section, bound to the caller's own type through
+    /// <see cref="FeatureSettings.Read{T}"/>.
+    ///
+    /// <para>Never null: a feature nobody configured gets <see cref="FeatureSettings.None"/>,
+    /// which reads as the type's defaults, so a caller needs no branch.</para></summary>
+    FeatureSettings SettingsFor(FeatureId id);
+
     /// <summary>Every feature this build declared, for a listing, a debug UI, or a config file
     /// written from what actually exists rather than from memory.</summary>
     IReadOnlyCollection<FeatureDefinition> Definitions { get; }
@@ -37,4 +45,10 @@ public interface IFeatureSwitches
     /// answers for it. That is what lets a handler ACT on the announcement: release a target,
     /// retract a plan, zero a buffer somebody else binds every frame.</para></summary>
     event Action<FeatureId, bool>? Changed;
+
+    /// <summary>Raised when a feature's settings are replaced, with the new ones — how a re-read
+    /// of <c>engine.json</c> reaches a feature that read its settings once at construction.
+    /// Raised under the same rule as <see cref="Changed"/>: what a handler is told last is what
+    /// <see cref="SettingsFor"/> now returns.</summary>
+    event Action<FeatureId, FeatureSettings>? SettingsChanged;
 }

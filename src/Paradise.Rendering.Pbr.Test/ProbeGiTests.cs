@@ -77,7 +77,7 @@ public class ProbeGiTests
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
         using var _ = backend;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = EmissiveRoom(pbr, gi: true, thickBlock: true);
         scene.Gi = scene.Gi with { MaxProbes = 512 };
         pbr.RenderFrame(scene);
@@ -163,9 +163,9 @@ public class ProbeGiTests
         using var _ = backend;
 
         (double R, double G, double B) off, on;
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             off = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: false), frames: 3));
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             on = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: true), frames: 12));
 
         // Without probes the white wall is unlit: black. With them it carries the red bounce, and
@@ -184,9 +184,9 @@ public class ProbeGiTests
         using var _ = backend;
 
         (double R, double G, double B) off, on;
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             off = Mean(Render(backend, pbr, OpenFloor(pbr, gi: false), frames: 3));
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             on = Mean(Render(backend, pbr, OpenFloor(pbr, gi: true), frames: 12));
 
         // The probes see the same flat sky the ambient path uses, so the floor's brightness is the
@@ -209,9 +209,9 @@ public class ProbeGiTests
         using var _ = backend;
 
         (double R, double G, double B) off, on;
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             off = Mean(Render(backend, pbr, OpenFloor(pbr, gi: false, exposure: 0.35f), frames: 3));
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             on = Mean(Render(backend, pbr, OpenFloor(pbr, gi: true, exposure: 0.35f), frames: 12));
 
         await Assert.That(off.R).IsGreaterThan(20.0);
@@ -225,7 +225,7 @@ public class ProbeGiTests
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
         using var _ = backend;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = OpenFloor(pbr, gi: true);
 
         scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(1f), 4, 1, 4) };
@@ -253,7 +253,7 @@ public class ProbeGiTests
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
         using var _ = backend;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = OpenFloor(pbr, gi: true);
         var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
 
@@ -285,9 +285,9 @@ public class ProbeGiTests
         using var _ = backend;
 
         (double R, double G, double B) all, budgeted;
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
             all = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: true), frames: 12));
-        using (var pbr = new PbrRenderer(backend, Size, Size))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
         {
             var scene = EmissiveRoom(pbr, gi: true);
             scene.Gi = scene.Gi with { ProbesPerFrame = 16, Hysteresis = 0.3f };
@@ -305,7 +305,7 @@ public class ProbeGiTests
         if (backend is null) return;
         using var _ = backend;
         var recorder = new RecordingRenderer(backend);
-        using var pbr = new PbrRenderer(recorder, Size, Size);
+        using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), Size, Size);
         var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
 
         var scene = OpenFloor(pbr, gi: false);

@@ -62,7 +62,7 @@ public class RenderPipelineTests
         var a = new Probe("a") { Log = log };
         var b = new Probe("b") { Log = log };
         var c = new Probe("c") { Log = log };
-        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(b).Add(c);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b).Add(c);
         pipeline.Switches.Set(b.Definition.Id, false);
         log.Clear();
 
@@ -78,7 +78,7 @@ public class RenderPipelineTests
     {
         var log = new List<string>();
         var a = new Probe("a") { Log = log };
-        using var pipeline = new RenderPipeline(8, 8).Add(a);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
 
         pipeline.Setup(GraphWithTextures());
         pipeline.Switches.Set(a.Definition.Id, false);
@@ -95,7 +95,7 @@ public class RenderPipelineTests
     public async Task on_enabled_changed_fires_on_the_transition_only()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline(8, 8).Add(a);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
 
         pipeline.Setup(GraphWithTextures());
         pipeline.Switches.Set(a.Definition.Id, false);
@@ -127,7 +127,7 @@ public class RenderPipelineTests
     public async Task a_feature_that_ships_disabled_stays_off_and_is_not_notified()
     {
         var a = new Probe("a", enabledByDefault: false);
-        using var pipeline = new RenderPipeline(8, 8).Add(a);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
 
         pipeline.Setup(GraphWithTextures());
 
@@ -144,7 +144,7 @@ public class RenderPipelineTests
         var first = new Probe("first") { Log = log };
         var last = new Probe("last") { Log = log };
         var between = new Probe("between") { Log = log };
-        using var pipeline = new RenderPipeline(8, 8).Add(first, 100).Add(last, 300).Add(between, 200);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(first, 100).Add(last, 300).Add(between, 200);
 
         pipeline.Setup(GraphWithTextures());
 
@@ -159,7 +159,7 @@ public class RenderPipelineTests
     public async Task an_equal_order_keeps_insertion_order()
     {
         var log = new List<string>();
-        using var pipeline = new RenderPipeline(8, 8)
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches())
             .Add(new Probe("a") { Log = log }, 100)
             .Add(new Probe("b") { Log = log }, 100)
             .Add(new Probe("c") { Log = log }, 100);
@@ -176,7 +176,7 @@ public class RenderPipelineTests
     {
         var scene = new Probe("scene");
         var capture = new Probe("capture", FrameRequirements.SceneColorCapture);
-        using var pipeline = new RenderPipeline(8, 8).Add(scene).Add(capture);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(scene).Add(capture);
 
         pipeline.Setup(GraphWithTextures());
         var seenBySceneFirst = scene.SeenRequirements;
@@ -194,7 +194,7 @@ public class RenderPipelineTests
     {
         var producer = new Probe("producer") { Publishes = "result" };
         var consumer = new Probe("consumer") { Consumes = "result" };
-        using var pipeline = new RenderPipeline(8, 8).Add(producer).Add(consumer);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(producer).Add(consumer);
         var graph = GraphWithTextures();
 
         pipeline.Setup(graph);
@@ -227,7 +227,7 @@ public class RenderPipelineTests
         var log = new List<string>();
         var a = new Probe("a") { Log = log };
         var b = new Probe("b") { Log = log };
-        var pipeline = new RenderPipeline(8, 8).Add(a).Add(b);
+        var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b);
         pipeline.Switches.Set(b.Definition.Id, false);
         log.Clear();
 
@@ -259,7 +259,7 @@ public class RenderPipelineTests
     public async Task find_returns_the_first_feature_of_a_type()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(new Probe("b"));
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(new Probe("b"));
 
         await Assert.That(pipeline.Find<Probe>()).IsSameReferenceAs(a);
     }
@@ -298,7 +298,7 @@ public class RenderPipelineTests
     public async Task add_tells_the_feature_the_current_size()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline(320, 200);
+        using var pipeline = new RenderPipeline(320, 200, new FeatureSwitches());
 
         pipeline.Add(a);
 

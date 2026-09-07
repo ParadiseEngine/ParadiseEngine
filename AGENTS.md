@@ -212,6 +212,20 @@ Layers merge nearest-last: declarations, then the file, then the environment, th
 line. `dotnet run --project src/Paradise.Rendering.Sample -- --list-features` prints what a build
 has.
 
+A feature is also configured, not only switched. The file's second section carries a settings
+object per feature, and `switches.SettingsFor(id).Read(GameJson.Default.WeatherSettings)` binds it
+to the caller's own record through a `JsonTypeInfo` the CALLER supplies — so this assembly never
+reflects over a type it was not handed, and stays AOT- and trim-clean. Nothing engine-side uses
+it: an engine feature's parameters are scene-authored, and this exists for the game feature the
+engine has never heard of.
+
+```jsonc
+{
+  "features": { "rendering.globalIllumination": false, "game.weather": true },
+  "settings": { "game.weather": { "intensity": 0.6, "windMetresPerSecond": 3.5 } }
+}
+```
+
 The assembly has **no package references at all**, deliberately: `Paradise.ECS`, which otherwise
 references nothing, references this. Its one diagnostic — a configured name no declaration claims,
 `FeatureSwitches.Unknown` — is reported as data rather than logged, so it needs no logging
@@ -220,7 +234,7 @@ because a namespace of the latter name is in scope for every file under `Paradis
 an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
 meaning Microsoft.Coyote's, and all six stopped compiling.
 
-Five things that are not obvious:
+Eight things that are not obvious:
 
 - **A switch and a scene setting are different questions, and both have to say yes.** The switch is
   the platform's answer ("this build does not do probe GI"), applied once from configuration; a
@@ -245,6 +259,23 @@ Five things that are not obvious:
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
   reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
   cannot say so with a list position when the engine does all the adding.
+- **A settings type's properties are `get; set;`, never `init`.** An `init` accessor makes
+  System.Text.Json build the object WITHOUT running the parameterless constructor, so every
+  property the file leaves out reads as `default` — 0, not the `= 1f` the initializer says — with
+  no error either way. It is the accessor and not `record` vs `class`; all four combinations were
+  probed. The same class of silence sits next to it: a source-generated `JsonSerializerContext`
+  matches the C# property name EXACTLY unless told otherwise, so a camelCase file binds nothing at
+  all. Both are pinned by `FeatureSettingsTests`.
+- **The two sections exist to keep the nested-name trap closed.** A value under `features` may not
+  be an object, because `{"rendering": {"bloom": false}}` would otherwise parse as a feature called
+  `rendering` with a setting called `bloom` — the spelling nobody meant, accepted silently. It is
+  refused with the flat form and the `settings` section named in the message. Settings merge
+  WHOLESALE between layers, not deep: a deep merge has no answer for "which layer owns element 3".
+- **`PbrRenderer` and `RenderPipeline` take the switchboard as a REQUIRED argument.** It was a
+  defaulted last parameter for about a day, and that is a host getting a private switchboard, every
+  feature at its declared default, and a config file that reached nothing — no error, and a frame
+  that still renders. A caller that configures nothing writes `new FeatureSwitches()` and has said
+  so.
 - **Writes are serialized and `Changed` is raised inside that same critical section.** Deciding
   "did this change?" and announcing it is a check-then-act, and a subscriber ACTS on the
   announcement; with two writers the last announcement could otherwise contradict the state

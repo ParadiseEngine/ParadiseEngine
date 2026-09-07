@@ -59,14 +59,17 @@ public sealed class RenderPipeline : IDisposable
     /// <param name="width">The frame size features are told on <see cref="Add"/>, before any
     /// resize, so a feature declares its targets once through the same call either way.</param>
     /// <param name="height">The frame height, as <paramref name="width"/>.</param>
-    /// <param name="switches">The engine's feature configuration. Null gives this pipeline a
-    /// private one, in which every feature runs at the default its declaration asked for — what a
-    /// test or a host that configures nothing wants.</param>
-    public RenderPipeline(uint width, uint height, FeatureSwitches? switches = null)
+    /// <param name="switches">The engine's feature configuration — REQUIRED, and required to be
+    /// the one the rest of the process reads. A default here would mean a pipeline that quietly
+    /// got a private switchboard, ran every feature at its declared default and ignored the config
+    /// file with nothing to notice: the frame just renders, wrongly. A caller that genuinely
+    /// configures nothing writes <c>new FeatureSwitches()</c> and has said so.</param>
+    public RenderPipeline(uint width, uint height, FeatureSwitches switches)
     {
+        ArgumentNullException.ThrowIfNull(switches);
         Width = Math.Max(1, width);
         Height = Math.Max(1, height);
-        Switches = switches ?? new FeatureSwitches();
+        Switches = switches;
         Switches.Changed += OnFeatureChanged;
         Features = new FeatureView(_entries);
     }

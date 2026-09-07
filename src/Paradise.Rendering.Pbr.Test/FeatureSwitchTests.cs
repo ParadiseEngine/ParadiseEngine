@@ -82,7 +82,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr);
 
         for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
@@ -115,7 +115,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr);
 
         for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
@@ -156,9 +156,9 @@ public class FeatureSwitchTests
               }
             }
             """);
-        var switches = new FeatureSwitches(config.Features);
+        var switches = new FeatureSwitches(config);
 
-        using var pbr = new PbrRenderer(backend, Size, Size, switches: switches);
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
         var scene = BuildScene(pbr);
         pbr.RenderFrame(scene);
         var neverEnabled = Brightness(backend);
@@ -167,7 +167,7 @@ public class FeatureSwitchTests
         // shadows off must reach the picture a build that turns them off does. It does not, if
         // the shadow plan a frame never ran is left zeroed — every light then claims array layer
         // 0 and the scene samples a map nothing has drawn into.
-        using var toggled = new PbrRenderer(backend, Size, Size);
+        using var toggled = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var toggledScene = BuildScene(toggled);
         toggled.RenderFrame(toggledScene);
         toggled.Switches.Set(PbrFeatures.Shadows.Id, false);
@@ -192,7 +192,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr);
         scene.Gi = new PbrGi { Enabled = true, RaysPerProbe = 32, Hysteresis = 0.5f, MaxProbes = 512 };
         for (var i = 0; i < 4; i++) pbr.RenderFrame(scene);
@@ -203,7 +203,7 @@ public class FeatureSwitchTests
         var switchedOff = Brightness(backend);
 
         // The same scene that never asked for probes: what "off" has to look like.
-        using var never = new PbrRenderer(backend, Size, Size);
+        using var never = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var neverScene = BuildScene(never);
         never.RenderFrame(neverScene);
         var withoutProbes = Brightness(backend);
@@ -225,7 +225,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr);
         scene.Ssao = new PbrSsao { Enabled = true, Radius = 0.6f, Intensity = 2f };
         scene.RayTracedAo = new PbrRayTracedAo { Enabled = true, RaysPerPixel = 4, MaxDistance = 1f };
@@ -236,7 +236,7 @@ public class FeatureSwitchTests
         var switchedOff = Brightness(backend);
 
         // The same scene with neither occlusion asked for: what "no occlusion" looks like.
-        using var never = new PbrRenderer(backend, Size, Size);
+        using var never = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var neverScene = BuildScene(never);
         never.RenderFrame(neverScene);
         var withoutOcclusion = Brightness(backend);
@@ -244,6 +244,53 @@ public class FeatureSwitchTests
         await Assert.That(Passes(pbr, "Prepass.")).IsEqualTo(0);
         await Assert.That(Passes(pbr, "Rtao.")).IsEqualTo(0);
         await Assert.That(switchedOff).IsEqualTo(withoutOcclusion).Within(0.01);
+    }
+
+    /// <summary>Every built-in switched off ON ITS OWN, from before the renderer was built, and
+    /// then all of them at once — two frames each, and none of them may throw.
+    ///
+    /// <para>This is the general form of what the per-feature tests check one at a time, and it is
+    /// the case a running renderer never reaches: a feature switched off AFTER a frame has left
+    /// its state filled in, while one that was never on has not. The probe GI feature failed
+    /// exactly here — the scene binds the state buffer that feature's setup picks, and with the
+    /// probes configured off no setup ever picked one, so the frame died resolving a bind group
+    /// instead of rendering without indirect light.</para></summary>
+    [Test]
+    public async Task every_built_in_can_be_configured_off_before_the_first_frame()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        var failures = new List<string>();
+        // null = every feature at once, the case each single-feature run is a slice of.
+        foreach (var only in PbrFeatures.All.Append(null))
+        {
+            var switches = new FeatureSwitches();
+            foreach (var definition in PbrFeatures.All)
+            {
+                if (only is null || definition.Id == only.Id) switches.Set(definition.Id, false);
+            }
+            try
+            {
+                using var pbr = new PbrRenderer(backend, switches, Size, Size);
+                var scene = BuildScene(pbr);
+                // Every scene-side switch ON, so nothing is skipped for want of being asked for:
+                // the configuration is the only thing keeping a feature out of the frame.
+                scene.Ssao = new PbrSsao { Enabled = true, Radius = 0.6f, Intensity = 2f };
+                scene.RayTracedAo = new PbrRayTracedAo { Enabled = true };
+                scene.Ssr = new PbrScreenSpaceReflection { Enabled = true };
+                scene.Gi = new PbrGi { Enabled = true, RaysPerProbe = 32, MaxProbes = 256 };
+                pbr.RenderFrame(scene);
+                pbr.RenderFrame(scene); // the second frame reads what the first left behind
+            }
+            catch (Exception error)
+            {
+                failures.Add($"{only?.Name ?? "everything"}: {error.GetType().Name} {error.Message}");
+            }
+        }
+
+        await Assert.That(failures).IsEmpty();
     }
 
     /// <summary>The renderer's own scene-color capture API is the switch, so a host that has never
@@ -256,7 +303,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var changes = 0;
         pbr.SceneColorViewChanged += () => changes++;
 
@@ -285,7 +332,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
 
         var declared = pbr.Switches.Definitions.Select(d => d.Name).ToArray();
         var describedAll = pbr.Switches.Definitions.All(d => d.Summary.Length > 0);
@@ -306,7 +353,7 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var probe = new OrderProbe();
         pbr.Pipeline.Add(probe, PbrFeatureOrder.Scene - 1);
         var scene = BuildScene(pbr);

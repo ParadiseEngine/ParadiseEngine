@@ -98,7 +98,7 @@ public class PassMatrixBaselineTests
                 // are grow-only (the shadow-map array, the draw ring), so a shared instance would
                 // make each case's structure depend on which cases ran before it — and a golden
                 // that only holds in matrix order is worse than none.
-                using var pbr = new PbrRenderer(recorder, Size, Size)
+                using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), Size, Size)
                 {
                     SceneColorCapture = testCase.Capture,
                 };

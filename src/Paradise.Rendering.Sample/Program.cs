@@ -166,7 +166,8 @@ internal static class Program
             return null;
         }
 
-        var switches = new FeatureSwitches(configuration.Features);
+        // The whole document, not just its switches: a game feature's settings travel with it.
+        var switches = new FeatureSwitches(configuration);
         PbrFeatures.DeclareAll(switches);
         // A name nothing declares is a stale line in somebody's config, not a feature that is
         // off — worth saying out loud, and not worth refusing to start over.

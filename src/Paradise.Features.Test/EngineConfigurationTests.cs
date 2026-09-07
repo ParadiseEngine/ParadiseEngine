@@ -80,6 +80,25 @@ public class EngineConfigurationTests
             .Throws<FormatException>().WithMessageContaining("not valid JSON");
     }
 
+    /// <summary>The layer a host starts from before it has read anything, and the one every test
+    /// above happens to skip because <see cref="EngineConfiguration.Read(string)"/> fills both sections in.
+    /// It has to be usable: its sections are empty, not null. They were null once — a static
+    /// initializer above the field it reads — and nothing noticed until a real host merged onto it
+    /// and iterated the result.</summary>
+    [Test]
+    public async Task the_empty_layer_is_usable_as_a_starting_point()
+    {
+        var switches = new FeatureSwitches(EngineConfiguration.Empty);
+        var merged = EngineConfiguration.Empty
+            .Merge(new EngineConfiguration { Features = FeatureOverrides.Parse("-rendering.bloom") });
+        var mergedSwitches = new FeatureSwitches(merged);
+
+        await Assert.That(EngineConfiguration.Empty.Features.Count).IsEqualTo(0);
+        await Assert.That(EngineConfiguration.Empty.Settings.Count).IsEqualTo(0);
+        await Assert.That(switches.Definitions).IsEmpty();
+        await Assert.That(mergedSwitches.IsEnabled(new FeatureId("rendering.bloom"))).IsFalse();
+    }
+
     /// <summary>Nearest to the person running the build wins.</summary>
     [Test]
     public async Task a_later_layer_wins_name_by_name()

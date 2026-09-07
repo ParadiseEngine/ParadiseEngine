@@ -102,6 +102,11 @@ public sealed class ProbeGiFeature : IRenderFeature
         EnsureRayBuffer(1);
         EnsureAtlases(1, 1, 1);
         UploadVolume();
+        // The buffer the SCENE binds, not one of ours: Setup normally picks which of the two
+        // state buffers this frame shades against, and a build with the probes switched off never
+        // runs one — leaving the scene to bind a default handle and the graph to fail resolving
+        // its group. Picked here so the answer exists before the first frame.
+        ShadingStateBuffer = _stateBuffers[_current];
     }
 
     public FeatureDefinition Definition => PbrFeatures.GlobalIllumination;

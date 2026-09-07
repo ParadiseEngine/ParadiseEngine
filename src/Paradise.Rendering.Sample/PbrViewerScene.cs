@@ -43,7 +43,7 @@ internal sealed class PbrViewerScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger, switches: Program.Features);
+        _pbr = new PbrRenderer(renderer, Program.Features, _width, _height, logger: logger);
 
         if (glbPath is not null)
         {

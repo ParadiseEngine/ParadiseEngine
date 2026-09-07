@@ -48,7 +48,7 @@ public class HostFeatureTests
         }
         using var _ = backend;
         var recorder = new RecordingRenderer(backend);
-        using var pbr = new PbrRenderer(recorder, 32, 32);
+        using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), 32, 32);
         var vignette = new VignetteFeature();
         pbr.Pipeline.Add(vignette);
         var eye = new Vector3(0f, 1f, 3f);
