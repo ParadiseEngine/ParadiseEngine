@@ -86,7 +86,6 @@ public sealed class ProjectManifest
         RejectUnknown(sourceName, document.Unknown, "at the document root");
         RejectUnknown(sourceName, document.Assets?.Unknown, "in [assets]");
         RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
-        RejectUnknown(sourceName, document.Extract?.Unknown, "in [extract]");
         RejectUnknown(sourceName, document.Host?.Unknown, "in [host]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
@@ -134,17 +133,25 @@ public sealed class ProjectManifest
 
         static string? Folder(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim().TrimEnd('/');
 
+        var directories = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in document.Extract?.Unknown ?? [])
+        {
+            // A kind's value is a directory. Anything else is a typo worth naming here, since no
+            // reading of it makes sense whatever the extractor chain turns out to declare.
+            if (value is not string text)
+            {
+                throw new ProjectManifestException(sourceName, $"sets '{key}' in [extract] to {(value is null ? "nothing" : value.GetType().Name.ToLowerInvariant())}; a kind's value is a directory");
+            }
+
+            if (Folder(text) is { } folder) directories[key] = folder;
+        }
+
         var extract = new ExtractSettings(
             Folder(document.Extract?.Directory),
             string.IsNullOrWhiteSpace(document.Extract?.StaticMeshComponent) ? null : document.Extract.StaticMeshComponent,
             string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent)
         {
-            Meshes = Folder(document.Extract?.Meshes),
-            Skeletons = Folder(document.Extract?.Skeletons),
-            Animations = Folder(document.Extract?.Animations),
-            Materials = Folder(document.Extract?.Materials),
-            Textures = Folder(document.Extract?.Textures),
-            Prefabs = Folder(document.Extract?.Prefabs),
+            Directories = directories,
         };
         return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host));
     }
@@ -253,17 +260,32 @@ public sealed record HostSettings(string? Project, IReadOnlyList<string> Argumen
     public static HostSettings None { get; } = new(null, []);
 }
 
-/// <summary>A file an extraction is about to write, as far as WHERE it goes is concerned.</summary>
-public enum ExtractKind
+/// <summary>
+/// A kind of thing an extractor writes, as far as WHERE it goes is concerned, and what its
+/// directory falls back to when the project names none for it.
+/// </summary>
+/// <remarks>
+/// Declared by the extractor that produces the kind, not by the engine: a game's own container may
+/// yield tilesets or LODs, and having to add an enum member for one would be the same "edit the
+/// engine every time" the extractor chain exists to remove. <paramref name="Id"/> is the key an
+/// author writes in <c>[extract]</c>, so it reads as the plural noun it is: <c>materials</c>.
+/// </remarks>
+/// <param name="FallsBackTo">The kind whose directory this one takes when the project names none — a <c>.skeleton</c> follows the geometry that names it. Null goes straight to <c>directory</c>.</param>
+public sealed record ExtractKindDeclaration(string Id, string? FallsBackTo = null);
+
+/// <summary>
+/// The kind ids the built-in extractor declares, as constants. A game's extractor reuses one when
+/// its output belongs with everything else of that kind — a tileset's materials are materials — and
+/// declares its own id when it does not.
+/// </summary>
+public static class ExtractKinds
 {
-    /// <summary>The geometry documents: a <c>.mesh</c> or a <c>.skinnedmesh</c>.</summary>
-    Mesh,
-    /// <summary>The <c>.skeleton</c> a skinned mesh names. Its own kind because a project can reasonably file it with the rig's clips rather than with the geometry; it defaults to the geometry's directory, which is where it has always gone.</summary>
-    Skeleton,
-    Animation,
-    Material,
-    Texture,
-    Prefab,
+    public const string Meshes = "meshes";
+    public const string Skeletons = "skeletons";
+    public const string Animations = "animations";
+    public const string Materials = "materials";
+    public const string Textures = "textures";
+    public const string Prefabs = "prefabs";
 }
 
 /// <summary>
@@ -271,38 +293,50 @@ public enum ExtractKind
 /// names a generated prefab authors a mesh into (null = the schema decides by name).
 /// </summary>
 /// <remarks>
-/// Every directory is assets-relative. <see cref="Directory"/> is what a kind that names none
-/// falls back to, and a null fallback means beside the GLB — so a project that sets nothing keeps
-/// the original behaviour, and one that sets only <c>directory</c> keeps the single-folder one.
-/// A GLB's own <c>[glb] extract</c> outranks all of it: a per-GLB directive is more specific than
-/// a project default, so it names one folder for everything that GLB extracts to.
+/// <para>
+/// Every directory is assets-relative, and the keys are open: any key that is not one of this
+/// section's own settings is a KIND, resolved against whatever the build's extractor chain
+/// declares. The manifest cannot judge that on its own — whether a kind exists depends on the
+/// chain the tool was built with, which is a runtime fact — so parsing accepts any string-valued
+/// key and <c>verify</c> reports one nothing declares. A typo is still caught; it is caught by the
+/// component that knows the answer.
+/// </para>
+/// <para>
+/// <see cref="Directory"/> is the last fallback, and a null fallback means beside the source
+/// container — so a project that sets nothing keeps the original behaviour, and one that sets only
+/// <c>directory</c> keeps the single-folder one. A container's own <c>[glb] extract</c> outranks
+/// all of it: a per-file directive is more specific than a project default.
+/// </para>
 /// </remarks>
 public sealed record ExtractSettings(string? Directory, string? StaticMeshComponent, string? SkinnedMeshComponent)
 {
     public static ExtractSettings None { get; } = new(null, null, null);
 
-    public string? Meshes { get; init; }
+    /// <summary>Kind id to assets-relative directory, exactly as the manifest spelled it; unvalidated by design (see the remarks).</summary>
+    public IReadOnlyDictionary<string, string> Directories { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
-    /// <summary>Null falls back to <see cref="Meshes"/>: a skeleton has always landed with the geometry, and a project that says nothing keeps that.</summary>
-    public string? Skeletons { get; init; }
+    /// <summary>The keys naming a kind, so <c>verify</c> can name one nothing declares.</summary>
+    public IEnumerable<string> Kinds => Directories.Keys;
 
-    public string? Animations { get; init; }
-
-    public string? Materials { get; init; }
-
-    public string? Textures { get; init; }
-
-    public string? Prefabs { get; init; }
-
-    /// <summary>Where <paramref name="kind"/> goes, or null for beside the GLB.</summary>
-    public string? DirectoryFor(ExtractKind kind) => kind switch
+    /// <summary>
+    /// Where <paramref name="kind"/> goes, or null for beside the source container: the kind's own
+    /// directory, else the one it declares it falls back to, else <see cref="Directory"/>.
+    /// </summary>
+    /// <param name="declarations">The build's declared kinds, which is what makes a fallback resolvable.</param>
+    public string? DirectoryFor(string kind, IReadOnlyList<ExtractKindDeclaration>? declarations = null)
     {
-        ExtractKind.Mesh => Meshes,
-        ExtractKind.Skeleton => Skeletons ?? Meshes,
-        ExtractKind.Animation => Animations,
-        ExtractKind.Material => Materials,
-        ExtractKind.Texture => Textures,
-        ExtractKind.Prefab => Prefabs,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
-    } ?? Directory;
+        ArgumentNullException.ThrowIfNull(kind);
+
+        // A cycle in the declared fallbacks would spin here; the chain is short and the visited set
+        // costs nothing, so a badly-declared extractor degrades to `directory` instead of hanging.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var current = kind;
+        while (current is not null && seen.Add(current))
+        {
+            if (Directories.TryGetValue(current, out var directory)) return directory;
+            current = declarations?.FirstOrDefault(d => string.Equals(d.Id, current, StringComparison.Ordinal))?.FallsBackTo;
+        }
+
+        return Directory;
+    }
 }

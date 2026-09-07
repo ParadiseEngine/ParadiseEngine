@@ -60,11 +60,13 @@ public static class ProjectVerifier
             return findings;
         }
 
-        var ignore = VerifyManifest(fileSystem, layout, findings)?.Ignore ?? AssetIgnoreRules.None;
-
-        var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var chain = importers ?? AssetImporters.All;
         var containers = extractors ?? AssetExtractors.All;
+        var manifest = VerifyManifest(fileSystem, layout, findings);
+        var ignore = manifest?.Ignore ?? AssetIgnoreRules.None;
+        if (manifest is not null) VerifyExtractKinds(layout, manifest, containers, findings);
+
+        var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
         var cooked = new Dictionary<UPath, CookedGlb?>();
         foreach (var path in sources.Files)
@@ -124,6 +126,22 @@ public static class ProjectVerifier
             .OrderBy(finding => finding.Severity == VerifySeverity.Error ? 0 : 1)
             .ThenBy(finding => finding.Path.FullName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// A <c>[extract]</c> key naming a kind no extractor in this chain declares. The manifest cannot
+    /// check this itself — which kinds exist depends on the chain the tool was built with — so the
+    /// check lives here, where the chain is known, and a typo is still caught.
+    /// </summary>
+    private static void VerifyExtractKinds(AssetProjectLayout layout, ProjectManifest manifest, IReadOnlyList<IAssetExtractor> extractors, List<VerifyFinding> findings)
+    {
+        var declared = AssetExtractors.Kinds(extractors).Select(kind => kind.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var kind in manifest.Extract.Kinds.Where(kind => !declared.Contains(kind)).OrderBy(kind => kind, StringComparer.Ordinal))
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Error, layout.Manifest,
+                $"routes '{kind}' in [extract], which no extractor in this build declares (it declares: {string.Join(", ", declared.OrderBy(id => id, StringComparer.Ordinal))}); nothing would ever be written there"));
+        }
     }
 
     private static ProjectManifest? VerifyManifest(IFileSystem fileSystem, AssetProjectLayout layout, List<VerifyFinding> findings)

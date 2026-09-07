@@ -39,6 +39,13 @@ public interface IAssetExtractor
 {
     string Name { get; }
 
+    /// <summary>
+    /// The kinds this extractor writes, so <c>[extract]</c> can route them and <c>verify</c> can
+    /// name a key nothing declares. Reuse an <see cref="ExtractKinds"/> id when the output belongs
+    /// with everything else of that kind; declare a new one when it does not.
+    /// </summary>
+    IReadOnlyList<ExtractKindDeclaration> Kinds { get; }
+
     /// <summary>Whether this extractor reads the container at <paramref name="source"/>. The one claim point; nothing else searches.</summary>
     bool Claims(IFileSystem fileSystem, UPath source);
 
@@ -82,6 +89,13 @@ public static class AssetExtractors
         return null;
     }
 
+    /// <summary>Every kind the chain declares, nearest-first, so a lookup finds an appended extractor's redeclaration before a built-in's.</summary>
+    public static IReadOnlyList<ExtractKindDeclaration> Kinds(IReadOnlyList<IAssetExtractor> extractors)
+    {
+        ArgumentNullException.ThrowIfNull(extractors);
+        return [.. extractors.Reverse().SelectMany(extractor => extractor.Kinds)];
+    }
+
     /// <summary>The names in a chain, for a message that has to say what this build can read.</summary>
     public static string Known(IReadOnlyList<IAssetExtractor> extractors)
     {
@@ -93,8 +107,22 @@ public static class AssetExtractors
 /// <summary>glTF binary: the engine's own container, and the reference implementation of the seam.</summary>
 public sealed class GlbExtractor : IAssetExtractor
 {
+    /// <summary>What a GLB yields. A <c>.skeleton</c> falls back to the geometry's directory because that is where it has always landed; a project files it with the rig's clips by saying so.</summary>
+    public static IReadOnlyList<ExtractKindDeclaration> DeclaredKinds { get; } =
+    [
+        new(ExtractKinds.Meshes),
+        new(ExtractKinds.Skeletons, FallsBackTo: ExtractKinds.Meshes),
+        new(ExtractKinds.Animations),
+        new(ExtractKinds.Materials),
+        new(ExtractKinds.Textures),
+        new(ExtractKinds.Prefabs),
+    ];
+
     /// <inheritdoc />
     public string Name => "glb";
+
+    /// <inheritdoc />
+    public IReadOnlyList<ExtractKindDeclaration> Kinds => DeclaredKinds;
 
     /// <inheritdoc />
     public bool Claims(IFileSystem fileSystem, UPath source) => MeshContainer.IsMesh(source);

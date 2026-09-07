@@ -20,6 +20,10 @@ public class AssetExtractorSeamTests
     {
         public string Name => "crate";
 
+        /// <summary>A kind of its own, and one it shares with the built-ins: both must route.</summary>
+        public IReadOnlyList<ExtractKindDeclaration> Kinds { get; } =
+            [new("tilesets"), new("tilemaps", FallsBackTo: "tilesets"), new(ExtractKinds.Materials)];
+
         public bool Claims(IFileSystem fileSystem, UPath source)
             => string.Equals(source.GetExtensionWithDot(), ".crate", StringComparison.OrdinalIgnoreCase);
 
@@ -38,6 +42,8 @@ public class AssetExtractorSeamTests
     private sealed class GreedyExtractor : IAssetExtractor
     {
         public string Name => "greedy";
+
+        public IReadOnlyList<ExtractKindDeclaration> Kinds { get; } = [];
 
         public bool Claims(IFileSystem fileSystem, UPath source) => true;
 
@@ -92,6 +98,39 @@ public class AssetExtractorSeamTests
         // An extractor that says it is already extracted has nothing to report.
         var done = ProjectVerifier.Verify(fileSystem, s_layout, [.. AssetExtractors.All, new CrateExtractor(extracted: true)]);
         await Assert.That(done.Any(finding => finding.Path == "/game/assets/models/box.crate")).IsFalse();
+    }
+
+    [Test]
+    public async Task an_extract_key_no_extractor_declares_is_a_verify_error_naming_what_is_available()
+    {
+        // The open key set moves this check from the manifest to here, where the chain is known.
+        // A game's kind is fine when its extractor is in the build, and a typo is still caught.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.WriteAllText(
+            "/game/assets/project.toml",
+            "name = \"x\"\nschema_version = 1\n\n[extract]\nmaterials = \"materials\"\ntilesets = \"tilesets\"\n");
+
+        var withGame = ProjectVerifier.Verify(fileSystem, s_layout, [.. AssetExtractors.All, new CrateExtractor()]);
+        await Assert.That(withGame.Any(finding => finding.Message.Contains("[extract]"))).IsFalse();
+
+        var without = ProjectVerifier.Verify(fileSystem, s_layout);
+
+        var found = without.Single(finding => finding.Message.Contains("[extract]"));
+        await Assert.That(found.Severity).IsEqualTo(VerifySeverity.Error);
+        await Assert.That(found.Message).Contains("tilesets");
+        await Assert.That(found.Message).Contains("meshes");   // names what IS declared
+    }
+
+    [Test]
+    public async Task the_chain_declares_its_kinds_nearest_first()
+    {
+        var kinds = AssetExtractors.Kinds([.. AssetExtractors.All, new CrateExtractor()]);
+
+        // The appended extractor's declarations come first, so its redeclaration of a shared kind
+        // is the one a lookup finds.
+        await Assert.That(kinds[0].Id).IsEqualTo("tilesets");
+        await Assert.That(kinds.Count(kind => kind.Id == ExtractKinds.Materials)).IsEqualTo(2);
+        await Assert.That(kinds.Select(kind => kind.Id)).Contains(ExtractKinds.Prefabs);
     }
 
     [Test]

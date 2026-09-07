@@ -281,19 +281,19 @@ public static partial class AssetExtractor
         {
             // The sidecar's own `extract` names ONE folder for everything this GLB writes and
             // outranks the manifest's per-kind keys: it is the more specific directive of the two.
-            UPath For(ExtractKind kind)
+            UPath For(string kind)
             {
-                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind);
+                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind, GlbExtractor.DeclaredKinds);
                 return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
             }
 
             return new ExtractDirectories(
-                For(ExtractKind.Mesh),
-                For(ExtractKind.Skeleton),
-                For(ExtractKind.Animation),
-                For(ExtractKind.Material),
-                For(ExtractKind.Texture),
-                For(ExtractKind.Prefab));
+                For(ExtractKinds.Meshes),
+                For(ExtractKinds.Skeletons),
+                For(ExtractKinds.Animations),
+                For(ExtractKinds.Materials),
+                For(ExtractKinds.Textures),
+                For(ExtractKinds.Prefabs));
         }
 
         /// <summary>
