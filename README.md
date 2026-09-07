@@ -215,11 +215,15 @@ animations = "animations"      # .anim
 materials  = "materials"       # .material
 textures   = "textures"        # images the GLB no longer embeds
 prefabs    = "prefabs/models"  # the generated .prefab
+tilesets   = "tilesets"        # a kind a GAME's extractor declares — no engine change
 ```
 
-Set nothing and everything lands beside the GLB; set only `directory` and everything lands in that
-one folder. A `.skeleton` falls back to `meshes` before `directory`, because it has always landed
-with the geometry that names it; a project files it with the rig's clips by saying so. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
+The keys are open: anything that is not one of the section's own settings is a KIND, and the kinds
+that exist are whatever the build's extractor chain declares (see below). Set nothing and everything
+lands beside the container; set only `directory` and everything lands in one folder. A kind falls
+back to the one its declaration names before `directory` — a `.skeleton` follows the geometry that
+names it, which is where it has always landed, and a project files it with the rig's clips by
+saying so. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
 for everything that GLB extracts to. Changing a key never moves what is already extracted: the
 sidecar records each output by guid and a later run re-syncs it where it now lives, so a routing
 change applies to what the GLB has no record of yet, and moving the existing files (`paradise
@@ -287,10 +291,14 @@ and NativeAOT rules out scanning for it:
 
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
-return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
+return Paradise.Cli.BuildHost.Run(
+    args,
+    importers: [.. AssetImporters.All, new MyBankImporter()],
+    extractors: [.. AssetExtractors.All, new MyCrateExtractor()]);
 ```
 
-The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
+Both chains are lowest precedence first, so an appended entry shadows the built-in it replaces, and
+every verb runs them: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`, `host play`.
 
 An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
 `rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
@@ -298,6 +306,55 @@ An importer that wants its asset kind in the reference graph — and so followed
 `Rewrite` (bring them in line with the tree: the sidecar's entries always, the asset's own bytes
 only when the context allows). The findings are derived from the sites by the one rule, so an
 importer cannot forget one; nothing in the pipeline lists formats.
+
+### A game's own source container: `IAssetExtractor`
+
+An importer says how a file is BUILT. An extractor says what a source container turns INTO — a GLB
+is one, and a game's own format is another. `Claims` is the only place anything asks what reads a
+container; nothing else searches by extension.
+
+An extractor declares the KINDS it writes, and `[extract]` routes them by those ids, so a format
+that yields tilesets or LODs needs no engine change to be filed properly:
+
+```csharp
+public string Name => "crate";
+
+public IReadOnlyList<ExtractKindDeclaration> Kinds { get; } =
+[
+    new("tilesets"),                     // the game's own kind
+    new(ExtractKinds.Materials),         // and one it shares with the built-ins
+];
+
+public bool Claims(IFileSystem fileSystem, UPath source)
+    => source.GetExtensionWithDot() == ".crate";
+```
+
+A key in `[extract]` that no extractor in the build declares is a `verify` error naming the kinds
+that ARE declared — the manifest cannot check that itself, because which kinds exist depends on the
+chain the tool was built with.
+
+The engine owns the parts that are hard and are nobody's format, and an extractor gets them by
+using them:
+
+- **The record.** What a container extracted to is written to the `[extract]` sidecar domain
+  (`ExtractionRecord`), a flat list of parts carrying kind, ownership, index, name, identity and
+  two fingerprints. Every extractor writes the same record; none needs a codec.
+- **Ownership** is the sync policy: `ToolOwned` (the container is the only side, so the watcher
+  mints and rewrites it freely), `TwoSided` (an authored document the container can change under),
+  `Blob` (authored bytes with nothing to write back).
+- **The keep-in-step rule.** `ExtractionSync.Decide` takes each side's fingerprint now and the pair
+  recorded at the last sync, and says whether a file is unchanged, stale, edited, adoptable, or a
+  conflict `--take-glb` / `--take-document` resolves. It returns the decision and not the
+  fingerprints to record, because after `TakeDocument` a format that can write the edit back has
+  both sides reading as the document and one that cannot still has two.
+- **Identity.** `SidecarMaintainer.Ensure` mints a sidecar for each written file, and a recorded
+  part is found again through `AssetIndex.Resolve` — by guid, so a file the author moved is
+  re-synced where it now lives instead of written again at the default path. Catch its path half up
+  when you record it: the guid decides, the path is a hint.
+
+`GameExtractorTests` in `Paradise.Assets.Pipeline.Test` is a complete worked example — a container
+format the engine cannot read, extracted with routing, identities, conflicts and moves all working,
+written out of the public surface only.
 
 ## Third-party libraries
 
