@@ -48,8 +48,20 @@ public sealed class SceneColorCaptureFeature : IRenderFeature
         ViewChanged?.Invoke();
     }
 
-    /// <summary>The captured opaque scene: rgb is the opaque+sky color, ALPHA is the opaque
-    /// scene's device depth. Invalid while disabled; recreated on resize.</summary>
+    /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
+    /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
+    /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
+    /// geometry in front of the surface — fall back to the unoffset sample).
+    ///
+    /// <para>Two consumer caveats. The fp16 alpha quantizes 32-bit device depth (~5e-4 steps near
+    /// the far plane), so treat it as a coarse near/mid-field signal, not a precise depth buffer.
+    /// And READ THE DEPTH VIA <c>textureLoad</c>, never a filtering sampler — bilinear across a
+    /// depth discontinuity interpolates a depth belonging to no real surface and mis-rejects at
+    /// silhouettes (the color half may stay filtered).</para>
+    ///
+    /// <para>Invalid while this feature is switched off, and RECREATED on resize: rebind material
+    /// extra entries from <see cref="ViewChanged"/> through
+    /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</para></summary>
     public TextureViewHandle View =>
         _ctx.Targets.Contains(PbrTargets.SceneColor) ? _ctx.Targets.View(PbrTargets.SceneColor) : default;
 

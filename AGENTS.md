@@ -271,17 +271,18 @@ Twelve things that are not obvious:
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
   reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
   cannot say so with a list position when the engine does all the adding.
-- **A feature's settings belong to the feature, not to a shortcut on the renderer.**
-  `PbrRenderer` used to publish `ShadowMapSize`, `ShadowBlurTexels`, `DirectionalShadowRadius`
-  and `SetSpecularAa`, forwarding each into the built-in that owns it. That is the renderer
-  saying three of its nine features are special, when the only thing making them so was the
-  shortcut — a game's feature could never have one. They are gone; a host writes
-  `pipeline.Find<ShadowFeature>()!.MapSize = …`, which is what it already writes for a feature
-  it added itself. The same went for the internal `…ForTest` forwarders: a test asks the
-  pipeline for the feature like everybody else. What is left on the renderer is the frame and
-  what the frame produced — `RenderFrame`, `LastPassNames`, `Materials`, `Pipeline`,
-  `Switches` — plus `SceneColorView`, which is a frame OUTPUT rather than a feature's setting
-  and is already slated to be retired by the material-registry follow-up in #242.
+- **Nothing on the renderer names a particular feature.** `PbrRenderer` used to publish
+  `ShadowMapSize`, `ShadowBlurTexels`, `DirectionalShadowRadius`, `SetSpecularAa`,
+  `SceneColorCapture`, `SceneColorView` and `SceneColorViewChanged`, each forwarding into the
+  built-in that owns it, plus four internal `…ForTest` accessors doing the same. That is the
+  renderer saying three of its nine features are special, and the only thing making them so was
+  the forwarding — a game's feature could never have any of it. All gone. A host writes
+  `pipeline.Find<ShadowFeature>()!.MapSize = …` or
+  `pipeline.Find<SceneColorCaptureFeature>()!.View`, which is exactly what it already writes for
+  a feature it added itself, and a test asks the pipeline like everybody else. What is left is
+  the frame and what the frame produced: `RenderFrame`, `LastPassNames`, `LastCpuTimings`,
+  `Materials`, `Pipeline`, `Switches`, `AspectRatio`, and the upload surface. A shortcut that
+  seems worth adding back is a sign the FEATURE's own API is missing something.
 - **A feature that fills a buffer while RECORDING uploads it in `BeforeSubmit`.** A recorder runs
   inside the compile, so the shadow pass's caster ring has nothing in it when `Setup` returns and
   no moment left after the submit. That upload used to be a line in `PbrRenderer.RenderFrame`

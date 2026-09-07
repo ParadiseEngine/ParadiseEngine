@@ -72,15 +72,6 @@ public sealed partial class PbrRenderer : IDisposable
         PbrBuiltInFeatures.AddTo(Pipeline, _ctx, specularAaVariance, specularAaClamp);
     }
 
-    // The ONE feature this renderer still reaches for, and only for SceneColorView below.
-    //
-    // A renderer that publishes a shortcut to a built-in says that built-in is special, and the
-    // only thing that made the others so was that the shortcut existed: a feature's settings
-    // belong to the feature, which is public and reachable through Pipeline.Find<T>() by anyone,
-    // including for a feature a game wrote. The shadow map's size and the scene's specular-AA
-    // used to be forwarded here and are not any more.
-    private SceneColorCaptureFeature Capture => Pipeline.Find<SceneColorCaptureFeature>()!;
-
     public MaterialResourceCache Materials { get; }
 
     /// <summary>CPU time the last <see cref="RenderFrame"/> spent in each of its phases. Filled
@@ -101,43 +92,6 @@ public sealed partial class PbrRenderer : IDisposable
     /// Flipping a switch here changes the next frame — see <see cref="PbrFeatures"/> for the
     /// names, and note that a scene's own <c>Enabled</c> flags still have to agree.</summary>
     public FeatureSwitches Switches => Pipeline.Switches;
-
-    /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
-    /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
-    /// <see cref="SceneColorView"/> before the blend bucket renders — so a blend material
-    /// (water) can sample what is BEHIND it for screen-space refraction. Enable before creating
-    /// the materials that bind the view. Costs one fullscreen blit plus a color+depth reload
-    /// per frame while enabled.</summary>
-    public bool SceneColorCapture
-    {
-        get => Switches.IsEnabled(PbrFeatures.SceneColorCapture.Id);
-        set => Switches.Set(PbrFeatures.SceneColorCapture.Id, value);
-    }
-
-    /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
-    /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
-    /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
-    /// geometry in front of the surface — fall back to the unoffset sample). Two consumer
-    /// caveats: the fp16 alpha quantizes 32-bit device depth (~5e-4 steps near the far plane),
-    /// so treat it as a coarse near/mid-field signal, not a precise depth buffer; and READ THE
-    /// DEPTH VIA textureLoad, never a filtering sampler — bilinear across a depth discontinuity
-    /// interpolates a depth belonging to no real surface and mis-rejects at silhouettes (the
-    /// color half may stay filtered). Invalid while
-    /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
-    /// material extra entries from <see cref="SceneColorViewChanged"/> via
-    /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
-    public TextureViewHandle SceneColorView => Capture.View;
-
-    /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
-    /// capture, or Resize while enabled — rebind material extra entries to the new view) or
-    /// destroyed (disabling capture — the view is INVALID in the handler; unbind or repoint
-    /// affected materials, never re-bind the stale view). Always fires after every engine-side
-    /// rebind, so subscribers see a consistent renderer.</summary>
-    public event Action? SceneColorViewChanged
-    {
-        add => Capture.ViewChanged += value;
-        remove => Capture.ViewChanged -= value;
-    }
 
     public float AspectRatio => _ctx.Width / (float)_ctx.Height;
 

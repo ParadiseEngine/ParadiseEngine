@@ -68,6 +68,10 @@ public class FeatureSwitchTests
         return scene;
     }
 
+    /// <summary>The capture feature, reached the way anything reaches a feature.</summary>
+    private static SceneColorCaptureFeature Capture(PbrRenderer pbr) =>
+        pbr.Pipeline.Find<SceneColorCaptureFeature>()!;
+
     private static int Passes(PbrRenderer pbr, string prefix) =>
         pbr.LastPassNames.Count(name => name.StartsWith(prefix, StringComparison.Ordinal));
 
@@ -294,32 +298,35 @@ public class FeatureSwitchTests
         await Assert.That(failures).IsEmpty();
     }
 
-    /// <summary>The renderer's own scene-color capture API is the switch, so a host that has never
-    /// heard of the configuration drives the same thing — and the view event still fires
-    /// synchronously, which is what lets a host bind materials to it straight after.</summary>
+    /// <summary>The capture feature's target exists exactly while its switch is on, and its view
+    /// event fires on the transition — synchronously, on the thread that flipped it, which is what
+    /// lets a host switch capture on and then create the materials that bind the view.
+    ///
+    /// <para>Reached through the pipeline like any other feature: the renderer used to publish a
+    /// <c>SceneColorCapture</c> property and a <c>SceneColorView</c> of its own, which made this
+    /// one built-in special for no reason a game's feature could ever share.</para></summary>
     [Test]
-    public async Task the_scene_color_capture_property_and_its_switch_are_one_thing()
+    public async Task the_capture_feature_follows_its_own_switch()
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
         using var _ = backend;
 
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var capture = Capture(pbr);
         var changes = 0;
-        pbr.SceneColorViewChanged += () => changes++;
+        capture.ViewChanged += () => changes++;
 
-        var offByDefault = pbr.SceneColorCapture;
-        pbr.SceneColorCapture = true;
-        var viewAfterProperty = pbr.SceneColorView.IsValid;
-        var switchAfterProperty = pbr.Switches.IsEnabled(PbrFeatures.SceneColorCapture.Id);
+        var offByDefault = capture.View.IsValid;
+        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+        var viewWhenOn = capture.View.IsValid;
 
         pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, false);
-        var propertyAfterSwitch = pbr.SceneColorCapture;
+        var viewWhenOff = capture.View.IsValid;
 
         await Assert.That(offByDefault).IsFalse();
-        await Assert.That(viewAfterProperty).IsTrue();
-        await Assert.That(switchAfterProperty).IsTrue();
-        await Assert.That(propertyAfterSwitch).IsFalse();
+        await Assert.That(viewWhenOn).IsTrue();
+        await Assert.That(viewWhenOff).IsFalse();
         await Assert.That(changes).IsEqualTo(2);
     }
 
