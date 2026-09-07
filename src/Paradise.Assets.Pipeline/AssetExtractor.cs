@@ -281,19 +281,19 @@ public static partial class AssetExtractor
         {
             // The sidecar's own `extract` names ONE folder for everything this GLB writes and
             // outranks the manifest's per-kind keys: it is the more specific directive of the two.
-            UPath For(ExtractKind kind)
+            UPath For(string kind)
             {
-                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind);
+                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind, GlbExtractor.DeclaredKinds);
                 return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
             }
 
             return new ExtractDirectories(
-                For(ExtractKind.Mesh),
-                For(ExtractKind.Skeleton),
-                For(ExtractKind.Animation),
-                For(ExtractKind.Material),
-                For(ExtractKind.Texture),
-                For(ExtractKind.Prefab));
+                For(ExtractKinds.Meshes),
+                For(ExtractKinds.Skeletons),
+                For(ExtractKinds.Animations),
+                For(ExtractKinds.Materials),
+                For(ExtractKinds.Textures),
+                For(ExtractKinds.Prefabs));
         }
 
         /// <summary>
@@ -525,89 +525,44 @@ public static partial class AssetExtractor
         /// <summary>One extracted file under the sync rule (an image today): the GLB side is what it extracts to now, the document side is the file on disk. <see langword="null"/> when a foreign file was refused.</summary>
         private GlbExtraction.Entry? Blob(AssetIndex index, UPath path, byte[] fresh, GlbExtraction.Entry? recorded, string kind)
         {
-            var glbSide = Fingerprint(fresh);
-            var exists = fileSystem.FileExists(path);
-            var documentSide = exists ? Fingerprint(fileSystem.ReadAllBytes(path)) : null;
+            var sourceSide = Fingerprint(fresh);
+            var documentSide = fileSystem.FileExists(path) ? Fingerprint(fileSystem.ReadAllBytes(path)) : null;
             var relative = index.Relative(path);
+            var outcome = ExtractionSync.Decide(sourceSide, documentSide, recorded?.GlbFingerprint, recorded?.DocumentFingerprint, resolution, kind);
 
-            if (!exists)
+            GlbExtraction.Entry Entry(string source, string document) => new(Reference(index, path), source, document);
+
+            switch (outcome.Action)
             {
-                Write(index, path, fresh);
-                return new GlbExtraction.Entry(Reference(index, path), glbSide, glbSide);
-            }
+                case SyncAction.Create:
+                    Write(index, path, fresh);
+                    return Entry(sourceSide, sourceSide);
 
-            if (recorded is null) return Foreign(relative, Reference(index, path), glbSide, documentSide!, () => fileSystem.WriteAllBytes(path, fresh));
-
-            var glbChanged = recorded.GlbFingerprint != glbSide;
-            var documentChanged = recorded.DocumentFingerprint != documentSide;
-            switch (glbChanged, documentChanged)
-            {
-                case (false, false):
+                case SyncAction.Unchanged:
                     return recorded;
 
-                case (true, false):
+                case SyncAction.TakeSource:
                     fileSystem.WriteAllBytes(path, fresh);
-                    _written.Add(new ExtractedFile(relative, "re-extracted: the GLB changed"));
-                    return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
+                    _written.Add(new ExtractedFile(relative, outcome.Note));
+                    return Entry(sourceSide, sourceSide);
 
-                case (false, true):
-                    // Nothing produces an edited blob today; the direction is reserved, not silent.
-                    // The record keeps the LAST-SYNCED fingerprint, so the divergence stays visible
-                    // and a later re-export is the conflict it is, not a silent overwrite.
+                case SyncAction.Adopt:
+                    _kept.Add($"{relative} ({outcome.Note})");
+                    return Entry(sourceSide, sourceSide);
+
+                case SyncAction.AdoptAsIs:
+                    _kept.Add($"{relative} ({outcome.Note})");
+                    return Entry(sourceSide, documentSide!);
+
+                case SyncAction.TakeDocument:
+                    // Nothing produces an edited blob today and no format writes one back, so the
+                    // record keeps its LAST-SYNCED pair: the divergence stays visible and a later
+                    // re-export is the conflict it is, not a silent overwrite.
                     _warnings.Add($"{relative} changed since it was extracted, and a {kind} cannot be written back into the GLB yet; `extract --take-glb` re-extracts it, or keep the edit and this warning");
                     return recorded;
 
                 default:
-                    return Conflict(relative, recorded, path, fresh, glbSide, documentSide!);
-            }
-        }
-
-        /// <summary>
-        /// A file at the extraction path that no sync recorded: another GLB's output, or the author's.
-        /// Adopted when it already holds what the GLB extracts to; otherwise the flags name a side,
-        /// and without one it is refused rather than recorded — recording it would make it this
-        /// GLB's on the next re-export, and for an image bind the GLB to pixels that are not its own.
-        /// </summary>
-        private GlbExtraction.Entry? Foreign(string relative, AssetReference reference, string glbSide, string documentSide, Action takeGlb)
-        {
-            if (glbSide == documentSide)
-            {
-                _kept.Add($"{relative} (exists with what the GLB extracts to; adopted)");
-                return new GlbExtraction.Entry(reference, glbSide, glbSide);
-            }
-
-            switch (resolution)
-            {
-                case ConflictResolution.TakeGlb:
-                    takeGlb();
-                    _written.Add(new ExtractedFile(relative, "existed and was not extracted by this tool: took the GLB's"));
-                    return new GlbExtraction.Entry(reference, glbSide, glbSide);
-
-                case ConflictResolution.TakeDocument:
-                    _kept.Add($"{relative} (existed and was not extracted by this tool: adopted as is)");
-                    return new GlbExtraction.Entry(reference, glbSide, documentSide);
-
-                default:
-                    _errors.Add($"{relative}: exists and was not extracted by this tool, and differs from what the GLB extracts to; delete it, or re-run with `--take-glb` to overwrite it or `--take-document` to adopt it");
-                    return null;
-            }
-        }
-
-        private GlbExtraction.Entry Conflict(string relative, GlbExtraction.Entry recorded, UPath path, byte[] fresh, string glbSide, string documentSide)
-        {
-            switch (resolution)
-            {
-                case ConflictResolution.TakeGlb:
-                    fileSystem.WriteAllBytes(path, fresh);
-                    _written.Add(new ExtractedFile(relative, "conflict: took the GLB's"));
-                    return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
-
-                case ConflictResolution.TakeDocument:
-                    _written.Add(new ExtractedFile(relative, "conflict: kept the document's"));
-                    return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = documentSide };
-
-                default:
-                    _errors.Add($"{relative}: both the GLB and the extracted file changed since they were last in step; re-run with `--take-glb` or `--take-document`");
+                    _errors.Add($"{relative}: {outcome.Problem}");
                     return recorded;
             }
         }
@@ -673,29 +628,34 @@ public static partial class AssetExtractor
                 return recorded ?? new GlbExtraction.Entry(Reference(index, path), glbSide, "");
             }
 
+            // Both sides are fingerprinted over the glTF-expressible subset, so a Paradise-only
+            // edit is never a divergence.
             var documentSide = Fingerprint(CanonicalTomlWriter.WriteBytes(GlbMaterialWriter.Subset(onDisk)));
-            if (recorded is null) return Foreign(relative, Reference(index, path), glbSide, documentSide, () => fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(fromGlb)));
+            var outcome = ExtractionSync.Decide(glbSide, documentSide, recorded?.GlbFingerprint, recorded?.DocumentFingerprint, resolution, "material");
+            var entry = recorded ?? new GlbExtraction.Entry(Reference(index, path), glbSide, documentSide);
 
-            var glbChanged = recorded.GlbFingerprint != glbSide;
-            var documentChanged = recorded.DocumentFingerprint != documentSide;
-            switch (glbChanged, documentChanged)
+            switch (outcome.Action)
             {
-                case (false, false):
+                case SyncAction.Unchanged:
                     return recorded;
 
-                case (true, false):
-                    return TakeGlb(index, path, fromGlb, onDisk, recorded, glbSide, "re-extracted: the GLB changed");
+                case SyncAction.TakeSource:
+                    return TakeGlb(index, path, fromGlb, onDisk, entry, glbSide, outcome.Note!);
 
-                case (false, true):
-                    return TakeDocument(index, path, materialIndex, onDisk, recorded, documentSide, "written back into the GLB");
+                case SyncAction.TakeDocument:
+                    return TakeDocument(index, path, materialIndex, onDisk, entry, documentSide, outcome.Note!);
+
+                case SyncAction.Adopt:
+                    _kept.Add($"{relative} ({outcome.Note})");
+                    return new GlbExtraction.Entry(Reference(index, path), glbSide, glbSide);
+
+                case SyncAction.AdoptAsIs:
+                    _kept.Add($"{relative} ({outcome.Note})");
+                    return new GlbExtraction.Entry(Reference(index, path), glbSide, documentSide);
 
                 default:
-                    return resolution switch
-                    {
-                        ConflictResolution.TakeGlb => TakeGlb(index, path, fromGlb, onDisk, recorded, glbSide, "conflict: took the GLB's"),
-                        ConflictResolution.TakeDocument => TakeDocument(index, path, materialIndex, onDisk, recorded, documentSide, "conflict: kept the document's, written into the GLB"),
-                        _ => Refuse(relative, recorded),
-                    };
+                    _errors.Add($"{relative}: {outcome.Problem}");
+                    return recorded;
             }
         }
 
@@ -732,12 +692,6 @@ public static partial class AssetExtractor
             }
 
             return recorded with { GlbFingerprint = documentSide, DocumentFingerprint = documentSide };
-        }
-
-        private GlbExtraction.Entry Refuse(string relative, GlbExtraction.Entry recorded)
-        {
-            _errors.Add($"{relative}: both the GLB's material and the document changed since they were last in step; re-run with `--take-glb` or `--take-document`");
-            return recorded;
         }
 
         private static CanonicalTomlTable MaterialDocumentFrom(GltfMaterialData material, string name, Func<int, AssetReference?> textureAt, out List<string> unresolved)

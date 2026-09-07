@@ -50,30 +50,17 @@ internal sealed class ExtractSectionDocument
     [JsonPropertyName("directory")]
     public string? Directory { get; set; }
 
-    [JsonPropertyName("meshes")]
-    public string? Meshes { get; set; }
-
-    [JsonPropertyName("skeletons")]
-    public string? Skeletons { get; set; }
-
-    [JsonPropertyName("animations")]
-    public string? Animations { get; set; }
-
-    [JsonPropertyName("materials")]
-    public string? Materials { get; set; }
-
-    [JsonPropertyName("textures")]
-    public string? Textures { get; set; }
-
-    [JsonPropertyName("prefabs")]
-    public string? Prefabs { get; set; }
-
     [JsonPropertyName("static_mesh_component")]
     public string? StaticMeshComponent { get; set; }
 
     [JsonPropertyName("skinned_mesh_component")]
     public string? SkinnedMeshComponent { get; set; }
 
+    /// <summary>
+    /// Every other key: a kind's directory. Not an error like the other sections' extension data,
+    /// because which kinds exist is the extractor chain's to say and the manifest cannot see it —
+    /// `verify` reports one nothing declares.
+    /// </summary>
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
 }
