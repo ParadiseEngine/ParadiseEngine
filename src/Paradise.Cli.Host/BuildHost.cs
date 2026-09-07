@@ -9,18 +9,20 @@ namespace Paradise.Cli;
 /// <summary>
 /// The <c>paradise</c> command's entry point, callable from any console project. The dotnet
 /// tool is <c>return BuildHost.Run(args);</c>; a game that extends the pipeline is
-/// <c>return BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()]);</c> in its own
-/// <c>tools/assets</c> project, and build and watch run that chain. That
-/// is the extension path (issue #208): a chain is code, so it is passed as code.
+/// <c>return BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()], [.. AssetExtractors.All, new MyExtractor()]);</c>
+/// in its own <c>tools/assets</c> project, and every verb runs those chains. That is the
+/// extension path (issue #208): a chain is code, so it is passed as code — an importer says how a
+/// file is built, an extractor says what a source container turns into.
 /// </summary>
 public static class BuildHost
 {
     /// <summary>Exit codes: 0 clean, 1 findings or failure, 2 usage error — the same trio as contract-check.</summary>
-    public static int Run(string[] args, IReadOnlyList<IAssetImporter>? importers = null)
+    public static int Run(string[] args, IReadOnlyList<IAssetImporter>? importers = null, IReadOnlyList<IAssetExtractor>? extractors = null)
     {
         ArgumentNullException.ThrowIfNull(args);
 
         var chain = importers ?? AssetImporters.All;
+        var containers = extractors ?? AssetExtractors.All;
         if (chain.Count == 0) return Unknown("the importer chain is empty; pass AssetImporters.All plus your own");
         if (args.Length == 0) return Usage();
 
@@ -34,9 +36,9 @@ public static class BuildHost
         return group switch
         {
             "new" => New(physical, args.Skip(1).ToArray()),
-            "assets" => Assets(physical, chain, verb, rest),
+            "assets" => Assets(physical, chain, containers, verb, rest),
             "tools" => Tools(physical, verb, rest),
-            "host" => Host(physical, chain, verb, rest),
+            "host" => Host(physical, chain, containers, verb, rest),
             "--help" or "-h" or "help" => Usage(),
             _ => Unknown($"unknown command '{group}'"),
         };
@@ -68,7 +70,7 @@ public static class BuildHost
         return Verbs.New(physical, physical.ConvertPathFromInternal(root), name);
     }
 
-    private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
+    private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, IReadOnlyList<IAssetExtractor> extractors, string? assetVerb, string[] arguments)
     {
         if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue)");
 
@@ -127,26 +129,26 @@ public static class BuildHost
 
         return assetVerb switch
         {
-            "verify" => Verbs.Verify(physical, layout, fix, importers),
+            "verify" => Verbs.Verify(physical, layout, fix, importers, extractors),
             "prefab-check" => Verbs.PrefabCheck(physical, layout, fix),
             "clean" => Verbs.Clean(physical, layout, keepEditor),
             "build" => Verbs.Build(physical, layout, profile, editor, importers),
             "catalogue" => Verbs.Catalogue(physical, layout),
-            "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers),
+            "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers, extractors),
             "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, positional[0]), Absolute(physical, positional[1]), importers),
             "mv" => Unknown("'mv' needs a source and a destination: paradise assets mv <from> <to>"),
             "rm" when positional.Count == 1 => Verbs.Remove(physical, layout, Absolute(physical, positional[0]), force, dryRun, importers),
             "rm" => Unknown("'rm' needs one path: paradise assets rm <path> [--force] [--dry-run]"),
             "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, positional[0]), transitive, importers),
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
-            "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, positional[0]), all, resolution, importers),
+            "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, positional[0]), all, resolution, importers, extractors),
             "extract" => Unknown("'extract' needs one path: paradise assets extract <glb | dir --all> [--take-glb | --take-document]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
     }
 
-    private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? hostVerb, string[] arguments)
+    private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, IReadOnlyList<IAssetExtractor> extractors, string? hostVerb, string[] arguments)
     {
         if (hostVerb is null) return Unknown("'host' needs a verb (build, play)");
 

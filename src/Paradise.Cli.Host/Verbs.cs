@@ -14,12 +14,12 @@ internal static class Verbs
     /// errors: a duplicate guid resolves to the ordinal-first asset, and fixing before that error
     /// was shown would rewrite paths toward an arbitrary winner the author never saw named.
     /// </param>
-    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix, IReadOnlyList<IAssetImporter>? importers = null)
+    public static int Verify(IFileSystem fileSystem, AssetProjectLayout layout, bool fix, IReadOnlyList<IAssetImporter>? importers = null, IReadOnlyList<IAssetExtractor>? extractors = null)
     {
         // One scan for both passes: the fix rewrites document bodies only, never files or
         // identities, so the index it was taken over still describes the tree after it.
         var index = AssetIndex.Scan(fileSystem, layout.Assets, IgnoreRules(fileSystem, layout));
-        var findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
+        var findings = ProjectVerifier.Verify(fileSystem, layout, index, importers, extractors);
 
         if (fix && findings.All(finding => finding.Severity != VerifySeverity.Error))
         {
@@ -29,7 +29,7 @@ internal static class Verbs
                 foreach (var repointed in repaired.Repointed) Console.WriteLine($"       {repointed}");
             }
 
-            findings = ProjectVerifier.Verify(fileSystem, layout, index, importers);
+            findings = ProjectVerifier.Verify(fileSystem, layout, index, importers, extractors);
         }
         else if (fix)
         {
@@ -84,7 +84,8 @@ internal static class Verbs
         bool dryRun,
         bool build,
         bool tray,
-        IReadOnlyList<IAssetImporter> importers)
+        IReadOnlyList<IAssetImporter> importers,
+        IReadOnlyList<IAssetExtractor>? extractors = null)
     {
         var log = PipelineLog.For(fileSystem, layout);
         var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout), importers);
@@ -105,7 +106,7 @@ internal static class Verbs
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
         using var signals = new WatchSignals();
-        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers);
+        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers, extractors: extractors);
         var minted = watcher.MintReferences();
         if (minted > 0) Console.WriteLine($"watch: {minted} mesh, skeleton and clip document(s) minted");
         TrayGameSession? game = null;
@@ -285,20 +286,21 @@ internal static class Verbs
     }
 
     /// <summary>One GLB, or every GLB under a directory with <paramref name="all"/>.</summary>
-    public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null)
+    public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null, IReadOnlyList<IAssetExtractor>? extractors = null)
     {
+        var containers = extractors ?? AssetExtractors.All;
         var targets = new List<UPath>();
         if (fileSystem.DirectoryExists(target))
         {
             if (!all)
             {
-                Console.Error.WriteLine($"extract: '{Display(fileSystem, target)}' is a directory; pass --all to extract every GLB under it");
+                Console.Error.WriteLine($"extract: '{Display(fileSystem, target)}' is a directory; pass --all to extract every source container under it");
                 return 1;
             }
 
             var ignore = IgnoreRules(fileSystem, layout);
             targets.AddRange(fileSystem.EnumerateFiles(target, "*", SearchOption.AllDirectories)
-                .Where(path => MeshContainer.IsMesh(path) && !ignore.Matches(layout.Assets, path))
+                .Where(path => AssetExtractors.For(containers, fileSystem, path) is not null && !ignore.Matches(layout.Assets, path))
                 .OrderBy(p => p.FullName, StringComparer.Ordinal));
         }
         else
@@ -311,9 +313,16 @@ internal static class Verbs
         // The same minting authority `watch` runs, started for this command; no watcher is alive
         // to hold a quarantined identity, so there is none to lose.
         var maintainer = new SidecarMaintainer(fileSystem, layout, log, ignore: IgnoreRules(fileSystem, layout), importers: importers);
-        foreach (var glb in targets)
+        foreach (var source in targets)
         {
-            var result = AssetExtractor.Extract(fileSystem, layout, glb, importers, resolution, log, maintainer: maintainer);
+            if (AssetExtractors.For(containers, fileSystem, source) is not { } extractor)
+            {
+                Console.Error.WriteLine($"error: nothing extracts '{Display(fileSystem, source)}'; this build reads: {AssetExtractors.Known(containers)}");
+                failed++;
+                continue;
+            }
+
+            var result = extractor.Extract(new ExtractRequest(fileSystem, layout, source, importers ?? AssetImporters.All, resolution, log, Maintainer: maintainer));
             foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
             foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
             foreach (var written in result.Written) Console.WriteLine($"wrote: {written}");
@@ -321,7 +330,7 @@ internal static class Verbs
             if (!result.Succeeded) failed++;
         }
 
-        Console.WriteLine($"extract: {targets.Count} glb(s), {failed} failed");
+        Console.WriteLine($"extract: {targets.Count} container(s), {failed} failed");
         return failed == 0 ? 0 : 1;
     }
 

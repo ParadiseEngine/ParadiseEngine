@@ -25,7 +25,7 @@ public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path,
 public static class ProjectVerifier
 {
     /// <summary>Findings, errors first.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout)
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetExtractor>? extractors = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -42,12 +42,12 @@ public static class ProjectVerifier
             ignore = AssetIgnoreRules.None;
         }
 
-        return Verify(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, ignore));
+        return Verify(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, ignore), extractors: extractors);
     }
 
-    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout)"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetExtractor})"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
     public static IReadOnlyList<VerifyFinding> Verify(
-        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null)
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null, IReadOnlyList<IAssetExtractor>? extractors = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -64,6 +64,7 @@ public static class ProjectVerifier
 
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var chain = importers ?? AssetImporters.All;
+        var containers = extractors ?? AssetExtractors.All;
         var guids = new Dictionary<Guid, UPath>();
         var cooked = new Dictionary<UPath, CookedGlb?>();
         foreach (var path in sources.Files)
@@ -97,8 +98,8 @@ public static class ProjectVerifier
                     VerifyMeshReference(fileSystem, sources, path, cooked, findings);
                     break;
 
-                case AssetClass.Foreign when MeshContainer.IsMesh(path):
-                    VerifyExtracted(fileSystem, path, findings);
+                case AssetClass.Foreign when AssetExtractors.For(containers, fileSystem, path) is { } extractor:
+                    VerifyExtracted(fileSystem, extractor, path, findings);
                     break;
 
                 case AssetClass.Foreign when path.GetName().EndsWith(".ktx2", StringComparison.OrdinalIgnoreCase):
@@ -232,21 +233,12 @@ public static class ProjectVerifier
         }
     }
 
-    /// <summary>A GLB that was never extracted has nothing for the build: the mesh, materials and clips that ship are the extracted ones.</summary>
-    private static void VerifyExtracted(IFileSystem fileSystem, UPath path, List<VerifyFinding> findings)
+    /// <summary>A source container that was never extracted has nothing for the build: the mesh, materials and clips that ship are the extracted ones.</summary>
+    private static void VerifyExtracted(IFileSystem fileSystem, IAssetExtractor extractor, UPath path, List<VerifyFinding> findings)
     {
-        var sidecar = SidecarMeta.PathFor(path);
-        if (!fileSystem.FileExists(sidecar)) return;   // the missing-sidecar finding already covers it
-        var bytes = fileSystem.ReadAllBytes(path);
-        if (!MeshContainer.HasGeometry(path, bytes) || !AssetExtractor.HasAuthoredParts(bytes)) return;
-        try
-        {
-            if (GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecar)).Authored) return;
-        }
-        catch (SidecarMetaException)
-        {
-            return;   // reported against the sidecar
-        }
+        if (!fileSystem.FileExists(SidecarMeta.PathFor(path))) return;   // the missing-sidecar finding already covers it
+        if (!extractor.HasParts(fileSystem, path) || !extractor.HasAuthoredParts(fileSystem, path)) return;
+        if (extractor.IsExtracted(fileSystem, path)) return;
 
         findings.Add(new VerifyFinding(
             VerifySeverity.Warning, path,
