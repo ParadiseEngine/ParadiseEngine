@@ -17,14 +17,27 @@ public static class PbrTargets
     /// game's blend material samples it. Exists only while capture is on.</summary>
     public const string SceneColor = "PbrSceneColor";
 
-    /// <summary>World positions from the SSAO pre-pass.</summary>
-    public const string SsaoPosition = "PbrSsaoPosition";
+    /// <summary>World-space normals of the opaque scene from the depth + normal pre-pass
+    /// (Rgba16Float: xyz unit normal, w coverage).</summary>
+    public const string PrepassNormal = "PbrPrepassNormal";
 
-    /// <summary>The pre-pass's own depth; written and never read.</summary>
-    public const string SsaoPrepassDepth = "PbrSsaoPrepassDepth";
+    /// <summary>The pre-pass's depth: the opaque scene's Depth32Float before the main pass, read
+    /// as an unfilterable float by screen-space effects.</summary>
+    public const string PrepassDepth = "PbrPrepassDepth";
 
     /// <summary>The shadow-map array, one layer per shadow view.</summary>
     public const string ShadowArray = "PbrShadowArray";
+
+    /// <summary>Ray-traced ambient occlusion, one value per pixel (Rgba16Float, r = visibility).</summary>
+    public const string RayTracedAo = "PbrRayTracedAo";
+
+    /// <summary>The two probe irradiance atlases (Rgba16Float octahedral tiles with a 1-texel
+    /// border), alternating roles each frame: one is read, the other written.</summary>
+    internal static readonly string[] GiIrradiance = ["PbrGiIrradiance0", "PbrGiIrradiance1"];
+
+    /// <summary>The two probe visibility atlases (mean and mean-squared distance), alternating
+    /// like <see cref="GiIrradiance"/>.</summary>
+    internal static readonly string[] GiVisibility = ["PbrGiVisibility0", "PbrGiVisibility1"];
 
     internal static readonly string[] Bloom = ["PbrBloom0", "PbrBloom1", "PbrBloom2", "PbrBloom3", "PbrBloom4", "PbrBloom5"];
 
@@ -41,6 +54,18 @@ public static class PbrResults
     /// <summary>Bloom mip 0, published only in frames the chain runs.</summary>
     public const string Bloom = "Pbr.Bloom";
 
-    /// <summary>The SSAO position target, published only in frames the pre-pass runs.</summary>
-    public const string SsaoPosition = "Pbr.Ssao.Position";
+    /// <summary>The pre-pass normal target, published only in frames the pre-pass runs.</summary>
+    public const string PrepassNormal = "Pbr.Prepass.Normal";
+
+    /// <summary>The pre-pass depth target, published together with <see cref="PrepassNormal"/>.</summary>
+    public const string PrepassDepth = "Pbr.Prepass.Depth";
+
+    /// <summary>The ray-traced ambient occlusion texture, published in frames it is computed.</summary>
+    public const string RayTracedAo = "Pbr.RayTracedAo";
+
+    /// <summary>This frame's probe irradiance atlas, published in frames the probes update.</summary>
+    public const string GiIrradiance = "Pbr.Gi.Irradiance";
+
+    /// <summary>This frame's probe visibility atlas, published with <see cref="GiIrradiance"/>.</summary>
+    public const string GiVisibility = "Pbr.Gi.Visibility";
 }

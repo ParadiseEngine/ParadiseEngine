@@ -37,4 +37,13 @@
     <Link Include="../.editorconfig" />
   </ItemGroup>
 
+  <!-- dotnet build -p:ParadiseProfiling=true compiles the profiling paths in: per-pass GPU
+       timestamps in the WebGPU backend, CPU phase timings in the PBR renderer, the sample's
+       bench. A global property reaches every project in the build, so the renderer and the host
+       that reads its timings always agree; a define set in one csproj would not. Off, the public
+       members stay (a host compiles either way) and report that timing is unavailable. -->
+  <PropertyGroup Condition="'$(ParadiseProfiling)' == 'true'">
+    <DefineConstants>$(DefineConstants);PARADISE_PROFILING</DefineConstants>
+  </PropertyGroup>
+
 </Project>

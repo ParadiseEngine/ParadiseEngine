@@ -38,6 +38,9 @@ public sealed record PbrLight
     // Godot LIGHT_PARAM_SIZE: directional = angular diameter in DEGREES; point/spot = world
     // radius in meters. 0 = punctual (no highlight softening).
     public float Size { get; init; }
+    /// <summary>How much of this light the probes bounce (Godot's <c>light_indirect_energy</c>):
+    /// 1 carries it faithfully, 0 keeps it out of the indirect lighting entirely.</summary>
+    public float IndirectEnergy { get; init; } = 1f;
 
     public SceneLightGpu ToGpu() => new()
     {
@@ -50,7 +53,7 @@ public sealed record PbrLight
         // raw radius (the shader derives the per-fragment angular term from distance).
         SizeParams = new Vector4(
             Type == PbrLightType.Directional ? 1f - MathF.Cos(Size * (MathF.PI / 180f)) : Size,
-            0f, 0f, 0f),
+            0f, MathF.Max(IndirectEnergy, 0f), 0f),
     };
 }
 
@@ -103,6 +106,77 @@ public sealed record PbrBloom
     public float Intensity { get; init; } = 0.6f;
 }
 
+/// <summary>Ray-traced ambient occlusion: hemisphere rays from the depth + normal pre-pass into the
+/// scene's bounding volume hierarchy. <see cref="MaxDistance"/> is how far an occluder counts, in
+/// world units; <see cref="NormalBias"/> lifts the ray origin off its surface.</summary>
+public sealed record PbrRayTracedAo
+{
+    public bool Enabled { get; init; }
+    public int RaysPerPixel { get; init; } = 4;
+    public float MaxDistance { get; init; } = 1f;
+    public float NormalBias { get; init; } = 0.01f;
+
+    /// <summary>Fraction of the frame's resolution the occlusion is traced at, (0, 1]. Half
+    /// resolution traces a quarter of the rays and upsamples bilinearly, which ambient occlusion
+    /// — a low-frequency term — tolerates well.</summary>
+    public float ResolutionScale { get; init; } = 0.5f;
+}
+
+/// <summary>An authored probe volume: where the probe grid starts, how far apart its probes are,
+/// and how many there are per axis. Overrides the fit to the static scene.</summary>
+public sealed record PbrProbeVolume(Vector3 Origin, Vector3 Spacing, int CountX, int CountY, int CountZ);
+
+/// <summary>Probe global illumination: a grid of irradiance probes updated every frame by rays
+/// traced into the scene's bounding volume hierarchy, replacing the sky ambient for surfaces
+/// inside the volume. Everything has a default; <see cref="Volume"/> null fits the static scene.</summary>
+public sealed record PbrGi
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Rays traced per probe per update, 8 to 256; the quality knob a host sets once per platform.</summary>
+    public int RaysPerProbe { get; init; } = 128;
+
+    /// <summary>How much of the previous frame's irradiance survives an update: 0.97 converges
+    /// over a second or two and rejects ray noise; lower reacts faster and shimmers more.</summary>
+    public float Hysteresis { get; init; } = 0.97f;
+
+    /// <summary>Upper bound on probes when the volume is fitted automatically.</summary>
+    public int MaxProbes { get; init; } = 4096;
+
+    /// <summary>Probes traced per frame; 0 traces the whole volume every frame.</summary>
+    public int ProbesPerFrame { get; init; }
+
+    /// <summary>Scales the indirect light the probes contribute.</summary>
+    public float Intensity { get; init; } = 1f;
+
+    /// <summary>Lookup bias off the shaded surface along its normal, as a fraction of probe spacing.</summary>
+    public float NormalBias { get; init; } = 0.1f;
+
+    /// <summary>Lookup bias toward the viewer, as a fraction of probe spacing.</summary>
+    public float ViewBias { get; init; } = 0.3f;
+
+    /// <summary>World-space padding around the static scene when the volume is fitted.</summary>
+    public float FitMargin { get; init; } = 0.5f;
+
+    /// <summary>An authored volume, or null to fit the static scene's bounds.</summary>
+    public PbrProbeVolume? Volume { get; init; }
+}
+
+/// <summary>How an instance takes part in global illumination. Mirrors Godot's
+/// <c>GeometryInstance3D.gi_mode</c> so an exporter carries it verbatim.</summary>
+public enum PbrGiMode : byte
+{
+    /// <summary>Traced: the instance occludes and bounces light, and receives it.</summary>
+    Static = 0,
+
+    /// <summary>Receives light from the probes but is not traced — a moving prop or a
+    /// character, whose bounce would lag a frame behind it anyway.</summary>
+    Dynamic = 1,
+
+    /// <summary>Neither traced nor lit by the probes: shaded with the sky ambient alone.</summary>
+    Disabled = 2,
+}
+
 /// <summary>Screen-space ambient-occlusion parameters (from Godot's Environment SSAO). When
 /// <see cref="Enabled"/>, the renderer runs a world-position pre-pass and darkens ambient in
 /// creases/contacts. <see cref="Radius"/> is in world units.</summary>
@@ -113,6 +187,20 @@ public sealed record PbrSsao
     public float Intensity { get; init; } = 2f;
     public float Bias { get; init; } = 0.05f;
     public float Power { get; init; } = 1.5f;
+}
+
+/// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: bucketing the
+/// scene, building the trace hierarchy, feature setup (uniform uploads, cluster binning, pass
+/// declaration), graph compile (sorting, culling, recording), draw-ring upload, and submit.</summary>
+public struct PbrCpuTimings
+{
+    public double Partition;
+    public double TraceBuild;
+    public double Setup;
+    public double Compile;
+    public double Upload;
+    public double Submit;
+    public readonly double Total => Partition + TraceBuild + Setup + Compile + Upload + Submit;
 }
 
 /// <summary>Camera state: matrices via <see cref="PbrMath"/>, plus the world position the
@@ -139,7 +227,10 @@ public sealed record PbrPrimitive(
     // Uploaded with joints/weights interleaved after the tangent (20 floats/vertex instead of 12),
     // which selects the skinned pipeline and its matching vertex layout. The two must travel
     // together: the rigid layout over a skinned buffer reads tangents as positions.
-    bool Skinned = false);
+    bool Skinned = false,
+    // The primitive's mesh in the renderer's trace scene, or -1 when it has none (a dynamic
+    // primitive keeps the hierarchy of the geometry it was uploaded with).
+    int TraceMesh = -1);
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);
@@ -155,6 +246,9 @@ public sealed class PbrInstance
     /// what lets five characters share one set of GPU buffers and still hold different poses.
     /// Write the matrices with <c>PbrRenderer.SetJointPalette</c> before the frame.</summary>
     public int JointOffset = -1;
+    /// <summary>How the instance takes part in global illumination; static by default, so a scene
+    /// lights itself with nothing authored.</summary>
+    public PbrGiMode GiMode = PbrGiMode.Static;
 }
 
 /// <summary>Everything <see cref="PbrRenderer.RenderFrame"/> consumes for one frame. Plain CPU
@@ -195,6 +289,8 @@ public sealed class PbrScene
     // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
     // and the shader darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();
+    public PbrRayTracedAo RayTracedAo = new();
+    public PbrGi Gi = new();
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
 }

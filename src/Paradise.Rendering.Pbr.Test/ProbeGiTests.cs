@@ -1,0 +1,353 @@
+using System.Numerics;
+using Paradise.Rendering.Pbr.Test.Baseline;
+using Paradise.Rendering.WebGPU;
+
+namespace Paradise.Rendering.Pbr.Test;
+
+/// <summary>The probes, proven by pictures: light that can only arrive by bouncing appears when the
+/// probes are on and not when they are off, and a scene lit by sky alone looks the same either way,
+/// which pins the irradiance convention the probes and the sky ambient share.</summary>
+public class ProbeGiTests
+{
+    private const uint Size = 96;
+
+    private static WebGpuRenderer? TryCreateHeadlessOrSkip()
+    {
+        try
+        {
+            return WebGpuRenderer.CreateHeadless(Size, Size);
+        }
+        catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
+        {
+            Skip.Test($"No WebGPU adapter available on this host: {error.Message}");
+            return null;
+        }
+    }
+
+    private static PbrScene Camera(Vector3 eye, Vector3 target) => new()
+    {
+        Camera = new PbrCamera
+        {
+            View = PbrMath.LookAt(eye, target, Vector3.UnitY),
+            Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+            Position = eye,
+        },
+        Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Linear },
+    };
+
+    /// <summary>Two facing walls in the dark: one glows red, the other is white and receives
+    /// nothing but what bounces off the glow. The camera looks at the white one.</summary>
+    private static PbrScene EmissiveRoom(PbrRenderer pbr, bool gi, bool thickBlock = false)
+    {
+        var (vertices, indices) = Procedural.UnitCube();
+        var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.9f, 0.9f, 1f));
+        var glow = pbr.Materials.AddMaterial(new Paradise.Assets.Gltf.GltfMaterialData(
+            Name: "glow", BaseColorFactor: new Vector4(0.1f, 0.1f, 0.1f, 1f), MetallicFactor: 0f, RoughnessFactor: 1f,
+            EmissiveFactor: new Vector3(6f, 0f, 0f), NormalScale: 1f, OcclusionStrength: 1f, TransmissionFactor: 0f,
+            AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Opaque, AlphaCutoff: 0.5f, DoubleSided: false,
+            BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1,
+            BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity), []);
+        var whiteMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, white)]);
+        var glowMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, glow)]);
+
+        // Camera between the walls, looking at the white one; the glowing wall is behind it.
+        var scene = Camera(new Vector3(0f, 1f, 0.5f), new Vector3(0f, 1f, -2f));
+        scene.Ambient = new PbrAmbient { Sky = Vector3.Zero, Equator = Vector3.Zero, Ground = Vector3.Zero, Flat = true };
+        scene.Gi = new PbrGi { Enabled = gi, RaysPerProbe = 64, Hysteresis = 0.5f, MaxProbes = 512 };
+        scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, -2f) });
+        scene.Instances.Add(new PbrInstance { Mesh = glowMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, 2f) });
+        scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 0.2f, 6f)) * Matrix4x4.CreateTranslation(0f, -1f, 0f) });
+        // A block too thick for relocation to push a probe out of: its interior grid points are
+        // switched off, which is the state the flicker test watches.
+        if (thickBlock)
+            scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(2.5f, 2.5f, 2.5f)) * Matrix4x4.CreateTranslation(-1.5f, 0.35f, -0.5f) });
+        return scene;
+    }
+
+
+
+    /// <summary>A probe switched off inside geometry must stay off. Reclassifying it from the
+    /// trace's placeholder miss rays reactivated it at its grid point every window lap, where it
+    /// was traced, saw back faces and was switched off again — a state oscillation with the
+    /// lap's period. The states are read back: a thick block switches some probes off, and the
+    /// set of inactive probes is identical across two further laps.</summary>
+    [Test]
+    public async Task an_inactive_probe_stays_inactive_across_window_laps()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = EmissiveRoom(pbr, gi: true, thickBlock: true);
+        scene.Gi = scene.Gi with { MaxProbes = 512 };
+        pbr.RenderFrame(scene);
+        var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
+        var probes = gi.ProbeCount;
+        var lap = (probes + 2) / 3;
+        scene.Gi = scene.Gi with { ProbesPerFrame = lap };
+        for (var i = 0; i < 12; i++) pbr.RenderFrame(scene);
+
+        var before = ReadInactive(backend, gi, probes);
+        await Assert.That(before.Count).IsGreaterThan(0);
+        await Assert.That(before.Count).IsLessThan(probes / 2);
+        // Frames within a lap and at whole laps: the set must not change at any of them.
+        for (var frame = 1; frame <= 6; frame++)
+        {
+            pbr.RenderFrame(scene);
+            var now = ReadInactive(backend, gi, probes);
+            await Assert.That(now).IsEquivalentTo(before);
+        }
+    }
+
+    private static HashSet<int> ReadInactive(WebGpuRenderer backend, ProbeGiFeature gi, int probes)
+    {
+        var bytes = backend.ReadbackBuffer(gi.ShadingStateBuffer, 0, (ulong)probes * 16);
+        var inactive = new HashSet<int>();
+        for (var i = 0; i < probes; i++)
+            if (BitConverter.ToSingle(bytes, i * 16 + 12) < 0.5f) inactive.Add(i);
+        return inactive;
+    }
+
+    /// <summary>A long corridor with a tight budget: the fit must keep widening until the grid fits
+    /// both the probe budget and the atlas, not give up after a fixed number of attempts.</summary>
+    [Test]
+    public async Task a_fit_of_a_long_corridor_with_a_tight_budget_stays_within_both_limits()
+    {
+        var volume = ProbeGiFeature.Fit(new Geometry.Aabb(new Vector3(0f, 0f, 0f), new Vector3(2000f, 2f, 2f)), new PbrGi { MaxProbes = 64 });
+        await Assert.That(volume).IsNotNull();
+        await Assert.That(volume!.CountX * volume.CountY * volume.CountZ).IsLessThanOrEqualTo(64);
+        await Assert.That(volume.CountX * volume.CountY * 16).IsLessThanOrEqualTo(8192);
+        await Assert.That(volume.CountX).IsGreaterThan(volume.CountY);
+    }
+
+    private static PbrScene OpenFloor(PbrRenderer pbr, bool gi, float exposure = 1f)
+    {
+        var (vertices, indices) = Procedural.UnitCube();
+        var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
+        var scene = Camera(new Vector3(0f, 2f, 3f), Vector3.Zero);
+        scene.Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Equator = new Vector3(0.5f), Ground = new Vector3(0.5f), Flat = true, Exposure = exposure };
+        scene.Gi = new PbrGi { Enabled = gi, RaysPerProbe = 128, Hysteresis = 0.5f, MaxProbes = 256 };
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, white)]),
+            Model = Matrix4x4.CreateScale(new Vector3(6f, 0.1f, 6f)) * Matrix4x4.CreateTranslation(0f, -0.05f, 0f),
+        });
+        return scene;
+    }
+
+    private static (double R, double G, double B) Mean(byte[] pixels)
+    {
+        // BGRA8 readback.
+        double r = 0, g = 0, b = 0;
+        var count = pixels.Length / 4;
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            b += pixels[i];
+            g += pixels[i + 1];
+            r += pixels[i + 2];
+        }
+        return (r / count, g / count, b / count);
+    }
+
+    private static byte[] Render(WebGpuRenderer backend, PbrRenderer pbr, PbrScene scene, int frames)
+    {
+        for (var i = 0; i < frames; i++) pbr.RenderFrame(scene);
+        return (byte[])backend.ReadbackColor(out _, out _).Clone();
+    }
+
+    [Test]
+    public async Task an_emissive_wall_lights_the_wall_facing_it_only_through_the_probes()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        (double R, double G, double B) off, on;
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            off = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: false), frames: 3));
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            on = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: true), frames: 12));
+
+        // Without probes the white wall is unlit: black. With them it carries the red bounce, and
+        // nothing else — the glow has no green or blue to bounce.
+        await Assert.That(off.R).IsLessThan(2.0);
+        await Assert.That(on.R).IsGreaterThan(12.0);
+        await Assert.That(on.G).IsLessThan(on.R * 0.25);
+        await Assert.That(on.B).IsLessThan(on.R * 0.25);
+    }
+
+    [Test]
+    public async Task an_open_floor_under_a_flat_sky_looks_the_same_with_and_without_probes()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        (double R, double G, double B) off, on;
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            off = Mean(Render(backend, pbr, OpenFloor(pbr, gi: false), frames: 3));
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            on = Mean(Render(backend, pbr, OpenFloor(pbr, gi: true), frames: 12));
+
+        // The probes see the same flat sky the ambient path uses, so the floor's brightness is the
+        // same convention either way: a mismatch here is a missing π or a doubled exposure.
+        // Some darkening is expected below the horizon: probes near the floor see the floor's own
+        // albedo instead of sky for their downward rays, which the sky-only ambient cannot.
+        await Assert.That(off.R).IsGreaterThan(40.0);
+        await Assert.That(Math.Abs(on.R - off.R)).IsLessThan(off.R * 0.2);
+    }
+
+    /// <summary>Exposure is applied exactly once on the probe path — in the trace's sky term — so
+    /// a scene at exposure 2 agrees with the ambient path at exposure 2 the way it does at 1. The
+    /// defect this pins: scaling the probe result by exposure again in the fragment shader, which
+    /// made the sky share exposure² while the bounce share stayed exposure¹.</summary>
+    [Test]
+    public async Task probes_and_sky_ambient_agree_at_an_exposure_other_than_one()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        (double R, double G, double B) off, on;
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            off = Mean(Render(backend, pbr, OpenFloor(pbr, gi: false, exposure: 0.35f), frames: 3));
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            on = Mean(Render(backend, pbr, OpenFloor(pbr, gi: true, exposure: 0.35f), frames: 12));
+
+        await Assert.That(off.R).IsGreaterThan(20.0);
+        await Assert.That(Math.Abs(on.R - off.R)).IsLessThan(off.R * 0.2);
+    }
+
+    /// <summary>An authored volume is held to the fit's limits at setup, with the count named.</summary>
+    [Test]
+    public async Task an_authored_volume_outside_the_limits_is_refused_by_name()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = OpenFloor(pbr, gi: true);
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(1f), 4, 1, 4) };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("4x1x4");
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 100, 100, 100), MaxProbes = 4096 };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("MaxProbes");
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 64, 64, 2), MaxProbes = 100000 };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("atlas");
+
+        // ...and a valid authored volume is adopted as given.
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(new Vector3(-3f, 0f, -3f), new Vector3(1f), 7, 3, 7), MaxProbes = 4096 };
+        pbr.RenderFrame(scene);
+        var active = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
+        await Assert.That(active).IsEqualTo(scene.Gi.Volume);
+    }
+
+    /// <summary>An empty primitive instanced as static must not poison the fit: its inverted
+    /// infinite bounds would transform to NaN. A traced vertex stream shorter than a position and
+    /// a normal is refused at upload.</summary>
+    [Test]
+    public async Task empty_and_malformed_primitives_are_kept_out_of_the_trace()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = OpenFloor(pbr, gi: true);
+        var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
+
+        scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([pbr.UploadPrimitive([], [], material)]) });
+        // A singular model has no object space to trace in; it is drawn and left out of the hierarchy.
+        var (cube, cubeIndices) = Procedural.UnitCube();
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = new PbrMesh([pbr.UploadPrimitive(cube, cubeIndices, material)]),
+            Model = Matrix4x4.CreateScale(new Vector3(1f, 0f, 1f)) * Matrix4x4.CreateTranslation(0f, 0.5f, 0f),
+        });
+        pbr.RenderFrame(scene);
+        var volume = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
+        await Assert.That(volume).IsNotNull();
+        await Assert.That(float.IsFinite(volume!.Origin.X) && float.IsFinite(volume.Spacing.X)).IsTrue();
+
+        await Assert.That(() => pbr.UploadPrimitive([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], [0, 1, 2], material, stride: 3))
+            .Throws<ArgumentException>().WithMessageContaining("stride");
+    }
+
+    /// <summary>The budget: tracing a handful of probes per frame reaches the same picture as
+    /// tracing them all, given the frames to go round. What the window skips must be carried
+    /// forward unchanged, or the untraced probes read as black holes in the atlas.</summary>
+    [Test]
+    public async Task a_probe_budget_smaller_than_the_volume_still_converges()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        (double R, double G, double B) all, budgeted;
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            all = Mean(Render(backend, pbr, EmissiveRoom(pbr, gi: true), frames: 12));
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+        {
+            var scene = EmissiveRoom(pbr, gi: true);
+            scene.Gi = scene.Gi with { ProbesPerFrame = 16, Hysteresis = 0.3f };
+            budgeted = Mean(Render(backend, pbr, scene, frames: 80));
+        }
+
+        await Assert.That(budgeted.R).IsGreaterThan(all.R * 0.6);
+        await Assert.That(budgeted.R).IsLessThan(all.R * 1.4);
+    }
+
+    [Test]
+    public async Task the_probe_passes_run_only_while_enabled_and_the_volume_fits_the_scene()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        var recorder = new RecordingRenderer(backend);
+        using var pbr = new PbrRenderer(recorder, Size, Size);
+        var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
+
+        var scene = OpenFloor(pbr, gi: false);
+        pbr.RenderFrame(scene);
+        var computeOff = Count(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
+        var volumeOff = gi.ActiveVolume;
+
+        scene.Gi = scene.Gi with { Enabled = true };
+        pbr.RenderFrame(scene);
+        var computeOn = Count(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
+        var dispatches = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
+        var volume = gi.ActiveVolume;
+
+        await Assert.That(computeOff).IsEqualTo(0);
+        await Assert.That(volumeOff).IsNull();
+        await Assert.That(computeOn).IsEqualTo(3);
+        await Assert.That(dispatches).IsEqualTo(4);
+        await Assert.That(volume).IsNotNull();
+        // The floor is 6×0.1×6 around the origin plus the default half-metre margin: the fitted
+        // grid spans it and stays under the probe budget.
+        await Assert.That(volume!.CountX * volume.CountY * volume.CountZ).IsLessThanOrEqualTo(256);
+        await Assert.That(volume.Origin.X).IsLessThanOrEqualTo(-3f);
+        await Assert.That(volume.Origin.X + (volume.CountX - 1) * volume.Spacing.X).IsGreaterThanOrEqualTo(3f);
+        await Assert.That(gi.ProbeCount).IsEqualTo(volume.CountX * volume.CountY * volume.CountZ);
+    }
+
+    [Test]
+    public async Task a_fit_respects_the_probe_budget_and_the_atlas_limit()
+    {
+        var volume = ProbeGiFeature.Fit(new Geometry.Aabb(new Vector3(-100f, 0f, -100f), new Vector3(100f, 30f, 100f)), new PbrGi { MaxProbes = 4096 });
+        await Assert.That(volume).IsNotNull();
+        await Assert.That(volume!.CountX * volume.CountY * volume.CountZ).IsLessThanOrEqualTo(4096);
+        await Assert.That(volume.CountX * volume.CountY * 16).IsLessThanOrEqualTo(8192);
+        await Assert.That(volume.CountX).IsGreaterThanOrEqualTo(2);
+        await Assert.That(ProbeGiFeature.Fit(Geometry.Aabb.Empty, new PbrGi())).IsNull();
+    }
+
+    private static int Count(RenderCommand[] commands, RenderCommandKind kind)
+    {
+        var count = 0;
+        foreach (var command in commands)
+            if (command.Kind == kind) count++;
+        return count;
+    }
+}

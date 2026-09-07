@@ -33,6 +33,7 @@ public static class UniformLayoutValidator
         ("sceneLightShadowMatrices", 6416, 24576), // 64 × 6 × 64-byte mat4
         ("time", 30992, 16),
         ("shadowFilter", 31008, 16),
+        ("invViewProj", 31024, 64),
     ];
 
     private static readonly (string Name, uint Offset, uint Size)[] s_materialFields =

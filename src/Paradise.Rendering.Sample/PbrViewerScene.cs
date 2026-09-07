@@ -27,6 +27,12 @@ internal sealed class PbrViewerScene : IDisposable
     private uint _width;
     private uint _height;
 
+    /// <summary>Process-wide switch read when a scene is built: ray-traced ambient occlusion on.</summary>
+    public static bool RayTracedAo { get; set; }
+
+    /// <summary>Process-wide switch read when a scene is built: probe global illumination on.</summary>
+    public static bool ProbeGi { get; set; }
+
     /// <param name="logger">Where <see cref="PbrRenderer"/>'s diagnostics go. Taken rather than
     /// created: a scene is not the host, and which sink to install — and at what level — is the
     /// host's call. <c>Program</c> makes it once from <c>--log-level</c>.</param>
@@ -74,8 +80,17 @@ internal sealed class PbrViewerScene : IDisposable
                 Mesh = metalMesh,
                 Model = Matrix4x4.CreateScale(0.7f) * Matrix4x4.CreateRotationY(0.5f) * Matrix4x4.CreateTranslation(0.9f, 0.15f, 0f),
             });
+            // A floor under the cubes, so contact occlusion and bounce have a surface to land on.
+            var floor = _pbr.Materials.AddDefaultMaterial(new Vector4(0.7f, 0.7f, 0.68f, 1f), metallic: 0f, roughness: 0.9f);
+            _scene.Instances.Add(new PbrInstance
+            {
+                Mesh = new PbrMesh([_pbr.UploadPrimitive(vertices, indices, floor)]),
+                Model = Matrix4x4.CreateScale(new Vector3(8f, 0.1f, 8f)) * Matrix4x4.CreateTranslation(0f, -0.55f, 0f),
+            });
         }
 
+        _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 2f };
+        _scene.Gi = new PbrGi { Enabled = ProbeGi };
         _scene.Lights.Add(new PbrLight
         {
             Type = PbrLightType.Directional,

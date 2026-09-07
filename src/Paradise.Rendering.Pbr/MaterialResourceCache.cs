@@ -12,6 +12,9 @@ namespace Paradise.Rendering.Pbr;
 /// while the target does not exist the binding is black, never dangling.</summary>
 public readonly record struct MaterialTarget(uint Binding, string Target);
 
+/// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
+public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
+
 /// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
 /// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
 /// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
@@ -29,6 +32,8 @@ public sealed class MaterialResourceCache : IDisposable
     // dedupes byte-identical images across assets.
     private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
     private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
+    // What a ray hit reads of a material: the factors alone, since a hit samples no textures.
+    private readonly List<TraceSurface> _surfaces = [];
     // Materials with target-following entries, and the view each entry was last built with.
     private readonly Dictionary<int, TargetSet> _targets = new();
     private readonly GraphTextureRegistry? _registry;
@@ -197,6 +202,7 @@ public sealed class MaterialResourceCache : IDisposable
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
         // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
+        _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
         var materialId = _materials.Count - 1;
         if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
         return materialId;
@@ -323,6 +329,9 @@ public sealed class MaterialResourceCache : IDisposable
     public BindGroupHandle GetBindGroup(int materialId) => _materials[materialId].Group;
 
     public bool IsBlend(int materialId) => _materials[materialId].Blend;
+
+    /// <summary>The factor-only surface the tracer shades a hit on this material with.</summary>
+    public TraceSurface GetTraceSurface(int materialId) => _surfaces[materialId];
 
     private TextureHandle ResolveTexture(
         int imageIndex, GltfImageData[] images, CompressedTextureUsage usage, TextureHandle fallback)

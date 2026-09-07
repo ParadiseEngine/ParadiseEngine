@@ -36,6 +36,9 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly CompositeFeature _composite;
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
+#if PARADISE_PROFILING
+    private readonly System.Diagnostics.Stopwatch _clock = new();
+#endif
 
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
@@ -50,16 +53,20 @@ public sealed partial class PbrRenderer : IDisposable
         Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
         _ctx.Materials = Materials;
 
-        // List order is dependency order: the scene reads the shadow plan and the SSAO result,
-        // the capture reads the scene's targets, the composite reads bloom's.
+        // List order is dependency order: the scene reads the shadow plan and the pre-pass
+        // result, the capture reads the scene's targets, the composite reads bloom's.
         _shadows = new ShadowFeature(_ctx);
-        var ssao = new SsaoFeature(_ctx);
-        _scene = new SceneFeature(_ctx, _shadows, ssao, specularAaVariance, specularAaClamp);
+        var prepass = new PrepassFeature(_ctx);
+        var rtao = new RayTracedAoFeature(_ctx);
+        var gi = new ProbeGiFeature(_ctx, _shadows);
+        _scene = new SceneFeature(_ctx, _shadows, prepass, gi, specularAaVariance, specularAaClamp);
         _capture = new SceneColorCaptureFeature(_ctx);
         _composite = new CompositeFeature(_ctx);
         Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height)
             .Add(_shadows)
-            .Add(ssao)
+            .Add(prepass)
+            .Add(rtao)
+            .Add(gi)
             .Add(_scene)
             .Add(_capture)
             .Add(new BloomFeature(_ctx))
@@ -67,6 +74,13 @@ public sealed partial class PbrRenderer : IDisposable
     }
 
     public MaterialResourceCache Materials { get; }
+
+    /// <summary>CPU time the last <see cref="RenderFrame"/> spent in each of its phases. Filled
+    /// only by a build with <c>-p:ParadiseProfiling=true</c>; zero otherwise.</summary>
+    public PbrCpuTimings LastCpuTimings { get; private set; }
+
+    /// <summary>The passes the last frame submitted, in the order a backend times them.</summary>
+    public IReadOnlyList<string> LastPassNames => _graph.LivePassNames;
 
     /// <summary>The features that make up a frame, in the order they set up. A host adds its own
     /// after these; they see the engine's targets by the names in <see cref="PbrTargets"/> and
@@ -293,10 +307,15 @@ public sealed partial class PbrRenderer : IDisposable
         }
         if (vertices.Length < stride) { min = max = Vector3.Zero; }
 
+        // Every primitive gets a hierarchy at upload; the tracer only ever reads the ones the
+        // frame's instances reference, and a hierarchy built from the upload-time stream is what a
+        // dynamic or skinned primitive traces as (its rest pose, under the instance transform).
+        var traceMesh = _ctx.Trace.AddMesh(vertices, stride, indices);
+
         return new PbrPrimitive(
             vb, ib, (uint)indices.Length,
             (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
-            min, max);
+            min, max, TraceMesh: traceMesh);
     }
 
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
@@ -319,6 +338,8 @@ public sealed partial class PbrRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        var timings = new PbrCpuTimings();
+        Lap();
         var view = scene.Camera.View;
         var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
 
@@ -349,12 +370,18 @@ public sealed partial class PbrRenderer : IDisposable
 
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
+        timings.Partition = Lap();
+        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it.
+        if (scene.RayTracedAo.Enabled || scene.Gi.Enabled) _ctx.Trace.BuildFrame(opaque, Materials);
+        timings.TraceBuild = Lap();
         _graph.Reset();
         Pipeline.Setup(_graph);
+        timings.Setup = Lap();
 
         _commandWriter.ResetWrittenCount();
         var stream = _graph.Compile(_commandWriter);
         _ctx.BindGroups.EndFrame();
+        timings.Compile = Lap();
 
         // Recording staged the draw uniforms; upload them now, before the stream that reads them.
         _shadows.UploadStagedDraws();
@@ -368,8 +395,23 @@ public sealed partial class PbrRenderer : IDisposable
             _ctx.JointHighWater = 0;
         }
 
+        timings.Upload = Lap();
         _renderer.Submit(in stream);
+        timings.Submit = Lap();
+        LastCpuTimings = timings;
     }
+
+    /// <summary>Milliseconds since the previous lap; 0 in a build without profiling.</summary>
+#if PARADISE_PROFILING
+    private double Lap()
+    {
+        var ms = _clock.Elapsed.TotalMilliseconds;
+        _clock.Restart();
+        return ms;
+    }
+#else
+    private static double Lap() => 0;
+#endif
 
     internal int PipelineVariantCountForTest => _programs.PipelineCount;
     // Culling is invisible in the submitted stream — a pass that was declared and dropped and

@@ -112,6 +112,7 @@ jobs:
             Paradise.Assets.Pipeline
             Paradise.Assets.Gltf
             Paradise.Assets.Textures
+            Paradise.Geometry
             Paradise.Rendering.Pbr
             Paradise.Ui
             Paradise.Ui.ImGui

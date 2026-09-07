@@ -91,6 +91,9 @@ internal sealed partial class WebGpuDevice : IDisposable
     /// requires it (the transcoder falls back to RGBA32 otherwise).</summary>
     public bool SupportsBc { get; private set; }
 
+    /// <summary>True when the adapter granted timestamp queries — what per-pass GPU timing needs.</summary>
+    public bool SupportsTimestampQuery { get; private set; }
+
     /// <summary>Device-required alignment for dynamic uniform-buffer offsets. Draw-UBO rings
     /// must stride by a multiple of this (WebGPU guarantees ≤ 256; we clamp up to 256 so ring
     /// layouts stay stable across adapters).</summary>
@@ -159,6 +162,14 @@ internal sealed partial class WebGpuDevice : IDisposable
         // Negotiate optional features up-front: BC texture compression is required for the
         // KTX2→BC transcode path; when absent the asset layer falls back to RGBA32 uploads.
         var supportsBc = adapter.HasFeature(WgFeatureName.TextureCompressionBC);
+        // Timestamp queries cost nothing until a pass asks to be timed; requesting them up front
+        // is what lets a profiler be switched on at runtime rather than at device creation. Only a
+        // profiling build asks: a shipping build must not depend on an optional feature it never uses.
+#if PARADISE_PROFILING
+        var supportsTimestamps = adapter.HasFeature(WgFeatureName.TimestampQuery);
+#else
+        var supportsTimestamps = false;
+#endif
 
         // NOT `static` lambdas any more: they capture the logger, which costs one closure per
         // device — once, at creation — and is what lets a host route Dawn's validation errors
@@ -181,16 +192,16 @@ internal sealed partial class WebGpuDevice : IDisposable
                 LogDeviceLost(log, reason, text);
             },
         };
-        if (supportsBc)
-        {
-            deviceDesc.RequiredFeatures = new[] { WgFeatureName.TextureCompressionBC };
-        }
+        var features = new System.Collections.Generic.List<WgFeatureName>(2);
+        if (supportsBc) features.Add(WgFeatureName.TextureCompressionBC);
+        if (supportsTimestamps) features.Add(WgFeatureName.TimestampQuery);
+        if (features.Count > 0) deviceDesc.RequiredFeatures = features.ToArray();
 
         var device = adapter.RequestDeviceSync(in deviceDesc, AdapterTimeoutNs)
             ?? throw new InvalidOperationException("WebGPU device creation failed.");
 
         var queue = device.GetQueue();
-        var result = new WebGpuDevice(instance, adapter, device, queue) { SupportsBc = supportsBc };
+        var result = new WebGpuDevice(instance, adapter, device, queue) { SupportsBc = supportsBc, SupportsTimestampQuery = supportsTimestamps };
         var limits = device.GetLimits();
         result.UniformBufferOffsetAlignment = Math.Max(256, limits.MinUniformBufferOffsetAlignment);
         return result;

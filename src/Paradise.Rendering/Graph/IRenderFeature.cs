@@ -14,6 +14,11 @@ public enum FrameRequirements
     /// <summary>The opaque scene must be resolved into a sampleable texture before transparent
     /// geometry draws: the scene pass splits at the opaque/blend boundary.</summary>
     SceneColorCapture = 1 << 0,
+
+    /// <summary>The opaque scene's depth and normals must exist before the main pass: the
+    /// depth + normal pre-pass runs and publishes its targets, whatever the scene's own
+    /// screen-space settings say.</summary>
+    DepthNormalPrepass = 1 << 1,
 }
 
 /// <summary>One unit of the frame: a thing that owns its own GPU resources and declares its own
