@@ -278,9 +278,24 @@ public class LightCullingTests
         await Assert.That(passesOn).IsEqualTo(1);
         await Assert.That(passesOff).IsEqualTo(0);
         await Assert.That(passesBack).IsEqualTo(1);
+
         // The switch moves cost, never pixels. This is also what catches a retraction that did not
         // happen: switched off with a stale mask buffer still bound, lights would go missing.
-        await Assert.That(pixelsOff).IsEquivalentTo(pixelsOn);
+        //
+        // Compared BY INDEX, not with IsEquivalentTo, which tests membership only — a frame whose
+        // pixels were shuffled satisfies it, and this is the assertion carrying the claim.
+        await Assert.That(pixelsOff.Length).IsEqualTo(pixelsOn.Length);
+        for (var i = 0; i < pixelsOn.Length; i++)
+        {
+            if (pixelsOff[i] == pixelsOn[i]) continue;
+            throw new InvalidOperationException(
+                $"Byte {i} (pixel {i / 4}, channel {i % 4}) differs: culling on {pixelsOn[i]}, off {pixelsOff[i]}.");
+        }
+        // And not vacuously: two black frames would match byte for byte and prove nothing about
+        // whether the lights were ever shaded.
+        var lit = 0;
+        foreach (var value in pixelsOn) if (value != 0) lit++;
+        await Assert.That(lit).IsGreaterThan(pixelsOn.Length / 4);
     }
 
     [Test]
