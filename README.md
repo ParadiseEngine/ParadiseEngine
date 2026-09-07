@@ -209,7 +209,8 @@ GLB's sidecar sets `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
 ```toml
 [extract]
 directory  = "models"          # the fallback for any kind that names none
-meshes     = "models"          # .mesh / .skinnedmesh / .skeleton
+meshes     = "models"          # .mesh / .skinnedmesh
+skeletons  = "animations"      # .skeleton (falls back to `meshes`, not `directory`)
 animations = "animations"      # .anim
 materials  = "materials"       # .material
 textures   = "textures"        # images the GLB no longer embeds
@@ -217,7 +218,8 @@ prefabs    = "prefabs/models"  # the generated .prefab
 ```
 
 Set nothing and everything lands beside the GLB; set only `directory` and everything lands in that
-one folder. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
+one folder. A `.skeleton` falls back to `meshes` before `directory`, because it has always landed
+with the geometry that names it; a project files it with the rig's clips by saying so. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
 for everything that GLB extracts to. Changing a key never moves what is already extracted: the
 sidecar records each output by guid and a later run re-syncs it where it now lives, so a routing
 change applies to what the GLB has no record of yet, and moving the existing files (`paradise

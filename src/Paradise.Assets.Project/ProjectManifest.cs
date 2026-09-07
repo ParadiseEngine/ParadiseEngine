@@ -140,6 +140,7 @@ public sealed class ProjectManifest
             string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent)
         {
             Meshes = Folder(document.Extract?.Meshes),
+            Skeletons = Folder(document.Extract?.Skeletons),
             Animations = Folder(document.Extract?.Animations),
             Materials = Folder(document.Extract?.Materials),
             Textures = Folder(document.Extract?.Textures),
@@ -255,8 +256,10 @@ public sealed record HostSettings(string? Project, IReadOnlyList<string> Argumen
 /// <summary>A file an extraction is about to write, as far as WHERE it goes is concerned.</summary>
 public enum ExtractKind
 {
-    /// <summary>The geometry documents: a <c>.mesh</c> or <c>.skinnedmesh</c>, and the <c>.skeleton</c> the latter names. They travel together because a skinned mesh document is unreadable without its skeleton.</summary>
+    /// <summary>The geometry documents: a <c>.mesh</c> or a <c>.skinnedmesh</c>.</summary>
     Mesh,
+    /// <summary>The <c>.skeleton</c> a skinned mesh names. Its own kind because a project can reasonably file it with the rig's clips rather than with the geometry; it defaults to the geometry's directory, which is where it has always gone.</summary>
+    Skeleton,
     Animation,
     Material,
     Texture,
@@ -280,6 +283,9 @@ public sealed record ExtractSettings(string? Directory, string? StaticMeshCompon
 
     public string? Meshes { get; init; }
 
+    /// <summary>Null falls back to <see cref="Meshes"/>: a skeleton has always landed with the geometry, and a project that says nothing keeps that.</summary>
+    public string? Skeletons { get; init; }
+
     public string? Animations { get; init; }
 
     public string? Materials { get; init; }
@@ -292,6 +298,7 @@ public sealed record ExtractSettings(string? Directory, string? StaticMeshCompon
     public string? DirectoryFor(ExtractKind kind) => kind switch
     {
         ExtractKind.Mesh => Meshes,
+        ExtractKind.Skeleton => Skeletons ?? Meshes,
         ExtractKind.Animation => Animations,
         ExtractKind.Material => Materials,
         ExtractKind.Texture => Textures,

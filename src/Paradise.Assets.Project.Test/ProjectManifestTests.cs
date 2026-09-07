@@ -112,6 +112,20 @@ public class ProjectManifestTests
 
         // `meshes` names nothing, so the geometry documents take the section's fallback.
         await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Mesh)).IsEqualTo("cooked");
+
+        // Nor does `skeletons`, and its first fallback is the geometry's directory, not the section's.
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Skeleton)).IsEqualTo("cooked");
+    }
+
+    [Test]
+    public async Task a_skeleton_follows_the_meshes_directory_until_it_names_its_own()
+    {
+        var withMeshes = ProjectManifest.Parse($"{Minimal}\n\n[extract]\ndirectory = \"cooked\"\nmeshes = \"meshes\"\n", "project.toml");
+        await Assert.That(withMeshes.Extract.DirectoryFor(ExtractKind.Skeleton)).IsEqualTo("meshes");
+
+        var withOwn = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmeshes = \"meshes\"\nskeletons = \"animations\"\n", "project.toml");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Skeleton)).IsEqualTo("animations");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Mesh)).IsEqualTo("meshes");
     }
 
     [Test]

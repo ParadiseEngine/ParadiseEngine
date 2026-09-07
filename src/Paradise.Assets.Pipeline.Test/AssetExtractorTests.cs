@@ -618,6 +618,7 @@ public class AssetExtractorTests
 
             [extract]
             directory = "cooked"
+            skeletons = "animations"
             animations = "animations"
             materials = "materials"
             textures = "textures"
@@ -630,7 +631,7 @@ public class AssetExtractorTests
         foreach (var expected in new[]
                  {
                      "cooked/crate.mesh",
-                     "cooked/crate.skeleton",
+                     "animations/crate.skeleton",
                      "animations/crate.Bob.anim",
                      "materials/crate.wood.material",
                      "materials/crate.metal.material",
@@ -647,7 +648,7 @@ public class AssetExtractorTests
 
         var extraction = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
         await Assert.That(extraction.Mesh!.Path).IsEqualTo("cooked/crate.mesh");
-        await Assert.That(extraction.Skeleton!.Path).IsEqualTo("cooked/crate.skeleton");
+        await Assert.That(extraction.Skeleton!.Path).IsEqualTo("animations/crate.skeleton");
         await Assert.That(extraction.Clips.Single().Reference.Path).IsEqualTo("animations/crate.Bob.anim");
         await Assert.That(extraction.Images.Single().Entry.Reference.Path).IsEqualTo("textures/crate_0.png");
         await Assert.That(extraction.Materials.Select(m => m.Entry.Reference.Path))

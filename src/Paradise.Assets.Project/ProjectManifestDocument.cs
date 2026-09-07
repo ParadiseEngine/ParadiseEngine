@@ -53,6 +53,9 @@ internal sealed class ExtractSectionDocument
     [JsonPropertyName("meshes")]
     public string? Meshes { get; set; }
 
+    [JsonPropertyName("skeletons")]
+    public string? Skeletons { get; set; }
+
     [JsonPropertyName("animations")]
     public string? Animations { get; set; }
 

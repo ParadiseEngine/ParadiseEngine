@@ -124,7 +124,7 @@ public static partial class AssetExtractor
     }
 
     /// <summary>Where one GLB's extraction writes each kind, resolved once per run.</summary>
-    private sealed record ExtractDirectories(UPath Meshes, UPath Animations, UPath Materials, UPath Textures, UPath Prefabs);
+    private sealed record ExtractDirectories(UPath Meshes, UPath Skeletons, UPath Animations, UPath Materials, UPath Textures, UPath Prefabs);
 
     private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
     {
@@ -197,7 +197,7 @@ public static partial class AssetExtractor
 
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(glb));
-            var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Meshes / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
+            var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Skeletons / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
             var mesh = MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton);
             var clips = Clips(index, directories.Animations, stem, source, cooked, recorded);
             if (referencesOnly)
@@ -289,6 +289,7 @@ public static partial class AssetExtractor
 
             return new ExtractDirectories(
                 For(ExtractKind.Mesh),
+                For(ExtractKind.Skeleton),
                 For(ExtractKind.Animation),
                 For(ExtractKind.Material),
                 For(ExtractKind.Texture),
