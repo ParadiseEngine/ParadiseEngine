@@ -12,6 +12,12 @@
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 64;
 
+// Shadow views the frame can carry — one array layer each, one matrix each. Its OWN number, not
+// MaxSceneLights * 6: a light that only shades costs no layer, and raising the light cap must not
+// enlarge this array. Mirrored by FrameUniformsGpu.MaxShadowViews, and a divergence between the
+// two is what UniformLayoutValidator throws on at renderer init.
+static const int MaxShadowViews = 384;
+
 struct SceneLight
 {
     float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
@@ -42,7 +48,7 @@ struct FrameUniforms
     float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
-    float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
+    float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow-array layer; index = light.spotAngles.z + face
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
     float4   shadowFilter;   // x: soft-shadow PCF disk radius in shadow texels, yzw unused
     // Inverse of the camera view-projection: how a screen-space effect turns a pre-pass depth

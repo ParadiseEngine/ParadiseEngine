@@ -218,11 +218,6 @@ Things that bit, so they are rules:
   32× less unprojection — was within noise of a thread per froxel. Neither is in the tree. The pass
   is too small a share of the frame for its shape to matter, so measure this pass in isolation
   before rewriting it, and treat "froxels × lights looks quadratic" as the trap it is.
-  Moving Forward+ binning off the CPU paid twice at `--lights 62` (64 lights, the mask width): the
-  `setup` phase went 0.63 → 0.045 ms because the per-frame clear and 300 KB mask upload went with
-  it, and the GPU frame went 3.8 → 2.9 ms because a gather against the froxel box is tighter than
-  the screen-AABB scatter it replaced and fewer zero-contribution lights get shaded. The picture is
-  byte-identical across the change.
 
 ### A feature is switched by engine configuration, not by a flag of its own
 
