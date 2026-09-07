@@ -766,6 +766,41 @@ public class AssetExtractorTests
     }
 
     [Test]
+    public async Task a_prefab_routed_where_the_scan_cannot_see_it_is_an_error_like_any_other_kind()
+    {
+        // The prefab is never recorded, so nothing downstream notices it landed somewhere the scan
+        // ignores: it would have no identity, nothing could reference it, and the run would report
+        // success. It is the one kind whose route the record cannot check, so the run checks it.
+        using var fileSystem = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["hidden/*"]
+
+            [extract]
+            prefabs = "hidden"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("extract.prefabs") && e.Contains("hidden/crate.prefab"))).IsTrue();
+
+        // Routed somewhere the scan DOES see, the same project is clean.
+        using var visible = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [extract]
+            prefabs = "prefabs"
+            """);
+        var fine = AssetExtractor.Extract(visible, s_layout, Glb);
+        await Assert.That(fine.Errors).IsEmpty();
+        await Assert.That(visible.FileExists("/game/assets/prefabs/crate.prefab")).IsTrue();
+    }
+
+    [Test]
     public async Task a_skinned_glbs_unindexed_skeleton_is_an_error_not_a_throw()
     {
         // The rigid path was covered; this is the skinned one, where the .skinnedmesh NAMES the

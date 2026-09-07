@@ -221,9 +221,17 @@ public static partial class AssetExtractor
             ReportUnresolved(index, extraction);
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
-            if (generatePrefab && Seed(index, layout, directories.Prefabs / $"{stem}.prefab", stem, Identified(index, extraction), cooked))
+            var prefab = directories.Prefabs / $"{stem}.prefab";
+            if (generatePrefab && Seed(index, layout, prefab, stem, Identified(index, extraction), cooked))
             {
                 index = Rescan();
+
+                // The prefab is the one kind the record does not carry, so nothing downstream would
+                // notice it landed where the scan cannot see it — an ignored folder, or one spelled
+                // with another case. It would have no identity, so nothing could ever reference it,
+                // and the run would report success. Checked here instead, in the same terms as
+                // every recorded kind.
+                if (index.IdentityOf(prefab) is null) Unresolved(index, "extract.prefabs", index.Relative(prefab));
             }
 
             Save(index, sidecarPath, extraction);
@@ -290,11 +298,15 @@ public static partial class AssetExtractor
         {
             foreach (var (where, reference) in Identified(index, extraction).Entries().Where(entry => entry.Reference.Guid == Guid.Empty))
             {
-                // Deduplicated: Save reports too, so an abort path that already named one does not
-                // say it twice.
-                var message = $"{index.Relative(glb)}: {where} wrote '{reference.Path}', which no asset under assets/ carries; check the directory `[extract]` names for it — the spelling, its case included, has to match the tree";
-                if (!_errors.Contains(message)) _errors.Add(message);
+                Unresolved(index, where, reference.Path);
             }
+        }
+
+        /// <summary>Deduplicated: Save reports as well as the run, so an abort path that already named one does not say it twice.</summary>
+        private void Unresolved(AssetIndex index, string where, string path)
+        {
+            var message = $"{index.Relative(glb)}: {where} wrote '{path}', which no asset under assets/ carries; check the directory `[extract]` names for it — the spelling, its case included, has to match the tree";
+            if (!_errors.Contains(message)) _errors.Add(message);
         }
 
         private ExtractDirectories Directories(GlbExtraction settings, ProjectManifest manifest)
