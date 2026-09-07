@@ -52,7 +52,6 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
         _historyPipeline = ctx.Renderer.CreatePipeline(blit, PbrTargets.HdrFormat);
         _uniformBuffer = ctx.Renderer.CreateBuffer(new BufferDesc(
             "PbrSsrUniforms", (ulong)Unsafe.SizeOf<SsrUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        EnsureTargets(1f);
     }
 
     /// <summary>Whether last frame's HDR copy exists to read: false before the first frame the
@@ -67,8 +66,10 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
 
     public void Resize(uint width, uint height)
     {
-        EnsureTargets(_scale);
-        // A resized history holds nothing this frame; the reflections return on the next.
+        // Targets exist only once the feature has run: two frame-sized textures, one of them
+        // HDR, are not worth holding for a renderer that never reflects. Setup re-ensures them
+        // at the new size; a resized history holds nothing this frame either way.
+        if (_ctx.Targets.Contains(PbrTargets.SsrHistory)) EnsureTargets(_scale);
         _historyValid = false;
     }
 
@@ -97,11 +98,14 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
 
         // The history copy is declared whenever the feature is on, so the first frame with
         // something opaque already has last frame's picture to read. Its consumer is NEXT frame's
-        // trace, which the graph cannot see, so it is kept explicitly.
+        // trace, which the graph cannot see: the pass is kept explicitly, and so is its STORE —
+        // inferred, the graph discards an attachment nothing reads this frame, which is exactly
+        // the first frame and the frame after a resize, the two that exist to fill it.
+        EnsureTargets(settings.ResolutionScale);
         var history = graph.Texture(PbrTargets.SsrHistory);
         graph.AddRasterPass("Ssr.History", RenderPassEvent.AfterTransparent)
             .NeverCull()
-            .Color(0, history, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
+            .Color(0, history, LoadOp.Clear, StoreOp.Store, clear: new ColorRgba(0f, 0f, 0f, 0f))
             .BindGroup(0, "PbrSsrHistoryGroup", _historyGroup,
             [
                 GraphBinding.Texture(0, graph.Texture(PbrTargets.Hdr)),
@@ -113,7 +117,6 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
         var viewProjection = _ctx.ViewProjection;
         if (hasPrepass && _historyValid)
         {
-            EnsureTargets(settings.ResolutionScale);
             var uniforms = new SsrUniformsGpu
             {
                 Params = new Vector4(Math.Clamp(settings.MaxSteps, 1, 256), MathF.Max(settings.MaxDistance, 1e-3f),

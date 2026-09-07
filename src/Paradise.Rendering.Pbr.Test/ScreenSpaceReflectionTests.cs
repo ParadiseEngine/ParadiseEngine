@@ -87,10 +87,9 @@ public class ScreenSpaceReflectionTests
         return sum / (double)count;
     }
 
-    private static byte[] Render(WebGpuRenderer backend, PbrRenderer pbr, PbrScene scene)
+    private static byte[] Render(WebGpuRenderer backend, PbrRenderer pbr, PbrScene scene, int frames = 4)
     {
-        // The reflection reads the previous frame, so the third frame is the first steady one.
-        for (var i = 0; i < 4; i++) pbr.RenderFrame(scene);
+        for (var i = 0; i < frames; i++) pbr.RenderFrame(scene);
         var pixels = (byte[])backend.ReadbackColor(out var width, out var height).Clone();
         if (Environment.GetEnvironmentVariable("PARADISE_SSR_DUMP") is { } dump)
         {
@@ -115,6 +114,27 @@ public class ScreenSpaceReflectionTests
 
         await Assert.That(without).IsLessThan(8);
         await Assert.That(with).IsGreaterThan(without + 30);
+    }
+
+    /// <summary>The second frame is the first that reflects, and it reads the history the first
+    /// frame wrote — which the graph would have DISCARDED, nothing reading it that frame, had the
+    /// blit not declared its store. A black history reflects black with full confidence.</summary>
+    [Test]
+    public async Task The_second_frame_already_reflects_what_the_first_stored()
+    {
+        using var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+
+        var second = FloorRedness(Render(backend, pbr, BuildScene(pbr, ssr: true), frames: 2), backend.ColorFormat);
+        await Assert.That(pbr.LastPassNames).Contains("Ssr.Trace");
+        await Assert.That(second).IsGreaterThan(30);
+
+        // And the frame after a resize, whose history the resized blit wrote once.
+        pbr.Resize(Size + 8, Size + 8);
+        pbr.Resize(Size, Size);
+        var afterResize = FloorRedness(Render(backend, pbr, BuildScene(pbr, ssr: true), frames: 2), backend.ColorFormat);
+        await Assert.That(afterResize).IsGreaterThan(30);
     }
 
     [Test]

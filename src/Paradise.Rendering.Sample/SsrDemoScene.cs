@@ -8,14 +8,17 @@ using Paradise.Rendering.WebGPU;
 namespace Paradise.Rendering.Sample;
 
 /// <summary>The screen-space reflection test scene: a polished dark floor under a row of colored
-/// pillars, a glowing slab and a spinning gold block, seen from low enough that the floor is mostly
-/// reflection. Half the floor is a mirror and half is brushed, so the roughness fade is visible in
+/// pillars, a glowing slab, a spinning gold block and a walking skinned mannequin, seen from low
+/// enough that the floor is mostly reflection. Half the floor is a mirror and half is brushed, so the roughness fade is visible in
 /// one frame; the camera orbits slowly, which is what shows a reflection that lags or smears.</summary>
 internal sealed class SsrDemoScene : IDisposable
 {
     private readonly PbrRenderer _pbr;
     private readonly PbrScene _scene = new();
     private readonly PbrInstance _spinner;
+    private readonly PbrInstance _walker;
+    private readonly SkinnedMannequin _mannequin = new();
+    private readonly Matrix4x4[] _palette = new Matrix4x4[SkinnedMannequin.JointCount];
     private int _frame;
     private float _yaw;
     private float _pitch = 0.18f;
@@ -63,6 +66,13 @@ internal sealed class SsrDemoScene : IDisposable
 
         _spinner = new PbrInstance { Mesh = Box(gold), GiMode = PbrGiMode.Dynamic };
         _scene.Instances.Add(_spinner);
+
+        // A skinned walker on the mirror half: its reflection follows the pose because the
+        // pre-pass skins too, and it is dynamic because it moves every frame.
+        var orange = _pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.45f, 0.12f, 1f), metallic: 0f, roughness: 0.5f);
+        var walkerMesh = new PbrMesh([_pbr.UploadSkinnedPrimitive(_mannequin.Vertices, _mannequin.JointsWeights, _mannequin.Indices, orange)]);
+        _walker = new PbrInstance { Mesh = walkerMesh, JointOffset = 0, GiMode = PbrGiMode.Dynamic };
+        _scene.Instances.Add(_walker);
 
         _scene.HasSkyBackground = true;
         _scene.SkyTopColor = new Vector3(0.25f, 0.45f, 0.85f);
@@ -120,13 +130,19 @@ internal sealed class SsrDemoScene : IDisposable
 
     public void Zoom(float wheel) => _distance = Math.Clamp(_distance * (1f - wheel * 0.1f), 2f, 30f);
 
-    /// <summary>The gold block spins above the floor's seam. Frame-driven so a headless run is deterministic.</summary>
+    /// <summary>The gold block spins over the mirror half, clear of the seam so its reflection is
+    /// read against one material. Frame-driven so a headless run is deterministic.</summary>
     private void AnimateSpinner()
     {
         var time = _frame / 60f;
         var angle = Animate ? time * 0.7f : 0.4f;
         _spinner.Model = Matrix4x4.CreateScale(1.2f) * Matrix4x4.CreateRotationY(angle) * Matrix4x4.CreateRotationX(angle * 0.5f)
-            * Matrix4x4.CreateTranslation(0f, 1.6f + 0.2f * MathF.Sin(time), -1f);
+            * Matrix4x4.CreateTranslation(-2.2f, 1.6f + 0.2f * MathF.Sin(time), -1f);
+        // The walker turns slowly on the spot so the reflection shows every side of the rig.
+        var walkTime = Animate ? time : 0.3f;
+        _walker.Model = Matrix4x4.CreateRotationY(Animate ? time * 0.4f : 0.6f) * Matrix4x4.CreateTranslation(-4.6f, 0f, -0.5f);
+        _mannequin.Pose(walkTime, Matrix4x4.Identity, _palette);
+        _pbr.SetJointPalette(_walker.JointOffset, _palette);
         _scene.ElapsedSeconds = time;
     }
 

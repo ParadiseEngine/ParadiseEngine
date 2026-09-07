@@ -67,21 +67,6 @@ float sceneViewDepth(float2 uv)
     return mul(ssrUniforms.viewProj, float4(worldAt(uv, depth), 1.0)).w;
 }
 
-/// Projects a world point; returns false behind the camera. uv is in [0,1] texture space.
-bool project(float3 world, out float2 uv, out float viewDepth)
-{
-    float4 clip = mul(ssrUniforms.viewProj, float4(world, 1.0));
-    viewDepth = clip.w;
-    if (clip.w <= 1e-4)
-    {
-        uv = float2(0.0, 0.0);
-        return false;
-    }
-    float2 ndc = clip.xy / clip.w;
-    uv = ndc * float2(0.5, -0.5) + 0.5;
-    return true;
-}
-
 bool onScreen(float2 uv)
 {
     return all(uv >= 0.0) && all(uv <= 1.0);
@@ -132,8 +117,14 @@ void ssrMain(uint3 id: SV_DispatchThreadID)
     const float nearW = 0.05;
     if (clip1.w < nearW)
     {
-        // The far end crosses the camera plane; shorten the ray to stop just in front of it.
-        rayLength *= (clip0.w - nearW) / max(clip0.w - clip1.w, 1e-5);
+        // The far end crosses the camera plane; shorten the ray to stop just in front of it. A
+        // surface already closer than that has no ray to walk.
+        rayLength *= max(clip0.w - nearW, 0.0) / max(clip0.w - clip1.w, 1e-5);
+        if (rayLength <= 0.0)
+        {
+            ssrTexture.Store(pixel, float4(0.0, 0.0, 0.0, 0.0));
+            return;
+        }
         clip1 = mul(ssrUniforms.viewProj, float4(position + dir * rayLength, 1.0));
     }
     float2 prepassSize = ssrUniforms.screen.zw;
@@ -153,6 +144,10 @@ void ssrMain(uint3 id: SV_DispatchThreadID)
 
     float sPrevious = 0.0;
     float scenePrevious = clip0.w;
+    // Whether the previous sample was in front of what the screen holds there. A crossing is
+    // the transition from in front to behind; a sample that is behind because the ray already
+    // passed behind an occluder is not one, and must not re-hit that occluder's front face.
+    bool wasInFront = true;
     float sHit = -1.0;
     float behind = 0.0;
     for (int i = 0; i < steps; i++)
@@ -163,7 +158,8 @@ void ssrMain(uint3 id: SV_DispatchThreadID)
         if (!onScreen(sampleUv)) break;
         float rayDepth = 1.0 / lerp(invW0, invW1, s);
         float sceneDepth = sceneViewDepth(sampleUv);
-        if (sceneDepth > 0.0 && rayDepth > sceneDepth)
+        bool inFront = !(sceneDepth > 0.0 && rayDepth > sceneDepth);
+        if (!inFront && wasInFront)
         {
             // Behind the surface this step: bisect back to the crossing, then ask how far
             // behind it the ray is there. A ray that passed BEHIND something keeps walking,
@@ -203,6 +199,7 @@ void ssrMain(uint3 id: SV_DispatchThreadID)
         }
         sPrevious = s;
         scenePrevious = sceneDepth;
+        wasInFront = inFront;
     }
 
     if (sHit < 0.0)
