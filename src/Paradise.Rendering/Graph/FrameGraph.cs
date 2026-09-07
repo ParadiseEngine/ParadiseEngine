@@ -33,7 +33,7 @@ public enum GraphResourceScope
     External,
 
     /// <summary>Only passes in this graph consume it. A write nobody declares a
-    /// <see cref="FrameGraph.PassBuilder.Reads"/> for is dead, and the pass producing it is culled.
+    /// <see cref="FrameGraph.PassBuilder.Reads(GraphTexture)"/> for is dead, and the pass producing it is culled.
     ///
     /// <para>This is information the declaring code has and the graph cannot derive: the read
     /// usually lives inside a bind group built once at resize, where nothing in the frame's
@@ -49,6 +49,15 @@ public readonly record struct GraphTexture(int Index)
 {
     internal bool IsValid => Index >= 0;
     public static readonly GraphTexture Invalid = new(-1);
+}
+
+/// <summary>A buffer the graph tracks reads and writes of, so a compute pass that fills it and
+/// the pass that consumes it are ordered and culled by the same rules as textures. The graph
+/// never allocates it; a feature imports the buffer it owns.</summary>
+public readonly record struct GraphBuffer(int Index)
+{
+    internal bool IsValid => Index >= 0;
+    public static readonly GraphBuffer Invalid = new(-1);
 }
 
 /// <summary>Builds one frame's pass list, then lowers it to a <see cref="RenderCommandStream"/>.
@@ -82,6 +91,7 @@ public sealed partial class FrameGraph
     private readonly Dictionary<string, int> _owned = new(StringComparer.Ordinal);
     private readonly List<Pass> _passes = [];
     private readonly List<ReadEdge> _reads = [];
+    private readonly List<WriteEdge> _writes = [];
     private readonly List<GraphBinding> _bindings = [];
     private readonly Stack<int> _liveStack = new();
     private readonly ILogger _log;
@@ -100,7 +110,7 @@ public sealed partial class FrameGraph
         _log = logger ?? NullLogger.Instance;
         // Index 0 is always the backbuffer, so Reset never has to re-add it and Backbuffer needs
         // no null check at a declaration site.
-        _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default, null));
+        _resources.Add(new Resource(ResourceKind.Backbuffer, GraphResourceScope.External, default, default, null, default));
     }
 
     /// <summary>The targets this graph owns, or null.</summary>
@@ -121,6 +131,7 @@ public sealed partial class FrameGraph
     {
         _passes.Clear();
         _reads.Clear();
+        _writes.Clear();
         _bindings.Clear();
         _owned.Clear();
         _resources.RemoveRange(1, _resources.Count - 1);
@@ -129,7 +140,7 @@ public sealed partial class FrameGraph
     /// <summary>Route a color attachment to a texture view the caller owns.</summary>
     public GraphTexture ImportColor(TextureViewHandle view, GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedColor, scope, view, default, null));
+        _resources.Add(new Resource(ResourceKind.ImportedColor, scope, view, default, null, default));
         return new GraphTexture(_resources.Count - 1);
     }
 
@@ -138,8 +149,20 @@ public sealed partial class FrameGraph
     public GraphTexture ImportDepth(TextureHandle texture, TextureViewHandle view = default,
         GraphResourceScope scope = GraphResourceScope.External)
     {
-        _resources.Add(new Resource(ResourceKind.ImportedDepth, scope, view, texture, null));
+        _resources.Add(new Resource(ResourceKind.ImportedDepth, scope, view, texture, null, default));
         return new GraphTexture(_resources.Count - 1);
+    }
+
+    /// <summary>Track a buffer the caller owns. A compute pass that binds it for writing becomes
+    /// its producer; a pass that binds it for reading depends on that producer, and a
+    /// <see cref="GraphResourceScope.GraphOnly"/> buffer nobody reads culls whoever fills it —
+    /// which is how a ray-trace pass whose only output is a hit buffer is switched off from the
+    /// consumer's side, the way a texture producer already is.</summary>
+    public GraphBuffer ImportBuffer(BufferHandle buffer, GraphResourceScope scope = GraphResourceScope.External)
+    {
+        if (!buffer.IsValid) throw new ArgumentException("Buffer handle is invalid.", nameof(buffer));
+        _resources.Add(new Resource(ResourceKind.ImportedBuffer, scope, default, default, null, buffer));
+        return new GraphBuffer(_resources.Count - 1);
     }
 
     /// <summary>A target the graph owns, by its <see cref="GraphTextureRegistry"/> name. One
@@ -154,7 +177,7 @@ public sealed partial class FrameGraph
         var textures = Textures ?? throw new InvalidOperationException(
             "This graph owns no textures; import the resource instead.");
         var scope = textures.IsExported(name) ? GraphResourceScope.External : GraphResourceScope.GraphOnly;
-        _resources.Add(new Resource(ResourceKind.Owned, scope, textures.View(name), textures.Texture(name), name));
+        _resources.Add(new Resource(ResourceKind.Owned, scope, textures.View(name), textures.Texture(name), name, default));
         index = _resources.Count - 1;
         _owned.Add(name, index);
         return new GraphTexture(index);
@@ -163,12 +186,25 @@ public sealed partial class FrameGraph
     /// <summary>Declare a raster pass. <paramref name="offset"/> shifts it within the event's gap —
     /// <c>Opaque + 1</c> runs immediately after the built-in opaque pass and still before anything
     /// at <see cref="RenderPassEvent.AfterOpaque"/>.</summary>
-    public PassBuilder AddRasterPass(string name, RenderPassEvent when, int offset = 0)
+    public PassBuilder AddRasterPass(string name, RenderPassEvent when, int offset = 0) =>
+        AddPass(name, when, offset, PassKind.Raster);
+
+    /// <summary>Declare a compute pass. It has no attachments, so what it produces is declared
+    /// through its bind groups — a <see cref="GraphBinding.StorageTexture"/> or a
+    /// <see cref="GraphBinding.Buffer(uint, GraphBuffer, ulong, ulong, bool)"/> bound for writing
+    /// — or with <see cref="PassBuilder.Writes(GraphTexture)"/> when the write goes through a
+    /// group the graph does not build. It is sorted, culled and ordered exactly like a raster
+    /// pass; only the lowering differs, and it takes no slot in the pass table.</summary>
+    public PassBuilder AddComputePass(string name, RenderPassEvent when, int offset = 0) =>
+        AddPass(name, when, offset, PassKind.Compute);
+
+    private PassBuilder AddPass(string name, RenderPassEvent when, int offset, PassKind kind)
     {
         ArgumentNullException.ThrowIfNull(name);
         _passes.Add(new Pass
         {
             Name = name,
+            Kind = kind,
             SortKey = (int)when + offset,
         });
         return new PassBuilder(this, _passes.Count - 1);
@@ -217,10 +253,14 @@ public sealed partial class FrameGraph
         }
         CheckReadsFollowWrites(passes, count);
 
+        // Only raster passes occupy the pass table: a compute pass has no attachments, so the
+        // table index a BeginPass carries counts raster passes in sorted order and skips compute.
+        var rasterCount = 0;
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
-            ref var desc = ref _descs[slot];
+            if (pass.Kind != PassKind.Raster) continue;
+            ref var desc = ref _descs[rasterCount++];
             desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(passes, slot, count));
             for (var c = 0; c < pass.ColorCount; c++)
                 desc[c] = ResolveColor(passes, slot, count, c);
@@ -232,16 +272,26 @@ public sealed partial class FrameGraph
             ResolveBindGroups(ref passes[_order[slot]]);
 
         var encoder = new RenderCommandEncoder(writer);
+        var rasterSlot = 0;
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
-            encoder.BeginPass(slot);
             var recording = new PassRecording(encoder, pass.Groups, pass.Name);
-            pass.Invoke!(pass.Recorder!, pass.Context!, ref recording, pass.Argument);
-            encoder.EndPass();
+            if (pass.Kind == PassKind.Compute)
+            {
+                encoder.BeginComputePass();
+                pass.Invoke!(pass.Recorder!, pass.Context!, ref recording, pass.Argument);
+                encoder.EndComputePass();
+            }
+            else
+            {
+                encoder.BeginPass(rasterSlot++);
+                pass.Invoke!(pass.Recorder!, pass.Context!, ref recording, pass.Argument);
+                encoder.EndPass();
+            }
         }
 
-        return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, count));
+        return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, rasterCount));
     }
 
     private void ResolveBindGroups(ref Pass pass)
@@ -260,7 +310,18 @@ public sealed partial class FrameGraph
 
     private BindGroupEntryDesc Resolve(in GraphBinding binding)
     {
-        if (binding.Kind == GraphBindingKind.Raw) return binding.Raw;
+        switch (binding.Kind)
+        {
+            case GraphBindingKind.Raw:
+                return binding.Raw;
+            case GraphBindingKind.BufferRead:
+            case GraphBindingKind.BufferWrite:
+            {
+                var buffer = _resources[binding.TargetBuffer.Index];
+                // The declaration carried the window; the handle is the graph's to supply.
+                return BindGroupEntryDesc.ForBuffer(binding.Binding, buffer.Buffer, binding.Raw.Offset, binding.Raw.Size);
+            }
+        }
 
         var resource = _resources[binding.Target.Index];
         if (resource.Kind != ResourceKind.Owned)
@@ -276,7 +337,7 @@ public sealed partial class FrameGraph
         for (var i = 0; i < count; i++)
         {
             ref var pass = ref passes[i];
-            if (pass.ColorCount == 0 && !pass.HasDepth)
+            if (pass.Kind == PassKind.Raster && pass.ColorCount == 0 && !pass.HasDepth)
                 throw new InvalidOperationException(
                     $"Raster pass '{pass.Name}' declares no attachments; it would render nowhere.");
             if (pass.Recorder is null)
@@ -286,12 +347,13 @@ public sealed partial class FrameGraph
 
         // A pass that samples what it is rendering into is rejected by every backend at draw
         // time with a message about a bind group; name the pass and the resource here instead.
+        // The same holds for a compute pass reading a buffer or texture it also writes.
         foreach (var edge in _reads)
         {
             if (edge.History) continue;
-            if (Writes(in passes[edge.Pass], edge.Resource))
+            if (WritesResource(passes, edge.Pass, edge.Resource))
                 throw new InvalidOperationException(
-                    $"Pass '{passes[edge.Pass].Name}' reads '{NameOf(edge.Resource)}' while rendering into it.");
+                    $"Pass '{passes[edge.Pass].Name}' reads '{NameOf(edge.Resource)}' while writing it.");
         }
     }
 
@@ -309,7 +371,7 @@ public sealed partial class FrameGraph
 
         _liveStack.Clear();
         for (var i = 0; i < count; i++)
-            if (passes[i].NeverCull || WritesObservable(in passes[i]))
+            if (passes[i].NeverCull || WritesObservable(passes, i))
                 _liveStack.Push(i);
 
         while (_liveStack.Count > 0)
@@ -336,24 +398,38 @@ public sealed partial class FrameGraph
     private void PushProducers(Span<Pass> passes, int count, int resourceIndex)
     {
         for (var producer = 0; producer < count; producer++)
-            if (!passes[producer].Live && Writes(in passes[producer], resourceIndex))
+            if (!passes[producer].Live && WritesResource(passes, producer, resourceIndex))
                 _liveStack.Push(producer);
     }
 
-    private bool WritesObservable(in Pass pass)
+    private bool WritesObservable(Span<Pass> passes, int passIndex)
     {
+        ref var pass = ref passes[passIndex];
         for (var c = 0; c < pass.ColorCount; c++)
             if (_resources[pass.Colors[c].Target.Index].Scope == GraphResourceScope.External)
                 return true;
-        return pass.HasDepth && _resources[pass.Depth.Target.Index].Scope == GraphResourceScope.External;
+        if (pass.HasDepth && _resources[pass.Depth.Target.Index].Scope == GraphResourceScope.External)
+            return true;
+        foreach (var edge in _writes)
+            if (edge.Pass == passIndex && _resources[edge.Resource].Scope == GraphResourceScope.External)
+                return true;
+        return false;
     }
 
-    private static bool Writes(in Pass pass, int resourceIndex)
+    /// <summary>Whether <paramref name="passIndex"/> writes <paramref name="resourceIndex"/>, as
+    /// an attachment or through a declared storage write.</summary>
+    private bool WritesResource(Span<Pass> passes, int passIndex, int resourceIndex)
     {
+        ref var pass = ref passes[passIndex];
         for (var c = 0; c < pass.ColorCount; c++)
             if (pass.Colors[c].Target.Index == resourceIndex)
                 return true;
-        return pass.HasDepth && pass.Depth.Target.Index == resourceIndex;
+        if (pass.HasDepth && pass.Depth.Target.Index == resourceIndex)
+            return true;
+        foreach (var edge in _writes)
+            if (edge.Pass == passIndex && edge.Resource == resourceIndex)
+                return true;
+        return false;
     }
 
     private ColorAttachmentDesc ResolveColor(Span<Pass> passes, int slot, int count, int color)
@@ -413,12 +489,15 @@ public sealed partial class FrameGraph
 
     private void RequireNoLaterWriter(Span<Pass> passes, int slot, int count, int resourceIndex)
     {
-        if (_resources[resourceIndex].Kind != ResourceKind.Owned) return;
+        // Owned textures and tracked buffers have all their writers in this graph; an imported
+        // texture or the backbuffer may have been written by the host before the frame.
+        var kind = _resources[resourceIndex].Kind;
+        if (kind != ResourceKind.Owned && kind != ResourceKind.ImportedBuffer) return;
         if (WrittenBefore(passes, slot, resourceIndex)) return;
         for (var later = slot + 1; later < count; later++)
         {
+            if (!WritesResource(passes, _order[later], resourceIndex)) continue;
             ref var writer = ref passes[_order[later]];
-            if (!Writes(in writer, resourceIndex)) continue;
             ref var reader = ref passes[_order[slot]];
             throw new InvalidOperationException(
                 $"Pass '{reader.Name}' (event {reader.SortKey}) reads '{NameOf(resourceIndex)}' before " +
@@ -467,7 +546,7 @@ public sealed partial class FrameGraph
     private bool WrittenBefore(Span<Pass> passes, int slot, int resourceIndex)
     {
         for (var earlier = 0; earlier < slot; earlier++)
-            if (Writes(in passes[_order[earlier]], resourceIndex)) return true;
+            if (WritesResource(passes, _order[earlier], resourceIndex)) return true;
         return false;
     }
 
@@ -482,7 +561,12 @@ public sealed partial class FrameGraph
     private string NameOf(int resourceIndex)
     {
         var resource = _resources[resourceIndex];
-        return resource.Name ?? (resource.Kind == ResourceKind.Backbuffer ? "backbuffer" : $"imported#{resourceIndex}");
+        return resource.Name ?? resource.Kind switch
+        {
+            ResourceKind.Backbuffer => "backbuffer",
+            ResourceKind.ImportedBuffer => $"buffer#{resourceIndex}",
+            _ => $"imported#{resourceIndex}",
+        };
     }
 
     /// <summary>Loading what nothing wrote reads last frame's contents — or, after a resize,
@@ -491,12 +575,16 @@ public sealed partial class FrameGraph
         Message = "Pass '{Pass}' loads '{Resource}', which no earlier pass wrote this frame.")]
     private static partial void LogLoadOfUnwritten(ILogger logger, string pass, string resource);
 
-    private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth, Owned }
+    private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth, Owned, ImportedBuffer }
+
+    private enum PassKind : byte { Raster, Compute }
 
     private readonly record struct Resource(
-        ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture, string? Name);
+        ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture, string? Name, BufferHandle Buffer);
 
     private readonly record struct ReadEdge(int Pass, int Resource, bool History);
+
+    private readonly record struct WriteEdge(int Pass, int Resource);
 
     private struct Attachment
     {
@@ -553,6 +641,7 @@ public sealed partial class FrameGraph
     private struct Pass
     {
         public string Name;
+        public PassKind Kind;
         public int SortKey;
         public object? Context;
         public Delegate? Recorder;
@@ -592,6 +681,7 @@ public sealed partial class FrameGraph
             if (!target.IsValid) throw new ArgumentException("Attachment target is not a graph resource.", nameof(target));
 
             ref var pass = ref _graph.PassAt(_index);
+            RequireRaster(in pass, "a color attachment");
             if (slot > pass.ColorCount)
                 throw new ArgumentOutOfRangeException(nameof(slot),
                     $"Color slot {slot} skips slot {pass.ColorCount}; attachments must be bound in order.");
@@ -619,6 +709,7 @@ public sealed partial class FrameGraph
             if (!target.IsValid) throw new ArgumentException("Attachment target is not a graph resource.", nameof(target));
 
             ref var pass = ref _graph.PassAt(_index);
+            RequireRaster(in pass, "a depth attachment");
             pass.HasDepth = true;
             pass.Depth = new Attachment { Target = target, Load = load, Store = store, ClearDepth = clear, Layer = layer };
             return this;
@@ -648,8 +739,22 @@ public sealed partial class FrameGraph
             foreach (var binding in bindings)
             {
                 _graph._bindings.Add(binding);
-                if (binding.Kind != GraphBindingKind.Raw)
-                    Reads(binding.Target);
+                switch (binding.Kind)
+                {
+                    case GraphBindingKind.TextureView:
+                    case GraphBindingKind.TextureArrayView:
+                        Reads(binding.Target);
+                        break;
+                    case GraphBindingKind.StorageTextureView:
+                        Writes(binding.Target);
+                        break;
+                    case GraphBindingKind.BufferRead:
+                        Reads(binding.TargetBuffer);
+                        break;
+                    case GraphBindingKind.BufferWrite:
+                        Writes(binding.TargetBuffer);
+                        break;
+                }
             }
             _graph.PassAt(_index).GroupDecls[(int)groupIndex] = new GroupDecl
             {
@@ -668,6 +773,42 @@ public sealed partial class FrameGraph
             if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
             _graph._reads.Add(new ReadEdge(_index, source.Index, History: false));
             return this;
+        }
+
+        /// <summary>Declare that this pass reads <paramref name="source"/> through a group the graph
+        /// does not build. The buffer twin of <see cref="Reads(GraphTexture)"/>.</summary>
+        public PassBuilder Reads(GraphBuffer source)
+        {
+            if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
+            _graph._reads.Add(new ReadEdge(_index, source.Index, History: false));
+            return this;
+        }
+
+        /// <summary>Declare that this pass writes <paramref name="target"/> other than as an
+        /// attachment — a storage texture bound through a group the graph does not build. The pass
+        /// becomes the target's producer for culling and ordering, exactly as if it rendered into
+        /// it. Bound through <see cref="BindGroup"/> with <see cref="GraphBinding.StorageTexture"/>
+        /// the declaration is derived and this call is unnecessary.</summary>
+        public PassBuilder Writes(GraphTexture target)
+        {
+            if (!target.IsValid) throw new ArgumentException("Write target is not a graph resource.", nameof(target));
+            _graph._writes.Add(new WriteEdge(_index, target.Index));
+            return this;
+        }
+
+        /// <summary>Declare that this pass writes <paramref name="target"/>. The buffer twin of
+        /// <see cref="Writes(GraphTexture)"/>.</summary>
+        public PassBuilder Writes(GraphBuffer target)
+        {
+            if (!target.IsValid) throw new ArgumentException("Write target is not a graph resource.", nameof(target));
+            _graph._writes.Add(new WriteEdge(_index, target.Index));
+            return this;
+        }
+
+        private static void RequireRaster(in Pass pass, string what)
+        {
+            if (pass.Kind != PassKind.Raster)
+                throw new InvalidOperationException($"Compute pass '{pass.Name}' cannot declare {what}; it has no attachments.");
         }
 
         /// <summary>Declare that this pass samples what <paramref name="source"/> held at the END

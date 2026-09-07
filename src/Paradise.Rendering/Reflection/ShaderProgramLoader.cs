@@ -21,7 +21,8 @@ public static class ShaderProgramLoader
     // the declarations in pbr.slang and the Slang.targets WGSL depth-texture patch.
     private const string ShadowTextureName = "shadowTexture";
     private const string ShadowSamplerName = "shadowSampler";
-    private const string PositionTextureName = "positionTexture"; // SSAO world-position pre-pass (Rgba32Float, unfilterable)
+    // The depth + normal pre-pass's depth (Depth32Float viewed as unfilterable float, textureLoad only).
+    private const string PrepassDepthTextureName = "prepassDepthTexture";
     // The opaque scene depth read by the capture blit (Depth32Float viewed as unfilterable float,
     // textureLoad only — WebGPU allows depth formats under the unfilterable-float sample type).
     private const string CaptureDepthTextureName = "captureDepthTexture";
@@ -157,12 +158,16 @@ public static class ShaderProgramLoader
             var entry = type.Kind switch
             {
                 "constantBuffer" => BuildConstantBufferEntry(p, binding, type, group, uniformBlocks, defaultVisibility),
+                // The well-known names take the file's default visibility, not Fragment: a compute
+                // tracer samples the shadow array and the pre-pass depth too, and an entry the
+                // compute stage cannot see fails createComputePipeline — asynchronously, so the
+                // dispatch is silently dropped rather than reported.
                 "resource" when p.Name == ShadowTextureName => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.DepthTextureArray),
-                "resource" when p.Name == PositionTextureName => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
+                    binding.Index, defaultVisibility, BindingResourceType.DepthTextureArray),
+                "resource" when p.Name == PrepassDepthTextureName => new BindGroupLayoutEntryDesc(
+                    binding.Index, defaultVisibility, BindingResourceType.UnfilterableFloatTexture),
                 "resource" when p.Name == CaptureDepthTextureName => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.UnfilterableFloatTexture),
+                    binding.Index, defaultVisibility, BindingResourceType.UnfilterableFloatTexture),
                 // WTexture2D / RWTexture2D → WGSL texture_storage_2d<format, access>. The
                 // [format("...")] attribute is REQUIRED: without it slangc silently defaults the
                 // WGSL to rgba32float while reflecting no format at all, and a guessed layout
@@ -186,7 +191,7 @@ public static class ShaderProgramLoader
                 "resource" when type.BaseShape == "structuredBuffer" => new BindGroupLayoutEntryDesc(
                     binding.Index, defaultVisibility, BindingResourceType.ReadonlyStorageBuffer),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(
-                    binding.Index, ShaderStage.Fragment, BindingResourceType.ComparisonSampler),
+                    binding.Index, defaultVisibility, BindingResourceType.ComparisonSampler),
                 "samplerState" => new BindGroupLayoutEntryDesc(
                     binding.Index, defaultVisibility, BindingResourceType.Sampler),
                 _ => throw new NotSupportedException(

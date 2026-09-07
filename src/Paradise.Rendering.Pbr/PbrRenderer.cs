@@ -50,16 +50,20 @@ public sealed partial class PbrRenderer : IDisposable
         Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
         _ctx.Materials = Materials;
 
-        // List order is dependency order: the scene reads the shadow plan and the SSAO result,
-        // the capture reads the scene's targets, the composite reads bloom's.
+        // List order is dependency order: the scene reads the shadow plan and the pre-pass
+        // result, the capture reads the scene's targets, the composite reads bloom's.
         _shadows = new ShadowFeature(_ctx);
-        var ssao = new SsaoFeature(_ctx);
-        _scene = new SceneFeature(_ctx, _shadows, ssao, specularAaVariance, specularAaClamp);
+        var prepass = new PrepassFeature(_ctx);
+        var rtao = new RayTracedAoFeature(_ctx);
+        var gi = new ProbeGiFeature(_ctx, _shadows);
+        _scene = new SceneFeature(_ctx, _shadows, prepass, gi, specularAaVariance, specularAaClamp);
         _capture = new SceneColorCaptureFeature(_ctx);
         _composite = new CompositeFeature(_ctx);
         Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height)
             .Add(_shadows)
-            .Add(ssao)
+            .Add(prepass)
+            .Add(rtao)
+            .Add(gi)
             .Add(_scene)
             .Add(_capture)
             .Add(new BloomFeature(_ctx))
@@ -293,10 +297,15 @@ public sealed partial class PbrRenderer : IDisposable
         }
         if (vertices.Length < stride) { min = max = Vector3.Zero; }
 
+        // Every primitive gets a hierarchy at upload; the tracer only ever reads the ones the
+        // frame's instances reference, and a hierarchy built from the upload-time stream is what a
+        // dynamic or skinned primitive traces as (its rest pose, under the instance transform).
+        var traceMesh = _ctx.Trace.AddMesh(vertices, stride, indices);
+
         return new PbrPrimitive(
             vb, ib, (uint)indices.Length,
             (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
-            min, max);
+            min, max, TraceMesh: traceMesh);
     }
 
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
@@ -349,6 +358,8 @@ public sealed partial class PbrRenderer : IDisposable
 
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
+        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it.
+        if (scene.RayTracedAo.Enabled || scene.Gi.Enabled) _ctx.Trace.BuildFrame(opaque, Materials);
         _graph.Reset();
         Pipeline.Setup(_graph);
 

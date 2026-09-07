@@ -17,6 +17,7 @@
 #define PARADISE_PBR_CORE_SLANG
 
 #include "uniforms.slang"
+#include "probes.slang"
 
 // --- PBR helper functions ---
 // GGX/Trowbridge-Reitz NDF from a precomputed (possibly size_A-widened) NdotH.
@@ -94,232 +95,6 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
     float3 B = cross(N, T) * worldTangent.w;
 
     return normalize(T * normalSample.x + B * normalSample.y + N * normalSample.z);
-}
-
-float getDistanceAttenuation(float distanceToLight, float range, float decay)
-{
-    if (range <= 0.0)
-    {
-        return 1.0;
-    }
-
-    // Godot's get_omni_attenuation: window² · pow(distance, -decay) with a (d/range)^4 cutoff. The
-    // 4th-power window keeps the light near full strength before cutting sharply at the range boundary.
-    // decay is the exported LIGHT_PARAM_ATTENUATION (Godot's default 1.0 is inverse-LINEAR, not
-    // inverse-square) — matching it is what makes the light pool the right size/brightness.
-    float nd = distanceToLight / range;
-    nd *= nd;              // (d/range)^2
-    nd *= nd;              // (d/range)^4
-    float window = saturate(1.0 - nd);
-    float smoothRangeFade = window * window;
-    float dist = max(distanceToLight, 0.0001);
-    return smoothRangeFade * pow(dist, -decay);
-}
-
-float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
-{
-    // Godot's spot cone (light_process_spot): a smooth radial falloff from the cone axis (full) to the
-    // edge (zero) — NOT a hard-edged disc. spotRim is 0 on-axis, 1 at the cone boundary; Godot raises it
-    // to spot_angle_attenuation (default 1.0, assumed here → linear rim). The previous inner/outer blend
-    // drew a hard "circle" on the ground whenever no inner angle was authored (Godot has no inner angle),
-    // because it fell back to inner == outer. spotAngles.y (inner angle) is unused in this model.
-    float3 lightToSurface = -surfaceToLight;
-    float3 coneDirection = -normalize(light.directionAndRange.xyz);
-    float cosTheta = dot(lightToSurface, coneDirection);
-    float coneCos = cos(radians(light.spotAngles.x * 0.5)); // cosine of the cone half-angle
-    float scos = max(cosTheta, coneCos);
-    float denom = max(1.0 - coneCos, 1e-4); // guards a degenerate 0°-outer-angle spot (coneCos == 1)
-    float spotRim = max(1e-4, (1.0 - scos) / denom);
-    return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
-}
-
-// Shadow bias — two mechanisms, each sized by the map's ACTUAL texel world size (per light in
-// sizeParams.y: directional = metres, point/spot = metres per metre of receiver distance, since
-// perspective texels grow with range). A fixed world-space bias is only ever correct for one texel
-// size — the old 0.05 m constant was tuned when the camera-fitted 4096 sun map made ~2.5 cm texels,
-// and any coarser map (a scene authoring a smaller ShadowMapSize, a wider legacy fit) outgrew it and
-// flat ground self-shadowed in diagonal bands.
-//
-// 1. NORMAL-OFFSET bias: lift the receiver sample along its surface normal, scaled up toward
-//    grazing incidence (capped — the tan() blow-up at N·L → 0 must not push the sample outside
-//    the light's footprint). With the plane bias below covering the PCF disk, this only has to
-//    cover the CENTRE texel's own depth quantization — half a texel times the slope — and it must
-//    stay that small: every texel of lift is a strip of CONTACT LIGHT-LEAK beside each caster
-//    (near a wall's base the occluder's stored depth is nearly the receiver's own, so any lift
-//    reads the base as non-occluding and the shadow fades toward the contact line — visibly, on
-//    a coarse map, where a texel is tens of centimetres). Perpendicular to the surface, so unlike
-//    a large depth bias it does not shift the sample along the light and does not detach object
-//    shadows from their contact point.
-// 2. RECEIVER-PLANE depth bias (Isidoro): each PCF tap compares against the receiver PLANE's depth
-//    at the tap's own location — the plane's depth gradient in light NDC is solved from two
-//    projected surface tangents — instead of the centre depth. Without it the disk's outer taps
-//    need the normal offset to cover the WHOLE disk radius (blur × texel × slope), which at coarse
-//    resolutions is metres of lift and visibly eats every short shadow; with it the offset stays
-//    at ~1 texel no matter the blur.
-//
-// ShadowDepthBias is a small constant NDC residual on top. Together these keep flat ground
-// acne-free at every map resolution while contact shadows stay attached (matching Godot).
-static const float ShadowDepthBias = 0.0004;
-// Lift in texels = ShadowNormalBiasTexels · (1 + tan(angle to light)), capped: the half-texel
-// centre quantization needs ~0.5·tan texels of lift (the geometry works out to 0.5·sinθ/cos²θ),
-// and every texel beyond that widens the contact light-leak strip. The cap bounds the grazing
-// blow-up; past it the surface is nearly edge-on to the light and receives little direct light
-// anyway, so residual acne there stays invisible.
-static const float ShadowNormalBiasTexels = 0.5;      // soft path: plane bias covers the disk
-static const float ShadowNormalBiasTexelsHard = 1.0;  // hard path: no plane bias, hw 2x2 footprint
-static const float ShadowMaxSlopeTexels = 2.0;    // cap on the total lift, in texels
-// NDC cap on the per-tap plane adjustment. It bounds SILHOUETTE light-leak: at a shadow edge the
-// receiver plane extends past the caster, and an unbounded gradient there would tilt taps into
-// accepting the caster's own depth. Sized against the camera-fit sun's depth range (~0.5-1.5 m of
-// depth per 0.01 NDC); the legacy whole-scene fit's larger range makes the cap proportionally
-// looser, which errs toward more bias on the path whose texels are also proportionally coarser.
-static const float ShadowPlaneBiasClamp = 0.01;
-
-// Cube face index (point lights) from the dominant axis of the light→surface direction.
-int getPointShadowFace(float3 dir)
-{
-    float3 a = abs(dir);
-    if (a.x >= a.y && a.x >= a.z) return dir.x > 0.0 ? 0 : 1;
-    if (a.y >= a.z)               return dir.y > 0.0 ? 2 : 3;
-    return dir.z > 0.0 ? 4 : 5;
-}
-
-// Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shadow-map
-// array — one full-resolution layer per shadow view (dir/spot = 1, point = 6 cube faces) — via the
-// light's per-face view-projection. No tile UV math and no seam clamp: each layer owns all of [0,1].
-// Interleaved Gradient Noise (Godot's quick_hash) — decorrelates the per-pixel PCF disk rotation.
-float shadowDiskHash(float2 pos)
-{
-    const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
-    return frac(magic.z * frac(dot(pos, magic.xy)));
-}
-
-// geoN is the GEOMETRIC normal (front-face-corrected interpolated vertex normal), not the
-// normal-mapped shading normal: every quantity here — the lift direction, the slope factor, the
-// receiver-plane basis — describes the real surface the shadow map rasterized. A normal-mapped
-// floor's shading normal tilts the solved plane away from the actual geometry, turning the
-// per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
-// the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
-// out of the shadow lookup entirely.)
-float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
-{
-    if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
-        return 1.0; // no shadow for this light
-
-    int face = 0;
-    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5) // point light
-        face = getPointShadowFace(-surfaceToLight);
-    if ((float)face >= light.shadowAtlas.y)
-        return 1.0;
-
-    // Normal-offset bias (mechanism 1 above): the centre texel's quantization, more toward
-    // grazing, capped — and no more, or the contact strip beside every caster lightens. The
-    // hard-shadow path carries a larger base: it has no receiver-plane bias (a single tap has no
-    // offsets to adjust), and its hardware 2x2 comparison footprint needs up to ~sqrt(2)·tan
-    // texels of depth coverage that the soft path's per-tap plane adjustment provides instead.
-    float texelWorld = light.sizeParams.y;
-    if (light.positionAndType.w > 0.5)
-    {
-        // Perspective (point/spot): texels grow with distance. RADIAL distance, not axial — an
-        // over-estimate of up to 1/cos(off-axis angle) at a cone's rim, deliberately erring
-        // toward more bias rather than under-covering the texel.
-        texelWorld *= length(light.positionAndType.xyz - worldPos);
-    }
-    float biasTexels = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
-    float ndotl = saturate(dot(geoN, surfaceToLight));
-    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
-    float liftTexels = min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels);
-    float3 samplePos = worldPos + geoN * (texelWorld * liftTexels);
-
-    int matrixIndex = lightIndex * 6 + face;
-    float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
-    if (shadowPos.w <= 0.0)
-        return 1.0;
-    float3 ndc = shadowPos.xyz / shadowPos.w;
-    float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5; // NDC → UV, Y flipped (WebGPU clip-Z [0,1])
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
-        return 1.0; // outside the light frustum → treat as lit
-
-    float layer = light.spotAngles.z + (float)face; // array slice for this view
-    float texel = frame.shadowSettings.x;
-    float compare = ndc.z - ShadowDepthBias;
-
-    float lit;
-    if (light.shadowAtlas.w > 0.5)
-    {
-        // Soft shadows: Godot's SOFT_HIGH-class PCF — a 16-sample Vogel disk
-        // (r = sqrt((i+0.5)/16), theta = 2.4i), disk radius frame.shadowFilter.x shadow texels
-        // (scene-authored; see Lighting.ShadowBlur in the export contract), randomly rotated
-        // per pixel with interleaved gradient noise like sample_directional_pcf_shadow. The
-        // rotation trades fixed-kernel banding for fine noise — but the noise AMPLITUDE goes as
-        // 1/sqrt(taps), and it stops averaging out once the penumbra is WIDE on screen: on a
-        // coarse map (a texel is tens of centimetres) 8 taps rendered every shadow edge as
-        // visible diagonal stipple, IGN's own dither pattern. 16 taps is the tier that reads
-        // as smooth there while the per-tap hardware 2x2 comparison (the sampler is Linear)
-        // keeps the narrow-penumbra case dense. 4 taps at radius 2 (the old SOFT_LOW tier)
-        // visibly sawtoothed even at fine texel sizes.
-        static const float2 kVogel16[16] = {
-            float2(+0.176777, +0.000000),
-            float2(-0.225780, +0.206818),
-            float2(+0.034587, -0.393769),
-            float2(+0.284530, +0.371204),
-            float2(-0.522210, -0.092451),
-            float2(+0.494753, -0.314594),
-            float2(-0.165602, +0.615488),
-            float2(-0.315405, -0.607676),
-            float2(+0.684569, +0.250232),
-            float2(-0.712353, +0.293773),
-            float2(+0.343624, -0.733602),
-            float2(+0.253403, +0.809035),
-            float2(-0.764550, -0.443523),
-            float2(+0.897228, -0.196804),
-            float2(-0.547908, +0.778490),
-            float2(-0.125948, -0.976159),
-        };
-        float s = texel * frame.shadowFilter.x;
-        float r = shadowDiskHash(fragCoord) * 2.0 * PI;
-        float cr = cos(r);
-        float sr = sin(r);
-
-        // Receiver-plane depth bias (mechanism 2 in the bias comment): the plane's NDC depth
-        // gradient, solved from two surface tangents projected through this face's matrix. Each
-        // tap then compares against the PLANE's depth at its own offset rather than the centre's,
-        // which is what lets the normal offset above stay at ~1 texel instead of covering the
-        // whole disk. Exact for the ortho sun; first-order (and ample) for spot/point perspective.
-        float3 tan1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
-        float3 tan2 = cross(geoN, tan1);
-        float planeStep = max(texelWorld, 1e-4);
-        float4 q1 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan1 * planeStep, 1.0));
-        float4 q2 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan2 * planeStep, 1.0));
-        float3 e1 = q1.xyz / max(q1.w, 1e-6) - ndc;
-        float3 e2 = q2.xyz / max(q2.w, 1e-6) - ndc;
-        float det = e1.x * e2.y - e1.y * e2.x;
-        // dz per NDC-xy offset d: dz = dot(zGrad, d) with the 2x2 solve below; degenerate when the
-        // plane is edge-on to the light (both tangents project to one line) — no adjustment then.
-        float2 zGrad = abs(det) > 1e-9
-            ? float2(e1.z * e2.y - e1.y * e2.z, e1.x * e2.z - e1.z * e2.x) / det
-            : float2(0.0, 0.0);
-
-        lit = 0.0;
-        [unroll] for (int k = 0; k < 16; k++)
-        {
-            // Godot's mat2(vec2(cr,-sr), vec2(sr,cr)) * offset (column-major GLSL).
-            float2 o = float2(cr * kVogel16[k].x + sr * kVogel16[k].y,
-                              -sr * kVogel16[k].x + cr * kVogel16[k].y);
-            float2 uvOff = o * s;
-            // UV → NDC offset is (2, -2) (the Y flip from the uv mapping above).
-            float dz = clamp(zGrad.x * (2.0 * uvOff.x) + zGrad.y * (-2.0 * uvOff.y),
-                             -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
-            lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + uvOff, layer), compare + dz);
-        }
-        lit *= 0.0625;
-    }
-    else
-    {
-        lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
-    }
-
-    return lerp(1.0 - light.spotAngles.w, 1.0, lit);
 }
 
 float3 evaluateDirectLight(
@@ -521,11 +296,10 @@ float3 applyTonemap(float3 color, float exposure, float white, float mode)
     return tonemapAgx(color);                            // AgX
 }
 
-// Screen-space ambient occlusion from the world-position pre-pass. A spiral of screen-space taps
-// around the fragment; each reconstructs the neighbour's world position (sampled directly, no matrix
-// math) and occludes when it's within `radius` of the fragment and above its tangent plane. Returns
-// a [0,1] AO multiplier applied to ambient only. Reading positionTexture via textureLoad avoids the
-// depth-format sampling hazard.
+// Screen-space ambient occlusion from the depth pre-pass. A spiral of screen-space taps around the
+// fragment; each reconstructs the neighbour's world position from its depth and occludes when it's
+// within `radius` of the fragment and above its tangent plane. Returns a [0,1] AO multiplier
+// applied to ambient only.
 float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
 {
     float intensity = ssao.params.x;
@@ -551,8 +325,8 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
         int2 samplePix = int2(fragCoord + rdir * a * pixelRadius);
         if (samplePix.x < 0 || samplePix.y < 0 || samplePix.x >= (int)screenSize.x || samplePix.y >= (int)screenSize.y) continue;
 
-        float4 p = positionTexture.Load(int3(samplePix, 0));
-        if (p.w < 0.5) continue; // background (cleared to 0)
+        float4 p = prepassWorldPosition(samplePix, screenSize);
+        if (p.w < 0.5) continue; // background (depth at the clear value)
 
         float3 diff = p.xyz - worldPos;
         float dist = length(diff);
@@ -801,9 +575,17 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     }
 
     // Ambient: L2 SH sky irradiance per-normal (Godot's sky-SH ambient) when provided; the
-    // 3-zone hemisphere blend remains as the fallback, and the flat mode overrides both.
+    // 3-zone hemisphere blend remains as the fallback, and the flat mode overrides both. With a
+    // probe volume on, the probes replace all three for surfaces inside it (their misses already
+    // carry the sky), except for a draw whose GI mode is disabled (highlight.z).
     float3 hemisphereColor;
-    if (frame.ambientGround.w > 0.5)
+    float3 probeIrradiance;
+    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+        && sampleProbeIrradiance(input.worldPos, N, V, probeIrradiance))
+    {
+        hemisphereColor = probeIrradiance;
+    }
+    else if (frame.ambientGround.w > 0.5)
     {
         hemisphereColor = frame.ambient.rgb; // flat ambient
     }
@@ -833,8 +615,10 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
             ? lerp(groundColor, equatorColor, hemisphere * 2.0)
             : lerp(equatorColor, skyColor, (hemisphere - 0.5) * 2.0);
     }
-    // Screen-space AO (from the world-position pre-pass) also darkens only the ambient, like Godot.
+    // Screen-space and ray-traced AO also darken only the ambient, like Godot.
     occlusion *= computeSsao(input.position.xy, input.worldPos, N);
+    if (ssao.rtao.x > 0.5)
+        occlusion *= rtAoTexture.Load(int3((int2)input.position.xy, 0)).r;
     float exposure = max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 

@@ -1,0 +1,227 @@
+using System;
+using System.IO;
+using System.Numerics;
+using Microsoft.Extensions.Logging;
+using Paradise.Assets.Gltf;
+using Paradise.Rendering;
+using Paradise.Rendering.Pbr;
+using Paradise.Rendering.WebGPU;
+
+namespace Paradise.Rendering.Sample;
+
+/// <summary>The global-illumination test scene: a Cornell-style room — white floor, ceiling and
+/// back wall, a red wall on the left and a green one on the right, the classic two boxes — lit
+/// by an emissive ceiling panel (static), a sun that swings across the open front (dynamic) and a
+/// warm point light circling inside (dynamic), with a small dynamic prop orbiting the tall box.
+/// The red and green bleed onto the boxes and the white walls is what probe GI is for, and a
+/// light that moves is what a runtime solution is for. An optional GLB's geometry stands on the
+/// short box (factor materials only: the downloaded models carry PNG textures the KTX2 contract
+/// does not admit, so the demo reads geometry alone).</summary>
+internal sealed class GiDemoScene : IDisposable
+{
+    private readonly PbrRenderer _pbr;
+    private readonly PbrScene _scene = new();
+    private readonly PbrInstance _prop;
+    private readonly PbrLight _sunTemplate;
+    private readonly PbrLight _lampTemplate;
+    private int _frame;
+    private float _yaw;
+    private float _pitch = 0.12f;
+    private float _distance = 8.5f;
+    private bool _autoOrbit = true;
+    private uint _width;
+    private uint _height;
+
+    /// <summary>Process-wide switches read when the scene is built.</summary>
+    public static bool ProbeGi { get; set; } = true;
+    public static bool RayTracedAo { get; set; }
+    public static bool AnimateLights { get; set; } = true;
+
+    /// <summary>Only the emissive ceiling panel lights the room: it is not a light, so with the
+    /// probes off the room is dark and with them on it is lit — the classic Cornell box.</summary>
+    public static bool PanelOnly { get; set; }
+
+    public GiDemoScene(WebGpuRenderer renderer, uint width, uint height, string? modelPath, ILogger? logger = null)
+    {
+        _width = Math.Max(1, width);
+        _height = Math.Max(1, height);
+        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger);
+
+        var (cube, cubeIndices) = Procedural.UnitCube();
+        var white = _pbr.Materials.AddDefaultMaterial(new Vector4(0.73f, 0.73f, 0.73f, 1f), metallic: 0f, roughness: 0.9f);
+        var red = _pbr.Materials.AddDefaultMaterial(new Vector4(0.65f, 0.05f, 0.05f, 1f), metallic: 0f, roughness: 0.9f);
+        var green = _pbr.Materials.AddDefaultMaterial(new Vector4(0.12f, 0.45f, 0.15f, 1f), metallic: 0f, roughness: 0.9f);
+        var blue = _pbr.Materials.AddDefaultMaterial(new Vector4(0.2f, 0.35f, 0.9f, 1f), metallic: 0f, roughness: 0.6f);
+        var panel = _pbr.Materials.AddMaterial(Emissive(PanelOnly ? new Vector3(30f, 28f, 25f) : new Vector3(6f, 5.6f, 5f)), []);
+
+        PbrMesh Box(int material) => new([_pbr.UploadPrimitive(cube, cubeIndices, material)]);
+        var whiteBox = Box(white);
+
+        // The room: 6 m wide, 4 m tall, 6 m deep, floor at y = 0, open toward +z (the camera).
+        const float w = 6f, h = 4f, d = 6f, t = 0.2f;
+        Add(whiteBox, Matrix4x4.CreateScale(w + 2 * t, t, d + 2 * t) * Matrix4x4.CreateTranslation(0f, -t / 2, 0f)); // floor
+        Add(whiteBox, Matrix4x4.CreateScale(w + 2 * t, t, d + 2 * t) * Matrix4x4.CreateTranslation(0f, h + t / 2, 0f)); // ceiling
+        Add(whiteBox, Matrix4x4.CreateScale(w + 2 * t, h + 2 * t, t) * Matrix4x4.CreateTranslation(0f, h / 2, -d / 2 - t / 2)); // back
+        Add(Box(red), Matrix4x4.CreateScale(t, h + 2 * t, d + 2 * t) * Matrix4x4.CreateTranslation(-w / 2 - t / 2, h / 2, 0f)); // left
+        Add(Box(green), Matrix4x4.CreateScale(t, h + 2 * t, d + 2 * t) * Matrix4x4.CreateTranslation(w / 2 + t / 2, h / 2, 0f)); // right
+        Add(Box(panel), Matrix4x4.CreateScale(1.6f, 0.05f, 1.6f) * Matrix4x4.CreateTranslation(0f, h - 0.03f, -0.5f)); // ceiling light
+
+        // The classic pair: a tall box at the back left, a short box at the front right.
+        Add(whiteBox, Matrix4x4.CreateScale(1.2f, 2.4f, 1.2f) * Matrix4x4.CreateRotationY(0.3f) * Matrix4x4.CreateTranslation(-1.1f, 1.2f, -1.2f));
+        Add(whiteBox, Matrix4x4.CreateScale(1.2f, 1.2f, 1.2f) * Matrix4x4.CreateRotationY(-0.3f) * Matrix4x4.CreateTranslation(1.2f, 0.6f, 0.6f));
+
+        if (modelPath is not null) PlaceModel(modelPath, new Vector3(1.2f, 1.2f, 0.6f), 1.2f);
+
+        // A dynamic prop: lit by the probes, not traced, because it moves every frame.
+        _prop = new PbrInstance { Mesh = Box(blue), GiMode = PbrGiMode.Dynamic };
+        _scene.Instances.Add(_prop);
+
+        // A dim sky: the room is lit by what comes through the open front and bounces, which is
+        // the point. With the probes off only the directly lit patches survive.
+        _scene.Ambient = new PbrAmbient
+        {
+            Sky = new Vector3(0.08f, 0.10f, 0.14f),
+            Equator = new Vector3(0.05f, 0.05f, 0.06f),
+            Ground = new Vector3(0.02f, 0.02f, 0.02f),
+        };
+        _scene.Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Filmic, Exposure = 0.7f, White = 4f };
+        _scene.Bloom = new PbrBloom { Enabled = true, Threshold = 1.2f, Intensity = 0.25f };
+        _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = 128, Hysteresis = 0.9f, MaxProbes = 4096 };
+        _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
+
+        _sunTemplate = new PbrLight
+        {
+            Type = PbrLightType.Directional,
+            Color = new Vector3(1f, 0.95f, 0.85f),
+            Intensity = PanelOnly ? 0f : 2.0f,
+            CastsShadows = true,
+            SoftShadows = true,
+            Size = 1.5f,
+        };
+        _lampTemplate = new PbrLight
+        {
+            Type = PbrLightType.Point,
+            Color = new Vector3(1f, 0.55f, 0.25f),
+            Intensity = PanelOnly ? 0f : 4f,
+            Range = 9f,
+            CastsShadows = true,
+        };
+        _scene.Lights.Add(_sunTemplate);
+        _scene.Lights.Add(_lampTemplate);
+        Animate();
+
+        Console.WriteLine(
+            $"[GiDemo] probes {(ProbeGi ? "on" : "off")}, ray-traced AO {(RayTracedAo ? "on" : "off")}, " +
+            $"{_scene.Instances.Count} instances{(modelPath is null ? "" : $", model {Path.GetFileName(modelPath)}")}.");
+    }
+
+    private void Add(PbrMesh mesh, Matrix4x4 model) => _scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = model });
+
+    private static GltfMaterialData Emissive(Vector3 color) => new(
+        Name: "panel", BaseColorFactor: new Vector4(1f, 1f, 1f, 1f), MetallicFactor: 0f, RoughnessFactor: 1f,
+        EmissiveFactor: color, NormalScale: 1f, OcclusionStrength: 1f, TransmissionFactor: 0f,
+        AlphaMode: GltfAlphaMode.Opaque, AlphaCutoff: 0.5f, DoubleSided: false,
+        BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1,
+        BaseColorUvTransform: GltfUvTransform.Identity);
+
+    /// <summary>Load a GLB's geometry, drop its texture references (factors only), and stand it on
+    /// <paramref name="top"/> scaled to <paramref name="size"/> metres.</summary>
+    private void PlaceModel(string path, Vector3 top, float size)
+    {
+        var asset = GltfSceneReader.ReadGeometry(File.ReadAllBytes(path));
+        var materials = new GltfMaterialData[asset.Materials.Length];
+        for (var i = 0; i < materials.Length; i++)
+        {
+            materials[i] = asset.Materials[i] with
+            {
+                BaseColorImage = -1, MetallicRoughnessImage = -1, NormalImage = -1, OcclusionImage = -1, EmissiveImage = -1,
+                // A textured model's factors are often 1: white, fully metallic — which bounces
+                // nothing. Give it a matte surface so the room's colours land on it.
+                MetallicFactor = 0f,
+                RoughnessFactor = 0.7f,
+            };
+        }
+        var meshes = _pbr.UploadMesh(asset with { Materials = materials, Images = [] });
+
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var instance in asset.Instances)
+        {
+            foreach (var primitive in asset.Meshes[instance.MeshIndex].Primitives)
+            {
+                var vertices = primitive.Vertices;
+                for (var v = 0; v + 2 < vertices.Length; v += 12)
+                {
+                    var p = Vector3.Transform(new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]), instance.WorldTransform);
+                    min = Vector3.Min(min, p);
+                    max = Vector3.Max(max, p);
+                }
+            }
+        }
+        var extent = max - min;
+        var scale = size / MathF.Max(MathF.Max(extent.X, extent.Y), MathF.Max(extent.Z, 1e-3f));
+        var centre = (min + max) * 0.5f;
+        var fit = Matrix4x4.CreateTranslation(-centre.X, -min.Y, -centre.Z) * Matrix4x4.CreateScale(scale) * Matrix4x4.CreateTranslation(top);
+        foreach (var instance in asset.Instances)
+            Add(meshes[instance.MeshIndex], instance.WorldTransform * fit);
+    }
+
+    public void Resize(uint width, uint height)
+    {
+        _width = Math.Max(1, width);
+        _height = Math.Max(1, height);
+        _pbr.Resize(_width, _height);
+    }
+
+    public void Drag(float deltaX, float deltaY)
+    {
+        _autoOrbit = false;
+        _yaw += deltaX * 0.01f;
+        _pitch = Math.Clamp(_pitch + deltaY * 0.01f, -0.6f, 1.2f);
+    }
+
+    public void Zoom(float wheel) => _distance = Math.Clamp(_distance * (1f - wheel * 0.1f), 2f, 30f);
+
+    /// <summary>The sun swings across the open side; the lamp circles the room at head height;
+    /// the prop orbits the tall box. Frame-driven so a headless run is deterministic.</summary>
+    private void Animate()
+    {
+        var time = _frame / 60f;
+        var sunAngle = AnimateLights ? 0.9f + 0.5f * MathF.Sin(time * 0.35f) : 0.9f;
+        _scene.Lights[0] = _sunTemplate with
+        {
+            // From the surface toward the light: high and from the open front, sweeping left-right.
+            Direction = Vector3.Normalize(new Vector3(MathF.Sin(sunAngle) * 0.8f, 0.9f, 0.8f)),
+        };
+        var lampAngle = AnimateLights ? time * 0.8f : 0.4f;
+        _scene.Lights[1] = _lampTemplate with
+        {
+            Position = new Vector3(1.8f * MathF.Cos(lampAngle), 1.6f, 1.8f * MathF.Sin(lampAngle) + 0.5f),
+        };
+        var propAngle = AnimateLights ? time * 0.6f : 0f;
+        _prop.Model = Matrix4x4.CreateScale(0.5f) * Matrix4x4.CreateRotationY(propAngle * 2f)
+            * Matrix4x4.CreateTranslation(-1.1f + 1.6f * MathF.Cos(propAngle), 1.6f + 0.4f * MathF.Sin(time), -1.2f + 1.6f * MathF.Sin(propAngle));
+        _scene.ElapsedSeconds = time;
+    }
+
+    public void RenderFrame()
+    {
+        if (_autoOrbit) _yaw = 0.25f * MathF.Sin(_frame / 60f * 0.2f);
+        var target = new Vector3(0f, 1.8f, -0.5f);
+        var eye = target + new Vector3(
+            _distance * MathF.Cos(_pitch) * MathF.Sin(_yaw),
+            _distance * MathF.Sin(_pitch),
+            _distance * MathF.Cos(_pitch) * MathF.Cos(_yaw));
+        _scene.Camera = new PbrCamera
+        {
+            View = PbrMath.LookAt(eye, target, Vector3.UnitY),
+            Projection = PbrMath.Perspective(MathF.PI / 3.2f, _width / (float)_height, 0.05f, 100f),
+            Position = eye,
+        };
+        Animate();
+        _pbr.RenderFrame(_scene);
+        _frame++;
+    }
+
+    public void Dispose() => _pbr.Dispose();
+}

@@ -130,6 +130,59 @@ public struct MyNode : INode
 
 Low-level unmanaged binary blob library backing the BT layout. Key types: `BlobArray<T>`, `BlobString<TEncoding>`, `BlobPtr<T>`, `ManagedBlobAssetReference<T>`. Builders (`ValueBuilder`, `StructBuilder`, `ArrayBuilder`, `TreeBuilder`, `SortedArrayBuilder`) produce pinned memory blocks.
 
+### Runtime global illumination: probes over a compute ray tracer
+
+**Indirect light is a probe volume, updated every frame by rays traced in compute against the
+scene's own geometry — no bake, no hardware ray tracing, WebGPU only.** `PbrScene.Gi.Enabled`
+turns it on; the volume fits the static scene unless `PbrGi.Volume` authors one. Three layers,
+each testable on its own:
+
+- **`Paradise.Geometry`** builds the hierarchy: `TriangleBvh.Build` (binned SAH, collapsed to
+  8-wide nodes with 8-bit quantized child bounds — `BvhNode`, 96 bytes, mirrored byte for byte by
+  `Common/bvh.slang`) and `BvhTraversal.ClosestHit`, the CPU twin of the shader walk that the
+  tests hold the builder against. Decoded child boxes are always conservative; a test proves it.
+- **`TraceScene`** (in `Paradise.Rendering.Pbr`) is the scene as the tracer sees it: ONE merged
+  buffer per kind — nodes, triangles, vertices — with every primitive's hierarchy rebased to
+  absolute indices at `UploadPrimitive` (there is no bindless, so a mesh cannot be a buffer of its
+  own), plus a per-frame top-level hierarchy over the opaque `PbrGiMode.Static` instances whose
+  instance table is laid out in leaf order. It is rebuilt only in frames something traces.
+- **`ProbeGiFeature`** runs four compute passes at `RenderPassEvent.GlobalIllumination`: trace
+  (`probeTrace.slang`, hits shaded with the frame's lights and shadow maps, the material's
+  factors, and LAST frame's probes — the infinite bounce; misses take the sky ambient), two
+  blends into ping-ponged octahedral atlases (`probeBlend.slang`: irradiance at 8×8 per probe,
+  distance moments at 14×14, each tile with a 1-texel wrap border so bilinear reads cross edges),
+  and relocation/classification for the next frame (`probeUpdate.slang`). `pbrCore.slang` replaces
+  the sky ambient with `sampleProbeIrradiance` for surfaces inside the volume (Chebyshev
+  visibility keeps a probe behind a wall from leaking through it) unless the draw's GI mode is
+  disabled. `RayTracedAoFeature` is the tracer's proving ground: a picture that must darken.
+
+Things that bit, so they are rules:
+
+- **slangc keeps every global an included file declares, referenced or not.** A compute shader
+  that includes `pbrCore.slang` inherits the whole raster layout and collides with its own group
+  0. `Common/lighting.slang` holds exactly what shading a hit needs (frame UBO, shadow array and
+  sampler at group 1 bindings 0–2, attenuation and shadow lookup); `uniforms.slang` adds the
+  raster-only bindings on top. Check a new program's bind groups in
+  `obj/…/shaders/<name>.reflection.json` before trusting them.
+- **A compute pass fails silently when a layout entry is not visible to it.** Dawn reports the
+  pipeline error asynchronously and the dispatch is dropped; the loader's name-based overrides
+  (`shadowTexture`, `prepassDepthTexture`, …) therefore take the file's default visibility. Prove
+  a compute pass with a picture that must change, never with "it ran".
+- **The frame graph knows compute:** `AddComputePass`, `GraphBinding.StorageTexture` (a WRITE
+  edge), `ImportBuffer` + `GraphBinding.Buffer(…, write:)` for tracked buffers. A trace whose
+  only output is a private hit buffer is culled the moment nothing binds that buffer for
+  reading — the same switch-off rule textures have. A pass reading last frame's atlas declares a
+  plain read of a resource nothing writes this frame, which the graph allows.
+- **The probes and the sky share one irradiance convention: E/π.** A probe texel is the
+  cosine-weighted mean of its rays' radiance, which is what the SH sky ambient already is, so a
+  scene under a flat sky renders the same with the probes on or off (a test pins this, within the
+  darkening the probes correctly see below the horizon). Direct light at a hit follows the
+  raster's non-physical convention (no 1/π); the sky term carries the exposure, so exposure is
+  applied nowhere else on the probe path.
+- **The depth + normal pre-pass declares the WHOLE vertex stream** even though it reads two
+  attributes: the reflected stride comes from the struct, and a position-only struct once
+  sampled interleaved normals as positions for as long as SSAO existed.
+
 ### Diagnostics go through `ILogger`, never `Console`
 
 **An engine library takes an `ILogger` and references `Microsoft.Extensions.Logging.Abstractions`

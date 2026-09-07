@@ -17,27 +17,25 @@ public sealed partial class SceneFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private readonly ShadowFeature _shadows;
-    private readonly SsaoFeature _ssao;
-    private readonly BufferHandle _frameUniformBuffer;
+    private readonly PrepassFeature _prepass;
+    private readonly ProbeGiFeature _gi;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
     private readonly HashSet<int> _materialsSeen = [];
     private float _specularAaVariance;
     private float _specularAaClamp;
 
-    internal SceneFeature(PbrContext ctx, ShadowFeature shadows, SsaoFeature ssao, float specularAaVariance, float specularAaClamp)
+    internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
         _shadows = shadows;
-        _ssao = ssao;
+        _prepass = prepass;
+        _gi = gi;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
-        var renderer = ctx.Renderer;
 
-        var frameDesc = new BufferDesc("PbrFrameUniforms", (ulong)Unsafe.SizeOf<FrameUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst);
-        _frameUniformBuffer = renderer.CreateBuffer(in frameDesc);
         _frameGroupLayout = ctx.Programs.Group(1);
-        _lightingGroupLayout = ctx.Programs.Group(3); // SSAO + sky-specular LUT + DFG
+        _lightingGroupLayout = ctx.Programs.Group(3); // pre-pass + SSAO uniforms + sky-specular LUT + DFG
 
         EnsureTargets();
         EnsureClusterBuffer();
@@ -81,9 +79,13 @@ public sealed partial class SceneFeature : IRenderFeature
         var hdr = graph.Texture(PbrTargets.Hdr);
         var depth = graph.Texture(PbrTargets.Depth);
         var shadows = graph.Texture(PbrTargets.ShadowArray);
-        // The one place SSAO is switched off: bind black instead of the positions and the
-        // pre-pass that produces them is unreachable.
-        var position = frame.Blackboard.GetOrDefault(PbrResults.SsaoPosition, frame.Black);
+        // The one place the pre-pass is switched off from this side: bind black instead of its
+        // targets and, unless another feature reads them, the pass that produces them is unreachable.
+        var prepassNormal = frame.Blackboard.GetOrDefault(PbrResults.PrepassNormal, frame.Black);
+        var prepassDepth = frame.Blackboard.GetOrDefault(PbrResults.PrepassDepth, frame.Black);
+        var rtao = frame.Blackboard.GetOrDefault(PbrResults.RayTracedAo, frame.Black);
+        var giIrradiance = frame.Blackboard.GetOrDefault(PbrResults.GiIrradiance, frame.Black);
+        var giVisibility = frame.Blackboard.GetOrDefault(PbrResults.GiVisibility, frame.Black);
         var split = (frame.Requirements & FrameRequirements.SceneColorCapture) != 0;
 
         // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
@@ -92,7 +94,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
-        DeclareGroups(main, shadows, position);
+        DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
         if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
         main.Record(this, split ? RecordOpaque : RecordAll);
@@ -104,7 +106,7 @@ public sealed partial class SceneFeature : IRenderFeature
             var blend = graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
                 .Color(0, hdr, LoadOp.Load, clear: scene.ClearColor)
                 .Depth(depth, LoadOp.Load, clear: 1f);
-            DeclareGroups(blend, shadows, position);
+            DeclareGroups(blend, shadows, prepassNormal, prepassDepth, rtao, giIrradiance, giVisibility);
             DeclareMaterialReads(graph, blend, _ctx.Blend);
             blend.Record(this, RecordBlend);
         }
@@ -132,23 +134,31 @@ public sealed partial class SceneFeature : IRenderFeature
     /// <summary>Groups 1 and 3 of the main program, shared by every pass that draws scene geometry.
     /// The frame group's buffers grow, so their sizes are read here each frame and a grown buffer
     /// is a different group by content.</summary>
-    private void DeclareGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture position)
+    private void DeclareGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture prepassNormal, GraphTexture prepassDepth,
+        GraphTexture rtao, GraphTexture giIrradiance, GraphTexture giVisibility)
     {
         pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
         [
-            GraphBinding.Buffer(0, _frameUniformBuffer, 0, (ulong)Unsafe.SizeOf<FrameUniformsGpu>()),
+            GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
             GraphBinding.TextureArray(1, shadows),
             GraphBinding.Sampler(2, _shadows.Sampler),
             GraphBinding.Buffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
             GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
         ]);
-        pass.BindGroup(3, "PbrSsaoGroup", _lightingGroupLayout,
+        pass.BindGroup(3, "PbrLightingGroup", _lightingGroupLayout,
         [
-            GraphBinding.Buffer(0, _ssao.UniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
-            GraphBinding.Texture(1, position),
+            GraphBinding.Buffer(0, _prepass.SsaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
+            GraphBinding.Texture(1, prepassNormal),
             GraphBinding.View(2, _skySpecLutView),
             GraphBinding.Sampler(3, _skySpecSampler),
             GraphBinding.View(4, _dfgLutView),
+            GraphBinding.Texture(5, prepassDepth),
+            GraphBinding.Texture(6, rtao),
+            GraphBinding.Texture(7, giIrradiance),
+            GraphBinding.Texture(8, giVisibility),
+            GraphBinding.Buffer(9, _gi.VolumeBuffer, 0, ProbeGiFeature.VolumeBufferBytes),
+            GraphBinding.Buffer(10, _gi.ShadingStateBuffer, 0, _gi.StateBufferBytes),
+            GraphBinding.Sampler(11, _gi.Sampler),
         ]);
     }
 
@@ -210,7 +220,8 @@ public sealed partial class SceneFeature : IRenderFeature
                 NormalMatrix = PbrMath.NormalMatrix(instance.Model),
                 // y carries the joint palette base for skinned draws; the lanes beside the
                 // highlight weight were already spare, so this needs no uniform layout change.
-                Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f, 0f, 0f),
+                Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f,
+                    instance.GiMode == PbrGiMode.Disabled ? 1f : 0f, 0f),
             };
             var slot = ctx.DrawIndex;
             MemoryMarshal.Write(ctx.DrawStaging.AsSpan(slot * (int)ctx.DrawStride), in uniforms);
@@ -229,7 +240,6 @@ public sealed partial class SceneFeature : IRenderFeature
         var renderer = _ctx.Renderer;
         DisposeSky();
         DisposeLuts();
-        renderer.DestroyBuffer(_frameUniformBuffer);
         if (_clusterBuffer.IsValid) renderer.DestroyBuffer(_clusterBuffer);
     }
 }

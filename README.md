@@ -44,7 +44,8 @@ All packages are published to NuGet from a single version tag — the libraries 
 | [Paradise.Rendering](src/Paradise.Rendering) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.svg)](https://www.nuget.org/packages/Paradise.Rendering) | Backend-agnostic rendering data contract: handles, descriptors, reflection records |
 | [Paradise.Rendering.WebGPU](src/Paradise.Rendering.WebGPU) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.WebGPU.svg)](https://www.nuget.org/packages/Paradise.Rendering.WebGPU) | WebGPU (Dawn) backend via WebGPUSharp |
 | [Paradise.Rendering.Browser](src/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | Browser (WebAssembly) WebGPU backend driving the browser's own WebGPU through a bundled JS shim — consumers write no JavaScript |
-| [Paradise.Rendering.Pbr](src/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders |
+| [Paradise.Geometry](src/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide, quantized bounding volume hierarchies over triangles or instances, in the layout the compute ray tracer reads, with the CPU builder and reference traversal |
+| [Paradise.Rendering.Pbr](src/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders, Forward+ lights, shadow maps, and runtime probe global illumination over a compute ray tracer |
 
 ### Assets
 

@@ -178,6 +178,9 @@ public sealed partial class SceneFeature
             scene.Tonemap.Exposure,
             scene.Tonemap.White);
         frame.ShadowFilter = new Vector4(_shadows.BlurTexels, 0f, 0f, 0f);
+        // Identity on a singular view-projection (degenerate camera) rather than NaN — the same
+        // precedent as the sky's unprojection.
+        frame.InvViewProj = Matrix4x4.Invert(_ctx.ViewProjection, out var invViewProj) ? invViewProj : Matrix4x4.Identity;
         // L2 sky-SH ambient: coefficients pass through verbatim; [0].w flags the SH path on.
         if (scene.Ambient.Sh is { Length: 9 } sh)
         {
@@ -212,7 +215,7 @@ public sealed partial class SceneFeature
             light.SizeParams.Y = _shadows.TexelWorld(i);
             frame.Lights[i] = light;
         }
-        _ctx.Renderer.UpdateBuffer<FrameUniformsGpu>(_frameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
+        _ctx.Renderer.UpdateBuffer<FrameUniformsGpu>(_ctx.FrameUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref frame, 1));
         if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
     }
 

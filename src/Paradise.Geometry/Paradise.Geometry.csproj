@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Geometry</AssemblyName>
+    <RootNamespace>Paradise.Geometry</RootNamespace>
+    <PackageId>Paradise.Geometry</PackageId>
+    <Title>Paradise.Geometry</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Managed geometry acceleration structures: a wide, quantized bounding volume hierarchy over triangles or instances in the layout the renderer's compute ray tracer reads, plus the CPU builder and reference traversal that verify it.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>bvh;raytracing;geometry;nativeaot;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Geometry.Test" />
+  </ItemGroup>
+
+</Project>

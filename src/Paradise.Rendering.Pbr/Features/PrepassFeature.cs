@@ -5,16 +5,17 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Screen-space ambient occlusion's input: a world-position pre-pass at
-/// <see cref="RenderPassEvent.Prepass"/> over the opaque bucket, into an Rgba32Float target the
-/// scene's group 3 samples via textureLoad.
+/// <summary>The depth + normal pre-pass over the opaque bucket at <see cref="RenderPassEvent.Prepass"/>:
+/// a Depth32Float depth and an Rgba16Float world-normal target, and the SSAO uniforms the scene
+/// reads them with.
 ///
-/// <para>The pass is declared every frame and runs only when something reads it: in frames the
-/// effect is on, the position target is published as <see cref="PbrResults.SsaoPosition"/> and
-/// the scene binds it; otherwise the scene binds black and the graph culls the pre-pass. The
-/// uniforms carry intensity 0 in exactly those frames, so the shader never samples an unwritten
-/// target.</para></summary>
-public sealed class SsaoFeature : IRenderFeature
+/// <para>The pass is declared every frame and runs only when something reads it: in frames SSAO is
+/// on or a feature requires <see cref="FrameRequirements.DepthNormalPrepass"/>, both targets are
+/// published as <see cref="PbrResults.PrepassNormal"/> and <see cref="PbrResults.PrepassDepth"/>
+/// and consumers bind them; otherwise they bind black and the graph culls the pass. The SSAO
+/// uniforms carry intensity 0 in exactly the frames SSAO is off, so the shader never samples an
+/// unwritten target for it.</para></summary>
+public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private readonly ShaderProgramDesc _program;
@@ -22,16 +23,16 @@ public sealed class SsaoFeature : IRenderFeature
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal SsaoFeature(PbrContext ctx)
+    internal PrepassFeature(PbrContext ctx)
     {
         _ctx = ctx;
         var renderer = ctx.Renderer;
 
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
-        // dynamic-offset). Vertex layout is position-only over the mesh stride.
-        _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.positionPrepass"));
+        // dynamic-offset). Vertex layout is position + normal over the mesh stride.
+        _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.depthNormalPrepass"));
         _pipeline = renderer.CreatePipeline(
-            _program, TextureFormat.Rgba32Float,
+            _program, NormalFormat,
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less);
@@ -39,53 +40,67 @@ public sealed class SsaoFeature : IRenderFeature
         {
             BindGroupEntryDesc.ForBuffer(0, ctx.JointBuffer, 0, ctx.JointBufferBytes),
         }));
-        UniformBuffer = renderer.CreateBuffer(new BufferDesc(
+        SsaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
 
         EnsureTargets();
     }
 
-    public string Name => "Ssao";
+    public const TextureFormat NormalFormat = TextureFormat.Rgba16Float;
+
+    public string Name => "Prepass";
     public bool Enabled => true;
     public FrameRequirements Requires => FrameRequirements.None;
 
-    /// <summary>Group-3 uniforms: intensity, radius, bias, power, and the screen size.</summary>
-    internal BufferHandle UniformBuffer { get; }
+    /// <summary>Group-3 SSAO uniforms: intensity, radius, bias, power, and the screen size.</summary>
+    internal BufferHandle SsaoUniformBuffer { get; }
 
     public void Resize(uint width, uint height) => EnsureTargets();
 
     private void EnsureTargets()
     {
-        _ctx.Targets.Ensure(PbrTargets.SsaoPosition, _ctx.FrameTarget(TextureFormat.Rgba32Float));
-        _ctx.Targets.Ensure(PbrTargets.SsaoPrepassDepth, _ctx.FrameTarget(TextureFormat.Depth32Float));
+        _ctx.Targets.Ensure(PbrTargets.PrepassNormal, _ctx.FrameTarget(NormalFormat));
+        _ctx.Targets.Ensure(PbrTargets.PrepassDepth, _ctx.FrameTarget(TextureFormat.Depth32Float));
     }
 
     public void Setup(in FrameContext frame)
     {
         var scene = _ctx.Scene;
         var s = scene.Ssao;
-        // Intensity 0 (SSAO off, or nothing opaque this frame) makes the shader skip position
-        // sampling — the same condition that decides whether the target is published below.
-        var runs = s.Enabled && _ctx.Opaque.Count > 0;
+        var hasOpaque = _ctx.Opaque.Count > 0;
+        // Intensity 0 (SSAO off, or nothing opaque this frame) makes the shader skip its taps.
+        var ssaoRuns = s.Enabled && hasOpaque;
+        // The ray-traced AO pass publishes exactly when it is enabled and the pre-pass ran, which
+        // is this condition; the flag tells the shader the bound texture is real rather than black.
+        var rtaoRuns = scene.RayTracedAo.Enabled && hasOpaque;
         var uniforms = new SsaoUniformsGpu
         {
-            Params = new Vector4(runs ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
+            Params = new Vector4(ssaoRuns ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
             Screen = new Vector4(1f / _ctx.Width, 1f / _ctx.Height, _ctx.Width, _ctx.Height),
+            Rtao = new Vector4(rtaoRuns ? 1f : 0f, 0f, 0f, 0f),
         };
-        _ctx.Renderer.UpdateBuffer<SsaoUniformsGpu>(UniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
+        _ctx.Renderer.UpdateBuffer<SsaoUniformsGpu>(SsaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 
-        var position = frame.Graph.Texture(PbrTargets.SsaoPosition);
-        frame.Graph.AddRasterPass("Ssao.Position", RenderPassEvent.Prepass)
-            .Color(0, position, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
-            .Depth(frame.Graph.Texture(PbrTargets.SsaoPrepassDepth), LoadOp.Clear, clear: 1f)
+        var normal = frame.Graph.Texture(PbrTargets.PrepassNormal);
+        var depth = frame.Graph.Texture(PbrTargets.PrepassDepth);
+        frame.Graph.AddRasterPass("Prepass.DepthNormal", RenderPassEvent.Prepass)
+            .Color(0, normal, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 0f))
+            .Depth(depth, LoadOp.Clear, clear: 1f)
             .Record(this, RecordPrepass);
 
-        if (runs) frame.Blackboard.Publish(PbrResults.SsaoPosition, position);
+        // Published whenever a consumer wants it; a frame with nothing opaque publishes nothing,
+        // so a consumer binds black rather than a cleared target it would misread as geometry.
+        var required = (frame.Requirements & FrameRequirements.DepthNormalPrepass) != 0;
+        if (hasOpaque && (ssaoRuns || required))
+        {
+            frame.Blackboard.Publish(PbrResults.PrepassNormal, normal);
+            frame.Blackboard.Publish(PbrResults.PrepassDepth, depth);
+        }
     }
 
     // opaque[i] uses the same dynamic offset EncodeBucket fills for it, so no extra ring space or
     // upload is needed — which is also why this recorder assumes the opaque bucket starts at slot 0.
-    private static void RecordPrepass(SsaoFeature self, ref PassRecording pass, int _)
+    private static void RecordPrepass(PrepassFeature self, ref PassRecording pass, int _)
     {
         ref var encoder = ref pass.Encoder;
         var ctx = self._ctx;
@@ -111,7 +126,7 @@ public sealed class SsaoFeature : IRenderFeature
     {
         if (_skinnedPipeline.IsValid) return _skinnedPipeline;
         _skinnedPipeline = _ctx.Renderer.CreatePipeline(
-            _program, TextureFormat.Rgba32Float,
+            _program, NormalFormat,
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less,
@@ -125,6 +140,6 @@ public sealed class SsaoFeature : IRenderFeature
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
         renderer.DestroyBindGroup(_jointGroup);
-        renderer.DestroyBuffer(UniformBuffer);
+        renderer.DestroyBuffer(SsaoUniformBuffer);
     }
 }

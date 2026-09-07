@@ -4,50 +4,14 @@
 #ifndef PARADISE_PBR_UNIFORMS_SLANG
 #define PARADISE_PBR_UNIFORMS_SLANG
 
-static const float PI = 3.14159265359;
-static const int MaxSceneLights = 64;
-
-struct SceneLight
-{
-    float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
-    float4 directionAndRange;     // xyz: direction from surface to light, w: range
-    float4 colorAndIntensity;     // rgb: color, w: intensity
-    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
-    float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
-    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), y: shadow texel world size (directional: metres; point/spot: metres per metre of receiver distance), zw unused
-};
+#include "lighting.slang"
 
 struct DrawUniforms
 {
     float4x4 mvp;          // Model-View-Projection matrix
     float4x4 model;        // Model matrix (for world-space normals/positions)
     float4x4 normalMatrix; // Inverse-transpose model matrix (for world-space normals)
-    float4 highlight;      // x: highlight weight, yzw unused
-};
-
-struct FrameUniforms
-{
-    float4   cameraPos;      // World-space camera position (xyz), w unused
-    float4   ambient;        // Ambient sky color (rgb) + exposure multiplier (a)
-    float4   ambientEquator; // Ambient equator color (rgb), w: scene light count
-    float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
-    float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
-    // L2 spherical-harmonic sky irradiance (E/π), 9 RGB coefficients in Ramamoorthi order
-    // (Y00, Y1-1, Y10, Y11, Y2-2, Y2-1, Y20, Y21, Y22) with the band factors Â=(1, 2/3, 1/4)
-    // premultiplied at export — the per-normal ambient Godot's sky-SH produces, replacing the
-    // 3-zone hemisphere blend. ambientSh[0].w > 0.5 enables the SH path (zones are the fallback).
-    float4   ambientSh[9];
-    // Forward+ clustering (Godot's froxel model, CPU-binned): the screen is tiled 32x32 px and
-    // view depth is split into logarithmic slices; clusterMasks holds TWO uint bitmask words per
-    // froxel (word i>>5, bit i&31 = sceneLights[i] overlaps it). Directional lights are never
-    // clustered.
-    float4   cameraForward;  // xyz: world-space camera forward (unit), w: cluster near
-    float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
-    SceneLight sceneLights[MaxSceneLights];
-    float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
-    float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
-    float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
-    float4   shadowFilter;   // x: soft-shadow PCF disk radius in shadow texels, yzw unused
+    float4 highlight;      // x: highlight weight, y: joint palette base (skinned), z: probe GI disabled for this draw, w unused
 };
 
 struct MaterialUniforms
@@ -70,21 +34,6 @@ struct MaterialUniforms
 
 [[vk::binding(0, 0)]]
 ConstantBuffer<DrawUniforms> draw;
-
-[[vk::binding(0, 1)]]
-ConstantBuffer<FrameUniforms> frame;
-
-// Shadow map array (a single Depth32Float 2D array, one layer per shadow view) + comparison
-// sampler, on the group-1 slots reserved when shadow mapping was removed. NOTE: the generated WGSL
-// declares shadowTexture as texture_2d_array<f32>; a build-time patch (Slang.targets) rewrites it
-// to texture_depth_2d_array, which WGSL requires for textureSampleCompareLevel (Slang issue #6942).
-// The loader forces the matching bind-group layout (DepthTextureArray + ComparisonSampler) by these
-// exact names.
-[[vk::binding(1, 1)]]
-Texture2DArray<float> shadowTexture;
-
-[[vk::binding(2, 1)]]
-SamplerComparisonState shadowSampler;
 
 // Per-froxel light bitmasks (Forward+). Rebuilt by the renderer every frame; conservatively
 // binned on the CPU (sphere bounds, ±1 froxel padding), so a set bit may be a false positive
@@ -124,21 +73,24 @@ Texture2D<float4> occlusionTexture;
 [[vk::binding(6, 2)]]
 Texture2D<float4> emissiveTexture;
 
-// Group 3: screen-space ambient occlusion. positionTexture is the world-position pre-pass (xyz =
-// world position, w = coverage; Rgba32Float, sampled with textureLoad — unfilterable, no sampler).
-// AO is computed inline in the fragment and multiplies only the ambient term; intensity 0 disables
-// it (the pre-pass is skipped and the shader early-outs, so the stale texture is never read).
+// Group 3: screen-space effects and environment tables. The depth + normal pre-pass is read here
+// with textureLoad: prepassNormalTexture is Rgba16Float (xyz = unit world normal, w = coverage,
+// cleared to 0 so the background reads w = 0) and prepassDepthTexture is the pre-pass's
+// Depth32Float viewed as an unfilterable float (a world position is frame.invViewProj of it).
+// SSAO is computed inline in the fragment and multiplies only the ambient term; intensity 0
+// disables it (the pre-pass is culled and the shader early-outs, so the stale texture is never read).
 struct SsaoUniforms
 {
     float4 params; // x: intensity (0 = off), y: radius (world units), z: bias, w: power
     float4 screen; // xy: 1/screenSize (texel), zw: screenSize (pixels)
+    float4 rtao;   // x: ray-traced AO texture bound this frame (else it is black and skipped)
 };
 
 [[vk::binding(0, 3)]]
 ConstantBuffer<SsaoUniforms> ssao;
 
 [[vk::binding(1, 3)]]
-Texture2D<float4> positionTexture;
+Texture2D<float4> prepassNormalTexture;
 
 // Sky-reflection specular (Godot Environment.reflected_light_source = Sky/Background): the
 // ProceduralSky radiance GGX-prefiltered on the CPU into a small LUT. The gradient sky is
@@ -159,6 +111,26 @@ SamplerState skySpecularSampler;
 // whose few-percent corner error showed up on metals (× energy compensation × many lights).
 [[vk::binding(4, 3)]]
 Texture2D<float4> dfgLut;
+
+// NOTE: the generated WGSL declares this as texture_2d<f32>; the loader forces the bind-group
+// layout to UnfilterableFloat by this exact name, which is what lets a depth texture bind here.
+[[vk::binding(5, 3)]]
+Texture2D<float> prepassDepthTexture;
+
+// Ray-traced ambient occlusion (r = visibility) from rtao.slang, per pixel; read with textureLoad.
+[[vk::binding(6, 3)]]
+Texture2D<float4> rtAoTexture;
+
+/// World position of the pre-pass surface under pixel `pixel`, or w = 0 where the pre-pass wrote
+/// nothing (depth still at the clear value). WebGPU clip-Z is [0,1] and NDC y points up.
+float4 prepassWorldPosition(int2 pixel, float2 screenSize)
+{
+    float depth = prepassDepthTexture.Load(int3(pixel, 0)).r;
+    if (depth >= 1.0) return float4(0.0, 0.0, 0.0, 0.0);
+    float2 ndc = (float2(pixel) + 0.5) / screenSize * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float4 world = mul(frame.invViewProj, float4(ndc, depth, 1.0));
+    return float4(world.xyz / world.w, 1.0);
+}
 
 struct VertexInput
 {

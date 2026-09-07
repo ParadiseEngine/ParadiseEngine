@@ -37,6 +37,7 @@ internal static class Program
         Cube,     // M2: textured lit cube with depth (--cube)
         Pbr,      // PR-5: PBR viewer, procedural or GLB (--pbr [path.glb])
         Compute,  // v0.9: compute-written plasma via SubmitOffscreen (--compute)
+        GiDemo,   // the probe GI test room, static + moving lights (--gi-demo [model.glb])
     }
 
     private static int Main(string[] args)
@@ -45,14 +46,29 @@ internal static class Program
         s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions { MinLevel = level });
 
         var headlessFrames = ParseHeadless(args);
+        var screenshotPath = ParseValue(args, "--screenshot");
+        // Global-illumination switches for the PBR viewer; the scene reads them when it is built.
+        PbrViewerScene.RayTracedAo = Array.IndexOf(args, "--rtao") >= 0;
+        PbrViewerScene.ProbeGi = Array.IndexOf(args, "--gi") >= 0;
         var kind = SceneKind.Triangle;
         string? glbPath = null;
         var pbrIndex = Array.IndexOf(args, "--pbr");
+        var giDemoIndex = Array.IndexOf(args, "--gi-demo");
         if (pbrIndex >= 0)
         {
             kind = SceneKind.Pbr;
             if (pbrIndex + 1 < args.Length && !args[pbrIndex + 1].StartsWith("--", StringComparison.Ordinal))
                 glbPath = args[pbrIndex + 1];
+        }
+        else if (giDemoIndex >= 0)
+        {
+            kind = SceneKind.GiDemo;
+            if (giDemoIndex + 1 < args.Length && !args[giDemoIndex + 1].StartsWith("--", StringComparison.Ordinal))
+                glbPath = args[giDemoIndex + 1];
+            GiDemoScene.ProbeGi = Array.IndexOf(args, "--no-gi") < 0;
+            GiDemoScene.RayTracedAo = PbrViewerScene.RayTracedAo;
+            GiDemoScene.AnimateLights = Array.IndexOf(args, "--static-lights") < 0;
+            GiDemoScene.PanelOnly = Array.IndexOf(args, "--panel-only") >= 0;
         }
         else if (Array.IndexOf(args, "--cube") >= 0)
         {
@@ -65,13 +81,20 @@ internal static class Program
 
         try
         {
-            return headlessFrames is int n ? RunHeadless(n, kind, glbPath) : RunWindowed(kind, glbPath);
+            return headlessFrames is int n ? RunHeadless(n, kind, glbPath, screenshotPath) : RunWindowed(kind, glbPath);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Sample failed: {ex}");
             return 1;
         }
+    }
+
+    /// <summary>The value after <paramref name="flag"/>, or null when the flag is absent.</summary>
+    private static string? ParseValue(string[] args, string flag)
+    {
+        var index = Array.IndexOf(args, flag);
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
     }
 
     /// <summary><c>--log-level &lt;level&gt;</c>, or Information. Null means the argument was bad and was reported.</summary>
@@ -107,7 +130,7 @@ internal static class Program
         return null;
     }
 
-    private static int RunHeadless(int frameCount, SceneKind kind, string? glbPath)
+    private static int RunHeadless(int frameCount, SceneKind kind, string? glbPath, string? screenshotPath)
     {
         if (frameCount < 0) return 1;
 
@@ -150,6 +173,13 @@ internal static class Program
                         scene.RenderFrame();
                     break;
                 }
+                case SceneKind.GiDemo:
+                {
+                    using var scene = new GiDemoScene(renderer, InitialWidth, InitialHeight, glbPath, s_log.CreateLogger("PbrRenderer"));
+                    for (var i = 0; i < frameCount; i++)
+                        scene.RenderFrame();
+                    break;
+                }
                 default:
                 {
                     using var scene = new TriangleScene(renderer);
@@ -159,6 +189,13 @@ internal static class Program
                 }
             }
             Console.WriteLine($"Headless mode: rendered {frameCount} {kind} frames against an offscreen target.");
+            if (screenshotPath is not null)
+            {
+                var pixels = renderer.ReadbackColor(out var width, out var height);
+                using var file = File.Create(screenshotPath);
+                PngWriter.Write(file, new ColorReadback(pixels, width, height), renderer.ColorFormat);
+                Console.WriteLine($"Screenshot written to {screenshotPath}.");
+            }
             return 0;
         }
         finally
@@ -193,6 +230,7 @@ internal static class Program
             using var cubeScene = kind == SceneKind.Cube ? new LitCubeScene(renderer, surfaceDesc.Width, surfaceDesc.Height) : null;
             using var computeScene = kind == SceneKind.Compute ? new ComputeScene(renderer) : null;
             using var pbrScene = kind == SceneKind.Pbr ? new PbrViewerScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath, s_log.CreateLogger("PbrRenderer")) : null;
+            using var giScene = kind == SceneKind.GiDemo ? new GiDemoScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath, s_log.CreateLogger("PbrRenderer")) : null;
 
             var quit = false;
             SDL_Event ev;
@@ -219,7 +257,17 @@ internal static class Program
                             renderer.Resize((uint)w, (uint)h);
                             cubeScene?.Resize((uint)w, (uint)h);
                             pbrScene?.Resize((uint)w, (uint)h);
+                            giScene?.Resize((uint)w, (uint)h);
                         }
+                    }
+                    else if (type == SDL_EventType.SDL_EVENT_MOUSE_MOTION && giScene is not null)
+                    {
+                        if ((ev.motion.state & SDL_MouseButtonFlags.SDL_BUTTON_LMASK) != 0)
+                            giScene.Drag(ev.motion.xrel, ev.motion.yrel);
+                    }
+                    else if (type == SDL_EventType.SDL_EVENT_MOUSE_WHEEL && giScene is not null)
+                    {
+                        giScene.Zoom(ev.wheel.y);
                     }
                     else if (type == SDL_EventType.SDL_EVENT_MOUSE_MOTION && pbrScene is not null)
                     {
@@ -233,6 +281,7 @@ internal static class Program
                     }
                 }
                 if (pbrScene is not null) pbrScene.RenderFrame();
+                else if (giScene is not null) giScene.RenderFrame();
                 else if (cubeScene is not null) cubeScene.RenderFrame();
                 else if (computeScene is not null) computeScene.RenderFrame();
                 else triangleScene!.RenderFrame();

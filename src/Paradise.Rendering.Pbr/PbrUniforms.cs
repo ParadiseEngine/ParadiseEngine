@@ -27,7 +27,8 @@ public struct SceneLightGpu
     [FieldOffset(64)] public Vector4 ShadowAtlas;       // x columns, y face count, z LIGHT_PARAM_SPECULAR, w soft flag
     // x: LIGHT_PARAM_SIZE — directional carries 1−cos(angular°) precomputed (Godot light_storage
     // convention); point/spot carry the raw world radius (the shader derives the per-fragment
-    // angular term). Softens specular highlights + NdotL like Godot's size_A. yzw unused.
+    // angular term). Softens specular highlights + NdotL like Godot's size_A. y: shadow texel
+    // world size (renderer-filled), z: indirect energy, w unused.
     [FieldOffset(80)] public Vector4 SizeParams;
 }
 
@@ -54,8 +55,8 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31024 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 31024)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31088 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 31088)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
@@ -74,6 +75,7 @@ public struct FrameUniformsGpu
     [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
     [FieldOffset(30992)] public Vector4 Time;                  // x elapsed seconds (procedural animation)
     [FieldOffset(31008)] public Vector4 ShadowFilter;          // x soft-shadow PCF disk radius (texels)
+    [FieldOffset(31024)] public Matrix4x4 InvViewProj;         // depth → world for screen-space effects
 }
 
 /// <summary>Mirror of pbr.slang <c>DrawUniforms</c> (208 B; ring slots stride to the device's
@@ -99,12 +101,13 @@ public struct ShadowDrawUniformsGpu
 }
 
 /// <summary>Mirror of pbr.slang group-3 <c>SsaoUniforms</c>: params (x intensity, y radius, z bias,
-/// w power) and screen (xy 1/size, zw size).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 32)]
+/// w power), screen (xy 1/size, zw size) and rtao (x: ray-traced AO texture bound).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 48)]
 public struct SsaoUniformsGpu
 {
     [FieldOffset(0)] public Vector4 Params;
     [FieldOffset(16)] public Vector4 Screen;
+    [FieldOffset(32)] public Vector4 Rtao;
 }
 
 /// <summary>Mirror of sky.slang <c>SkyUniforms</c>: Godot's ProceduralSkyMaterial as a per-view-ray

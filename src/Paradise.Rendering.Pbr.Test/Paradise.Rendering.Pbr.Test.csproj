@@ -17,6 +17,10 @@
          package-consumer story broke. -->
     <SlangShader Include="Shaders/*.slang" />
     <SlangIncludeDir Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/" />
+    <!-- The engine includes are build INPUTS: without them an edit to uniforms.slang leaves the
+         fixtures compiled against the old layout, and the extension-compatibility check then
+         reports the fixture as the thing that changed. -->
+    <SlangShaderInclude Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/Common/**/*.slang" />
   </ItemGroup>
 
   <ItemGroup>

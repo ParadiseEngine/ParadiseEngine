@@ -45,6 +45,10 @@ internal sealed class PbrContext : IDisposable
             "PbrJointPalettes", JointBufferBytes, BufferUsage.Storage | BufferUsage.CopyDst));
         renderer.UpdateBuffer<Matrix4x4>(JointBuffer, 0, JointPalettes);
 
+        Trace = new TraceScene(renderer);
+        FrameUniformBuffer = renderer.CreateBuffer(new BufferDesc(
+            "PbrFrameUniforms", (ulong)Unsafe.SizeOf<FrameUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
+
         LinearClampSampler = renderer.CreateSampler(new SamplerDesc(
             "PbrCompositeSampler",
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
@@ -89,6 +93,15 @@ internal sealed class PbrContext : IDisposable
     /// <summary>Linear, clamped: what every fullscreen pass samples with.</summary>
     public SamplerHandle LinearClampSampler { get; }
 
+    /// <summary>The scene as the compute tracer sees it: merged hierarchies and the frame's
+    /// instances. Built by the renderer before features set up, in frames something traces.</summary>
+    public TraceScene Trace { get; }
+
+    /// <summary>The frame uniforms (lights, shadow matrices, ambient, camera). Filled by the scene
+    /// feature each frame; bound by it and by the compute passes that shade ray hits.</summary>
+    public BufferHandle FrameUniformBuffer { get; }
+    public static ulong FrameUniformBytes => (ulong)Unsafe.SizeOf<FrameUniformsGpu>();
+
     // Frame-local: set by RenderFrame before any feature runs, read by every recorder.
     public PbrScene Scene { get; private set; } = null!;
     public Matrix4x4 View { get; private set; }
@@ -116,6 +129,8 @@ internal sealed class PbrContext : IDisposable
         Renderer.DestroyBuffer(DrawUniformRing);
         Renderer.DestroyBuffer(JointBuffer);
         Renderer.DestroySampler(LinearClampSampler);
+        Renderer.DestroyBuffer(FrameUniformBuffer);
+        Trace.Dispose();
         BindGroups.Dispose();
         Targets.Dispose();
     }

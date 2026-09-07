@@ -25,6 +25,12 @@ public enum RenderPassEvent
     Shadows = 100,
 
     AfterShadows = 200,
+
+    /// <summary>Built-in: probe global illumination — the ray trace against the scene's BVH and
+    /// the blends that fold the hits into the probe atlases. After the shadow maps it samples,
+    /// before anything that shades.</summary>
+    GlobalIllumination = 250,
+
     BeforePrepass = 300,
 
     /// <summary>Built-in: the SSAO world-position pre-pass.</summary>
