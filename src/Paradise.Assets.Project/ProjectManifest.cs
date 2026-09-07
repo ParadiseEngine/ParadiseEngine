@@ -37,6 +37,13 @@ public sealed class ProjectManifest
     /// <summary>Where <c>paradise assets extract</c> puts what it extracts, and which components it wires a mesh into; every member optional.</summary>
     public ExtractSettings Extract { get; }
 
+    /// <summary>
+    /// <c>[extensions] assemblies</c>: assemblies the tooling loads to find this project's own
+    /// importers, relative to the PROJECT ROOT like <c>[host] project</c> — an extension assembly
+    /// is a sibling of the asset tree, never inside it. Empty for a project that extends nothing.
+    /// </summary>
+    public IReadOnlyList<string> Extensions { get; init; } = [];
+
     /// <summary>The game's launcher for <c>paradise host</c>; <see cref="HostSettings.None"/> when the project declares none.</summary>
     public HostSettings Host { get; }
 
@@ -87,6 +94,7 @@ public sealed class ProjectManifest
         RejectUnknown(sourceName, document.Assets?.Unknown, "in [assets]");
         RejectUnknown(sourceName, document.Build?.Unknown, "in [build]");
         RejectUnknown(sourceName, document.Host?.Unknown, "in [host]");
+        RejectUnknown(sourceName, document.Extensions?.Unknown, "in [extensions]");
 
         if (string.IsNullOrWhiteSpace(document.Name))
         {
@@ -153,7 +161,16 @@ public sealed class ProjectManifest
         {
             Directories = directories,
         };
-        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host));
+        var assemblies = document.Extensions?.Assemblies ?? [];
+        if (assemblies.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ProjectManifestException(sourceName, "lists an empty string in [extensions] assemblies");
+        }
+
+        return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host))
+        {
+            Extensions = assemblies.ConvertAll(path => path.Trim()),
+        };
     }
 
     private static HostSettings ReadHost(string sourceName, HostSectionDocument? document)

@@ -289,13 +289,33 @@ is its own from the path and, at most, a header; `Import` does the work — and 
 through `Paradise.Cli.Host` from a console project of its own — the tool cannot be handed code,
 and NativeAOT rules out scanning for it:
 
+```toml
+# assets/project.toml — the global `paradise` loads these and appends what it finds
+[extensions]
+assemblies = ["tools/assets/bin/Debug/net10.0/MyGame.Assets.dll"]
+```
+
+Paths are relative to the PROJECT ROOT, like `[host] project`. The assembly is scanned for public
+`IAssetImporter` types with a parameterless constructor, and they are appended to the chain — so
+one `paradise`, and its `watch` and tray, run the game's own importers. The project that produces
+the assembly must be built first; a path that does not exist says so and names it.
+
+The other way, which needs no configuration and is what CI should prefer, is a console project of
+the game's own:
+
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
 return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
 ```
 
-One chain, lowest precedence first, so an appended importer shadows the built-in it replaces, and
-every verb runs it: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`, `host play`.
+MSBuild then guarantees the game's importers and the pipeline they compile against are one coherent
+closure, which dynamic loading cannot promise: an extension built against a different `Paradise`
+version fails at load, and the error says so rather than leaving you reading "could not load type".
+
+Either way it is one chain, lowest precedence first, so an appended importer shadows the built-in it
+replaces, and every verb runs it: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`,
+`host play`. Loading by reflection is also why `Paradise.Cli` is not NativeAOT-published or trimmed
+— a deliberate cost of the single command.
 
 An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
 `rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:

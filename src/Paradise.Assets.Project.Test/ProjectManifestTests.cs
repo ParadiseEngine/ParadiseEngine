@@ -188,6 +188,48 @@ public class ProjectManifestTests
     ];
 
     [Test]
+    public async Task extensions_name_assemblies_relative_to_the_project_root()
+    {
+        var manifest = ProjectManifest.Parse("""
+            name = "shiningpie"
+            schema_version = 1
+
+            [extensions]
+            assemblies = ["tools/assets/bin/Debug/net10.0/ShiningPie.Assets.dll", " spaced.dll "]
+            """, "project.toml");
+
+        await Assert.That(manifest.Extensions).IsEquivalentTo(new[]
+        {
+            "tools/assets/bin/Debug/net10.0/ShiningPie.Assets.dll",
+            "spaced.dll",
+        });
+    }
+
+    [Test]
+    public async Task a_project_that_extends_nothing_names_no_assemblies()
+    {
+        await Assert.That(ProjectManifest.Parse(Minimal, "project.toml").Extensions).IsEmpty();
+    }
+
+    [Test]
+    public async Task an_empty_extension_path_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extensions]\nassemblies = [\"a.dll\", \"\"]\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("[extensions]");
+    }
+
+    [Test]
+    public async Task an_unknown_extensions_key_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extensions]\nplugins = [\"a.dll\"]\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("plugins");
+    }
+
+    [Test]
     public async Task an_unknown_root_key_is_refused()
     {
         var error = Rejects($"{Minimal}\nnmae = \"y\"\n");

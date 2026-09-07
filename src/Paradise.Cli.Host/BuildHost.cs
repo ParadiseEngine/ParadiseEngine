@@ -126,6 +126,8 @@ public static class BuildHost
             return 1;
         }
 
+        importers = ExtensionLoader.Extend(physical, layout, importers);
+
         return assetVerb switch
         {
             "verify" => Verbs.Verify(physical, layout, fix, importers),
@@ -195,6 +197,8 @@ public static class BuildHost
             Console.Error.WriteLine($"paradise: {error.Message}");
             return 1;
         }
+
+        importers = ExtensionLoader.Extend(physical, layout, importers);
 
         // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner
         // installs it for the child's lifetime), and a handler that outlived the child would
