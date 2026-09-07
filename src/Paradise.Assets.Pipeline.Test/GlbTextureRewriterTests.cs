@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -51,7 +52,7 @@ public class GlbTextureRewriterTests
 
         await Assert.That(GlbBinary.TryRead(withVendorChunk, out var read, out var readBin)).IsTrue();
         await Assert.That(read["asset"]!["version"]!.GetValue<string>()).IsEqualTo("2.0");
-        await Assert.That(readBin).IsEquivalentTo(bin);
+        await Assert.That(readBin).IsEquivalentTo(bin, CollectionOrdering.Matching);
         await Assert.That(() => Paradise.Assets.Gltf.GlbContainer.Parse(withVendorChunk).Bin.Length).IsEqualTo(4);
     }
 
@@ -122,13 +123,13 @@ public class GlbTextureRewriterTests
         await Assert.That(GlbTextureRewriter.TryListEmbedded(glb, "crate", out var images, out _)).IsTrue();
 
         await Assert.That(images.Count).IsEqualTo(2);
-        await Assert.That(images[0].Bytes).IsEquivalentTo(png);
+        await Assert.That(images[0].Bytes).IsEquivalentTo(png, CollectionOrdering.Matching);
         await Assert.That(images[0].SourceExtension).IsEqualTo(".png");
         await Assert.That(images[0].Preset).IsEqualTo(TextureEncodingPreset.UastcNormalLinear);
         await Assert.That(images[0].PresetNote).IsNull();
         await Assert.That(images[0].SidecarName).IsEqualTo("crate_0.ktx2");
         await Assert.That(images[1].IsKtx2).IsTrue();
-        await Assert.That(images[1].Bytes).IsEquivalentTo(ktx2);
+        await Assert.That(images[1].Bytes).IsEquivalentTo(ktx2, CollectionOrdering.Matching);
         // Bound to no material slot: the name decides, and the note says so.
         await Assert.That(images[1].PresetNote).Contains("inferred");
         await Assert.That(images[1].SidecarName).IsEqualTo("crate_1.ktx2");
@@ -165,7 +166,7 @@ public class GlbTextureRewriterTests
         var views = (JsonArray)gltf["bufferViews"]!;
         await Assert.That(views.Count).IsEqualTo(1);
         await Assert.That(gltf["accessors"]![0]!["bufferView"]!.GetValue<int>()).IsEqualTo(0);
-        await Assert.That(bin.AsSpan(0, 4).ToArray()).IsEquivalentTo(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+        await Assert.That(bin.AsSpan(0, 4).ToArray()).IsEquivalentTo(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD }, CollectionOrdering.Matching);
         await Assert.That(gltf["buffers"]![0]!["byteLength"]!.GetValue<int>()).IsEqualTo(bin.Length);
         // Every externalised image is declared through KHR_texture_basisu, the pass-through
         // KTX2 included: image/ktx2 is only valid under the extension (#207).
@@ -194,12 +195,12 @@ public class GlbTextureRewriterTests
         var view = gltf["bufferViews"]![gltf["images"]![0]!["bufferView"]!.GetValue<int>()]!;
         var offset = view["byteOffset"]!.GetValue<int>();
         var length = view["byteLength"]!.GetValue<int>();
-        await Assert.That(bin.AsSpan(offset, length).ToArray()).IsEquivalentTo(ktx2);
+        await Assert.That(bin.AsSpan(offset, length).ToArray()).IsEquivalentTo(ktx2, CollectionOrdering.Matching);
         await Assert.That((string?)gltf["images"]![0]!["mimeType"]).IsEqualTo("image/ktx2");
         await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]).IsNotNull();
         // The untouched image and the geometry still resolve after the repack.
         var other = gltf["bufferViews"]![gltf["images"]![1]!["bufferView"]!.GetValue<int>()]!;
-        await Assert.That(bin.AsSpan(other["byteOffset"]!.GetValue<int>(), other["byteLength"]!.GetValue<int>()).ToArray()).IsEquivalentTo(new byte[] { 4, 5, 6 });
+        await Assert.That(bin.AsSpan(other["byteOffset"]!.GetValue<int>(), other["byteLength"]!.GetValue<int>()).ToArray()).IsEquivalentTo(new byte[] { 4, 5, 6 }, CollectionOrdering.Matching);
 
         await Assert.That(GlbTextureRewriter.TryEmbedKtx2(glb, new Dictionary<int, byte[]> { [5] = ktx2 }, out _, out var error)).IsFalse();
         await Assert.That(error).Contains("#5");

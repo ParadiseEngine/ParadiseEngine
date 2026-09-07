@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -21,7 +22,7 @@ public class MeshTextureReferencesTests
         var gltf = Read(rewrite.Glb);
         await Assert.That(Images(rewrite.Glb)[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/rust.ktx2");
         await Assert.That(Images(rewrite.Glb)[0]!["mimeType"]!.GetValue<string>()).IsEqualTo("image/ktx2");
-        await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "../textures/rust.png" });
+        await Assert.That(rewrite.Sources).IsEquivalentTo(new[] { "../textures/rust.png" }, CollectionOrdering.Matching);
         // image/ktx2 is only valid under KHR_texture_basisu — the one contract every KTX2 the
         // pipeline writes follows (#207), so readers other than Paradise's accept the mesh.
         await Assert.That(gltf["textures"]![0]!["extensions"]!["KHR_texture_basisu"]!["source"]!.GetValue<int>()).IsEqualTo(0);
@@ -40,7 +41,7 @@ public class MeshTextureReferencesTests
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(rewrite.Glb).IsEquivalentTo(glb);
+        await Assert.That(rewrite.Glb).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -80,7 +81,7 @@ public class MeshTextureReferencesTests
 
         GlbBinary.TryRead(MeshTextureReferences.Rewrite(glb).Glb, out _, out var rewritten);
 
-        await Assert.That(rewritten).IsEquivalentTo(bin);
+        await Assert.That(rewritten).IsEquivalentTo(bin, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -91,7 +92,7 @@ public class MeshTextureReferencesTests
         var twice = MeshTextureReferences.Rewrite(once.Glb);
 
         await Assert.That(twice.Sources.Count).IsEqualTo(0);
-        await Assert.That(twice.Glb).IsEquivalentTo(once.Glb);
+        await Assert.That(twice.Glb).IsEquivalentTo(once.Glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -104,7 +105,7 @@ public class MeshTextureReferencesTests
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(rewrite.Glb).IsEquivalentTo(glb);
+        await Assert.That(rewrite.Glb).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -125,7 +126,7 @@ public class MeshTextureReferencesTests
         var rewrite = MeshTextureReferences.Rewrite(glb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(rewrite.Glb).IsEquivalentTo(glb);
+        await Assert.That(rewrite.Glb).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -137,7 +138,7 @@ public class MeshTextureReferencesTests
         var rewrite = MeshTextureReferences.Rewrite(notAGlb);
 
         await Assert.That(rewrite.Sources.Count).IsEqualTo(0);
-        await Assert.That(rewrite.Glb).IsEquivalentTo(notAGlb);
+        await Assert.That(rewrite.Glb).IsEquivalentTo(notAGlb, CollectionOrdering.Matching);
     }
 
     private static JsonArray Images(byte[] glb) => (JsonArray)Read(glb)["images"]!;

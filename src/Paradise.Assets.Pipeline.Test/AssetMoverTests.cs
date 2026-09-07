@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -26,7 +27,7 @@ public class AssetMoverTests
         await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/props/box/crate.glb.meta").Guid).IsEqualTo(s_crate);
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.meta")).IsFalse();
 
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "levels/district.prefab" });
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "levels/district.prefab" }, CollectionOrdering.Matching);
         var document = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/levels/district.prefab");
         var mesh = (CanonicalInlineTable)document.Objects[0].Components[1].Data.Value("Mesh")!;
         await Assert.That(mesh.Value("path")).IsEqualTo("props/box/crate.glb");
@@ -68,7 +69,7 @@ public class AssetMoverTests
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props");
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Moved).IsEquivalentTo(new[] { "props/crate.glb" });
+        await Assert.That(result.Moved).IsEquivalentTo(new[] { "props/crate.glb" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.FileExists("/game/assets/props/crate.glb.meta")).IsTrue();
     }
 
@@ -182,7 +183,7 @@ public class AssetMoverTests
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
         await Assert.That(result.Warnings).IsEmpty();
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" });
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
         await Assert.That(image.Reference!.Path).IsEqualTo("textures/metal/rust.png");
@@ -220,7 +221,7 @@ public class AssetMoverTests
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/grass.png", "/game/assets/textures/ground/grass.png");
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "materials/grass.material" });
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "materials/grass.material" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllText("/game/assets/materials/grass.material")).Contains("path = \"textures/ground/grass.png\"");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
@@ -239,7 +240,7 @@ public class AssetMoverTests
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/materials/grass.material", "/game/assets/materials/plants/grass.material");
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "prefabs/reed.prefab" });
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "prefabs/reed.prefab" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllText("/game/assets/prefabs/reed.prefab")).Contains("materials/plants/grass.material");
     }
 
@@ -289,7 +290,7 @@ public class AssetMoverTests
             var result = AssetMover.Move(physical, layout, layout.Assets / "models/crate.glb", layout.Assets / "models/box.glb");
 
             await Assert.That(result.Succeeded).IsFalse();
-            await Assert.That(result.Moved).IsEquivalentTo(new[] { "models/box.glb" });
+            await Assert.That(result.Moved).IsEquivalentTo(new[] { "models/box.glb" }, CollectionOrdering.Matching);
             await Assert.That(result.Errors.Count).IsEqualTo(1);
             await Assert.That(result.Errors[0]).Contains("levels/district.prefab");
             await Assert.That(result.Errors[0]).Contains("still name the old path");
@@ -329,6 +330,8 @@ public class AssetMoverTests
             await Assert.That(directory.Errors).IsEmpty();
             await Assert.That(file.Errors).IsEmpty();
             await Assert.That(Directory.EnumerateDirectories(Path.Combine(root, "assets")).Select(Path.GetFileName)).Contains("models");
+            // Unordered deliberately: Directory.EnumerateFiles promises no order, and the claim
+            // here is which files the move left behind, not what order the OS lists them in.
             await Assert.That(Directory.EnumerateFiles(Path.Combine(root, "assets", "models")).Select(f => Path.GetFileName(f)!)).IsEquivalentTo(new[] { "Crate.glb", "Crate.glb.meta" });
             await Assert.That(File.ReadAllText(Path.Combine(root, "assets", "levels", "district.prefab"))).Contains("path = \"models/Crate.glb\"");
         }
@@ -357,7 +360,7 @@ public class AssetMoverTests
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors[0]).Contains(reason);
-        await Assert.That(AssetIndex.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName)).IsEquivalentTo(files);
+        await Assert.That(AssetIndex.Scan(fileSystem, "/game/assets").Files.Select(f => f.FullName)).IsEquivalentTo(files, CollectionOrdering.Matching);
     }
 
     private static void WriteLevel(MemoryFileSystem fileSystem, UPath path, string meshPath)

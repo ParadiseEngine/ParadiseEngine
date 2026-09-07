@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.Features.Test;
 
 /// <summary>The rules a subsystem relies on: a declaration supplies the default, an override
@@ -76,7 +78,7 @@ public class FeatureSwitchesTests
         switches.Set(Bloom.Id, false);  // same again: no change
         switches.Reset(Bloom.Id);
 
-        await Assert.That(seen).IsEquivalentTo([("rendering.bloom", false), ("rendering.bloom", true)]);
+        await Assert.That(seen).IsEquivalentTo([("rendering.bloom", false), ("rendering.bloom", true)], CollectionOrdering.Matching);
     }
 
     /// <summary>A stale line in a config file is the one thing this can get wrong silently, so it
@@ -91,7 +93,7 @@ public class FeatureSwitchesTests
         switches.Declare(Bloom);
 
         await Assert.That(beforeDeclaring).Contains("rendering.bloom");
-        await Assert.That(switches.Unknown).IsEquivalentTo(["rendering.blom", "rendering/bloom"]);
+        await Assert.That(switches.Unknown).IsEquivalentTo(["rendering.blom", "rendering/bloom"], CollectionOrdering.Matching);
     }
 
     [Test]
@@ -124,7 +126,7 @@ public class FeatureSwitchesTests
         switches.Declare(Capture);
 
         await Assert.That(switches.Definitions.Select(d => d.Name).Order())
-            .IsEquivalentTo(["rendering.bloom", "rendering.sceneColorCapture"]);
+            .IsEquivalentTo(["rendering.bloom", "rendering.sceneColorCapture"], CollectionOrdering.Matching);
     }
 
     /// <summary>What a debug UI writes back, or a second process is started with, so it renders

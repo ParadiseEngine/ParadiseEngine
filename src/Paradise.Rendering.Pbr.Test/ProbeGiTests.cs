@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
@@ -95,6 +96,8 @@ public class ProbeGiTests
         {
             pbr.RenderFrame(scene);
             var now = ReadInactive(backend, gi, probes);
+            // Unordered deliberately: these are HashSet<int>, and the claim is that the SET of
+            // inactive probes does not change — a HashSet has no order to assert.
             await Assert.That(now).IsEquivalentTo(before);
         }
     }

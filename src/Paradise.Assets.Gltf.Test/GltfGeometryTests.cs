@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.IO;
 
 namespace Paradise.Assets.Gltf.Test;
@@ -20,11 +21,11 @@ public class GltfGeometryTests
         await Assert.That(primitive.HasNormals).IsTrue();
         await Assert.That(primitive.HasTexCoords).IsTrue();
         await Assert.That(primitive.HasTangents).IsTrue();
-        await Assert.That(primitive.Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 0, 2, 3 });
+        await Assert.That(primitive.Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 0, 2, 3 }, CollectionOrdering.Matching);
 
         // Vertex 2 = (1,1,0), normal +Z, uv (1,1), tangent (1,0,0,1) — interleaved at 12 floats.
         var v2 = primitive.Vertices.AsSpan(2 * GltfPrimitive.FloatsPerVertex, GltfPrimitive.FloatsPerVertex).ToArray();
-        await Assert.That(v2).IsEquivalentTo(new float[] { 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1 });
+        await Assert.That(v2).IsEquivalentTo(new float[] { 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -35,7 +36,7 @@ public class GltfGeometryTests
     {
         var glb = GlbTestBuilder.FullQuad(out _, componentType).Build();
         var asset = GltfSceneReader.Read(glb);
-        await Assert.That(asset.Meshes[0].Primitives[0].Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 0, 2, 3 });
+        await Assert.That(asset.Meshes[0].Primitives[0].Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 0, 2, 3 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -47,7 +48,7 @@ public class GltfGeometryTests
         b.SetSceneRoots(b.AddNode(mesh: mesh));
 
         var asset = GltfSceneReader.Read(b.Build());
-        await Assert.That(asset.Meshes[0].Primitives[0].Indices).IsEquivalentTo(new uint[] { 0, 1, 2 });
+        await Assert.That(asset.Meshes[0].Primitives[0].Indices).IsEquivalentTo(new uint[] { 0, 1, 2 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -65,7 +66,7 @@ public class GltfGeometryTests
 
         var v0 = primitive.Vertices.AsSpan(0, GltfPrimitive.FloatsPerVertex).ToArray();
         // pos (0,0,0), default normal +Y, uv zero, default tangent (1,0,0,+1).
-        await Assert.That(v0).IsEquivalentTo(new float[] { 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1 });
+        await Assert.That(v0).IsEquivalentTo(new float[] { 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1 }, CollectionOrdering.Matching);
     }
 
     [Test]

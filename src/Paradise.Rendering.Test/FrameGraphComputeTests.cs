@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Buffers;
 using Paradise.Rendering.Graph;
 
@@ -62,7 +63,7 @@ public class FrameGraphComputeTests
             RenderCommandKind.BeginPass, RenderCommandKind.EndPass,
             RenderCommandKind.BeginComputePass, RenderCommandKind.Dispatch, RenderCommandKind.EndComputePass,
             RenderCommandKind.BeginPass, RenderCommandKind.EndPass,
-        });
+        }, CollectionOrdering.Matching);
         await Assert.That(dispatch).IsEqualTo(12u);
         await Assert.That(lastBegin).IsEqualTo(1);
     }
@@ -103,7 +104,7 @@ public class FrameGraphComputeTests
         var kinds = Kinds(stream);
 
         await Assert.That(graph.CulledPassCount).IsEqualTo(1);
-        await Assert.That(kinds).IsEquivalentTo(new[] { RenderCommandKind.BeginPass, RenderCommandKind.EndPass });
+        await Assert.That(kinds).IsEquivalentTo(new[] { RenderCommandKind.BeginPass, RenderCommandKind.EndPass }, CollectionOrdering.Matching);
     }
 
     /// <summary>...and a read binding of the same buffer revives it, with the group resolved to

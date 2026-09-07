@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation.Offline;
@@ -18,7 +19,7 @@ public class OzzArchiveTests
         await Assert.That(read.Value.JointCount).IsEqualTo(3);
         await Assert.That(read.Value.Names[0].ToString()).IsEqualTo("hip");
         await Assert.That(read.Value.Names[2].ToString()).IsEqualTo("prop");
-        await Assert.That(read.Value.Parents.ToArray()).IsEquivalentTo(new short[] { -1, 0, -1 });
+        await Assert.That(read.Value.Parents.ToArray()).IsEquivalentTo(new short[] { -1, 0, -1 }, CollectionOrdering.Matching);
         await Assert.That(read.Value.RestPoses[0].Translation).IsEqualTo(new Vector3(0, 1, 0));
         await Assert.That(read.Value.RestPoses[1].Rotation).IsEqualTo(TestRigs.QuarterTurnZ);
         await Assert.That(read.Value.FindJoint("knee")).IsEqualTo(1);
@@ -56,9 +57,9 @@ public class OzzArchiveTests
         await Assert.That(read.Value.Name.ToString()).IsEqualTo("Walk");
         await Assert.That(read.Value.Duration).IsEqualTo(2f);
         await Assert.That(read.Value.TrackCount).IsEqualTo(3);
-        await Assert.That(read.Value.Timepoints.ToArray()).IsEquivalentTo(new[] { 0f, 1f });
+        await Assert.That(read.Value.Timepoints.ToArray()).IsEquivalentTo(new[] { 0f, 1f }, CollectionOrdering.Matching);
         await Assert.That(read.Value.Rotations.KeyCount).IsEqualTo(AnimationBlob.PaddedTrackCount(3) * 2);
-        await Assert.That(OzzArchive.WriteAnimation(ref read.Value)).IsEquivalentTo(bytes);
+        await Assert.That(OzzArchive.WriteAnimation(ref read.Value)).IsEquivalentTo(bytes, CollectionOrdering.Matching);
         await Assert.That(OzzArchive.IsAnimation(bytes)).IsTrue();
     }
 
@@ -145,11 +146,11 @@ public class OzzArchiveTests
         using var opened = ClipFormat.Open(bytes);
 
         await Assert.That(read.Name).IsEqualTo("Walk");
-        await Assert.That(read.Channels).IsEquivalentTo(clip.Channels);
+        await Assert.That(read.Channels).IsEquivalentTo(clip.Channels, CollectionOrdering.Matching);
         await Assert.That(read.Duration).IsEqualTo(1f);
         await Assert.That(opened.Value.Duration).IsEqualTo(1f);
         await Assert.That(opened.Value.Channels[1].Step).IsTrue();
-        await Assert.That(ClipFormat.Write(clip)).IsEquivalentTo(bytes);
+        await Assert.That(ClipFormat.Write(clip)).IsEquivalentTo(bytes, CollectionOrdering.Matching);
         await Assert.That(ClipFormat.IsClip(bytes)).IsTrue();
         await Assert.That(() => ClipFormat.Write(new ClipData("x", [new ClipChannelData(0, ChannelPath.Scale, false, [0f, 1f], [1, 1, 1])]))).Throws<ArgumentException>();
         await Assert.That(() => ClipFormat.Read("nope"u8.ToArray())).Throws<InvalidDataException>();

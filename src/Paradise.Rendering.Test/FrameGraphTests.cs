@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Buffers;
 using Paradise.Rendering.Graph;
 
@@ -39,7 +40,7 @@ public class FrameGraphTests
         var stream = graph.Compile(writer);
 
         // Draw vertex counts stand in for identity: 10 (Opaque), 20 (Opaque+1), 30 (AfterOpaque).
-        await Assert.That(DrawCounts(stream)).IsEquivalentTo(new uint[] { 10, 20, 30 });
+        await Assert.That(DrawCounts(stream)).IsEquivalentTo(new uint[] { 10, 20, 30 }, CollectionOrdering.Matching);
     }
 
     /// <summary>Ties keep declaration order, so two features registered at the same event run in
@@ -58,7 +59,7 @@ public class FrameGraphTests
         }
 
         var stream = graph.Compile(writer);
-        await Assert.That(DrawCounts(stream)).IsEquivalentTo(new uint[] { 100, 101, 102, 103, 104, 105, 106, 107 });
+        await Assert.That(DrawCounts(stream)).IsEquivalentTo(new uint[] { 100, 101, 102, 103, 104, 105, 106, 107 }, CollectionOrdering.Matching);
     }
 
     /// <summary>BeginPass indices must address the SORTED table, not the declaration order — the
@@ -352,7 +353,7 @@ public class FrameGraphTests
 
         await Assert.That(passCount).IsEqualTo(2);
         await Assert.That(firstTarget).IsEqualTo(new TextureViewHandle(5, 1));
-        await Assert.That(beginIndices).IsEquivalentTo(new[] { 0, 1 });
+        await Assert.That(beginIndices).IsEquivalentTo(new[] { 0, 1 }, CollectionOrdering.Matching);
     }
 
     private static int[] BeginPassIndices(in RenderCommandStream stream)

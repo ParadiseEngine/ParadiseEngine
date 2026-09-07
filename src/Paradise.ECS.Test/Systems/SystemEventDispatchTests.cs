@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.ECS.Test;
 
 // ============================================================================
@@ -78,7 +80,7 @@ public sealed class SystemEventDispatchTests : IDisposable
         schedule.Run(world);
 
         var expected = new[] { 1, 2 };
-        await Assert.That(Values(world.Events.Incoming<Ping>())).IsEquivalentTo(expected);
+        await Assert.That(Values(world.Events.Incoming<Ping>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -103,7 +105,7 @@ public sealed class SystemEventDispatchTests : IDisposable
         var parallel = RunUnder<ParallelWaveScheduler>();
 
         await Assert.That(sequential.Length).IsEqualTo(500);
-        await Assert.That(parallel).IsEquivalentTo(sequential); // threading must not change order
+        await Assert.That(parallel).IsEquivalentTo(sequential, CollectionOrdering.Matching); // threading must not change order
     }
 
     [Test]
@@ -129,7 +131,7 @@ public sealed class SystemEventDispatchTests : IDisposable
         }
 
         var expected = new[] { 1, 2 };
-        await Assert.That(PingSink.Seen).IsEquivalentTo(expected);
+        await Assert.That(PingSink.Seen).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     private static int[] Values(ReadOnlySpan<Ping> span)

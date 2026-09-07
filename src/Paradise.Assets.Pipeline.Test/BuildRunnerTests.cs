@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text;
 
 using Paradise.Assets.Documents;
@@ -139,7 +140,7 @@ public class BuildRunnerTests
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk"))
-            .IsEquivalentTo(fileSystem.ReadAllBytes("/game/assets/audio/init.bnk"));
+            .IsEquivalentTo(fileSystem.ReadAllBytes("/game/assets/audio/init.bnk"), CollectionOrdering.Matching);
     }
 
     [Test]
@@ -601,7 +602,7 @@ public class BuildRunnerTests
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
         // The marker survives, which is the only way to SEE a skip: the copy was not redone.
-        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 9, 9, 9 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 9, 9, 9 }, CollectionOrdering.Matching);
         // ...and the manifest still describes it. A skip that dropped the entry would leave the
         // manifest listing only what CHANGED, which is not what a manifest is.
         await Assert.That(fileSystem.ReadAllText("/game/.editor/play/manifest.json"))
@@ -618,7 +619,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/assets/audio/crate.bnk", [4, 5, 6]);
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
-        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 4, 5, 6 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 4, 5, 6 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -635,7 +636,7 @@ public class BuildRunnerTests
         ProjectVerifierTests.Mint(fileSystem, "/game/assets/audio/crate.bnk");
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
 
-        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -791,7 +792,7 @@ public class BuildRunnerTests
         await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
 
         await Assert.That(encoder.Encodes).IsEqualTo(1);
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2")).IsEquivalentTo(marker);
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2")).IsEquivalentTo(marker, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -1005,7 +1006,7 @@ public class BuildRunnerTests
         fileSystem.WriteAllBytes("/game/build/audio/crate.bnk", [1]);
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Succeeded).IsTrue();
 
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/crate.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/crate.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -1220,12 +1221,12 @@ public class BuildRunnerTests
         IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, new OptionalCompanionImporter()];
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", chain);
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3 }, CollectionOrdering.Matching);
 
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk.txt");
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run().Succeeded).IsTrue();
 
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3, 1, 2, 3 });
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3, 1, 2, 3 }, CollectionOrdering.Matching);
     }
 
     [Test]

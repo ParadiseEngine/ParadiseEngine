@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json.Nodes;
 
 using Paradise.Assets.Documents;
@@ -159,7 +160,7 @@ public class AssetExtractorTests
         var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
         await Assert.That(images.Count).IsEqualTo(1);
         await Assert.That(images[0].Uri).IsEqualTo("crate_0.png");
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png, CollectionOrdering.Matching);
 
         // The material samples the extracted texture by identity, and knows nothing of the GLB.
         var wood = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.wood.material");
@@ -225,7 +226,7 @@ public class AssetExtractorTests
         var root = prefab.Root;
         await Assert.That(root.Name).IsEqualTo("crate");
         // A seed, not a projection: nothing on the root records the GLB it came from (#256).
-        await Assert.That(root.Meta!.Data.Select(entry => entry.Key)).IsEquivalentTo(new[] { "Guid", "Name" });
+        await Assert.That(root.Meta!.Data.Select(entry => entry.Key)).IsEquivalentTo(new[] { "Guid", "Name" }, CollectionOrdering.Matching);
         var meshComponent = root.Component(Guid.Parse("edee8bd8-9321-47db-819d-9bdadf010be4"))!;
         await Assert.That(meshComponent.Type).IsEqualTo("Game.StaticMesh");
         var meshReference = (CanonicalInlineTable)meshComponent.Data.Value("Mesh")!;
@@ -265,7 +266,7 @@ public class AssetExtractorTests
 
         await Assert.That(result.Errors).IsEmpty();
         // The re-export embedded the same image again, so the GLB is rewritten to point at the file; nothing else is.
-        await Assert.That(result.Written.Select(w => w.Path)).IsEquivalentTo(["models/crate.glb"]);
+        await Assert.That(result.Written.Select(w => w.Path)).IsEquivalentTo(["models/crate.glb"], CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.mesh")).IsEqualTo(mesh);
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.prefab")).IsEqualTo(prefab);
 
@@ -347,7 +348,7 @@ public class AssetExtractorTests
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(result.Written.Any(w => w.Path == "models/crate_0.png" && w.Note!.Contains("re-extracted"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted, CollectionOrdering.Matching);
         var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
         await Assert.That(recorded.Images.Single().Name).IsEqualTo("images[0]");
         await Assert.That(recorded.Images.Single().Entry.Reference.Path).IsEqualTo("models/crate_0.png");
@@ -364,14 +365,14 @@ public class AssetExtractorTests
         var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(refused.Succeeded).IsFalse();
         await Assert.That(refused.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-glb"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xFF, 0xFF });
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xFF, 0xFF }, CollectionOrdering.Matching);
         // The GLB was not rewritten to point at pixels that are not its own, and nothing was recorded.
         await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
         await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Images).IsEmpty();
 
         var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
         await Assert.That(taken.Succeeded).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png, CollectionOrdering.Matching);
 
         // A file that already holds what the GLB extracts to is simply adopted.
         fileSystem.DeleteFile(Glb + ".meta");
@@ -396,7 +397,7 @@ public class AssetExtractorTests
         var edited = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(edited.Errors).IsEmpty();
         await Assert.That(edited.Warnings.Any(w => w.Contains("crate_0.png") && w.Contains("cannot be written back"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted, CollectionOrdering.Matching);
 
         // Both sides move: the artist re-textures, and the file on disk is still the author's edit.
         byte[] repainted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9];
@@ -404,13 +405,13 @@ public class AssetExtractorTests
         var conflict = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(conflict.Succeeded).IsFalse();
         await Assert.That(conflict.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-glb"))).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted, CollectionOrdering.Matching);
         // And the GLB was not rewritten to point at a file that is not what it embeds.
         await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
 
         var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeGlb);
         await Assert.That(resolved.Succeeded).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -552,7 +553,7 @@ public class AssetExtractorTests
         await Assert.That(MaterialDocument.Load(fileSystem, "/game/assets/models/crate.Mat_A_1.material").Value("MetallicFactor")).IsEqualTo(1.0);
 
         var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
-        await Assert.That(recorded.Materials.Select(m => m.Index)).IsEquivalentTo([0, 1]);
+        await Assert.That(recorded.Materials.Select(m => m.Index)).IsEquivalentTo([0, 1], CollectionOrdering.Matching);
         var root = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/models/crate.prefab").Root;
         var slots = (IReadOnlyList<object>)root.Component(GlbExtraction.MaterialsComponentId)!.Data.Value("Slots")!;
         await Assert.That(((CanonicalInlineTable)slots[0]).Value("path")).IsEqualTo("models/crate.Mat_A_1.material");
@@ -577,7 +578,7 @@ public class AssetExtractorTests
         var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(refused.Succeeded).IsFalse();
         await Assert.That(refused.Errors.Single()).Contains("crate.metal.material");
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(repainted, CollectionOrdering.Matching);
 
         // The retry sees the same one conflict, not a manufactured one on the image it already rewrote.
         var retry = AssetExtractor.Extract(fileSystem, s_layout, Glb);
@@ -644,7 +645,7 @@ public class AssetExtractorTests
 
         // Nothing lands beside the GLB any more, and the sidecar records where each kind went.
         await Assert.That(fileSystem.EnumerateFiles("/game/assets/models").Select(p => p.GetName()).Order(StringComparer.Ordinal))
-            .IsEquivalentTo(new[] { "crate.glb", "crate.glb.meta" });
+            .IsEquivalentTo(new[] { "crate.glb", "crate.glb.meta" }, CollectionOrdering.Matching);
 
         var extraction = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
         await Assert.That(extraction.Mesh!.Path).IsEqualTo("cooked/crate.mesh");
@@ -652,7 +653,7 @@ public class AssetExtractorTests
         await Assert.That(extraction.Clips.Single().Reference.Path).IsEqualTo("animations/crate.Bob.anim");
         await Assert.That(extraction.Images.Single().Entry.Reference.Path).IsEqualTo("textures/crate_0.png");
         await Assert.That(extraction.Materials.Select(m => m.Entry.Reference.Path))
-            .IsEquivalentTo(new[] { "materials/crate.wood.material", "materials/crate.metal.material" });
+            .IsEquivalentTo(new[] { "materials/crate.wood.material", "materials/crate.metal.material" }, CollectionOrdering.Matching);
 
         // The GLB was rewritten to point at the texture where it actually landed.
         var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
@@ -872,7 +873,7 @@ public class AssetExtractorTests
 
         var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeDocument);
         await Assert.That(resolved.Succeeded).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xAB, 0xCD });
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xAB, 0xCD }, CollectionOrdering.Matching);
 
         // The point: the conflict is OVER. An image cannot be written back into the GLB, so the two
         // sides stay different — recording the old pair would raise the same conflict every run and

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -67,7 +68,7 @@ public class TomlContractParityTests
         // The entity is otherwise identical: same components, same ids, same order.
         await Assert.That(fromToml.Entities[0].Count).IsEqualTo(fromJson.Entities[0].Count);
         await Assert.That(fromToml.Entities[0].Select(component => component.Id))
-            .IsEquivalentTo(fromJson.Entities[0].Select(component => component.Id));
+            .IsEquivalentTo(fromJson.Entities[0].Select(component => component.Id), CollectionOrdering.Matching);
     }
 
     [Test]

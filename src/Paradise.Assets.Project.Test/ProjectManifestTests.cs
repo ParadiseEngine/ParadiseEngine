@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.Assets.Project.Test;
 
 public class ProjectManifestTests
@@ -155,7 +157,7 @@ public class ProjectManifestTests
         await Assert.That(manifest.Extract.DirectoryFor("tilesets", game)).IsEqualTo("tilesets");
         await Assert.That(manifest.Extract.DirectoryFor("tilemaps", game)).IsEqualTo("tilesets");
         await Assert.That(manifest.Extract.DirectoryFor("lods", game)).IsEqualTo("src");
-        await Assert.That(manifest.Extract.Kinds).IsEquivalentTo(new[] { "tilesets" });
+        await Assert.That(manifest.Extract.Kinds).IsEquivalentTo(new[] { "tilesets" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -202,7 +204,7 @@ public class ProjectManifestTests
         {
             "tools/assets/bin/Debug/net10.0/ShiningPie.Assets.dll",
             "spaced.dll",
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -365,7 +367,7 @@ public class ProjectManifestTests
         var manifest = ProjectManifest.Parse($"{Minimal}\n\n[host]\nproject = \"Game.Launcher/Game.Launcher.csproj\"\narguments = [\"--ui\", \"ui/Shell.xaml\"]\n", "project.toml");
 
         await Assert.That(manifest.Host.Project).IsEqualTo("Game.Launcher/Game.Launcher.csproj");
-        await Assert.That(manifest.Host.Arguments).IsEquivalentTo(new[] { "--ui", "ui/Shell.xaml" });
+        await Assert.That(manifest.Host.Arguments).IsEquivalentTo(new[] { "--ui", "ui/Shell.xaml" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -427,7 +429,7 @@ public class ProjectManifestTests
             ignore = [".DS_Store", "*.tmp", "scratch/**"]
             """, "project.toml");
 
-        await Assert.That(manifest.Ignore.Patterns).IsEquivalentTo(new[] { ".DS_Store", "*.tmp", "scratch/**" });
+        await Assert.That(manifest.Ignore.Patterns).IsEquivalentTo(new[] { ".DS_Store", "*.tmp", "scratch/**" }, CollectionOrdering.Matching);
         await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/models/.DS_Store")).IsTrue();
         await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/scratch/a/b.prefab")).IsTrue();
         await Assert.That(manifest.Ignore.Matches("/game/assets", "/game/assets/models/crate.glb")).IsFalse();

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Pipeline;
 
 using Zio;
@@ -67,7 +68,7 @@ public class WatchSessionTests
             (WatchStatus.Alive, 0),
             (WatchStatus.Building, 0),
             (WatchStatus.Idle, 0),
-        });
+        }, CollectionOrdering.Matching);
         await Assert.That(log).Contains("watch: rebuilt 4 asset(s) into /game/build");
     }
 
@@ -93,7 +94,7 @@ public class WatchSessionTests
         await Assert.That(session.Status).IsEqualTo(WatchStatus.Idle);
         await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/build");
         await Assert.That(tray.States.Select(s => s.Status).ToArray())
-            .IsEquivalentTo(new[] { WatchStatus.Alive, WatchStatus.Building, WatchStatus.Idle });
+            .IsEquivalentTo(new[] { WatchStatus.Alive, WatchStatus.Building, WatchStatus.Idle }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -125,7 +126,7 @@ public class WatchSessionTests
             (WatchStatus.Alive, 0),
             (WatchStatus.Building, 0),
             (WatchStatus.Failed, 2),
-        });
+        }, CollectionOrdering.Matching);
     }
 
     /// <summary>A rebuild that throws — a file Blender is still writing, a sidecar rewritten mid-build — is a failed build, not a dead watch (issue #203).</summary>
@@ -161,7 +162,7 @@ public class WatchSessionTests
             WatchStatus.Failed,
             WatchStatus.Building,
             WatchStatus.Idle,
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -207,7 +208,7 @@ public class WatchSessionTests
 
         await Assert.That(rebuilt).IsFalse();
         await Assert.That(session.Status).IsEqualTo(WatchStatus.Alive);
-        await Assert.That(tray.States.ToArray()).IsEquivalentTo(new (WatchStatus, int)[] { (WatchStatus.Alive, 0) });
+        await Assert.That(tray.States.ToArray()).IsEquivalentTo(new (WatchStatus, int)[] { (WatchStatus.Alive, 0) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -240,7 +241,7 @@ public class WatchSessionTests
             WatchStatus.Failed,
             WatchStatus.Building,
             WatchStatus.Idle,
-        });
+        }, CollectionOrdering.Matching);
         await Assert.That(tray.States[2].Errors).IsEqualTo(1);
         await Assert.That(tray.States[^1].Errors).IsEqualTo(0);
     }
@@ -277,7 +278,7 @@ public class WatchSessionTests
 
         session.Run();
 
-        await Assert.That(seen.ToArray()).IsEquivalentTo(new[] { true, false });
+        await Assert.That(seen.ToArray()).IsEquivalentTo(new[] { true, false }, CollectionOrdering.Matching);
         await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/.editor/play");
         await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/build");
     }

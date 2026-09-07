@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -18,7 +19,7 @@ public class GlbBinaryTests
         await Assert.That(read).IsTrue();
         await Assert.That(round["meshes"]![0]!["name"]!.GetValue<string>()).IsEqualTo("crate");
         // Padded to a 4-byte boundary on write, per the GLB spec — the payload is a prefix of it.
-        await Assert.That(chunk.Take(bin.Length)).IsEquivalentTo(bin);
+        await Assert.That(chunk.Take(bin.Length)).IsEquivalentTo(bin, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -46,7 +47,7 @@ public class GlbBinaryTests
         {
             GlbBinary.Write(path, gltf, bin);
 
-            await Assert.That(File.ReadAllBytes(path)).IsEquivalentTo(GlbBinary.Write(gltf, bin));
+            await Assert.That(File.ReadAllBytes(path)).IsEquivalentTo(GlbBinary.Write(gltf, bin), CollectionOrdering.Matching);
         }
         finally
         {

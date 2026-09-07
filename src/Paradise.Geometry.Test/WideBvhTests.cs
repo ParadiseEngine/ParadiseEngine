@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Runtime.CompilerServices;
 
 namespace Paradise.Geometry.Test;
@@ -299,7 +300,7 @@ public class WideBvhTests
         var (positions, indices) = RandomSoup(500, seed: 9);
         var a = TriangleBvh.Build(positions, indices);
         var b = TriangleBvh.Build(positions, indices);
-        await Assert.That(a.ItemOrder).IsEquivalentTo(b.ItemOrder);
+        await Assert.That(a.ItemOrder).IsEquivalentTo(b.ItemOrder, CollectionOrdering.Matching);
         await Assert.That(a.Nodes.Length).IsEqualTo(b.Nodes.Length);
         for (var i = 0; i < a.Nodes.Length; i++)
         {

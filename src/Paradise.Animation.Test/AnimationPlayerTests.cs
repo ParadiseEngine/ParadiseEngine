@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation.Offline;
@@ -63,8 +64,8 @@ public class AnimationPlayerTests
         context.Value.Sample(ref turn.Value, 0.3f, ref expected.Value);
         LocalToModel.Compute(ref skeleton.Value, ref expected.Value, models);
 
-        await Assert.That(player.LocalPose.ToArray()).IsEquivalentTo(expected.Value.ToArray());
-        await Assert.That(player.ModelMatrices.ToArray()).IsEquivalentTo(models);
+        await Assert.That(player.LocalPose.ToArray()).IsEquivalentTo(expected.Value.ToArray(), CollectionOrdering.Matching);
+        await Assert.That(player.ModelMatrices.ToArray()).IsEquivalentTo(models, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -114,7 +115,7 @@ public class AnimationPlayerTests
         player.Evaluate();
 
         await Assert.That(player.Current).IsNull();
-        await Assert.That(player.LocalPose.ToArray()).IsEquivalentTo(skeleton.Value.RestPoses.ToArray());
+        await Assert.That(player.LocalPose.ToArray()).IsEquivalentTo(skeleton.Value.RestPoses.ToArray(), CollectionOrdering.Matching);
         var error = await Assert.That(() => player.Play(foreign)).Throws<ArgumentException>();
         await Assert.That(error!.Message).Contains("1 tracks");
     }
@@ -161,7 +162,7 @@ public class AnimationPlayerTests
 
         await Assert.That(sameMemory).IsTrue();
         await Assert.That(player.State.Models.Length).IsEqualTo(player.JointCount);
-        await Assert.That(player.ModelMatrices.ToArray()).IsEquivalentTo(modelsFromState);
+        await Assert.That(player.ModelMatrices.ToArray()).IsEquivalentTo(modelsFromState, CollectionOrdering.Matching);
         await Assert.That(player.State.Current.MaxPaddedTracks).IsEqualTo(AnimationBlob.PaddedTrackCount(player.JointCount));
     }
 

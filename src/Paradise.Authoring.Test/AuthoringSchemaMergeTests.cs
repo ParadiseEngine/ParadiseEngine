@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json;
 using Paradise.Authoring;
 
@@ -29,7 +30,7 @@ public class AuthoringSchemaMergeTests
             Doc(Component("C.Three", 3)));
 
         await Assert.That(merged.Components.Select(c => c.Type))
-            .IsEquivalentTo(new[] { "A.One", "B.Two", "C.Three" });
+            .IsEquivalentTo(new[] { "A.One", "B.Two", "C.Three" }, CollectionOrdering.Matching);
     }
 
     /// <summary>Earlier wins, so a host can pass the ENGINE schema first: a game that copies the

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json.Serialization;
 using Tomlyn.Serialization;
 
@@ -133,7 +134,7 @@ public class FeatureSettingsTests
             intensity = 1.0
             """));
 
-        await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"]);
+        await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"], CollectionOrdering.Matching);
     }
 
     /// <summary>Re-reading <c>engine.json</c> is a live change: a feature that read its settings
@@ -159,7 +160,7 @@ public class FeatureSettingsTests
             intensity = 0.9
             """));
 
-        await Assert.That(announced).IsEquivalentTo([0.9f]);
+        await Assert.That(announced).IsEquivalentTo([0.9f], CollectionOrdering.Matching);
         await Assert.That(switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default).Intensity)
             .IsEqualTo(0.9f);
     }
@@ -213,7 +214,7 @@ public class FeatureSettingsTests
         await Assert.That(text).Contains("intensity");
         await Assert.That(text).DoesNotContain("name");
         await Assert.That(text).DoesNotContain("enabled");
-        await Assert.That(TomlEngineConfiguration.ReservedKeys).IsEquivalentTo(["name", "enabled"]);
+        await Assert.That(TomlEngineConfiguration.ReservedKeys).IsEquivalentTo(["name", "enabled"], CollectionOrdering.Matching);
     }
 
     /// <summary>A settings object that does not fit the record names the FEATURE, because that is

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
@@ -198,7 +199,7 @@ public class SceneColorCaptureTests
             var b = pixels[idx + 0];
             var r = pixels[idx + 2];
 
-            await Assert.That(pbr.Materials.TargetsOf(materialId).ToArray()).IsEquivalentTo([PbrTargets.SceneColor]);
+            await Assert.That(pbr.Materials.TargetsOf(materialId).ToArray()).IsEquivalentTo([PbrTargets.SceneColor], CollectionOrdering.Matching);
             await Assert.That((int)r).IsGreaterThan(120);
             await Assert.That((int)r).IsGreaterThan(b + 40);
         }

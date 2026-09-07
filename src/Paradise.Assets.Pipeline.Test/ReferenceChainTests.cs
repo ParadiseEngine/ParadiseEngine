@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -93,12 +94,12 @@ public class ReferenceChainTests
         // Unrecorded: the site is path-only until the importer records it.
         var before = ReferenceGraph.Build(fileSystem, s_layout, AssetIndex.Scan(fileSystem, s_layout.Assets), importers: s_chain);
         await Assert.That(before.DependentsOf(flour)).IsEmpty();
-        await Assert.That(before.PathOnly.Select(entry => entry.Site.Hint ?? "")).IsEquivalentTo(new[] { "pantry/flour.png" });
+        await Assert.That(before.PathOnly.Select(entry => entry.Site.Hint ?? "")).IsEquivalentTo(new[] { "pantry/flour.png" }, CollectionOrdering.Matching);
 
         ReferenceRepair.Fix(fileSystem, s_layout, s_chain);
 
         var after = ReferenceGraph.Build(fileSystem, s_layout, AssetIndex.Scan(fileSystem, s_layout.Assets), importers: s_chain);
-        await Assert.That(after.DependentsOf(flour).Select(edge => edge.Where)).IsEquivalentTo(new[] { "ingredient" });
+        await Assert.That(after.DependentsOf(flour).Select(edge => edge.Where)).IsEquivalentTo(new[] { "ingredient" }, CollectionOrdering.Matching);
         await Assert.That(after.PathOnly).IsEmpty();
     }
 
@@ -113,7 +114,7 @@ public class ReferenceChainTests
         var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/pantry/flour.png", "/game/assets/pantry/grains/flour.png", importers: s_chain);
 
         await Assert.That(moved.Errors).IsEmpty();
-        await Assert.That(moved.Rewritten).IsEquivalentTo(new[] { "recipes/bread.recipe" });
+        await Assert.That(moved.Rewritten).IsEquivalentTo(new[] { "recipes/bread.recipe" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllText("/game/assets/recipes/bread.recipe").Trim()).IsEqualTo("pantry/grains/flour.png");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout, AssetIndex.Scan(fileSystem, s_layout.Assets), s_chain)).IsEmpty();
 

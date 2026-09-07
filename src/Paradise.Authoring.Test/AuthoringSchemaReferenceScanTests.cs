@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -149,7 +150,7 @@ public class AuthoringSchemaReferenceScanTests
         var schema = AuthoringSchemaReader.Read(json!);
         await Assert.That(schema.Version).IsEqualTo(AuthoringSchemaDocument.CurrentVersion);
         await Assert.That(schema.Components.Select(c => c.Type))
-            .IsEquivalentTo(new[] { "Library.LibraryComponent" });
+            .IsEquivalentTo(new[] { "Library.LibraryComponent" }, CollectionOrdering.Matching);
         await Assert.That(schema.Components.Single().DisplayName).IsEqualTo("From The Library");
     }
 
@@ -203,7 +204,7 @@ public class AuthoringSchemaReferenceScanTests
             Build("Library", LibrarySource));
 
         await Assert.That(AuthoringSchemaReader.Read(json!).Components.Select(c => c.Type))
-            .IsEquivalentTo(new[] { "Consumer.ConsumerComponent", "Library.LibraryComponent" });
+            .IsEquivalentTo(new[] { "Consumer.ConsumerComponent", "Library.LibraryComponent" }, CollectionOrdering.Matching);
     }
 
     /// <summary>

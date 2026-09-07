@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -43,7 +44,7 @@ public class ImGuiTextureProtocolTests
             ImTextureStatus.WantCreate,
             ImTextureStatus.WantUpdates,
             ImTextureStatus.Ok,
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]

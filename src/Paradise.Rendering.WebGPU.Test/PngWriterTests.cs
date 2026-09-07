@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using Paradise.Rendering.WebGPU;
@@ -58,7 +59,7 @@ public class PngWriterTests
         PngWriter.WriteRgba(stream, new byte[Width * Height * 4], Width, Height);
         var png = stream.ToArray();
 
-        await Assert.That(png[..8]).IsEquivalentTo(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        await Assert.That(png[..8]).IsEquivalentTo(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }, CollectionOrdering.Matching);
         // IHDR's payload starts at 16: width, height, then depth 8 and colour type 6 (RGBA).
         await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16))).IsEqualTo((uint)Width);
         await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20))).IsEqualTo((uint)Height);
@@ -76,7 +77,7 @@ public class PngWriterTests
         using var stream = new MemoryStream();
         PngWriter.Write(stream, readback, PdTextureFormat.Bgra8Unorm);
 
-        await Assert.That(pixels).IsEquivalentTo(original);
+        await Assert.That(pixels).IsEquivalentTo(original, CollectionOrdering.Matching);
 
         var scanlines = Scanlines(stream.ToArray());
         await Assert.That(scanlines.Length).IsEqualTo((Width * 4 + 1) * Height);

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation.Offline;
@@ -76,7 +77,7 @@ public class SamplingTests
                 using var fresh = JointPoses.Create(skeleton.Value.JointCount);
                 using var context = SamplingContext.Create(skeleton.Value.JointCount);
                 context.Value.Sample(ref clip.Value, ratio, ref fresh.Value);
-                await Assert.That(poses.Value.ToArray()).IsEquivalentTo(fresh.Value.ToArray());
+                await Assert.That(poses.Value.ToArray()).IsEquivalentTo(fresh.Value.ToArray(), CollectionOrdering.Matching);
             }
         }
     }
@@ -95,7 +96,7 @@ public class SamplingTests
         context.Value.Sample(ref clip.Value, 1f, ref end.Value);
         context.Value.Sample(ref clip.Value, 7f, ref poses.Value);
 
-        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(end.Value.ToArray());
+        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(end.Value.ToArray(), CollectionOrdering.Matching);
         var error = await Assert.That(() => small.Value.Sample(ref clip.Value, 0f, ref poses.Value)).Throws<ArgumentException>();
         await Assert.That(error!.Message).Contains("at most 0");
     }
@@ -118,7 +119,7 @@ public class SamplingTests
         using var fresh = SamplingContext.Create(skeleton.Value.JointCount);
         fresh.Value.Sample(ref second.Value, 0.3f, ref expected.Value);
 
-        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(expected.Value.ToArray());
+        await Assert.That(poses.Value.ToArray()).IsEquivalentTo(expected.Value.ToArray(), CollectionOrdering.Matching);
     }
 
     [Test]

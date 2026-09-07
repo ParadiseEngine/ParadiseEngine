@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text;
 
 namespace Paradise.Assets.Documents.Test;
@@ -25,7 +26,7 @@ public class ParityCorpusTests
         var table = TomlDocumentReader.Parse(text, static problem => new FormatException(problem));
         var model = TomlDocumentReader.ToCanonical(table, "in the fixture", static problem => new FormatException(problem));
 
-        await Assert.That(CanonicalTomlWriter.WriteBytes(model)).IsEquivalentTo(bytes).Because(Path.GetFileName(path));
+        await Assert.That(CanonicalTomlWriter.WriteBytes(model)).IsEquivalentTo(bytes, CollectionOrdering.Matching).Because(Path.GetFileName(path));
     }
 
     [Test]

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 namespace Paradise.Assets.Documents.Test;
@@ -28,7 +29,7 @@ public class LocalTransformCodecTests
 
         await Assert.That(WellKnownComponents.PayloadProblem(component)).IsNull();
         await Assert.That(component.Data.Select(pair => pair.Key).ToArray())
-            .IsEquivalentTo(new[] { WellKnownComponents.Position, WellKnownComponents.Rotation, WellKnownComponents.Scale });
+            .IsEquivalentTo(new[] { WellKnownComponents.Position, WellKnownComponents.Rotation, WellKnownComponents.Scale }, CollectionOrdering.Matching);
     }
 
     /// <summary>Transforms come from float32 vectors; the shortest decimal keeps 0.1 out of the diff as 0.10000000149011612 (issue #200).</summary>

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 namespace Paradise.Assets.Mesh.Test;
@@ -31,9 +32,9 @@ public class MeshBlobTests
         var read = MeshBlobFormat.Read(bytes);
 
         await Assert.That(read.Layout).IsEqualTo(MeshVertexLayout.Static);
-        await Assert.That(read.Vertices).IsEquivalentTo(Sample().Vertices);
-        await Assert.That(read.Indices).IsEquivalentTo(new uint[] { 0, 1, 2 });
-        await Assert.That(read.Draws).IsEquivalentTo(Sample().Draws);
+        await Assert.That(read.Vertices).IsEquivalentTo(Sample().Vertices, CollectionOrdering.Matching);
+        await Assert.That(read.Indices).IsEquivalentTo(new uint[] { 0, 1, 2 }, CollectionOrdering.Matching);
+        await Assert.That(read.Draws).IsEquivalentTo(Sample().Draws, CollectionOrdering.Matching);
         await Assert.That(read.BoundsMin).IsEqualTo(new Vector3(-1, -2, -3));
         await Assert.That(read.BoundsMax).IsEqualTo(new Vector3(1, 2, 3));
     }
@@ -47,7 +48,7 @@ public class MeshBlobTests
         await Assert.That(read.VertexCount).IsEqualTo(3);
         await Assert.That(read.Draws[0].SkinIndex).IsEqualTo(0);
         await Assert.That(read.Draws[0].NodeIndex).IsEqualTo(4);
-        await Assert.That(read.Skin!.Joints).IsEquivalentTo(new[] { 3, 7 });
+        await Assert.That(read.Skin!.Joints).IsEquivalentTo(new[] { 3, 7 }, CollectionOrdering.Matching);
         await Assert.That(read.Skin.InverseBindMatrices[1]).IsEqualTo(Matrix4x4.CreateTranslation(0, -1, 0));
         await Assert.That(read.Skin.Skeleton).IsEqualTo("models/rig.skeleton");
         await Assert.That(MeshBlobFormat.Read(MeshBlobFormat.Write(Sample())).Skin).IsNull();
@@ -104,7 +105,7 @@ public class MeshBlobTests
     [Test]
     public async Task the_same_data_gives_the_same_bytes()
     {
-        await Assert.That(MeshBlobFormat.Write(Sample())).IsEquivalentTo(MeshBlobFormat.Write(Sample()));
+        await Assert.That(MeshBlobFormat.Write(Sample())).IsEquivalentTo(MeshBlobFormat.Write(Sample()), CollectionOrdering.Matching);
     }
 
     [Test]

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Authoring;
 
 namespace Paradise.Authoring.Test;
@@ -36,7 +37,7 @@ public class SchemaV2Tests
         // The element is a shape REFERENCE, and its own fields are what the exporter bakes out.
         await Assert.That(colliders.Items!.AuthoredBy).IsEqualTo(AuthoredBySources.Shape);
         await Assert.That(colliders.Items!.Fields!.Select(f => f.Name))
-            .IsEquivalentTo(new[] { "Kind", "Size", "LocalCenter", "LocalRotation", "Radius" });
+            .IsEquivalentTo(new[] { "Kind", "Size", "LocalCenter", "LocalRotation", "Radius" }, CollectionOrdering.Matching);
     }
 
     /// <summary>
@@ -55,7 +56,7 @@ public class SchemaV2Tests
         await Assert.That(destination.Type).IsEqualTo(AuthoredFieldTypes.Object);
         await Assert.That(destination.AuthoredBy).IsEqualTo(AuthoredBySources.Transform);
         await Assert.That(destination.Fields!.Select(f => f.Name))
-            .IsEquivalentTo(new[] { "Position", "Yaw" });
+            .IsEquivalentTo(new[] { "Position", "Yaw" }, CollectionOrdering.Matching);
         await Assert.That(destination.Fields!.Single(f => f.Name == "Position").Type)
             .IsEqualTo(AuthoredFieldTypes.Vector3);
         await Assert.That(destination.Fields!.Single(f => f.Name == "Yaw").Unit)
@@ -106,7 +107,7 @@ public class SchemaV2Tests
     [Test]
     public async Task an_asset_reference_carries_its_accepted_kinds()
     {
-        await Assert.That(Field("Model").AssetKinds).IsEquivalentTo(new[] { ".glb", ".gltf" });
+        await Assert.That(Field("Model").AssetKinds).IsEquivalentTo(new[] { ".glb", ".gltf" }, CollectionOrdering.Matching);
         await Assert.That(AuthoringSchema.Json.Contains("*.glb")).IsFalse();
     }
 

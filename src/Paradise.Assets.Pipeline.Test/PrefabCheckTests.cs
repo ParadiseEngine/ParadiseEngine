@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -91,6 +92,6 @@ public class PrefabCheckTests
         var results = PrefabCheck.Run(fileSystem, s_layout);
 
         await Assert.That(results.Select(result => result.Path.GetName()).ToArray())
-            .IsEquivalentTo(new[] { "a.prefab", "b.prefab" });
+            .IsEquivalentTo(new[] { "a.prefab", "b.prefab" }, CollectionOrdering.Matching);
     }
 }

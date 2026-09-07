@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Paradise.Export.Data;
@@ -89,7 +90,7 @@ public class AuthoredComponentRouterTests
 
         await Assert.That(instances).IsEmpty();
         await Assert.That(unresolved.Select(c => c.Id))
-            .IsEquivalentTo(new[] { TestComponentIds.MoverId, LedgeId });
+            .IsEquivalentTo(new[] { TestComponentIds.MoverId, LedgeId }, CollectionOrdering.Matching);
     }
 
     /// <summary>
@@ -245,7 +246,7 @@ public class AuthoredComponentRouterTests
         var instances = AuthoredComponentRouter.Materialize(document, new LedgeRegistry());
 
         await Assert.That(instances.OfType<LedgeFixture>().Select(l => l.Label))
-            .IsEquivalentTo(new[] { "first", "second" });
+            .IsEquivalentTo(new[] { "first", "second" }, CollectionOrdering.Matching);
     }
 
     /// <summary>An empty document is empty, not an error.</summary>
@@ -269,7 +270,7 @@ public class AuthoredComponentRouterTests
             AuthoredComponentRouter.Materialize(entity, TestRegistry.Default, unresolved);
 
         await Assert.That(unresolved.Select(c => c.Id))
-            .IsEquivalentTo(new[] { TestComponentIds.MoverId });
+            .IsEquivalentTo(new[] { TestComponentIds.MoverId }, CollectionOrdering.Matching);
         await Assert.That(instances.OfType<GlowFixture>().Single().ShadowMapSize).IsEqualTo(512);
     }
 

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation;
@@ -71,11 +72,11 @@ public class GltfCookTests
 
         var cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(b.Build()));
 
-        await Assert.That(cooked.Mesh.Draws.Select(d => d.Name ?? "")).IsEquivalentTo(new[] { "A", "B" });
+        await Assert.That(cooked.Mesh.Draws.Select(d => d.Name ?? "")).IsEquivalentTo(new[] { "A", "B" }, CollectionOrdering.Matching);
         await Assert.That(cooked.Mesh.Draws[1].FirstIndex).IsEqualTo(3u);
         await Assert.That(cooked.Mesh.Draws[1].MaterialSlot).IsEqualTo(1);
-        await Assert.That(cooked.Mesh.Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 3, 4, 5 });
-        await Assert.That(cooked.SlotMaterials).IsEquivalentTo(new[] { -1, -1 });
+        await Assert.That(cooked.Mesh.Indices).IsEquivalentTo(new uint[] { 0, 1, 2, 3, 4, 5 }, CollectionOrdering.Matching);
+        await Assert.That(cooked.SlotMaterials).IsEquivalentTo(new[] { -1, -1 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -108,12 +109,12 @@ public class GltfCookTests
         await Assert.That(cooked.Mesh.Vertices[16]).IsEqualTo(0.75f);   // weight 0
         await Assert.That(cooked.Mesh.Draws[0].SkinIndex).IsEqualTo(0);
         await Assert.That(cooked.Mesh.Draws[0].NodeIndex).IsEqualTo(0);
-        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 1, 2 }, CollectionOrdering.Matching);
         await Assert.That(cooked.Mesh.Skin.InverseBindMatrices.Length).IsEqualTo(2);
         await Assert.That(cooked.Skeleton).IsNotNull();
         using var skeleton = OzzArchive.ReadSkeleton(cooked.Skeleton!);
         await Assert.That(skeleton.Value.JointCount).IsEqualTo(3);
-        await Assert.That(Names(ref skeleton.Value)).IsEquivalentTo(new[] { "Body", "hip", "knee" });
+        await Assert.That(Names(ref skeleton.Value)).IsEquivalentTo(new[] { "Body", "hip", "knee" }, CollectionOrdering.Matching);
         await Assert.That(skeleton.Value.Parents[2]).IsEqualTo((short)1);
         await Assert.That(skeleton.Value.RestPoses[1].Translation).IsEqualTo(new Vector3(0, 1, 0));
         await Assert.That(cooked.Clips.Count).IsEqualTo(1);
@@ -146,9 +147,9 @@ public class GltfCookTests
 
         // Roots in node order, each followed by its subtree: hip, knee, Body.
         using var skeleton = OzzArchive.ReadSkeleton(cooked.Skeleton!);
-        await Assert.That(Names(ref skeleton.Value)).IsEquivalentTo(new[] { "hip", "knee", "Body" });
-        await Assert.That(skeleton.Value.Parents.ToArray()).IsEquivalentTo(new short[] { -1, 0, -1 });
-        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 0, 1 });
+        await Assert.That(Names(ref skeleton.Value)).IsEquivalentTo(new[] { "hip", "knee", "Body" }, CollectionOrdering.Matching);
+        await Assert.That(skeleton.Value.Parents.ToArray()).IsEquivalentTo(new short[] { -1, 0, -1 }, CollectionOrdering.Matching);
+        await Assert.That(cooked.Mesh.Skin!.Joints).IsEquivalentTo(new[] { 0, 1 }, CollectionOrdering.Matching);
         await Assert.That(cooked.Mesh.Draws[0].NodeIndex).IsEqualTo(2);
         await Assert.That(cooked.Clips[0].Channels[0].Joint).IsEqualTo(1);
         // The skeleton and clip cook to ozz archives that load back.
@@ -176,7 +177,7 @@ public class GltfCookTests
         var once = MeshBlobFormat.Write(GltfCook.Cook(GltfSceneReader.ReadGeometry(glb)).Mesh);
         var twice = MeshBlobFormat.Write(GltfCook.Cook(GltfSceneReader.ReadGeometry(glb)).Mesh);
 
-        await Assert.That(once).IsEquivalentTo(twice);
+        await Assert.That(once).IsEquivalentTo(twice, CollectionOrdering.Matching);
         await Assert.That(MeshBlobFormat.Read(once).Draws[0].Name).IsEqualTo("Crate");
     }
 
