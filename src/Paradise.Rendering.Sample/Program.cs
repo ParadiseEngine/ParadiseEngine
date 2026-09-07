@@ -40,6 +40,7 @@ internal static class Program
         Pbr,      // PR-5: PBR viewer, procedural or GLB (--pbr [path.glb])
         Compute,  // v0.9: compute-written plasma via SubmitOffscreen (--compute)
         GiDemo,   // the probe GI test room, static + moving lights (--gi-demo [model.glb])
+        SsrDemo,  // the screen-space reflection floor (--ssr-demo)
     }
 
     private static int s_screenshotEvery;
@@ -71,6 +72,7 @@ internal static class Program
         // Global-illumination switches for the PBR viewer; the scene reads them when it is built.
         PbrViewerScene.RayTracedAo = Array.IndexOf(args, "--rtao") >= 0;
         PbrViewerScene.ProbeGi = Array.IndexOf(args, "--gi") >= 0;
+        PbrViewerScene.Reflections = Array.IndexOf(args, "--ssr") >= 0;
         var kind = SceneKind.Triangle;
         string? glbPath = null;
         var pbrIndex = Array.IndexOf(args, "--pbr");
@@ -88,11 +90,18 @@ internal static class Program
                 glbPath = args[giDemoIndex + 1];
             GiDemoScene.ProbeGi = Array.IndexOf(args, "--no-gi") < 0;
             GiDemoScene.RayTracedAo = PbrViewerScene.RayTracedAo;
+            GiDemoScene.Reflections = PbrViewerScene.Reflections;
             GiDemoScene.AnimateLights = Array.IndexOf(args, "--static-lights") < 0;
             GiDemoScene.PanelOnly = Array.IndexOf(args, "--panel-only") >= 0;
             if (int.TryParse(ParseValue(args, "--gi-rays"), out var giRays)) GiDemoScene.RaysPerProbe = giRays;
             if (int.TryParse(ParseValue(args, "--gi-max-probes"), out var giMax)) GiDemoScene.MaxProbes = giMax;
             if (int.TryParse(ParseValue(args, "--gi-probes-per-frame"), out var giWindow)) GiDemoScene.ProbesPerFrame = giWindow;
+        }
+        else if (Array.IndexOf(args, "--ssr-demo") >= 0)
+        {
+            kind = SceneKind.SsrDemo;
+            SsrDemoScene.Reflections = Array.IndexOf(args, "--no-ssr") < 0;
+            SsrDemoScene.Animate = Array.IndexOf(args, "--static-lights") < 0;
         }
         else if (Array.IndexOf(args, "--cube") >= 0)
         {
@@ -233,6 +242,16 @@ internal static class Program
 #endif
                     break;
                 }
+                case SceneKind.SsrDemo:
+                {
+                    using var scene = new SsrDemoScene(renderer, InitialWidth, InitialHeight, s_log.CreateLogger("PbrRenderer"));
+                    for (var i = 0; i < frameCount; i++)
+                    {
+                        scene.RenderFrame();
+                        afterFrame?.Invoke(i);
+                    }
+                    break;
+                }
                 default:
                 {
                     using var scene = new TriangleScene(renderer);
@@ -284,6 +303,7 @@ internal static class Program
             using var computeScene = kind == SceneKind.Compute ? new ComputeScene(renderer) : null;
             using var pbrScene = kind == SceneKind.Pbr ? new PbrViewerScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath, s_log.CreateLogger("PbrRenderer")) : null;
             using var giScene = kind == SceneKind.GiDemo ? new GiDemoScene(renderer, surfaceDesc.Width, surfaceDesc.Height, glbPath, s_log.CreateLogger("PbrRenderer")) : null;
+            using var ssrScene = kind == SceneKind.SsrDemo ? new SsrDemoScene(renderer, surfaceDesc.Width, surfaceDesc.Height, s_log.CreateLogger("PbrRenderer")) : null;
 
             var quit = false;
             SDL_Event ev;
@@ -311,6 +331,7 @@ internal static class Program
                             cubeScene?.Resize((uint)w, (uint)h);
                             pbrScene?.Resize((uint)w, (uint)h);
                             giScene?.Resize((uint)w, (uint)h);
+                            ssrScene?.Resize((uint)w, (uint)h);
                         }
                     }
                     else if (type == SDL_EventType.SDL_EVENT_MOUSE_MOTION && giScene is not null)
@@ -321,6 +342,15 @@ internal static class Program
                     else if (type == SDL_EventType.SDL_EVENT_MOUSE_WHEEL && giScene is not null)
                     {
                         giScene.Zoom(ev.wheel.y);
+                    }
+                    else if (type == SDL_EventType.SDL_EVENT_MOUSE_MOTION && ssrScene is not null)
+                    {
+                        if ((ev.motion.state & SDL_MouseButtonFlags.SDL_BUTTON_LMASK) != 0)
+                            ssrScene.Drag(ev.motion.xrel, ev.motion.yrel);
+                    }
+                    else if (type == SDL_EventType.SDL_EVENT_MOUSE_WHEEL && ssrScene is not null)
+                    {
+                        ssrScene.Zoom(ev.wheel.y);
                     }
                     else if (type == SDL_EventType.SDL_EVENT_MOUSE_MOTION && pbrScene is not null)
                     {
@@ -335,6 +365,7 @@ internal static class Program
                 }
                 if (pbrScene is not null) pbrScene.RenderFrame();
                 else if (giScene is not null) giScene.RenderFrame();
+                else if (ssrScene is not null) ssrScene.RenderFrame();
                 else if (cubeScene is not null) cubeScene.RenderFrame();
                 else if (computeScene is not null) computeScene.RenderFrame();
                 else triangleScene!.RenderFrame();

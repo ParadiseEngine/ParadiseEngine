@@ -33,6 +33,9 @@ internal sealed class PbrViewerScene : IDisposable
     /// <summary>Process-wide switch read when a scene is built: probe global illumination on.</summary>
     public static bool ProbeGi { get; set; }
 
+    /// <summary>Screen-space reflection on the viewer's scene (--ssr).</summary>
+    public static bool Reflections { get; set; }
+
     /// <param name="logger">Where <see cref="PbrRenderer"/>'s diagnostics go. Taken rather than
     /// created: a scene is not the host, and which sink to install — and at what level — is the
     /// host's call. <c>Program</c> makes it once from <c>--log-level</c>.</param>
@@ -91,6 +94,7 @@ internal sealed class PbrViewerScene : IDisposable
 
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 2f };
         _scene.Gi = new PbrGi { Enabled = ProbeGi };
+        _scene.Ssr = new PbrScreenSpaceReflection { Enabled = Reflections };
         _scene.Lights.Add(new PbrLight
         {
             Type = PbrLightType.Directional,

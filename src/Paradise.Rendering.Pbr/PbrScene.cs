@@ -122,6 +122,33 @@ public sealed record PbrRayTracedAo
     public float ResolutionScale { get; init; } = 0.5f;
 }
 
+/// <summary>Screen-space reflection: each pixel's mirror ray marched through the depth + normal
+/// pre-pass, colored from the previous frame's HDR scene. Sharp — a rough surface fades it out
+/// toward <see cref="MaxRoughness"/> and keeps the probe or sky specular instead.</summary>
+public sealed record PbrScreenSpaceReflection
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Fixed-length steps along the ray, 1 to 256; each costs a depth read per pixel.</summary>
+    public int MaxSteps { get; init; } = 64;
+
+    /// <summary>How far a reflected ray travels, in world units, before it gives up.</summary>
+    public float MaxDistance { get; init; } = 12f;
+
+    /// <summary>How far behind a surface the ray may be and still count as hitting it, in world
+    /// units; too thin misses thin geometry, too thick smears a surface over what is behind it.</summary>
+    public float Thickness { get; init; } = 0.3f;
+
+    /// <summary>Roughness at which the reflection has faded out completely.</summary>
+    public float MaxRoughness { get; init; } = 0.5f;
+
+    /// <summary>Scales the reflected color.</summary>
+    public float Intensity { get; init; } = 1f;
+
+    /// <summary>Fraction of the frame's resolution the reflection is traced at, (0, 1].</summary>
+    public float ResolutionScale { get; init; } = 1f;
+}
+
 /// <summary>An authored probe volume: where the probe grid starts, how far apart its probes are,
 /// and how many there are per axis. Overrides the fit to the static scene.</summary>
 public sealed record PbrProbeVolume(Vector3 Origin, Vector3 Spacing, int CountX, int CountY, int CountZ);
@@ -290,6 +317,7 @@ public sealed class PbrScene
     // and the shader darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();
     public PbrRayTracedAo RayTracedAo = new();
+    public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];

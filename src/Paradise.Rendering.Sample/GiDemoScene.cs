@@ -35,6 +35,7 @@ internal sealed class GiDemoScene : IDisposable
     /// <summary>Process-wide switches read when the scene is built.</summary>
     public static bool ProbeGi { get; set; } = true;
     public static bool RayTracedAo { get; set; }
+    public static bool Reflections { get; set; }
     public static bool AnimateLights { get; set; } = true;
 
     /// <summary>Only the emissive ceiling panel lights the room: it is not a light, so with the
@@ -95,6 +96,7 @@ internal sealed class GiDemoScene : IDisposable
         _scene.Bloom = new PbrBloom { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--no-bloom") < 0, Threshold = 1.2f, Intensity = 0.25f };
         _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = RaysPerProbe, Hysteresis = 0.97f, MaxProbes = MaxProbes, ProbesPerFrame = ProbesPerFrame };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
+        _scene.Ssr = new PbrScreenSpaceReflection { Enabled = Reflections, MaxDistance = 12f };
 
         _sunTemplate = new PbrLight
         {

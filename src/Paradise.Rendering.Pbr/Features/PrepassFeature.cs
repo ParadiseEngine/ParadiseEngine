@@ -18,14 +18,16 @@ namespace Paradise.Rendering.Pbr;
 public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
+    private readonly ScreenSpaceReflectionFeature _ssr;
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal PrepassFeature(PbrContext ctx)
+    internal PrepassFeature(PbrContext ctx, ScreenSpaceReflectionFeature ssr)
     {
         _ctx = ctx;
+        _ssr = ssr;
         var renderer = ctx.Renderer;
 
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
@@ -73,11 +75,13 @@ public sealed class PrepassFeature : IRenderFeature
         // The ray-traced AO pass publishes exactly when it is enabled and the pre-pass ran, which
         // is this condition; the flag tells the shader the bound texture is real rather than black.
         var rtaoRuns = scene.RayTracedAo.Enabled && hasOpaque;
+        // Likewise the reflection pass, which additionally needs last frame's picture to exist.
+        var ssrRuns = scene.Ssr.Enabled && hasOpaque && _ssr.HistoryReady;
         var uniforms = new SsaoUniformsGpu
         {
             Params = new Vector4(ssaoRuns ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
             Screen = new Vector4(1f / _ctx.Width, 1f / _ctx.Height, _ctx.Width, _ctx.Height),
-            Rtao = new Vector4(rtaoRuns ? 1f : 0f, 0f, 0f, 0f),
+            Rtao = new Vector4(rtaoRuns ? 1f : 0f, ssrRuns ? 1f : 0f, scene.Ssr.MaxRoughness, 0f),
         };
         _ctx.Renderer.UpdateBuffer<SsaoUniformsGpu>(SsaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 

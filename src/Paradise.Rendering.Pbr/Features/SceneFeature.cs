@@ -84,6 +84,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var prepassNormal = frame.Blackboard.GetOrDefault(PbrResults.PrepassNormal, frame.Black);
         var prepassDepth = frame.Blackboard.GetOrDefault(PbrResults.PrepassDepth, frame.Black);
         var rtao = frame.Blackboard.GetOrDefault(PbrResults.RayTracedAo, frame.Black);
+        var ssr = frame.Blackboard.GetOrDefault(PbrResults.SsrReflection, frame.Black);
         var giIrradiance = frame.Blackboard.GetOrDefault(PbrResults.GiIrradiance, frame.Black);
         var giVisibility = frame.Blackboard.GetOrDefault(PbrResults.GiVisibility, frame.Black);
         var split = (frame.Requirements & FrameRequirements.SceneColorCapture) != 0;
@@ -94,7 +95,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
-        DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, giIrradiance, giVisibility);
+        DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
         if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
         main.Record(this, split ? RecordOpaque : RecordAll);
@@ -106,7 +107,7 @@ public sealed partial class SceneFeature : IRenderFeature
             var blend = graph.AddRasterPass("Main.Blend", RenderPassEvent.Transparent)
                 .Color(0, hdr, LoadOp.Load, clear: scene.ClearColor)
                 .Depth(depth, LoadOp.Load, clear: 1f);
-            DeclareGroups(blend, shadows, prepassNormal, prepassDepth, rtao, giIrradiance, giVisibility);
+            DeclareGroups(blend, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
             DeclareMaterialReads(graph, blend, _ctx.Blend);
             blend.Record(this, RecordBlend);
         }
@@ -135,7 +136,7 @@ public sealed partial class SceneFeature : IRenderFeature
     /// The frame group's buffers grow, so their sizes are read here each frame and a grown buffer
     /// is a different group by content.</summary>
     private void DeclareGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture prepassNormal, GraphTexture prepassDepth,
-        GraphTexture rtao, GraphTexture giIrradiance, GraphTexture giVisibility)
+        GraphTexture rtao, GraphTexture ssr, GraphTexture giIrradiance, GraphTexture giVisibility)
     {
         pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
         [
@@ -159,6 +160,7 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Buffer(9, _gi.VolumeBuffer, 0, ProbeGiFeature.VolumeBufferBytes),
             GraphBinding.Buffer(10, _gi.ShadingStateBuffer, 0, _gi.StateBufferBytes),
             GraphBinding.Sampler(11, _gi.Sampler),
+            GraphBinding.Texture(12, ssr),
         ]);
     }
 
