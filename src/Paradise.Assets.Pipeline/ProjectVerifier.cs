@@ -25,7 +25,7 @@ public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path,
 public static class ProjectVerifier
 {
     /// <summary>Findings, errors first.</summary>
-    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetExtractor>? extractors = null)
+    public static IReadOnlyList<VerifyFinding> Verify(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -42,12 +42,12 @@ public static class ProjectVerifier
             ignore = AssetIgnoreRules.None;
         }
 
-        return Verify(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, ignore), extractors: extractors);
+        return Verify(fileSystem, layout, AssetIndex.Scan(fileSystem, layout.Assets, ignore), importers);
     }
 
-    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetExtractor})"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
+    /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetImporter})"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
     public static IReadOnlyList<VerifyFinding> Verify(
-        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null, IReadOnlyList<IAssetExtractor>? extractors = null)
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -61,10 +61,9 @@ public static class ProjectVerifier
         }
 
         var chain = importers ?? AssetImporters.All;
-        var containers = extractors ?? AssetExtractors.All;
         var manifest = VerifyManifest(fileSystem, layout, findings);
         var ignore = manifest?.Ignore ?? AssetIgnoreRules.None;
-        if (manifest is not null) VerifyExtractKinds(layout, manifest, containers, findings);
+        if (manifest is not null) VerifyExtractKinds(layout, manifest, chain, findings);
 
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
@@ -100,7 +99,7 @@ public static class ProjectVerifier
                     VerifyMeshReference(fileSystem, sources, path, cooked, findings);
                     break;
 
-                case AssetClass.Foreign when AssetExtractors.For(containers, fileSystem, path) is { } extractor:
+                case AssetClass.Foreign when ImporterChain.Extractor(chain, fileSystem, layout, path) is { } extractor:
                     VerifyExtracted(fileSystem, extractor, path, findings);
                     break;
 
@@ -133,14 +132,14 @@ public static class ProjectVerifier
     /// check this itself — which kinds exist depends on the chain the tool was built with — so the
     /// check lives here, where the chain is known, and a typo is still caught.
     /// </summary>
-    private static void VerifyExtractKinds(AssetProjectLayout layout, ProjectManifest manifest, IReadOnlyList<IAssetExtractor> extractors, List<VerifyFinding> findings)
+    private static void VerifyExtractKinds(AssetProjectLayout layout, ProjectManifest manifest, IReadOnlyList<IAssetImporter> importers, List<VerifyFinding> findings)
     {
-        var declared = AssetExtractors.Kinds(extractors).Select(kind => kind.Id).ToHashSet(StringComparer.Ordinal);
+        var declared = ImporterChain.ExtractKinds(importers).Select(kind => kind.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var kind in manifest.Extract.Kinds.Where(kind => !declared.Contains(kind)).OrderBy(kind => kind, StringComparer.Ordinal))
         {
             findings.Add(new VerifyFinding(
                 VerifySeverity.Error, layout.Manifest,
-                $"routes '{kind}' in [extract], which no extractor in this build declares (it declares: {string.Join(", ", declared.OrderBy(id => id, StringComparer.Ordinal))}); nothing would ever be written there"));
+                $"routes '{kind}' in [extract], which no importer in this build declares (it declares: {string.Join(", ", declared.OrderBy(id => id, StringComparer.Ordinal))}); nothing would ever be written there"));
         }
     }
 
@@ -252,7 +251,7 @@ public static class ProjectVerifier
     }
 
     /// <summary>A source container that was never extracted has nothing for the build: the mesh, materials and clips that ship are the extracted ones.</summary>
-    private static void VerifyExtracted(IFileSystem fileSystem, IAssetExtractor extractor, UPath path, List<VerifyFinding> findings)
+    private static void VerifyExtracted(IFileSystem fileSystem, IAssetImporter extractor, UPath path, List<VerifyFinding> findings)
     {
         if (!fileSystem.FileExists(SidecarMeta.PathFor(path))) return;   // the missing-sidecar finding already covers it
         if (!extractor.HasParts(fileSystem, path) || !extractor.HasAuthoredParts(fileSystem, path)) return;

@@ -278,7 +278,7 @@ public sealed record ExtractKindDeclaration(string Id, string? FallsBackTo = nul
 /// its output belongs with everything else of that kind — a tileset's materials are materials — and
 /// declares its own id when it does not.
 /// </summary>
-public static class ExtractKinds
+public static class ExtractKind
 {
     public const string Meshes = "meshes";
     public const string Skeletons = "skeletons";

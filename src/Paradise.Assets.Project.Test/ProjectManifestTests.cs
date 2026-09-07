@@ -106,26 +106,26 @@ public class ProjectManifestTests
             """, "project.toml");
 
         var kinds = GlbKinds;
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Animations, kinds)).IsEqualTo("animations");
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Materials, kinds)).IsEqualTo("materials");
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Textures, kinds)).IsEqualTo("textures");
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Prefabs, kinds)).IsEqualTo("prefabs/models");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Animations, kinds)).IsEqualTo("animations");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Materials, kinds)).IsEqualTo("materials");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Textures, kinds)).IsEqualTo("textures");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Prefabs, kinds)).IsEqualTo("prefabs/models");
 
         // `meshes` names nothing, so the geometry documents take the section's fallback, and so
         // does the skeleton — through `meshes`, which is also unset.
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Meshes, kinds)).IsEqualTo("cooked");
-        await Assert.That(manifest.Extract.DirectoryFor(ExtractKinds.Skeletons, kinds)).IsEqualTo("cooked");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Meshes, kinds)).IsEqualTo("cooked");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Skeletons, kinds)).IsEqualTo("cooked");
     }
 
     [Test]
     public async Task a_skeleton_follows_the_meshes_directory_until_it_names_its_own()
     {
         var withMeshes = ProjectManifest.Parse($"{Minimal}\n\n[extract]\ndirectory = \"cooked\"\nmeshes = \"meshes\"\n", "project.toml");
-        await Assert.That(withMeshes.Extract.DirectoryFor(ExtractKinds.Skeletons, GlbKinds)).IsEqualTo("meshes");
+        await Assert.That(withMeshes.Extract.DirectoryFor(ExtractKind.Skeletons, GlbKinds)).IsEqualTo("meshes");
 
         var withOwn = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmeshes = \"meshes\"\nskeletons = \"animations\"\n", "project.toml");
-        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKinds.Skeletons, GlbKinds)).IsEqualTo("animations");
-        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKinds.Meshes, GlbKinds)).IsEqualTo("meshes");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Skeletons, GlbKinds)).IsEqualTo("animations");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Meshes, GlbKinds)).IsEqualTo("meshes");
     }
 
     [Test]
@@ -179,12 +179,12 @@ public class ProjectManifestTests
 
     private static IReadOnlyList<ExtractKindDeclaration> GlbKinds =>
     [
-        new(ExtractKinds.Meshes),
-        new(ExtractKinds.Skeletons, FallsBackTo: ExtractKinds.Meshes),
-        new(ExtractKinds.Animations),
-        new(ExtractKinds.Materials),
-        new(ExtractKinds.Textures),
-        new(ExtractKinds.Prefabs),
+        new(ExtractKind.Meshes),
+        new(ExtractKind.Skeletons, FallsBackTo: ExtractKind.Meshes),
+        new(ExtractKind.Animations),
+        new(ExtractKind.Materials),
+        new(ExtractKind.Textures),
+        new(ExtractKind.Prefabs),
     ];
 
     [Test]

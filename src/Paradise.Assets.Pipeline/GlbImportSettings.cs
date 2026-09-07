@@ -162,11 +162,11 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 
         return new GlbExtraction(
             extraction.Directory,
-            One(ExtractKinds.Meshes),
-            One(ExtractKinds.Skeletons),
-            [.. extraction.OfKind(ExtractKinds.Animations).Select(part => new GlbExtraction.NamedReference(part.Index, part.Name, part.Reference))],
-            [.. extraction.OfKind(ExtractKinds.Materials).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))],
-            [.. extraction.OfKind(ExtractKinds.Textures).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))]);
+            One(ExtractKind.Meshes),
+            One(ExtractKind.Skeletons),
+            [.. extraction.OfKind(ExtractKind.Animations).Select(part => new GlbExtraction.NamedReference(part.Index, part.Name, part.Reference))],
+            [.. extraction.OfKind(ExtractKind.Materials).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))],
+            [.. extraction.OfKind(ExtractKind.Textures).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))]);
     }
 
     /// <summary>The GLB's named buckets as the engine's flat parts list. A mesh or skeleton has one part per container, so its index is 0 and its name is the file's stem.</summary>
@@ -175,14 +175,14 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         static string Stem(AssetReference reference) => Path.GetFileNameWithoutExtension(reference.Path);
         var parts = new List<ExtractedPart>();
 
-        if (extraction.Mesh is { } mesh) parts.Add(new ExtractedPart(ExtractKinds.Meshes, PartOwnership.ToolOwned, 0, Stem(mesh), mesh));
-        if (extraction.Skeleton is { } skeleton) parts.Add(new ExtractedPart(ExtractKinds.Skeletons, PartOwnership.ToolOwned, 0, Stem(skeleton), skeleton));
-        parts.AddRange(extraction.Clips.Select(clip => new ExtractedPart(ExtractKinds.Animations, PartOwnership.ToolOwned, clip.Index, clip.Name, clip.Reference)));
+        if (extraction.Mesh is { } mesh) parts.Add(new ExtractedPart(ExtractKind.Meshes, PartOwnership.ToolOwned, 0, Stem(mesh), mesh));
+        if (extraction.Skeleton is { } skeleton) parts.Add(new ExtractedPart(ExtractKind.Skeletons, PartOwnership.ToolOwned, 0, Stem(skeleton), skeleton));
+        parts.AddRange(extraction.Clips.Select(clip => new ExtractedPart(ExtractKind.Animations, PartOwnership.ToolOwned, clip.Index, clip.Name, clip.Reference)));
         parts.AddRange(extraction.Materials.Select(material => new ExtractedPart(
-            ExtractKinds.Materials, PartOwnership.TwoSided, material.Index, material.Name,
+            ExtractKind.Materials, PartOwnership.TwoSided, material.Index, material.Name,
             material.Entry.Reference, material.Entry.GlbFingerprint, material.Entry.DocumentFingerprint)));
         parts.AddRange(extraction.Images.Select(image => new ExtractedPart(
-            ExtractKinds.Textures, PartOwnership.Blob, image.Index, image.Name,
+            ExtractKind.Textures, PartOwnership.Blob, image.Index, image.Name,
             image.Entry.Reference, image.Entry.GlbFingerprint, image.Entry.DocumentFingerprint)));
 
         return new Extraction(extraction.Directory, parts);
@@ -193,12 +193,12 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(extraction);
-        ExtractionRecord.Write(meta, GlbExtractorName, ToRecord(extraction));
+        ExtractionRecord.Write(meta, GlbImporterName, ToRecord(extraction));
         WriteDomain(meta, Read(meta), ReadOptimization(meta));
     }
 
-    /// <summary>The name the record is written under; the GLB extractor's, and what tells a record apart from another extractor's.</summary>
-    internal const string GlbExtractorName = "glb";
+    /// <summary>The name the record is written under: the importer's, which is what tells one extractor's record from another's.</summary>
+    internal const string GlbImporterName = "glb";
 
     /// <summary>
     /// The one writer of the domain, from parsed values, so the spelling is the same whichever

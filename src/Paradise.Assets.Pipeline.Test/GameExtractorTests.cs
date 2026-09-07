@@ -35,19 +35,24 @@ public class GameExtractorTests
     /// container is its only side); a material is two-sided (the author edits it, and the container
     /// can change under them).
     /// </summary>
-    private sealed class CrateExtractor : IAssetExtractor
+    private sealed class CrateExtractor : IAssetImporter
     {
         public string Name => "crate";
 
-        public IReadOnlyList<ExtractKindDeclaration> Kinds { get; } = [new(Tilesets), new(ExtractKinds.Materials)];
+        public bool RecordsIdentity => true;
 
-        public bool Claims(IFileSystem fileSystem, UPath source)
-            => string.Equals(source.GetExtensionWithDot(), ".crate", StringComparison.OrdinalIgnoreCase);
+        public IReadOnlyList<ExtractKindDeclaration> ExtractKinds { get; } = [new(Tilesets), new(ExtractKind.Materials)];
+
+        public bool Claims(ImportCandidate candidate)
+            => string.Equals(candidate.Asset.GetExtensionWithDot(), ".crate", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>A `.crate` ships nothing of its own — what the build reads is the parts it was extracted into.</summary>
+        public bool Import(ImportContext context, List<string> errors) => true;
 
         public bool HasParts(IFileSystem fileSystem, UPath source) => fileSystem.FileExists(source);
 
         public bool HasAuthoredParts(IFileSystem fileSystem, UPath source)
-            => Lines(fileSystem, source).Any(line => line.Kind == ExtractKinds.Materials);
+            => Lines(fileSystem, source).Any(line => line.Kind == ExtractKind.Materials);
 
         public bool IsExtracted(IFileSystem fileSystem, UPath source)
         {
@@ -96,7 +101,7 @@ public class GameExtractorTests
                 // Routing: the project's directory for this kind, the kind's declared fallback, then
                 // `directory`, then beside the container — all of it the engine's, for a kind the
                 // engine has never heard of.
-                var relative = recorded.Directory ?? manifest.Extract.DirectoryFor(kind, Kinds);
+                var relative = recorded.Directory ?? manifest.Extract.DirectoryFor(kind, ExtractKinds);
                 var directory = relative is null ? request.Source.GetDirectory() : (request.Layout.Assets / relative).ToAbsolute();
 
                 // A recorded part is found by GUID, so a file an author moved is re-synced where it
@@ -286,6 +291,6 @@ public class GameExtractorTests
         await Assert.That(fileSystem.FileExists("/game/assets/materials/village.stone.material")).IsFalse();
 
         var extraction = ExtractionRecord.Read(SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(Crate)));
-        await Assert.That(extraction.OfKind(ExtractKinds.Materials).Single().Reference.Path).IsEqualTo("materials/tiles/stone.material");
+        await Assert.That(extraction.OfKind(ExtractKind.Materials).Single().Reference.Path).IsEqualTo("materials/tiles/stone.material");
     }
 }

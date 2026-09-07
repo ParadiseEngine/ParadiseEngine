@@ -215,11 +215,11 @@ animations = "animations"      # .anim
 materials  = "materials"       # .material
 textures   = "textures"        # images the GLB no longer embeds
 prefabs    = "prefabs/models"  # the generated .prefab
-tilesets   = "tilesets"        # a kind a GAME's extractor declares — no engine change
+tilesets   = "tilesets"        # a kind a GAME's importer declares — no engine change
 ```
 
 The keys are open: anything that is not one of the section's own settings is a KIND, and the kinds
-that exist are whatever the build's extractor chain declares (see below). Set nothing and everything
+that exist are whatever the build's importer chain declares (see below). Set nothing and everything
 lands beside the container; set only `directory` and everything lands in one folder. A kind falls
 back to the one its declaration names before `directory` — a `.skeleton` follows the geometry that
 names it, which is where it has always landed, and a project files it with the rig's clips by
@@ -291,14 +291,11 @@ and NativeAOT rules out scanning for it:
 
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
-return Paradise.Cli.BuildHost.Run(
-    args,
-    importers: [.. AssetImporters.All, new MyBankImporter()],
-    extractors: [.. AssetExtractors.All, new MyCrateExtractor()]);
+return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
 ```
 
-Both chains are lowest precedence first, so an appended entry shadows the built-in it replaces, and
-every verb runs them: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`, `host play`.
+One chain, lowest precedence first, so an appended importer shadows the built-in it replaces, and
+every verb runs it: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`, `host play`.
 
 An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
 `rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
@@ -307,33 +304,45 @@ An importer that wants its asset kind in the reference graph — and so followed
 only when the context allows). The findings are derived from the sites by the one rule, so an
 importer cannot forget one; nothing in the pipeline lists formats.
 
-### A game's own source container: `IAssetExtractor`
+### An importer's other half: what a source container turns INTO
 
-An importer says how a file is BUILT. An extractor says what a source container turns INTO — a GLB
-is one, and a game's own format is another. `Claims` is the only place anything asks what reads a
-container; nothing else searches by extension.
+`Import` says how a file is BUILT. Extraction says what a source CONTAINER turns into — a GLB is
+one, a game's own format is another — and it is the same importer's other half, not a second chain:
+one `Claims` decides both, and the sidecar's recorded `importer` name dispatches both, so editing
+that line moves extraction with it.
 
-An extractor declares the KINDS it writes, and `[extract]` routes them by those ids, so a format
-that yields tilesets or LODs needs no engine change to be filed properly:
+It is **never called from `Import`**, and must not be. `ImportContext.FileSystem` is read-only under
+`assets/` because the build index records every read to decide what to rebuild, while extraction
+WRITES there and mints identities. A build that wrote its own inputs would dirty the tree on every
+CI run, invalidate its own index mid-run, and have nowhere to put `--take-glb` / `--take-document`,
+which are an author's per-invocation decisions. `extract` and `watch` call it; `build` never does.
+
+An importer declares the KINDS its extraction writes — which is also what says whether it extracts
+at all — and `[extract]` routes them by those ids, so a format that yields tilesets or LODs needs no
+engine change to be filed properly:
 
 ```csharp
 public string Name => "crate";
 
-public IReadOnlyList<ExtractKindDeclaration> Kinds { get; } =
-[
-    new("tilesets"),                     // the game's own kind
-    new(ExtractKinds.Materials),         // and one it shares with the built-ins
-];
+public bool Claims(ImportCandidate candidate)
+    => candidate.Asset.GetExtensionWithDot() == ".crate";
 
-public bool Claims(IFileSystem fileSystem, UPath source)
-    => source.GetExtensionWithDot() == ".crate";
+public IReadOnlyList<ExtractKindDeclaration> ExtractKinds { get; } =
+[
+    new("tilesets"),            // the game's own kind
+    new(ExtractKind.Materials), // and one it shares with the built-ins
+];
 ```
 
-A key in `[extract]` that no extractor in the build declares is a `verify` error naming the kinds
+Everything else — `HasParts`, `HasAuthoredParts`, `IsExtracted`, `Extract`, `MintReferences` — is
+default-implemented to "reads no container", so the many importers that only build a file someone
+else authored are unaffected.
+
+A key in `[extract]` that no importer in the build declares is a `verify` error naming the kinds
 that ARE declared — the manifest cannot check that itself, because which kinds exist depends on the
 chain the tool was built with.
 
-The engine owns the parts that are hard and are nobody's format, and an extractor gets them by
+The engine owns the parts that are hard and are nobody's format, and an importer gets them by
 using them:
 
 - **The record.** What a container extracted to is written to the `[extract]` sidecar domain

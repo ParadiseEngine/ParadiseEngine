@@ -79,6 +79,69 @@ public sealed class GlbImporter : IAssetImporter
     /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [GlbImportSettings.Instance];
 
+    /// <summary>What a GLB yields. A <c>.skeleton</c> falls back to the geometry's directory because that is where it has always landed; a project files it with the rig's clips by saying so.</summary>
+    public static IReadOnlyList<ExtractKindDeclaration> DeclaredKinds { get; } =
+    [
+        new(ExtractKind.Meshes),
+        new(ExtractKind.Skeletons, FallsBackTo: ExtractKind.Meshes),
+        new(ExtractKind.Animations),
+        new(ExtractKind.Materials),
+        new(ExtractKind.Textures),
+        new(ExtractKind.Prefabs),
+    ];
+
+    /// <inheritdoc />
+    public IReadOnlyList<ExtractKindDeclaration> ExtractKinds => DeclaredKinds;
+
+    /// <inheritdoc />
+    public bool HasParts(IFileSystem fileSystem, UPath source)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return fileSystem.FileExists(source) && MeshContainer.HasGeometry(source, fileSystem.ReadAllBytes(source));
+    }
+
+    /// <inheritdoc />
+    public bool HasAuthoredParts(IFileSystem fileSystem, UPath source)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return fileSystem.FileExists(source) && AssetExtractor.HasAuthoredParts(fileSystem.ReadAllBytes(source));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>A sidecar that will not parse is the sidecar's own finding, not this one's: true keeps the caller quiet about a file already reported.</remarks>
+    public bool IsExtracted(IFileSystem fileSystem, UPath source)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+
+        var sidecar = SidecarMeta.PathFor(source);
+        if (!fileSystem.FileExists(sidecar)) return false;
+        try
+        {
+            return ExtractionRecord.Read(SidecarMeta.Load(fileSystem, sidecar)).Authored;
+        }
+        catch (SidecarMetaException)
+        {
+            return true;
+        }
+    }
+
+    /// <inheritdoc />
+    public ExtractResult Extract(ExtractRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return AssetExtractor.Extract(
+            request.FileSystem, request.Layout, request.Source, request.Importers,
+            request.Resolution, request.Logger, request.GeneratePrefab, request.Maintainer);
+    }
+
+    /// <inheritdoc />
+    public ExtractResult MintReferences(ExtractRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return AssetExtractor.MintReferences(
+            request.FileSystem, request.Layout, request.Source, request.Importers, request.Logger, request.Maintainer);
+    }
+
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
     {

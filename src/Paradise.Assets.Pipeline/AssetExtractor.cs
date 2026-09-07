@@ -21,7 +21,11 @@ public sealed record ExtractResult(
     IReadOnlyList<ExtractedFile> Written,
     IReadOnlyList<string> Kept,
     IReadOnlyList<string> Warnings,
-    bool HasAuthoredParts = false);
+    bool HasAuthoredParts = false)
+{
+    /// <summary>What an importer that reads no container returns: a success that did nothing, since being asked is not an error.</summary>
+    public static ExtractResult NothingToExtract { get; } = new(true, [], [], [], []);
+}
 
 /// <summary>A file <c>extract</c> wrote, and why when it was not a first write: the path stays a path, so a consumer that resolves it never sees the note.</summary>
 /// <param name="Path">Relative to <c>assets/</c>.</param>
@@ -283,17 +287,17 @@ public static partial class AssetExtractor
             // outranks the manifest's per-kind keys: it is the more specific directive of the two.
             UPath For(string kind)
             {
-                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind, GlbExtractor.DeclaredKinds);
+                var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind, GlbImporter.DeclaredKinds);
                 return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
             }
 
             return new ExtractDirectories(
-                For(ExtractKinds.Meshes),
-                For(ExtractKinds.Skeletons),
-                For(ExtractKinds.Animations),
-                For(ExtractKinds.Materials),
-                For(ExtractKinds.Textures),
-                For(ExtractKinds.Prefabs));
+                For(ExtractKind.Meshes),
+                For(ExtractKind.Skeletons),
+                For(ExtractKind.Animations),
+                For(ExtractKind.Materials),
+                For(ExtractKind.Textures),
+                For(ExtractKind.Prefabs));
         }
 
         /// <summary>

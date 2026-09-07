@@ -35,7 +35,6 @@ public sealed partial class AssetWatcher : IDisposable
     private readonly ILogger _log;
     private readonly Func<DateTimeOffset> _now;
     private readonly IReadOnlyList<IAssetImporter> _importers;
-    private readonly IReadOnlyList<IAssetExtractor> _extractors;
 
     // `object`, not `System.Threading.Lock`: Coyote (1.7.11) rewrites Monitor.Enter/Exit but not
     // Lock.EnterScope, so with the newer type Paradise.Assets.Pipeline.CoyoteTest cannot control
@@ -50,15 +49,14 @@ public sealed partial class AssetWatcher : IDisposable
 
     private IFileSystemWatcher? _watcher;
 
-    /// <summary>Creates a watcher over one project; <paramref name="importers"/> is the chain every rebuild runs and <paramref name="extractors"/> the one that says what a source container is (the built-ins when omitted).</summary>
+    /// <summary>Creates a watcher over one project; <paramref name="importers"/> is the chain every rebuild runs, and the same chain says what a source container is (the built-ins when omitted).</summary>
     public AssetWatcher(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         SidecarMaintainer maintainer,
         ILogger? logger = null,
         Func<DateTimeOffset>? now = null,
-        IReadOnlyList<IAssetImporter>? importers = null,
-        IReadOnlyList<IAssetExtractor>? extractors = null)
+        IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -70,7 +68,6 @@ public sealed partial class AssetWatcher : IDisposable
         _log = logger ?? NullLogger.Instance;
         _now = now ?? (static () => DateTimeOffset.UtcNow);
         _importers = importers ?? AssetImporters.All;
-        _extractors = extractors ?? AssetExtractors.All;
     }
 
     /// <summary>Whether anything is waiting out its debounce.</summary>
@@ -251,8 +248,8 @@ public sealed partial class AssetWatcher : IDisposable
             .ToList();
     }
 
-    /// <summary>Whether any extractor in the chain reads this file as a source container.</summary>
-    private bool Extractable(UPath path) => AssetExtractors.For(_extractors, _fileSystem, path) is not null;
+    /// <summary>Whether the chain reads this file as a source container — its sidecar's importer, else the claim.</summary>
+    private bool Extractable(UPath path) => ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not null;
 
     /// <summary>
     /// A source container gets its tool-owned documents on the spot: they carry no author work,
@@ -263,7 +260,7 @@ public sealed partial class AssetWatcher : IDisposable
     /// </summary>
     private int MintReferences(UPath path)
     {
-        if (AssetExtractors.For(_extractors, _fileSystem, path) is not { } extractor || !_fileSystem.FileExists(path)) return 0;
+        if (ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not { } extractor || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
         if (!_fileSystem.FileExists(sidecar) || !extractor.HasParts(_fileSystem, path)) return 0;
 
