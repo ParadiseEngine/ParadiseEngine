@@ -63,6 +63,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
+#if PARADISE_PROFILING
     // Per-pass GPU timing: one timestamp pair per pass of the presenting stream, resolved into a
     // buffer the caller reads back with ReadPassTimings. Created on first use.
     private const int MaxTimedPasses = 128;
@@ -70,6 +71,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private WgBuffer? _timingResolve;
     private WgBuffer? _timingReadback;
     private int _timedPasses;
+#endif
     /// <summary>Volatile because it is read on any thread that calls in and written by whichever
     /// thread disposes. It is an ADVISORY guard: every <c>ObjectDisposedException.ThrowIf</c> in
     /// this file reads it, and each of those is a check-then-act that a concurrent disposal can
@@ -286,21 +288,25 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
     public bool SupportsBcTextureCompression => _device.SupportsBc;
 
-    /// <summary>True when the adapter granted timestamp queries; <see cref="PassTimingEnabled"/>
-    /// has no effect otherwise.</summary>
+    /// <summary>True when per-pass GPU timing can work: the build compiled it in
+    /// (<c>-p:ParadiseProfiling=true</c>) and the adapter granted timestamp queries.
+    /// <see cref="PassTimingEnabled"/> has no effect otherwise.</summary>
     public bool SupportsPassTiming => _device.SupportsTimestampQuery;
 
     /// <summary>Time every pass of each presenting <see cref="Submit"/> on the GPU. Read the
     /// results with <see cref="ReadPassTimings"/>. A profiler's switch: it stalls the frame the
-    /// results are read in, so leave it off in a shipping build.</summary>
+    /// results are read in, and it does nothing unless <see cref="SupportsPassTiming"/>.</summary>
     public bool PassTimingEnabled { get; set; }
 
     /// <summary>GPU duration in milliseconds of each pass of the last presenting submit, in the
     /// order the passes were begun (render and compute alike). Blocks until that submit has
-    /// finished. Empty when timing is off or unsupported.</summary>
+    /// finished. Empty when timing is off, unsupported, or not compiled in.</summary>
     public double[] ReadPassTimings()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+#if !PARADISE_PROFILING
+        return [];
+#else
         if (_timedPasses == 0 || _timingReadback is null) return [];
         var count = _timedPasses;
         _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
@@ -324,8 +330,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             _timingReadback.Unmap();
         }
         return result;
+#endif
     }
 
+#if !PARADISE_PROFILING
+    private static WebGpuSharp.PassTimestampWrites? TimestampsFor(int passOrdinal) => null;
+
+    private static void ResolveTimings(WgCommandEncoder encoder, int timedPasses)
+    {
+    }
+
+    private static void DisposeTimings()
+    {
+    }
+#else
     private WebGpuSharp.PassTimestampWrites? TimestampsFor(int passOrdinal)
     {
         if (!PassTimingEnabled || !SupportsPassTiming || passOrdinal >= MaxTimedPasses) return null;
@@ -363,6 +381,17 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         encoder.ResolveQuerySet(_timingQueries, 0, (uint)(timedPasses * 2), _timingResolve!, 0);
         encoder.CopyBufferToBuffer(_timingResolve!, 0, _timingReadback!, 0, (ulong)(timedPasses * 16));
     }
+
+    private void DisposeTimings()
+    {
+        _timingReadback?.Destroy();
+        _timingResolve?.Destroy();
+        _timingQueries?.Destroy();
+        _timingReadback = null;
+        _timingResolve = null;
+        _timingQueries = null;
+    }
+#endif
 
     /// <summary>Required stride alignment for dynamic uniform-buffer offsets (≥ 256).</summary>
     public uint UniformBufferOffsetAlignment => _device.UniformBufferOffsetAlignment;
@@ -1199,16 +1228,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         pass ?? throw new InvalidOperationException(renderPass is not null
             ? "Compute command issued inside a render pass — compute commands need a BeginComputePass scope."
             : "Compute command issued outside of an active BeginComputePass/EndComputePass scope.");
-
-    private void DisposeTimings()
-    {
-        _timingReadback?.Destroy();
-        _timingResolve?.Destroy();
-        _timingQueries?.Destroy();
-        _timingReadback = null;
-        _timingResolve = null;
-        _timingQueries = null;
-    }
 
     private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView? backbuffer, WebGpuSharp.PassTimestampWrites? timing = null)
     {

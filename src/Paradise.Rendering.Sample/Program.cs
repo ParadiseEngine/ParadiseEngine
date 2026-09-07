@@ -53,6 +53,13 @@ internal static class Program
         var headlessFrames = ParseHeadless(args);
         var screenshotPath = ParseValue(args, "--screenshot");
         s_bench = Array.IndexOf(args, "--bench") >= 0;
+#if !PARADISE_PROFILING
+        if (s_bench)
+        {
+            Console.Error.WriteLine("--bench needs a profiling build: dotnet build -p:ParadiseProfiling=true");
+            return 1;
+        }
+#endif
         if (ParseValue(args, "--size") is { } size && size.Split('x') is [var sw, var sh]
             && uint.TryParse(sw, out var width) && uint.TryParse(sh, out var height) && width > 0 && height > 0)
         {
@@ -205,17 +212,25 @@ internal static class Program
                 case SceneKind.GiDemo:
                 {
                     using var scene = new GiDemoScene(renderer, InitialWidth, InitialHeight, glbPath, s_log.CreateLogger("PbrRenderer"));
+#if PARADISE_PROFILING
                     var bench = s_bench ? new PassBenchmark(renderer) : null;
+#endif
                     for (var i = 0; i < frameCount; i++)
                     {
+#if PARADISE_PROFILING
                         bench?.BeginFrame();
+#endif
                         scene.RenderFrame();
+#if PARADISE_PROFILING
                         bench?.Record(i, scene.Renderer);
+#endif
                         afterFrame?.Invoke(i);
                     }
+#if PARADISE_PROFILING
                     bench?.Report(frameCount);
                     if (bench is not null && scene.Renderer.Pipeline.Find<ProbeGiFeature>()?.ActiveVolume is { } volume)
                         Console.WriteLine($"[bench] probe volume {volume.CountX}x{volume.CountY}x{volume.CountZ} = {volume.CountX * volume.CountY * volume.CountZ} probes, spacing {volume.Spacing.X:F2} m");
+#endif
                     break;
                 }
                 default:

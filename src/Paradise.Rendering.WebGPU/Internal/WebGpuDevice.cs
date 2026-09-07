@@ -163,8 +163,13 @@ internal sealed partial class WebGpuDevice : IDisposable
         // KTX2→BC transcode path; when absent the asset layer falls back to RGBA32 uploads.
         var supportsBc = adapter.HasFeature(WgFeatureName.TextureCompressionBC);
         // Timestamp queries cost nothing until a pass asks to be timed; requesting them up front
-        // is what lets a profiler be switched on at runtime rather than at device creation.
+        // is what lets a profiler be switched on at runtime rather than at device creation. Only a
+        // profiling build asks: a shipping build must not depend on an optional feature it never uses.
+#if PARADISE_PROFILING
         var supportsTimestamps = adapter.HasFeature(WgFeatureName.TimestampQuery);
+#else
+        var supportsTimestamps = false;
+#endif
 
         // NOT `static` lambdas any more: they capture the logger, which costs one closure per
         // device — once, at creation — and is what lets a host route Dawn's validation errors

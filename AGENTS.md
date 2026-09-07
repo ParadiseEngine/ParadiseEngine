@@ -182,8 +182,11 @@ Things that bit, so they are rules:
 - **The depth + normal pre-pass declares the WHOLE vertex stream** even though it reads two
   attributes: the reflected stride comes from the struct, and a position-only struct once
   sampled interleaved normals as positions for as long as SSAO existed.
-- **Profile with the sample's `--bench`, and trust the frame total, not the per-pass rows, on
-  Apple GPUs.** `WebGpuRenderer.PassTimingEnabled` + `ReadPassTimings` give per-pass timestamp
+- **Profile with the sample's `--bench` in a profiling build (`dotnet build
+  -p:ParadiseProfiling=true`, which defines `PARADISE_PROFILING` in every project), and trust the
+  frame total, not the per-pass rows, on Apple GPUs.** The timestamp plumbing, the CPU phase
+  laps and the bench compile only then; the members stay in the API and report nothing
+  otherwise. `WebGpuRenderer.PassTimingEnabled` + `ReadPassTimings` give per-pass timestamp
   pairs (names from `FrameGraph.LivePassNames`), but Apple GPUs run passes concurrently and a
   timestamp pair measures wall time while other work is in flight — every bloom mip "took" 3 ms
   beside a compute trace, for a 5 ms frame. The bench also prints the GPU idle-to-idle frame time

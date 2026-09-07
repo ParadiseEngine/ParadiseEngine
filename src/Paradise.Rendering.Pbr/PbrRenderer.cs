@@ -36,7 +36,9 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly CompositeFeature _composite;
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
+#if PARADISE_PROFILING
     private readonly System.Diagnostics.Stopwatch _clock = new();
+#endif
 
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
@@ -73,7 +75,8 @@ public sealed partial class PbrRenderer : IDisposable
 
     public MaterialResourceCache Materials { get; }
 
-    /// <summary>CPU time the last <see cref="RenderFrame"/> spent in each of its phases.</summary>
+    /// <summary>CPU time the last <see cref="RenderFrame"/> spent in each of its phases. Filled
+    /// only by a build with <c>-p:ParadiseProfiling=true</c>; zero otherwise.</summary>
     public PbrCpuTimings LastCpuTimings { get; private set; }
 
     /// <summary>The passes the last frame submitted, in the order a backend times them.</summary>
@@ -335,8 +338,8 @@ public sealed partial class PbrRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _clock.Restart();
         var timings = new PbrCpuTimings();
+        Lap();
         var view = scene.Camera.View;
         var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
 
@@ -398,12 +401,17 @@ public sealed partial class PbrRenderer : IDisposable
         LastCpuTimings = timings;
     }
 
+    /// <summary>Milliseconds since the previous lap; 0 in a build without profiling.</summary>
+#if PARADISE_PROFILING
     private double Lap()
     {
         var ms = _clock.Elapsed.TotalMilliseconds;
         _clock.Restart();
         return ms;
     }
+#else
+    private static double Lap() => 0;
+#endif
 
     internal int PipelineVariantCountForTest => _programs.PipelineCount;
     // Culling is invisible in the submitted stream — a pass that was declared and dropped and

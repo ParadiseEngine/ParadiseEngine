@@ -1,3 +1,4 @@
+#if PARADISE_PROFILING
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -74,3 +75,4 @@ internal sealed class PassBenchmark
         Console.WriteLine($"  {"CPU total",-28} {_cpu.Sum() / _frames,8:F3} ms");
     }
 }
+#endif
