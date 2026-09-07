@@ -63,6 +63,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
+    // Per-pass GPU timing: one timestamp pair per pass of the presenting stream, resolved into a
+    // buffer the caller reads back with ReadPassTimings. Created on first use.
+    private const int MaxTimedPasses = 128;
+    private WebGpuSharp.QuerySet? _timingQueries;
+    private WgBuffer? _timingResolve;
+    private WgBuffer? _timingReadback;
+    private int _timedPasses;
     /// <summary>Volatile because it is read on any thread that calls in and written by whichever
     /// thread disposes. It is an ADVISORY guard: every <c>ObjectDisposedException.ThrowIf</c> in
     /// this file reads it, and each of those is a check-then-act that a concurrent disposal can
@@ -278,6 +285,84 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <summary>True when the adapter granted BC texture compression — required before creating
     /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
     public bool SupportsBcTextureCompression => _device.SupportsBc;
+
+    /// <summary>True when the adapter granted timestamp queries; <see cref="PassTimingEnabled"/>
+    /// has no effect otherwise.</summary>
+    public bool SupportsPassTiming => _device.SupportsTimestampQuery;
+
+    /// <summary>Time every pass of each presenting <see cref="Submit"/> on the GPU. Read the
+    /// results with <see cref="ReadPassTimings"/>. A profiler's switch: it stalls the frame the
+    /// results are read in, so leave it off in a shipping build.</summary>
+    public bool PassTimingEnabled { get; set; }
+
+    /// <summary>GPU duration in milliseconds of each pass of the last presenting submit, in the
+    /// order the passes were begun (render and compute alike). Blocks until that submit has
+    /// finished. Empty when timing is off or unsupported.</summary>
+    public double[] ReadPassTimings()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_timedPasses == 0 || _timingReadback is null) return [];
+        var count = _timedPasses;
+        _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
+        var bytes = (nuint)(count * 16);
+        _timingReadback.MapSync(WebGpuSharp.MapMode.Read, 0, bytes, 5_000);
+        var result = new double[count];
+        try
+        {
+            _timingReadback.GetConstMappedRange(0, bytes, (ReadOnlySpan<byte> mapped) =>
+            {
+                for (var i = 0; i < count; i++)
+                {
+                    var begin = BitConverter.ToUInt64(mapped.Slice(i * 16, 8));
+                    var end = BitConverter.ToUInt64(mapped.Slice(i * 16 + 8, 8));
+                    result[i] = end >= begin ? (end - begin) / 1_000_000.0 : 0.0;
+                }
+            });
+        }
+        finally
+        {
+            _timingReadback.Unmap();
+        }
+        return result;
+    }
+
+    private WebGpuSharp.PassTimestampWrites? TimestampsFor(int passOrdinal)
+    {
+        if (!PassTimingEnabled || !SupportsPassTiming || passOrdinal >= MaxTimedPasses) return null;
+        if (_timingQueries is null)
+        {
+            var queryDesc = new WebGpuSharp.QuerySetDescriptor { Label = "ParadisePassTimings", Type = WebGpuSharp.QueryType.Timestamp, Count = MaxTimedPasses * 2 };
+            _timingQueries = _device.Device.CreateQuerySet(in queryDesc)
+                ?? throw new InvalidOperationException("Timestamp query set creation returned null.");
+            _timingResolve = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+            {
+                Label = "ParadisePassTimingsResolve",
+                Size = MaxTimedPasses * 16,
+                Usage = WebGpuSharp.BufferUsage.QueryResolve | WebGpuSharp.BufferUsage.CopySrc,
+            }) ?? throw new InvalidOperationException("Timing resolve buffer creation returned null.");
+            _timingReadback = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+            {
+                Label = "ParadisePassTimingsReadback",
+                Size = MaxTimedPasses * 16,
+                Usage = WebGpuSharp.BufferUsage.MapRead | WebGpuSharp.BufferUsage.CopyDst,
+            }) ?? throw new InvalidOperationException("Timing readback buffer creation returned null.");
+        }
+        return new WebGpuSharp.PassTimestampWrites
+        {
+            QuerySet = _timingQueries,
+            BeginningOfPassWriteIndex = (uint)(passOrdinal * 2),
+            EndOfPassWriteIndex = (uint)(passOrdinal * 2 + 1),
+        };
+    }
+
+    /// <summary>After the stream: resolve the pass timestamps into the readback buffer.</summary>
+    private void ResolveTimings(WgCommandEncoder encoder, int timedPasses)
+    {
+        _timedPasses = timedPasses;
+        if (timedPasses == 0 || _timingQueries is null) return;
+        encoder.ResolveQuerySet(_timingQueries, 0, (uint)(timedPasses * 2), _timingResolve!, 0);
+        encoder.CopyBufferToBuffer(_timingResolve!, 0, _timingReadback!, 0, (ulong)(timedPasses * 16));
+    }
 
     /// <summary>Required stride alignment for dynamic uniform-buffer offsets (≥ 256).</summary>
     public uint UniformBufferOffsetAlignment => _device.UniformBufferOffsetAlignment;
@@ -648,7 +733,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         if (!TryAcquireBackbufferView(out var view)) return;
 
         var encoder = _device.Device.CreateCommandEncoder();
-        ExecuteStream(in stream, encoder, view);
+        var timedPasses = ExecuteStream(in stream, encoder, view, timed: true);
+        ResolveTimings(encoder, timedPasses);
         OverlayPass?.Invoke(encoder, view);
         // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
         // without its UI — and before Finish, so the copy rides the frame's own command buffer.
@@ -900,10 +986,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
     }
 
-    private void ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer)
+    /// <returns>How many passes were timed (0 unless <paramref name="timed"/> and timing is on).</returns>
+    private int ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer, bool timed = false)
     {
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
+        var passOrdinal = 0;
+        var timedPasses = 0;
 
         WgRenderPassEncoder? activePass = null;
         // Compute passes get a parallel local: WgComputePassEncoder is an unrelated struct type,
@@ -929,7 +1018,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         if ((uint)passIndex >= (uint)passes.Length)
                             throw new InvalidOperationException(
                                 $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
-                        activePass = BeginPass(encoder, passes[passIndex], backbuffer);
+                        var timing = timed ? TimestampsFor(passOrdinal) : null;
+                        if (timing is not null) timedPasses = passOrdinal + 1;
+                        passOrdinal++;
+                        activePass = BeginPass(encoder, passes[passIndex], backbuffer, timing);
                         passHasDepth = passes[passIndex].Depth is not null;
                         break;
                     }
@@ -1037,7 +1129,18 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         if (activeComputePass is not null)
                             throw new InvalidOperationException(
                                 "Nested BeginComputePass — previous compute pass was not ended (missing EndComputePass).");
-                        activeComputePass = encoder.BeginComputePass();
+                        var computeTiming = timed ? TimestampsFor(passOrdinal) : null;
+                        if (computeTiming is not null) timedPasses = passOrdinal + 1;
+                        passOrdinal++;
+                        if (computeTiming is { } writes)
+                        {
+                            var computeDesc = new WebGpuSharp.ComputePassDescriptor { Label = "ParadiseComputePass", TimestampWrites = writes };
+                            activeComputePass = encoder.BeginComputePass(in computeDesc);
+                        }
+                        else
+                        {
+                            activeComputePass = encoder.BeginComputePass();
+                        }
                         break;
                     }
                     case RenderCommandKind.EndComputePass:
@@ -1084,6 +1187,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             activePass?.End();
             activeComputePass?.End();
         }
+        return timedPasses;
     }
 
     private static WgRenderPassEncoder RequireActiveRenderPass(WgRenderPassEncoder? pass, WgComputePassEncoder? computePass) =>
@@ -1096,7 +1200,17 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             ? "Compute command issued inside a render pass — compute commands need a BeginComputePass scope."
             : "Compute command issued outside of an active BeginComputePass/EndComputePass scope.");
 
-    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView? backbuffer)
+    private void DisposeTimings()
+    {
+        _timingReadback?.Destroy();
+        _timingResolve?.Destroy();
+        _timingQueries?.Destroy();
+        _timingReadback = null;
+        _timingResolve = null;
+        _timingQueries = null;
+    }
+
+    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView? backbuffer, WebGpuSharp.PassTimestampWrites? timing = null)
     {
         // Either ZERO color attachments (a depth-only pass, e.g. a shadow layer fill), or a SINGLE
         // color attachment — targeting either the backbuffer (ColorView invalid) or an offscreen
@@ -1149,6 +1263,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         {
             ColorAttachments = colors,
             Label = colorCount == 0 ? "ParadiseDepthPass" : "ParadiseRenderPass",
+            TimestampWrites = timing,
         };
         if (pass.Depth is { } depth)
         {
@@ -1197,6 +1312,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     public void Dispose()
     {
+        DisposeTimings();
         // ONE-SHOT. Check-then-set was two steps, so two threads could both pass it and both tear
         // down — and teardown ends in _target.Dispose() and _device.Dispose(), which is a native
         // double-free rather than a harmless second pass. IDisposable is not conventionally

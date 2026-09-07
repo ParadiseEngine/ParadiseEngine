@@ -115,6 +115,11 @@ public sealed record PbrRayTracedAo
     public int RaysPerPixel { get; init; } = 4;
     public float MaxDistance { get; init; } = 1f;
     public float NormalBias { get; init; } = 0.01f;
+
+    /// <summary>Fraction of the frame's resolution the occlusion is traced at, (0, 1]. Half
+    /// resolution traces a quarter of the rays and upsamples bilinearly, which ambient occlusion
+    /// — a low-frequency term — tolerates well.</summary>
+    public float ResolutionScale { get; init; } = 0.5f;
 }
 
 /// <summary>An authored probe volume: where the probe grid starts, how far apart its probes are,
@@ -128,7 +133,7 @@ public sealed record PbrGi
 {
     public bool Enabled { get; init; }
 
-    /// <summary>Rays traced per probe per update; the quality knob a host sets once per platform.</summary>
+    /// <summary>Rays traced per probe per update, 8 to 256; the quality knob a host sets once per platform.</summary>
     public int RaysPerProbe { get; init; } = 128;
 
     /// <summary>How much of the previous frame's irradiance survives an update: 0.97 converges
@@ -182,6 +187,20 @@ public sealed record PbrSsao
     public float Intensity { get; init; } = 2f;
     public float Bias { get; init; } = 0.05f;
     public float Power { get; init; } = 1.5f;
+}
+
+/// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: bucketing the
+/// scene, building the trace hierarchy, feature setup (uniform uploads, cluster binning, pass
+/// declaration), graph compile (sorting, culling, recording), draw-ring upload, and submit.</summary>
+public struct PbrCpuTimings
+{
+    public double Partition;
+    public double TraceBuild;
+    public double Setup;
+    public double Compile;
+    public double Upload;
+    public double Submit;
+    public readonly double Total => Partition + TraceBuild + Setup + Compile + Upload + Submit;
 }
 
 /// <summary>Camera state: matrices via <see cref="PbrMath"/>, plus the world position the

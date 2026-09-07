@@ -41,6 +41,11 @@ internal sealed class GiDemoScene : IDisposable
     /// probes off the room is dark and with them on it is lit — the classic Cornell box.</summary>
     public static bool PanelOnly { get; set; }
 
+    /// <summary>Probe budget knobs for the benchmark.</summary>
+    public static int RaysPerProbe { get; set; } = 128;
+    public static int MaxProbes { get; set; } = 4096;
+    public static int ProbesPerFrame { get; set; }
+
     public GiDemoScene(WebGpuRenderer renderer, uint width, uint height, string? modelPath, ILogger? logger = null)
     {
         _width = Math.Max(1, width);
@@ -88,7 +93,7 @@ internal sealed class GiDemoScene : IDisposable
         };
         _scene.Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Filmic, Exposure = 0.6f, White = 4f };
         _scene.Bloom = new PbrBloom { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--no-bloom") < 0, Threshold = 1.2f, Intensity = 0.25f };
-        _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = 128, Hysteresis = 0.97f, MaxProbes = 4096 };
+        _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = RaysPerProbe, Hysteresis = 0.97f, MaxProbes = MaxProbes, ProbesPerFrame = ProbesPerFrame };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
 
         _sunTemplate = new PbrLight
@@ -113,7 +118,7 @@ internal sealed class GiDemoScene : IDisposable
         Animate();
 
         Console.WriteLine(
-            $"[GiDemo] probes {(ProbeGi ? "on" : "off")}, ray-traced AO {(RayTracedAo ? "on" : "off")}, " +
+            $"[GiDemo] probes {(ProbeGi ? "on" : "off")} (rays {RaysPerProbe}, max {MaxProbes}, per frame {ProbesPerFrame}), ray-traced AO {(RayTracedAo ? "on" : "off")}, " +
             $"{_scene.Instances.Count} instances{(modelPath is null ? "" : $", model {Path.GetFileName(modelPath)}")}.");
     }
 
@@ -226,6 +231,9 @@ internal sealed class GiDemoScene : IDisposable
         _pbr.RenderFrame(_scene);
         _frame++;
     }
+
+    /// <summary>The renderer, for the benchmark's pass names and CPU timings.</summary>
+    public PbrRenderer Renderer => _pbr;
 
     public void Dispose() => _pbr.Dispose();
 }

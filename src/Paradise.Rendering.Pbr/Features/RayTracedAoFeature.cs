@@ -29,6 +29,9 @@ public sealed class RayTracedAoFeature : IRenderFeature
     private readonly BindGroupLayoutDesc _traceGroup;
     private readonly BufferHandle _uniformBuffer;
     private uint _frame;
+    private uint _targetWidth;
+    private uint _targetHeight;
+    private float _scale = 1f;
 
     internal RayTracedAoFeature(PbrContext ctx)
     {
@@ -39,7 +42,7 @@ public sealed class RayTracedAoFeature : IRenderFeature
         _traceGroup = ShaderPrograms.FindGroup(program, 1);
         _uniformBuffer = ctx.Renderer.CreateBuffer(new BufferDesc(
             "PbrRtaoUniforms", (ulong)Unsafe.SizeOf<RtaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
-        EnsureTarget();
+        EnsureTarget(1f);
     }
 
     public string Name => "RayTracedAo";
@@ -47,12 +50,16 @@ public sealed class RayTracedAoFeature : IRenderFeature
     public FrameRequirements Requires =>
         _ctx.Scene.RayTracedAo.Enabled ? FrameRequirements.DepthNormalPrepass : FrameRequirements.None;
 
-    public void Resize(uint width, uint height) => EnsureTarget();
+    public void Resize(uint width, uint height) => EnsureTarget(_scale);
 
-    private void EnsureTarget()
+    private void EnsureTarget(float scale)
     {
+        _scale = Math.Clamp(scale, 0.1f, 1f);
+        scale = _scale;
+        _targetWidth = Math.Max(1, (uint)MathF.Ceiling(_ctx.Width * scale));
+        _targetHeight = Math.Max(1, (uint)MathF.Ceiling(_ctx.Height * scale));
         _ctx.Targets.Ensure(PbrTargets.RayTracedAo, new TextureDesc(
-            null, _ctx.Width, _ctx.Height, 1, 1, 1, TextureDimension.D2, TextureFormat.Rgba16Float,
+            null, _targetWidth, _targetHeight, 1, 1, 1, TextureDimension.D2, TextureFormat.Rgba16Float,
             TextureUsage.StorageBinding | TextureUsage.TextureBinding));
     }
 
@@ -64,10 +71,12 @@ public sealed class RayTracedAoFeature : IRenderFeature
             || !frame.Blackboard.TryGet(PbrResults.PrepassDepth, out var depth))
             return;
 
+        EnsureTarget(settings.ResolutionScale);
         var uniforms = new RtaoUniformsGpu
         {
             Params = new Vector4(Math.Clamp(settings.RaysPerPixel, 1, 64), MathF.Max(settings.MaxDistance, 1e-3f), _frame++, settings.NormalBias),
-            Screen = new Vector4(_ctx.Width, _ctx.Height, 0f, 0f),
+            // xy: the AO target's size (the dispatch), zw: the pre-pass's size it reads from.
+            Screen = new Vector4(_targetWidth, _targetHeight, _ctx.Width, _ctx.Height),
             InvViewProj = Matrix4x4.Invert(_ctx.ViewProjection, out var inv) ? inv : Matrix4x4.Identity,
         };
         _ctx.Renderer.UpdateBuffer<RtaoUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
@@ -91,7 +100,7 @@ public sealed class RayTracedAoFeature : IRenderFeature
         pass.Encoder.SetComputePipeline(self._pipeline);
         pass.SetBindGroup(0);
         pass.SetBindGroup(1);
-        pass.Encoder.Dispatch(new DispatchCommand((self._ctx.Width + 7) / 8, (self._ctx.Height + 7) / 8, 1));
+        pass.Encoder.Dispatch(new DispatchCommand((self._targetWidth + 7) / 8, (self._targetHeight + 7) / 8, 1));
     }
 
     public void Dispose()

@@ -164,6 +164,10 @@ bool traceMesh(uint rootNode, float3 origin, float3 dir, inout float tMax, out u
     stack[depth++] = rootNode;
     bool hit = false;
 
+    // Children are pushed in slot order, not nearest-first. Sorting the internal children by
+    // entry distance so the nearest pops first was measured (Cornell room, 3072 probes × 128
+    // rays, Apple GPU) at +0.3 ms a frame: the insertion sort and its register pressure cost more
+    // than the nodes it skipped. Revisit with a scene whose rays travel far before hitting.
     while (depth > 0)
     {
         BvhNode node = traceNodes[stack[--depth]];
@@ -171,7 +175,8 @@ bool traceMesh(uint rootNode, float3 origin, float3 dir, inout float tMax, out u
         {
             uint meta = bvhChildMeta(node, child);
             if (meta == 0u) continue;
-            if (isinf(bvhChildEntry(node, child, origin, invDir, tMax))) continue;
+            float entry = bvhChildEntry(node, child, origin, invDir, tMax);
+            if (isinf(entry)) continue;
 
             if ((meta & BvhLeafFlag) != 0u)
             {
@@ -202,6 +207,47 @@ bool traceMesh(uint rootNode, float3 origin, float3 dir, inout float tMax, out u
     return hit;
 }
 
+/// Any hit within tMax against one mesh: returns at the first triangle the ray touches.
+bool traceMeshAny(uint rootNode, float3 origin, float3 dir, float tMax)
+{
+    float3 invDir = safeInverse(dir);
+    uint stack[BvhStackDepth];
+    int depth = 0;
+    stack[depth++] = rootNode;
+
+    while (depth > 0)
+    {
+        BvhNode node = traceNodes[stack[--depth]];
+        for (int child = 0; child < 8; child++)
+        {
+            uint meta = bvhChildMeta(node, child);
+            if (meta == 0u) continue;
+            if (isinf(bvhChildEntry(node, child, origin, invDir, tMax))) continue;
+
+            if ((meta & BvhLeafFlag) != 0u)
+            {
+                uint first = node.leafBase + (meta & 0xFFu);
+                uint count = (meta >> 8) & 0x3Fu;
+                for (uint i = first; i < first + count; i++)
+                {
+                    uint4 tri = traceTriangles[i];
+                    float t;
+                    float2 uv;
+                    if (rayTriangle(origin, dir,
+                            traceVertices[tri.x * 2].xyz, traceVertices[tri.y * 2].xyz, traceVertices[tri.z * 2].xyz,
+                            tMax, t, uv))
+                        return true;
+                }
+            }
+            else if (depth < BvhStackDepth)
+            {
+                stack[depth++] = node.childBase + (meta & 7u);
+            }
+        }
+    }
+    return false;
+}
+
 /// Closest hit through the instance hierarchy, in world space. A world-space t: the ray is moved
 /// into each instance's object space without renormalizing its direction, so distances agree.
 bool traceClosest(float3 origin, float3 dir, float tMax, out TraceHit hit)
@@ -225,7 +271,8 @@ bool traceClosest(float3 origin, float3 dir, float tMax, out TraceHit hit)
         {
             uint meta = bvhChildMeta(node, child);
             if (meta == 0u) continue;
-            if (isinf(bvhChildEntry(node, child, origin, invDir, hit.t))) continue;
+            float entry = bvhChildEntry(node, child, origin, invDir, hit.t);
+            if (isinf(entry)) continue;
 
             if ((meta & BvhLeafFlag) != 0u)
             {
@@ -258,11 +305,44 @@ bool traceClosest(float3 origin, float3 dir, float tMax, out TraceHit hit)
     return any;
 }
 
-/// Any hit within tMax — for shadow and occlusion rays, where the first hit is enough.
+/// Any hit within tMax — for shadow and occlusion rays, where the first hit is enough and the
+/// walk stops at it instead of searching on for the closest.
 bool traceAny(float3 origin, float3 dir, float tMax)
 {
-    TraceHit hit;
-    return traceClosest(origin, dir, tMax, hit);
+    if (trace.instanceCount == 0u) return false;
+    float3 invDir = safeInverse(dir);
+    uint stack[BvhStackDepth];
+    int depth = 0;
+    stack[depth++] = trace.tlasRoot;
+
+    while (depth > 0)
+    {
+        BvhNode node = traceNodes[stack[--depth]];
+        for (int child = 0; child < 8; child++)
+        {
+            uint meta = bvhChildMeta(node, child);
+            if (meta == 0u) continue;
+            if (isinf(bvhChildEntry(node, child, origin, invDir, tMax))) continue;
+
+            if ((meta & BvhLeafFlag) != 0u)
+            {
+                uint first = node.leafBase + (meta & 0xFFu);
+                uint count = (meta >> 8) & 0x3Fu;
+                for (uint i = first; i < first + count; i++)
+                {
+                    TraceInstance inst = traceInstances[i];
+                    float3 o = mul(inst.worldToObject, float4(origin, 1.0)).xyz;
+                    float3 d = mul((float3x3)inst.worldToObject, dir);
+                    if (traceMeshAny(inst.rootNode, o, d, tMax)) return true;
+                }
+            }
+            else if (depth < BvhStackDepth)
+            {
+                stack[depth++] = node.childBase + (meta & 7u);
+            }
+        }
+    }
+    return false;
 }
 
 /// The interpolated, world-space unit normal at a hit, flipped to face the ray.

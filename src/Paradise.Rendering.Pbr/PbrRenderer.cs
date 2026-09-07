@@ -36,6 +36,7 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly CompositeFeature _composite;
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
+    private readonly System.Diagnostics.Stopwatch _clock = new();
 
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
@@ -71,6 +72,12 @@ public sealed partial class PbrRenderer : IDisposable
     }
 
     public MaterialResourceCache Materials { get; }
+
+    /// <summary>CPU time the last <see cref="RenderFrame"/> spent in each of its phases.</summary>
+    public PbrCpuTimings LastCpuTimings { get; private set; }
+
+    /// <summary>The passes the last frame submitted, in the order a backend times them.</summary>
+    public IReadOnlyList<string> LastPassNames => _graph.LivePassNames;
 
     /// <summary>The features that make up a frame, in the order they set up. A host adds its own
     /// after these; they see the engine's targets by the names in <see cref="PbrTargets"/> and
@@ -328,6 +335,8 @@ public sealed partial class PbrRenderer : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        _clock.Restart();
+        var timings = new PbrCpuTimings();
         var view = scene.Camera.View;
         var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
 
@@ -358,14 +367,18 @@ public sealed partial class PbrRenderer : IDisposable
 
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
+        timings.Partition = Lap();
         // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it.
         if (scene.RayTracedAo.Enabled || scene.Gi.Enabled) _ctx.Trace.BuildFrame(opaque, Materials);
+        timings.TraceBuild = Lap();
         _graph.Reset();
         Pipeline.Setup(_graph);
+        timings.Setup = Lap();
 
         _commandWriter.ResetWrittenCount();
         var stream = _graph.Compile(_commandWriter);
         _ctx.BindGroups.EndFrame();
+        timings.Compile = Lap();
 
         // Recording staged the draw uniforms; upload them now, before the stream that reads them.
         _shadows.UploadStagedDraws();
@@ -379,7 +392,17 @@ public sealed partial class PbrRenderer : IDisposable
             _ctx.JointHighWater = 0;
         }
 
+        timings.Upload = Lap();
         _renderer.Submit(in stream);
+        timings.Submit = Lap();
+        LastCpuTimings = timings;
+    }
+
+    private double Lap()
+    {
+        var ms = _clock.Elapsed.TotalMilliseconds;
+        _clock.Restart();
+        return ms;
     }
 
     internal int PipelineVariantCountForTest => _programs.PipelineCount;

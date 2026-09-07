@@ -182,6 +182,18 @@ Things that bit, so they are rules:
 - **The depth + normal pre-pass declares the WHOLE vertex stream** even though it reads two
   attributes: the reflected stride comes from the struct, and a position-only struct once
   sampled interleaved normals as positions for as long as SSAO existed.
+- **Profile with the sample's `--bench`, and trust the frame total, not the per-pass rows, on
+  Apple GPUs.** `WebGpuRenderer.PassTimingEnabled` + `ReadPassTimings` give per-pass timestamp
+  pairs (names from `FrameGraph.LivePassNames`), but Apple GPUs run passes concurrently and a
+  timestamp pair measures wall time while other work is in flight — every bloom mip "took" 3 ms
+  beside a compute trace, for a 5 ms frame. The bench also prints the GPU idle-to-idle frame time
+  (submit, then wait); attribute cost by toggling features (`--no-gi`, `--rtao`, `--no-bloom`,
+  `--gi-rays N`, `--gi-max-probes N`, `--gi-probes-per-frame N`). Measured on an Apple M-series at
+  1280×960 in the Cornell room: base 2.1 ms (bloom 0.8), probes +2.3 ms at 3072 probes × 128 rays
+  (linear in rays), RT-AO +2.6 ms at half resolution with 8 rays. Two things that paid: staging a
+  probe's rays and directions in workgroup memory once per blend workgroup (halved the blend), and
+  an early-out any-hit walk plus half resolution for RT-AO (9.5 → 2.6 ms). One that did not:
+  nearest-first child ordering in the traversal (+0.3 ms; the sort outweighed the skipped nodes).
 
 ### Diagnostics go through `ILogger`, never `Console`
 

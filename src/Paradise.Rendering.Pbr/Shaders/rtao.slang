@@ -8,7 +8,7 @@
 struct RtaoUniforms
 {
     float4 params;       // x: rays per pixel, y: max distance (world), z: frame index, w: normal bias
-    float4 screen;       // xy: screen size (pixels), zw unused
+    float4 screen;       // xy: AO target size (pixels), zw: pre-pass size it samples
     float4x4 invViewProj;
 };
 
@@ -58,15 +58,18 @@ void rtaoMain(uint3 id: SV_DispatchThreadID)
     float2 screen = rtao.screen.xy;
     if (pixel.x >= (int)screen.x || pixel.y >= (int)screen.y) return;
 
-    float4 normalSample = prepassNormalTexture.Load(int3(pixel, 0));
-    float depth = prepassDepthTexture.Load(int3(pixel, 0)).r;
+    // The pre-pass may be finer than this target: read the pre-pass pixel under this one's centre.
+    float2 uv = (float2(pixel) + 0.5) / screen;
+    int2 source = int2(uv * rtao.screen.zw);
+    float4 normalSample = prepassNormalTexture.Load(int3(source, 0));
+    float depth = prepassDepthTexture.Load(int3(source, 0)).r;
     if (normalSample.w < 0.5 || depth >= 1.0)
     {
         rtaoTexture.Store(pixel, float4(1.0, 1.0, 1.0, 1.0));
         return;
     }
 
-    float2 ndc = (float2(pixel) + 0.5) / screen * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float2 ndc = uv * float2(2.0, -2.0) + float2(-1.0, 1.0);
     float4 world = mul(rtao.invViewProj, float4(ndc, depth, 1.0));
     float3 position = world.xyz / world.w;
     float3 normal = normalize(normalSample.xyz);

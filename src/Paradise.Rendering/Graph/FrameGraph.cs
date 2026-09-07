@@ -126,6 +126,13 @@ public sealed partial class FrameGraph
     /// <summary>How many passes the last <see cref="Compile"/> dropped as unreachable.</summary>
     public int CulledPassCount { get; private set; }
 
+    /// <summary>The passes the last <see cref="Compile"/> recorded, in the order they were begun
+    /// — render and compute alike. The k-th name is the k-th pass a backend's per-pass timing
+    /// reports, which is how a profiler puts a name to a number.</summary>
+    public IReadOnlyList<string> LivePassNames => _livePassNames;
+
+    private readonly List<string> _livePassNames = [];
+
     /// <summary>Drop the previous frame's declarations. Capacity is kept.</summary>
     public void Reset()
     {
@@ -273,9 +280,11 @@ public sealed partial class FrameGraph
 
         var encoder = new RenderCommandEncoder(writer);
         var rasterSlot = 0;
+        _livePassNames.Clear();
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
+            _livePassNames.Add(pass.Name);
             var recording = new PassRecording(encoder, pass.Groups, pass.Name);
             if (pass.Kind == PassKind.Compute)
             {

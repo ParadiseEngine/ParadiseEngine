@@ -6,6 +6,7 @@ using Paradise.Windowing;
 using System;
 using System.Runtime.InteropServices;
 using Paradise.Rendering;
+using Paradise.Rendering.Pbr;
 using Paradise.Rendering.WebGPU;
 using static SDL.SDL3;
 using SDL;
@@ -42,6 +43,7 @@ internal static class Program
     }
 
     private static int s_screenshotEvery;
+    private static bool s_bench;
 
     private static int Main(string[] args)
     {
@@ -50,6 +52,7 @@ internal static class Program
 
         var headlessFrames = ParseHeadless(args);
         var screenshotPath = ParseValue(args, "--screenshot");
+        s_bench = Array.IndexOf(args, "--bench") >= 0;
         if (ParseValue(args, "--size") is { } size && size.Split('x') is [var sw, var sh]
             && uint.TryParse(sw, out var width) && uint.TryParse(sh, out var height) && width > 0 && height > 0)
         {
@@ -80,6 +83,9 @@ internal static class Program
             GiDemoScene.RayTracedAo = PbrViewerScene.RayTracedAo;
             GiDemoScene.AnimateLights = Array.IndexOf(args, "--static-lights") < 0;
             GiDemoScene.PanelOnly = Array.IndexOf(args, "--panel-only") >= 0;
+            if (int.TryParse(ParseValue(args, "--gi-rays"), out var giRays)) GiDemoScene.RaysPerProbe = giRays;
+            if (int.TryParse(ParseValue(args, "--gi-max-probes"), out var giMax)) GiDemoScene.MaxProbes = giMax;
+            if (int.TryParse(ParseValue(args, "--gi-probes-per-frame"), out var giWindow)) GiDemoScene.ProbesPerFrame = giWindow;
         }
         else if (Array.IndexOf(args, "--cube") >= 0)
         {
@@ -199,11 +205,17 @@ internal static class Program
                 case SceneKind.GiDemo:
                 {
                     using var scene = new GiDemoScene(renderer, InitialWidth, InitialHeight, glbPath, s_log.CreateLogger("PbrRenderer"));
+                    var bench = s_bench ? new PassBenchmark(renderer) : null;
                     for (var i = 0; i < frameCount; i++)
                     {
+                        bench?.BeginFrame();
                         scene.RenderFrame();
+                        bench?.Record(i, scene.Renderer);
                         afterFrame?.Invoke(i);
                     }
+                    bench?.Report(frameCount);
+                    if (bench is not null && scene.Renderer.Pipeline.Find<ProbeGiFeature>()?.ActiveVolume is { } volume)
+                        Console.WriteLine($"[bench] probe volume {volume.CountX}x{volume.CountY}x{volume.CountZ} = {volume.CountX * volume.CountY * volume.CountZ} probes, spacing {volume.Spacing.X:F2} m");
                     break;
                 }
                 default:

@@ -620,8 +620,10 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     }
     // Screen-space and ray-traced AO also darken only the ambient, like Godot.
     occlusion *= computeSsao(input.position.xy, input.worldPos, N);
+    // Sampled, not loaded: the AO target may be a fraction of the frame's size, and bilinear
+    // filtering is the upsample.
     if (ssao.rtao.x > 0.5)
-        occlusion *= rtAoTexture.Load(int3((int2)input.position.xy, 0)).r;
+        occlusion *= rtAoTexture.SampleLevel(skySpecularSampler, input.position.xy * ssao.screen.xy, 0.0).r;
     float exposure = max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 

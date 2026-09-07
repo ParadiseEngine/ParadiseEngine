@@ -24,6 +24,8 @@ public sealed class ProbeGiFeature : IRenderFeature
     private const int IrradianceTexels = 8;
     private const int VisibilityTexels = 14;
     private const int MaxAtlasSize = 8192;
+    // Must match probeBlend.slang's MaxRays: the blend stages a probe's rays in workgroup memory.
+    private const int MaxRaysPerProbe = 256;
     private const int TraceWorkgroup = 64;
 
     [StructLayout(LayoutKind.Sequential, Size = 16)]
@@ -145,7 +147,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         // one this frame's atlases are blended against, not the handle that was just destroyed.
         ShadingStateBuffer = _stateBuffers[_current];
         var graph = frame.Graph;
-        var rays = Math.Clamp(gi.RaysPerProbe, 8, 1024);
+        var rays = Math.Clamp(gi.RaysPerProbe, 8, MaxRaysPerProbe);
         var windowCount = gi.ProbesPerFrame <= 0 ? _probeCount : Math.Min(_probeCount, gi.ProbesPerFrame);
         var windowStart = _windowStart;
         _windowStart = windowCount >= _probeCount ? 0 : (_windowStart + windowCount) % _probeCount;
