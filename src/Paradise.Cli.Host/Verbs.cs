@@ -287,18 +287,19 @@ internal static class Verbs
     /// <summary>One GLB, or every GLB under a directory with <paramref name="all"/>.</summary>
     public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null)
     {
+        var chain = importers ?? AssetImporters.All;
         var targets = new List<UPath>();
         if (fileSystem.DirectoryExists(target))
         {
             if (!all)
             {
-                Console.Error.WriteLine($"extract: '{Display(fileSystem, target)}' is a directory; pass --all to extract every GLB under it");
+                Console.Error.WriteLine($"extract: '{Display(fileSystem, target)}' is a directory; pass --all to extract every source container under it");
                 return 1;
             }
 
             var ignore = IgnoreRules(fileSystem, layout);
             targets.AddRange(fileSystem.EnumerateFiles(target, "*", SearchOption.AllDirectories)
-                .Where(path => MeshContainer.IsMesh(path) && !ignore.Matches(layout.Assets, path))
+                .Where(path => ImporterChain.Extractor(chain, fileSystem, layout, path) is not null && !ignore.Matches(layout.Assets, path))
                 .OrderBy(p => p.FullName, StringComparer.Ordinal));
         }
         else
@@ -311,9 +312,16 @@ internal static class Verbs
         // The same minting authority `watch` runs, started for this command; no watcher is alive
         // to hold a quarantined identity, so there is none to lose.
         var maintainer = new SidecarMaintainer(fileSystem, layout, log, ignore: IgnoreRules(fileSystem, layout), importers: importers);
-        foreach (var glb in targets)
+        foreach (var source in targets)
         {
-            var result = AssetExtractor.Extract(fileSystem, layout, glb, importers, resolution, log, maintainer: maintainer);
+            if (ImporterChain.Extractor(chain, fileSystem, layout, source) is not { } extractor)
+            {
+                Console.Error.WriteLine($"error: nothing extracts '{Display(fileSystem, source)}'; this build reads: {ImporterChain.KnownExtractors(chain)}");
+                failed++;
+                continue;
+            }
+
+            var result = extractor.Extract(new ExtractRequest(fileSystem, layout, source, chain, resolution, log, Maintainer: maintainer));
             foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
             foreach (var warning in result.Warnings) Console.Error.WriteLine($"warning: {warning}");
             foreach (var written in result.Written) Console.WriteLine($"wrote: {written}");
@@ -321,7 +329,7 @@ internal static class Verbs
             if (!result.Succeeded) failed++;
         }
 
-        Console.WriteLine($"extract: {targets.Count} glb(s), {failed} failed");
+        Console.WriteLine($"extract: {targets.Count} container(s), {failed} failed");
         return failed == 0 ? 0 : 1;
     }
 

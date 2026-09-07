@@ -206,6 +206,31 @@ at, and a `.prefab` wiring them, generated once and the author's from then on. T
 sees glTF: it reads the cooked files and the built materials. A clip keeps every key unless the
 GLB's sidecar sets `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
 
+`[extract]` decides where each kind lands, assets-relative:
+
+```toml
+[extract]
+directory  = "models"          # the fallback for any kind that names none
+meshes     = "models"          # .mesh / .skinnedmesh
+skeletons  = "animations"      # .skeleton (falls back to `meshes`, not `directory`)
+animations = "animations"      # .anim
+materials  = "materials"       # .material
+textures   = "textures"        # images the GLB no longer embeds
+prefabs    = "prefabs/models"  # the generated .prefab
+tilesets   = "tilesets"        # a kind a GAME's importer declares — no engine change
+```
+
+The keys are open: anything that is not one of the section's own settings is a KIND, and the kinds
+that exist are whatever the build's importer chain declares (see below). Set nothing and everything
+lands beside the container; set only `directory` and everything lands in one folder. A kind falls
+back to the one its declaration names before `directory` — a `.skeleton` follows the geometry that
+names it, which is where it has always landed, and a project files it with the rig's clips by
+saying so. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
+for everything that GLB extracts to. Changing a key never moves what is already extracted: the
+sidecar records each output by guid and a later run re-syncs it where it now lives, so a routing
+change applies to what the GLB has no record of yet, and moving the existing files (`paradise
+assets mv`) is the author's call.
+
 The mesh, skeleton and clip documents carry no author work, so `watch` mints them for a new or
 re-exported GLB on its own; a re-export that changes geometry or adds a clip needs no verb at
 all. Materials, textures and the prefab are the author's from the moment they exist, so `watch`
@@ -266,12 +291,33 @@ is its own from the path and, at most, a header; `Import` does the work — and 
 through `Paradise.Cli.Host` from a console project of its own — the tool cannot be handed code,
 and NativeAOT rules out scanning for it:
 
+```toml
+# assets/project.toml — the global `paradise` loads these and appends what it finds
+[extensions]
+assemblies = ["tools/assets/bin/Debug/net10.0/MyGame.Assets.dll"]
+```
+
+Paths are relative to the PROJECT ROOT, like `[host] project`. The assembly is scanned for public
+`IAssetImporter` types with a parameterless constructor, and they are appended to the chain — so
+one `paradise`, and its `watch` and tray, run the game's own importers. The project that produces
+the assembly must be built first; a path that does not exist says so and names it.
+
+The other way, which needs no configuration and is what CI should prefer, is a console project of
+the game's own:
+
 ```csharp
 // tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
 return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
 ```
 
-The chain is lowest precedence first, so an appended importer shadows the built-in it replaces.
+MSBuild then guarantees the game's importers and the pipeline they compile against are one coherent
+closure, which dynamic loading cannot promise: an extension built against a different `Paradise`
+version fails at load, and the error says so rather than leaving you reading "could not load type".
+
+Either way it is one chain, lowest precedence first, so an appended importer shadows the built-in it
+replaces, and every verb runs it: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`,
+`host play`. Loading by reflection is also why `Paradise.Cli` is not NativeAOT-published or trimmed
+— a deliberate cost of the single command.
 
 An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
 `rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
@@ -279,6 +325,70 @@ An importer that wants its asset kind in the reference graph — and so followed
 `Rewrite` (bring them in line with the tree: the sidecar's entries always, the asset's own bytes
 only when the context allows). The findings are derived from the sites by the one rule, so an
 importer cannot forget one; nothing in the pipeline lists formats.
+
+### An importer's other half: what a source container turns INTO
+
+`Import` says how a file is BUILT. Extraction says what a source CONTAINER turns into — a GLB is
+one, a game's own format is another — and it is the same importer's other half, not a second chain:
+one `Claims` decides both, and the sidecar's recorded `importer` name dispatches both, so editing
+that line moves extraction with it.
+
+It is **never called from `Import`**, and must not be. `ImportContext.FileSystem` is read-only under
+`assets/` because the build index records every read to decide what to rebuild, while extraction
+WRITES there and mints identities. A build that wrote its own inputs would dirty the tree on every
+CI run, invalidate its own index mid-run, and have nowhere to put `--take-glb` / `--take-document`,
+which are an author's per-invocation decisions. `extract` and `watch` call it; `build` never does.
+
+An importer declares the KINDS its extraction writes — which is also what says whether it extracts
+at all — and `[extract]` routes them by those ids, so a format that yields tilesets or LODs needs no
+engine change to be filed properly:
+
+```csharp
+public string Name => "crate";
+
+public bool Claims(ImportCandidate candidate)
+    => candidate.Asset.GetExtensionWithDot() == ".crate";
+
+public IReadOnlyList<ExtractKindDeclaration> ExtractKinds { get; } =
+[
+    new("tilesets"),            // the game's own kind
+    new(ExtractKind.Materials), // and one it shares with the built-ins
+];
+```
+
+Everything else — `HasParts`, `HasAuthoredParts`, `IsExtracted`, `Extract`, `MintReferences` — is
+default-implemented to "reads no container", so the many importers that only build a file someone
+else authored are unaffected.
+
+A key in `[extract]` that no importer in the build declares is a `verify` error naming the kinds
+that ARE declared — the manifest cannot check that itself, because which kinds exist depends on the
+chain the tool was built with.
+
+The engine owns the parts that are hard and are nobody's format, and an importer gets them by
+using them:
+
+- **The record.** What a container extracted to is written to the `[extract]` sidecar domain
+  (`ExtractionRecord`), a flat list of parts carrying kind, ownership, index, name, identity and
+  two fingerprints. Every extractor writes the same record; none needs a codec.
+- **Ownership** is the sync policy: `ToolOwned` (the container is the only side, so the watcher
+  mints and rewrites it freely), `TwoSided` (an authored document the container can change under),
+  `Blob` (authored bytes with nothing to write back).
+- **The keep-in-step rule.** `ExtractionSync.Decide` takes each side's fingerprint now and the pair
+  recorded at the last sync, and says whether a file is unchanged, stale, edited, adoptable, or a
+  conflict `--take-glb` / `--take-document` resolves. It returns the decision and not the
+  fingerprints to record, because after `TakeDocument` a format that can write the edit back has
+  both sides reading as the document and one that cannot still has two.
+- **The generated prefab is the exception**: it is written once and never recorded, so nothing
+  downstream would notice it landed where the scan cannot see it. Its route is therefore checked
+  directly after it is written, and an unindexed one is the same error every recorded kind gets.
+- **Identity.** `SidecarMaintainer.Ensure` mints a sidecar for each written file, and a recorded
+  part is found again through `AssetIndex.Resolve` — by guid, so a file the author moved is
+  re-synced where it now lives instead of written again at the default path. Catch its path half up
+  when you record it: the guid decides, the path is a hint.
+
+`GameExtractorTests` in `Paradise.Assets.Pipeline.Test` is a complete worked example — a container
+format the engine cannot read, extracted with routing, identities, conflicts and moves all working,
+written out of the public surface only.
 
 ## Third-party libraries
 

@@ -49,7 +49,7 @@ public sealed partial class AssetWatcher : IDisposable
 
     private IFileSystemWatcher? _watcher;
 
-    /// <summary>Creates a watcher over one project; <paramref name="importers"/> is the chain every rebuild runs (the built-ins when omitted).</summary>
+    /// <summary>Creates a watcher over one project; <paramref name="importers"/> is the chain every rebuild runs, and the same chain says what a source container is (the built-ins when omitted).</summary>
     public AssetWatcher(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
@@ -208,12 +208,12 @@ public sealed partial class AssetWatcher : IDisposable
         return CatchUp(index, dependents.Distinct());
     }
 
-    /// <summary>Every GLB's mesh, skeleton and clip documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
+    /// <summary>Every source container's tool-owned documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
     public int MintReferences()
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var minted = 0;
-        foreach (var path in index.Files.Where(MeshContainer.IsMesh).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal))
+        foreach (var path in index.Files.Where(Extractable).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal))
         {
             minted += MintReferences(path);
         }
@@ -243,23 +243,26 @@ public sealed partial class AssetWatcher : IDisposable
         var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
         return documents
             .SelectMany(graph.DependentFilesOf)
-            .Where(MeshContainer.IsMesh)
+            .Where(Extractable)
             .Distinct()
             .ToList();
     }
 
+    /// <summary>Whether the chain reads this file as a source container — its sidecar's importer, else the claim.</summary>
+    private bool Extractable(UPath path) => ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not null;
+
     /// <summary>
-    /// A GLB with geometry gets its mesh, skeleton and clip reference documents on the spot: they
-    /// are tool-owned, carry no author work, and a re-export that adds a clip should add its
-    /// document without a verb. Materials, textures and the prefab are the author's from the
-    /// moment they exist, so those are offered, never written — extraction of them mints files an
-    /// author edits, which is not a watcher's to do on a save.
+    /// A source container gets its tool-owned documents on the spot: they carry no author work,
+    /// and a re-export that adds a clip should add its document without a verb. Materials,
+    /// textures and the prefab are the author's from the moment they exist, so those are offered,
+    /// never written — extraction of them mints files an author edits, which is not a watcher's to
+    /// do on a save.
     /// </summary>
     private int MintReferences(UPath path)
     {
-        if (!MeshContainer.IsMesh(path) || !_fileSystem.FileExists(path)) return 0;
+        if (ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not { } extractor || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
-        if (!_fileSystem.FileExists(sidecar) || !MeshContainer.HasGeometry(path, _fileSystem.ReadAllBytes(path))) return 0;
+        if (!_fileSystem.FileExists(sidecar) || !extractor.HasParts(_fileSystem, path)) return 0;
 
         var relative = path.FullName[(_layout.Assets.FullName.Length + 1)..];
         if (_maintainer.DryRun)
@@ -268,18 +271,11 @@ public sealed partial class AssetWatcher : IDisposable
             return 0;
         }
 
-        var result = AssetExtractor.MintReferences(_fileSystem, _layout, path, _importers, _log, _maintainer);
+        var result = extractor.MintReferences(new ExtractRequest(_fileSystem, _layout, path, _importers, Logger: _log, Maintainer: _maintainer));
         foreach (var error in result.Errors) LogMintRefused(_log, error);
         foreach (var written in result.Written) LogMinted(_log, written.ToString());
 
-        try
-        {
-            if (result.HasAuthoredParts && !GlbImportSettings.ReadExtraction(SidecarMeta.Load(_fileSystem, sidecar)).Authored) LogOffer(_log, relative);
-        }
-        catch (SidecarMetaException)
-        {
-            // verify's finding
-        }
+        if (result.HasAuthoredParts && !extractor.IsExtracted(_fileSystem, path)) LogOffer(_log, relative);
 
         return result.Written.Count;
     }

@@ -202,6 +202,43 @@ public interface IAssetImporter
 
     /// <summary>The sidecar settings domains this importer reads, so <c>verify</c> knows a table under one is meant and can check its shape. A domain exists exactly when a step reads it.</summary>
     IReadOnlyList<IImportSettingsDomain> SettingsDomains => [];
+
+    // ---- Extraction: what a SOURCE CONTAINER turns into --------------------------------------
+    //
+    // A GLB is a container, and a game's own format is another. Extraction is the same importer's
+    // other half rather than a second chain, so one Claims decides both and the sidecar's recorded
+    // `importer` name dispatches both — hand-edit that line and extraction follows it too.
+    //
+    // It is NOT called from Import, and must never be: these WRITE into assets/ and mint
+    // identities, while ImportContext.FileSystem is read-only there because the build index
+    // records every read to decide what to rebuild. A build that wrote its own inputs would dirty
+    // the tree on every CI run and invalidate its own index mid-run. `extract` and `watch` call
+    // them; `build` never does.
+
+    /// <summary>The kinds this importer's extraction writes, which is also what says whether it extracts at all. Empty for the many importers that only build a file someone else authored.</summary>
+    IReadOnlyList<ExtractKindDeclaration> ExtractKinds => [];
+
+    /// <summary>Whether this importer reads its asset as a source container. Derived, so there is no second thing to keep in step.</summary>
+    bool Extracts => ExtractKinds.Count > 0;
+
+    /// <summary>Whether the container holds anything to write documents for at all — an empty one is not an error, just nothing to do.</summary>
+    bool HasParts(IFileSystem fileSystem, UPath source) => false;
+
+    /// <summary>Whether it holds anything only <c>extract</c> writes (materials, embedded images); the documents the watcher mints on its own are not that.</summary>
+    bool HasAuthoredParts(IFileSystem fileSystem, UPath source) => false;
+
+    /// <summary>Whether <c>extract</c> has already run for it, as the sidecar records.</summary>
+    bool IsExtracted(IFileSystem fileSystem, UPath source) => false;
+
+    /// <summary>The full verb: every part, including the ones an author owns from the moment they exist.</summary>
+    ExtractResult Extract(ExtractRequest request) => ExtractResult.NothingToExtract;
+
+    /// <summary>
+    /// Only the parts that carry no author work, for the watcher: minting those on a save is the
+    /// same class of action as minting a sidecar, while writing a material or a prefab under an
+    /// author is not.
+    /// </summary>
+    ExtractResult MintReferences(ExtractRequest request) => ExtractResult.NothingToExtract;
 }
 
 public static class AssetImporters

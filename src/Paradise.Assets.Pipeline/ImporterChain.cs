@@ -68,6 +68,40 @@ public static class ImporterChain
     }
 
     /// <summary>
+    /// The importer that EXTRACTS <paramref name="source"/>, or null when none does.
+    /// </summary>
+    /// <remarks>
+    /// Through the sidecar's recorded name first, exactly as importing dispatches: what reads a
+    /// container and what builds it are the same importer, so hand-editing the <c>importer</c> line
+    /// moves both. Falls back to the claim for a file no sidecar has been minted for yet.
+    /// </remarks>
+    public static IAssetImporter? Extractor(IReadOnlyList<IAssetImporter> importers, IFileSystem fileSystem, AssetProjectLayout layout, UPath source)
+    {
+        ArgumentNullException.ThrowIfNull(importers);
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(layout);
+
+        var sidecar = AssetSidecar.TryLoad(fileSystem, source, importers);
+        var importer = For(importers, new ImportCandidate(fileSystem, layout, source, sidecar)).Importer;
+        return importer is { Extracts: true } ? importer : null;
+    }
+
+    /// <summary>Every kind the chain declares, nearest-first, so a lookup finds an appended importer's redeclaration before a built-in's.</summary>
+    public static IReadOnlyList<ExtractKindDeclaration> ExtractKinds(IReadOnlyList<IAssetImporter> importers)
+    {
+        ArgumentNullException.ThrowIfNull(importers);
+        return [.. importers.Reverse().SelectMany(importer => importer.ExtractKinds)];
+    }
+
+    /// <summary>The importers in a chain that read a container, for a message that has to say what this build can extract.</summary>
+    public static string KnownExtractors(IReadOnlyList<IAssetImporter> importers)
+    {
+        ArgumentNullException.ThrowIfNull(importers);
+        var names = importers.Where(importer => importer.Extracts).Select(importer => importer.Name).ToList();
+        return names.Count == 0 ? "none" : string.Join(", ", names);
+    }
+
+    /// <summary>
     /// The importer for <paramref name="candidate"/>: the one its sidecar names when the chain has
     /// it, else the claim. A recorded name the chain lacks is <see cref="Resolution.Unknown"/> —
     /// a game's own importer missing from the list passed to <c>BuildHost.Run</c> is the usual

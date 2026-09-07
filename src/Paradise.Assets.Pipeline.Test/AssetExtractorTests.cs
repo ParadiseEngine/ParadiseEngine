@@ -599,12 +599,313 @@ public class AssetExtractorTests
 
         using var overridden = Project();
         var meta = SidecarMeta.Load(overridden, Glb + ".meta");
-        meta.SetSetting(GlbImportSettings.Domain, new CanonicalTomlTable { { GlbImportSettings.ExtractKey, "models/crate" } });
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "models/crate" } });
         meta.Save(overridden, Glb + ".meta");
 
         var bySidecar = AssetExtractor.Extract(overridden, s_layout, Glb);
         await Assert.That(bySidecar.Errors).IsEmpty();
         await Assert.That(overridden.FileExists("/game/assets/models/crate/crate.mesh")).IsTrue();
+    }
+
+    [Test]
+    public async Task the_per_kind_directories_place_each_kind_and_directory_is_their_fallback()
+    {
+        // `meshes` names nothing on purpose: the geometry documents take the section's fallback,
+        // so a project can route the authored kinds away without also moving the cooked ones.
+        using var fileSystem = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [extract]
+            directory = "cooked"
+            skeletons = "animations"
+            animations = "animations"
+            materials = "materials"
+            textures = "textures"
+            prefabs = "prefabs/models"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        foreach (var expected in new[]
+                 {
+                     "cooked/crate.mesh",
+                     "animations/crate.skeleton",
+                     "animations/crate.Bob.anim",
+                     "materials/crate.wood.material",
+                     "materials/crate.metal.material",
+                     "textures/crate_0.png",
+                     "prefabs/models/crate.prefab",
+                 })
+        {
+            await Assert.That(fileSystem.FileExists($"/game/assets/{expected}")).IsTrue();
+        }
+
+        // Nothing lands beside the GLB any more, and the sidecar records where each kind went.
+        await Assert.That(fileSystem.EnumerateFiles("/game/assets/models").Select(p => p.GetName()).Order(StringComparer.Ordinal))
+            .IsEquivalentTo(new[] { "crate.glb", "crate.glb.meta" });
+
+        var extraction = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(extraction.Mesh!.Path).IsEqualTo("cooked/crate.mesh");
+        await Assert.That(extraction.Skeleton!.Path).IsEqualTo("animations/crate.skeleton");
+        await Assert.That(extraction.Clips.Single().Reference.Path).IsEqualTo("animations/crate.Bob.anim");
+        await Assert.That(extraction.Images.Single().Entry.Reference.Path).IsEqualTo("textures/crate_0.png");
+        await Assert.That(extraction.Materials.Select(m => m.Entry.Reference.Path))
+            .IsEquivalentTo(new[] { "materials/crate.wood.material", "materials/crate.metal.material" });
+
+        // The GLB was rewritten to point at the texture where it actually landed.
+        var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
+        await Assert.That(images.Single().Uri).IsEqualTo("../textures/crate_0.png");
+
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_sidecar_extract_directory_outranks_every_per_kind_key()
+    {
+        // A per-GLB directive is the more specific of the two, so it names ONE folder for
+        // everything that GLB extracts to rather than merging with the project's routing.
+        using var fileSystem = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [extract]
+            materials = "materials"
+            prefabs = "prefabs"
+            """);
+        var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "one-off" } });
+        meta.Save(fileSystem, Glb + ".meta");
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/one-off/crate.wood.material")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/assets/one-off/crate.prefab")).IsTrue();
+        await Assert.That(fileSystem.DirectoryExists("/game/assets/materials")).IsFalse();
+        await Assert.That(fileSystem.DirectoryExists("/game/assets/prefabs")).IsFalse();
+    }
+
+    [Test]
+    public async Task routing_a_kind_elsewhere_after_a_first_extract_leaves_the_files_it_already_placed()
+    {
+        // The recorded guid is the identity, so a second run re-syncs what it already wrote where
+        // it now lives; only what the GLB has NO record of is placed by the new setting.
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        fileSystem.WriteAllText("/game/assets/project.toml", """
+            name = "x"
+            schema_version = 1
+
+            [extract]
+            materials = "materials"
+            """);
+
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(again.Errors).IsEmpty();
+        await Assert.That(again.Written).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.wood.material")).IsTrue();
+        await Assert.That(fileSystem.DirectoryExists("/game/assets/materials")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_sidecar_from_before_the_record_moved_keeps_its_directory_and_its_identities()
+    {
+        // The record used to live in [glb], in glTF's shape. A tree minted then must not lose its
+        // per-GLB `extract` directory or its recorded guids on the first run after the move: Target
+        // would fall back to the default path, write new files there under NEW identities, and
+        // orphan everything the project already references.
+        using var fileSystem = Project();
+        var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "custom" } });
+        meta.Save(fileSystem, Glb + ".meta");
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/custom/crate.wood.material")).IsTrue();
+
+        var before = ExtractionRecord.Read(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+
+        // Rewrite that record the old way and take the new domain away entirely.
+        var legacy = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        var glb = new CanonicalTomlTable { { "extract", "custom" } };
+        if (before.OfKind(ExtractKind.Meshes).FirstOrDefault() is { } mesh) glb.Add("mesh", AssetReferenceCodec.Write(mesh.Reference));
+        static object Named(ExtractedPart part) => new CanonicalInlineTable
+        {
+            { "index", (long)part.Index },
+            { "name", part.Name },
+            { "guid", DocumentGuid.Format(part.Reference.Guid) },
+            { "path", part.Reference.Path },
+            { "glb", part.SourceFingerprint! },
+            { "doc", part.DocumentFingerprint! },
+        };
+
+        glb.Add("materials", before.OfKind(ExtractKind.Materials).Select(Named).ToList());
+
+        // Images too, and they are the ones that PROVE the migration is needed: the first extract
+        // took them out of the container, so nothing can re-derive them and the record is their
+        // only memory. Drop it and they are simply gone.
+        glb.Add("images", before.OfKind(ExtractKind.Textures).Select(Named).ToList());
+        legacy.SetSetting(GlbImportSettings.Domain, glb);
+        legacy.RemoveSetting(ExtractionRecord.Domain);
+        legacy.Save(fileSystem, Glb + ".meta");
+
+        var migrated = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(migrated.Errors).IsEmpty();
+        await Assert.That(migrated.Written).IsEmpty();          // nothing re-written at a default path
+        var after = ExtractionRecord.Read(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(after.Directory).IsEqualTo("custom");  // the per-GLB override survived
+        var beforeSet = string.Join("\n", before.Parts.OrderBy(x => x.Reference.Path, StringComparer.Ordinal).Select(x => $"{x.Kind}/{x.Index} {x.Reference.Path} {x.Reference.Guid}"));
+        var afterSet = string.Join("\n", after.Parts.OrderBy(x => x.Reference.Path, StringComparer.Ordinal).Select(x => $"{x.Kind}/{x.Index} {x.Reference.Path} {x.Reference.Guid}"));
+        await Assert.That(afterSet).IsEqualTo(beforeSet);
+
+        // And the legacy keys are gone, so this runs once.
+        await Assert.That(SidecarMeta.Load(fileSystem, Glb + ".meta").Setting(GlbImportSettings.Domain)?.Value("mesh")).IsNull();
+    }
+
+    [Test]
+    public async Task a_prefab_routed_where_the_scan_cannot_see_it_is_an_error_like_any_other_kind()
+    {
+        // The prefab is never recorded, so nothing downstream notices it landed somewhere the scan
+        // ignores: it would have no identity, nothing could reference it, and the run would report
+        // success. It is the one kind whose route the record cannot check, so the run checks it.
+        using var fileSystem = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["hidden/*"]
+
+            [extract]
+            prefabs = "hidden"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("extract.prefabs") && e.Contains("hidden/crate.prefab"))).IsTrue();
+
+        // And again on a SECOND run, where Seed declines because the file is already there. Keying
+        // the check on "this run wrote it" let an unindexed prefab from an earlier run pass.
+        var second = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(second.Succeeded).IsFalse();
+        await Assert.That(second.Errors.Any(e => e.Contains("extract.prefabs") && e.Contains("hidden/crate.prefab"))).IsTrue();
+
+        // Routed somewhere the scan DOES see, the same project is clean.
+        using var visible = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [extract]
+            prefabs = "prefabs"
+            """);
+        var fine = AssetExtractor.Extract(visible, s_layout, Glb);
+        await Assert.That(fine.Errors).IsEmpty();
+        await Assert.That(visible.FileExists("/game/assets/prefabs/crate.prefab")).IsTrue();
+    }
+
+    [Test]
+    public async Task a_prefab_placed_elsewhere_is_not_reported_as_a_missing_route()
+    {
+        // Seed declines for two reasons, and only one of them is a problem. Here a prefab somewhere
+        // else already places the mesh, so nothing is written at the extract path and there is
+        // nothing to be unindexed — the run must stay clean.
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        // Move the generated prefab out of the way, into a folder the scan DOES see, and re-run:
+        // the reference graph finds it placing the mesh, so Seed writes nothing at the old path.
+        fileSystem.CreateDirectory("/game/assets/levels");
+        foreach (var suffix in new[] { "", ".meta" })
+        {
+            fileSystem.MoveFile($"/game/assets/models/crate.prefab{suffix}", $"/game/assets/levels/placed.prefab{suffix}");
+        }
+
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(again.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.prefab")).IsFalse();
+        await Assert.That(again.Kept.Any(kept => kept.Contains("placed.prefab"))).IsTrue();
+    }
+
+    [Test]
+    public async Task a_skinned_glbs_unindexed_skeleton_is_an_error_not_a_throw()
+    {
+        // The rigid path was covered; this is the skinned one, where the .skinnedmesh NAMES the
+        // skeleton. Writing that document with an unresolved reference threw out of the codec
+        // before anything could report it — and the watcher drains with no try/catch, so it
+        // reached a save as a stack trace naming neither the GLB nor the directory.
+        using var fileSystem = Project(SkinnedCrateGlb(), manifest: """
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["hidden/*"]
+
+            [extract]
+            skeletons = "hidden"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("extract.skeleton") && e.Contains("hidden/crate.skeleton"))).IsTrue();
+        await Assert.That(result.Errors.All(e => !e.Contains("Parameter"))).IsTrue();
+
+        // The mesh document is not written either: one that names a skeleton nothing carries would
+        // be a dangling reference the build follows.
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.skinnedmesh")).IsFalse();
+    }
+
+    [Test]
+    public async Task take_document_settles_an_image_conflict_instead_of_raising_it_forever()
+    {
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        // Both sides move: the GLB is re-exported with new pixels AND the extracted file is edited.
+        fileSystem.WriteAllBytes(Glb, CrateGlb(png: [.. s_png, 9, 9]));
+        fileSystem.WriteAllBytes("/game/assets/models/crate_0.png", [0xAB, 0xCD]);
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Succeeded).IsFalse();
+
+        var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeDocument);
+        await Assert.That(resolved.Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xAB, 0xCD });
+
+        // The point: the conflict is OVER. An image cannot be written back into the GLB, so the two
+        // sides stay different — recording the old pair would raise the same conflict every run and
+        // leave --take-document unable to settle anything.
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(again.Succeeded).IsTrue();
+        await Assert.That(again.Errors).IsEmpty();
+    }
+
+    [Test]
+    public async Task an_extract_directory_the_scan_does_not_carry_is_an_error_naming_it()
+    {
+        // The sidecar records an output by guid, and the index is what hands one out. When it
+        // cannot — here because the project ignores the folder the materials were routed into —
+        // recording the entry threw out of the reference codec with a stack trace instead of
+        // naming the directory at fault, which on a case-insensitive filesystem is what a
+        // `models`/`Models` mismatch in `[extract]` looks like.
+        using var fileSystem = Project(manifest: """
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["hidden/*"]
+
+            [extract]
+            materials = "hidden"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("extract.materials[0]") && e.Contains("hidden/crate.wood.material"))).IsTrue();
+        await Assert.That(result.Errors.All(e => !e.Contains("Parameter"))).IsTrue();
     }
 
     [Test]

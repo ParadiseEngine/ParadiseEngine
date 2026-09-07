@@ -91,6 +91,164 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task extract_routes_each_kind_and_falls_back_to_directory()
+    {
+        var manifest = ProjectManifest.Parse("""
+            name = "shiningpie"
+            schema_version = 1
+
+            [extract]
+            directory = "cooked"
+            animations = "animations/"
+            materials = "materials"
+            textures = "textures"
+            prefabs = "prefabs/models"
+            """, "project.toml");
+
+        var kinds = GlbKinds;
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Animations, kinds)).IsEqualTo("animations");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Materials, kinds)).IsEqualTo("materials");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Textures, kinds)).IsEqualTo("textures");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Prefabs, kinds)).IsEqualTo("prefabs/models");
+
+        // `meshes` names nothing, so the geometry documents take the section's fallback, and so
+        // does the skeleton — through `meshes`, which is also unset.
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Meshes, kinds)).IsEqualTo("cooked");
+        await Assert.That(manifest.Extract.DirectoryFor(ExtractKind.Skeletons, kinds)).IsEqualTo("cooked");
+    }
+
+    [Test]
+    public async Task a_skeleton_follows_the_meshes_directory_until_it_names_its_own()
+    {
+        var withMeshes = ProjectManifest.Parse($"{Minimal}\n\n[extract]\ndirectory = \"cooked\"\nmeshes = \"meshes\"\n", "project.toml");
+        await Assert.That(withMeshes.Extract.DirectoryFor(ExtractKind.Skeletons, GlbKinds)).IsEqualTo("meshes");
+
+        var withOwn = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmeshes = \"meshes\"\nskeletons = \"animations\"\n", "project.toml");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Skeletons, GlbKinds)).IsEqualTo("animations");
+        await Assert.That(withOwn.Extract.DirectoryFor(ExtractKind.Meshes, GlbKinds)).IsEqualTo("meshes");
+    }
+
+    [Test]
+    public async Task an_extract_section_that_names_no_directory_leaves_every_kind_beside_the_source()
+    {
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nstatic_mesh_component = \"Game.StaticMesh\"\n", "project.toml");
+
+        foreach (var kind in GlbKinds)
+        {
+            await Assert.That(manifest.Extract.DirectoryFor(kind.Id, GlbKinds)).IsNull();
+        }
+
+        await Assert.That(manifest.Extract.StaticMeshComponent).IsEqualTo("Game.StaticMesh");
+        await Assert.That(manifest.Extract.Kinds).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_kind_the_engine_never_heard_of_routes_like_any_other()
+    {
+        // The whole point of the open key set: a game's extractor declares `tilesets`, and the
+        // manifest routes it with no engine change. The manifest does not judge the name — whether
+        // a kind exists depends on the build's extractor chain, so `verify` is what reports one
+        // nothing declares.
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\ndirectory = \"src\"\ntilesets = \"tilesets\"\n", "project.toml");
+
+        IReadOnlyList<ExtractKindDeclaration> game = [new("tilesets"), new("tilemaps", FallsBackTo: "tilesets")];
+        await Assert.That(manifest.Extract.DirectoryFor("tilesets", game)).IsEqualTo("tilesets");
+        await Assert.That(manifest.Extract.DirectoryFor("tilemaps", game)).IsEqualTo("tilesets");
+        await Assert.That(manifest.Extract.DirectoryFor("lods", game)).IsEqualTo("src");
+        await Assert.That(manifest.Extract.Kinds).IsEquivalentTo(new[] { "tilesets" });
+    }
+
+    [Test]
+    public async Task a_fallback_cycle_degrades_to_directory_rather_than_hanging()
+    {
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\ndirectory = \"src\"\n", "project.toml");
+
+        IReadOnlyList<ExtractKindDeclaration> looped = [new("a", FallsBackTo: "b"), new("b", FallsBackTo: "a")];
+        await Assert.That(manifest.Extract.DirectoryFor("a", looped)).IsEqualTo("src");
+    }
+
+    [Test]
+    public async Task a_kind_whose_value_is_not_a_directory_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmaterials = 3\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("materials");
+        await Assert.That(error.Message).Contains("[extract]");
+    }
+
+    private static IReadOnlyList<ExtractKindDeclaration> GlbKinds =>
+    [
+        new(ExtractKind.Meshes),
+        new(ExtractKind.Skeletons, FallsBackTo: ExtractKind.Meshes),
+        new(ExtractKind.Animations),
+        new(ExtractKind.Materials),
+        new(ExtractKind.Textures),
+        new(ExtractKind.Prefabs),
+    ];
+
+    [Test]
+    public async Task extensions_name_assemblies_relative_to_the_project_root()
+    {
+        var manifest = ProjectManifest.Parse("""
+            name = "shiningpie"
+            schema_version = 1
+
+            [extensions]
+            assemblies = ["tools/assets/bin/Debug/net10.0/ShiningPie.Assets.dll", " spaced.dll "]
+            """, "project.toml");
+
+        await Assert.That(manifest.Extensions).IsEquivalentTo(new[]
+        {
+            "tools/assets/bin/Debug/net10.0/ShiningPie.Assets.dll",
+            "spaced.dll",
+        });
+    }
+
+    [Test]
+    public async Task a_project_that_extends_nothing_names_no_assemblies()
+    {
+        await Assert.That(ProjectManifest.Parse(Minimal, "project.toml").Extensions).IsEmpty();
+    }
+
+    [Test]
+    public async Task an_empty_extension_path_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extensions]\nassemblies = [\"a.dll\", \"\"]\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("[extensions]");
+    }
+
+    [Test]
+    public async Task an_unknown_extensions_key_is_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(
+            () => ProjectManifest.Parse($"{Minimal}\n\n[extensions]\nplugins = [\"a.dll\"]\n", "project.toml"));
+
+        await Assert.That(error!.Message).Contains("plugins");
+    }
+
+    [Test]
+    public async Task an_extract_directory_outside_the_asset_tree_is_refused_at_the_key()
+    {
+        // Diagnosed here rather than as an unresolved entry per extracted file: the value is what
+        // is wrong, and `(layout.Assets / relative)` would happily put output where nothing indexes it.
+        foreach (var bad in new[] { "/etc", "../outside", "materials/../..", "C:/temp" })
+        {
+            var error = Assert.Throws<ProjectManifestException>(
+                () => ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmaterials = \"{bad}\"\n", "project.toml"));
+
+            await Assert.That(error!.Message).Contains("materials");
+            await Assert.That(error.Message).Contains("assets/");
+        }
+
+        // A nested relative directory is fine, and so is a trailing slash.
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmaterials = \"a/b/\"\n", "project.toml");
+        await Assert.That(manifest.Extract.DirectoryFor("materials")).IsEqualTo("a/b");
+    }
+
+    [Test]
     public async Task an_unknown_root_key_is_refused()
     {
         var error = Rejects($"{Minimal}\nnmae = \"y\"\n");

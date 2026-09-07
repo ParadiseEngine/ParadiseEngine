@@ -10,8 +10,9 @@ namespace Paradise.Cli;
 /// The <c>paradise</c> command's entry point, callable from any console project. The dotnet
 /// tool is <c>return BuildHost.Run(args);</c>; a game that extends the pipeline is
 /// <c>return BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()]);</c> in its own
-/// <c>tools/assets</c> project, and build and watch run that chain. That
-/// is the extension path (issue #208): a chain is code, so it is passed as code.
+/// <c>tools/assets</c> project, and every verb runs that chain. That is the extension path
+/// (issue #208): a chain is code, so it is passed as code. ONE chain: an importer says how a file
+/// is built AND, when it reads a source container, what that container turns into.
 /// </summary>
 public static class BuildHost
 {
@@ -125,6 +126,8 @@ public static class BuildHost
             return 1;
         }
 
+        importers = ExtensionLoader.Extend(physical, layout, importers);
+
         return assetVerb switch
         {
             "verify" => Verbs.Verify(physical, layout, fix, importers),
@@ -194,6 +197,8 @@ public static class BuildHost
             Console.Error.WriteLine($"paradise: {error.Message}");
             return 1;
         }
+
+        importers = ExtensionLoader.Extend(physical, layout, importers);
 
         // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner
         // installs it for the child's lifetime), and a handler that outlived the child would

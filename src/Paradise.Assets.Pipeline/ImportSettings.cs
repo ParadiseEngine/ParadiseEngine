@@ -81,10 +81,15 @@ public static class ImportSettings
     /// <summary>The built-in importers' domains, for a caller with no chain of its own.</summary>
     public static IReadOnlyList<IImportSettingsDomain> Domains => Declared(AssetImporters.All);
 
+    /// <remarks>
+    /// The extraction record leads and is not any importer's: it is the engine's own domain, written
+    /// by whichever extractor produced the asset's parts. An importer chain does not know which
+    /// extractor that was, and every chain has to be able to read it, so it is always declared.
+    /// </remarks>
     public static IReadOnlyList<IImportSettingsDomain> Declared(IReadOnlyList<IAssetImporter> importers)
     {
         ArgumentNullException.ThrowIfNull(importers);
-        return importers.SelectMany(importer => importer.SettingsDomains).ToList();
+        return [ExtractionRecord.Instance, .. importers.SelectMany(importer => importer.SettingsDomains)];
     }
 
     public static IImportSettingsDomain? Find(string name, IReadOnlyList<IAssetImporter>? importers = null)

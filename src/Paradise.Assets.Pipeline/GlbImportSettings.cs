@@ -1,5 +1,6 @@
 using Paradise.Animation.Offline;
 using Paradise.Assets.Documents;
+using Paradise.Assets.Project;
 using Paradise.Authoring;
 
 namespace Paradise.Assets.Pipeline;
@@ -34,25 +35,6 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 
     public const string UriKey = "uri";
 
-    public const string ExtractKey = "extract";
-    public const string MeshKey = "mesh";
-    public const string SkeletonKey = "skeleton";
-    /// <summary>
-    /// Accepted by validation, never read and never written. Sidecars minted before generated
-    /// prefabs stopped being tracked still carry it, and an unknown key in <c>[glb]</c> is a hard
-    /// error — so DELETING this constant fails <c>verify</c> on every such project, with nothing
-    /// in the suite to catch it. The key clears itself the next time <c>extract</c> rewrites the
-    /// sidecar.
-    /// </summary>
-    public const string PrefabKey = "prefab";
-    public const string ClipsKey = "clips";
-    public const string MaterialsKey = "materials";
-    public const string ImagesKey = "images";
-    public const string NameKey = "name";
-    public const string IndexKey = "index";
-    public const string GlbFingerprintKey = "glb";
-    public const string DocumentFingerprintKey = "doc";
-
     /// <summary><c>optimize = { tolerance = 0.001, distance = 0.1 }</c>: the clip decimation the build applies to this GLB's clips; absent keeps every key.</summary>
     public const string OptimizeKey = "optimize";
     public const string ToleranceKey = "tolerance";
@@ -75,33 +57,14 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         {
             switch (key)
             {
-                case ExtractKey when value is string: continue;
-                case ExtractKey: return $"holds a non-string '{ExtractKey}' in [{Domain}]";
                 case OptimizeKey when ReadOptimization(value) is not null: continue;
                 case OptimizeKey: return $"holds '{OptimizeKey}' in [{Domain}] that is not {{ tolerance, distance }} with positive numbers";
-                case MeshKey or SkeletonKey or PrefabKey when ReadReference(value) is not null: continue;
-                case MeshKey or SkeletonKey or PrefabKey: return $"holds '{key}' in [{Domain}] that is not {{ guid, path }}";
-                case ClipsKey when value is IReadOnlyList<object> clips:
-                    foreach (var item in clips)
-                    {
-                        if (ReadIndex(item) is null || Lookup(item, NameKey) is not string || ReadReference(item) is null)
-                        {
-                            return $"holds an entry in [{Domain}].{key} that is not {{ index, name, guid, path }}";
-                        }
-                    }
 
-                    continue;
-                case MaterialsKey or ImagesKey when value is IReadOnlyList<object> named:
-                    foreach (var item in named)
-                    {
-                        if (ReadIndex(item) is null || Lookup(item, NameKey) is not string || ReadExtracted(item) is null)
-                        {
-                            return $"holds an entry in [{Domain}].{key} that is not {{ index, name, guid, path, glb, doc }}";
-                        }
-                    }
-
-                    continue;
-                case ClipsKey or MaterialsKey or ImagesKey: return $"holds a non-array '{key}' in [{Domain}]";
+                // The extraction record moved to [extract]. A sidecar that still carries it here is
+                // read once and rewritten by the next extract, so it is not a finding — reporting
+                // it would make every GLB in an upgrading project an error before the one command
+                // that fixes them all.
+                case LegacyExtractKey or LegacyMeshKey or LegacySkeletonKey or LegacyClipsKey or LegacyMaterialsKey or LegacyImagesKey or LegacyPrefabKey: continue;
                 case ReferencesKey: break;
                 default: return $"holds '{key}' in [{Domain}], which is not a glb setting";
             }
@@ -155,7 +118,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(references);
-        WriteDomain(meta, ReadExtraction(meta), references, ReadOptimization(meta));
+        WriteDomain(meta, references, ReadOptimization(meta));
     }
 
     /// <summary>The recorded clip decimation, or null for none.</summary>
@@ -169,7 +132,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public static void WriteOptimization(SidecarMeta meta, AnimationOptimizer.Setting? setting)
     {
         ArgumentNullException.ThrowIfNull(meta);
-        WriteDomain(meta, ReadExtraction(meta), Read(meta), setting);
+        WriteDomain(meta, Read(meta), setting);
     }
 
     private static AnimationOptimizer.Setting? ReadOptimization(object? value)
@@ -190,19 +153,122 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     };
 
     /// <summary>What <c>extract</c> recorded, or an empty record for a GLB never extracted.</summary>
+    /// <remarks>The record itself is the engine's and format-neutral (<see cref="ExtractionRecord"/>); this maps it into the shape the GLB pipeline works in.</remarks>
     public static GlbExtraction ReadExtraction(SidecarMeta meta)
     {
         ArgumentNullException.ThrowIfNull(meta);
+
+        // A sidecar minted before the record moved out of [glb] is read in its old shape, ONCE:
+        // the next extract writes [extract] and WriteDomain drops the legacy keys. Without this the
+        // first re-extraction after upgrading loses the per-GLB `extract` directory and every
+        // recorded identity, so Target falls back to the default path, writes new files there under
+        // NEW guids, and orphans everything the project already references.
+        if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return legacy;
+
+        return FromRecord(ExtractionRecord.Read(meta));
+    }
+
+    /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it. Delete once no tree in the wild predates the move.</summary>
+    private static GlbExtraction? ReadLegacy(SidecarMeta meta)
+    {
         var table = meta.Setting(Domain);
-        if (table is null) return GlbExtraction.None;
+        if (table is null) return null;
+
+        var directory = table.Value(LegacyExtractKey) as string;
+        var mesh = ReadReference(table.Value(LegacyMeshKey));
+        var skeleton = ReadReference(table.Value(LegacySkeletonKey));
+        var clips = ReadLegacyClips(table.Value(LegacyClipsKey));
+        var materials = ReadLegacyNamed(table.Value(LegacyMaterialsKey));
+        var images = ReadLegacyNamed(table.Value(LegacyImagesKey));
+
+        if (directory is null && mesh is null && skeleton is null && clips.Count == 0 && materials.Count == 0 && images.Count == 0) return null;
+        return new GlbExtraction(directory, mesh, skeleton, clips, materials, images);
+    }
+
+    private static List<GlbExtraction.NamedReference> ReadLegacyClips(object? value)
+    {
+        var result = new List<GlbExtraction.NamedReference>();
+        if (value is not IReadOnlyList<object> items) return result;
+        foreach (var item in items)
+        {
+            if (LegacyIndex(item) is { } index && Lookup(item, LegacyNameKey) is string name && ReadReference(item) is { } reference)
+            {
+                result.Add(new GlbExtraction.NamedReference(index, name, reference));
+            }
+        }
+
+        return result;
+    }
+
+    private static List<GlbExtraction.NamedEntry> ReadLegacyNamed(object? value)
+    {
+        var result = new List<GlbExtraction.NamedEntry>();
+        if (value is not IReadOnlyList<object> items) return result;
+        foreach (var item in items)
+        {
+            if (LegacyIndex(item) is not { } index || Lookup(item, LegacyNameKey) is not string name || ReadReference(item) is not { } reference) continue;
+            result.Add(new GlbExtraction.NamedEntry(index, name, new GlbExtraction.Entry(
+                reference,
+                Lookup(item, LegacyGlbFingerprintKey) as string ?? "",
+                Lookup(item, LegacyDocumentFingerprintKey) as string ?? "")));
+        }
+
+        return result;
+    }
+
+    private static int? LegacyIndex(object? item) => Lookup(item, LegacyIndexKey) switch
+    {
+        long index and >= 0 and <= int.MaxValue => (int)index,
+        int index and >= 0 => index,
+        _ => null,
+    };
+
+    /// <summary>Generated prefabs stopped being tracked long ago; sidecars minted before that still carry the key.</summary>
+    private const string LegacyPrefabKey = "prefab";
+
+    private const string LegacyExtractKey = "extract";
+    private const string LegacyMeshKey = "mesh";
+    private const string LegacySkeletonKey = "skeleton";
+    private const string LegacyClipsKey = "clips";
+    private const string LegacyMaterialsKey = "materials";
+    private const string LegacyImagesKey = "images";
+    private const string LegacyNameKey = "name";
+    private const string LegacyIndexKey = "index";
+    private const string LegacyGlbFingerprintKey = "glb";
+    private const string LegacyDocumentFingerprintKey = "doc";
+
+    /// <summary>The engine's flat parts list as the GLB's named buckets.</summary>
+    internal static GlbExtraction FromRecord(Extraction extraction)
+    {
+        AssetReference? One(string kind) => extraction.OfKind(kind).FirstOrDefault()?.Reference;
+        GlbExtraction.Entry Entry(ExtractedPart part) => new(part.Reference, part.SourceFingerprint ?? "", part.DocumentFingerprint ?? "");
 
         return new GlbExtraction(
-            table.Value(ExtractKey) as string,
-            ReadReference(table.Value(MeshKey)),
-            ReadReference(table.Value(SkeletonKey)),
-            ReadNamedReferences(table.Value(ClipsKey)),
-            ReadNamed(table.Value(MaterialsKey)),
-            ReadNamed(table.Value(ImagesKey)));
+            extraction.Directory,
+            One(ExtractKind.Meshes),
+            One(ExtractKind.Skeletons),
+            [.. extraction.OfKind(ExtractKind.Animations).Select(part => new GlbExtraction.NamedReference(part.Index, part.Name, part.Reference))],
+            [.. extraction.OfKind(ExtractKind.Materials).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))],
+            [.. extraction.OfKind(ExtractKind.Textures).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))]);
+    }
+
+    /// <summary>The GLB's named buckets as the engine's flat parts list. A mesh or skeleton has one part per container, so its index is 0 and its name is the file's stem.</summary>
+    internal static Extraction ToRecord(GlbExtraction extraction)
+    {
+        static string Stem(AssetReference reference) => Path.GetFileNameWithoutExtension(reference.Path);
+        var parts = new List<ExtractedPart>();
+
+        if (extraction.Mesh is { } mesh) parts.Add(new ExtractedPart(ExtractKind.Meshes, PartOwnership.ToolOwned, 0, Stem(mesh), mesh));
+        if (extraction.Skeleton is { } skeleton) parts.Add(new ExtractedPart(ExtractKind.Skeletons, PartOwnership.ToolOwned, 0, Stem(skeleton), skeleton));
+        parts.AddRange(extraction.Clips.Select(clip => new ExtractedPart(ExtractKind.Animations, PartOwnership.ToolOwned, clip.Index, clip.Name, clip.Reference)));
+        parts.AddRange(extraction.Materials.Select(material => new ExtractedPart(
+            ExtractKind.Materials, PartOwnership.TwoSided, material.Index, material.Name,
+            material.Entry.Reference, material.Entry.GlbFingerprint, material.Entry.DocumentFingerprint)));
+        parts.AddRange(extraction.Images.Select(image => new ExtractedPart(
+            ExtractKind.Textures, PartOwnership.Blob, image.Index, image.Name,
+            image.Entry.Reference, image.Entry.GlbFingerprint, image.Entry.DocumentFingerprint)));
+
+        return new Extraction(extraction.Directory, parts);
     }
 
     /// <summary>Records <paramref name="extraction"/>, keeping the references half of the domain.</summary>
@@ -210,28 +276,31 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(extraction);
-        WriteDomain(meta, extraction, Read(meta), ReadOptimization(meta));
+        ExtractionRecord.Write(meta, GlbImporterName, ToRecord(extraction));
+        WriteDomain(meta, Read(meta), ReadOptimization(meta));
     }
+
+    /// <summary>The name the record is written under: the importer's, which is what tells one extractor's record from another's.</summary>
+    internal const string GlbImporterName = "glb";
 
     /// <summary>
     /// The one writer of the domain, from parsed values, so the spelling is the same whichever
     /// half changed: the sidecar reader hands an inline table back as a plain one, and copying
     /// that through verbatim wrote it back as a <c>[glb.mesh]</c> section the next run undid.
     /// </summary>
-    private static void WriteDomain(SidecarMeta meta, GlbExtraction extraction, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
+    /// <remarks>
+    /// What a GLB EXTRACTED to is not here any more — that is the engine's <see cref="ExtractionRecord"/>,
+    /// the same record every extractor writes. What is left is the two things only a GLB has: the
+    /// uris its container names, and the clip decimation its clips are cooked with.
+    /// </remarks>
+    private static void WriteDomain(SidecarMeta meta, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
     {
         var table = new CanonicalTomlTable();
-        if (extraction.Directory is { } directory) table.Add(ExtractKey, directory);
         if (optimization is { } setting)
         {
             table.Add(OptimizeKey, new CanonicalInlineTable { { ToleranceKey, (double)setting.Tolerance }, { DistanceKey, (double)setting.Distance } });
         }
 
-        if (extraction.Mesh is { } mesh) table.Add(MeshKey, AssetReferenceCodec.Write(mesh));
-        if (extraction.Skeleton is { } skeleton) table.Add(SkeletonKey, AssetReferenceCodec.Write(skeleton));
-        if (extraction.Clips.Count > 0) table.Add(ClipsKey, extraction.Clips.Select(WriteNamedReference).Cast<object>().ToList());
-        if (extraction.Materials.Count > 0) table.Add(MaterialsKey, extraction.Materials.Select(WriteNamed).Cast<object>().ToList());
-        if (extraction.Images.Count > 0) table.Add(ImagesKey, extraction.Images.Select(WriteNamed).Cast<object>().ToList());
         if (references.Count > 0)
         {
             table.Add(ReferencesKey, references.Select(reference => (object)new CanonicalInlineTable
@@ -255,56 +324,10 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         return new AssetReference(guid, path);
     }
 
-    private static List<GlbExtraction.NamedReference> ReadNamedReferences(object? value)
-    {
-        var result = new List<GlbExtraction.NamedReference>();
-        if (value is not IReadOnlyList<object> items) return result;
-        foreach (var item in items)
-        {
-            if (ReadIndex(item) is { } index && Lookup(item, NameKey) is string name && ReadReference(item) is { } reference)
-            {
-                result.Add(new GlbExtraction.NamedReference(index, name, reference));
-            }
-        }
 
-        return result;
-    }
-
-    private static CanonicalInlineTable WriteNamedReference(GlbExtraction.NamedReference named) => new()
-    {
-        { IndexKey, (long)named.Index },
-        { NameKey, named.Name },
-        { AssetReferenceCodec.GuidKey, DocumentGuid.Format(named.Reference.Guid) },
-        { AssetReferenceCodec.PathKey, named.Reference.Path },
-    };
-
-    private static List<GlbExtraction.NamedEntry> ReadNamed(object? value)
-    {
-        var result = new List<GlbExtraction.NamedEntry>();
-        if (value is not IReadOnlyList<object> items) return result;
-        foreach (var item in items)
-        {
-            if (ReadIndex(item) is { } index && Lookup(item, NameKey) is string name && ReadExtracted(item) is { } entry)
-            {
-                result.Add(new GlbExtraction.NamedEntry(index, name, entry));
-            }
-        }
-
-        return result;
-    }
 
     // A table at a domain's root reads back as a CanonicalTomlTable, one inside an array as a
     // CanonicalInlineTable; the record is the same either way, so both are read here.
-    private static GlbExtraction.Entry? ReadExtracted(object? value)
-    {
-        if (value is not (CanonicalTomlTable or CanonicalInlineTable)) return null;
-        if (Lookup(value, AssetReferenceCodec.GuidKey) is not string guidText || !DocumentGuid.TryParse(guidText, out var guid)) return null;
-        if (Lookup(value, AssetReferenceCodec.PathKey) is not string { Length: > 0 } path) return null;
-        return new GlbExtraction.Entry(
-            new AssetReference(guid, path),
-            Lookup(value, GlbFingerprintKey) as string ?? "",
-            Lookup(value, DocumentFingerprintKey) as string ?? "");
-    }
 
     private static object? Lookup(object? table, string key) => table switch
     {
@@ -313,27 +336,6 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         _ => null,
     };
 
-    private static CanonicalInlineTable WriteEntry(GlbExtraction.Entry entry) => new()
-    {
-        { AssetReferenceCodec.GuidKey, DocumentGuid.Format(entry.Reference.Guid) },
-        { AssetReferenceCodec.PathKey, entry.Reference.Path },
-        { GlbFingerprintKey, entry.GlbFingerprint },
-        { DocumentFingerprintKey, entry.DocumentFingerprint },
-    };
-
-    private static int? ReadIndex(object? item) => Lookup(item, IndexKey) switch
-    {
-        long index and >= 0 and <= int.MaxValue => (int)index,
-        int index and >= 0 => index,
-        _ => null,
-    };
-
-    private static CanonicalInlineTable WriteNamed(GlbExtraction.NamedEntry named)
-    {
-        var table = new CanonicalInlineTable { { IndexKey, (long)named.Index }, { NameKey, named.Name } };
-        foreach (var (key, value) in WriteEntry(named.Entry)) table.Add(key, value);
-        return table;
-    }
 
     private static MeshReference? ReadEntry(object entry)
     {

@@ -31,6 +31,9 @@ internal sealed class ProjectManifestDocument
     [JsonPropertyName("host")]
     public HostSectionDocument? Host { get; set; }
 
+    [JsonPropertyName("extensions")]
+    public ExtensionsSectionDocument? Extensions { get; set; }
+
     /// <summary>Anything Tomlyn could not map. Non-empty is an error: a typo'd key that a lenient read ignored is a setting that never applied.</summary>
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
@@ -55,6 +58,20 @@ internal sealed class ExtractSectionDocument
 
     [JsonPropertyName("skinned_mesh_component")]
     public string? SkinnedMeshComponent { get; set; }
+
+    /// <summary>
+    /// Every other key: a kind's directory. Not an error like the other sections' extension data,
+    /// because which kinds exist is the extractor chain's to say and the manifest cannot see it —
+    /// `verify` reports one nothing declares.
+    /// </summary>
+    [TomlExtensionData]
+    public Dictionary<string, object?>? Unknown { get; set; }
+}
+
+internal sealed class ExtensionsSectionDocument
+{
+    [JsonPropertyName("assemblies")]
+    public List<string>? Assemblies { get; set; }
 
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
