@@ -9,31 +9,25 @@ public class EngineConfigurationTests
     [Test]
     public async Task a_document_reads_its_features()
     {
-        var config = EngineConfiguration.Read("""
-            {
-              "features": {
-                "rendering.bloom": false,
-                "rendering.globalIllumination": true
-              }
-            }
+        var config = TomlEngineConfiguration.Read("""
+            [features]
+            "rendering.bloom" = false
+            "rendering.globalIllumination" = true
             """);
 
         await Assert.That(config.Features.TryGet("rendering.bloom", out var bloom) && !bloom).IsTrue();
         await Assert.That(config.Features.TryGet("rendering.globalIllumination", out var gi) && gi).IsTrue();
     }
 
-    /// <summary>Hand-edited by design, the same latitude the engine's other hand-edited documents
-    /// get: a comment saying WHY a feature is off is the most useful line in such a file.</summary>
+    /// <summary>Hand-edited by design, which is most of why the file is TOML: a comment saying WHY
+    /// a feature is off is the most useful line in such a file.</summary>
     [Test]
-    public async Task comments_and_a_trailing_comma_are_allowed()
+    public async Task comments_are_allowed()
     {
-        var config = EngineConfiguration.Read("""
-            {
-              // The integrated GPU cannot afford the probe trace.
-              "features": {
-                "rendering.globalIllumination": false,
-              },
-            }
+        var config = TomlEngineConfiguration.Read("""
+            # The integrated GPU cannot afford the probe trace.
+            [features]
+            "rendering.globalIllumination" = false   # measured at 2.3 ms
             """);
 
         await Assert.That(config.Features.Count).IsEqualTo(1);
@@ -42,49 +36,63 @@ public class EngineConfigurationTests
     [Test]
     public async Task a_stream_reads_the_same_document()
     {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("""{"features":{"rendering.bloom":false}}"""));
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("[features]\n\"rendering.bloom\" = false"));
 
-        var config = EngineConfiguration.Read(stream);
+        var config = TomlEngineConfiguration.Read(stream);
 
         await Assert.That(config.Features.Count).IsEqualTo(1);
     }
 
     [Test]
-    public async Task a_document_with_no_features_section_configures_nothing()
+    public async Task a_document_with_no_sections_configures_nothing()
     {
-        var config = EngineConfiguration.Read("""{"somethingElse": 1}""");
+        var config = TomlEngineConfiguration.Read("somethingElse = 1");
 
         await Assert.That(config.Features.Count).IsEqualTo(0);
+        await Assert.That(config.Settings.Count).IsEqualTo(0);
     }
 
-    /// <summary>Two spellings of one name is how a config file starts disagreeing with itself, so
-    /// the nested shape is refused with the flat one in the message rather than guessed at.</summary>
+    /// <summary>TOML would read an unquoted dotted key as nesting, and under <c>[settings]</c> that
+    /// nesting cannot be told from the settings themselves. One rule for both sections — the name
+    /// is one key — and the refusal says so.</summary>
     [Test]
-    public async Task a_nested_features_object_is_refused_by_name()
+    public async Task an_unquoted_dotted_name_is_refused_with_the_quoted_form()
     {
-        await Assert.That(() => EngineConfiguration.Read("""{"features":{"rendering":{"bloom":false}}}"""))
-            .Throws<FormatException>().WithMessageContaining("rendering.<feature>");
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [features]
+            rendering.bloom = false
+            """))
+            .Throws<FormatException>().WithMessageContaining("\"rendering.<feature>\"");
     }
 
     [Test]
     public async Task a_value_that_is_not_a_boolean_is_refused()
     {
-        await Assert.That(() => EngineConfiguration.Read("""{"features":{"rendering.bloom":"off"}}"""))
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [features]
+            "rendering.bloom" = "off"
+            """))
             .Throws<FormatException>().WithMessageContaining("rendering.bloom");
     }
 
     [Test]
-    public async Task malformed_json_names_itself_as_a_configuration_problem()
+    public async Task a_section_that_is_not_a_table_is_refused()
     {
-        await Assert.That(() => EngineConfiguration.Read("{ nope"))
-            .Throws<FormatException>().WithMessageContaining("not valid JSON");
+        await Assert.That(() => TomlEngineConfiguration.Read("features = 3"))
+            .Throws<FormatException>().WithMessageContaining("features");
+    }
+
+    [Test]
+    public async Task malformed_toml_names_itself_as_a_configuration_problem()
+    {
+        await Assert.That(() => TomlEngineConfiguration.Read("[features"))
+            .Throws<FormatException>().WithMessageContaining("not valid TOML");
     }
 
     /// <summary>The layer a host starts from before it has read anything, and the one every test
-    /// above happens to skip because <see cref="EngineConfiguration.Read(string)"/> fills both sections in.
-    /// It has to be usable: its sections are empty, not null. They were null once — a static
-    /// initializer above the field it reads — and nothing noticed until a real host merged onto it
-    /// and iterated the result.</summary>
+    /// above happens to skip because the reader fills both sections in. It has to be usable: its
+    /// sections are empty, not null. They were null once — a static initializer above the field it
+    /// reads — and nothing noticed until a real host merged onto it and iterated the result.</summary>
     [Test]
     public async Task the_empty_layer_is_usable_as_a_starting_point()
     {
@@ -103,7 +111,11 @@ public class EngineConfigurationTests
     [Test]
     public async Task a_later_layer_wins_name_by_name()
     {
-        var file = EngineConfiguration.Read("""{"features":{"rendering.bloom":false,"rendering.shadows":false}}""");
+        var file = TomlEngineConfiguration.Read("""
+            [features]
+            "rendering.bloom" = false
+            "rendering.shadows" = false
+            """);
         var command = new EngineConfiguration { Features = FeatureOverrides.Parse("+rendering.bloom") };
 
         var merged = file.Merge(command);
@@ -188,12 +200,21 @@ public class FeatureIdTests
         await Assert.That(FeatureId.TryParse(name, out _)).IsFalse();
     }
 
+    /// <summary>A record's own equality would compare the wrapped string ordinally, so this checks
+    /// every door into it goes through the case-insensitive one the type promises — the
+    /// synthesized <c>==</c> included, which is the one the record would quietly take over.</summary>
     [Test]
     public async Task two_spellings_of_one_name_are_the_same_id()
     {
-        await Assert.That(new FeatureId("Rendering.Bloom")).IsEqualTo(new FeatureId("rendering.bloom"));
-        await Assert.That(new FeatureId("Rendering.Bloom").GetHashCode())
-            .IsEqualTo(new FeatureId("rendering.bloom").GetHashCode());
+        var upper = new FeatureId("Rendering.Bloom");
+        var lower = new FeatureId("rendering.bloom");
+
+        await Assert.That(upper).IsEqualTo(lower);
+        await Assert.That(upper == lower).IsTrue();
+        await Assert.That(upper != lower).IsFalse();
+        await Assert.That(upper.Equals((object)lower)).IsTrue();
+        await Assert.That(upper.GetHashCode()).IsEqualTo(lower.GetHashCode());
+        await Assert.That(upper.ToString()).IsEqualTo("Rendering.Bloom"); // the spelling survives
     }
 
     [Test]

@@ -17,6 +17,7 @@
     <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
     <ProjectReference Include="../Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
     <ProjectReference Include="../Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
+    <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
   </ItemGroup>
 
   <ItemGroup>

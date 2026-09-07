@@ -147,14 +147,11 @@ public class FeatureSwitchTests
         if (backend is null) return;
         using var _ = backend;
 
-        var config = EngineConfiguration.Read("""
-            {
-              // The integrated GPU cannot afford either.
-              "features": {
-                "rendering.shadows": false,
-                "rendering.bloom": false
-              }
-            }
+        var config = TomlEngineConfiguration.Read("""
+            # The integrated GPU cannot afford either.
+            [features]
+            "rendering.shadows" = false
+            "rendering.bloom" = false
             """);
         var switches = new FeatureSwitches(config);
 

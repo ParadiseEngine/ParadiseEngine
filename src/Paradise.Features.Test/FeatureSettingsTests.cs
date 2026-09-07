@@ -29,18 +29,18 @@ public class FeatureSettingsTests
     private static readonly FeatureId s_weather = new("game.weather");
 
     private const string Document = """
-        {
-          "features": { "game.weather": true },
-          "settings": {
-            "game.weather": { "intensity": 0.6, "windMetresPerSecond": 3.5 }
-          }
-        }
+        [features]
+        "game.weather" = true
+
+        [settings."game.weather"]
+        intensity = 0.6
+        windMetresPerSecond = 3.5
         """;
 
     [Test]
     public async Task a_game_feature_reads_what_the_file_configured_it_with()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(Document));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
         switches.Declare(new FeatureDefinition("game.weather", true, "Rain and wind."));
 
         var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
@@ -61,8 +61,10 @@ public class FeatureSettingsTests
     [Test]
     public async Task an_unwritten_property_keeps_its_initializer()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(
-            """{"settings":{"game.weather":{"kind":"snow"}}}"""));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            kind = "snow"
+            """));
 
         var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
 
@@ -90,7 +92,10 @@ public class FeatureSettingsTests
     [Test]
     public async Task settings_without_a_switch_are_kept()
     {
-        var config = EngineConfiguration.Read("""{"settings":{"game.weather":{"intensity":0.25}}}""");
+        var config = TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            intensity = 0.25
+            """);
 
         var switches = new FeatureSwitches(config);
         switches.Declare(new FeatureDefinition("game.weather", true));
@@ -106,7 +111,7 @@ public class FeatureSettingsTests
     [Test]
     public async Task settings_survive_arriving_before_the_declaration()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(Document));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
 
         var beforeDeclaring = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
         switches.Declare(new FeatureDefinition("game.weather", true));
@@ -119,8 +124,10 @@ public class FeatureSettingsTests
     [Test]
     public async Task settings_for_a_name_nobody_declares_are_reported()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(
-            """{"settings":{"game.gone":{"intensity":1}}}"""));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
+            [settings."game.gone"]
+            intensity = 1.0
+            """));
 
         await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"]);
     }
@@ -130,15 +137,21 @@ public class FeatureSettingsTests
     [Test]
     public async Task replacing_settings_announces_the_new_ones()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(Document));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
         switches.Declare(new FeatureDefinition("game.weather", true));
         var announced = new List<float>();
         switches.SettingsChanged += (_, settings) =>
             announced.Add(settings.Read(GameJson.Default.WeatherSettings).Intensity);
 
-        switches.Apply(EngineConfiguration.Read("""{"settings":{"game.weather":{"intensity":0.9}}}"""));
+        switches.Apply(TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            intensity = 0.9
+            """));
         // The same text again: nothing moved, nothing announced.
-        switches.Apply(EngineConfiguration.Read("""{"settings":{"game.weather":{"intensity":0.9}}}"""));
+        switches.Apply(TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            intensity = 0.9
+            """));
 
         await Assert.That(announced).IsEquivalentTo([0.9f]);
         await Assert.That(switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings).Intensity)
@@ -150,8 +163,11 @@ public class FeatureSettingsTests
     [Test]
     public async Task a_later_layer_replaces_a_feature_s_settings_whole()
     {
-        var merged = EngineConfiguration.Read(Document)
-            .Merge(EngineConfiguration.Read("""{"settings":{"game.weather":{"kind":"snow"}}}"""));
+        var merged = TomlEngineConfiguration.Read(Document)
+            .Merge(TomlEngineConfiguration.Read("""
+                [settings."game.weather"]
+                kind = "snow"
+                """));
         var switches = new FeatureSwitches(merged);
 
         var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
@@ -163,8 +179,11 @@ public class FeatureSettingsTests
     [Test]
     public async Task a_layer_that_says_nothing_about_settings_leaves_them_alone()
     {
-        var merged = EngineConfiguration.Read(Document)
-            .Merge(EngineConfiguration.Read("""{"features":{"game.weather":false}}"""));
+        var merged = TomlEngineConfiguration.Read(Document)
+            .Merge(TomlEngineConfiguration.Read("""
+                [features]
+                "game.weather" = false
+                """));
         var switches = new FeatureSwitches(merged);
 
         await Assert.That(switches.IsEnabled(s_weather)).IsFalse();
@@ -175,16 +194,22 @@ public class FeatureSettingsTests
     /// <summary>The nested-name trap the two sections exist to keep closed, and the message that
     /// says where the settings actually go.</summary>
     [Test]
-    public async Task an_object_under_features_still_points_at_the_settings_section()
+    public async Task a_table_under_features_still_points_at_the_settings_section()
     {
-        await Assert.That(() => EngineConfiguration.Read("""{"features":{"game":{"weather":false}}}"""))
-            .Throws<FormatException>().WithMessageContaining("\"settings\"");
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [features.game]
+            weather = false
+            """))
+            .Throws<FormatException>().WithMessageContaining("[settings.");
     }
 
     [Test]
     public async Task a_scalar_under_settings_is_refused_by_name()
     {
-        await Assert.That(() => EngineConfiguration.Read("""{"settings":{"game.weather":true}}"""))
+        await Assert.That(() => TomlEngineConfiguration.Read("""
+            [settings]
+            "game.weather" = true
+            """))
             .Throws<FormatException>().WithMessageContaining("game.weather");
     }
 
@@ -193,21 +218,26 @@ public class FeatureSettingsTests
     [Test]
     public async Task settings_that_do_not_fit_the_type_name_the_feature()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(
-            """{"settings":{"game.weather":{"intensity":"a lot"}}}"""));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            intensity = "a lot"
+            """));
 
         await Assert.That(() => switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings))
             .Throws<FormatException>().WithMessageContaining("game.weather");
     }
 
-    /// <summary>The escape hatch for a game whose settings are not a record.</summary>
+    /// <summary>The escape hatch for a game whose settings are not a record — the normalized JSON
+    /// payload, not the TOML the file said, which the property name and its docs both say.</summary>
     [Test]
-    public async Task raw_hands_back_what_the_file_said()
+    public async Task the_payload_is_reachable_as_json()
     {
-        var switches = new FeatureSwitches(EngineConfiguration.Read(
-            """{"settings":{"game.weather":{"intensity":0.5}}}"""));
+        var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
+            [settings."game.weather"]
+            intensity = 0.5
+            """));
 
-        await Assert.That(switches.SettingsFor(s_weather).Raw).Contains("\"intensity\"");
-        await Assert.That(FeatureSettings.None.Raw).IsEmpty();
+        await Assert.That(switches.SettingsFor(s_weather).Json).Contains("\"intensity\"");
+        await Assert.That(FeatureSettings.None.Json).IsEmpty();
     }
 }

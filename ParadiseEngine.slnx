@@ -37,6 +37,7 @@
     <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
     <Project Path="src/Paradise.Authoring/Paradise.Authoring.csproj" />
     <Project Path="src/Paradise.Features/Paradise.Features.csproj" />
+    <Project Path="src/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
     <Project Path="src/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <Project Path="src/Paradise.Export/Paradise.Export.csproj" />
     <Project Path="src/Paradise.Physics/Paradise.Physics.csproj" />

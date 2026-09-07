@@ -15,5 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />
+    <!-- The reader is a separate assembly (see its csproj); its tests live here rather than in a
+         project of their own, because what they check is the model this one owns. -->
+    <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
   </ItemGroup>
 </Project>

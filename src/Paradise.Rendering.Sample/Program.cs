@@ -139,7 +139,7 @@ internal static class Program
     }
 
     /// <summary>Builds this run's feature configuration from the three layers a person configures
-    /// a build through, nearest last: <c>--config engine.json</c>, then
+    /// a build through, nearest last: <c>--config engine.toml</c>, then
     /// <c>PARADISE_FEATURES</c>, then <c>--features +a,-b</c>. Null means an argument was bad and
     /// was reported.
     ///
@@ -154,7 +154,7 @@ internal static class Program
             if (ParseValue(args, "--config") is { } path)
             {
                 using var file = File.OpenRead(path);
-                configuration = EngineConfiguration.Read(file);
+                configuration = TomlEngineConfiguration.Read(file);
             }
             configuration = configuration
                 .Merge(new EngineConfiguration { Features = FeatureOverrides.FromEnvironment() })

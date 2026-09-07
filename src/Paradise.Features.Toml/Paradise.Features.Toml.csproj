@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Features.Toml</AssemblyName>
+    <RootNamespace>Paradise.Features</RootNamespace>
+    <PackageId>Paradise.Features.Toml</PackageId>
+    <Title>Paradise.Features.Toml</Title>
+    <Description>Reads a Paradise engine configuration (engine.toml) into the format-neutral EngineConfiguration that Paradise.Features applies.</Description>
+    <PackageTags>configuration;feature-flags;toml;nativeaot;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- A separate assembly for one reader, on purpose. Paradise.Features has NO package
+       references because Paradise.ECS — which references nothing else at all — references it, and
+       a TOML parser in the ECS's dependency closure is a cost every consumer of the ECS pays for a
+       file only a host reads. Same shape as the logging rule in AGENTS.md: the abstraction is
+       dependency-free, the concrete reader is a package the HOST picks. -->
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />
+  </ItemGroup>
+
+</Project>

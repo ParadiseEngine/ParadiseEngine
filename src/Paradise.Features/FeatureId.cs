@@ -17,7 +17,7 @@ namespace Paradise.Features;
 /// <c>rendering.bloom</c> is a trap with no upside. The declared spelling is what
 /// <see cref="Value"/> and <see cref="ToString"/> give back, so a listing still reads the way the
 /// feature's author wrote it.</para></summary>
-public readonly struct FeatureId : IEquatable<FeatureId>
+public readonly record struct FeatureId
 {
     private readonly string? _value;
 
@@ -82,15 +82,16 @@ public readonly struct FeatureId : IEquatable<FeatureId>
         return segmentLength == 0 ? $"'{value}' ends with a '.'; feature ids read like 'rendering.bloom'." : null;
     }
 
+    /// <summary>Written out rather than left to the record, which would compare the wrapped
+    /// string ordinally and make <c>Rendering.Bloom</c> a different feature from
+    /// <c>rendering.bloom</c> — see the type's own remarks. The synthesized <c>==</c> and
+    /// <c>Equals(object)</c> route through this one, so the whole type stays consistent.</summary>
     public bool Equals(FeatureId other) => StringComparer.OrdinalIgnoreCase.Equals(Value, other.Value);
 
-    public override bool Equals(object? obj) => obj is FeatureId other && Equals(other);
-
+    /// <inheritdoc cref="Equals(FeatureId)"/>
     public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
+    /// <summary>The name, not the record's <c>FeatureId { Value = … }</c>: this goes into error
+    /// messages and listings, where the name alone is the useful part.</summary>
     public override string ToString() => Value;
-
-    public static bool operator ==(FeatureId left, FeatureId right) => left.Equals(right);
-
-    public static bool operator !=(FeatureId left, FeatureId right) => !left.Equals(right);
 }

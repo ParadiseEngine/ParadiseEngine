@@ -185,7 +185,7 @@ public sealed class FeatureSwitches : IFeatureSwitches
             _settings[name] = settings;
             // A malformed name has no id to announce with; it is still kept, so Unknown reports it
             // rather than a stale line disappearing — the same rule the switches follow.
-            if (!ReferenceEquals(before, settings) && !string.Equals(before.Raw, settings.Raw, StringComparison.Ordinal)
+            if (!ReferenceEquals(before, settings) && !string.Equals(before.Json, settings.Json, StringComparison.Ordinal)
                 && FeatureId.TryParse(name, out var id))
             {
                 SettingsChanged?.Invoke(id, settings);

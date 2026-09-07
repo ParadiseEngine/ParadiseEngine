@@ -83,6 +83,7 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 
 - `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `net10.0`.
 - `src/Paradise.Features` — Engine-wide feature configuration: the features a build declares and the switches that turn each on or off at runtime. No package dependencies at all, because the renderer and the ECS both reference it.
+- `src/Paradise.Features.Toml` — Reads `engine.toml` into that. A separate assembly so Tomlyn stays out of the ECS's dependency closure.
 - `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `net10.0`.
 - `src/Paradise.BT.Sample` — Console sample demonstrating tree construction, blackboard usage, and ticking.
 - `src/Paradise.BT.Test` / `src/Paradise.BLOB.Test` — TUnit test suites.
@@ -206,25 +207,34 @@ Things that bit, so they are rules:
 whether it is on — the renderer's features, an ECS schedule's systems, and whatever a game adds
 next.** `Paradise.Features` holds that: `FeatureId` (a validated dotted name — `rendering.bloom`,
 `gameplay.weather`), the declaration that gives it a default and a description, and
-`FeatureSwitches`, the one object per process that answers. `EngineConfiguration.Read` parses
-`engine.json`; `FeatureOverrides.Parse` reads a `--features +a,-b` flag or `PARADISE_FEATURES`.
+`FeatureSwitches`, the one object per process that answers. `TomlEngineConfiguration.Read` parses
+`engine.toml`; `FeatureOverrides.Parse` reads a `--features +a,-b` flag or `PARADISE_FEATURES`.
 Layers merge nearest-last: declarations, then the file, then the environment, then the command
 line. `dotnet run --project src/Paradise.Rendering.Sample -- --list-features` prints what a build
 has.
 
 A feature is also configured, not only switched. The file's second section carries a settings
-object per feature, and `switches.SettingsFor(id).Read(GameJson.Default.WeatherSettings)` binds it
-to the caller's own record through a `JsonTypeInfo` the CALLER supplies — so this assembly never
-reflects over a type it was not handed, and stays AOT- and trim-clean. Nothing engine-side uses
-it: an engine feature's parameters are scene-authored, and this exists for the game feature the
-engine has never heard of.
+table per feature, and `switches.SettingsFor(id).Read(GameJson.Default.WeatherSettings)` binds it
+to the caller's own record. Nothing engine-side uses it: an engine feature's parameters are
+scene-authored, and this exists for the game feature the engine has never heard of.
 
-```jsonc
-{
-  "features": { "rendering.globalIllumination": false, "game.weather": true },
-  "settings": { "game.weather": { "intensity": 0.6, "windMetresPerSecond": 3.5 } }
-}
+```toml
+# engine.toml
+[features]
+"rendering.globalIllumination" = false   # the integrated GPU cannot afford the probe trace
+"game.weather" = true
+
+[settings."game.weather"]
+intensity = 0.6
+windMetresPerSecond = 3.5
 ```
+
+**The reader is a second assembly, `Paradise.Features.Toml`.** Reading TOML needs Tomlyn, and
+`Paradise.Features` has no package references because `Paradise.ECS` — which references nothing
+else at all — references it; a TOML parser in the ECS's closure is a cost every consumer of the
+ECS pays for a file only a host reads. Same shape as the logging rule below: the abstraction is
+dependency-free, the concrete reader is a package the host picks. What crosses the seam is
+`EngineConfiguration`, a bag of names and values that depends on nothing.
 
 The assembly has **no package references at all**, deliberately: `Paradise.ECS`, which otherwise
 references nothing, references this. Its one diagnostic — a configured name no declaration claims,
@@ -234,7 +244,7 @@ because a namespace of the latter name is in scope for every file under `Paradis
 an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
 meaning Microsoft.Coyote's, and all six stopped compiling.
 
-Eight things that are not obvious:
+Ten things that are not obvious:
 
 - **A switch and a scene setting are different questions, and both have to say yes.** The switch is
   the platform's answer ("this build does not do probe GI"), applied once from configuration; a
@@ -259,6 +269,19 @@ Eight things that are not obvious:
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
   reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
   cannot say so with a list position when the engine does all the adding.
+- **The feature name is ONE key, quoted.** TOML reads `rendering.bloom = false` as a table
+  `rendering` holding `bloom`, and under `[settings]` that nesting cannot be told from the settings
+  themselves — `[settings.game.weather]` is either the feature `game.weather` or the feature `game`
+  with a setting `weather`. One rule for both sections, so neither is ambiguous: quote the name. A
+  table where a feature's state belongs is refused with the quoted form in the message.
+- **The settings PAYLOAD is JSON even though the file is TOML.** `Paradise.Features` holds no
+  format reader, so the payload has to be text it can bind with the BCL alone, and
+  source-generated System.Text.Json is the BCL's only AOT- and trim-clean typed binding. Binding
+  straight from TOML also works (Tomlyn 2.10 has a source-generated context, which the reader
+  itself uses for the untyped read) and was rejected because it would put the binder in the reader
+  assembly, away from the type it belongs to, and make a game declare a Tomlyn context for its
+  settings and a JSON one for everything else. Nothing a person writes is JSON;
+  `FeatureSettings.Json` is named for what it hands back.
 - **A settings type's properties are `get; set;`, never `init`.** An `init` accessor makes
   System.Text.Json build the object WITHOUT running the parameterless constructor, so every
   property the file leaves out reads as `default` — 0, not the `= 1f` the initializer says — with
@@ -266,11 +289,9 @@ Eight things that are not obvious:
   probed. The same class of silence sits next to it: a source-generated `JsonSerializerContext`
   matches the C# property name EXACTLY unless told otherwise, so a camelCase file binds nothing at
   all. Both are pinned by `FeatureSettingsTests`.
-- **The two sections exist to keep the nested-name trap closed.** A value under `features` may not
-  be an object, because `{"rendering": {"bloom": false}}` would otherwise parse as a feature called
-  `rendering` with a setting called `bloom` — the spelling nobody meant, accepted silently. It is
-  refused with the flat form and the `settings` section named in the message. Settings merge
-  WHOLESALE between layers, not deep: a deep merge has no answer for "which layer owns element 3".
+- **Settings merge WHOLESALE between layers, not deep.** A deep merge reads well in the two-file
+  case and has no answer for "which layer owns element 3" the moment an array is involved; a later
+  file that means to change one field writes the table it wants.
 - **`PbrRenderer` and `RenderPipeline` take the switchboard as a REQUIRED argument.** It was a
   defaulted last parameter for about a day, and that is a host getting a private switchboard, every
   feature at its declared default, and a config file that reached nothing — no error, and a frame
