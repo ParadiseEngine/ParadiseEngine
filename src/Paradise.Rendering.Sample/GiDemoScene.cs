@@ -51,7 +51,7 @@ internal sealed class GiDemoScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger);
+        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger, switches: Program.Features);
 
         var (cube, cubeIndices) = Procedural.UnitCube();
         var white = _pbr.Materials.AddDefaultMaterial(new Vector4(0.73f, 0.73f, 0.73f, 1f), metallic: 0f, roughness: 0.9f);

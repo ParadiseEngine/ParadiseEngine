@@ -1,3 +1,4 @@
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -21,32 +22,30 @@ public sealed class SceneColorCaptureFeature : IRenderFeature
         _ctx = ctx;
     }
 
-    public string Name => "SceneColorCapture";
+    public FeatureDefinition Definition => PbrFeatures.SceneColorCapture;
     public FrameRequirements Requires => FrameRequirements.SceneColorCapture;
 
-    /// <summary>Enable before creating the materials that bind <see cref="View"/>. Toggling
-    /// raises <see cref="ViewChanged"/> after the target exists (or has gone).</summary>
-    public bool Enabled
+    /// <summary>The target exists exactly while the switch is on, and
+    /// <see cref="ViewChanged"/> fires on the transition — synchronously, on the thread that
+    /// flipped it, so a host can switch capture on and then create the materials that bind
+    /// <see cref="View"/>.</summary>
+    public void OnEnabledChanged(bool enabled)
     {
-        get => _enabled;
-        set
+        if (_enabled == enabled) return;
+        _enabled = enabled;
+        if (enabled)
         {
-            if (_enabled == value) return;
-            _enabled = value;
-            if (value)
-            {
-                EnsurePipeline();
-                EnsureTarget();
-            }
-            else
-            {
-                _ctx.Targets.Release(PbrTargets.SceneColor);
-            }
-            // The disable path fires the event too — the view is INVALID inside the handler, and
-            // any material still bound to the old view must unbind or repoint (a bind group
-            // referencing the destroyed view is a Dawn validation error on its next SetBindGroup).
-            ViewChanged?.Invoke();
+            EnsurePipeline();
+            EnsureTarget();
         }
+        else
+        {
+            _ctx.Targets.Release(PbrTargets.SceneColor);
+        }
+        // The disable path fires the event too — the view is INVALID inside the handler, and
+        // any material still bound to the old view must unbind or repoint (a bind group
+        // referencing the destroyed view is a Dawn validation error on its next SetBindGroup).
+        ViewChanged?.Invoke();
     }
 
     /// <summary>The captured opaque scene: rgb is the opaque+sky color, ALPHA is the opaque

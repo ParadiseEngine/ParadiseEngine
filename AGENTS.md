@@ -40,7 +40,7 @@ dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 
 Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
 `Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
-`Paradise.Ui.ImGui.CoyoteTest`.
+`Paradise.Ui.ImGui.CoyoteTest`, `Paradise.Features.CoyoteTest`.
 
 A fourth thing, learned from the asset watcher: **lock on an `object`, not on
 `System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
@@ -82,6 +82,7 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 ### Monorepo Layout
 
 - `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `net10.0`.
+- `src/Paradise.Features` — Engine-wide feature configuration: the features a build declares and the switches that turn each on or off at runtime. No package dependencies at all, because the renderer and the ECS both reference it.
 - `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `net10.0`.
 - `src/Paradise.BT.Sample` — Console sample demonstrating tree construction, blackboard usage, and ticking.
 - `src/Paradise.BT.Test` / `src/Paradise.BLOB.Test` — TUnit test suites.
@@ -198,6 +199,58 @@ Things that bit, so they are rules:
   probe's rays and directions in workgroup memory once per blend workgroup (halved the blend), and
   an early-out any-hit walk plus half resolution for RT-AO (9.5 → 2.6 ms). One that did not:
   nearest-first child ordering in the traversal (+0.3 ms; the sort outweighed the skipped nodes).
+
+### A feature is switched by engine configuration, not by a flag of its own
+
+**Anything a build can turn off declares a `FeatureDefinition` and asks `IFeatureSwitches`
+whether it is on — the renderer's features, an ECS schedule's systems, and whatever a game adds
+next.** `Paradise.Features` holds that: `FeatureId` (a validated dotted name — `rendering.bloom`,
+`gameplay.weather`), the declaration that gives it a default and a description, and
+`FeatureSwitches`, the one object per process that answers. `EngineConfiguration.Read` parses
+`engine.json`; `FeatureOverrides.Parse` reads a `--features +a,-b` flag or `PARADISE_FEATURES`.
+Layers merge nearest-last: declarations, then the file, then the environment, then the command
+line. `dotnet run --project src/Paradise.Rendering.Sample -- --list-features` prints what a build
+has.
+
+The assembly has **no package references at all**, deliberately: `Paradise.ECS`, which otherwise
+references nothing, references this. Its one diagnostic — a configured name no declaration claims,
+`FeatureSwitches.Unknown` — is reported as data rather than logged, so it needs no logging
+abstraction to say it. It is called `Paradise.Features` rather than `Paradise.Configuration`
+because a namespace of the latter name is in scope for every file under `Paradise.*` and then beats
+an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
+meaning Microsoft.Coyote's, and all six stopped compiling.
+
+Five things that are not obvious:
+
+- **A switch and a scene setting are different questions, and both have to say yes.** The switch is
+  the platform's answer ("this build does not do probe GI"), applied once from configuration; a
+  scene's own `Enabled` (`PbrGi`, `PbrBloom`, …) is the content's answer ("this level uses it"),
+  authored per level. Collapsing them either lets a level override a platform decision or forces
+  the platform decision to be re-made in every level. They behave differently too, and a test pins
+  it: a scene that wants no bloom leaves the chain DECLARED and the graph culls it; a switch that
+  is off means the feature never runs and there is nothing to cull.
+- **Order does not matter, and that is load-bearing.** The config file is read before the renderer
+  exists, so an override lands on a name nothing has declared yet. It is kept by NAME and still
+  wins when the declaration arrives — and a name no declaration ever claims stays in `Unknown`
+  instead of vanishing, because a typo in a config file must not read as a feature that is off.
+- **A feature that leaves state behind must implement `IRenderFeature.OnEnabledChanged`.** Being
+  switched off is not the same as declaring no passes: the shadow plan, the pre-pass's SSAO
+  uniforms and the probe volume are all read by the SCENE every frame whether or not the feature
+  that owns them ran. Left alone they repeat the last enabled frame — a light keeps sampling a
+  shadow layer nothing fills, ambient is multiplied by a black occlusion texture the flags still
+  call real. The pipeline calls the hook on the transition only, including once at `Add` when
+  configuration already said off. Each of the three is guarded by a test that fails without it.
+- **Adding a feature touches no renderer.** `PbrBuiltInFeatures` is the whole list of engine
+  features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
+  at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
+  reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
+  cannot say so with a list position when the engine does all the adding.
+- **Writes are serialized and `Changed` is raised inside that same critical section.** Deciding
+  "did this change?" and announcing it is a check-then-act, and a subscriber ACTS on the
+  announcement; with two writers the last announcement could otherwise contradict the state
+  everyone now reads, leaving a feature switched on with its state retracted.
+  `Paradise.Features.CoyoteTest` pins it — three of its five specs fail within 200 iterations
+  against the unlocked version.
 
 ### Diagnostics go through `ILogger`, never `Console`
 

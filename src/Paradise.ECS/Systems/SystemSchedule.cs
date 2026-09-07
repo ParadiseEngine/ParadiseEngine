@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 
 namespace Paradise.ECS;
 
@@ -75,6 +76,8 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     private readonly ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
     private readonly ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
     private readonly ImmutableArray<SystemMetadata<TMask>> _metadata;
+    private readonly ImmutableArray<FeatureId> _features;
+    private readonly IFeatureSwitches? _switches;
     private readonly IWaveScheduler _scheduler;
     private readonly EntityCommandBufferPool _ecbPool;
     private readonly SystemEventBufferPool _eventPool;
@@ -85,12 +88,16 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         ImmutableArray<SystemRunChunkAction<TMask, TConfig>?> dispatchers,
         ImmutableArray<SystemRunWorldAction<TMask, TConfig>?> worldDispatchers,
         ImmutableArray<SystemMetadata<TMask>> metadata,
+        ImmutableArray<FeatureId> features,
+        IFeatureSwitches? switches,
         IWaveScheduler scheduler)
     {
         _waves = waves;
         _dispatchers = dispatchers;
         _worldDispatchers = worldDispatchers;
         _metadata = metadata;
+        _features = features;
+        _switches = switches;
         _scheduler = scheduler;
         _ecbPool = new EntityCommandBufferPool();
         _eventPool = new SystemEventBufferPool();
@@ -181,6 +188,8 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
             _workItems.Clear();
             foreach (var systemId in wave)
             {
+                if (!IsEnabled(systemId)) continue;
+
                 // World systems: one work item per run, dispatched with both worlds.
                 if (_worldDispatchers[systemId] is { } worldDispatcher)
                 {
@@ -214,6 +223,18 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         }
     }
 
+    /// <summary>Whether the feature this system belongs to is switched on. Decided HERE, on the
+    /// scheduling thread, once per run — not inside the system, and not per chunk: a gated
+    /// system that is off contributes no work items at all, so it costs nothing and rents no
+    /// command buffer. Rent order over the systems that DO run is still schedule order, so
+    /// playback stays deterministic.</summary>
+    private bool IsEnabled(int systemId)
+    {
+        if (_switches is null) return true;
+        var feature = _features[systemId];
+        return feature.IsEmpty || _switches.IsEnabled(feature);
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _ecbPool.Dispose();
 }
@@ -221,7 +242,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 /// <summary>
 /// Builder for selecting which systems to include in a schedule. Worlds are not part of
 /// this: a built schedule names its world at every run.
-/// Dependency resolution happens at <see cref="Build(IDagScheduler, IWaveScheduler)"/> time,
+/// Dependency resolution happens at <see cref="Build(IDagScheduler, IWaveScheduler, IFeatureSwitches?)"/> time,
 /// computing waves only for the systems actually added.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
@@ -233,6 +254,7 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     private readonly List<SystemMetadata<TMask>> _metadata;
     private readonly List<SystemRunChunkAction<TMask, TConfig>?> _dispatchers;
     private readonly List<SystemRunWorldAction<TMask, TConfig>?> _worldDispatchers;
+    private readonly List<FeatureId> _features;
 
     /// <summary>Public only because C# requires a struct's parameterless constructor to be —
     /// <see cref="SystemSchedule{TMask,TConfig}.Create()"/> is the way in, and the generated
@@ -242,6 +264,7 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
         _metadata = new List<SystemMetadata<TMask>>();
         _dispatchers = new List<SystemRunChunkAction<TMask, TConfig>?>();
         _worldDispatchers = new List<SystemRunWorldAction<TMask, TConfig>?>();
+        _features = new List<FeatureId>();
     }
 
     /// <summary>Adds a per-entity or per-chunk system to the schedule.</summary>
@@ -249,10 +272,29 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     /// <returns>This builder for chaining.</returns>
     public SystemScheduleBuilder<TMask, TConfig> Add<T>()
         where T : ISystem<TMask, TConfig>, allows ref struct
+        => Add<T>(default);
+
+    /// <summary>Adds a per-entity or per-chunk system that belongs to <paramref name="feature"/>:
+    /// the schedule skips it entirely in runs where that feature is switched off.
+    ///
+    /// <para>This is how a GAMEPLAY feature is switched — a set of systems, named once here, off
+    /// from the same config file and the same debug panel that turn a render feature off. The
+    /// alternative, an <c>if</c> at the top of every system in the set, is a thing somebody
+    /// forgets in one of them and pays for in all of them.</para>
+    ///
+    /// <para>The gate needs a switchboard to read, which
+    /// <see cref="Build(IDagScheduler, IWaveScheduler, IFeatureSwitches?)"/> takes; built without
+    /// one, a gated system runs.</para></summary>
+    /// <typeparam name="T">The system type implementing <see cref="ISystem{TMask,TConfig}"/>.</typeparam>
+    /// <param name="feature">The feature this system belongs to.</param>
+    /// <returns>This builder for chaining.</returns>
+    public SystemScheduleBuilder<TMask, TConfig> Add<T>(FeatureId feature)
+        where T : ISystem<TMask, TConfig>, allows ref struct
     {
         _metadata.Add(T.Metadata);
         _dispatchers.Add(T.RunChunk);
         _worldDispatchers.Add(null);
+        _features.Add(feature);
         return this;
     }
 
@@ -261,10 +303,19 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     /// <returns>This builder for chaining.</returns>
     public SystemScheduleBuilder<TMask, TConfig> AddWorld<T>()
         where T : IWorldSystemRunner<TMask, TConfig>, allows ref struct
+        => AddWorld<T>(default);
+
+    /// <inheritdoc cref="Add{T}(FeatureId)"/>
+    /// <typeparam name="T">The system type implementing <see cref="IWorldSystemRunner{TMask,TConfig}"/>.</typeparam>
+    /// <param name="feature">The feature this system belongs to.</param>
+    /// <returns>This builder for chaining.</returns>
+    public SystemScheduleBuilder<TMask, TConfig> AddWorld<T>(FeatureId feature)
+        where T : IWorldSystemRunner<TMask, TConfig>, allows ref struct
     {
         _metadata.Add(T.Metadata);
         _dispatchers.Add(null);
         _worldDispatchers.Add(T.RunWorld);
+        _features.Add(feature);
         return this;
     }
 
@@ -275,17 +326,35 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
         where TScheduler : IWaveScheduler, new()
         => Build(new DefaultDagScheduler(), new TScheduler());
 
+    /// <inheritdoc cref="Build{TScheduler}()"/>
+    /// <typeparam name="TScheduler">The wave scheduler type implementing <see cref="IWaveScheduler"/>.</typeparam>
+    /// <param name="switches">The engine's feature configuration, read on every run.</param>
+    /// <returns>A new <see cref="SystemSchedule{TMask,TConfig}"/>.</returns>
+    public SystemSchedule<TMask, TConfig> Build<TScheduler>(IFeatureSwitches switches)
+        where TScheduler : IWaveScheduler, new()
+        => Build(new DefaultDagScheduler(), new TScheduler(), switches);
+
     /// <summary>Builds a schedule with the default DAG scheduler and a custom wave scheduler instance.</summary>
     /// <param name="scheduler">The wave scheduler strategy to use.</param>
     /// <returns>A new <see cref="SystemSchedule{TMask,TConfig}"/>.</returns>
     public SystemSchedule<TMask, TConfig> Build(IWaveScheduler scheduler)
         => Build(new DefaultDagScheduler(), scheduler);
 
+    /// <inheritdoc cref="Build(IWaveScheduler)"/>
+    /// <param name="scheduler">The wave scheduler strategy to use.</param>
+    /// <param name="switches">The engine's feature configuration, read on every run.</param>
+    /// <returns>A new <see cref="SystemSchedule{TMask,TConfig}"/>.</returns>
+    public SystemSchedule<TMask, TConfig> Build(IWaveScheduler scheduler, IFeatureSwitches switches)
+        => Build(new DefaultDagScheduler(), scheduler, switches);
+
     /// <summary>Builds a schedule with a custom DAG scheduler and wave scheduler.</summary>
     /// <param name="dag">The DAG scheduler for computing execution waves.</param>
     /// <param name="scheduler">The wave scheduler strategy to use.</param>
     /// <returns>A new <see cref="SystemSchedule{TMask,TConfig}"/>.</returns>
-    public SystemSchedule<TMask, TConfig> Build(IDagScheduler dag, IWaveScheduler scheduler)
+    /// <param name="switches">The engine's feature configuration. Read on every run, so a
+    /// feature switched off between two ticks stops running at the next one; null runs every
+    /// system the builder was given, gated or not.</param>
+    public SystemSchedule<TMask, TConfig> Build(IDagScheduler dag, IWaveScheduler scheduler, IFeatureSwitches? switches = null)
     {
         var metadataSpan = CollectionsMarshal.AsSpan(_metadata);
         var rawWaves = dag.ComputeWaves(metadataSpan);
@@ -297,6 +366,8 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
             ImmutableArray.Create(_dispatchers.ToArray()),
             ImmutableArray.Create(_worldDispatchers.ToArray()),
             ImmutableArray.Create(_metadata.ToArray()),
+            ImmutableArray.Create(_features.ToArray()),
+            switches,
             scheduler);
     }
 }

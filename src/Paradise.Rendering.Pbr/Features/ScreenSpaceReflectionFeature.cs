@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -59,8 +60,7 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
     /// whether the bound reflection texture is real.</summary>
     internal bool HistoryReady => _historyValid;
 
-    public string Name => "ScreenSpaceReflection";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.ScreenSpaceReflection;
     public FrameRequirements Requires =>
         _ctx.Scene.Ssr.Enabled ? FrameRequirements.DepthNormalPrepass : FrameRequirements.None;
 
@@ -71,6 +71,15 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
         // at the new size; a resized history holds nothing this frame either way.
         if (_ctx.Targets.Contains(PbrTargets.SsrHistory)) EnsureTargets(_scale);
         _historyValid = false;
+    }
+
+    /// <summary>The pre-pass asks <see cref="HistoryReady"/> whether the reflection texture the
+    /// scene binds holds anything; switched off, this feature stops copying the frame but the
+    /// last copy is still there, so the answer has to be retracted here rather than in a
+    /// <see cref="Setup"/> that no longer runs.</summary>
+    public void OnEnabledChanged(bool enabled)
+    {
+        if (!enabled) _historyValid = false;
     }
 
     private void EnsureTargets(float scale)

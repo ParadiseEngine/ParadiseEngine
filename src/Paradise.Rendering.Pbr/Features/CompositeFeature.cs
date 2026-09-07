@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -30,8 +31,7 @@ public sealed class CompositeFeature : IRenderFeature
             "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
     }
 
-    public string Name => "Composite";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.Composite;
     public FrameRequirements Requires => FrameRequirements.None;
 
     internal bool UsesSrgbEntryPoint { get; }

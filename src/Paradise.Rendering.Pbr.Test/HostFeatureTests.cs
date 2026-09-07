@@ -1,4 +1,5 @@
 using System.Numerics;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
@@ -14,8 +15,7 @@ public class HostFeatureTests
         public int Recorded;
         public bool SawHdr;
 
-        public string Name => "Vignette";
-        public bool Enabled => true;
+        public FeatureDefinition Definition { get; } = new("game.vignette", true, "Darkens the frame edges.");
         public FrameRequirements Requires => FrameRequirements.None;
         public void Resize(uint width, uint height) { }
 

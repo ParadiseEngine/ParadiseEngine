@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Features</AssemblyName>
+    <RootNamespace>Paradise.Features</RootNamespace>
+    <PackageId>Paradise.Features</PackageId>
+    <Title>Paradise.Features</Title>
+    <Description>Engine-wide feature configuration: the catalog of features a build declares and the switches that turn each on or off at runtime, layered from defaults, a config file, the environment and the command line.</Description>
+    <PackageTags>configuration;feature-flags;nativeaot;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Features.Test" />
+  </ItemGroup>
+
+  <!-- Named for what it holds rather than "Paradise.Configuration", which was the first choice
+       and is a trap: a namespace of that name is in scope for every file under Paradise.*, and
+       it then beats an IMPORTED type called Configuration. Every Coyote suite in this repo says
+       `Configuration.Create()` meaning Microsoft.Coyote's, and all six stopped compiling. -->
+
+
+  <!-- NO package references, deliberately. Every subsystem that can be switched off references
+       this assembly — including Paradise.ECS, which has no other reference at all — so anything
+       added here is added to all of them at once. The JSON reader is in the BCL, and the one
+       diagnostic this assembly produces (an override naming no declared feature) is reported as
+       data through FeatureSwitches.Unknown rather than logged, so not even a logging abstraction
+       is needed to consume it. -->
+
+</Project>

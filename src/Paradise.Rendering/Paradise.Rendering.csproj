@@ -32,4 +32,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Which features run is engine configuration, not a renderer concept: RenderPipeline reads
+         the same switchboard the ECS and the debug UI read. The reference is to an abstraction
+         with no dependencies of its own, the way every library here takes ILogger. -->
+    <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />
+  </ItemGroup>
+
 </Project>

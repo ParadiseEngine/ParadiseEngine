@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Buffers;
 using System.Numerics;
 using Paradise.Assets.Gltf;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -40,10 +41,22 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly System.Diagnostics.Stopwatch _clock = new();
 #endif
 
+    /// <param name="renderer">The backend the frame is submitted to.</param>
+    /// <param name="width">Frame width in pixels.</param>
+    /// <param name="height">Frame height in pixels.</param>
+    /// <param name="maxAnisotropy">Anisotropic filtering cap for material textures.</param>
+    /// <param name="specularAaVariance">Geometric specular-AA strength.</param>
+    /// <param name="specularAaClamp">Geometric specular-AA clamp.</param>
+    /// <param name="logger">Where engine diagnostics go.</param>
+    /// <param name="switches">The engine's feature configuration — the same object the rest of
+    /// the engine is switched by. The built-in features declare themselves into it and read it
+    /// every frame, so a config file that says <c>"rendering.bloom": false</c> reaches this
+    /// renderer without the host writing any renderer-specific code. Null builds a private one,
+    /// in which every feature runs at its declared default.</param>
     public PbrRenderer(
         IRenderer renderer, uint width, uint height,
         ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f,
-        ILogger? logger = null)
+        ILogger? logger = null, FeatureSwitches? switches = null)
     {
         _renderer = renderer;
         _log = logger ?? NullLogger.Instance;
@@ -53,26 +66,14 @@ public sealed partial class PbrRenderer : IDisposable
         Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
         _ctx.Materials = Materials;
 
-        // List order is dependency order: the scene reads the shadow plan and the pre-pass
-        // result, the capture reads the scene's targets, the composite reads bloom's.
-        _shadows = new ShadowFeature(_ctx);
-        var ssr = new ScreenSpaceReflectionFeature(_ctx);
-        var prepass = new PrepassFeature(_ctx, ssr);
-        var rtao = new RayTracedAoFeature(_ctx);
-        var gi = new ProbeGiFeature(_ctx, _shadows);
-        _scene = new SceneFeature(_ctx, _shadows, prepass, gi, specularAaVariance, specularAaClamp);
-        _capture = new SceneColorCaptureFeature(_ctx);
-        _composite = new CompositeFeature(_ctx);
-        Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height)
-            .Add(_shadows)
-            .Add(prepass)
-            .Add(rtao)
-            .Add(ssr)
-            .Add(gi)
-            .Add(_scene)
-            .Add(_capture)
-            .Add(new BloomFeature(_ctx))
-            .Add(_composite);
+        Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height, switches);
+        PbrBuiltInFeatures.AddTo(Pipeline, _ctx, specularAaVariance, specularAaClamp);
+        // Found rather than held from construction: the list belongs to PbrBuiltInFeatures, and
+        // the four the renderer's own API forwards to are reached the same way a host reaches one.
+        _shadows = Pipeline.Find<ShadowFeature>()!;
+        _scene = Pipeline.Find<SceneFeature>()!;
+        _capture = Pipeline.Find<SceneColorCaptureFeature>()!;
+        _composite = Pipeline.Find<CompositeFeature>()!;
     }
 
     public MaterialResourceCache Materials { get; }
@@ -85,9 +86,16 @@ public sealed partial class PbrRenderer : IDisposable
     public IReadOnlyList<string> LastPassNames => _graph.LivePassNames;
 
     /// <summary>The features that make up a frame, in the order they set up. A host adds its own
-    /// after these; they see the engine's targets by the names in <see cref="PbrTargets"/> and
-    /// its results by those in <see cref="PbrResults"/>.</summary>
+    /// through <see cref="RenderPipeline.Add"/> — after these by default, or at a
+    /// <see cref="PbrFeatureOrder"/> slot to land between two of them; they see the engine's
+    /// targets by the names in <see cref="PbrTargets"/> and its results by those in
+    /// <see cref="PbrResults"/>.</summary>
     public RenderPipeline Pipeline { get; }
+
+    /// <summary>The engine's feature configuration, as this renderer reads it every frame.
+    /// Flipping a switch here changes the next frame — see <see cref="PbrFeatures"/> for the
+    /// names, and note that a scene's own <c>Enabled</c> flags still have to agree.</summary>
+    public FeatureSwitches Switches => Pipeline.Switches;
 
     /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
     /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
@@ -130,8 +138,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// per frame while enabled.</summary>
     public bool SceneColorCapture
     {
-        get => _capture.Enabled;
-        set => _capture.Enabled = value;
+        get => Switches.IsEnabled(PbrFeatures.SceneColorCapture.Id);
+        set => Switches.Set(PbrFeatures.SceneColorCapture.Id, value);
     }
 
     /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
@@ -373,8 +381,13 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
         timings.Partition = Lap();
-        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it.
-        if (scene.RayTracedAo.Enabled || scene.Gi.Enabled) _ctx.Trace.BuildFrame(opaque, Materials);
+        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it —
+        // which means asking the switches too, or a build with the tracers configured off still
+        // pays for a hierarchy nothing will walk.
+        var tracesThisFrame =
+            (scene.RayTracedAo.Enabled && Switches.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
+            (scene.Gi.Enabled && Switches.IsEnabled(PbrFeatures.GlobalIllumination.Id));
+        if (tracesThisFrame) _ctx.Trace.BuildFrame(opaque, Materials);
         timings.TraceBuild = Lap();
         _graph.Reset();
         Pipeline.Setup(_graph);

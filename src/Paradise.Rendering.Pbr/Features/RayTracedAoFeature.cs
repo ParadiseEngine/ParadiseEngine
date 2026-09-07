@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -45,8 +46,7 @@ public sealed class RayTracedAoFeature : IRenderFeature
         EnsureTarget(1f);
     }
 
-    public string Name => "RayTracedAo";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.RayTracedAo;
     public FrameRequirements Requires =>
         _ctx.Scene.RayTracedAo.Enabled ? FrameRequirements.DepthNormalPrepass : FrameRequirements.None;
 

@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -43,8 +44,7 @@ public sealed partial class SceneFeature : IRenderFeature
         CreateLuts();
     }
 
-    public string Name => "Scene";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.Scene;
     public FrameRequirements Requires => FrameRequirements.None;
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
