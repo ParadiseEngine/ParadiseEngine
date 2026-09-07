@@ -308,21 +308,25 @@ public class ProbeGiTests
         using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), Size, Size);
         var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
 
+        // Counted by NAME, and by the DELTA a dispatch count moves — not by how many compute
+        // passes the frame holds. Forward+ light culling bins in compute every frame, so a
+        // whole-frame count measures whoever else happens to dispatch.
         var scene = OpenFloor(pbr, gi: false);
         pbr.RenderFrame(scene);
-        var computeOff = Count(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
+        var computeOff = CountPasses(pbr, "Gi.");
+        var dispatchesOff = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
         var volumeOff = gi.ActiveVolume;
 
         scene.Gi = scene.Gi with { Enabled = true };
         pbr.RenderFrame(scene);
-        var computeOn = Count(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
-        var dispatches = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
+        var computeOn = CountPasses(pbr, "Gi.");
+        var dispatchesOn = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
         var volume = gi.ActiveVolume;
 
         await Assert.That(computeOff).IsEqualTo(0);
         await Assert.That(volumeOff).IsNull();
         await Assert.That(computeOn).IsEqualTo(3);
-        await Assert.That(dispatches).IsEqualTo(4);
+        await Assert.That(dispatchesOn - dispatchesOff).IsEqualTo(4);
         await Assert.That(volume).IsNotNull();
         // The floor is 6×0.1×6 around the origin plus the default half-metre margin: the fitted
         // grid spans it and stays under the probe budget.
@@ -341,6 +345,14 @@ public class ProbeGiTests
         await Assert.That(volume.CountX * volume.CountY * 16).IsLessThanOrEqualTo(8192);
         await Assert.That(volume.CountX).IsGreaterThanOrEqualTo(2);
         await Assert.That(ProbeGiFeature.Fit(Geometry.Aabb.Empty, new PbrGi())).IsNull();
+    }
+
+    private static int CountPasses(PbrRenderer pbr, string prefix)
+    {
+        var count = 0;
+        foreach (var name in pbr.LastPassNames)
+            if (name.StartsWith(prefix, StringComparison.Ordinal)) count++;
+        return count;
     }
 
     private static int Count(RenderCommand[] commands, RenderCommandKind kind)

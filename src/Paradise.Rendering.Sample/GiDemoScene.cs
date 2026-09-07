@@ -47,6 +47,12 @@ internal sealed class GiDemoScene : IDisposable
     public static int MaxProbes { get; set; } = 4096;
     public static int ProbesPerFrame { get; set; }
 
+    /// <summary>Extra point lights scattered through the room (--lights N). The room's own two
+    /// lights are not enough to show what Forward+ binning costs or saves: the froxel grid is
+    /// rebuilt at the same size whatever the light count, so only a scene with many lights
+    /// separates the per-frame grid cost from the per-light one.</summary>
+    public static int ExtraLights { get; set; }
+
     public GiDemoScene(WebGpuRenderer renderer, uint width, uint height, string? modelPath, ILogger? logger = null)
     {
         _width = Math.Max(1, width);
@@ -117,11 +123,31 @@ internal sealed class GiDemoScene : IDisposable
         };
         _scene.Lights.Add(_sunTemplate);
         _scene.Lights.Add(_lampTemplate);
+        AddExtraLights();
         Animate();
 
         Console.WriteLine(
             $"[GiDemo] probes {(ProbeGi ? "on" : "off")} (rays {RaysPerProbe}, max {MaxProbes}, per frame {ProbesPerFrame}), ray-traced AO {(RayTracedAo ? "on" : "off")}, " +
-            $"{_scene.Instances.Count} instances{(modelPath is null ? "" : $", model {Path.GetFileName(modelPath)}")}.");
+            $"{_scene.Lights.Count} lights, {_scene.Instances.Count} instances{(modelPath is null ? "" : $", model {Path.GetFileName(modelPath)}")}.");
+    }
+
+    // A deterministic spiral of short-range point lights through the room, so a bench run is
+    // comparable between builds.
+    private void AddExtraLights()
+    {
+        for (var i = 0; i < ExtraLights; i++)
+        {
+            var t = i / (float)Math.Max(ExtraLights, 1);
+            var angle = t * MathF.Tau * 3f;
+            _scene.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Point,
+                Position = new Vector3(MathF.Cos(angle) * 3.5f, 0.4f + t * 4.5f, MathF.Sin(angle) * 3.5f),
+                Color = new Vector3(0.6f + 0.4f * t, 0.7f, 1f - 0.4f * t),
+                Intensity = 1.5f,
+                Range = 3f,
+            });
+        }
     }
 
     private void Add(PbrMesh mesh, Matrix4x4 model) => _scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = model });

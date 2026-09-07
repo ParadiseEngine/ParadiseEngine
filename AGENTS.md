@@ -194,12 +194,19 @@ Things that bit, so they are rules:
   timestamp pair measures wall time while other work is in flight — every bloom mip "took" 3 ms
   beside a compute trace, for a 5 ms frame. The bench also prints the GPU idle-to-idle frame time
   (submit, then wait); attribute cost by toggling features (`--no-gi`, `--rtao`, `--no-bloom`,
-  `--gi-rays N`, `--gi-max-probes N`, `--gi-probes-per-frame N`). Measured on an Apple M-series at
+  `--gi-rays N`, `--gi-max-probes N`, `--gi-probes-per-frame N`, `--lights N`). `--bench` is wired
+  into the `--gi-demo` scene only; `--pbr --bench` silently reports nothing. Measured on an Apple
+  M-series at
   1280×960 in the Cornell room: base 2.1 ms (bloom 0.8), probes +2.3 ms at 3072 probes × 128 rays
   (linear in rays), RT-AO +2.6 ms at half resolution with 8 rays. Two things that paid: staging a
   probe's rays and directions in workgroup memory once per blend workgroup (halved the blend), and
   an early-out any-hit walk plus half resolution for RT-AO (9.5 → 2.6 ms). One that did not:
   nearest-first child ordering in the traversal (+0.3 ms; the sort outweighed the skipped nodes).
+  Moving Forward+ binning off the CPU paid twice at `--lights 62` (64 lights, the mask width): the
+  `setup` phase went 0.63 → 0.045 ms because the per-frame clear and 300 KB mask upload went with
+  it, and the GPU frame went 3.8 → 2.9 ms because a gather against the froxel box is tighter than
+  the screen-AABB scatter it replaced and fewer zero-contribution lights get shaded. The picture is
+  byte-identical across the change.
 
 ### A feature is switched by engine configuration, not by a flag of its own
 
@@ -276,8 +283,28 @@ Thirteen things that are not obvious:
   uniforms and the probe volume are all read by the SCENE every frame whether or not the feature
   that owns them ran. Left alone they repeat the last enabled frame — a light keeps sampling a
   shadow layer nothing fills, ambient is multiplied by a black occlusion texture the flags still
-  call real. The pipeline calls the hook on the transition only, including once at `Add` when
-  configuration already said off. Each of the three is guarded by a test that fails without it.
+  call real, a moving camera shades against the froxels of whatever frame binned last and lights
+  that have since come into view go missing. The pipeline calls the hook on the transition only,
+  including once at `Add` when configuration already said off. Each of the four is guarded by a
+  test that fails without it.
+- **Forward+ binning is a compute pass whose shader stays off `lighting.slang`.** `lightCull.slang`
+  gathers — one thread per froxel, every light's sphere against that froxel's view-space box — so
+  nothing needs an atomic. Including `Common/lighting.slang` to reach `frame.sceneLights` would
+  make the frame UBO, the shadow array and its comparison sampler mandatory bindings of a program
+  that reads none of them, and the feature would then satisfy three group-1 slots with stand-ins
+  and take a dependency on `ShadowFeature` to do it; the centres and radii are uploaded instead, in
+  view space, as the only light data binning needs. The slice boundaries are uploaded too: WGSL's
+  `pow` is `exp2(y·log2(x))` to a few ULP and `MathF.Pow` is not, so a shader deriving its own
+  would disagree with `ClusterBinning` by an ULP and flip a light that straddles one — which is
+  exactly the bit-exact agreement the CPU twin exists to let a test assert.
+- **`ClusterBinning` is to `lightCull.slang` what `BvhTraversal.ClosestHit` is to `bvh.slang`:**
+  production code nothing calls in a frame, mirroring the shader line for line so the tests can
+  hold it against a brute-force oracle and hold the shader against it. The oracle is one-sided on
+  purpose — a point inside a froxel within a light's range proves the bit must be set — with a
+  second test proving the masks are not simply full, which inclusion alone would satisfy. Because
+  the attenuation window is `saturate(1 − (d/range)⁴)`, exactly zero at and beyond the range, a
+  correctly binned frame and an unbinned one are bit-identical: the culling switch moves cost and
+  never pixels, and the pass-matrix PIXEL goldens did not move when binning left the CPU.
 - **Adding a feature touches no renderer.** `PbrBuiltInFeatures` is the whole list of engine
   features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same

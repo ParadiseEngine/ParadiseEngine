@@ -11,10 +11,11 @@ namespace Paradise.Rendering.Pbr;
 /// <see cref="RenderPipeline.Add"/> at a <see cref="PbrFeatureOrder"/> slot, and needs no change
 /// here at all.</para>
 ///
-/// <para>The two constructor arguments that are not the context — the scene reads the shadow
-/// plan, the pre-pass reads whether reflections have a history — are the engine features that
-/// are genuinely one thing split in two. Everything else a feature needs from another feature
-/// travels by name on the frame's blackboard, which is what lets any of them be switched off
+/// <para>The constructor arguments that are not the context — the scene reads the shadow plan and
+/// the froxel grid, the pre-pass reads whether reflections have a history — are the engine
+/// features that are genuinely one thing split in two, or that hand over a BUFFER, which the
+/// blackboard does not carry. Everything else a feature needs from another feature travels by name
+/// on the frame's blackboard, which is what lets any of them be switched off
 /// independently.</para></summary>
 internal static class PbrBuiltInFeatures
 {
@@ -24,13 +25,15 @@ internal static class PbrBuiltInFeatures
         var ssr = new ScreenSpaceReflectionFeature(ctx);
         var prepass = new PrepassFeature(ctx, ssr);
         var gi = new ProbeGiFeature(ctx, shadows);
+        var lightCulling = new LightCullingFeature(ctx);
         pipeline
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
-            .Add(new SceneFeature(ctx, shadows, prepass, gi, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
+            .Add(lightCulling, PbrFeatureOrder.LightCulling)
+            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
             .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);

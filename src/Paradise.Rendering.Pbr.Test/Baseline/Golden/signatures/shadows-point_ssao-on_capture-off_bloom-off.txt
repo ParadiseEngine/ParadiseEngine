@@ -1,5 +1,5 @@
 # shadows-point_ssao-on_capture-off_bloom-off
-submit presenting passes=9 commands=115
+submit presenting passes=9 commands=120
 pass 00  colors=0
          depth tex#0 view#0 load=Clear store=Store clear=1
 pass 01  colors=0
@@ -106,34 +106,39 @@ BeginPass 06
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
 EndPass
+BeginComputePass
+  SetComputePipeline cpipeline#0
+  SetBindGroup 0 bg#4
+  Dispatch 8x1x1
+EndComputePass
 BeginPass 07
   SetPipeline pipeline#2
-  SetBindGroup 0 bg#4
+  SetBindGroup 0 bg#5
   Draw verts=3 inst=1 first=0/0
-  SetBindGroup 1 bg#5
-  SetBindGroup 3 bg#6
+  SetBindGroup 1 bg#6
+  SetBindGroup 3 bg#7
   SetPipeline pipeline#3
   SetBindGroup 0 bg#3 dyn=0
-  SetBindGroup 2 bg#7
+  SetBindGroup 2 bg#8
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
   SetBindGroup 0 bg#3 dyn=256
-  SetBindGroup 2 bg#8
+  SetBindGroup 2 bg#9
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 1 bg#5
-  SetBindGroup 3 bg#6
+  SetBindGroup 1 bg#6
+  SetBindGroup 3 bg#7
   SetPipeline pipeline#4
   SetBindGroup 0 bg#3 dyn=512
-  SetBindGroup 2 bg#9
+  SetBindGroup 2 bg#10
   SetVertexBuffer 0 buf#4 offset=0 size=1152
   SetIndexBuffer buf#5 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
 EndPass
 BeginPass 08
   SetPipeline pipeline#5
-  SetBindGroup 0 bg#10
+  SetBindGroup 0 bg#11
   Draw verts=3 inst=1 first=0/0
 EndPass
