@@ -59,6 +59,12 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             {
                 case OptimizeKey when ReadOptimization(value) is not null: continue;
                 case OptimizeKey: return $"holds '{OptimizeKey}' in [{Domain}] that is not {{ tolerance, distance }} with positive numbers";
+
+                // The extraction record moved to [extract]. A sidecar that still carries it here is
+                // read once and rewritten by the next extract, so it is not a finding — reporting
+                // it would make every GLB in an upgrading project an error before the one command
+                // that fixes them all.
+                case LegacyExtractKey or LegacyMeshKey or LegacySkeletonKey or LegacyClipsKey or LegacyMaterialsKey or LegacyImagesKey or LegacyPrefabKey: continue;
                 case ReferencesKey: break;
                 default: return $"holds '{key}' in [{Domain}], which is not a glb setting";
             }
@@ -151,8 +157,85 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public static GlbExtraction ReadExtraction(SidecarMeta meta)
     {
         ArgumentNullException.ThrowIfNull(meta);
+
+        // A sidecar minted before the record moved out of [glb] is read in its old shape, ONCE:
+        // the next extract writes [extract] and WriteDomain drops the legacy keys. Without this the
+        // first re-extraction after upgrading loses the per-GLB `extract` directory and every
+        // recorded identity, so Target falls back to the default path, writes new files there under
+        // NEW guids, and orphans everything the project already references.
+        if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return legacy;
+
         return FromRecord(ExtractionRecord.Read(meta));
     }
+
+    /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it. Delete once no tree in the wild predates the move.</summary>
+    private static GlbExtraction? ReadLegacy(SidecarMeta meta)
+    {
+        var table = meta.Setting(Domain);
+        if (table is null) return null;
+
+        var directory = table.Value(LegacyExtractKey) as string;
+        var mesh = ReadReference(table.Value(LegacyMeshKey));
+        var skeleton = ReadReference(table.Value(LegacySkeletonKey));
+        var clips = ReadLegacyClips(table.Value(LegacyClipsKey));
+        var materials = ReadLegacyNamed(table.Value(LegacyMaterialsKey));
+        var images = ReadLegacyNamed(table.Value(LegacyImagesKey));
+
+        if (directory is null && mesh is null && skeleton is null && clips.Count == 0 && materials.Count == 0 && images.Count == 0) return null;
+        return new GlbExtraction(directory, mesh, skeleton, clips, materials, images);
+    }
+
+    private static List<GlbExtraction.NamedReference> ReadLegacyClips(object? value)
+    {
+        var result = new List<GlbExtraction.NamedReference>();
+        if (value is not IReadOnlyList<object> items) return result;
+        foreach (var item in items)
+        {
+            if (LegacyIndex(item) is { } index && Lookup(item, LegacyNameKey) is string name && ReadReference(item) is { } reference)
+            {
+                result.Add(new GlbExtraction.NamedReference(index, name, reference));
+            }
+        }
+
+        return result;
+    }
+
+    private static List<GlbExtraction.NamedEntry> ReadLegacyNamed(object? value)
+    {
+        var result = new List<GlbExtraction.NamedEntry>();
+        if (value is not IReadOnlyList<object> items) return result;
+        foreach (var item in items)
+        {
+            if (LegacyIndex(item) is not { } index || Lookup(item, LegacyNameKey) is not string name || ReadReference(item) is not { } reference) continue;
+            result.Add(new GlbExtraction.NamedEntry(index, name, new GlbExtraction.Entry(
+                reference,
+                Lookup(item, LegacyGlbFingerprintKey) as string ?? "",
+                Lookup(item, LegacyDocumentFingerprintKey) as string ?? "")));
+        }
+
+        return result;
+    }
+
+    private static int? LegacyIndex(object? item) => Lookup(item, LegacyIndexKey) switch
+    {
+        long index and >= 0 and <= int.MaxValue => (int)index,
+        int index and >= 0 => index,
+        _ => null,
+    };
+
+    /// <summary>Generated prefabs stopped being tracked long ago; sidecars minted before that still carry the key.</summary>
+    private const string LegacyPrefabKey = "prefab";
+
+    private const string LegacyExtractKey = "extract";
+    private const string LegacyMeshKey = "mesh";
+    private const string LegacySkeletonKey = "skeleton";
+    private const string LegacyClipsKey = "clips";
+    private const string LegacyMaterialsKey = "materials";
+    private const string LegacyImagesKey = "images";
+    private const string LegacyNameKey = "name";
+    private const string LegacyIndexKey = "index";
+    private const string LegacyGlbFingerprintKey = "glb";
+    private const string LegacyDocumentFingerprintKey = "doc";
 
     /// <summary>The engine's flat parts list as the GLB's named buckets.</summary>
     internal static GlbExtraction FromRecord(Extraction extraction)

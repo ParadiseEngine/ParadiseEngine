@@ -139,7 +139,27 @@ public sealed class ProjectManifest
             }
         }
 
-        static string? Folder(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim().TrimEnd('/');
+        // Assets-relative and nothing else. `/etc` or `../out` would reach
+        // `(layout.Assets / relative)` and put extraction output outside the tree, where nothing
+        // indexes it — diagnosed here, at the key, rather than as an unresolved entry per file.
+        string? Folder(string? value, string key)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            var folder = value.Trim().Replace('\\', '/').TrimEnd('/');
+            if (folder.Length == 0) return null;
+
+            if (folder.StartsWith('/') || (folder.Length > 1 && folder[1] == ':'))
+            {
+                throw new ProjectManifestException(sourceName, $"sets '{key}' in [extract] to '{value}', which is absolute; extraction directories are relative to assets/");
+            }
+
+            if (folder.Split('/').Any(segment => segment == ".."))
+            {
+                throw new ProjectManifestException(sourceName, $"sets '{key}' in [extract] to '{value}', which climbs above assets/; extraction writes inside the asset tree");
+            }
+
+            return folder;
+        }
 
         var directories = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, value) in document.Extract?.Unknown ?? [])
@@ -151,11 +171,11 @@ public sealed class ProjectManifest
                 throw new ProjectManifestException(sourceName, $"sets '{key}' in [extract] to {(value is null ? "nothing" : value.GetType().Name.ToLowerInvariant())}; a kind's value is a directory");
             }
 
-            if (Folder(text) is { } folder) directories[key] = folder;
+            if (Folder(text, key) is { } folder) directories[key] = folder;
         }
 
         var extract = new ExtractSettings(
-            Folder(document.Extract?.Directory),
+            Folder(document.Extract?.Directory, "directory"),
             string.IsNullOrWhiteSpace(document.Extract?.StaticMeshComponent) ? null : document.Extract.StaticMeshComponent,
             string.IsNullOrWhiteSpace(document.Extract?.SkinnedMeshComponent) ? null : document.Extract.SkinnedMeshComponent)
         {

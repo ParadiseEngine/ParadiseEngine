@@ -376,6 +376,10 @@ using them:
   conflict `--take-glb` / `--take-document` resolves. It returns the decision and not the
   fingerprints to record, because after `TakeDocument` a format that can write the edit back has
   both sides reading as the document and one that cannot still has two.
+- **The generated prefab is the exception**: it is written once and never recorded, so it is the one
+  kind whose routing is not checked — a `prefabs` key naming a folder the tree ignores writes the
+  file with no error, where every other kind reports an unresolved entry. `Seed` finds it again by
+  path on the next run, so it stays consistent; it is simply not identified.
 - **Identity.** `SidecarMaintainer.Ensure` mints a sidecar for each written file, and a recorded
   part is found again through `AssetIndex.Resolve` — by guid, so a file the author moved is
   re-synced where it now lives instead of written again at the default path. Catch its path half up

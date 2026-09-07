@@ -230,6 +230,25 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task an_extract_directory_outside_the_asset_tree_is_refused_at_the_key()
+    {
+        // Diagnosed here rather than as an unresolved entry per extracted file: the value is what
+        // is wrong, and `(layout.Assets / relative)` would happily put output where nothing indexes it.
+        foreach (var bad in new[] { "/etc", "../outside", "materials/../..", "C:/temp" })
+        {
+            var error = Assert.Throws<ProjectManifestException>(
+                () => ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmaterials = \"{bad}\"\n", "project.toml"));
+
+            await Assert.That(error!.Message).Contains("materials");
+            await Assert.That(error.Message).Contains("assets/");
+        }
+
+        // A nested relative directory is fine, and so is a trailing slash.
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[extract]\nmaterials = \"a/b/\"\n", "project.toml");
+        await Assert.That(manifest.Extract.DirectoryFor("materials")).IsEqualTo("a/b");
+    }
+
+    [Test]
     public async Task an_unknown_root_key_is_refused()
     {
         var error = Rejects($"{Minimal}\nnmae = \"y\"\n");

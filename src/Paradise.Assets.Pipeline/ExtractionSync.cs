@@ -13,11 +13,21 @@ public enum SyncAction
     TakeSource,
 
     /// <summary>
-    /// Keep the file and write its expressible half back into the container. A format that CAN do
-    /// that records both sides as the document, since the container then reads as it; one that
-    /// cannot says so and keeps the recorded pair, leaving the divergence visible.
+    /// The document moved and the container did not. Keep the file and write its expressible half
+    /// back into the container: a format that CAN do that records both sides as the document, since
+    /// the container then reads as it. One that cannot keeps the recorded pair, leaving the
+    /// divergence visible for the re-export that will make it a conflict.
     /// </summary>
     TakeDocument,
+
+    /// <summary>
+    /// Both sides moved and the author said to keep the document. Distinct from
+    /// <see cref="TakeDocument"/> because the answer for a format that cannot write back is the
+    /// opposite: there the divergence is deliberate and now RESOLVED, so both current fingerprints
+    /// are recorded. Keeping the old pair would re-raise the same conflict on every later run and
+    /// leave `--take-document` unable to settle it at all.
+    /// </summary>
+    ResolveToDocument,
 
     /// <summary>A file no sync recorded that already holds what the container extracts to: record it as this container's, writing nothing.</summary>
     Adopt,
@@ -94,7 +104,7 @@ public static class ExtractionSync
             _ => resolution switch
             {
                 ConflictResolution.TakeGlb => new SyncOutcome(SyncAction.TakeSource, "conflict: took the container's"),
-                ConflictResolution.TakeDocument => new SyncOutcome(SyncAction.TakeDocument, "conflict: kept the document's"),
+                ConflictResolution.TakeDocument => new SyncOutcome(SyncAction.ResolveToDocument, "conflict: kept the document's"),
                 _ => new SyncOutcome(SyncAction.Refuse, Problem:
                     $"both the container and the extracted {noun} changed since they were last in step; re-run with `--take-glb` or `--take-document`"),
             },

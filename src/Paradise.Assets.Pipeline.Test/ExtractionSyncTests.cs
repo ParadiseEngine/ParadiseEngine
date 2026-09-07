@@ -52,8 +52,27 @@ public class ExtractionSyncTests
 
         await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeGlb).Action)
             .IsEqualTo(SyncAction.TakeSource);
+        // ResolveToDocument, NOT TakeDocument: the two differ for a format that cannot write back.
+        // A passive divergence there holds the recorded pair so a re-export becomes the conflict it
+        // is; a RESOLVED conflict records both sides as they stand, or `--take-document` could
+        // never settle anything and the same conflict would return on every run.
         await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeDocument).Action)
+            .IsEqualTo(SyncAction.ResolveToDocument);
+    }
+
+    [Test]
+    public async Task a_resolved_conflict_is_a_different_action_from_a_passive_divergence()
+    {
+        var recorded = Recorded(Source, Document);
+
+        // Only the document moved — nobody asked for anything.
+        await Assert.That(ExtractionSync.Decide(Source, "edited", recorded, ConflictResolution.Refuse).Action)
             .IsEqualTo(SyncAction.TakeDocument);
+
+        // Both moved and the author named a side. Same "keep the document" intent, but the caller
+        // has to be able to tell them apart, so it is not carried in the note.
+        await Assert.That(ExtractionSync.Decide("changed", "edited", recorded, ConflictResolution.TakeDocument).Action)
+            .IsEqualTo(SyncAction.ResolveToDocument);
     }
 
     [Test]

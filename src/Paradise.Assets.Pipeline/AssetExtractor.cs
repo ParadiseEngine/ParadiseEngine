@@ -250,17 +250,33 @@ public static partial class AssetExtractor
             => a.Mesh == b.Mesh && a.Skeleton == b.Skeleton && a.Directory == b.Directory
                 && a.Clips.SequenceEqual(b.Clips) && a.Materials.SequenceEqual(b.Materials) && a.Images.SequenceEqual(b.Images);
 
+        /// <summary>
+        /// Records what resolved. An entry the scan could not give a guid is DROPPED rather than
+        /// written — the reference codec throws on one — but the rest is still saved, because the
+        /// files it names were written and a sidecar that does not say so reports them as conflicts
+        /// the author never made on the retry. Reporting happens here too: the abort paths reach
+        /// Save without having called ReportUnresolved, and silence would be worse than the throw
+        /// this guard replaced.
+        /// </summary>
         private void Save(AssetIndex index, UPath sidecarPath, GlbExtraction extraction)
         {
             var identified = Identified(index, extraction);
-
-            // ReportUnresolved has already named these; writing them would throw out of the codec.
-            if (identified.Entries().Any(entry => entry.Reference.Guid == Guid.Empty)) return;
+            ReportUnresolved(index, identified);
 
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
-            GlbImportSettings.WriteExtraction(meta, identified);
+            GlbImportSettings.WriteExtraction(meta, Resolved(identified));
             meta.Save(fileSystem, sidecarPath);
         }
+
+        /// <summary>The record with every entry the scan could not identify removed, so what is written can be.</summary>
+        private static GlbExtraction Resolved(GlbExtraction extraction) => extraction with
+        {
+            Mesh = extraction.Mesh is { Guid: var m } && m == Guid.Empty ? null : extraction.Mesh,
+            Skeleton = extraction.Skeleton is { Guid: var s } && s == Guid.Empty ? null : extraction.Skeleton,
+            Clips = [.. extraction.Clips.Where(clip => clip.Reference.Guid != Guid.Empty)],
+            Materials = [.. extraction.Materials.Where(material => material.Entry.Reference.Guid != Guid.Empty)],
+            Images = [.. extraction.Images.Where(image => image.Entry.Reference.Guid != Guid.Empty)],
+        };
 
         /// <summary>
         /// Errors for every extracted file the scan cannot give a guid, and whether there were any.
@@ -270,15 +286,15 @@ public static partial class AssetExtractor
         /// the tree does not spell that way: on a case-insensitive filesystem <c>models</c> and
         /// <c>Models</c> are one folder but two index keys.
         /// </summary>
-        private bool ReportUnresolved(AssetIndex index, GlbExtraction extraction)
+        private void ReportUnresolved(AssetIndex index, GlbExtraction extraction)
         {
-            var unresolved = Identified(index, extraction).Entries().Where(entry => entry.Reference.Guid == Guid.Empty).ToList();
-            foreach (var (where, reference) in unresolved)
+            foreach (var (where, reference) in Identified(index, extraction).Entries().Where(entry => entry.Reference.Guid == Guid.Empty))
             {
-                _errors.Add($"{index.Relative(glb)}: {where} wrote '{reference.Path}', which no asset under assets/ carries; check the directory `[extract]` names for it — the spelling, its case included, has to match the tree");
+                // Deduplicated: Save reports too, so an abort path that already named one does not
+                // say it twice.
+                var message = $"{index.Relative(glb)}: {where} wrote '{reference.Path}', which no asset under assets/ carries; check the directory `[extract]` names for it — the spelling, its case included, has to match the tree";
+                if (!_errors.Contains(message)) _errors.Add(message);
             }
-
-            return unresolved.Count > 0;
         }
 
         private ExtractDirectories Directories(GlbExtraction settings, ProjectManifest manifest)
@@ -394,6 +410,13 @@ public static partial class AssetExtractor
                 index = rescan();
                 skeleton = Identified(index, skeleton);
             }
+
+            // Still nothing carrying it: the skeleton landed where the scan does not see it — an
+            // `[extract]` directory the tree ignores, or spells with another case. Writing the
+            // document anyway throws out of the reference codec, naming neither the GLB nor the
+            // directory, and the watcher drains without a try/catch, so that reaches a save. The
+            // skeleton's own entry is unresolved too, which is what ReportUnresolved names.
+            if (skeleton.Guid == Guid.Empty) return recorded;
 
             return Document(index, target, new MeshReferenceDocument(source, MeshSlot.SkinnedMesh, Skeleton: skeleton), recorded);
         }
@@ -565,6 +588,13 @@ public static partial class AssetExtractor
                     _warnings.Add($"{relative} changed since it was extracted, and a {kind} cannot be written back into the GLB yet; `extract --take-glb` re-extracts it, or keep the edit and this warning");
                     return recorded;
 
+                case SyncAction.ResolveToDocument:
+                    // The author settled a conflict. Both sides are recorded as they stand — the
+                    // container's is NOT the document's, since nothing was written back — so the
+                    // conflict is over rather than raised again on every later run.
+                    _written.Add(new ExtractedFile(relative, outcome.Note));
+                    return Entry(sourceSide, documentSide!);
+
                 default:
                     _errors.Add($"{relative}: {outcome.Problem}");
                     return recorded;
@@ -646,7 +676,10 @@ public static partial class AssetExtractor
                 case SyncAction.TakeSource:
                     return TakeGlb(index, path, fromGlb, onDisk, entry, glbSide, outcome.Note!);
 
-                case SyncAction.TakeDocument:
+                case SyncAction.TakeDocument or SyncAction.ResolveToDocument:
+                    // A material's expressible half goes back into the GLB either way, so after it
+                    // the two sides read alike and the distinction the blob path needs does not
+                    // arise here.
                     return TakeDocument(index, path, materialIndex, onDisk, entry, documentSide, outcome.Note!);
 
                 case SyncAction.Adopt:

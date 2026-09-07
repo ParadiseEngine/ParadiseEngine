@@ -712,6 +712,112 @@ public class AssetExtractorTests
     }
 
     [Test]
+    public async Task a_sidecar_from_before_the_record_moved_keeps_its_directory_and_its_identities()
+    {
+        // The record used to live in [glb], in glTF's shape. A tree minted then must not lose its
+        // per-GLB `extract` directory or its recorded guids on the first run after the move: Target
+        // would fall back to the default path, write new files there under NEW identities, and
+        // orphan everything the project already references.
+        using var fileSystem = Project();
+        var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "custom" } });
+        meta.Save(fileSystem, Glb + ".meta");
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/assets/custom/crate.wood.material")).IsTrue();
+
+        var before = ExtractionRecord.Read(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+
+        // Rewrite that record the old way and take the new domain away entirely.
+        var legacy = SidecarMeta.Load(fileSystem, Glb + ".meta");
+        var glb = new CanonicalTomlTable { { "extract", "custom" } };
+        if (before.OfKind(ExtractKind.Meshes).FirstOrDefault() is { } mesh) glb.Add("mesh", AssetReferenceCodec.Write(mesh.Reference));
+        static object Named(ExtractedPart part) => new CanonicalInlineTable
+        {
+            { "index", (long)part.Index },
+            { "name", part.Name },
+            { "guid", DocumentGuid.Format(part.Reference.Guid) },
+            { "path", part.Reference.Path },
+            { "glb", part.SourceFingerprint! },
+            { "doc", part.DocumentFingerprint! },
+        };
+
+        glb.Add("materials", before.OfKind(ExtractKind.Materials).Select(Named).ToList());
+
+        // Images too, and they are the ones that PROVE the migration is needed: the first extract
+        // took them out of the container, so nothing can re-derive them and the record is their
+        // only memory. Drop it and they are simply gone.
+        glb.Add("images", before.OfKind(ExtractKind.Textures).Select(Named).ToList());
+        legacy.SetSetting(GlbImportSettings.Domain, glb);
+        legacy.RemoveSetting(ExtractionRecord.Domain);
+        legacy.Save(fileSystem, Glb + ".meta");
+
+        var migrated = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(migrated.Errors).IsEmpty();
+        await Assert.That(migrated.Written).IsEmpty();          // nothing re-written at a default path
+        var after = ExtractionRecord.Read(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(after.Directory).IsEqualTo("custom");  // the per-GLB override survived
+        var beforeSet = string.Join("\n", before.Parts.OrderBy(x => x.Reference.Path, StringComparer.Ordinal).Select(x => $"{x.Kind}/{x.Index} {x.Reference.Path} {x.Reference.Guid}"));
+        var afterSet = string.Join("\n", after.Parts.OrderBy(x => x.Reference.Path, StringComparer.Ordinal).Select(x => $"{x.Kind}/{x.Index} {x.Reference.Path} {x.Reference.Guid}"));
+        await Assert.That(afterSet).IsEqualTo(beforeSet);
+
+        // And the legacy keys are gone, so this runs once.
+        await Assert.That(SidecarMeta.Load(fileSystem, Glb + ".meta").Setting(GlbImportSettings.Domain)?.Value("mesh")).IsNull();
+    }
+
+    [Test]
+    public async Task a_skinned_glbs_unindexed_skeleton_is_an_error_not_a_throw()
+    {
+        // The rigid path was covered; this is the skinned one, where the .skinnedmesh NAMES the
+        // skeleton. Writing that document with an unresolved reference threw out of the codec
+        // before anything could report it — and the watcher drains with no try/catch, so it
+        // reached a save as a stack trace naming neither the GLB nor the directory.
+        using var fileSystem = Project(SkinnedCrateGlb(), manifest: """
+            name = "x"
+            schema_version = 1
+
+            [assets]
+            ignore = ["hidden/*"]
+
+            [extract]
+            skeletons = "hidden"
+            """);
+
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Any(e => e.Contains("extract.skeleton") && e.Contains("hidden/crate.skeleton"))).IsTrue();
+        await Assert.That(result.Errors.All(e => !e.Contains("Parameter"))).IsTrue();
+
+        // The mesh document is not written either: one that names a skeleton nothing carries would
+        // be a dangling reference the build follows.
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.skinnedmesh")).IsFalse();
+    }
+
+    [Test]
+    public async Task take_document_settles_an_image_conflict_instead_of_raising_it_forever()
+    {
+        using var fileSystem = Project();
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        // Both sides move: the GLB is re-exported with new pixels AND the extracted file is edited.
+        fileSystem.WriteAllBytes(Glb, CrateGlb(png: [.. s_png, 9, 9]));
+        fileSystem.WriteAllBytes("/game/assets/models/crate_0.png", [0xAB, 0xCD]);
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Succeeded).IsFalse();
+
+        var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeDocument);
+        await Assert.That(resolved.Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xAB, 0xCD });
+
+        // The point: the conflict is OVER. An image cannot be written back into the GLB, so the two
+        // sides stay different — recording the old pair would raise the same conflict every run and
+        // leave --take-document unable to settle anything.
+        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(again.Succeeded).IsTrue();
+        await Assert.That(again.Errors).IsEmpty();
+    }
+
+    [Test]
     public async Task an_extract_directory_the_scan_does_not_carry_is_an_error_naming_it()
     {
         // The sidecar records an output by guid, and the index is what hands one out. When it
