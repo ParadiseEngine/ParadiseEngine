@@ -68,6 +68,15 @@ public class FeatureSwitchTests
         return scene;
     }
 
+    /// <summary>Flip the capture switch and let the pipeline adopt it NOW. A switch is adopted at
+    /// the start of a frame, so a host that wants to bind a material to the view before the next
+    /// one begins the frame itself — which is what BeginFrame is public for.</summary>
+    private static void SetCapture(PbrRenderer pbr, bool enabled)
+    {
+        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, enabled);
+        pbr.Pipeline.BeginFrame();
+    }
+
     /// <summary>The capture feature, reached the way anything reaches a feature.</summary>
     private static SceneColorCaptureFeature Capture(PbrRenderer pbr) =>
         pbr.Pipeline.Find<SceneColorCaptureFeature>()!;
@@ -318,10 +327,10 @@ public class FeatureSwitchTests
         capture.ViewChanged += () => changes++;
 
         var offByDefault = capture.View.IsValid;
-        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+        SetCapture(pbr, true);
         var viewWhenOn = capture.View.IsValid;
 
-        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, false);
+        SetCapture(pbr, false);
         var viewWhenOff = capture.View.IsValid;
 
         await Assert.That(offByDefault).IsFalse();

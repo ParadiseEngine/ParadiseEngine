@@ -246,7 +246,7 @@ because a namespace of the latter name is in scope for every file under `Paradis
 an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
 meaning Microsoft.Coyote's, and all six stopped compiling.
 
-Twelve things that are not obvious:
+Thirteen things that are not obvious:
 
 - **A switch and a scene setting are different questions, and both have to say yes.** The switch is
   the platform's answer ("this build does not do probe GI"), applied once from configuration; a
@@ -259,6 +259,18 @@ Twelve things that are not obvious:
   exists, so an override lands on a name nothing has declared yet. It is kept by NAME and still
   wins when the declaration arrives — and a name no declaration ever claims stays in `Unknown`
   instead of vanishing, because a typo in a config file must not read as a feature that is off.
+- **A switch is read ONCE per frame and once per schedule run, and a transition is announced
+  there.** `RenderPipeline.BeginFrame` takes the frame's answer for every feature; requirements,
+  setup and `BeforeSubmit` all read it, so a switch flipped mid-frame lands on the next one.
+  `SystemSchedule` does the same before its first wave. Read live at each phase instead — which
+  is how both were first written — and a frame can set the shadow pass up, let it stage its
+  caster ring while the graph records, and then skip the `BeforeSubmit` that uploads it; and a
+  tick can run half of a gameplay feature's systems and skip the rest, with which half depending
+  on another thread's timing. That is also why the pipeline does NOT subscribe to
+  `FeatureSwitches.Changed`: a handler releasing a target on the flipping thread would be doing
+  it while the render thread recorded with it. A host that flips a switch and needs the feature
+  to have caught up before the next frame calls `BeginFrame` itself. Both are pinned by tests
+  that flip a switch from INSIDE the frame or run, which is the race made deterministic.
 - **A feature that leaves state behind must implement `IRenderFeature.OnEnabledChanged`.** Being
   switched off is not the same as declaring no passes: the shadow plan, the pre-pass's SSAO
   uniforms and the probe volume are all read by the SCENE every frame whether or not the feature

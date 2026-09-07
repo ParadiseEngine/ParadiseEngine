@@ -42,8 +42,14 @@ public interface IFeatureSwitches
     ///
     /// <para>Handlers run on the thread that made the change, and while writes are held off — so
     /// the last thing a handler was told about a feature is what <see cref="IsEnabled"/> now
-    /// answers for it. That is what lets a handler ACT on the announcement: release a target,
-    /// retract a plan, zero a buffer somebody else binds every frame.</para></summary>
+    /// answers for it.</para>
+    ///
+    /// <para><b>That thread is whoever flipped the switch, which is why a subscriber that owns
+    /// GPU or per-frame state does not use this event.</b> <c>RenderPipeline</c> polls instead,
+    /// once as it begins a frame, and announces the transition there: a handler releasing a
+    /// target from a debug panel's thread would be doing it while the render thread recorded
+    /// with it, and a frame that read the switch again at each phase could set a feature up and
+    /// then skip the submit half of it.</para></summary>
     event Action<FeatureId, bool>? Changed;
 
     /// <summary>Raised when a feature's settings are replaced, with the new ones — how a re-read

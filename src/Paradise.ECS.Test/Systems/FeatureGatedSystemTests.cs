@@ -2,6 +2,31 @@ using Paradise.Features;
 
 namespace Paradise.ECS.Test;
 
+/// <summary>Flips a feature switch from INSIDE a run — the deterministic stand-in for a debug
+/// panel or a config reload doing it on another thread, which is what makes the snapshot's
+/// absence observable without a race.</summary>
+public ref partial struct FlipsAFeatureMidRunSystem : IWorldSystem
+{
+    public static FeatureSwitches? Switches { get; set; }
+    public static FeatureId Target { get; set; }
+
+    public WsMovable.Segments Movable;
+
+    public void Execute() => Switches?.Set(Target, false);
+}
+
+/// <summary>Ordered after the flipper, so it lands in a later wave and would be skipped by a
+/// schedule that re-read the switch as it walked.</summary>
+[After<FlipsAFeatureMidRunSystem>]
+public ref partial struct MovesAfterTheFlipSystem : IEntitySystem
+{
+    public ref TestPosition Position;
+    public ref readonly TestVelocity Velocity;
+
+    public void Execute() =>
+        Position = new TestPosition { X = Position.X + Velocity.X, Y = Position.Y, Z = Position.Z };
+}
+
 /// <summary>A gameplay feature is a set of systems, switched from the same engine configuration
 /// the renderer reads. The schedule skips a gated system whose feature is off, and picks it up
 /// again the run after it comes back — no rebuild, no <c>if</c> inside the system.</summary>
@@ -84,6 +109,43 @@ public sealed class FeatureGatedSystemTests : IDisposable
         schedule.Run(_world);
 
         await Assert.That(_world.GetComponent<TestPosition>(e).X).IsEqualTo(2f);
+    }
+
+    /// <summary>A switch flipped WHILE a run is in progress lands on the NEXT run. Every system
+    /// of a feature belongs to the same tick or none of it does.
+    ///
+    /// <para>Re-read as the waves are walked instead, a feature switched off midway runs the
+    /// systems already scheduled and skips the rest — a tick in which a gameplay feature half
+    /// happened, and which half depended on another thread's timing.</para></summary>
+    [Test]
+    public async Task a_feature_switched_off_mid_run_still_finishes_that_run()
+    {
+        var e = SpawnMover();
+        var switches = Switches();
+        FlipsAFeatureMidRunSystem.Switches = switches;
+        FlipsAFeatureMidRunSystem.Target = s_movement.Id;
+        try
+        {
+            var schedule = SystemSchedule.Create()
+                .AddWorld<FlipsAFeatureMidRunSystem>()
+                .Add<MovesAfterTheFlipSystem>(s_movement.Id)
+                .Build<SequentialWaveScheduler>(switches);
+
+            schedule.Run(_world);
+            var afterTheRunThatFlipped = _world.GetComponent<TestPosition>(e).X;
+            schedule.Run(_world);
+            var afterTheNext = _world.GetComponent<TestPosition>(e).X;
+
+            // The flip happened in wave 0; the gated system is in wave 1 and still ran.
+            await Assert.That(afterTheRunThatFlipped).IsEqualTo(1f);
+            await Assert.That(switches.IsEnabled(s_movement.Id)).IsFalse();
+            // The next run is the one that adopts it.
+            await Assert.That(afterTheNext).IsEqualTo(1f);
+        }
+        finally
+        {
+            FlipsAFeatureMidRunSystem.Switches = null;
+        }
     }
 
     /// <summary>One feature off does not disturb the systems around it, including the ones the

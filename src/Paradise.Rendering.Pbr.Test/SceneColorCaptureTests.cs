@@ -11,6 +11,15 @@ namespace Paradise.Rendering.Pbr.Test;
 /// live material to the new view.</summary>
 public class SceneColorCaptureTests
 {
+    /// <summary>Flip the capture switch and let the pipeline adopt it NOW. A switch is adopted at
+    /// the start of a frame, so a host that wants to bind a material to the view before the next
+    /// one begins the frame itself — which is what BeginFrame is public for.</summary>
+    private static void SetCapture(PbrRenderer pbr, bool enabled)
+    {
+        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, enabled);
+        pbr.Pipeline.BeginFrame();
+    }
+
     /// <summary>The capture feature, reached the way anything reaches a feature.</summary>
     private static SceneColorCaptureFeature Capture(PbrRenderer pbr) =>
         pbr.Pipeline.Find<SceneColorCaptureFeature>()!;
@@ -94,7 +103,7 @@ public class SceneColorCaptureTests
             for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
             var off = (byte[])renderer.ReadbackColor(out _, out _).Clone();
 
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
             await Assert.That(Capture(pbr).View.IsValid).IsTrue();
             for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
             var on = renderer.ReadbackColor(out _, out _);
@@ -103,7 +112,7 @@ public class SceneColorCaptureTests
             // opaque-only frame — the same draws hit the same targets with the same state.
             await Assert.That(off.AsSpan().SequenceEqual(on)).IsTrue();
 
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, false);
+            SetCapture(pbr, false);
             await Assert.That(Capture(pbr).View.IsValid).IsFalse();
         }
         finally
@@ -120,7 +129,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -167,7 +176,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -211,7 +220,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
             var oldView = Capture(pbr).View;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
@@ -292,7 +301,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
             var oldView = Capture(pbr).View;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
@@ -331,7 +340,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.depthProbeFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -374,7 +383,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
 
             var raised = 0;
             var viewValidInHandler = true;
@@ -387,7 +396,7 @@ public class SceneColorCaptureTests
             // Disable must notify too — a subscriber still bound to the old view is otherwise
             // left holding a bind group over a destroyed resource. In the handler the view is
             // already INVALID: unbind/repoint, never re-bind it.
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, false);
+            SetCapture(pbr, false);
             await Assert.That(raised).IsEqualTo(1);
             await Assert.That(viewValidInHandler).IsFalse();
         }
@@ -405,7 +414,7 @@ public class SceneColorCaptureTests
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, true);
+            SetCapture(pbr, true);
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);

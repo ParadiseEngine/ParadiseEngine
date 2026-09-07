@@ -34,10 +34,15 @@ public class RenderPipelineTests
             Log.Add((enabled ? "on " : "off ") + Definition.Name);
         }
 
+        /// <summary>Flipped by a probe that has to change a switch from inside the frame — the
+        /// deterministic stand-in for a debug panel doing it on another thread.</summary>
+        public Action? DuringSetup { get; init; }
+
         public void Setup(in FrameContext frame)
         {
             Log.Add(Definition.Name);
             SeenRequirements = frame.Requirements;
+            DuringSetup?.Invoke();
             if (Publishes is not null)
             {
                 frame.Textures.Ensure(Publishes, new TextureDesc(null, 4, 4, 1, 1, 1, TextureDimension.D2,
@@ -70,7 +75,9 @@ public class RenderPipelineTests
 
         pipeline.Setup(GraphWithTextures());
 
-        await Assert.That(log).IsEquivalentTo(["test.a", "test.c"]);
+        // "off test.b" leads: the frame adopts the switch when it begins, which is also where the
+        // feature is told — not on the thread that flipped it.
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "test.c"]);
     }
 
     /// <summary>The switch is read every frame, so a host, a debug panel or a hot-reloaded config
@@ -88,6 +95,7 @@ public class RenderPipelineTests
         pipeline.Switches.Set(a.Definition.Id, true);
         pipeline.Setup(GraphWithTextures());
 
+        // Each transition is announced by the frame that adopts it, immediately before the setups.
         await Assert.That(log).IsEquivalentTo(["test.a", "off test.a", "on test.a", "test.a"]);
     }
 
@@ -109,7 +117,66 @@ public class RenderPipelineTests
         pipeline.Setup(GraphWithTextures());
         pipeline.BeforeSubmit();
 
-        await Assert.That(log).IsEquivalentTo(["test.a", "test.c", "submit test.a", "submit test.c"]);
+        await Assert.That(log)
+            .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"]);
+    }
+
+    /// <summary>A switch flipped WHILE the frame is being built does not take effect until the
+    /// next one. Every phase — requirements, setup, BeforeSubmit — reads the answer the frame
+    /// began with.
+    ///
+    /// <para>Read live at each phase instead, this is a half-configured frame: the shadow pass
+    /// sets up, stages its caster ring while the graph records, and then never gets the
+    /// BeforeSubmit that uploads it, so the submitted stream draws from a buffer nobody
+    /// filled.</para></summary>
+    [Test]
+    public async Task a_switch_flipped_during_a_frame_lands_on_the_next_one()
+    {
+        var log = new List<string>();
+        var b = new Probe("b", FrameRequirements.SceneColorCapture) { Log = log };
+        FeatureSwitches? switches = null;
+        var a = new Probe("a") { Log = log, DuringSetup = () => switches!.Set(b.Definition.Id, false) };
+        switches = new FeatureSwitches();
+        using var pipeline = new RenderPipeline(8, 8, switches).Add(a).Add(b);
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+        var seenByA = a.SeenRequirements;
+
+        var duringTheFrame = new List<string>(log);
+        log.Clear();
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+
+        // b was switched off midway through the first frame and still finished it, start to end.
+        await Assert.That(seenByA).IsEqualTo(FrameRequirements.SceneColorCapture);
+        await Assert.That(duringTheFrame)
+            .IsEquivalentTo(["test.a", "test.b", "submit test.a", "submit test.b"]);
+        // The second frame is the one that adopts it — and the transition is announced there,
+        // on the thread that begins the frame, not on the one that flipped the switch.
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "submit test.a"]);
+    }
+
+    /// <summary>The renderer decides things before any feature sets up — whether to build the
+    /// trace hierarchy, for one — so it can begin the frame itself and get the same answer setup
+    /// will use.</summary>
+    [Test]
+    public async Task beginning_the_frame_early_fixes_the_answer_setup_uses()
+    {
+        var switches = new FeatureSwitches();
+        var a = new Probe("a");
+        using var pipeline = new RenderPipeline(8, 8, switches).Add(a);
+
+        pipeline.BeginFrame();
+        var beforeFlip = pipeline.IsEnabled(a);
+        switches.Set(a.Definition.Id, false);
+        var afterFlip = pipeline.IsEnabled(a);
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(beforeFlip).IsTrue();
+        await Assert.That(afterFlip).IsTrue();          // the frame already began
+        await Assert.That(a.Log).IsEquivalentTo(["test.a"]);
+        await Assert.That(switches.IsEnabled(a.Definition.Id)).IsFalse(); // the switch did move
     }
 
     /// <summary>The transition, not the state: a feature that must retract something it left

@@ -25,10 +25,12 @@ public sealed class SceneColorCaptureFeature : IRenderFeature
     public FeatureDefinition Definition => PbrFeatures.SceneColorCapture;
     public FrameRequirements Requires => FrameRequirements.SceneColorCapture;
 
-    /// <summary>The target exists exactly while the switch is on, and
-    /// <see cref="ViewChanged"/> fires on the transition — synchronously, on the thread that
-    /// flipped it, so a host can switch capture on and then create the materials that bind
-    /// <see cref="View"/>.</summary>
+    /// <summary>The target exists exactly while the switch is on, and <see cref="ViewChanged"/>
+    /// fires on the transition — which the PIPELINE delivers when it begins a frame, not when the
+    /// switch was flipped. A host that turns capture on and wants to bind a material to
+    /// <see cref="View"/> before the next frame calls <c>RenderPipeline.BeginFrame</c> in
+    /// between; creating and destroying a target on whichever thread moved a switch is what that
+    /// indirection buys away.</summary>
     public void OnEnabledChanged(bool enabled)
     {
         if (_enabled == enabled) return;

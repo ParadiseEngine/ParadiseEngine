@@ -78,6 +78,9 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     private readonly ImmutableArray<SystemMetadata<TMask>> _metadata;
     private readonly ImmutableArray<FeatureId> _features;
     private readonly IFeatureSwitches? _switches;
+    /// <summary>Whether each system runs in THIS run, read from the switchboard once before any
+    /// wave is built. Sized at construction, refilled per run, never reallocated.</summary>
+    private readonly bool[] _enabledThisRun;
     private readonly IWaveScheduler _scheduler;
     private readonly EntityCommandBufferPool _ecbPool;
     private readonly SystemEventBufferPool _eventPool;
@@ -98,6 +101,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         _metadata = metadata;
         _features = features;
         _switches = switches;
+        _enabledThisRun = new bool[metadata.Length];
         _scheduler = scheduler;
         _ecbPool = new EntityCommandBufferPool();
         _eventPool = new SystemEventBufferPool();
@@ -158,6 +162,12 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         // EntityCommandBuffer. try/finally keeps the flag exception-safe (a throwing system
         // must not wedge the world), and it is cleared BEFORE _ecbPool.PlaybackAll below so
         // playback's Spawn/structural work is not blocked.
+        // ONE read per gated feature, before any wave is built. Read per system as the waves
+        // were walked, a switch flipped mid-run would run some of a feature's systems and skip
+        // the rest — a tick in which a gameplay feature half happened, and which half depended
+        // on another thread's timing.
+        TakeFeatureSnapshot();
+
         world.SetSystemRunInProgress(true);
         try
         {
@@ -223,17 +233,27 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         }
     }
 
-    /// <summary>Whether the feature this system belongs to is switched on. Decided HERE, on the
-    /// scheduling thread, once per run — not inside the system, and not per chunk: a gated
-    /// system that is off contributes no work items at all, so it costs nothing and rents no
-    /// command buffer. Rent order over the systems that DO run is still schedule order, so
-    /// playback stays deterministic.</summary>
-    private bool IsEnabled(int systemId)
+    /// <summary>Fixes which systems run, on the scheduling thread, before the run starts. A
+    /// gated system that is off then contributes no work items at all, so it costs nothing and
+    /// rents no command buffer; rent order over the systems that DO run is still schedule order,
+    /// so playback stays deterministic.</summary>
+    private void TakeFeatureSnapshot()
     {
-        if (_switches is null) return true;
-        var feature = _features[systemId];
-        return feature.IsEmpty || _switches.IsEnabled(feature);
+        if (_switches is null)
+        {
+            Array.Fill(_enabledThisRun, true);
+            return;
+        }
+        for (var systemId = 0; systemId < _enabledThisRun.Length; systemId++)
+        {
+            var feature = _features[systemId];
+            _enabledThisRun[systemId] = feature.IsEmpty || _switches.IsEnabled(feature);
+        }
     }
+
+    /// <summary>Whether this system runs in this run, as <see cref="TakeFeatureSnapshot"/>
+    /// decided before the first wave.</summary>
+    private bool IsEnabled(int systemId) => _enabledThisRun[systemId];
 
     /// <inheritdoc/>
     public void Dispose() => _ecbPool.Dispose();

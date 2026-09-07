@@ -276,6 +276,10 @@ public sealed partial class PbrRenderer : IDisposable
 
         var timings = new PbrCpuTimings();
         Lap();
+        // Before anything reads a switch: this fixes which features run in THIS frame and is the
+        // only place a transition is announced, so the trace-hierarchy decision below and the
+        // features' own setup cannot disagree about what is on.
+        Pipeline.BeginFrame();
         var view = scene.Camera.View;
         var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
 
@@ -311,8 +315,8 @@ public sealed partial class PbrRenderer : IDisposable
         // which means asking the switches too, or a build with the tracers configured off still
         // pays for a hierarchy nothing will walk.
         var tracesThisFrame =
-            (scene.RayTracedAo.Enabled && Switches.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
-            (scene.Gi.Enabled && Switches.IsEnabled(PbrFeatures.GlobalIllumination.Id));
+            (scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
+            (scene.Gi.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id));
         if (tracesThisFrame) _ctx.Trace.BuildFrame(opaque, Materials);
         timings.TraceBuild = Lap();
         _graph.Reset();
