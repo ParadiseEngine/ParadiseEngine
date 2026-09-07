@@ -30,7 +30,7 @@ public static class UniformLayoutValidator
         ("clusterParams", 240, 16),
         ("sceneLights", 256, 6144), // 64 × 96-byte SceneLight
         ("shadowSettings", 6400, 16),
-        ("sceneLightShadowMatrices", 6416, 24576), // 64 × 6 × 64-byte mat4
+        ("sceneLightShadowMatrices", 6416, 24576), // MaxShadowViews × 64-byte mat4
         ("time", 30992, 16),
         ("shadowFilter", 31008, 16),
         ("invViewProj", 31024, 64),

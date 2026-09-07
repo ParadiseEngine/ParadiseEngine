@@ -12,6 +12,12 @@
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 64;
 
+// Shadow views the frame can carry — one array layer each, one matrix each. Its OWN number, not
+// MaxSceneLights * 6: a light that only shades costs no layer, and raising the light cap must not
+// enlarge this array. Mirrored by FrameUniformsGpu.MaxShadowViews, and a divergence between the
+// two is what UniformLayoutValidator throws on at renderer init.
+static const int MaxShadowViews = 384;
+
 struct SceneLight
 {
     float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
@@ -42,7 +48,7 @@ struct FrameUniforms
     float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];
     float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
-    float4x4 sceneLightShadowMatrices[MaxSceneLights * 6]; // per light, per cube face (face 0 for dir/spot)
+    float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow-array layer; index = light.spotAngles.z + face
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
     float4   shadowFilter;   // x: soft-shadow PCF disk radius in shadow texels, yzw unused
     // Inverse of the camera view-projection: how a screen-space effect turns a pre-pass depth
@@ -171,6 +177,11 @@ float shadowDiskHash(float2 pos)
 // per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
 // the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
 // out of the shadow lookup entirely.)
+// lightIndex is unread since the shadow matrices became layer-keyed: the light record carries its
+// own base layer in spotAngles.z. It stays in the signature because a GAME's material shader calls
+// this (Pingu's poolInterior.slang does), and dropping a parameter would break that source for no
+// gain while the light cap is unchanged. It goes with the cap lift, which breaks those shaders
+// anyway.
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
@@ -206,7 +217,10 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if ((float)face >= light.shadowAtlas.y)
         return 1.0;
 
-    int matrixIndex = lightIndex * 6 + face;
+    // The matrix lives at the view's ARRAY LAYER, which is exactly the slice sampled below — one
+    // index for both, rather than a second lightIndex * 6 addressing scheme that reserved six
+    // slots per light and tied the matrix budget to the light budget.
+    int matrixIndex = (int)light.spotAngles.z + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
     if (shadowPos.w <= 0.0)
         return 1.0;

@@ -17,8 +17,10 @@ namespace Paradise.Rendering.Pbr;
 public sealed class ShadowFeature : IRenderFeature
 {
     private const uint DefaultMapSize = 1024;
-    // One array layer per shadow view. Cap = every scene light casting a 6-face point shadow.
-    private const int MaxLayers = FrameUniformsGpu.MaxSceneLights * 6; // 48
+    // One array layer per shadow view, capped by the shadow budget rather than by the light
+    // budget: a light that casts nothing costs no layer, and the two must scale apart because
+    // WebGPU's default maxTextureArrayLayers is 256 while a light cap has no such ceiling.
+    private const int MaxLayers = FrameUniformsGpu.MaxShadowViews;
 
     private readonly PbrContext _ctx;
     private readonly ShaderProgramDesc _program;
