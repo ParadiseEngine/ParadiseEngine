@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.Buffers;
 using System.Numerics;
 using Paradise.Assets.Gltf;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -30,21 +31,35 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly FrameGraph _graph;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
     private readonly List<BufferHandle> _ownedBuffers = [];
-    private readonly ShadowFeature _shadows;
-    private readonly SceneFeature _scene;
-    private readonly SceneColorCaptureFeature _capture;
-    private readonly CompositeFeature _composite;
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
 #if PARADISE_PROFILING
     private readonly System.Diagnostics.Stopwatch _clock = new();
 #endif
 
+    /// <param name="renderer">The backend the frame is submitted to.</param>
+    /// <param name="switches">The engine's feature configuration — the same object the rest of
+    /// the process is switched by. The built-in features declare themselves into it and read it
+    /// every frame, so a config file that says <c>"rendering.bloom": false</c> reaches this
+    /// renderer without the host writing any renderer-specific code.
+    ///
+    /// <para>REQUIRED, and second in the list, because the alternative was a defaulted last
+    /// parameter: a host that forgot it got a private switchboard, every feature at its declared
+    /// default, and a config file that reached nothing — with no error and a frame that still
+    /// renders. A caller that configures nothing writes <c>new FeatureSwitches()</c> and has said
+    /// so.</para></param>
+    /// <param name="width">Frame width in pixels.</param>
+    /// <param name="height">Frame height in pixels.</param>
+    /// <param name="maxAnisotropy">Anisotropic filtering cap for material textures.</param>
+    /// <param name="specularAaVariance">Geometric specular-AA strength.</param>
+    /// <param name="specularAaClamp">Geometric specular-AA clamp.</param>
+    /// <param name="logger">Where engine diagnostics go.</param>
     public PbrRenderer(
-        IRenderer renderer, uint width, uint height,
+        IRenderer renderer, FeatureSwitches switches, uint width, uint height,
         ushort maxAnisotropy = 16, float specularAaVariance = 0.25f, float specularAaClamp = 0.18f,
         ILogger? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(switches);
         _renderer = renderer;
         _log = logger ?? NullLogger.Instance;
         _programs = new MaterialPrograms(renderer);
@@ -53,26 +68,8 @@ public sealed partial class PbrRenderer : IDisposable
         Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
         _ctx.Materials = Materials;
 
-        // List order is dependency order: the scene reads the shadow plan and the pre-pass
-        // result, the capture reads the scene's targets, the composite reads bloom's.
-        _shadows = new ShadowFeature(_ctx);
-        var ssr = new ScreenSpaceReflectionFeature(_ctx);
-        var prepass = new PrepassFeature(_ctx, ssr);
-        var rtao = new RayTracedAoFeature(_ctx);
-        var gi = new ProbeGiFeature(_ctx, _shadows);
-        _scene = new SceneFeature(_ctx, _shadows, prepass, gi, specularAaVariance, specularAaClamp);
-        _capture = new SceneColorCaptureFeature(_ctx);
-        _composite = new CompositeFeature(_ctx);
-        Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height)
-            .Add(_shadows)
-            .Add(prepass)
-            .Add(rtao)
-            .Add(ssr)
-            .Add(gi)
-            .Add(_scene)
-            .Add(_capture)
-            .Add(new BloomFeature(_ctx))
-            .Add(_composite);
+        Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height, switches);
+        PbrBuiltInFeatures.AddTo(Pipeline, _ctx, specularAaVariance, specularAaClamp);
     }
 
     public MaterialResourceCache Materials { get; }
@@ -85,79 +82,16 @@ public sealed partial class PbrRenderer : IDisposable
     public IReadOnlyList<string> LastPassNames => _graph.LivePassNames;
 
     /// <summary>The features that make up a frame, in the order they set up. A host adds its own
-    /// after these; they see the engine's targets by the names in <see cref="PbrTargets"/> and
-    /// its results by those in <see cref="PbrResults"/>.</summary>
+    /// through <see cref="RenderPipeline.Add"/> — after these by default, or at a
+    /// <see cref="PbrFeatureOrder"/> slot to land between two of them; they see the engine's
+    /// targets by the names in <see cref="PbrTargets"/> and its results by those in
+    /// <see cref="PbrResults"/>.</summary>
     public RenderPipeline Pipeline { get; }
 
-    /// <summary>Per-layer shadow map resolution. Settable at runtime (the array is recreated on
-    /// the next frame); clamped to [256, 8192]. Scenes author this through the export contract's
-    /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
-    public uint ShadowMapSize
-    {
-        get => _shadows.MapSize;
-        set => _shadows.MapSize = value;
-    }
-
-    /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
-    /// shadow edge). Scenes author this through the export contract's <c>Lighting.ShadowBlur</c>;
-    /// hosts apply it here. Clamped to [0.5, 8].</summary>
-    public float ShadowBlurTexels
-    {
-        get => _shadows.BlurTexels;
-        set => _shadows.BlurTexels = value;
-    }
-
-    /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
-    /// shadow map covers. A camera-centred fit keeps texel density constant no matter how big the
-    /// scene grows; the box is snapped to whole texels so it does not shimmer as the camera moves,
-    /// and the depth range still spans the scene AABB so tall casters outside the circle keep
-    /// casting in. When the scene is smaller than the radius (or the radius is 0) the whole-scene
-    /// fit applies — small scenes keep their tighter box.</summary>
-    public float DirectionalShadowRadius
-    {
-        get => _shadows.DirectionalRadius;
-        set => _shadows.DirectionalRadius = value;
-    }
-
-    /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
-    public void SetSpecularAa(float variance, float clamp) => _scene.SetSpecularAa(variance, clamp);
-
-    /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
-    /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
-    /// <see cref="SceneColorView"/> before the blend bucket renders — so a blend material
-    /// (water) can sample what is BEHIND it for screen-space refraction. Enable before creating
-    /// the materials that bind the view. Costs one fullscreen blit plus a color+depth reload
-    /// per frame while enabled.</summary>
-    public bool SceneColorCapture
-    {
-        get => _capture.Enabled;
-        set => _capture.Enabled = value;
-    }
-
-    /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
-    /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
-    /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
-    /// geometry in front of the surface — fall back to the unoffset sample). Two consumer
-    /// caveats: the fp16 alpha quantizes 32-bit device depth (~5e-4 steps near the far plane),
-    /// so treat it as a coarse near/mid-field signal, not a precise depth buffer; and READ THE
-    /// DEPTH VIA textureLoad, never a filtering sampler — bilinear across a depth discontinuity
-    /// interpolates a depth belonging to no real surface and mis-rejects at silhouettes (the
-    /// color half may stay filtered). Invalid while
-    /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
-    /// material extra entries from <see cref="SceneColorViewChanged"/> via
-    /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
-    public TextureViewHandle SceneColorView => _capture.View;
-
-    /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
-    /// capture, or Resize while enabled — rebind material extra entries to the new view) or
-    /// destroyed (disabling capture — the view is INVALID in the handler; unbind or repoint
-    /// affected materials, never re-bind the stale view). Always fires after every engine-side
-    /// rebind, so subscribers see a consistent renderer.</summary>
-    public event Action? SceneColorViewChanged
-    {
-        add => _capture.ViewChanged += value;
-        remove => _capture.ViewChanged -= value;
-    }
+    /// <summary>The engine's feature configuration, as this renderer reads it every frame.
+    /// Flipping a switch here changes the next frame — see <see cref="PbrFeatures"/> for the
+    /// names, and note that a scene's own <c>Enabled</c> flags still have to agree.</summary>
+    public FeatureSwitches Switches => Pipeline.Switches;
 
     public float AspectRatio => _ctx.Width / (float)_ctx.Height;
 
@@ -342,6 +276,10 @@ public sealed partial class PbrRenderer : IDisposable
 
         var timings = new PbrCpuTimings();
         Lap();
+        // Before anything reads a switch: this fixes which features run in THIS frame and is the
+        // only place a transition is announced, so the trace-hierarchy decision below and the
+        // features' own setup cannot disagree about what is on.
+        Pipeline.BeginFrame();
         var view = scene.Camera.View;
         var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
 
@@ -373,8 +311,13 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
         timings.Partition = Lap();
-        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it.
-        if (scene.RayTracedAo.Enabled || scene.Gi.Enabled) _ctx.Trace.BuildFrame(opaque, Materials);
+        // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it —
+        // which means asking the switches too, or a build with the tracers configured off still
+        // pays for a hierarchy nothing will walk.
+        var tracesThisFrame =
+            (scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
+            (scene.Gi.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id));
+        if (tracesThisFrame) _ctx.Trace.BuildFrame(opaque, Materials);
         timings.TraceBuild = Lap();
         _graph.Reset();
         Pipeline.Setup(_graph);
@@ -385,8 +328,8 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BindGroups.EndFrame();
         timings.Compile = Lap();
 
-        // Recording staged the draw uniforms; upload them now, before the stream that reads them.
-        _shadows.UploadStagedDraws();
+        // Recording staged what the stream is about to read; every feature uploads its own now.
+        Pipeline.BeforeSubmit();
         if (_ctx.DrawIndex > 0)
             _renderer.UpdateBuffer<byte>(_ctx.DrawUniformRing, 0, _ctx.DrawStaging.AsSpan(0, _ctx.DrawIndex * (int)_ctx.DrawStride));
         // One write for every skinned instance staged this frame — the payload GPU skinning trades
@@ -422,14 +365,6 @@ public sealed partial class PbrRenderer : IDisposable
     internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
     internal int CustomProgramCountForTest => _programs.CustomProgramCount;
-    internal bool UsesSrgbEntryPointForTest => _composite.UsesSrgbEntryPoint;
-    internal bool CaptureFrameLightsForTest
-    {
-        get => _scene.CaptureFrameLightsForTest;
-        set => _scene.CaptureFrameLightsForTest = value;
-    }
-    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _scene.GetLightShadowAtlasForTest(lightIndex);
-    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => _scene.GetLightSizeParamsForTest(lightIndex);
 
     public void Dispose()
     {

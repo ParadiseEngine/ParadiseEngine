@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -41,8 +42,7 @@ public sealed class BloomFeature : IRenderFeature
         EnsureChain();
     }
 
-    public string Name => "Bloom";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.Bloom;
     public FrameRequirements Requires => FrameRequirements.None;
 
     public void Resize(uint width, uint height) => EnsureChain();

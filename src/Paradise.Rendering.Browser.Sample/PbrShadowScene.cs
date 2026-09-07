@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 using Paradise.Assets.Gltf;
 using Paradise.Diagnostics;
+using Paradise.Features;
 using Paradise.Rendering.Pbr;
 
 namespace Paradise.Rendering.Browser.Sample;
@@ -34,7 +35,7 @@ internal sealed class PbrShadowScene : IDisposable
     {
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
-        _pbr = new PbrRenderer(renderer, _width, _height, logger: logger);
+        _pbr = new PbrRenderer(renderer, new FeatureSwitches(), _width, _height, logger: logger);
 
         var (vertices, indices) = Procedural.UnitCube();
         var groundMaterial = _pbr.Materials.AddDefaultMaterial(new Vector4(0.42f, 0.45f, 0.5f, 1f), metallic: 0f, roughness: 0.9f);

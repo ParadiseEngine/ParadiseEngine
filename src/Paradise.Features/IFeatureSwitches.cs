@@ -1,0 +1,60 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Paradise.Features;
+
+/// <summary>The read half of the engine's feature configuration: which features this build has,
+/// and whether each is on RIGHT NOW.
+///
+/// <para>This is the abstraction a subsystem depends on. A renderer, an ECS schedule or a debug
+/// UI takes an <see cref="IFeatureSwitches"/> and asks; it never learns where the answer came
+/// from — a declaration's default, a config file, an environment variable, a command-line flag,
+/// or a switch a debug panel flipped a frame ago. The same reason every engine library takes an
+/// <c>ILogger</c> and not a console.</para>
+///
+/// <para>Ask every time you would act on the answer. <see cref="IsEnabled"/> is a dictionary
+/// lookup and is meant to be called per frame; caching it in a field is how a runtime toggle
+/// stops working.</para></summary>
+public interface IFeatureSwitches
+{
+    /// <summary>Whether <paramref name="id"/> is on. A feature nothing declared and nothing
+    /// overrode is off — a build without a feature answers the same way as a build that turned
+    /// it off, which is what a caller can actually act on.</summary>
+    bool IsEnabled(FeatureId id);
+
+    /// <summary>What the build declared about <paramref name="id"/>, if anything.</summary>
+    bool TryGetDefinition(FeatureId id, [MaybeNullWhen(false)] out FeatureDefinition definition);
+
+    /// <summary>What <paramref name="id"/> is configured with — the table written under its name
+    /// in the configuration's <c>settings</c> section, bound to the caller's own type by the
+    /// reader that produced it (<c>FeatureSettingsToml.Read</c> for <c>engine.toml</c>).
+    ///
+    /// <para>Never null: a feature nobody configured gets <see cref="FeatureSettings.None"/>,
+    /// which reads as the type's defaults, so a caller needs no branch.</para></summary>
+    FeatureSettings SettingsFor(FeatureId id);
+
+    /// <summary>Every feature this build declared, for a listing, a debug UI, or a config file
+    /// written from what actually exists rather than from memory.</summary>
+    IReadOnlyCollection<FeatureDefinition> Definitions { get; }
+
+    /// <summary>Raised when a feature's effective state changes, with its new state.
+    ///
+    /// <para>Handlers run on the thread that made the change, and while writes are held off — so
+    /// the last thing a handler was told about a feature is what <see cref="IsEnabled"/> now
+    /// answers for it.</para>
+    ///
+    /// <para><b>That thread is whoever flipped the switch, which is why a subscriber that owns
+    /// GPU or per-frame state does not use this event.</b> <c>RenderPipeline</c> polls instead,
+    /// once as it begins a frame, and announces the transition there: a handler releasing a
+    /// target from a debug panel's thread would be doing it while the render thread recorded
+    /// with it, and a frame that read the switch again at each phase could set a feature up and
+    /// then skip the submit half of it.</para></summary>
+    event Action<FeatureId, bool>? Changed;
+
+    /// <summary>Raised when a feature's settings are replaced, with the new ones — how a re-read
+    /// of <c>engine.json</c> reaches a feature that read its settings once at construction.
+    /// Raised under the same rule as <see cref="Changed"/>: what a handler is told last is what
+    /// <see cref="SettingsFor"/> now returns.</summary>
+    event Action<FeatureId, FeatureSettings>? SettingsChanged;
+}

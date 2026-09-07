@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -50,14 +51,28 @@ public sealed class PrepassFeature : IRenderFeature
 
     public const TextureFormat NormalFormat = TextureFormat.Rgba16Float;
 
-    public string Name => "Prepass";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.Prepass;
     public FrameRequirements Requires => FrameRequirements.None;
 
     /// <summary>Group-3 SSAO uniforms: intensity, radius, bias, power, and the screen size.</summary>
     internal BufferHandle SsaoUniformBuffer { get; }
 
     public void Resize(uint width, uint height) => EnsureTargets();
+
+    /// <summary>The scene pass binds <see cref="SsaoUniformBuffer"/> every frame, whether or not
+    /// this feature runs, so being switched off has to be WRITTEN there: without this the shader
+    /// keeps the last enabled frame's intensity and samples the black fallback with it, which
+    /// darkens every crease in the picture for as long as the feature stays off.</summary>
+    public void OnEnabledChanged(bool enabled)
+    {
+        if (!enabled) UploadSsaoUniforms(new SsaoUniformsGpu { Screen = ScreenParams() });
+    }
+
+    private Vector4 ScreenParams() => new(1f / _ctx.Width, 1f / _ctx.Height, _ctx.Width, _ctx.Height);
+
+    private void UploadSsaoUniforms(in SsaoUniformsGpu uniforms) =>
+        _ctx.Renderer.UpdateBuffer<SsaoUniformsGpu>(
+            SsaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in uniforms), 1));
 
     private void EnsureTargets()
     {
@@ -77,13 +92,12 @@ public sealed class PrepassFeature : IRenderFeature
         var rtaoRuns = scene.RayTracedAo.Enabled && hasOpaque;
         // Likewise the reflection pass, which additionally needs last frame's picture to exist.
         var ssrRuns = scene.Ssr.Enabled && hasOpaque && _ssr.HistoryReady;
-        var uniforms = new SsaoUniformsGpu
+        UploadSsaoUniforms(new SsaoUniformsGpu
         {
             Params = new Vector4(ssaoRuns ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
-            Screen = new Vector4(1f / _ctx.Width, 1f / _ctx.Height, _ctx.Width, _ctx.Height),
+            Screen = ScreenParams(),
             Rtao = new Vector4(rtaoRuns ? 1f : 0f, ssrRuns ? 1f : 0f, scene.Ssr.MaxRoughness, 0f),
-        };
-        _ctx.Renderer.UpdateBuffer<SsaoUniformsGpu>(SsaoUniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
+        });
 
         var normal = frame.Graph.Texture(PbrTargets.PrepassNormal);
         var depth = frame.Graph.Texture(PbrTargets.PrepassDepth);

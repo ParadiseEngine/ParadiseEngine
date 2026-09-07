@@ -1,19 +1,20 @@
 using System.Buffers;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Test;
 
-/// <summary>The feature seam: features run in list order, see each other only through the
-/// blackboard and the frame's requirements, and are skipped entirely when disabled.</summary>
+/// <summary>The feature seam: features run in the order their slots put them in, see each other
+/// only through the blackboard and the frame's requirements, and are skipped entirely when the
+/// engine's feature configuration says they are off.</summary>
 public class RenderPipelineTests
 {
-    private sealed class Probe(string name, FrameRequirements requires = FrameRequirements.None) : IRenderFeature
+    private sealed class Probe(string name, FrameRequirements requires = FrameRequirements.None, bool enabledByDefault = true) : IRenderFeature
     {
         // Per test, not static: TUnit runs tests in parallel.
         public List<string> Log { get; init; } = [];
 
-        public string Name { get; } = name;
-        public bool Enabled { get; set; } = true;
+        public FeatureDefinition Definition { get; } = new($"test.{name}", enabledByDefault);
         public FrameRequirements Requires { get; } = requires;
         public FrameRequirements SeenRequirements { get; private set; }
         public bool SawTexture { get; private set; }
@@ -21,13 +22,27 @@ public class RenderPipelineTests
         public string? Publishes { get; init; }
         public string? Consumes { get; init; }
         public int Resized { get; private set; }
+        public List<bool> EnabledChanges { get; } = [];
 
         public void Resize(uint width, uint height) => Resized++;
 
+        public void BeforeSubmit() => Log.Add("submit " + Definition.Name);
+
+        public void OnEnabledChanged(bool enabled)
+        {
+            EnabledChanges.Add(enabled);
+            Log.Add((enabled ? "on " : "off ") + Definition.Name);
+        }
+
+        /// <summary>Flipped by a probe that has to change a switch from inside the frame — the
+        /// deterministic stand-in for a debug panel doing it on another thread.</summary>
+        public Action? DuringSetup { get; init; }
+
         public void Setup(in FrameContext frame)
         {
-            Log.Add(Name);
+            Log.Add(Definition.Name);
             SeenRequirements = frame.Requirements;
+            DuringSetup?.Invoke();
             if (Publishes is not null)
             {
                 frame.Textures.Ensure(Publishes, new TextureDesc(null, 4, 4, 1, 1, 1, TextureDimension.D2,
@@ -40,7 +55,7 @@ public class RenderPipelineTests
 
         public void Dispose()
         {
-            Log.Add("dispose " + Name);
+            Log.Add("dispose " + Definition.Name);
             Disposed = true;
         }
     }
@@ -52,13 +67,196 @@ public class RenderPipelineTests
     {
         var log = new List<string>();
         var a = new Probe("a") { Log = log };
-        var b = new Probe("b") { Enabled = false, Log = log };
+        var b = new Probe("b") { Log = log };
         var c = new Probe("c") { Log = log };
-        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(b).Add(c);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b).Add(c);
+        pipeline.Switches.Set(b.Definition.Id, false);
+        log.Clear();
 
         pipeline.Setup(GraphWithTextures());
 
-        await Assert.That(log).IsEquivalentTo(["a", "c"]);
+        // "off test.b" leads: the frame adopts the switch when it begins, which is also where the
+        // feature is told — not on the thread that flipped it.
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "test.c"]);
+    }
+
+    /// <summary>The switch is read every frame, so a host, a debug panel or a hot-reloaded config
+    /// changes the frame without rebuilding anything.</summary>
+    [Test]
+    public async Task a_switch_flipped_between_frames_changes_the_next_frame()
+    {
+        var log = new List<string>();
+        var a = new Probe("a") { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.Switches.Set(a.Definition.Id, false);
+        pipeline.Setup(GraphWithTextures());
+        pipeline.Switches.Set(a.Definition.Id, true);
+        pipeline.Setup(GraphWithTextures());
+
+        // Each transition is announced by the frame that adopts it, immediately before the setups.
+        await Assert.That(log).IsEquivalentTo(["test.a", "off test.a", "on test.a", "test.a"]);
+    }
+
+    /// <summary>The hook a feature that fills a buffer while RECORDING needs: after every setup,
+    /// on the enabled features only, in the order they set up. A game's feature gets it on the
+    /// same terms as the shadow pass — which is the whole reason it is on the interface rather
+    /// than a call the frame loop makes into the one built-in it happened to know about.</summary>
+    [Test]
+    public async Task before_submit_reaches_every_enabled_feature_in_order()
+    {
+        var log = new List<string>();
+        var a = new Probe("a") { Log = log };
+        var b = new Probe("b") { Log = log };
+        var c = new Probe("c") { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b).Add(c);
+        pipeline.Switches.Set(b.Definition.Id, false);
+        log.Clear();
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+
+        await Assert.That(log)
+            .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"]);
+    }
+
+    /// <summary>A switch flipped WHILE the frame is being built does not take effect until the
+    /// next one. Every phase — requirements, setup, BeforeSubmit — reads the answer the frame
+    /// began with.
+    ///
+    /// <para>Read live at each phase instead, this is a half-configured frame: the shadow pass
+    /// sets up, stages its caster ring while the graph records, and then never gets the
+    /// BeforeSubmit that uploads it, so the submitted stream draws from a buffer nobody
+    /// filled.</para></summary>
+    [Test]
+    public async Task a_switch_flipped_during_a_frame_lands_on_the_next_one()
+    {
+        var log = new List<string>();
+        var b = new Probe("b", FrameRequirements.SceneColorCapture) { Log = log };
+        FeatureSwitches? switches = null;
+        var a = new Probe("a") { Log = log, DuringSetup = () => switches!.Set(b.Definition.Id, false) };
+        switches = new FeatureSwitches();
+        using var pipeline = new RenderPipeline(8, 8, switches).Add(a).Add(b);
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+        var seenByA = a.SeenRequirements;
+
+        var duringTheFrame = new List<string>(log);
+        log.Clear();
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+
+        // b was switched off midway through the first frame and still finished it, start to end.
+        await Assert.That(seenByA).IsEqualTo(FrameRequirements.SceneColorCapture);
+        await Assert.That(duringTheFrame)
+            .IsEquivalentTo(["test.a", "test.b", "submit test.a", "submit test.b"]);
+        // The second frame is the one that adopts it — and the transition is announced there,
+        // on the thread that begins the frame, not on the one that flipped the switch.
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "submit test.a"]);
+    }
+
+    /// <summary>The renderer decides things before any feature sets up — whether to build the
+    /// trace hierarchy, for one — so it can begin the frame itself and get the same answer setup
+    /// will use.</summary>
+    [Test]
+    public async Task beginning_the_frame_early_fixes_the_answer_setup_uses()
+    {
+        var switches = new FeatureSwitches();
+        var a = new Probe("a");
+        using var pipeline = new RenderPipeline(8, 8, switches).Add(a);
+
+        pipeline.BeginFrame();
+        var beforeFlip = pipeline.IsEnabled(a);
+        switches.Set(a.Definition.Id, false);
+        var afterFlip = pipeline.IsEnabled(a);
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(beforeFlip).IsTrue();
+        await Assert.That(afterFlip).IsTrue();          // the frame already began
+        await Assert.That(a.Log).IsEquivalentTo(["test.a"]);
+        await Assert.That(switches.IsEnabled(a.Definition.Id)).IsFalse(); // the switch did move
+    }
+
+    /// <summary>The transition, not the state: a feature that must retract something it left
+    /// behind hears about it exactly once, and hears nothing while the switch does not move.</summary>
+    [Test]
+    public async Task on_enabled_changed_fires_on_the_transition_only()
+    {
+        var a = new Probe("a");
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.Switches.Set(a.Definition.Id, false);
+        pipeline.Switches.Set(a.Definition.Id, false);
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(a.EnabledChanges).IsEquivalentTo([false]);
+    }
+
+    /// <summary>A config file is read before the renderer is built, so the override lands on a
+    /// name nothing has declared yet — and must still be in force when the feature turns up.</summary>
+    [Test]
+    public async Task an_override_applied_before_the_feature_exists_still_takes_effect()
+    {
+        var switches = new FeatureSwitches(FeatureOverrides.Parse("-test.a"));
+        var a = new Probe("a");
+        using var pipeline = new RenderPipeline(8, 8, switches).Add(a);
+
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(pipeline.IsEnabled(a)).IsFalse();
+        await Assert.That(a.Log).IsEquivalentTo(["off test.a"]);
+        await Assert.That(a.SeenRequirements).IsEqualTo(FrameRequirements.None);
+    }
+
+    /// <summary>A feature that ships off is off without anybody configuring anything, and is not
+    /// told about a state it was born in.</summary>
+    [Test]
+    public async Task a_feature_that_ships_disabled_stays_off_and_is_not_notified()
+    {
+        var a = new Probe("a", enabledByDefault: false);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a);
+
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(pipeline.IsEnabled(a)).IsFalse();
+        await Assert.That(a.EnabledChanges).IsEmpty();
+    }
+
+    /// <summary>The slot, not the call order: a feature added last can still set up first, which
+    /// is what lets a game publish something an engine feature reads.</summary>
+    [Test]
+    public async Task order_places_a_late_addition_between_two_earlier_ones()
+    {
+        var log = new List<string>();
+        var first = new Probe("first") { Log = log };
+        var last = new Probe("last") { Log = log };
+        var between = new Probe("between") { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(first, 100).Add(last, 300).Add(between, 200);
+
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(log).IsEquivalentTo(["test.first", "test.between", "test.last"]);
+        await Assert.That(pipeline.Features.Select(f => f.Definition.Name))
+            .IsEquivalentTo(["test.first", "test.between", "test.last"]);
+    }
+
+    /// <summary>Two features in the same slot keep the order they were added in — the tie-break
+    /// a composer relies on when it adds a group of features that belong together.</summary>
+    [Test]
+    public async Task an_equal_order_keeps_insertion_order()
+    {
+        var log = new List<string>();
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches())
+            .Add(new Probe("a") { Log = log }, 100)
+            .Add(new Probe("b") { Log = log }, 100)
+            .Add(new Probe("c") { Log = log }, 100);
+
+        pipeline.Setup(GraphWithTextures());
+
+        await Assert.That(log).IsEquivalentTo(["test.a", "test.b", "test.c"]);
     }
 
     /// <summary>The mechanism by which one feature reshapes a pass another owns: the requirement
@@ -68,12 +266,12 @@ public class RenderPipelineTests
     {
         var scene = new Probe("scene");
         var capture = new Probe("capture", FrameRequirements.SceneColorCapture);
-        using var pipeline = new RenderPipeline(8, 8).Add(scene).Add(capture);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(scene).Add(capture);
 
         pipeline.Setup(GraphWithTextures());
         var seenBySceneFirst = scene.SeenRequirements;
 
-        capture.Enabled = false;
+        pipeline.Switches.Set(capture.Definition.Id, false);
         pipeline.Setup(GraphWithTextures());
         var seenAfterDisable = scene.SeenRequirements;
 
@@ -86,13 +284,13 @@ public class RenderPipelineTests
     {
         var producer = new Probe("producer") { Publishes = "result" };
         var consumer = new Probe("consumer") { Consumes = "result" };
-        using var pipeline = new RenderPipeline(8, 8).Add(producer).Add(consumer);
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(producer).Add(consumer);
         var graph = GraphWithTextures();
 
         pipeline.Setup(graph);
         var seenWhenOn = consumer.SawTexture;
 
-        producer.Enabled = false;
+        pipeline.Switches.Set(producer.Definition.Id, false);
         graph.Reset();
         pipeline.Setup(graph);
         var seenWhenOff = consumer.SawTexture;
@@ -111,13 +309,17 @@ public class RenderPipelineTests
             .WithMessageContaining("hdr");
     }
 
+    /// <summary>Including the features that are off: one switched back on after a resize would
+    /// otherwise hand out a target sized for the old frame.</summary>
     [Test]
     public async Task resize_reaches_every_feature_and_dispose_runs_in_reverse()
     {
         var log = new List<string>();
         var a = new Probe("a") { Log = log };
         var b = new Probe("b") { Log = log };
-        var pipeline = new RenderPipeline(8, 8).Add(a).Add(b);
+        var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b);
+        pipeline.Switches.Set(b.Definition.Id, false);
+        log.Clear();
 
         pipeline.Resize(16, 16);
         pipeline.Dispose();
@@ -125,14 +327,29 @@ public class RenderPipelineTests
         // Once from Add, once from Resize: a feature declares its targets through one call.
         await Assert.That(a.Resized).IsEqualTo(2);
         await Assert.That(b.Resized).IsEqualTo(2);
-        await Assert.That(log).IsEquivalentTo(["dispose b", "dispose a"]);
+        await Assert.That(log).IsEquivalentTo(["dispose test.b", "dispose test.a"]);
+    }
+
+    /// <summary>A disposed pipeline stops hearing the switchboard it did not own — a shared
+    /// configuration outlives one renderer, and a dead feature must not be told anything.</summary>
+    [Test]
+    public async Task dispose_stops_the_pipeline_listening_to_a_shared_switchboard()
+    {
+        var switches = new FeatureSwitches();
+        var a = new Probe("a");
+        var pipeline = new RenderPipeline(8, 8, switches).Add(a);
+
+        pipeline.Dispose();
+        switches.Set(a.Definition.Id, false);
+
+        await Assert.That(a.EnabledChanges).IsEmpty();
     }
 
     [Test]
     public async Task find_returns_the_first_feature_of_a_type()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline(8, 8).Add(a).Add(new Probe("b"));
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(new Probe("b"));
 
         await Assert.That(pipeline.Find<Probe>()).IsSameReferenceAs(a);
     }
@@ -171,7 +388,7 @@ public class RenderPipelineTests
     public async Task add_tells_the_feature_the_current_size()
     {
         var a = new Probe("a");
-        using var pipeline = new RenderPipeline(320, 200);
+        using var pipeline = new RenderPipeline(320, 200, new FeatureSwitches());
 
         pipeline.Add(a);
 

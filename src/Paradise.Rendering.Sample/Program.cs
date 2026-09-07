@@ -5,6 +5,7 @@ using Paradise.Diagnostics;
 using Paradise.Windowing;
 using System;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering;
 using Paradise.Rendering.Pbr;
 using Paradise.Rendering.WebGPU;
@@ -46,10 +47,24 @@ internal static class Program
     private static int s_screenshotEvery;
     private static bool s_bench;
 
+    /// <summary>The engine's feature configuration for this run, handed to every
+    /// <see cref="PbrRenderer"/> the sample builds. One object per process: it is the engine's, not
+    /// the renderer's, and a host that grew an ECS schedule or a debug UI would pass this same one
+    /// to those too.</summary>
+    internal static FeatureSwitches Features { get; private set; } = new();
+
     private static int Main(string[] args)
     {
         if (ParseLogLevel(args) is not { } level) return 1;
         s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions { MinLevel = level });
+
+        if (ParseFeatures(args) is not { } features) return 1;
+        Features = features;
+        if (Array.IndexOf(args, "--list-features") >= 0)
+        {
+            ListFeatures();
+            return 0;
+        }
 
         var headlessFrames = ParseHeadless(args);
         var screenshotPath = ParseValue(args, "--screenshot");
@@ -120,6 +135,54 @@ internal static class Program
         {
             Console.Error.WriteLine($"Sample failed: {ex}");
             return 1;
+        }
+    }
+
+    /// <summary>Builds this run's feature configuration from the three layers a person configures
+    /// a build through, nearest last: <c>--config engine.toml</c>, then
+    /// <c>PARADISE_FEATURES</c>, then <c>--features +a,-b</c>. Null means an argument was bad and
+    /// was reported.
+    ///
+    /// <para>The built-ins are declared up front so <c>--list-features</c> and the stale-name
+    /// report work on a machine with no GPU adapter — the renderer declares the same definitions
+    /// again when it is built, which is a no-op.</para></summary>
+    private static FeatureSwitches? ParseFeatures(string[] args)
+    {
+        var configuration = EngineConfiguration.Empty;
+        try
+        {
+            if (ParseValue(args, "--config") is { } path)
+            {
+                using var file = File.OpenRead(path);
+                configuration = TomlEngineConfiguration.Read(file);
+            }
+            configuration = configuration
+                .Merge(new EngineConfiguration { Features = FeatureOverrides.FromEnvironment() })
+                .Merge(new EngineConfiguration { Features = FeatureOverrides.Parse(ParseValue(args, "--features")) });
+        }
+        catch (Exception error) when (error is FormatException or IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Feature configuration: {error.Message}");
+            return null;
+        }
+
+        // The whole document, not just its switches: a game feature's settings travel with it.
+        var switches = new FeatureSwitches(configuration);
+        PbrFeatures.DeclareAll(switches);
+        // A name nothing declares is a stale line in somebody's config, not a feature that is
+        // off — worth saying out loud, and not worth refusing to start over.
+        foreach (var name in switches.Unknown)
+            Console.Error.WriteLine($"Feature configuration: no feature named '{name}' in this build.");
+        return switches;
+    }
+
+    /// <summary>What this build can switch, and where each stands right now.</summary>
+    private static void ListFeatures()
+    {
+        foreach (var definition in Features.Definitions.OrderBy(d => d.Name, StringComparer.Ordinal))
+        {
+            var state = Features.IsEnabled(definition.Id) ? "on " : "off";
+            Console.WriteLine($"  {state}  {definition.Name,-36}  {definition.Summary}");
         }
     }
 

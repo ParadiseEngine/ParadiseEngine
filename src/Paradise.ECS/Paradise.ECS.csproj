@@ -21,6 +21,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!-- A gameplay feature is a set of systems, and it is switched off from the same engine
+         configuration a render feature is (SystemScheduleBuilder.Add<T>(FeatureId)). This is the
+         ECS's only reference to another Paradise assembly, and that assembly has no dependencies
+         of its own. -->
+    <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />
   </ItemGroup>
 
   <ItemGroup>

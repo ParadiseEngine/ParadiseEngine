@@ -11,6 +11,19 @@ namespace Paradise.Rendering.Pbr.Test;
 /// live material to the new view.</summary>
 public class SceneColorCaptureTests
 {
+    /// <summary>Flip the capture switch and let the pipeline adopt it NOW. A switch is adopted at
+    /// the start of a frame, so a host that wants to bind a material to the view before the next
+    /// one begins the frame itself — which is what BeginFrame is public for.</summary>
+    private static void SetCapture(PbrRenderer pbr, bool enabled)
+    {
+        pbr.Switches.Set(PbrFeatures.SceneColorCapture.Id, enabled);
+        pbr.Pipeline.BeginFrame();
+    }
+
+    /// <summary>The capture feature, reached the way anything reaches a feature.</summary>
+    private static SceneColorCaptureFeature Capture(PbrRenderer pbr) =>
+        pbr.Pipeline.Find<SceneColorCaptureFeature>()!;
+
     private static WebGpuRenderer? TryCreateHeadlessOrSkip(uint width = 64, uint height = 64)
     {
         try
@@ -84,14 +97,14 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var scene = BuildScene(pbr, new Vector4(0.2f, 0.7f, 0.3f, 1f));
 
             for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
             var off = (byte[])renderer.ReadbackColor(out _, out _).Clone();
 
-            pbr.SceneColorCapture = true;
-            await Assert.That(pbr.SceneColorView.IsValid).IsTrue();
+            SetCapture(pbr, true);
+            await Assert.That(Capture(pbr).View.IsValid).IsTrue();
             for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
             var on = renderer.ReadbackColor(out _, out _);
 
@@ -99,8 +112,8 @@ public class SceneColorCaptureTests
             // opaque-only frame — the same draws hit the same targets with the same state.
             await Assert.That(off.AsSpan().SequenceEqual(on)).IsTrue();
 
-            pbr.SceneColorCapture = false;
-            await Assert.That(pbr.SceneColorView.IsValid).IsFalse();
+            SetCapture(pbr, false);
+            await Assert.That(Capture(pbr).View.IsValid).IsFalse();
         }
         finally
         {
@@ -115,14 +128,14 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
             var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView)]);
+                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // A RED opaque cube behind, and a capture-consuming blend quad in front of the camera.
             var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
@@ -162,8 +175,8 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -206,9 +219,9 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
-            var oldView = pbr.SceneColorView;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
+            var oldView = Capture(pbr).View;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -233,7 +246,7 @@ public class SceneColorCaptureTests
             var g = pixels[idx + 1];
             var r = pixels[idx + 2];
 
-            await Assert.That(pbr.SceneColorView).IsNotEqualTo(oldView);
+            await Assert.That(Capture(pbr).View).IsNotEqualTo(oldView);
             await Assert.That((int)g).IsGreaterThan(120);
             await Assert.That((int)g).IsGreaterThan(r + 40);
         }
@@ -252,7 +265,7 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
@@ -287,29 +300,29 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
-            var oldView = pbr.SceneColorView;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
+            var oldView = Capture(pbr).View;
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(96, 96);
             var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView)]);
+                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             var raised = 0;
-            pbr.SceneColorViewChanged += () => raised++;
+            Capture(pbr).ViewChanged += () => raised++;
 
             renderer.Resize(96, 96);
             pbr.Resize(96, 96);
 
             await Assert.That(raised).IsEqualTo(1);
-            await Assert.That(pbr.SceneColorView.IsValid).IsTrue();
-            await Assert.That(pbr.SceneColorView).IsNotEqualTo(oldView);
+            await Assert.That(Capture(pbr).View.IsValid).IsTrue();
+            await Assert.That(Capture(pbr).View).IsNotEqualTo(oldView);
 
             // The game-side rebind the event exists for — then the frame renders with the fresh
             // view (an unbound stale view would surface as a Dawn error / dropped draws).
-            pbr.Materials.UpdateExtraEntry(materialId, BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView));
+            pbr.Materials.UpdateExtraEntry(materialId, BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View));
             var scene = BuildScene(pbr, new Vector4(0.2f, 0.7f, 0.3f, 1f));
             pbr.RenderFrame(scene);
         }
@@ -326,14 +339,14 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
 
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.depthProbeFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
             var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView)]);
+                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // An opaque cube in the middle distance, and a fullscreen-ish probe quad in front of
             // the camera visualizing captured DEPTH as grayscale.
@@ -369,21 +382,21 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
 
             var raised = 0;
             var viewValidInHandler = true;
-            pbr.SceneColorViewChanged += () =>
+            Capture(pbr).ViewChanged += () =>
             {
                 raised++;
-                viewValidInHandler = pbr.SceneColorView.IsValid;
+                viewValidInHandler = Capture(pbr).View.IsValid;
             };
 
             // Disable must notify too — a subscriber still bound to the old view is otherwise
             // left holding a bind group over a destroyed resource. In the handler the view is
             // already INVALID: unbind/repoint, never re-bind it.
-            pbr.SceneColorCapture = false;
+            SetCapture(pbr, false);
             await Assert.That(raised).IsEqualTo(1);
             await Assert.That(viewValidInHandler).IsFalse();
         }
@@ -400,20 +413,20 @@ public class SceneColorCaptureTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
-            pbr.SceneColorCapture = true;
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            SetCapture(pbr, true);
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
             var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, pbr.SceneColorView)]);
+                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // Standard slots are off limits.
             await Assert.That(() => pbr.Materials.UpdateExtraEntry(
-                materialId, BindGroupEntryDesc.ForTextureView(2, pbr.SceneColorView))).Throws<ArgumentException>();
+                materialId, BindGroupEntryDesc.ForTextureView(2, Capture(pbr).View))).Throws<ArgumentException>();
             // Unknown extra binding.
             await Assert.That(() => pbr.Materials.UpdateExtraEntry(
-                materialId, BindGroupEntryDesc.ForTextureView(9, pbr.SceneColorView))).Throws<ArgumentException>();
+                materialId, BindGroupEntryDesc.ForTextureView(9, Capture(pbr).View))).Throws<ArgumentException>();
             // Kind mismatch: a sampler where the program declares a texture.
             var sampler = renderer.CreateSampler(new SamplerDesc(
                 "WrongKind",

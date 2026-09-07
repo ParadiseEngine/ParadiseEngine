@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paradise.Geometry;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -101,10 +102,14 @@ public sealed class ProbeGiFeature : IRenderFeature
         EnsureRayBuffer(1);
         EnsureAtlases(1, 1, 1);
         UploadVolume();
+        // The buffer the SCENE binds, not one of ours: Setup normally picks which of the two
+        // state buffers this frame shades against, and a build with the probes switched off never
+        // runs one — leaving the scene to bind a default handle and the graph to fail resolving
+        // its group. Picked here so the answer exists before the first frame.
+        ShadingStateBuffer = _stateBuffers[_current];
     }
 
-    public string Name => "ProbeGi";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.GlobalIllumination;
     public FrameRequirements Requires => FrameRequirements.None;
 
     /// <summary>The probe volume uniforms the scene binds at group 3; origin.w = 0 while the
@@ -128,6 +133,17 @@ public sealed class ProbeGiFeature : IRenderFeature
     public void Resize(uint width, uint height)
     {
         // Probe atlases are sized by the volume, not the frame.
+    }
+
+    /// <summary>The volume uniform the scene binds is what tells the shader a probe grid covers
+    /// this pixel. Switched off, the atlases stop being blended but the volume would still claim
+    /// them, and every surface inside it would shade against a picture that is no longer being
+    /// updated — so the volume is retracted here.</summary>
+    public void OnEnabledChanged(bool enabled)
+    {
+        if (enabled || _volume.Origin.W == 0f) return;
+        _volume.Origin.W = 0f;
+        UploadVolume();
     }
 
     public void Setup(in FrameContext frame)

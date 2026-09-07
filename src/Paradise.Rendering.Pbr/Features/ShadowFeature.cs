@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -55,6 +56,10 @@ public sealed class ShadowFeature : IRenderFeature
         // A valid array must always exist even when nothing casts, because the scene's frame
         // group binds it unconditionally; hence the minimum of one layer.
         EnsureArray(1);
+        // Plan() is where "no light has a tile" is normally established, and a build with shadows
+        // switched off never runs one — so the invariant is established here too, rather than
+        // resting on _baseLayer's zeroes, which mean "layer 0" and not "no layer".
+        ClearPlan();
 
         // Depth-only caster pipeline. Its group-0 draw UBO is a dynamic-offset ring like the main
         // one; the vertex layout reads position from the full interleaved mesh stride (shadow.slang
@@ -76,8 +81,7 @@ public sealed class ShadowFeature : IRenderFeature
         }));
     }
 
-    public string Name => "Shadows";
-    public bool Enabled => true;
+    public FeatureDefinition Definition => PbrFeatures.Shadows;
     public FrameRequirements Requires => FrameRequirements.None;
 
     /// <summary>Per-layer shadow map resolution, clamped to [256, 8192]. The array is re-declared
@@ -121,6 +125,21 @@ public sealed class ShadowFeature : IRenderFeature
         // Shadow maps are sized by MapSize, not by the frame.
     }
 
+    /// <summary>The plan outlives the frame that built it — the scene's frame uniforms are
+    /// written from it — so a feature switched off mid-run has to retract it, or every light
+    /// keeps sampling the layer it last owned out of an array nobody is filling any more.</summary>
+    public void OnEnabledChanged(bool enabled)
+    {
+        if (!enabled) ClearPlan();
+    }
+
+    private void ClearPlan()
+    {
+        _views.Clear();
+        Array.Fill(_baseLayer, -1);
+        Array.Clear(_faceCount);
+    }
+
     public void Setup(in FrameContext frame)
     {
         Plan(_ctx.Scene, _ctx.View);
@@ -143,9 +162,10 @@ public sealed class ShadowFeature : IRenderFeature
         }
     }
 
-    /// <summary>Upload the caster uniforms the recorders staged. After compile, because staging
-    /// happens while recording.</summary>
-    internal void UploadStagedDraws()
+    /// <summary>Upload the caster uniforms the recorders staged. Here rather than at the end of
+    /// <see cref="Setup"/> because staging happens while the graph RECORDS, which is inside the
+    /// compile — and before the submit, because that is when the GPU reads the ring.</summary>
+    public void BeforeSubmit()
     {
         if (_stagedDraws > 0)
             _ctx.Renderer.UpdateBuffer<byte>(_drawRing, 0, _staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));
@@ -156,9 +176,7 @@ public sealed class ShadowFeature : IRenderFeature
     // plan is empty and no pass is declared (nothing samples an unwritten layer; base layer -1).
     private void Plan(PbrScene scene, in Matrix4x4 view)
     {
-        _views.Clear();
-        Array.Fill(_baseLayer, -1);
-        Array.Clear(_faceCount);
+        ClearPlan();
         if (_ctx.Opaque.Count == 0) return;
 
         ComputeWorldBounds(out var center, out var extent);

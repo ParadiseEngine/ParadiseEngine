@@ -82,7 +82,7 @@ public class ShaderExtensionTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var programId = pbr.RegisterMaterialProgram(LoadFixture());
             await Assert.That(programId).IsEqualTo(1);
             await Assert.That(pbr.CustomProgramCountForTest).IsEqualTo(1);
@@ -147,7 +147,7 @@ public class ShaderExtensionTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var fixture = LoadFixture();
 
             // Corrupt one frame-group binding the way a diverged include would: same slot,
@@ -182,7 +182,7 @@ public class ShaderExtensionTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var programId = pbr.RegisterMaterialProgram(LoadFixture());
             var material = FactorMaterial(Vector4.One);
 
@@ -206,7 +206,7 @@ public class ShaderExtensionTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var programId = pbr.RegisterMaterialProgram(LoadFixture());
             var (_, heightView) = CreateHeightfield(renderer);
             var material = FactorMaterial(Vector4.One);

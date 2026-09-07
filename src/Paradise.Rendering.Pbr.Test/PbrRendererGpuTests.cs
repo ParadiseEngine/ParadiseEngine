@@ -42,7 +42,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var vertexCount = vertices.Length / 12;
 
@@ -157,7 +157,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var scene = BuildCubeScene(pbr);
             for (var i = 0; i < 3; i++)
             {
@@ -180,7 +180,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var groundMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.5f, 0.5f, 0.5f, 1f));
             var occluderMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.3f, 0.2f, 1f));
@@ -254,7 +254,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.5f, 0.5f, 0.5f, 1f));
             var mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
@@ -282,14 +282,14 @@ public class PbrRendererGpuTests
             });
             scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
 
-            pbr.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
             // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
             // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
             // detaching). Point light: perspective texels are metres PER METRE of distance,
             // 2·tan(45°)/mapSize at the default 1024 map.
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
         }
         finally
         {
@@ -316,7 +316,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
             var mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
@@ -339,17 +339,17 @@ public class PbrRendererGpuTests
                 CastsShadows = true,
             });
             scene.Instances.Add(instance);
-            pbr.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
 
             // Unit cube → sceneRadius clamps to 4 < DirectionalShadowRadius (50) → legacy fit.
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(3f / 1024f).Within(1e-7f);
 
             // 300 m cube → sceneRadius ≈ 130 > 50 → camera-centred fit at radius + xyPad = 51.
             instance.Model = Matrix4x4.CreateScale(300f);
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(2f * 51f / 1024f).Within(1e-7f);
         }
         finally
@@ -365,7 +365,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var mat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
             var ground = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mat)]);
@@ -411,7 +411,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
             var glassMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.8f, 1f, 0.3f)); // blend → not opaque
             var glass = new PbrMesh([pbr.UploadPrimitive(vertices, indices, glassMat)]);
@@ -448,7 +448,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var scene = BuildCubeScene(pbr);
 
             // A transmissive material must route through the blend bucket.
@@ -497,10 +497,10 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             // The headless target is Bgra8Unorm (non-sRGB) → the shader must encode.
             await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
-            await Assert.That(pbr.UsesSrgbEntryPointForTest).IsTrue();
+            await Assert.That(pbr.Pipeline.Find<CompositeFeature>()!.UsesSrgbEntryPoint).IsTrue();
         }
         finally
         {
@@ -515,7 +515,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var fixturePath = System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2");
             var ktx2 = System.IO.File.ReadAllBytes(fixturePath);
             var images = new[] { new Paradise.Assets.Gltf.GltfImageData(ktx2) };
@@ -570,7 +570,7 @@ public class PbrRendererGpuTests
         if (renderer is null) return;
         try
         {
-            using var pbr = new PbrRenderer(renderer, 64, 64);
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             // Two DIFFERENT images, each living at index 0 of its own asset's image array —
             // the cross-GLB layout that an index-keyed cache collides on.
             var colorBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2"));

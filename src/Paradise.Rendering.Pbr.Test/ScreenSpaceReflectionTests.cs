@@ -104,7 +104,7 @@ public class ScreenSpaceReflectionTests
     {
         using var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
 
         var without = FloorRedness(Render(backend, pbr, BuildScene(pbr, ssr: false)), backend.ColorFormat);
         await Assert.That(pbr.LastPassNames).DoesNotContain("Ssr.Trace");
@@ -124,7 +124,7 @@ public class ScreenSpaceReflectionTests
     {
         using var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
 
         var second = FloorRedness(Render(backend, pbr, BuildScene(pbr, ssr: true), frames: 2), backend.ColorFormat);
         await Assert.That(pbr.LastPassNames).Contains("Ssr.Trace");
@@ -142,7 +142,7 @@ public class ScreenSpaceReflectionTests
     {
         using var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
-        using var pbr = new PbrRenderer(backend, Size, Size);
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr, ssr: true);
 
         pbr.RenderFrame(scene);

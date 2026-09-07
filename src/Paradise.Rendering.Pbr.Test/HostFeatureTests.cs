@@ -1,4 +1,5 @@
 using System.Numerics;
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
@@ -14,8 +15,7 @@ public class HostFeatureTests
         public int Recorded;
         public bool SawHdr;
 
-        public string Name => "Vignette";
-        public bool Enabled => true;
+        public FeatureDefinition Definition { get; } = new("game.vignette", true, "Darkens the frame edges.");
         public FrameRequirements Requires => FrameRequirements.None;
         public void Resize(uint width, uint height) { }
 
@@ -48,7 +48,7 @@ public class HostFeatureTests
         }
         using var _ = backend;
         var recorder = new RecordingRenderer(backend);
-        using var pbr = new PbrRenderer(recorder, 32, 32);
+        using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), 32, 32);
         var vignette = new VignetteFeature();
         pbr.Pipeline.Add(vignette);
         var eye = new Vector3(0f, 1f, 3f);

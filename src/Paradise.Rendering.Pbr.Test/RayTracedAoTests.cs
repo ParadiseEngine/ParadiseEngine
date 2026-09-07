@@ -85,12 +85,12 @@ public class RayTracedAoTests
         using var _ = backend;
 
         double walledOff, walledOn, openOff, openOn;
-        using (var pbr = new PbrRenderer(backend, 128, 128))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), 128, 128))
         {
             walledOff = Mean(Render(backend, pbr, BuildScene(pbr, wall: true, rtao: false)));
             walledOn = Mean(Render(backend, pbr, BuildScene(pbr, wall: true, rtao: true)));
         }
-        using (var pbr = new PbrRenderer(backend, 128, 128))
+        using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), 128, 128))
         {
             openOff = Mean(Render(backend, pbr, BuildScene(pbr, wall: false, rtao: false)));
             openOn = Mean(Render(backend, pbr, BuildScene(pbr, wall: false, rtao: true)));
@@ -112,7 +112,7 @@ public class RayTracedAoTests
         if (backend is null) return;
         using var _ = backend;
         var recorder = new Baseline.RecordingRenderer(backend);
-        using var pbr = new PbrRenderer(recorder, 32, 32);
+        using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), 32, 32);
 
         var scene = BuildScene(pbr, wall: true, rtao: false);
         pbr.RenderFrame(scene);

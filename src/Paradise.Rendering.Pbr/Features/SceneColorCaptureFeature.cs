@@ -1,3 +1,4 @@
+using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -21,36 +22,48 @@ public sealed class SceneColorCaptureFeature : IRenderFeature
         _ctx = ctx;
     }
 
-    public string Name => "SceneColorCapture";
+    public FeatureDefinition Definition => PbrFeatures.SceneColorCapture;
     public FrameRequirements Requires => FrameRequirements.SceneColorCapture;
 
-    /// <summary>Enable before creating the materials that bind <see cref="View"/>. Toggling
-    /// raises <see cref="ViewChanged"/> after the target exists (or has gone).</summary>
-    public bool Enabled
+    /// <summary>The target exists exactly while the switch is on, and <see cref="ViewChanged"/>
+    /// fires on the transition — which the PIPELINE delivers when it begins a frame, not when the
+    /// switch was flipped. A host that turns capture on and wants to bind a material to
+    /// <see cref="View"/> before the next frame calls <c>RenderPipeline.BeginFrame</c> in
+    /// between; creating and destroying a target on whichever thread moved a switch is what that
+    /// indirection buys away.</summary>
+    public void OnEnabledChanged(bool enabled)
     {
-        get => _enabled;
-        set
+        if (_enabled == enabled) return;
+        _enabled = enabled;
+        if (enabled)
         {
-            if (_enabled == value) return;
-            _enabled = value;
-            if (value)
-            {
-                EnsurePipeline();
-                EnsureTarget();
-            }
-            else
-            {
-                _ctx.Targets.Release(PbrTargets.SceneColor);
-            }
-            // The disable path fires the event too — the view is INVALID inside the handler, and
-            // any material still bound to the old view must unbind or repoint (a bind group
-            // referencing the destroyed view is a Dawn validation error on its next SetBindGroup).
-            ViewChanged?.Invoke();
+            EnsurePipeline();
+            EnsureTarget();
         }
+        else
+        {
+            _ctx.Targets.Release(PbrTargets.SceneColor);
+        }
+        // The disable path fires the event too — the view is INVALID inside the handler, and
+        // any material still bound to the old view must unbind or repoint (a bind group
+        // referencing the destroyed view is a Dawn validation error on its next SetBindGroup).
+        ViewChanged?.Invoke();
     }
 
-    /// <summary>The captured opaque scene: rgb is the opaque+sky color, ALPHA is the opaque
-    /// scene's device depth. Invalid while disabled; recreated on resize.</summary>
+    /// <summary>The captured opaque scene, linear HDR, target-sized — rgb is the opaque+sky
+    /// color, ALPHA is the opaque scene's device depth at that pixel (the depth-aware-refraction
+    /// rejection signal: a refracted sample with alpha &lt; the sampling fragment's own depth is
+    /// geometry in front of the surface — fall back to the unoffset sample).
+    ///
+    /// <para>Two consumer caveats. The fp16 alpha quantizes 32-bit device depth (~5e-4 steps near
+    /// the far plane), so treat it as a coarse near/mid-field signal, not a precise depth buffer.
+    /// And READ THE DEPTH VIA <c>textureLoad</c>, never a filtering sampler — bilinear across a
+    /// depth discontinuity interpolates a depth belonging to no real surface and mis-rejects at
+    /// silhouettes (the color half may stay filtered).</para>
+    ///
+    /// <para>Invalid while this feature is switched off, and RECREATED on resize: rebind material
+    /// extra entries from <see cref="ViewChanged"/> through
+    /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</para></summary>
     public TextureViewHandle View =>
         _ctx.Targets.Contains(PbrTargets.SceneColor) ? _ctx.Targets.View(PbrTargets.SceneColor) : default;
 

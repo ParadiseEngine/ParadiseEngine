@@ -29,6 +29,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
+    <!-- The configuration a host actually reads, so the test that proves a file reaches the
+         renderer starts from a real engine.toml rather than a hand-built layer. -->
+    <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
     <!-- Explicit since Pbr stopped referencing a concrete backend: the GPU tests drive the real
          thing through WebGpuRenderer.CreateHeadless, so they need a backend of their own. -->
     <ProjectReference Include="..\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />

@@ -40,7 +40,7 @@ dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 
 Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
 `Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
-`Paradise.Ui.ImGui.CoyoteTest`.
+`Paradise.Ui.ImGui.CoyoteTest`, `Paradise.Features.CoyoteTest`.
 
 A fourth thing, learned from the asset watcher: **lock on an `object`, not on
 `System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
@@ -82,6 +82,8 @@ handedness only enters where transforms, camera/projection matrices, or navmesh 
 ### Monorepo Layout
 
 - `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `net10.0`.
+- `src/Paradise.Features` — Engine-wide feature configuration: the features a build declares and the switches that turn each on or off at runtime. No package dependencies at all, because the renderer and the ECS both reference it.
+- `src/Paradise.Features.Toml` — Reads `engine.toml` into that. A separate assembly so Tomlyn stays out of the ECS's dependency closure.
 - `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `net10.0`.
 - `src/Paradise.BT.Sample` — Console sample demonstrating tree construction, blackboard usage, and ticking.
 - `src/Paradise.BT.Test` / `src/Paradise.BLOB.Test` — TUnit test suites.
@@ -198,6 +200,150 @@ Things that bit, so they are rules:
   probe's rays and directions in workgroup memory once per blend workgroup (halved the blend), and
   an early-out any-hit walk plus half resolution for RT-AO (9.5 → 2.6 ms). One that did not:
   nearest-first child ordering in the traversal (+0.3 ms; the sort outweighed the skipped nodes).
+
+### A feature is switched by engine configuration, not by a flag of its own
+
+**Anything a build can turn off declares a `FeatureDefinition` and asks `IFeatureSwitches`
+whether it is on — the renderer's features, an ECS schedule's systems, and whatever a game adds
+next.** `Paradise.Features` holds that: `FeatureId` (a validated dotted name — `rendering.bloom`,
+`gameplay.weather`), the declaration that gives it a default and a description, and
+`FeatureSwitches`, the one object per process that answers. `TomlEngineConfiguration.Read` parses
+`engine.toml`; `FeatureOverrides.Parse` reads a `--features +a,-b` flag or `PARADISE_FEATURES`.
+Layers merge nearest-last: declarations, then the file, then the environment, then the command
+line. `dotnet run --project src/Paradise.Rendering.Sample -- --list-features` prints what a build
+has.
+
+A feature is also configured, not only switched. The file's second section carries a settings
+table per feature, and `switches.SettingsFor(id).Read(GameJson.Default.WeatherSettings)` binds it
+to the caller's own record. Nothing engine-side uses it: an engine feature's parameters are
+scene-authored, and this exists for the game feature the engine has never heard of.
+
+```toml
+# engine.toml — one entry per feature, holding everything about it
+[[features]]
+name = "rendering.globalIllumination"
+enabled = false                      # the integrated GPU cannot afford the probe trace
+
+[[features]]
+name = "game.weather"
+enabled = true
+intensity = 0.6                      # everything but name/enabled is the feature's settings
+windMetresPerSecond = 3.5
+```
+
+**The reader is a second assembly, `Paradise.Features.Toml`.** Reading TOML needs Tomlyn, and
+`Paradise.Features` has no package references because `Paradise.ECS` — which references nothing
+else at all — references it; a TOML parser in the ECS's closure is a cost every consumer of the
+ECS pays for a file only a host reads. Same shape as the logging rule below: the abstraction is
+dependency-free, the concrete reader is a package the host picks. What crosses the seam is
+`EngineConfiguration`, a bag of names and values that depends on nothing.
+
+The assembly has **no package references at all**, deliberately: `Paradise.ECS`, which otherwise
+references nothing, references this. Its one diagnostic — a configured name no declaration claims,
+`FeatureSwitches.Unknown` — is reported as data rather than logged, so it needs no logging
+abstraction to say it. It is called `Paradise.Features` rather than `Paradise.Configuration`
+because a namespace of the latter name is in scope for every file under `Paradise.*` and then beats
+an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
+meaning Microsoft.Coyote's, and all six stopped compiling.
+
+Thirteen things that are not obvious:
+
+- **A switch and a scene setting are different questions, and both have to say yes.** The switch is
+  the platform's answer ("this build does not do probe GI"), applied once from configuration; a
+  scene's own `Enabled` (`PbrGi`, `PbrBloom`, …) is the content's answer ("this level uses it"),
+  authored per level. Collapsing them either lets a level override a platform decision or forces
+  the platform decision to be re-made in every level. They behave differently too, and a test pins
+  it: a scene that wants no bloom leaves the chain DECLARED and the graph culls it; a switch that
+  is off means the feature never runs and there is nothing to cull.
+- **Order does not matter, and that is load-bearing.** The config file is read before the renderer
+  exists, so an override lands on a name nothing has declared yet. It is kept by NAME and still
+  wins when the declaration arrives — and a name no declaration ever claims stays in `Unknown`
+  instead of vanishing, because a typo in a config file must not read as a feature that is off.
+- **A switch is read ONCE per frame and once per schedule run, and a transition is announced
+  there.** `RenderPipeline.BeginFrame` takes the frame's answer for every feature; requirements,
+  setup and `BeforeSubmit` all read it, so a switch flipped mid-frame lands on the next one.
+  `SystemSchedule` does the same before its first wave. Read live at each phase instead — which
+  is how both were first written — and a frame can set the shadow pass up, let it stage its
+  caster ring while the graph records, and then skip the `BeforeSubmit` that uploads it; and a
+  tick can run half of a gameplay feature's systems and skip the rest, with which half depending
+  on another thread's timing. That is also why the pipeline does NOT subscribe to
+  `FeatureSwitches.Changed`: a handler releasing a target on the flipping thread would be doing
+  it while the render thread recorded with it. A host that flips a switch and needs the feature
+  to have caught up before the next frame calls `BeginFrame` itself. Both are pinned by tests
+  that flip a switch from INSIDE the frame or run, which is the race made deterministic.
+- **A feature that leaves state behind must implement `IRenderFeature.OnEnabledChanged`.** Being
+  switched off is not the same as declaring no passes: the shadow plan, the pre-pass's SSAO
+  uniforms and the probe volume are all read by the SCENE every frame whether or not the feature
+  that owns them ran. Left alone they repeat the last enabled frame — a light keeps sampling a
+  shadow layer nothing fills, ambient is multiplied by a black occlusion texture the flags still
+  call real. The pipeline calls the hook on the transition only, including once at `Add` when
+  configuration already said off. Each of the three is guarded by a test that fails without it.
+- **Adding a feature touches no renderer.** `PbrBuiltInFeatures` is the whole list of engine
+  features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
+  at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
+  reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
+  cannot say so with a list position when the engine does all the adding.
+- **Nothing on the renderer names a particular feature.** `PbrRenderer` used to publish
+  `ShadowMapSize`, `ShadowBlurTexels`, `DirectionalShadowRadius`, `SetSpecularAa`,
+  `SceneColorCapture`, `SceneColorView` and `SceneColorViewChanged`, each forwarding into the
+  built-in that owns it, plus four internal `…ForTest` accessors doing the same. That is the
+  renderer saying three of its nine features are special, and the only thing making them so was
+  the forwarding — a game's feature could never have any of it. All gone. A host writes
+  `pipeline.Find<ShadowFeature>()!.MapSize = …` or
+  `pipeline.Find<SceneColorCaptureFeature>()!.View`, which is exactly what it already writes for
+  a feature it added itself, and a test asks the pipeline like everybody else. What is left is
+  the frame and what the frame produced: `RenderFrame`, `LastPassNames`, `LastCpuTimings`,
+  `Materials`, `Pipeline`, `Switches`, `AspectRatio`, and the upload surface. A shortcut that
+  seems worth adding back is a sign the FEATURE's own API is missing something.
+- **A feature that fills a buffer while RECORDING uploads it in `BeforeSubmit`.** A recorder runs
+  inside the compile, so the shadow pass's caster ring has nothing in it when `Setup` returns and
+  no moment left after the submit. That upload used to be a line in `PbrRenderer.RenderFrame`
+  reaching into `ShadowFeature`, which meant the frame loop knew that one built-in stages draws
+  and a GAME's feature with the same need could not be uploaded at all. The hook is on the
+  interface so both are served by the same call; the pass-matrix baseline goes red if the pipeline
+  stops making it.
+- **A feature is one `[[features]]` entry, and its name is a VALUE.** `name = "game.weather"`
+  needs no quoting rule and cannot be confused with table nesting, which a key would: TOML reads
+  `rendering.bloom = false` as a table `rendering` holding `bloom`. It is also the shape an
+  authored component already has in a `*.prefab` — reserved keys and a payload
+  (`PrefabComponent.ReservedKeys`) — so `TomlEngineConfiguration.ReservedKeys` follows that
+  vocabulary. `name` and `enabled` are the reader's; every other key is the feature's settings,
+  which costs a game the ability to have a setting called either, exactly as a prefab component
+  cannot have one called `id`. `enabled` is optional: an entry may configure a feature without
+  saying whether it runs. Two entries for one feature are refused rather than last-wins — that
+  silent drop is a failure this repo has already been bitten by in TOML.
+- **The settings payload is carried as text and bound by the reader that produced it.**
+  `FeatureSettings` holds `Text`, and `FeatureSettingsToml.Read<T>(context)` binds it through the
+  GAME's own source-generated `TomlSerializerContext` — so nothing reflects over a type it was not
+  handed, and nothing is converted on the way through. The binding cannot live on `FeatureSettings`
+  itself because that assembly may not name a Tomlyn type; it lives on the same seam the reader
+  does. An earlier version normalized the payload to JSON to keep the binder in the base assembly,
+  on the strength of a probe that showed Tomlyn binding nothing from a camelCase file. The probe
+  was wrong about the cause: `TomlSourceGenerationOptions` carries `PropertyNamingPolicy` exactly
+  like the JSON attribute does, and setting it makes the file bind as written. The conversion was
+  deleted.
+- **A settings type needs `get; set;` properties AND a naming policy on its context.** Both are
+  silent when missing. An `init` accessor makes the serializer build the object WITHOUT running
+  the parameterless constructor, so every property the file leaves out reads as `default` — 0, not
+  the `= 1f` the initializer says (it is the accessor and not `record` vs `class`; all four
+  combinations were probed). And a source-generated context matches the C# property name EXACTLY
+  unless given `PropertyNamingPolicy`, so a camelCase file binds nothing at all and every value
+  reads as its default. Both are pinned by `FeatureSettingsTests`, and both are the same trap in
+  the JSON and the TOML generators — they share the attribute shape.
+- **Settings merge WHOLESALE between layers, not deep.** A deep merge reads well in the two-file
+  case and has no answer for "which layer owns element 3" the moment an array is involved; a later
+  file that means to change one field writes the table it wants.
+- **`PbrRenderer` and `RenderPipeline` take the switchboard as a REQUIRED argument.** It was a
+  defaulted last parameter for about a day, and that is a host getting a private switchboard, every
+  feature at its declared default, and a config file that reached nothing — no error, and a frame
+  that still renders. A caller that configures nothing writes `new FeatureSwitches()` and has said
+  so.
+- **Writes are serialized and `Changed` is raised inside that same critical section.** Deciding
+  "did this change?" and announcing it is a check-then-act, and a subscriber ACTS on the
+  announcement; with two writers the last announcement could otherwise contradict the state
+  everyone now reads, leaving a feature switched on with its state retracted.
+  `Paradise.Features.CoyoteTest` pins it — three of its five specs fail within 200 iterations
+  against the unlocked version.
 
 ### Diagnostics go through `ILogger`, never `Console`
 
