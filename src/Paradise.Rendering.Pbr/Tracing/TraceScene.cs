@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using Paradise.Geometry;
 using Paradise.Rendering.Graph;
 
@@ -56,13 +57,14 @@ public struct TraceTriangleGpu
 /// into the merged buffers, rebased once here. The instance hierarchy is appended after the mesh
 /// nodes, so a frame that only moves instances rewrites its region alone, and the instance table
 /// is laid out in that hierarchy's leaf order so a leaf slot indexes it directly.</para></summary>
-internal sealed class TraceScene : IDisposable
+internal sealed partial class TraceScene : IDisposable
 {
     private const int NodeSize = 96;
     private static readonly int InstanceSize = Unsafe.SizeOf<TraceInstanceGpu>();
     private static readonly int MaterialSize = Unsafe.SizeOf<TraceMaterialGpu>();
 
     private readonly IRenderer _renderer;
+    private readonly ILogger _log;
     private readonly List<BvhNode> _meshNodes = [];
     private readonly List<TraceTriangleGpu> _triangles = [];
     private readonly List<Vector4> _vertices = [];
@@ -86,9 +88,10 @@ internal sealed class TraceScene : IDisposable
     private int _instanceCapacity;
     private int _materialCapacity;
 
-    public TraceScene(IRenderer renderer)
+    public TraceScene(IRenderer renderer, ILogger log)
     {
         _renderer = renderer;
+        _log = log;
         _uniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrTraceUniforms", (ulong)Unsafe.SizeOf<TraceUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
     }
@@ -106,7 +109,9 @@ internal sealed class TraceScene : IDisposable
 
     /// <summary>Build a hierarchy over an interleaved vertex stream (position in floats 0..2,
     /// normal in 3..5 of each <paramref name="stride"/>-float vertex) and merge it in. Returns the
-    /// mesh id a <see cref="PbrPrimitive"/> carries.</summary>
+    /// mesh id a <see cref="PbrPrimitive"/> carries, or -1 for a mesh the shader walk could not
+    /// hold — logged, and rendered without taking part in tracing, because a host that never
+    /// traces must still be able to upload it.</summary>
     public int AddMesh(ReadOnlySpan<float> vertices, int stride, ReadOnlySpan<uint> indices)
     {
         if (stride < 6)
@@ -126,10 +131,12 @@ internal sealed class TraceScene : IDisposable
 
         var bvh = TriangleBvh.Build(positions, indices);
         // The shader walk has a fixed stack; a hierarchy it cannot hold would drop children and
-        // miss occluders by direction, so it is refused here rather than traced wrong.
+        // miss occluders by direction, so the mesh is left out of tracing rather than traced wrong.
         if (bvh.RequiredStackDepth > BvhTraversal.StackDepth)
-            throw new InvalidOperationException(
-                $"Mesh hierarchy of height {bvh.Height} needs a traversal stack of {bvh.RequiredStackDepth}, above the shader's {BvhTraversal.StackDepth}.");
+        {
+            LogUntraceableMesh(_log, indices.Length / 3, bvh.Height, bvh.RequiredStackDepth, BvhTraversal.StackDepth);
+            return -1;
+        }
         var nodeBase = (uint)_meshNodes.Count;
         var triangleBase = (uint)_triangles.Count;
         var vertexBase = (uint)(_vertices.Count / 2);
@@ -176,11 +183,17 @@ internal sealed class TraceScene : IDisposable
             // poison the fit. It has nothing to hit either way.
             var bounds = _meshes[primitive.TraceMesh].Bounds;
             if (bounds.IsEmpty) continue;
+            // A singular model (a zero scale) cannot take a ray into object space; the instance is
+            // flat or degenerate on screen too, so it is left out rather than traced at rest pose.
+            if (!Matrix4x4.Invert(instance.Model, out _)) continue;
             _instanceSources.Add((instance, primitive));
             _instanceBounds.Add(Aabb.Transform(bounds, instance.Model));
         }
 
         var tlas = BvhBuilder.Build(CollectionsMarshal.AsSpan(_instanceBounds), maxLeafItems: 1);
+        if (tlas.RequiredStackDepth > BvhTraversal.StackDepth)
+            throw new InvalidOperationException(
+                $"Instance hierarchy over {_instanceSources.Count} instances needs a traversal stack of {tlas.RequiredStackDepth}, above the shader's {BvhTraversal.StackDepth}.");
         SceneBounds = tlas.Bounds;
         var meshNodeCount = (uint)_meshNodes.Count;
         _tlasNodes = tlas.Nodes;
@@ -192,7 +205,7 @@ internal sealed class TraceScene : IDisposable
         {
             var (instance, primitive) = _instanceSources[slot];
             var model = instance.Model;
-            if (!Matrix4x4.Invert(model, out var worldToObject)) worldToObject = Matrix4x4.Identity;
+            Matrix4x4.Invert(model, out var worldToObject); // singular models were skipped above
             _instances.Add(new TraceInstanceGpu
             {
                 WorldToObject = worldToObject,
@@ -276,6 +289,10 @@ internal sealed class TraceScene : IDisposable
         GraphBinding.Buffer(4, _materialBuffer, 0, (ulong)_materialCapacity * (ulong)MaterialSize),
         GraphBinding.Buffer(5, _uniformBuffer, 0, (ulong)Unsafe.SizeOf<TraceUniformsGpu>()),
     ];
+
+    [LoggerMessage(EventId = 95, Level = LogLevel.Warning,
+        Message = "A {Triangles}-triangle mesh builds a hierarchy of height {Height} that needs a traversal stack of {Needed} (the tracer holds {Available}); it renders but neither occludes nor bounces light.")]
+    private static partial void LogUntraceableMesh(ILogger logger, int triangles, int height, int needed, int available);
 
     public void Dispose()
     {

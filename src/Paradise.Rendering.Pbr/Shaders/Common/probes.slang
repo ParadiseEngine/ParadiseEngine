@@ -17,7 +17,7 @@ struct ProbeVolume
     float4 atlas;    // x: irradiance interior texels per probe, y: visibility interior texels,
                      // z: 1/irradiance atlas width, w: 1/irradiance atlas height
     float4 atlas2;   // xy: 1/visibility atlas size, z: normal bias (fraction of spacing), w: view bias
-    float4 params;   // x: intensity, y: rays per probe, z: hysteresis, w: frame index
+    float4 params;   // x: intensity, y: rays per probe, z: hysteresis, w unused
     float4 rotation; // unit quaternion rotating this frame's ray directions
     int4 window;     // x: first probe traced this frame, y: probes traced this frame, zw unused
 };

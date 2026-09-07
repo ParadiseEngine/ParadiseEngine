@@ -70,7 +70,6 @@ public sealed class ProbeGiFeature : IRenderFeature
     private int _resetSweepRemaining;
     private int _framesSinceReset;
     private int _windowStart;
-    private uint _frame;
     private ProbeVolumeGpu _volume;
     private readonly Random _random = new(1234);
 
@@ -210,7 +209,6 @@ public sealed class ProbeGiFeature : IRenderFeature
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
         _current = next;
         _framesSinceReset++;
-        _frame++;
     }
 
     private static void RecordTrace(ProbeGiFeature self, ref PassRecording pass, int workgroups)
@@ -298,15 +296,19 @@ public sealed class ProbeGiFeature : IRenderFeature
 
         var spacing = MathF.Cbrt(extent.X * extent.Y * extent.Z / maxProbes);
         spacing = MathF.Max(spacing, 0.01f);
+        // Widen the spacing until the grid fits the budget and the atlas. Terminates: every axis
+        // bottoms out at two probes, and 2×2×2 fits any budget of eight or more. The cube-root
+        // start is far off for a long corridor with a tight budget, which is why this is a loop
+        // and not a fixed number of attempts.
         int cx, cy, cz;
-        for (var attempt = 0; ; attempt++)
+        while (true)
         {
             cx = CountFor(extent.X, spacing);
             cy = CountFor(extent.Y, spacing);
             cz = CountFor(extent.Z, spacing);
             var fitsBudget = (long)cx * cy * cz <= maxProbes;
             var fitsAtlas = (long)cx * cy * (VisibilityTexels + 2) <= MaxAtlasSize && cz * (VisibilityTexels + 2) <= MaxAtlasSize;
-            if ((fitsBudget && fitsAtlas) || attempt > 64) break;
+            if (fitsBudget && fitsAtlas) break;
             spacing *= 1.1f;
         }
 
@@ -343,6 +345,9 @@ public sealed class ProbeGiFeature : IRenderFeature
     private void EnsureVolume(PbrProbeVolume fit, PbrGi gi)
     {
         if (_fitted is { } current && SameVolume(current, fit)) return;
+        // A refit to the same counts keeps the atlases (Ensure is idempotent on an equal
+        // descriptor), so tiles hold the OLD volume's light for probes that moved until the reset
+        // sweep — which writes outright — reaches them: a transient of at most one window lap.
         _fitted = fit;
         _probeCount = fit.CountX * fit.CountY * fit.CountZ;
         EnsureAtlases(fit.CountX, fit.CountY, fit.CountZ);
@@ -376,7 +381,7 @@ public sealed class ProbeGiFeature : IRenderFeature
             Counts = new Int4 { X = fit.CountX, Y = fit.CountY, Z = fit.CountZ, W = _probeCount },
             Atlas = new Vector4(IrradianceTexels, VisibilityTexels, 1f / irradianceWidth, 1f / irradianceHeight),
             Atlas2 = new Vector4(1f / visibilityWidth, 1f / visibilityHeight, MathF.Max(gi.NormalBias, 0f), MathF.Max(gi.ViewBias, 0f)),
-            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, resetFrame ? 0f : WarmUpHysteresis(gi.Hysteresis), _frame),
+            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, resetFrame ? 0f : WarmUpHysteresis(gi.Hysteresis), 0f),
             Rotation = RandomRotation(),
             Window = new Int4 { X = windowStart, Y = windowCount },
         };
@@ -430,8 +435,9 @@ public sealed class ProbeGiFeature : IRenderFeature
         for (var i = 0; i < 2; i++)
         {
             if (_stateBuffers[i].IsValid) _ctx.Renderer.DestroyBuffer(_stateBuffers[i]);
+            // CopySrc so a test can read the states back: the one way to see a probe's relocation.
             _stateBuffers[i] = _ctx.Renderer.CreateBuffer(new BufferDesc(
-                $"PbrProbeStates{i}", (ulong)needed * 16, BufferUsage.Storage | BufferUsage.CopyDst));
+                $"PbrProbeStates{i}", (ulong)needed * 16, BufferUsage.Storage | BufferUsage.CopyDst | BufferUsage.CopySrc));
         }
         _stateCapacity = needed;
     }

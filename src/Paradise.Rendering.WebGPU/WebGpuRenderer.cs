@@ -284,6 +284,40 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _device.Queue.WriteBuffer(native, offset, data);
     }
 
+    /// <summary>Read <paramref name="size"/> bytes of a buffer back to the CPU. Blocks on GPU
+    /// completion, so it is for tests and tooling — the way a compute pass's output (probe states,
+    /// a ray buffer) is asserted on. The buffer must carry <see cref="BufferUsage.CopySrc"/>, and
+    /// offset and size must be multiples of four.</summary>
+    public byte[] ReadbackBuffer(BufferHandle handle, ulong offset, ulong size)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (size == 0 || size % 4 != 0 || offset % 4 != 0)
+            throw new ArgumentException("Buffer readback offset and size must be non-zero multiples of four.", nameof(size));
+        var native = _device.ResolveBuffer(handle);
+        var staging = _device.Device.CreateBuffer(new WebGpuSharp.BufferDescriptor
+        {
+            Label = "ParadiseBufferReadback",
+            Size = size,
+            Usage = WebGpuSharp.BufferUsage.MapRead | WebGpuSharp.BufferUsage.CopyDst,
+        }) ?? throw new InvalidOperationException("Readback buffer creation returned null.");
+        try
+        {
+            var encoder = _device.Device.CreateCommandEncoder();
+            encoder.CopyBufferToBuffer(native, offset, staging, 0, size);
+            _device.Queue.Submit(encoder.Finish());
+            _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
+            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, 5_000);
+            var result = new byte[size];
+            staging.GetConstMappedRange(0, (nuint)size, (ReadOnlySpan<byte> mapped) => mapped.CopyTo(result));
+            return result;
+        }
+        finally
+        {
+            if (staging.GetMapState() == WebGpuSharp.BufferMapState.Mapped) staging.Unmap();
+            staging.Destroy();
+        }
+    }
+
     /// <summary>True when the adapter granted BC texture compression — required before creating
     /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
     public bool SupportsBcTextureCompression => _device.SupportsBc;

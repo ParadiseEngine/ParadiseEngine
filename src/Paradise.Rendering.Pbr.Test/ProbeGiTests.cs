@@ -37,7 +37,7 @@ public class ProbeGiTests
 
     /// <summary>Two facing walls in the dark: one glows red, the other is white and receives
     /// nothing but what bounces off the glow. The camera looks at the white one.</summary>
-    private static PbrScene EmissiveRoom(PbrRenderer pbr, bool gi)
+    private static PbrScene EmissiveRoom(PbrRenderer pbr, bool gi, bool thickBlock = false)
     {
         var (vertices, indices) = Procedural.UnitCube();
         var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.9f, 0.9f, 1f));
@@ -57,7 +57,67 @@ public class ProbeGiTests
         scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, -2f) });
         scene.Instances.Add(new PbrInstance { Mesh = glowMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, 2f) });
         scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 0.2f, 6f)) * Matrix4x4.CreateTranslation(0f, -1f, 0f) });
+        // A block too thick for relocation to push a probe out of: its interior grid points are
+        // switched off, which is the state the flicker test watches.
+        if (thickBlock)
+            scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(2.5f, 2.5f, 2.5f)) * Matrix4x4.CreateTranslation(-1.5f, 0.35f, -0.5f) });
         return scene;
+    }
+
+
+
+    /// <summary>A probe switched off inside geometry must stay off. Reclassifying it from the
+    /// trace's placeholder miss rays reactivated it at its grid point every window lap, where it
+    /// was traced, saw back faces and was switched off again — a state oscillation with the
+    /// lap's period. The states are read back: a thick block switches some probes off, and the
+    /// set of inactive probes is identical across two further laps.</summary>
+    [Test]
+    public async Task an_inactive_probe_stays_inactive_across_window_laps()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = EmissiveRoom(pbr, gi: true, thickBlock: true);
+        scene.Gi = scene.Gi with { MaxProbes = 512 };
+        pbr.RenderFrame(scene);
+        var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
+        var probes = gi.ProbeCount;
+        var lap = (probes + 2) / 3;
+        scene.Gi = scene.Gi with { ProbesPerFrame = lap };
+        for (var i = 0; i < 12; i++) pbr.RenderFrame(scene);
+
+        var before = ReadInactive(backend, gi, probes);
+        await Assert.That(before.Count).IsGreaterThan(0);
+        await Assert.That(before.Count).IsLessThan(probes / 2);
+        // Frames within a lap and at whole laps: the set must not change at any of them.
+        for (var frame = 1; frame <= 6; frame++)
+        {
+            pbr.RenderFrame(scene);
+            var now = ReadInactive(backend, gi, probes);
+            await Assert.That(now).IsEquivalentTo(before);
+        }
+    }
+
+    private static HashSet<int> ReadInactive(WebGpuRenderer backend, ProbeGiFeature gi, int probes)
+    {
+        var bytes = backend.ReadbackBuffer(gi.ShadingStateBuffer, 0, (ulong)probes * 16);
+        var inactive = new HashSet<int>();
+        for (var i = 0; i < probes; i++)
+            if (BitConverter.ToSingle(bytes, i * 16 + 12) < 0.5f) inactive.Add(i);
+        return inactive;
+    }
+
+    /// <summary>A long corridor with a tight budget: the fit must keep widening until the grid fits
+    /// both the probe budget and the atlas, not give up after a fixed number of attempts.</summary>
+    [Test]
+    public async Task a_fit_of_a_long_corridor_with_a_tight_budget_stays_within_both_limits()
+    {
+        var volume = ProbeGiFeature.Fit(new Geometry.Aabb(new Vector3(0f, 0f, 0f), new Vector3(2000f, 2f, 2f)), new PbrGi { MaxProbes = 64 });
+        await Assert.That(volume).IsNotNull();
+        await Assert.That(volume!.CountX * volume.CountY * volume.CountZ).IsLessThanOrEqualTo(64);
+        await Assert.That(volume.CountX * volume.CountY * 16).IsLessThanOrEqualTo(8192);
+        await Assert.That(volume.CountX).IsGreaterThan(volume.CountY);
     }
 
     private static PbrScene OpenFloor(PbrRenderer pbr, bool gi, float exposure = 1f)
@@ -198,6 +258,13 @@ public class ProbeGiTests
         var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
 
         scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([pbr.UploadPrimitive([], [], material)]) });
+        // A singular model has no object space to trace in; it is drawn and left out of the hierarchy.
+        var (cube, cubeIndices) = Procedural.UnitCube();
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = new PbrMesh([pbr.UploadPrimitive(cube, cubeIndices, material)]),
+            Model = Matrix4x4.CreateScale(new Vector3(1f, 0f, 1f)) * Matrix4x4.CreateTranslation(0f, 0.5f, 0f),
+        });
         pbr.RenderFrame(scene);
         var volume = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
         await Assert.That(volume).IsNotNull();

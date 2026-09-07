@@ -45,7 +45,7 @@ internal sealed class PbrContext : IDisposable
             "PbrJointPalettes", JointBufferBytes, BufferUsage.Storage | BufferUsage.CopyDst));
         renderer.UpdateBuffer<Matrix4x4>(JointBuffer, 0, JointPalettes);
 
-        Trace = new TraceScene(renderer);
+        Trace = new TraceScene(renderer, log);
         FrameUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrFrameUniforms", (ulong)Unsafe.SizeOf<FrameUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
 

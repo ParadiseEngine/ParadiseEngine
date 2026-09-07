@@ -25,7 +25,12 @@ void updateMain(uint3 id: SV_DispatchThreadID)
     float4 state = probeStates[probe];
     int windowProbe = probe - probeVolume.window.x;
     if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
-    if (windowProbe >= probeVolume.window.y)
+    // An inactive probe was not traced: its rays are the trace's placeholder misses, which would
+    // read here as open space and reactivate it at the grid point inside the wall it could not
+    // leave — then it is traced, sees back faces, and is switched off again, a flicker with the
+    // period of a window lap. Static geometry does not move, and a refit resets every state, so
+    // once off a probe stays off.
+    if (windowProbe >= probeVolume.window.y || state.w < 0.5)
     {
         probeStatesOut[probe] = state;
         return;
