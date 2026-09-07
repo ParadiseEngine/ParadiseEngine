@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
@@ -355,7 +356,7 @@ public class FeatureSwitchTests
         var describedAll = pbr.Switches.Definitions.All(d => d.Summary.Length > 0);
 
         // PbrFeatures.All is what a host lists without a GPU; it has to be the same set.
-        await Assert.That(declared.Order()).IsEquivalentTo(PbrFeatures.All.Select(d => d.Name).Order());
+        await Assert.That(declared.Order()).IsEquivalentTo(PbrFeatures.All.Select(d => d.Name).Order(), CollectionOrdering.Matching);
         await Assert.That(describedAll).IsTrue();
         await Assert.That(pbr.Pipeline.Features.Count).IsEqualTo(PbrFeatures.All.Count);
     }

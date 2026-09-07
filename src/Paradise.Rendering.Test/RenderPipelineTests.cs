@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Buffers;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
@@ -77,7 +78,7 @@ public class RenderPipelineTests
 
         // "off test.b" leads: the frame adopts the switch when it begins, which is also where the
         // feature is told — not on the thread that flipped it.
-        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "test.c"]);
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "test.c"], CollectionOrdering.Matching);
     }
 
     /// <summary>The switch is read every frame, so a host, a debug panel or a hot-reloaded config
@@ -96,7 +97,7 @@ public class RenderPipelineTests
         pipeline.Setup(GraphWithTextures());
 
         // Each transition is announced by the frame that adopts it, immediately before the setups.
-        await Assert.That(log).IsEquivalentTo(["test.a", "off test.a", "on test.a", "test.a"]);
+        await Assert.That(log).IsEquivalentTo(["test.a", "off test.a", "on test.a", "test.a"], CollectionOrdering.Matching);
     }
 
     /// <summary>The hook a feature that fills a buffer while RECORDING needs: after every setup,
@@ -118,7 +119,7 @@ public class RenderPipelineTests
         pipeline.BeforeSubmit();
 
         await Assert.That(log)
-            .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"]);
+            .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"], CollectionOrdering.Matching);
     }
 
     /// <summary>A switch flipped WHILE the frame is being built does not take effect until the
@@ -151,10 +152,10 @@ public class RenderPipelineTests
         // b was switched off midway through the first frame and still finished it, start to end.
         await Assert.That(seenByA).IsEqualTo(FrameRequirements.SceneColorCapture);
         await Assert.That(duringTheFrame)
-            .IsEquivalentTo(["test.a", "test.b", "submit test.a", "submit test.b"]);
+            .IsEquivalentTo(["test.a", "test.b", "submit test.a", "submit test.b"], CollectionOrdering.Matching);
         // The second frame is the one that adopts it — and the transition is announced there,
         // on the thread that begins the frame, not on the one that flipped the switch.
-        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "submit test.a"]);
+        await Assert.That(log).IsEquivalentTo(["off test.b", "test.a", "submit test.a"], CollectionOrdering.Matching);
     }
 
     /// <summary>The renderer decides things before any feature sets up — whether to build the
@@ -175,7 +176,7 @@ public class RenderPipelineTests
 
         await Assert.That(beforeFlip).IsTrue();
         await Assert.That(afterFlip).IsTrue();          // the frame already began
-        await Assert.That(a.Log).IsEquivalentTo(["test.a"]);
+        await Assert.That(a.Log).IsEquivalentTo(["test.a"], CollectionOrdering.Matching);
         await Assert.That(switches.IsEnabled(a.Definition.Id)).IsFalse(); // the switch did move
     }
 
@@ -192,7 +193,7 @@ public class RenderPipelineTests
         pipeline.Switches.Set(a.Definition.Id, false);
         pipeline.Setup(GraphWithTextures());
 
-        await Assert.That(a.EnabledChanges).IsEquivalentTo([false]);
+        await Assert.That(a.EnabledChanges).IsEquivalentTo([false], CollectionOrdering.Matching);
     }
 
     /// <summary>A config file is read before the renderer is built, so the override lands on a
@@ -207,7 +208,7 @@ public class RenderPipelineTests
         pipeline.Setup(GraphWithTextures());
 
         await Assert.That(pipeline.IsEnabled(a)).IsFalse();
-        await Assert.That(a.Log).IsEquivalentTo(["off test.a"]);
+        await Assert.That(a.Log).IsEquivalentTo(["off test.a"], CollectionOrdering.Matching);
         await Assert.That(a.SeenRequirements).IsEqualTo(FrameRequirements.None);
     }
 
@@ -238,9 +239,9 @@ public class RenderPipelineTests
 
         pipeline.Setup(GraphWithTextures());
 
-        await Assert.That(log).IsEquivalentTo(["test.first", "test.between", "test.last"]);
+        await Assert.That(log).IsEquivalentTo(["test.first", "test.between", "test.last"], CollectionOrdering.Matching);
         await Assert.That(pipeline.Features.Select(f => f.Definition.Name))
-            .IsEquivalentTo(["test.first", "test.between", "test.last"]);
+            .IsEquivalentTo(["test.first", "test.between", "test.last"], CollectionOrdering.Matching);
     }
 
     /// <summary>Two features in the same slot keep the order they were added in — the tie-break
@@ -256,7 +257,7 @@ public class RenderPipelineTests
 
         pipeline.Setup(GraphWithTextures());
 
-        await Assert.That(log).IsEquivalentTo(["test.a", "test.b", "test.c"]);
+        await Assert.That(log).IsEquivalentTo(["test.a", "test.b", "test.c"], CollectionOrdering.Matching);
     }
 
     /// <summary>The mechanism by which one feature reshapes a pass another owns: the requirement
@@ -327,7 +328,7 @@ public class RenderPipelineTests
         // Once from Add, once from Resize: a feature declares its targets through one call.
         await Assert.That(a.Resized).IsEqualTo(2);
         await Assert.That(b.Resized).IsEqualTo(2);
-        await Assert.That(log).IsEquivalentTo(["dispose test.b", "dispose test.a"]);
+        await Assert.That(log).IsEquivalentTo(["dispose test.b", "dispose test.a"], CollectionOrdering.Matching);
     }
 
     /// <summary>A disposed pipeline stops hearing the switchboard it did not own — a shared

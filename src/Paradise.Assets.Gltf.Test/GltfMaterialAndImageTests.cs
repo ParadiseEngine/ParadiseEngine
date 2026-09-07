@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.IO;
 using System.Numerics;
 using System.Text.Json.Nodes;
@@ -142,7 +143,7 @@ public class GltfMaterialAndImageTests
         b.SetSceneRoots(b.AddNode(mesh: mesh));
 
         var asset = GltfSceneReader.Read(b.Build());
-        await Assert.That(asset.Images[ktx2].Bytes).IsEquivalentTo(Ktx2MagicBytes);
+        await Assert.That(asset.Images[ktx2].Bytes).IsEquivalentTo(Ktx2MagicBytes, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -209,7 +210,7 @@ public class GltfMaterialAndImageTests
         // The resolver is asked for the image's uri, and its (KTX2) bytes populate the image.
         await Assert.That(requested).IsEqualTo("crate_0.ktx2");
         await Assert.That(asset.Images.Length).IsEqualTo(1);
-        await Assert.That(asset.Images[0].Bytes).IsEquivalentTo(Ktx2MagicBytes);
+        await Assert.That(asset.Images[0].Bytes).IsEquivalentTo(Ktx2MagicBytes, CollectionOrdering.Matching);
     }
 
     [Test]

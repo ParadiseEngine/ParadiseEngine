@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Authoring;
 
@@ -165,7 +166,7 @@ public class PrefabResolverTests
         {
             WellKnownComponents.MetaId, WellKnownComponents.TransformId,
             Guid.Parse(MeshId), Guid.Parse(TagId), Guid.Parse(MaterialsId),
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -335,7 +336,7 @@ public class PrefabResolverTests
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(result.Document.Objects.Select(o => o.Name ?? "").ToArray())
-            .IsEquivalentTo(new[] { "Fitting_01", "Post" });
+            .IsEquivalentTo(new[] { "Fitting_01", "Post" }, CollectionOrdering.Matching);
     }
 
     [Test]

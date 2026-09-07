@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Project;
 
 using Zio;
@@ -64,6 +65,6 @@ public class HostPlayArgumentsTests
             "--config", "/game/.editor/play/g/config.toml",
             "--ui", "ui/Shell.xaml",
             "--seed", "7",
-        });
+        }, CollectionOrdering.Matching);
     }
 }

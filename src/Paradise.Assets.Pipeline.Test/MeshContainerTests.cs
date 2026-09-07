@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -18,7 +19,7 @@ public class MeshContainerTests
         {
             new ContainerReference("images[0]", "../textures/rust.png"),
             new ContainerReference("images[3]", "t.png"),
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]

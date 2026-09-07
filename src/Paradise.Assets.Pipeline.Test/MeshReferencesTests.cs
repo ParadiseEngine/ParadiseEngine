@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -34,7 +35,7 @@ public class MeshReferencesTests
         await Assert.That(MeshReferences.Recorded(fileSystem, Mesh)).IsEquivalentTo(new[]
         {
             new MeshReference("images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png")),
-        });
+        }, CollectionOrdering.Matching);
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 

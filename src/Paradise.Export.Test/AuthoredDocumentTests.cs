@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text.Json;
 using Paradise.Authoring;
 using Paradise.Export.Data;
@@ -314,7 +315,7 @@ public class AuthoredDocumentTests
             """);
 
         await Assert.That(document.Components.Select(c => c.GetType().Name).ToArray())
-            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) });
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -368,7 +369,7 @@ public class AuthoredDocumentTests
         var amended = document.With(new LedgeFixture { Label = "replaced" });
 
         await Assert.That(amended.Components.Select(c => c.GetType().Name).ToArray())
-            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) });
+            .IsEquivalentTo(new[] { nameof(LedgeFixture), nameof(MoverFixture) }, CollectionOrdering.Matching);
         await Assert.That(amended.Components.Count).IsEqualTo(2);
     }
 

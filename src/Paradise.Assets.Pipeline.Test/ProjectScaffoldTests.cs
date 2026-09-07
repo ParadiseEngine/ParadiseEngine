@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -117,9 +118,9 @@ public class ProjectScaffoldTests
         // would make the sample's scales mean something other than metres.
         var accessor = gltf["accessors"]!.AsArray()[0]!;
         await Assert.That(accessor["min"]!.AsArray().Select(v => v!.GetValue<double>()).ToArray())
-            .IsEquivalentTo(new[] { -0.5, -0.5, -0.5 });
+            .IsEquivalentTo(new[] { -0.5, -0.5, -0.5 }, CollectionOrdering.Matching);
         await Assert.That(accessor["max"]!.AsArray().Select(v => v!.GetValue<double>()).ToArray())
-            .IsEquivalentTo(new[] { 0.5, 0.5, 0.5 });
+            .IsEquivalentTo(new[] { 0.5, 0.5, 0.5 }, CollectionOrdering.Matching);
     }
 
     [Test]

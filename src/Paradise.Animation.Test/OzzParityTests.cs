@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation.Offline;
@@ -21,7 +22,7 @@ public class OzzParityTests
         using var theirs = OzzArchive.ReadSkeleton(TestRigs.Fixture("ozz-skeleton.ozz"));
 
         await Assert.That(ours.Value.JointCount).IsEqualTo(theirs.Value.JointCount);
-        await Assert.That(ours.Value.Parents.ToArray()).IsEquivalentTo(theirs.Value.Parents.ToArray());
+        await Assert.That(ours.Value.Parents.ToArray()).IsEquivalentTo(theirs.Value.Parents.ToArray(), CollectionOrdering.Matching);
         for (var i = 0; i < ours.Value.JointCount; i++)
         {
             var mine = ours.Value.RestPoses[i];
@@ -34,7 +35,7 @@ public class OzzParityTests
         }
 
         // Loading ozz's bytes and saving them again is the identity.
-        await Assert.That(OzzArchive.WriteSkeleton(ref theirs.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-skeleton.ozz"));
+        await Assert.That(OzzArchive.WriteSkeleton(ref theirs.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-skeleton.ozz"), CollectionOrdering.Matching);
     }
 
     [Test]
@@ -45,9 +46,9 @@ public class OzzParityTests
 
         var ours = OzzArchive.WriteAnimation(ref built.Value);
 
-        await Assert.That(ours).IsEquivalentTo(TestRigs.Fixture("ozz-animation.ozz"));
+        await Assert.That(ours).IsEquivalentTo(TestRigs.Fixture("ozz-animation.ozz"), CollectionOrdering.Matching);
         using var reread = OzzArchive.ReadAnimation(ours);
-        await Assert.That(OzzArchive.WriteAnimation(ref reread.Value)).IsEquivalentTo(ours);
+        await Assert.That(OzzArchive.WriteAnimation(ref reread.Value)).IsEquivalentTo(ours, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -59,7 +60,7 @@ public class OzzParityTests
         var optimized = AnimationOptimizer.Optimize(clip(37), ref skeleton.Value, AnimationOptimizer.Setting.Default);
         using var built = AnimationBuilder.Build(optimized, iframeInterval: 0.5f);
 
-        await Assert.That(OzzArchive.WriteAnimation(ref built.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-animation-optimized.ozz"));
+        await Assert.That(OzzArchive.WriteAnimation(ref built.Value)).IsEquivalentTo(TestRigs.Fixture("ozz-animation-optimized.ozz"), CollectionOrdering.Matching);
     }
 
     [Test]

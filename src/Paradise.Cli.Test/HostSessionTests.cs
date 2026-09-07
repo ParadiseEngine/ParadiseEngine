@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Zio;
 using Zio.FileSystems;
 
@@ -75,7 +76,7 @@ public class HostSessionTests
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(runner.Specs).Count().IsEqualTo(1);
         await Assert.That(runner.Specs[0].FileName).IsEqualTo("/sdk/dotnet");
-        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { s_output.FullName, "--scene", "/repo/.editor/play/levels/a.prefab" });
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { s_output.FullName, "--scene", "/repo/.editor/play/levels/a.prefab" }, CollectionOrdering.Matching);
         await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo("/repo");
     }
 
@@ -90,8 +91,8 @@ public class HostSessionTests
 
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(runner.Specs).Count().IsEqualTo(2);
-        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", s_csproj.FullName, "-c", "Debug", "-v", "q", "--nologo", "--no-restore" });
-        await Assert.That(runner.Specs[1].Arguments).IsEquivalentTo(new[] { s_output.FullName });
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", s_csproj.FullName, "-c", "Debug", "-v", "q", "--nologo", "--no-restore" }, CollectionOrdering.Matching);
+        await Assert.That(runner.Specs[1].Arguments).IsEquivalentTo(new[] { s_output.FullName }, CollectionOrdering.Matching);
         // The stamp the session wrote is what makes the next Play skip the build.
         await Assert.That(HostFreshness.Inspect(fileSystem, s_csproj, "Debug").IsFresh).IsTrue();
     }
@@ -174,7 +175,7 @@ public class HostSessionTests
         await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[]
         {
             "watch", "run", "--non-interactive", "--project", s_csproj.FullName, "-c", "Debug", "--", "--scene", "x",
-        });
+        }, CollectionOrdering.Matching);
         await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo("/repo");
     }
 
@@ -189,7 +190,7 @@ public class HostSessionTests
         await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[]
         {
             "watch", "run", "--non-interactive", "--project", s_csproj.FullName, "-c", "Debug", "--no-restore", "--",
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -216,7 +217,7 @@ public class HostSessionTests
         var exit = Session(fileSystem, runner).Build(s_csproj, "Release", restore: true, CancellationToken.None);
 
         await Assert.That(exit).IsEqualTo(0);
-        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", s_csproj.FullName, "-c", "Release", "-v", "q", "--nologo" });
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", s_csproj.FullName, "-c", "Release", "-v", "q", "--nologo" }, CollectionOrdering.Matching);
         await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo("/repo/Game.Launcher");
     }
 }

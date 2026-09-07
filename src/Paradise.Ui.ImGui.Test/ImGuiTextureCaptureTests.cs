@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -124,7 +125,7 @@ public class ImGuiTextureCaptureTests
         // first row is bytes 20..27 and its second row (y=2) is 36..43 — tightly packed into 16
         // bytes with the row gap dropped.
         var expected = new byte[] { 20, 21, 22, 23, 24, 25, 26, 27, 36, 37, 38, 39, 40, 41, 42, 43 };
-        await Assert.That(ops[0].Pixels).IsEquivalentTo(expected);
+        await Assert.That(ops[0].Pixels).IsEquivalentTo(expected, CollectionOrdering.Matching);
         await Assert.That(frame.Texture.Status).IsEqualTo(ImTextureStatus.Ok);
     }
 

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Buffers.Binary;
 
 namespace Paradise.Assets.Pipeline.Test;
@@ -40,7 +41,7 @@ public class Ktx2HeaderTests
         var linear = Header(vkFormat: 145, transfer: 1);
         var before = (byte[])linear.Clone();
         Ktx2Header.ForceLinearTransfer(linear);
-        await Assert.That(linear).IsEquivalentTo(before);
+        await Assert.That(linear).IsEquivalentTo(before, CollectionOrdering.Matching);
     }
 
     [Test]

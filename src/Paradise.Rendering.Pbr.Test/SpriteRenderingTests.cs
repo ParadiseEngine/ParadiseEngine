@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -75,7 +76,7 @@ public class SpriteRenderingTests
         var indices = SpriteGeometry.QuadIndices(3);
         await Assert.That(indices.Length).IsEqualTo(18);
         // Second quad: base vertex 4, same 0,1,2 / 0,2,3 fan.
-        await Assert.That(indices[6..12]).IsEquivalentTo(new uint[] { 4, 5, 6, 4, 6, 7 });
+        await Assert.That(indices[6..12]).IsEquivalentTo(new uint[] { 4, 5, 6, 4, 6, 7 }, CollectionOrdering.Matching);
         // A cube is 6 quads.
         await Assert.That(SpriteGeometry.CubeIndices(2).Length).IsEqualTo(2 * 6 * 6);
     }

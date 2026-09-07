@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Text;
 
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,7 @@ public class ArtifactCacheTests
         fileSystem.DeleteFile("/work/crate.ktx2");
 
         await Assert.That(cache.TryFetch("ktx2", key, fileSystem, "/work/crate.ktx2")).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/work/crate.ktx2")).IsEquivalentTo(new byte[] { 1, 2, 3, 4 });
+        await Assert.That(fileSystem.ReadAllBytes("/work/crate.ktx2")).IsEquivalentTo(new byte[] { 1, 2, 3, 4 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -96,7 +97,7 @@ public class ArtifactCacheTests
         cache.Store("ktx2", key, fileSystem, "/work/a.ktx2");
 
         await Assert.That(cache.TryFetch("ktx2", key, fileSystem, "/build/models/deep/a.ktx2")).IsTrue();
-        await Assert.That(fileSystem.ReadAllBytes("/build/models/deep/a.ktx2")).IsEquivalentTo(new byte[] { 9 });
+        await Assert.That(fileSystem.ReadAllBytes("/build/models/deep/a.ktx2")).IsEquivalentTo(new byte[] { 9 }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -115,7 +116,7 @@ public class ArtifactCacheTests
         workFileSystem.DeleteFile("/out/a.ktx2");
 
         await Assert.That(cache.TryFetch("ktx2", key, workFileSystem, "/out/a.ktx2")).IsTrue();
-        await Assert.That(workFileSystem.ReadAllBytes("/out/a.ktx2")).IsEquivalentTo(new byte[] { 5, 6 });
+        await Assert.That(workFileSystem.ReadAllBytes("/out/a.ktx2")).IsEquivalentTo(new byte[] { 5, 6 }, CollectionOrdering.Matching);
     }
 
     [Test]

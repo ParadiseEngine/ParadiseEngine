@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Zio;
 using Zio.FileSystems;
 
@@ -62,7 +63,7 @@ public class HostFreshnessTests
         await Assert.That(freshness.ProjectDirectories).IsEquivalentTo(new UPath[]
         {
             "/repo/Game.Launcher", "/repo/Game.Core", "/engine/src/Paradise.ECS",
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Collections.Immutable;
 using System.Numerics;
 using System.Reflection;
@@ -282,7 +283,7 @@ public class AuthoredReaderTests
     {
         var (registry, _) = Run(PrimitivesSource);
         await Assert.That(((IAuthoredComponentRegistry)registry!).ComponentIds)
-            .IsEquivalentTo(new[] { new Guid(ThingId) });
+            .IsEquivalentTo(new[] { new Guid(ThingId) }, CollectionOrdering.Matching);
     }
 
     /// <summary>The full wire vocabulary in one record, shaped exactly as the addon writes it:
@@ -357,8 +358,8 @@ public class AuthoredReaderTests
         await Assert.That((float)Prop(body, "Weight")!).IsEqualTo(12.5f);
         await Assert.That((string)Prop(body, "Tag")!).IsEqualTo("fin");
 
-        await Assert.That((List<float>)Prop(rich, "Offsets")!).IsEquivalentTo([0.1f, 0.2f, 0.3f]);
-        await Assert.That((string[])Prop(rich, "Names")!).IsEquivalentTo(["a", "b"]);
+        await Assert.That((List<float>)Prop(rich, "Offsets")!).IsEquivalentTo([0.1f, 0.2f, 0.3f], CollectionOrdering.Matching);
+        await Assert.That((string[])Prop(rich, "Names")!).IsEquivalentTo(["a", "b"], CollectionOrdering.Matching);
     }
 
     private const string EnumSource = $$"""
@@ -488,7 +489,7 @@ public class AuthoredReaderTests
         await Assert.That((System.Numerics.Vector3)Prop(nully, "Home")!)
             .IsEqualTo(new System.Numerics.Vector3(1f, 2f, 3f));
         await Assert.That((float)Prop(Prop(nully, "Body")!, "Weight")!).IsEqualTo(9f);
-        await Assert.That((List<float>)Prop(nully, "Offsets")!).IsEquivalentTo([4f]);
+        await Assert.That((List<float>)Prop(nully, "Offsets")!).IsEquivalentTo([4f], CollectionOrdering.Matching);
         // The one exception: a string null passes through, as it did with the contexts.
         await Assert.That((string?)Prop(nully, "Label")).IsNull();
     }

@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.ECS.Test;
 
 /// <summary>
@@ -37,7 +39,7 @@ public sealed class SystemEventsTests
 
         var ids = ToIds(store.Incoming<Died>());
         var expected = new[] { 1, 3, 2 }; // writer 0's stream in order, then writer 1's
-        await Assert.That(ids).IsEquivalentTo(expected);
+        await Assert.That(ids).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -62,7 +64,7 @@ public sealed class SystemEventsTests
 
         var a = Run();
         var b = Run();
-        await Assert.That(a).IsEquivalentTo(b);
+        await Assert.That(a).IsEquivalentTo(b, CollectionOrdering.Matching);
         await Assert.That(a[0]).IsEqualTo(0);   // writer 0 first
         await Assert.That(a[^1]).IsEqualTo(71); // writer 7 last
     }
@@ -91,7 +93,7 @@ public sealed class SystemEventsTests
         store.Commit(writers);
 
         var expectedDied = new[] { 1, 4 };
-        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expectedDied);
+        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expectedDied, CollectionOrdering.Matching);
         var broke = store.Incoming<Broke>().ToArray();
         await Assert.That(broke.Length).IsEqualTo(1);
         await Assert.That(broke[0].Realm).IsEqualTo(3);
@@ -108,7 +110,7 @@ public sealed class SystemEventsTests
         b.CopyFrom(a);
 
         var expected = new[] { 7, 8 };
-        await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -124,7 +126,7 @@ public sealed class SystemEventsTests
         snapshot.CopyFrom(write);
 
         var expected = new[] { 42 };
-        await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -135,7 +137,7 @@ public sealed class SystemEventsTests
         store.SetIncoming<Died>(restored);
 
         var expected = new[] { 9, 10 };
-        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -149,7 +151,7 @@ public sealed class SystemEventsTests
         b.CopyFrom(a);
 
         var expected = new[] { 3 };
-        await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(b.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -164,7 +166,7 @@ public sealed class SystemEventsTests
         store.Commit(ReadOnlySpan<SystemEventWriter>.Empty);
 
         var expected = new[] { 11, 12 };
-        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(store.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -180,7 +182,7 @@ public sealed class SystemEventsTests
 
         var ids = ToIds(store.Incoming<Died>());
         var expected = new[] { 1, 2, 99 };
-        await Assert.That(ids).IsEquivalentTo(expected);
+        await Assert.That(ids).IsEquivalentTo(expected, CollectionOrdering.Matching);
         await Assert.That(ids[0]).IsEqualTo(1);  // writer 0 first
         await Assert.That(ids[1]).IsEqualTo(2);  // writer 1 next
         await Assert.That(ids[2]).IsEqualTo(99); // managed emit last (fixed, deterministic position)
@@ -211,7 +213,7 @@ public sealed class SystemEventsTests
         snapshot.CopyFrom(write);
 
         var expected = new[] { 55 };
-        await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected);
+        await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     private static int[] ToIds(ReadOnlySpan<Died> span)

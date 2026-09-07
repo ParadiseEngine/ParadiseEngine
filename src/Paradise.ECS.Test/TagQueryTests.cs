@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.ECS.Test;
 
 /// <summary>
@@ -72,7 +74,7 @@ public sealed class TagQueryTests : IDisposable
 
         // 1 and 3, not 2 — and note all three live in one chunk, so this is a row-level skip
         // rather than an archetype that failed to match.
-        await Assert.That(seen).IsEquivalentTo(new List<float> { 1f, 3f });
+        await Assert.That(seen).IsEquivalentTo(new List<float> { 1f, 3f }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -369,7 +371,7 @@ public sealed class TagQueryTests : IDisposable
             seen.Add(row.TestPosition.X);
 
         // Active and not player: only 2. Untagged 4 is out; player-only 1 is out; both 3 is out.
-        await Assert.That(seen).IsEquivalentTo(new List<float> { 2f });
+        await Assert.That(seen).IsEquivalentTo(new List<float> { 2f }, CollectionOrdering.Matching);
     }
 }
 

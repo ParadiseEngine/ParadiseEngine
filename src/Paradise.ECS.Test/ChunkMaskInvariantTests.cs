@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.ECS.Test;
 
 /// <summary>
@@ -208,6 +210,6 @@ public sealed class ChunkMaskInvariantTests : IDisposable
             found.Add(row.TestPosition.X);
         }
 
-        await Assert.That(found).IsEquivalentTo(new List<float> { 2999f });
+        await Assert.That(found).IsEquivalentTo(new List<float> { 2999f }, CollectionOrdering.Matching);
     }
 }

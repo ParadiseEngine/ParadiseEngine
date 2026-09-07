@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -24,7 +25,7 @@ public class AssetRemoverTests
         var result = AssetRemover.Remove(fileSystem, s_layout, "/game/assets/models/crate.glb");
 
         await Assert.That(result.Succeeded).IsTrue();
-        await Assert.That(result.Removed).IsEquivalentTo(new[] { "models/crate.glb" });
+        await Assert.That(result.Removed).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb")).IsFalse();
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb.meta")).IsFalse();
     }
@@ -100,7 +101,7 @@ public class AssetRemoverTests
         var result = AssetRemover.Remove(fileSystem, s_layout, "/game/assets/models/crate.glb", force: true, dryRun: true);
 
         await Assert.That(result.Succeeded).IsTrue();
-        await Assert.That(result.Removed).IsEquivalentTo(new[] { "models/crate.glb" });
+        await Assert.That(result.Removed).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
         await Assert.That(result.Dangling.Count).IsEqualTo(1);
         await Assert.That(fileSystem.FileExists("/game/assets/models/crate.glb")).IsTrue();
     }

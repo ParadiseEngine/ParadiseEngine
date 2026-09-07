@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
@@ -29,6 +30,8 @@ public class AuthoringSchemaTests
     {
         var schema = Schema();
         await Assert.That(schema.Version).IsEqualTo(AuthoringSchemaDocument.CurrentVersion);
+        // Unordered deliberately: which components the schema publishes is the contract the
+        // Blender addon reads; the order they appear in is not.
         await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
         {
             FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
@@ -82,7 +85,7 @@ public class AuthoringSchemaTests
             .IsEquivalentTo(new[]
             {
                 "ShapeType", "LocalCenter", "LocalRotation", "Size", "Radius", "Height",
-            });
+            }, CollectionOrdering.Matching);
 
         var lamp = Field(HostBound(), "Lamp");
         await Assert.That(lamp.AuthoredBy).IsEqualTo(AuthoredBySources.Light);
@@ -98,7 +101,7 @@ public class AuthoringSchemaTests
             .IsEquivalentTo(new[]
             {
                 "Projection", "Fov", "OrthographicSize", "Near", "Far", "Position", "Rotation",
-            });
+            }, CollectionOrdering.Matching);
 
         // The kinds' defaults reach the schema only as property initializers; a constructor body
         // is invisible to the generator and the editor would see an unspecified FOV.
@@ -118,7 +121,7 @@ public class AuthoringSchemaTests
         await Assert.That(flipbook.AuthoredBy).IsEqualTo(AuthoredBySources.SpriteSheet);
         await Assert.That(flipbook.Type).IsEqualTo(AuthoredFieldTypes.Object);
         await Assert.That(flipbook.Fields!.Select(f => f.Name))
-            .IsEquivalentTo(new[] { "Sheet", "Columns", "Rows", "QuadSize", "Billboard" });
+            .IsEquivalentTo(new[] { "Sheet", "Columns", "Rows", "QuadSize", "Billboard" }, CollectionOrdering.Matching);
         await Assert.That(flipbook.Fields!.Single(f => f.Name == "Columns").Default!.Value.GetInt32()).IsEqualTo(1);
         await Assert.That(flipbook.Fields!.Single(f => f.Name == "Billboard").Default!.Value.GetBoolean()).IsTrue();
 
@@ -223,7 +226,7 @@ public class AuthoringSchemaTests
     public async Task components_are_ordered_by_type_name_so_rebuilds_do_not_diff()
     {
         var types = Schema().Components.Select(c => c.Type).ToList();
-        await Assert.That(types).IsEquivalentTo(types.OrderBy(t => t, StringComparer.Ordinal).ToList());
+        await Assert.That(types).IsEquivalentTo(types.OrderBy(t => t, StringComparer.Ordinal).ToList(), CollectionOrdering.Matching);
     }
 
     [Test]
@@ -306,7 +309,7 @@ public class AuthoringSchemaTests
     {
         var shape = Field(Everything(), "Shape");
         await Assert.That(shape.Type).IsEqualTo(AuthoredFieldTypes.Enum);
-        await Assert.That(shape.Values).IsEquivalentTo(new[] { "Box", "Sphere", "Capsule" });
+        await Assert.That(shape.Values).IsEquivalentTo(new[] { "Box", "Sphere", "Capsule" }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -327,7 +330,7 @@ public class AuthoringSchemaTests
         var box = Field(Everything(), "Box");
         await Assert.That(box.Type).IsEqualTo(AuthoredFieldTypes.Object);
         await Assert.That(box.Fields!.Select(f => f.Name))
-            .IsEquivalentTo(new[] { "SizeX", "SizeY", "SizeZ" });
+            .IsEquivalentTo(new[] { "SizeX", "SizeY", "SizeZ" }, CollectionOrdering.Matching);
         await Assert.That(box.Fields!.Single(f => f.Name == "SizeX").Unit)
             .IsEqualTo(AuthoredUnits.Meters);
     }

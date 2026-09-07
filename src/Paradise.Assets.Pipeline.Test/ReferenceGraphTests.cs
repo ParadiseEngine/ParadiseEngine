@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -31,8 +32,8 @@ public class ReferenceGraphTests
         await Assert.That(edge.Target).IsEqualTo(crate);
         await Assert.That(edge.Where).IsEqualTo("game.Mesh.Mesh");
         await Assert.That(edge.Path).IsEqualTo("models/crate.glb");
-        await Assert.That(graph.DependentsOf(crate)).IsEquivalentTo(new[] { edge });
-        await Assert.That(graph.DependenciesOf(level)).IsEquivalentTo(new[] { edge });
+        await Assert.That(graph.DependentsOf(crate)).IsEquivalentTo(new[] { edge }, CollectionOrdering.Matching);
+        await Assert.That(graph.DependenciesOf(level)).IsEquivalentTo(new[] { edge }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -77,7 +78,9 @@ public class ReferenceGraphTests
 
         var graph = Graph(fileSystem);
 
-        await Assert.That(graph.DependentsOf(rust).Select(e => e.Referrer)).IsEquivalentTo(new[] { crate });
+        await Assert.That(graph.DependentsOf(rust).Select(e => e.Referrer)).IsEquivalentTo(new[] { crate }, CollectionOrdering.Matching);
+        // Unordered deliberately: TransitiveDependentsOf returns an IReadOnlySet, built by a
+        // stack walk over a HashSet. It is a set by type and by construction; there is no order.
         await Assert.That(graph.TransitiveDependentsOf(rust)).IsEquivalentTo(new[] { crate, box, level });
         await Assert.That(graph.TransitiveDependentsOf(level)).IsEmpty();
     }
@@ -97,7 +100,7 @@ public class ReferenceGraphTests
         await Assert.That(graph.Unreadable).IsEquivalentTo(new UPath[]
         {
             "/game/assets/levels/broken.prefab", "/game/assets/levels/orphan.prefab",
-        });
+        }, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -153,7 +156,7 @@ public class ReferenceGraphTests
         var graph = Graph(fileSystem);
 
         await Assert.That(graph.DependentsOf(crate).Count).IsEqualTo(2);
-        await Assert.That(graph.DependentFilesOf(crate)).IsEquivalentTo(new UPath[] { "/game/assets/levels/district.prefab" });
+        await Assert.That(graph.DependentFilesOf(crate)).IsEquivalentTo(new UPath[] { "/game/assets/levels/district.prefab" }, CollectionOrdering.Matching);
     }
 
     private static ReferenceGraph Graph(MemoryFileSystem fileSystem)

@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using System.Numerics;
 
 using Paradise.Animation.Offline;
@@ -17,7 +18,7 @@ public class OfflineTests
 
         await Assert.That(raw.Duration).IsEqualTo(1f);
         await Assert.That(raw.Tracks.Count).IsEqualTo(3);
-        await Assert.That(raw.Tracks[0].Translations.Select(k => k.Time).ToArray()).IsEquivalentTo(new[] { 0f, 0.5f - ClipConverter.StepLead, 0.5f, 1f - ClipConverter.StepLead, 1f });
+        await Assert.That(raw.Tracks[0].Translations.Select(k => k.Time).ToArray()).IsEquivalentTo(new[] { 0f, 0.5f - ClipConverter.StepLead, 0.5f, 1f - ClipConverter.StepLead, 1f }, CollectionOrdering.Matching);
         await Assert.That(raw.Tracks[0].Translations[1].Value).IsEqualTo(new Vector3(0, 1, 0));
         await Assert.That(raw.Tracks[1].Rotations.Single()).IsEqualTo(new RotationKey(0f, TestRigs.QuarterTurnZ));
         await Assert.That(raw.Tracks[2].Translations.Single().Value).IsEqualTo(Vector3.Zero);

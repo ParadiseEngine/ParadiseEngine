@@ -1,3 +1,4 @@
+using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
@@ -211,7 +212,7 @@ public class AssetWatcherTests
         watcher.Observe("/game/assets/models/crate.glb");
         clock.Now += AssetWatcher.Debounce;
         await Assert.That(watcher.Drain().SidecarActions).IsEqualTo(0);
-        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta")).IsEquivalentTo([.. sidecar, (byte)'\n']);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta")).IsEquivalentTo([.. sidecar, (byte)'\n'], CollectionOrdering.Matching);
     }
 
     /// <summary>
