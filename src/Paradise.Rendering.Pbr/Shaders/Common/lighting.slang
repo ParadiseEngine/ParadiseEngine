@@ -34,10 +34,10 @@ struct FrameUniforms
     // premultiplied at export — the per-normal ambient Godot's sky-SH produces, replacing the
     // 3-zone hemisphere blend. ambientSh[0].w > 0.5 enables the SH path (zones are the fallback).
     float4   ambientSh[9];
-    // Forward+ clustering (Godot's froxel model, CPU-binned): the screen is tiled 32x32 px and
-    // view depth is split into logarithmic slices; clusterMasks holds TWO uint bitmask words per
-    // froxel (word i>>5, bit i&31 = sceneLights[i] overlaps it). Directional lights are never
-    // clustered.
+    // Forward+ clustering (Godot's froxel model, binned in compute by lightCull.slang): the screen
+    // is tiled 32x32 px and view depth is split into logarithmic slices; clusterMasks holds TWO
+    // uint bitmask words per froxel (word i>>5, bit i&31 = sceneLights[i] overlaps it).
+    // Directional lights are never clustered.
     float4   cameraForward;  // xyz: world-space camera forward (unit), w: cluster near
     float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];

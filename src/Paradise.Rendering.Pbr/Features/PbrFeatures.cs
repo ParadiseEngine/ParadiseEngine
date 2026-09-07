@@ -46,6 +46,12 @@ public static class PbrFeatures
         "rendering.globalIllumination", true,
         "Probe global illumination. Off, indirect light is the sky ambient alone.");
 
+    /// <summary>Forward+ froxel binning in compute. Off, the froxel grid is retracted and every
+    /// light is tested against every pixel — the same picture at more cost.</summary>
+    public static FeatureDefinition LightCulling { get; } = new(
+        "rendering.lightCulling", true,
+        "Forward+ froxel light culling. Off, every light shades every pixel.");
+
     /// <summary>The scene itself: sky, opaque and blended geometry into the HDR target. Off,
     /// there is no picture — which is what makes it a useful thing to switch while looking for
     /// the cost of everything else.</summary>
@@ -75,7 +81,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination,
+        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Scene, SceneColorCapture, Bloom, Composite,
     ];
 
@@ -105,6 +111,7 @@ public static class PbrFeatureOrder
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
+    public const int LightCulling = 550;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
     public const int Bloom = 800;

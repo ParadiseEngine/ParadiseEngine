@@ -111,6 +111,7 @@ internal static class Program
             if (int.TryParse(ParseValue(args, "--gi-rays"), out var giRays)) GiDemoScene.RaysPerProbe = giRays;
             if (int.TryParse(ParseValue(args, "--gi-max-probes"), out var giMax)) GiDemoScene.MaxProbes = giMax;
             if (int.TryParse(ParseValue(args, "--gi-probes-per-frame"), out var giWindow)) GiDemoScene.ProbesPerFrame = giWindow;
+            if (int.TryParse(ParseValue(args, "--lights"), out var extraLights)) GiDemoScene.ExtraLights = extraLights;
         }
         else if (Array.IndexOf(args, "--ssr-demo") >= 0)
         {

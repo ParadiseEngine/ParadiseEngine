@@ -35,9 +35,9 @@ struct MaterialUniforms
 [[vk::binding(0, 0)]]
 ConstantBuffer<DrawUniforms> draw;
 
-// Per-froxel light bitmasks (Forward+). Rebuilt by the renderer every frame; conservatively
-// binned on the CPU (sphere bounds, ±1 froxel padding), so a set bit may be a false positive
-// (the light's attenuation then contributes ~0) but never a false negative — clustering is
+// Per-froxel light bitmasks (Forward+). Rebuilt every frame by lightCull.slang; conservatively
+// binned (sphere against the froxel's view-space bounding box), so a set bit may be a false
+// positive (the light's attenuation then contributes ~0) but never a false negative — clustering is
 // pure culling and must not change pixels.
 [[vk::binding(3, 1)]]
 StructuredBuffer<uint> clusterMasks;

@@ -114,18 +114,30 @@ public class RayTracedAoTests
         var recorder = new Baseline.RecordingRenderer(backend);
         using var pbr = new PbrRenderer(recorder, new FeatureSwitches(), 32, 32);
 
+        // Counted by NAME, and by the DELTA a dispatch count moves — not by how many compute
+        // passes the frame holds. Forward+ light culling bins in compute every frame, so a
+        // whole-frame count measures whoever else happens to dispatch.
         var scene = BuildScene(pbr, wall: true, rtao: false);
         pbr.RenderFrame(scene);
-        var withoutCompute = CountKind(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
+        var passesOff = CountPasses(pbr, "Rtao.");
+        var dispatchesOff = CountKind(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
 
         scene.RayTracedAo = scene.RayTracedAo with { Enabled = true };
         pbr.RenderFrame(scene);
-        var withCompute = CountKind(recorder.Frames[^1].Commands, RenderCommandKind.BeginComputePass);
-        var dispatches = CountKind(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
+        var passesOn = CountPasses(pbr, "Rtao.");
+        var dispatchesOn = CountKind(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
 
-        await Assert.That(withoutCompute).IsEqualTo(0);
-        await Assert.That(withCompute).IsEqualTo(1);
-        await Assert.That(dispatches).IsEqualTo(1);
+        await Assert.That(passesOff).IsEqualTo(0);
+        await Assert.That(passesOn).IsEqualTo(1);
+        await Assert.That(dispatchesOn - dispatchesOff).IsEqualTo(1);
+    }
+
+    private static int CountPasses(PbrRenderer pbr, string prefix)
+    {
+        var count = 0;
+        foreach (var name in pbr.LastPassNames)
+            if (name.StartsWith(prefix, StringComparison.Ordinal)) count++;
+        return count;
     }
 
     private static int CountKind(RenderCommand[] commands, RenderCommandKind kind)

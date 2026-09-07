@@ -8,8 +8,8 @@ namespace Paradise.Rendering.Pbr;
 
 /// <summary>The scene itself: the sky background, then every opaque draw, then every blended draw,
 /// in linear HDR at <see cref="RenderPassEvent.Opaque"/>. Owns the HDR and depth targets, the
-/// frame uniforms and their bind group, the Forward+ light clusters, and the environment lookup
-/// tables; reads the shadow plan and the SSAO uniforms from the two features that produce them.
+/// frame uniforms and their bind group, and the environment lookup tables; reads the shadow plan,
+/// the SSAO uniforms and the Forward+ froxel grid from the features that produce them.
 ///
 /// <para>When the frame requires <see cref="FrameRequirements.SceneColorCapture"/> the blended
 /// half moves to its own pass at <see cref="RenderPassEvent.Transparent"/>, after whatever pass
@@ -20,18 +20,21 @@ public sealed partial class SceneFeature : IRenderFeature
     private readonly ShadowFeature _shadows;
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
+    private readonly LightCullingFeature _lightCulling;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
     private readonly HashSet<int> _materialsSeen = [];
     private float _specularAaVariance;
     private float _specularAaClamp;
 
-    internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi, float specularAaVariance, float specularAaClamp)
+    internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
+        LightCullingFeature lightCulling, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
         _shadows = shadows;
         _prepass = prepass;
         _gi = gi;
+        _lightCulling = lightCulling;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
@@ -39,7 +42,6 @@ public sealed partial class SceneFeature : IRenderFeature
         _lightingGroupLayout = ctx.Programs.Group(3); // pre-pass + SSAO uniforms + sky-specular LUT + DFG
 
         EnsureTargets();
-        EnsureClusterBuffer();
         CreateSky();
         CreateLuts();
     }
@@ -54,11 +56,7 @@ public sealed partial class SceneFeature : IRenderFeature
         _specularAaClamp = clamp;
     }
 
-    public void Resize(uint width, uint height)
-    {
-        EnsureTargets();
-        EnsureClusterBuffer(); // tile counts changed → new mask buffer
-    }
+    public void Resize(uint width, uint height) => EnsureTargets();
 
     private void EnsureTargets()
     {
@@ -71,7 +69,6 @@ public sealed partial class SceneFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         var scene = _ctx.Scene;
-        BuildClusters(scene);
         UploadFrameUniforms(scene);
         if (scene.HasSkyBackground) UploadSky(scene);
 
@@ -143,7 +140,7 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
             GraphBinding.TextureArray(1, shadows),
             GraphBinding.Sampler(2, _shadows.Sampler),
-            GraphBinding.Buffer(3, _clusterBuffer, 0, (ulong)(_clusterMasks.Length * sizeof(uint))),
+            GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
             GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
         ]);
         pass.BindGroup(3, "PbrLightingGroup", _lightingGroupLayout,
@@ -239,9 +236,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     public void Dispose()
     {
-        var renderer = _ctx.Renderer;
         DisposeSky();
         DisposeLuts();
-        if (_clusterBuffer.IsValid) renderer.DestroyBuffer(_clusterBuffer);
     }
 }
