@@ -40,7 +40,7 @@ struct TraceInstance
 
 struct TraceMaterial
 {
-    float4 baseColor; // rgb albedo factor (textures are not read at a hit), a unused
+    float4 baseColor; // rgb albedo factor (textures are not read at a hit), a: metallic factor
     float4 emissive;  // rgb emissive factor, a unused
 };
 

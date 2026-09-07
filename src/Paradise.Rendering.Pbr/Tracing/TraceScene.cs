@@ -193,7 +193,11 @@ internal sealed class TraceScene : IDisposable
         for (var m = 0; m < materials.MaterialCount; m++)
         {
             var surface = materials.GetTraceSurface(m);
-            _materials[m] = new TraceMaterialGpu { BaseColor = surface.BaseColor, Emissive = new Vector4(surface.Emissive, 0f) };
+            _materials[m] = new TraceMaterialGpu
+            {
+                BaseColor = new Vector4(surface.BaseColor.X, surface.BaseColor.Y, surface.BaseColor.Z, surface.Metallic),
+                Emissive = new Vector4(surface.Emissive, 0f),
+            };
         }
 
         Upload(materials.MaterialCount);

@@ -40,7 +40,10 @@ float glassFresnel(float3 N, float3 V)
 // specular = F0·scale + f90·bias; the F0=1 response for energy compensation is scale + bias.
 float2 envBrdfAb(float roughness, float NdotV)
 {
-    return dfgLut.SampleLevel(skySpecularSampler, float2(NdotV, roughness), 0.0).rg;
+    // Both terms are bounded by 1 (a lossless split sum). The table's grazing column divides by
+    // NdotV and is stored in fp16, so a silhouette pixel could read infinity here — and one
+    // infinite pixel through the bloom chain is a white frame.
+    return saturate(dfgLut.SampleLevel(skySpecularSampler, float2(NdotV, roughness), 0.0).rg);
 }
 
 // Filament/Godot multiscatter energy compensation: single-scatter GGX loses energy at high
@@ -622,6 +625,19 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     float exposure = max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 
+    // Indirect specular. With a probe volume, the probes' irradiance along the reflection
+    // direction stands in for prefiltered radiance: exact for a rough surface, blurred for a
+    // polished one — a probe grid has no sharper answer — and it is what keeps a metal, which has
+    // no diffuse, from going black inside a room. The probes' misses already carry the sky, so
+    // the sky LUT below is the fallback for surfaces the volume does not cover.
+    float f90i = clamp(50.0 * F0.g, metallic, 1.0);
+    float3 R = reflect(-V, N);
+    float3 reflected;
+    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+        && sampleProbeIrradiance(input.worldPos, R, V, reflected))
+    {
+        ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
+    }
     // Sky-reflection specular (Godot reflected_light_source = Sky): GGX-prefiltered sky radiance
     // from the CPU LUT × the split-sum environment BRDF. The LUT has two row halves: the gradient
     // (u = reflection.y, rows 0..7) and the sun disk/halo (u = cos angle to the sun — radially
@@ -629,26 +645,28 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // headroom). The sun direction/colour come from the first directional scene light — the same
     // light the sky background pairs with, so a disabled sun vanishes from reflections too. AO
     // darkens it all like the diffuse ambient (Godot applies AO to all ambient light).
-    if (frame.aaSettings.x > 0.5)
+    else if (frame.aaSettings.x > 0.5)
     {
-        float3 R = reflect(-V, N);
         float NdotV = clamp(dot(N, V), 0.0001, 1.0);
         float vHalf = (clamp(roughness, 0.0, 1.0) * 7.0 + 0.5) / 16.0;
-        float3 prefiltered = skySpecularLut.Sample(skySpecularSampler, float2(R.y * 0.5 + 0.5, vHalf)).rgb;
+        // SampleLevel, not Sample: this branch now sits under a per-fragment condition (whether
+        // the probes answered), and WGSL forbids an implicit-derivative sample in non-uniform
+        // control flow — the module fails to compile and Dawn drops the whole frame. The LUT has
+        // one mip, so the explicit level costs nothing.
+        float3 prefiltered = skySpecularLut.SampleLevel(skySpecularSampler, float2(R.y * 0.5 + 0.5, vHalf), 0.0).rgb;
         for (int li = 0; li < sceneLightCount; li++)
         {
             if (frame.sceneLights[li].positionAndType.w < 0.5)
             {
                 float cosToSun = dot(R, normalize(frame.sceneLights[li].directionAndRange.xyz));
-                prefiltered += skySpecularLut.Sample(skySpecularSampler,
-                    float2(cosToSun * 0.5 + 0.5, 0.5 + vHalf)).rgb * 4.0;
+                prefiltered += skySpecularLut.SampleLevel(skySpecularSampler,
+                    float2(cosToSun * 0.5 + 0.5, 0.5 + vHalf), 0.0).rgb * 4.0;
                 break;
             }
         }
         // Godot's indirect-specular combine (scene_forward_clustered.glsl): the split-sum pair
         // with the cheap-luminance f90 and the multiscatter energy compensation (envAb/energyComp
         // computed once per fragment above).
-        float f90i = clamp(50.0 * F0.g, metallic, 1.0);
         ambient += prefiltered * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
     }
 

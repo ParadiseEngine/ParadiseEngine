@@ -17,8 +17,8 @@ public readonly record struct MaterialTarget(uint Binding, string Target);
 /// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
 /// and image dedupe keyed by (content hash, usage) — the same KTX2 payload used as color vs
 /// data transcodes to different formats, so usage is part of texture identity.</summary>
-/// <summary>A material as a ray hit sees it: albedo and emissive factors, no textures.</summary>
-public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive);
+/// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
+public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
 
 public sealed class MaterialResourceCache : IDisposable
 {
@@ -202,7 +202,7 @@ public sealed class MaterialResourceCache : IDisposable
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
         // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
-        _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor));
+        _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
         var materialId = _materials.Count - 1;
         if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
         return materialId;

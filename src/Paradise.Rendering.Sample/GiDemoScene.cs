@@ -87,7 +87,7 @@ internal sealed class GiDemoScene : IDisposable
             Ground = new Vector3(0.02f, 0.02f, 0.02f),
         };
         _scene.Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Filmic, Exposure = 0.6f, White = 4f };
-        _scene.Bloom = new PbrBloom { Enabled = true, Threshold = 1.2f, Intensity = 0.25f };
+        _scene.Bloom = new PbrBloom { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--no-bloom") < 0, Threshold = 1.2f, Intensity = 0.25f };
         _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = 128, Hysteresis = 0.97f, MaxProbes = 4096 };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
 
@@ -137,10 +137,12 @@ internal sealed class GiDemoScene : IDisposable
             materials[i] = asset.Materials[i] with
             {
                 BaseColorImage = -1, MetallicRoughnessImage = -1, NormalImage = -1, OcclusionImage = -1, EmissiveImage = -1,
-                // A textured model's factors are often 1: white, fully metallic — which bounces
-                // nothing. Give it a matte surface so the room's colours land on it.
-                MetallicFactor = 0f,
-                RoughnessFactor = 0.7f,
+                // Polished gold: a metal has no diffuse, so everything it shows is the room
+                // reflected through the probes' specular fallback — the red and green walls and
+                // the panel, blurred to the probes' resolution.
+                BaseColorFactor = new Vector4(1.0f, 0.78f, 0.36f, 1f),
+                MetallicFactor = 1f,
+                RoughnessFactor = 0.25f,
             };
         }
         var meshes = _pbr.UploadMesh(asset with { Materials = materials, Images = [] });

@@ -122,7 +122,9 @@ void traceMain(uint3 id: SV_DispatchThreadID)
     float3 hitPos = origin + dir * hit.t;
     float3 N = traceHitNormal(hit, dir);
     TraceMaterial material = traceMaterials[inst.material];
-    float3 albedo = material.baseColor.rgb;
+    // A metal has no diffuse: it bounces nothing the probes can carry (its specular would need a
+    // reflection direction a probe does not have), so a chrome wall reads as dark to the probes.
+    float3 albedo = material.baseColor.rgb * (1.0 - saturate(material.baseColor.a));
     float3 radiance = material.emissive.rgb;
     radiance += albedo * directLight(hitPos + N * 0.005, N, float2(ray, probe));
     // Last frame's probes light the hit point: the bounce. Outside the volume the sky stands in,
