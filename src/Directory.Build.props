@@ -18,8 +18,15 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- The version every Paradise.* package ships as. They are versioned TOGETHER: a consumer
          pins one number (ShiningPie's ParadiseVersion) and gets a set that was built and tested
-         against itself, so a partial bump is not a thing anyone can express by accident. -->
-    <Version>0.41.0</Version>
+         against itself, so a partial bump is not a thing anyone can express by accident.
+
+         0.42.0 is the extension path: a game adds its own asset types without editing the engine.
+         `[extract]` routes each kind to its own directory by open kind ids importers declare;
+         extraction became the importer's other half rather than a second chain; the extraction
+         record moved out of `[glb]` into a format-neutral `[extract]` sidecar domain; and the CLI
+         loads a project's own importers from `[extensions] assemblies`. A consumer must re-extract
+         once against this version — legacy sidecars are migrated on that run, not before. -->
+    <Version>0.42.0</Version>
   </PropertyGroup>
 
   <!-- Shared NuGet package metadata. Per-project csproj supplies Description and
