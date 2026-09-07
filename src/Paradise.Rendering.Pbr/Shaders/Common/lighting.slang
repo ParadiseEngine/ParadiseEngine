@@ -171,6 +171,11 @@ float shadowDiskHash(float2 pos)
 // per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
 // the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
 // out of the shadow lookup entirely.)
+// lightIndex is unread since the shadow matrices became layer-keyed: the light record carries its
+// own base layer in spotAngles.z. It stays in the signature because a GAME's material shader calls
+// this (Pingu's poolInterior.slang does), and dropping a parameter would break that source for no
+// gain while the light cap is unchanged. It goes with the cap lift, which breaks those shaders
+// anyway.
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
@@ -206,7 +211,10 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if ((float)face >= light.shadowAtlas.y)
         return 1.0;
 
-    int matrixIndex = lightIndex * 6 + face;
+    // The matrix lives at the view's ARRAY LAYER, which is exactly the slice sampled below — one
+    // index for both, rather than a second lightIndex * 6 addressing scheme that reserved six
+    // slots per light and tied the matrix budget to the light budget.
+    int matrixIndex = (int)light.spotAngles.z + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
     if (shadowPos.w <= 0.0)
         return 1.0;

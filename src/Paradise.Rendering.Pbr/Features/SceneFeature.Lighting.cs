@@ -78,10 +78,14 @@ public sealed partial class SceneFeature
             frame.Lights[i] = scene.Lights[i].ToGpu();
         }
 
-        // Per-face light-space matrices from the shadow plan.
-        foreach (var (lightIndex, face, _, vp) in _shadows.Views)
+        // Per-view light-space matrices from the shadow plan, keyed by the view's own ARRAY LAYER.
+        // Keyed by lightIndex * 6 once, which reserved six matrix slots for every light whether or
+        // not it cast anything and tied the matrix budget to the light budget; the layer is the
+        // index the shader already computes to sample the map, so the two now agree by
+        // construction rather than by arithmetic that has to match.
+        foreach (var (_, _, layer, vp) in _shadows.Views)
         {
-            frame.SceneLightShadowMatrices[lightIndex * 6 + face] = vp;
+            frame.SceneLightShadowMatrices[(int)layer] = vp;
         }
         // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
         // face count (shadowAtlas.y), soft-shadow flag (shadowAtlas.w) and shadow texel world

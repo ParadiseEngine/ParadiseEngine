@@ -39,9 +39,12 @@ public struct SceneLightArray
     private SceneLightGpu _element0;
 }
 
-/// <summary>Inline storage for the per-light, per-cube-face shadow view-projection matrices
-/// (<see cref="FrameUniformsGpu.MaxSceneLights"/> × 6). Stride matches WGSL's 64-byte mat4.</summary>
-[InlineArray(FrameUniformsGpu.MaxSceneLights * 6)]
+/// <summary>Inline storage for the shadow view-projection matrices, one per SHADOW VIEW and
+/// indexed by the view's own array layer — not by light. Stride matches WGSL's 64-byte mat4.
+///
+/// <para>Sized by <see cref="FrameUniformsGpu.MaxShadowViews"/> rather than by the light budget,
+/// so raising the light cap does not multiply the shadow budget by six.</para></summary>
+[InlineArray(FrameUniformsGpu.MaxShadowViews)]
 public struct ShadowMatrixArray
 {
     private Matrix4x4 _element0;
@@ -60,6 +63,13 @@ public struct AmbientShArray
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
+
+    /// <summary>Shadow views the frame can carry: one per directional or spot light that casts,
+    /// six per point light. Deliberately its OWN budget rather than <see cref="MaxSceneLights"/>
+    /// × 6 — the two were one constant, which meant a larger light cap silently asked for a larger
+    /// shadow-map array, and WebGPU's default maxTextureArrayLayers is 256. A shadow view costs a
+    /// depth-only pass and a full array layer; a light that only shades costs neither.</summary>
+    public const int MaxShadowViews = 384;
 
     [FieldOffset(0)] public Vector4 CameraPos;       // xyz world camera, w unused
     [FieldOffset(16)] public Vector4 Ambient;        // rgb sky, a exposure
