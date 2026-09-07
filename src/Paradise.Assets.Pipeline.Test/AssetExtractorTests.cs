@@ -599,7 +599,7 @@ public class AssetExtractorTests
 
         using var overridden = Project();
         var meta = SidecarMeta.Load(overridden, Glb + ".meta");
-        meta.SetSetting(GlbImportSettings.Domain, new CanonicalTomlTable { { GlbImportSettings.ExtractKey, "models/crate" } });
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "models/crate" } });
         meta.Save(overridden, Glb + ".meta");
 
         var bySidecar = AssetExtractor.Extract(overridden, s_layout, Glb);
@@ -675,7 +675,7 @@ public class AssetExtractorTests
             prefabs = "prefabs"
             """);
         var meta = SidecarMeta.Load(fileSystem, Glb + ".meta");
-        meta.SetSetting(GlbImportSettings.Domain, new CanonicalTomlTable { { GlbImportSettings.ExtractKey, "one-off" } });
+        meta.SetSetting(ExtractionRecord.Domain, new CanonicalTomlTable { { ExtractionRecord.ByKey, "glb" }, { ExtractionRecord.DirectoryKey, "one-off" } });
         meta.Save(fileSystem, Glb + ".meta");
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
