@@ -16,11 +16,16 @@ namespace Paradise.Features;
 /// <para><b>Why the payload is JSON when the file is TOML.</b> This assembly holds no format
 /// reader — it cannot, the ECS references it — so the payload has to be text it can bind without
 /// a package, and <see cref="JsonSerializer"/> with source-generated metadata is the BCL's only
-/// AOT- and trim-clean typed binding. Binding straight from TOML was the alternative and works
-/// (Tomlyn 2.10 has a source-generated context too), but it would put the binder in the reader
-/// assembly, away from the type it belongs to, and make a game declare a Tomlyn context for its
-/// settings and a JSON one for everything else. The conversion happens in the reader; nothing a
-/// person writes is JSON.</para>
+/// AOT- and trim-clean typed binding.
+///
+/// Binding straight from TOML instead was the alternative, and it was measured rather than
+/// assumed: Tomlyn 2.10's source-generated <c>TomlSerializer</c> matches the C# property name
+/// EXACTLY on the way in — <c>Intensity = 0.6</c> binds, <c>intensity = 0.6</c> silently reads as
+/// the default — while writing a model back out emits the lower-case key, so a
+/// table → text → object round trip loses every value. Taking that path would mean a hand-edited
+/// file spelling its keys <c>WindMetresPerSecond</c>, next to feature names that are camelCase,
+/// and the binder living in the reader assembly away from the type it belongs to. The conversion
+/// happens in the reader; nothing a person writes is JSON.</para>
 ///
 /// <para><b>Why a type and not a bag of getters.</b> Settings that deserve a name deserve a
 /// record: one place holding the defaults, the units in the property names, and the whole shape

@@ -286,11 +286,13 @@ Eleven things that are not obvious:
 - **The settings PAYLOAD is JSON even though the file is TOML.** `Paradise.Features` holds no
   format reader, so the payload has to be text it can bind with the BCL alone, and
   source-generated System.Text.Json is the BCL's only AOT- and trim-clean typed binding. Binding
-  straight from TOML also works (Tomlyn 2.10 has a source-generated context, which the reader
-  itself uses for the untyped read) and was rejected because it would put the binder in the reader
-  assembly, away from the type it belongs to, and make a game declare a Tomlyn context for its
-  settings and a JSON one for everything else. Nothing a person writes is JSON;
-  `FeatureSettings.Json` is named for what it hands back.
+  straight from TOML was the alternative and it was MEASURED, not assumed: Tomlyn 2.10's
+  source-generated `TomlSerializer` matches the C# property name exactly on the way in
+  (`Intensity = 0.6` binds, `intensity = 0.6` silently reads as the default) while emitting the
+  lower-case key on the way out, so a table → text → object round trip loses every value, and a
+  direct bind would make a hand-edited file spell its keys `WindMetresPerSecond` beside camelCase
+  feature names. Nothing a person writes is JSON; `FeatureSettings.Json` is named for what it
+  hands back, and the conversion runs once per configured feature at startup.
 - **A settings type's properties are `get; set;`, never `init`.** An `init` accessor makes
   System.Text.Json build the object WITHOUT running the parameterless constructor, so every
   property the file leaves out reads as `default` — 0, not the `= 1f` the initializer says — with

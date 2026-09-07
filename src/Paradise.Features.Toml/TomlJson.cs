@@ -10,9 +10,11 @@ namespace Paradise.Features;
 /// <see cref="FeatureSettings.Read{T}"/> binds from.
 ///
 /// <para>The conversion exists because <c>Paradise.Features</c> holds no format reader and must
-/// bind the payload with the BCL alone — see <see cref="FeatureSettings"/> for why binding
-/// straight from TOML was the rejected alternative. Every TOML scalar kind has a JSON spelling;
-/// dates and times become the ISO strings a <c>DateTimeOffset</c> property reads back.</para></summary>
+/// bind the payload with the BCL alone — see <see cref="FeatureSettings"/> for what binding
+/// straight from TOML was measured to cost. Every TOML scalar kind has a JSON spelling; dates and
+/// times become the ISO strings a <c>DateTimeOffset</c> property reads back. It runs once per
+/// configured feature at startup, so the extra parse is not a cost anybody pays per
+/// frame.</para></summary>
 internal static class TomlJson
 {
     public static FeatureSettings SettingsOf(string name, TomlTable table)
