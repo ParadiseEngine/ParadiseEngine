@@ -169,7 +169,8 @@ Things that bit, so they are rules:
   (`shadowTexture`, `prepassDepthTexture`, …) therefore take the file's default visibility. Prove
   a compute pass with a picture that must change, never with "it ran".
 - **The frame graph knows compute:** `AddComputePass`, `GraphBinding.StorageTexture` (a WRITE
-  edge), `ImportBuffer` + `GraphBinding.Buffer(…, write:)` for tracked buffers. A trace whose
+  edge), `ImportBuffer` + `GraphBinding.TrackedBuffer(…, write:)` for tracked buffers (named
+  apart from the raw `Buffer` so a tracked buffer cannot lose its edge by overload). A trace whose
   only output is a private hit buffer is culled the moment nothing binds that buffer for
   reading — the same switch-off rule textures have. A pass reading last frame's atlas declares a
   plain read of a resource nothing writes this frame, which the graph allows.

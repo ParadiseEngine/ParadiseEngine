@@ -60,12 +60,12 @@ public class ProbeGiTests
         return scene;
     }
 
-    private static PbrScene OpenFloor(PbrRenderer pbr, bool gi)
+    private static PbrScene OpenFloor(PbrRenderer pbr, bool gi, float exposure = 1f)
     {
         var (vertices, indices) = Procedural.UnitCube();
         var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
         var scene = Camera(new Vector3(0f, 2f, 3f), Vector3.Zero);
-        scene.Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Equator = new Vector3(0.5f), Ground = new Vector3(0.5f), Flat = true };
+        scene.Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Equator = new Vector3(0.5f), Ground = new Vector3(0.5f), Flat = true, Exposure = exposure };
         scene.Gi = new PbrGi { Enabled = gi, RaysPerProbe = 128, Hysteresis = 0.5f, MaxProbes = 256 };
         scene.Instances.Add(new PbrInstance
         {
@@ -135,6 +135,76 @@ public class ProbeGiTests
         // albedo instead of sky for their downward rays, which the sky-only ambient cannot.
         await Assert.That(off.R).IsGreaterThan(40.0);
         await Assert.That(Math.Abs(on.R - off.R)).IsLessThan(off.R * 0.2);
+    }
+
+    /// <summary>Exposure is applied exactly once on the probe path — in the trace's sky term — so
+    /// a scene at exposure 2 agrees with the ambient path at exposure 2 the way it does at 1. The
+    /// defect this pins: scaling the probe result by exposure again in the fragment shader, which
+    /// made the sky share exposure² while the bounce share stayed exposure¹.</summary>
+    [Test]
+    public async Task probes_and_sky_ambient_agree_at_an_exposure_other_than_one()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+
+        (double R, double G, double B) off, on;
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            off = Mean(Render(backend, pbr, OpenFloor(pbr, gi: false, exposure: 0.35f), frames: 3));
+        using (var pbr = new PbrRenderer(backend, Size, Size))
+            on = Mean(Render(backend, pbr, OpenFloor(pbr, gi: true, exposure: 0.35f), frames: 12));
+
+        await Assert.That(off.R).IsGreaterThan(20.0);
+        await Assert.That(Math.Abs(on.R - off.R)).IsLessThan(off.R * 0.2);
+    }
+
+    /// <summary>An authored volume is held to the fit's limits at setup, with the count named.</summary>
+    [Test]
+    public async Task an_authored_volume_outside_the_limits_is_refused_by_name()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = OpenFloor(pbr, gi: true);
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(1f), 4, 1, 4) };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("4x1x4");
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 100, 100, 100), MaxProbes = 4096 };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("MaxProbes");
+
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 64, 64, 2), MaxProbes = 100000 };
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("atlas");
+
+        // ...and a valid authored volume is adopted as given.
+        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(new Vector3(-3f, 0f, -3f), new Vector3(1f), 7, 3, 7), MaxProbes = 4096 };
+        pbr.RenderFrame(scene);
+        var active = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
+        await Assert.That(active).IsEqualTo(scene.Gi.Volume);
+    }
+
+    /// <summary>An empty primitive instanced as static must not poison the fit: its inverted
+    /// infinite bounds would transform to NaN. A traced vertex stream shorter than a position and
+    /// a normal is refused at upload.</summary>
+    [Test]
+    public async Task empty_and_malformed_primitives_are_kept_out_of_the_trace()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var _ = backend;
+        using var pbr = new PbrRenderer(backend, Size, Size);
+        var scene = OpenFloor(pbr, gi: true);
+        var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
+
+        scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([pbr.UploadPrimitive([], [], material)]) });
+        pbr.RenderFrame(scene);
+        var volume = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
+        await Assert.That(volume).IsNotNull();
+        await Assert.That(float.IsFinite(volume!.Origin.X) && float.IsFinite(volume.Spacing.X)).IsTrue();
+
+        await Assert.That(() => pbr.UploadPrimitive([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], [0, 1, 2], material, stride: 3))
+            .Throws<ArgumentException>().WithMessageContaining("stride");
     }
 
     /// <summary>The budget: tracing a handful of probes per frame reaches the same picture as

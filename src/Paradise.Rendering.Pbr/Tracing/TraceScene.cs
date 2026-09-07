@@ -109,6 +109,10 @@ internal sealed class TraceScene : IDisposable
     /// mesh id a <see cref="PbrPrimitive"/> carries.</summary>
     public int AddMesh(ReadOnlySpan<float> vertices, int stride, ReadOnlySpan<uint> indices)
     {
+        if (stride < 6)
+            throw new ArgumentException($"A traced vertex needs a position and a normal: stride {stride} holds fewer than six floats.", nameof(stride));
+        if (vertices.Length % stride != 0)
+            throw new ArgumentException($"{vertices.Length} floats do not divide into {stride}-float vertices.", nameof(vertices));
         var vertexCount = vertices.Length / stride;
         var positions = new Vector3[vertexCount];
         var normals = new Vector3[vertexCount];
@@ -121,6 +125,11 @@ internal sealed class TraceScene : IDisposable
         }
 
         var bvh = TriangleBvh.Build(positions, indices);
+        // The shader walk has a fixed stack; a hierarchy it cannot hold would drop children and
+        // miss occluders by direction, so it is refused here rather than traced wrong.
+        if (bvh.RequiredStackDepth > BvhTraversal.StackDepth)
+            throw new InvalidOperationException(
+                $"Mesh hierarchy of height {bvh.Height} needs a traversal stack of {bvh.RequiredStackDepth}, above the shader's {BvhTraversal.StackDepth}.");
         var nodeBase = (uint)_meshNodes.Count;
         var triangleBase = (uint)_triangles.Count;
         var vertexBase = (uint)(_vertices.Count / 2);
@@ -163,8 +172,12 @@ internal sealed class TraceScene : IDisposable
         foreach (var (instance, primitive, _) in opaque)
         {
             if (primitive.TraceMesh < 0 || instance.GiMode != PbrGiMode.Static) continue;
+            // An empty primitive has inverted infinite bounds; transformed, those turn into NaN and
+            // poison the fit. It has nothing to hit either way.
+            var bounds = _meshes[primitive.TraceMesh].Bounds;
+            if (bounds.IsEmpty) continue;
             _instanceSources.Add((instance, primitive));
-            _instanceBounds.Add(Aabb.Transform(_meshes[primitive.TraceMesh].Bounds, instance.Model));
+            _instanceBounds.Add(Aabb.Transform(bounds, instance.Model));
         }
 
         var tlas = BvhBuilder.Build(CollectionsMarshal.AsSpan(_instanceBounds), maxLeafItems: 1);

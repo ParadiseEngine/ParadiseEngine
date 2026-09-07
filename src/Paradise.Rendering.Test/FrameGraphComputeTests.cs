@@ -94,7 +94,7 @@ public class FrameGraphComputeTests
         var writer = new ArrayBufferWriter<RenderCommand>(64);
 
         graph.AddComputePass("trace", RenderPassEvent.GlobalIllumination)
-            .BindGroup(0, "g", SomeLayout, [GraphBinding.Buffer(0, hits, 0, 256, write: true)])
+            .BindGroup(0, "g", SomeLayout, [GraphBinding.TrackedBuffer(0, hits, 0, 256, write: true)])
             .Record(graph, BindGroupZero);
         graph.AddRasterPass("main", RenderPassEvent.Opaque)
             .Color(0, graph.Texture("out"), LoadOp.Clear).Record(graph, Nothing);
@@ -119,10 +119,10 @@ public class FrameGraphComputeTests
         var writer = new ArrayBufferWriter<RenderCommand>(64);
 
         graph.AddComputePass("trace", RenderPassEvent.GlobalIllumination)
-            .BindGroup(0, "write", SomeLayout, [GraphBinding.Buffer(0, hits, 0, 256, write: true)])
+            .BindGroup(0, "write", SomeLayout, [GraphBinding.TrackedBuffer(0, hits, 0, 256, write: true)])
             .Record(graph, BindGroupZero);
         graph.AddComputePass("blend", RenderPassEvent.GlobalIllumination, offset: 1)
-            .BindGroup(0, "read", SomeLayout, [GraphBinding.Buffer(2, hits, 64, 128)])
+            .BindGroup(0, "read", SomeLayout, [GraphBinding.TrackedBuffer(2, hits, 64, 128)])
             .NeverCull()
             .Record(graph, BindGroupZero);
         graph.AddRasterPass("main", RenderPassEvent.Opaque)

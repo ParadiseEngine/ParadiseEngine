@@ -64,7 +64,10 @@ public sealed class ProbeGiFeature : IRenderFeature
     private int _current;
     private PbrProbeVolume? _fitted;
     private int _probeCount;
-    private bool _reset;
+    // Probes still to be traced for the first time since the volume was (re)built: while any
+    // remain the blend writes outright, so a budgeted volume fills in as the window sweeps it
+    // rather than fading each later window in from a zero atlas.
+    private int _resetSweepRemaining;
     private int _framesSinceReset;
     private int _windowStart;
     private uint _frame;
@@ -95,6 +98,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         // Every resource the scene binds exists from the start, at its smallest, so a frame with
         // the probes off binds real objects and a disabled volume rather than nothing.
         EnsureStateBuffers(1);
+        ResetStates();
         EnsureRayBuffer(1);
         EnsureAtlases(1, 1, 1);
         UploadVolume();
@@ -132,6 +136,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         var gi = _ctx.Scene.Gi;
         ShadingStateBuffer = _stateBuffers[_current];
         var fit = gi.Enabled ? gi.Volume ?? Fit(_ctx.Trace.SceneBounds, gi) : null;
+        if (gi.Volume is { } authored) ValidateAuthored(authored, gi);
         if (fit is null)
         {
             if (_volume.Origin.W != 0f)
@@ -151,10 +156,12 @@ public sealed class ProbeGiFeature : IRenderFeature
         var windowCount = gi.ProbesPerFrame <= 0 ? _probeCount : Math.Min(_probeCount, gi.ProbesPerFrame);
         var windowStart = _windowStart;
         _windowStart = windowCount >= _probeCount ? 0 : (_windowStart + windowCount) % _probeCount;
+        var resetFrame = _resetSweepRemaining > 0;
+        _resetSweepRemaining = Math.Max(0, _resetSweepRemaining - windowCount);
         EnsureRayBuffer(windowCount * rays);
 
         var next = 1 - _current;
-        FillVolume(fit, gi, rays, windowStart, windowCount);
+        FillVolume(fit, gi, rays, windowStart, windowCount, resetFrame);
         UploadVolume();
 
         var rayBuffer = graph.ImportBuffer(_rayBuffer, GraphResourceScope.GraphOnly);
@@ -166,7 +173,7 @@ public sealed class ProbeGiFeature : IRenderFeature
 
         graph.AddComputePass("Gi.Trace", RenderPassEvent.GlobalIllumination)
             .BindGroup(0, "PbrGiTraceGroup", ShaderPrograms.FindGroup(_traceProgram, 0),
-                [GraphBinding.Buffer(0, rayBuffer, 0, rayBytes, write: true)])
+                [GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes, write: true)])
             .BindGroup(1, "PbrGiFrameGroup", ShaderPrograms.FindGroup(_traceProgram, 1), FrameGroupBindings(_traceProgram, graph))
             .BindGroup(2, "PbrGiSceneGroup", ShaderPrograms.FindGroup(_traceProgram, 2), _ctx.Trace.Bindings())
             .BindGroup(3, "PbrGiProbeGroup", ShaderPrograms.FindGroup(_traceProgram, 3),
@@ -178,7 +185,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         graph.AddComputePass("Gi.Blend", RenderPassEvent.GlobalIllumination, offset: 1)
             .BindGroup(0, "PbrGiBlendGroup", ShaderPrograms.FindGroup(_blendProgram, 0),
             [
-                GraphBinding.Buffer(0, rayBuffer, 0, rayBytes),
+                GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes),
                 GraphBinding.StorageTexture(1, writeIrradiance),
                 GraphBinding.StorageTexture(2, writeVisibility),
             ])
@@ -191,7 +198,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         graph.AddComputePass("Gi.Update", RenderPassEvent.GlobalIllumination, offset: 2)
             .BindGroup(0, "PbrGiUpdateGroup", ShaderPrograms.FindGroup(_updateProgram, 0),
             [
-                GraphBinding.Buffer(0, rayBuffer, 0, rayBytes),
+                GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes),
                 GraphBinding.Buffer(1, _stateBuffers[next], 0, StateBufferBytes),
             ])
             .BindGroup(3, "PbrGiUpdateProbeGroup", ShaderPrograms.FindGroup(_updateProgram, 3),
@@ -202,7 +209,6 @@ public sealed class ProbeGiFeature : IRenderFeature
         frame.Blackboard.Publish(PbrResults.GiIrradiance, writeIrradiance);
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
         _current = next;
-        _reset = false;
         _framesSinceReset++;
         _frame++;
     }
@@ -312,6 +318,26 @@ public sealed class ProbeGiFeature : IRenderFeature
         static int CountFor(float extent, float spacing) => Math.Clamp((int)MathF.Ceiling(extent / spacing) + 1, 2, 256);
     }
 
+    /// <summary>An authored volume is held to the limits the fit enforces on itself: at least two
+    /// probes per axis (the lookup interpolates between neighbours), the probe budget, and the
+    /// texture size the atlases must fit. Thrown here, at setup, with the offending count named.</summary>
+    internal static void ValidateAuthored(PbrProbeVolume volume, PbrGi gi)
+    {
+        if (volume.CountX < 2 || volume.CountY < 2 || volume.CountZ < 2)
+            throw new ArgumentException(
+                $"Probe volume counts {volume.CountX}x{volume.CountY}x{volume.CountZ}: every axis needs at least two probes.", nameof(gi));
+        var probes = (long)volume.CountX * volume.CountY * volume.CountZ;
+        if (probes > gi.MaxProbes)
+            throw new ArgumentException(
+                $"Probe volume holds {probes} probes, above PbrGi.MaxProbes = {gi.MaxProbes}; raise the budget or thin the grid.", nameof(gi));
+        var tile = VisibilityTexels + 2;
+        if ((long)volume.CountX * volume.CountY * tile > MaxAtlasSize || (long)volume.CountZ * tile > MaxAtlasSize)
+            throw new ArgumentException(
+                $"Probe volume {volume.CountX}x{volume.CountY}x{volume.CountZ} needs a {volume.CountX * volume.CountY * tile}x{volume.CountZ * tile} visibility atlas, above the {MaxAtlasSize} texture limit.", nameof(gi));
+        if (volume.Spacing.X <= 0f || volume.Spacing.Y <= 0f || volume.Spacing.Z <= 0f)
+            throw new ArgumentException($"Probe volume spacing {volume.Spacing} must be positive on every axis.", nameof(gi));
+    }
+
     /// <summary>Adopt <paramref name="fit"/> unless the current volume is the same to within a
     /// fraction of a probe, so a scene whose bounds jitter does not reallocate every frame.</summary>
     private void EnsureVolume(PbrProbeVolume fit, PbrGi gi)
@@ -323,7 +349,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         EnsureStateBuffers(_probeCount);
         ResetStates();
         _windowStart = 0;
-        _reset = true;
+        _resetSweepRemaining = _probeCount;
         _framesSinceReset = 0;
     }
 
@@ -334,7 +360,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         return (a.Origin - b.Origin).Length() <= tolerance && (a.Spacing - b.Spacing).Length() <= 0.01f * a.Spacing.Length();
     }
 
-    private void FillVolume(PbrProbeVolume fit, PbrGi gi, int rays, int windowStart, int windowCount)
+    private void FillVolume(PbrProbeVolume fit, PbrGi gi, int rays, int windowStart, int windowCount, bool resetFrame)
     {
         var irradianceWidth = fit.CountX * fit.CountY * (IrradianceTexels + 2);
         var irradianceHeight = fit.CountZ * (IrradianceTexels + 2);
@@ -350,7 +376,7 @@ public sealed class ProbeGiFeature : IRenderFeature
             Counts = new Int4 { X = fit.CountX, Y = fit.CountY, Z = fit.CountZ, W = _probeCount },
             Atlas = new Vector4(IrradianceTexels, VisibilityTexels, 1f / irradianceWidth, 1f / irradianceHeight),
             Atlas2 = new Vector4(1f / visibilityWidth, 1f / visibilityHeight, MathF.Max(gi.NormalBias, 0f), MathF.Max(gi.ViewBias, 0f)),
-            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, WarmUpHysteresis(gi.Hysteresis), _frame),
+            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, resetFrame ? 0f : WarmUpHysteresis(gi.Hysteresis), _frame),
             Rotation = RandomRotation(),
             Window = new Int4 { X = windowStart, Y = windowCount },
         };
@@ -363,7 +389,6 @@ public sealed class ProbeGiFeature : IRenderFeature
     private float WarmUpHysteresis(float configured)
     {
         var target = Math.Clamp(configured, 0f, 0.999f);
-        if (_reset) return 0f;
         // Half a frame's weight per frame of age: 0.9 after eighteen frames, 0.97 after sixty.
         var ramp = 1f - 1f / (_framesSinceReset * 0.5f + 1f);
         return MathF.Min(target, ramp);
@@ -409,7 +434,6 @@ public sealed class ProbeGiFeature : IRenderFeature
                 $"PbrProbeStates{i}", (ulong)needed * 16, BufferUsage.Storage | BufferUsage.CopyDst));
         }
         _stateCapacity = needed;
-        ResetStates();
     }
 
     /// <summary>Every probe active, on its grid point, in both buffers.</summary>

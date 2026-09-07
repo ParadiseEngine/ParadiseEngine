@@ -20,9 +20,11 @@ public readonly record struct GraphBinding(uint Binding, GraphBindingKind Kind, 
     public static GraphBinding StorageTexture(uint binding, GraphTexture texture) =>
         new(binding, GraphBindingKind.StorageTextureView, texture, default);
 
-    /// <summary>Bind a window of a tracked buffer. <paramref name="write"/> makes the pass the
-    /// buffer's producer; otherwise the pass depends on whoever wrote it.</summary>
-    public static GraphBinding Buffer(uint binding, GraphBuffer buffer, ulong offset, ulong size, bool write = false) =>
+    /// <summary>Bind a window of a buffer the graph tracks. <paramref name="write"/> makes the pass
+    /// the buffer's producer; otherwise the pass depends on whoever wrote it. Named apart from the
+    /// raw <see cref="Buffer"/> on purpose: a tracked buffer bound through the raw overload would
+    /// silently lose its edge, and a missed write edge is the culling bug the graph exists to prevent.</summary>
+    public static GraphBinding TrackedBuffer(uint binding, GraphBuffer buffer, ulong offset, ulong size, bool write = false) =>
         new(binding, write ? GraphBindingKind.BufferWrite : GraphBindingKind.BufferRead, GraphTexture.Invalid,
             BindGroupEntryDesc.ForBuffer(binding, default, offset, size), buffer);
 

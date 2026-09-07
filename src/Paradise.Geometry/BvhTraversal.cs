@@ -15,7 +15,9 @@ public interface IBvhLeafIntersector
 /// and to give tests an oracle; the renderer never runs it per frame.</summary>
 public static class BvhTraversal
 {
-    private const int StackDepth = 64;
+    /// <summary>Entries the walk's stack holds — the same as the shader's. A hierarchy needs
+    /// <see cref="WideBvh.RequiredStackDepth"/> of them, which the builder reports.</summary>
+    public const int StackDepth = 64;
 
     /// <summary>Closest hit within <paramref name="tMax"/>, which is shrunk to the hit distance.
     /// Returns true when anything was hit.</summary>

@@ -264,6 +264,35 @@ public class WideBvhTests
         await Assert.That(leaves).IsEqualTo(37);
     }
 
+    /// <summary>The shader walk has a fixed stack; the builder reports what a hierarchy needs, and
+    /// a large soup — and the degenerate case of coincident centroids the median split handles —
+    /// both fit. A hierarchy that did not would be refused at upload rather than traced wrong.</summary>
+    [Test]
+    public async Task large_and_degenerate_hierarchies_fit_the_traversal_stack()
+    {
+        var (positions, indices) = RandomSoup(60000, seed: 11, extent: 300f);
+        var large = TriangleBvh.Build(positions, indices);
+        await Assert.That(large.Height).IsGreaterThan(2);
+        await Assert.That(large.RequiredStackDepth).IsLessThanOrEqualTo(BvhTraversal.StackDepth);
+
+        var same = new Vector3[3 * 4000];
+        var sameIndices = new uint[3 * 4000];
+        for (var i = 0; i < 4000; i++)
+        {
+            same[i * 3] = new Vector3(0, 0, 0);
+            same[i * 3 + 1] = new Vector3(1, 0, 0);
+            same[i * 3 + 2] = new Vector3(0, 1, 0);
+            for (var k = 0; k < 3; k++) sameIndices[i * 3 + k] = (uint)(i * 3 + k);
+        }
+        var degenerate = TriangleBvh.Build(same, sameIndices);
+        await Assert.That(degenerate.RequiredStackDepth).IsLessThanOrEqualTo(BvhTraversal.StackDepth);
+
+        // The walk itself agrees with the bound: the CPU twin throws on overflow and does not.
+        var leaf = new TriangleBvh.Intersector(large, positions, indices);
+        var t = float.PositiveInfinity;
+        BvhTraversal.ClosestHit(large.Nodes, new Vector3(-400f, 0f, 0f), Vector3.UnitX, ref t, ref leaf);
+    }
+
     [Test]
     public async Task the_build_is_deterministic()
     {

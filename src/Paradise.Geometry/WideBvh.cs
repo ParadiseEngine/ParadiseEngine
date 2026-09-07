@@ -17,6 +17,28 @@ public sealed class WideBvh
         Nodes = nodes;
         ItemOrder = itemOrder;
         Bounds = bounds;
+        Height = HeightOf(nodes, 0);
+    }
+
+    /// <summary>Internal levels from the root to the deepest node (a lone root is 1).</summary>
+    public int Height { get; }
+
+    /// <summary>The stack a depth-first walk needs: popping a node at each level can leave up to
+    /// seven siblings pending, plus the eight children it pushes. A walk with a shallower stack
+    /// drops children silently, so the consumer checks this against its stack constant.</summary>
+    public int RequiredStackDepth => 7 * Height + 8;
+
+    private static int HeightOf(BvhNode[] nodes, int index)
+    {
+        var node = nodes[index];
+        var deepest = 0;
+        for (var child = 0; child < BvhNode.ChildCount; child++)
+        {
+            var meta = node.GetMeta(child);
+            if (meta == BvhNode.EmptyChild || !BvhNode.IsInternal(meta)) continue;
+            deepest = Math.Max(deepest, HeightOf(nodes, (int)node.ChildBase + BvhNode.InternalSlot(meta)));
+        }
+        return deepest + 1;
     }
 
     public BvhNode[] Nodes { get; }

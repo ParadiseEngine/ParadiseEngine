@@ -198,7 +198,7 @@ public sealed partial class FrameGraph
 
     /// <summary>Declare a compute pass. It has no attachments, so what it produces is declared
     /// through its bind groups — a <see cref="GraphBinding.StorageTexture"/> or a
-    /// <see cref="GraphBinding.Buffer(uint, GraphBuffer, ulong, ulong, bool)"/> bound for writing
+    /// <see cref="GraphBinding.TrackedBuffer"/> bound for writing
     /// — or with <see cref="PassBuilder.Writes(GraphTexture)"/> when the write goes through a
     /// group the graph does not build. It is sorted, culled and ordered exactly like a raster
     /// pass; only the lowering differs, and it takes no slot in the pass table.</summary>

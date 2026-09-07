@@ -85,8 +85,8 @@ void traceMain(uint3 id: SV_DispatchThreadID)
     int windowProbe = (int)id.x / rays;
     int ray = (int)id.x % rays;
     if (windowProbe >= probeVolume.window.y) return;
-    int probe = probeVolume.window.x + windowProbe;
-    if (probe >= probeVolume.counts.w) return;
+    // The window wraps: a budget that does not divide the volume still visits every probe.
+    int probe = (probeVolume.window.x + windowProbe) % probeVolume.counts.w;
     uint slot = (uint)(windowProbe * rays + ray);
 
     if (probeStates[probe].w < 0.5)

@@ -59,7 +59,8 @@ int2 borderSource(int2 t, int n)
 bool probeTracedThisFrame(int probe, out int windowProbe)
 {
     windowProbe = probe - probeVolume.window.x;
-    return windowProbe >= 0 && windowProbe < probeVolume.window.y;
+    if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
+    return windowProbe < probeVolume.window.y;
 }
 
 [shader("compute")]

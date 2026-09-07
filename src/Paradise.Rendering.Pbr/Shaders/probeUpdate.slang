@@ -24,7 +24,8 @@ void updateMain(uint3 id: SV_DispatchThreadID)
     if (probe >= probeVolume.counts.w) return;
     float4 state = probeStates[probe];
     int windowProbe = probe - probeVolume.window.x;
-    if (windowProbe < 0 || windowProbe >= probeVolume.window.y)
+    if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
+    if (windowProbe >= probeVolume.window.y)
     {
         probeStatesOut[probe] = state;
         return;

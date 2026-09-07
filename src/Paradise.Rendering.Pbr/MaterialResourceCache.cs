@@ -12,14 +12,14 @@ namespace Paradise.Rendering.Pbr;
 /// while the target does not exist the binding is black, never dangling.</summary>
 public readonly record struct MaterialTarget(uint Binding, string Target);
 
+/// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
+public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
+
 /// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
 /// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
 /// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
 /// and image dedupe keyed by (content hash, usage) — the same KTX2 payload used as color vs
 /// data transcodes to different formats, so usage is part of texture identity.</summary>
-/// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
-public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
-
 public sealed class MaterialResourceCache : IDisposable
 {
     private readonly IRenderer _renderer;

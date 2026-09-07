@@ -73,7 +73,9 @@ ConstantBuffer<TraceUniforms> trace;
 
 static const uint BvhLeafFlag = 0x8000u;
 static const uint BvhInternalFlag = 0x4000u;
-static const int BvhStackDepth = 32;
+// Matches Paradise.Geometry.BvhTraversal.StackDepth; TraceScene refuses a hierarchy whose
+// WideBvh.RequiredStackDepth exceeds it, so the walks below never drop a child silently.
+static const int BvhStackDepth = 64;
 
 struct TraceHit
 {

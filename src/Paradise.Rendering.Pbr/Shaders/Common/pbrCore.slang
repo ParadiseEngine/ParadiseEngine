@@ -583,10 +583,12 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // carry the sky), except for a draw whose GI mode is disabled (highlight.z).
     float3 hemisphereColor;
     float3 probeIrradiance;
+    bool probeLit = false;
     if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, N, V, probeIrradiance))
     {
         hemisphereColor = probeIrradiance;
+        probeLit = true;
     }
     else if (frame.ambientGround.w > 0.5)
     {
@@ -624,7 +626,10 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // filtering is the upsample.
     if (ssao.rtao.x > 0.5)
         occlusion *= rtAoTexture.SampleLevel(skySpecularSampler, input.position.xy * ssao.screen.xy, 0.0).r;
-    float exposure = max(frame.ambient.a, 0.0);
+    // The probes already carry the ambient exposure: their sky term applied it in the trace and
+    // their bounce term must not have it. Scaling here again would make the sky share of the
+    // indirect light exposure² while the bounce share stays exposure¹.
+    float exposure = probeLit ? 1.0 : max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 
     // Indirect specular. With a probe volume, the probes' irradiance along the reflection
