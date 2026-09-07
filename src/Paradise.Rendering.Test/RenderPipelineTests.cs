@@ -26,6 +26,8 @@ public class RenderPipelineTests
 
         public void Resize(uint width, uint height) => Resized++;
 
+        public void BeforeSubmit() => Log.Add("submit " + Definition.Name);
+
         public void OnEnabledChanged(bool enabled)
         {
             EnabledChanges.Add(enabled);
@@ -87,6 +89,27 @@ public class RenderPipelineTests
         pipeline.Setup(GraphWithTextures());
 
         await Assert.That(log).IsEquivalentTo(["test.a", "off test.a", "on test.a", "test.a"]);
+    }
+
+    /// <summary>The hook a feature that fills a buffer while RECORDING needs: after every setup,
+    /// on the enabled features only, in the order they set up. A game's feature gets it on the
+    /// same terms as the shadow pass — which is the whole reason it is on the interface rather
+    /// than a call the frame loop makes into the one built-in it happened to know about.</summary>
+    [Test]
+    public async Task before_submit_reaches_every_enabled_feature_in_order()
+    {
+        var log = new List<string>();
+        var a = new Probe("a") { Log = log };
+        var b = new Probe("b") { Log = log };
+        var c = new Probe("c") { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches()).Add(a).Add(b).Add(c);
+        pipeline.Switches.Set(b.Definition.Id, false);
+        log.Clear();
+
+        pipeline.Setup(GraphWithTextures());
+        pipeline.BeforeSubmit();
+
+        await Assert.That(log).IsEquivalentTo(["test.a", "test.c", "submit test.a", "submit test.c"]);
     }
 
     /// <summary>The transition, not the state: a feature that must retract something it left

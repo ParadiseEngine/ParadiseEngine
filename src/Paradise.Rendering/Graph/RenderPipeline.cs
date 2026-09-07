@@ -158,6 +158,16 @@ public sealed class RenderPipeline : IDisposable
             if (Switches.IsEnabled(entry.Feature.Definition.Id)) entry.Feature.Setup(in frame);
     }
 
+    /// <summary>Tell every enabled feature the frame is compiled and about to be submitted, in
+    /// the same order they set up. The caller runs this between its compile and its submit; a
+    /// feature that filled a buffer while recording uploads it here.</summary>
+    public void BeforeSubmit()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        foreach (var entry in _entries)
+            if (Switches.IsEnabled(entry.Feature.Definition.Id)) entry.Feature.BeforeSubmit();
+    }
+
     private void OnFeatureChanged(FeatureId id, bool enabled)
     {
         foreach (var entry in _entries)

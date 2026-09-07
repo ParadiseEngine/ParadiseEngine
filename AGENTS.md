@@ -244,7 +244,7 @@ because a namespace of the latter name is in scope for every file under `Paradis
 an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
 meaning Microsoft.Coyote's, and all six stopped compiling.
 
-Ten things that are not obvious:
+Eleven things that are not obvious:
 
 - **A switch and a scene setting are different questions, and both have to say yes.** The switch is
   the platform's answer ("this build does not do probe GI"), applied once from configuration; a
@@ -268,7 +268,16 @@ Ten things that are not obvious:
   features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
   at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
   reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
-  cannot say so with a list position when the engine does all the adding.
+  cannot say so with a list position when the engine does all the adding. `PbrRenderer` holds no
+  feature reference at all: what its own API forwards to it looks up through `Pipeline.Find<T>()`,
+  on cold paths only.
+- **A feature that fills a buffer while RECORDING uploads it in `BeforeSubmit`.** A recorder runs
+  inside the compile, so the shadow pass's caster ring has nothing in it when `Setup` returns and
+  no moment left after the submit. That upload used to be a line in `PbrRenderer.RenderFrame`
+  reaching into `ShadowFeature`, which meant the frame loop knew that one built-in stages draws
+  and a GAME's feature with the same need could not be uploaded at all. The hook is on the
+  interface so both are served by the same call; the pass-matrix baseline goes red if the pipeline
+  stops making it.
 - **The feature name is ONE key, quoted.** TOML reads `rendering.bloom = false` as a table
   `rendering` holding `bloom`, and under `[settings]` that nesting cannot be told from the settings
   themselves — `[settings.game.weather]` is either the feature `game.weather` or the feature `game`

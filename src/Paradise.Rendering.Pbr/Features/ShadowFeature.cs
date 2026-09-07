@@ -162,9 +162,10 @@ public sealed class ShadowFeature : IRenderFeature
         }
     }
 
-    /// <summary>Upload the caster uniforms the recorders staged. After compile, because staging
-    /// happens while recording.</summary>
-    internal void UploadStagedDraws()
+    /// <summary>Upload the caster uniforms the recorders staged. Here rather than at the end of
+    /// <see cref="Setup"/> because staging happens while the graph RECORDS, which is inside the
+    /// compile — and before the submit, because that is when the GPU reads the ring.</summary>
+    public void BeforeSubmit()
     {
         if (_stagedDraws > 0)
             _ctx.Renderer.UpdateBuffer<byte>(_drawRing, 0, _staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));

@@ -31,10 +31,6 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly FrameGraph _graph;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
     private readonly List<BufferHandle> _ownedBuffers = [];
-    private readonly ShadowFeature _shadows;
-    private readonly SceneFeature _scene;
-    private readonly SceneColorCaptureFeature _capture;
-    private readonly CompositeFeature _composite;
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
 #if PARADISE_PROFILING
@@ -74,13 +70,20 @@ public sealed partial class PbrRenderer : IDisposable
 
         Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height, switches);
         PbrBuiltInFeatures.AddTo(Pipeline, _ctx, specularAaVariance, specularAaClamp);
-        // Found rather than held from construction: the list belongs to PbrBuiltInFeatures, and
-        // the four the renderer's own API forwards to are reached the same way a host reaches one.
-        _shadows = Pipeline.Find<ShadowFeature>()!;
-        _scene = Pipeline.Find<SceneFeature>()!;
-        _capture = Pipeline.Find<SceneColorCaptureFeature>()!;
-        _composite = Pipeline.Find<CompositeFeature>()!;
     }
+
+    // The features the renderer's own API forwards to, looked up rather than held.
+    //
+    // A field would be a second place the pipeline's contents are recorded, captured once at
+    // construction and silently stale if the pipeline ever changed; and it would say that these
+    // four are special, when the only thing that makes them so is that PbrRenderer publishes a
+    // shortcut to them. Every one of these is a cold path — a level applying its render settings,
+    // a host binding a material to the captured scene — so the scan over nine features is free
+    // where it happens. The frame loop needs none of them: what used to be a field lived there
+    // for the shadow ring's upload, which the feature now does itself in BeforeSubmit.
+    private ShadowFeature Shadows => Pipeline.Find<ShadowFeature>()!;
+    private SceneFeature Scene => Pipeline.Find<SceneFeature>()!;
+    private SceneColorCaptureFeature Capture => Pipeline.Find<SceneColorCaptureFeature>()!;
 
     public MaterialResourceCache Materials { get; }
 
@@ -108,8 +111,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// <c>Lighting.ShadowMapSize</c>; hosts apply it here.</summary>
     public uint ShadowMapSize
     {
-        get => _shadows.MapSize;
-        set => _shadows.MapSize = value;
+        get => Shadows.MapSize;
+        set => Shadows.MapSize = value;
     }
 
     /// <summary>Soft-shadow PCF disk radius, in shadow texels (the penumbra width of every
@@ -117,8 +120,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// hosts apply it here. Clamped to [0.5, 8].</summary>
     public float ShadowBlurTexels
     {
-        get => _shadows.BlurTexels;
-        set => _shadows.BlurTexels = value;
+        get => Shadows.BlurTexels;
+        set => Shadows.BlurTexels = value;
     }
 
     /// <summary>Radius, in world metres, of the area around the CAMERA the directional (sun)
@@ -129,12 +132,12 @@ public sealed partial class PbrRenderer : IDisposable
     /// fit applies — small scenes keep their tighter box.</summary>
     public float DirectionalShadowRadius
     {
-        get => _shadows.DirectionalRadius;
-        set => _shadows.DirectionalRadius = value;
+        get => Shadows.DirectionalRadius;
+        set => Shadows.DirectionalRadius = value;
     }
 
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
-    public void SetSpecularAa(float variance, float clamp) => _scene.SetSpecularAa(variance, clamp);
+    public void SetSpecularAa(float variance, float clamp) => Scene.SetSpecularAa(variance, clamp);
 
     /// <summary>Opt-in scene-color capture: when enabled, the main pass splits at the
     /// opaque/blend boundary and the opaque+sky result is blitted (linear HDR) into
@@ -160,7 +163,7 @@ public sealed partial class PbrRenderer : IDisposable
     /// <see cref="SceneColorCapture"/> is off. RECREATED on <see cref="Resize"/> — rebind
     /// material extra entries from <see cref="SceneColorViewChanged"/> via
     /// <see cref="MaterialResourceCache.UpdateExtraEntry"/>.</summary>
-    public TextureViewHandle SceneColorView => _capture.View;
+    public TextureViewHandle SceneColorView => Capture.View;
 
     /// <summary>Raised whenever <see cref="SceneColorView"/> CHANGES: recreated (enabling
     /// capture, or Resize while enabled — rebind material extra entries to the new view) or
@@ -169,8 +172,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// rebind, so subscribers see a consistent renderer.</summary>
     public event Action? SceneColorViewChanged
     {
-        add => _capture.ViewChanged += value;
-        remove => _capture.ViewChanged -= value;
+        add => Capture.ViewChanged += value;
+        remove => Capture.ViewChanged -= value;
     }
 
     public float AspectRatio => _ctx.Width / (float)_ctx.Height;
@@ -404,8 +407,8 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BindGroups.EndFrame();
         timings.Compile = Lap();
 
-        // Recording staged the draw uniforms; upload them now, before the stream that reads them.
-        _shadows.UploadStagedDraws();
+        // Recording staged what the stream is about to read; every feature uploads its own now.
+        Pipeline.BeforeSubmit();
         if (_ctx.DrawIndex > 0)
             _renderer.UpdateBuffer<byte>(_ctx.DrawUniformRing, 0, _ctx.DrawStaging.AsSpan(0, _ctx.DrawIndex * (int)_ctx.DrawStride));
         // One write for every skinned instance staged this frame — the payload GPU skinning trades
@@ -441,14 +444,14 @@ public sealed partial class PbrRenderer : IDisposable
     internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
     internal int CustomProgramCountForTest => _programs.CustomProgramCount;
-    internal bool UsesSrgbEntryPointForTest => _composite.UsesSrgbEntryPoint;
+    internal bool UsesSrgbEntryPointForTest => Pipeline.Find<CompositeFeature>()!.UsesSrgbEntryPoint;
     internal bool CaptureFrameLightsForTest
     {
-        get => _scene.CaptureFrameLightsForTest;
-        set => _scene.CaptureFrameLightsForTest = value;
+        get => Scene.CaptureFrameLightsForTest;
+        set => Scene.CaptureFrameLightsForTest = value;
     }
-    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => _scene.GetLightShadowAtlasForTest(lightIndex);
-    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => _scene.GetLightSizeParamsForTest(lightIndex);
+    internal Vector4 GetLightShadowAtlasForTest(int lightIndex) => Scene.GetLightShadowAtlasForTest(lightIndex);
+    internal Vector4 GetLightSizeParamsForTest(int lightIndex) => Scene.GetLightSizeParamsForTest(lightIndex);
 
     public void Dispose()
     {

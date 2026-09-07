@@ -53,6 +53,22 @@ public interface IRenderFeature : IDisposable
     /// <summary>Declare this frame's passes and publish what other features may consume.</summary>
     void Setup(in FrameContext frame);
 
+    /// <summary>Between compile and submit, once per frame, for every enabled feature.
+    ///
+    /// <para><b>For what RECORDING staged.</b> A pass's recorder runs inside the compile, so a
+    /// feature that fills a uniform ring while recording — the shadow pass writes one caster's
+    /// matrix per draw — has nothing uploaded when <see cref="Setup"/> returns and no other
+    /// moment to do it: after this the command stream is submitted and the GPU reads the buffer.
+    /// Without the hook the only thing that CAN do the upload is whatever owns the frame loop,
+    /// which then has to know that this particular feature stages draws — and a game's feature,
+    /// which that loop has never heard of, cannot be uploaded at all.</para>
+    ///
+    /// <para>Most features have nothing to do here. Setting up a pass and recording it are the
+    /// whole job unless a resource the stream reads is filled during recording.</para></summary>
+    void BeforeSubmit()
+    {
+    }
+
     /// <summary>Called when this feature's switch flips, and only then — never once per frame.
     ///
     /// <para><b>Override it when being off is not the same as declaring no passes.</b> A feature
