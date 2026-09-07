@@ -283,23 +283,24 @@ Eleven things that are not obvious:
   themselves — `[settings.game.weather]` is either the feature `game.weather` or the feature `game`
   with a setting `weather`. One rule for both sections, so neither is ambiguous: quote the name. A
   table where a feature's state belongs is refused with the quoted form in the message.
-- **The settings PAYLOAD is JSON even though the file is TOML.** `Paradise.Features` holds no
-  format reader, so the payload has to be text it can bind with the BCL alone, and
-  source-generated System.Text.Json is the BCL's only AOT- and trim-clean typed binding. Binding
-  straight from TOML was the alternative and it was MEASURED, not assumed: Tomlyn 2.10's
-  source-generated `TomlSerializer` matches the C# property name exactly on the way in
-  (`Intensity = 0.6` binds, `intensity = 0.6` silently reads as the default) while emitting the
-  lower-case key on the way out, so a table → text → object round trip loses every value, and a
-  direct bind would make a hand-edited file spell its keys `WindMetresPerSecond` beside camelCase
-  feature names. Nothing a person writes is JSON; `FeatureSettings.Json` is named for what it
-  hands back, and the conversion runs once per configured feature at startup.
-- **A settings type's properties are `get; set;`, never `init`.** An `init` accessor makes
-  System.Text.Json build the object WITHOUT running the parameterless constructor, so every
-  property the file leaves out reads as `default` — 0, not the `= 1f` the initializer says — with
-  no error either way. It is the accessor and not `record` vs `class`; all four combinations were
-  probed. The same class of silence sits next to it: a source-generated `JsonSerializerContext`
-  matches the C# property name EXACTLY unless told otherwise, so a camelCase file binds nothing at
-  all. Both are pinned by `FeatureSettingsTests`.
+- **The settings payload is carried as text and bound by the reader that produced it.**
+  `FeatureSettings` holds `Text`, and `FeatureSettingsToml.Read<T>(context)` binds it through the
+  GAME's own source-generated `TomlSerializerContext` — so nothing reflects over a type it was not
+  handed, and nothing is converted on the way through. The binding cannot live on `FeatureSettings`
+  itself because that assembly may not name a Tomlyn type; it lives on the same seam the reader
+  does. An earlier version normalized the payload to JSON to keep the binder in the base assembly,
+  on the strength of a probe that showed Tomlyn binding nothing from a camelCase file. The probe
+  was wrong about the cause: `TomlSourceGenerationOptions` carries `PropertyNamingPolicy` exactly
+  like the JSON attribute does, and setting it makes the file bind as written. The conversion was
+  deleted.
+- **A settings type needs `get; set;` properties AND a naming policy on its context.** Both are
+  silent when missing. An `init` accessor makes the serializer build the object WITHOUT running
+  the parameterless constructor, so every property the file leaves out reads as `default` — 0, not
+  the `= 1f` the initializer says (it is the accessor and not `record` vs `class`; all four
+  combinations were probed). And a source-generated context matches the C# property name EXACTLY
+  unless given `PropertyNamingPolicy`, so a camelCase file binds nothing at all and every value
+  reads as its default. Both are pinned by `FeatureSettingsTests`, and both are the same trap in
+  the JSON and the TOML generators — they share the attribute shape.
 - **Settings merge WHOLESALE between layers, not deep.** A deep merge reads well in the two-file
   case and has no answer for "which layer owns element 3" the moment an array is involved; a later
   file that means to change one field writes the table it wants.

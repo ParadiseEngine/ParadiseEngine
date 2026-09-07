@@ -26,9 +26,9 @@ public interface IFeatureSwitches
     /// <summary>What the build declared about <paramref name="id"/>, if anything.</summary>
     bool TryGetDefinition(FeatureId id, [MaybeNullWhen(false)] out FeatureDefinition definition);
 
-    /// <summary>What <paramref name="id"/> is configured with — the object written under its name
-    /// in the config file's <c>settings</c> section, bound to the caller's own type through
-    /// <see cref="FeatureSettings.Read{T}"/>.
+    /// <summary>What <paramref name="id"/> is configured with — the table written under its name
+    /// in the configuration's <c>settings</c> section, bound to the caller's own type by the
+    /// reader that produced it (<c>FeatureSettingsToml.Read</c> for <c>engine.toml</c>).
     ///
     /// <para>Never null: a feature nobody configured gets <see cref="FeatureSettings.None"/>,
     /// which reads as the type's defaults, so a caller needs no branch.</para></summary>

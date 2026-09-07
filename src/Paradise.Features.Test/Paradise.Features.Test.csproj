@@ -11,6 +11,9 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
+    <!-- The settings binder is Tomlyn's, source-generated from the test's own context: what a
+         game declares, declared here too. -->
+    <PackageReference Include="Tomlyn" />
   </ItemGroup>
 
   <ItemGroup>

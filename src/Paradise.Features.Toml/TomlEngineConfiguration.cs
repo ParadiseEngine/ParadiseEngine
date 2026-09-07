@@ -120,7 +120,10 @@ public static class TomlEngineConfiguration
                     $"The settings for '{name}' are {Describe(value)}; a feature's settings are a table. " +
                     "Whether the feature is ON belongs under [features].");
             }
-            read.Add(new KeyValuePair<string, FeatureSettings>(name, TomlJson.SettingsOf(name, table)));
+            // The table serialized back to TOML, not the JSON it used to be converted into: the
+            // keys are the ones the file wrote, so the game's own context binds them.
+            read.Add(new KeyValuePair<string, FeatureSettings>(
+                name, new FeatureSettings(name, TomlSerializer.Serialize(table, UntypedToml.Default))));
         }
         return EngineConfiguration.FromSettings(read).Settings;
     }

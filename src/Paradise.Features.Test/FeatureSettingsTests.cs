@@ -1,16 +1,18 @@
 using System.Text.Json.Serialization;
+using Tomlyn.Serialization;
 
 namespace Paradise.Features.Test;
 
-/// <summary>A game's own settings record, and the source-generated metadata that binds it. Three
-/// lines in a game, and the reason nothing in <c>Paradise.Features</c> ever reflects over a type
-/// it was not handed: this stays AOT- and trim-clean.
+/// <summary>A game's own settings record, and the source-generated metadata that binds it. Four
+/// lines in a game, and the reason nothing here ever reflects over a type it was not handed: this
+/// stays AOT- and trim-clean.
 ///
-/// <para><c>get; set;</c> rather than the <c>init</c> the rest of this repo's data records use —
-/// see <see cref="FeatureSettings.Read{T}"/>: an init-only property loses its initializer through
-/// System.Text.Json, so a settings object that leaves it out would read as 0 rather than the
-/// default. <see cref="FeatureSettingsTests.an_unwritten_property_keeps_its_initializer"/> is the
-/// guard.</para></summary>
+/// <para>Both attributes earn their place, and both are silent when missing: without the naming
+/// policy the generator matches the C# property name exactly, so a camelCase file binds NOTHING;
+/// and with <c>init</c> instead of <c>set</c> a property the file leaves out loses its
+/// initializer. <see cref="FeatureSettingsTests.an_unwritten_property_keeps_its_initializer"/> and
+/// <see cref="FeatureSettingsTests.a_game_feature_reads_what_the_file_configured_it_with"/> are
+/// the guards.</para></summary>
 public sealed record WeatherSettings
 {
     public float Intensity { get; set; } = 1f;
@@ -18,9 +20,9 @@ public sealed record WeatherSettings
     public string Kind { get; set; } = "rain";
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(WeatherSettings))]
-internal sealed partial class GameJson : JsonSerializerContext;
+[TomlSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[TomlSerializable(typeof(WeatherSettings))]
+internal sealed partial class GameToml : TomlSerializerContext;
 
 /// <summary>The other half of configuring a feature: not only whether it runs, but what it runs
 /// with — for a feature the engine has never heard of.</summary>
@@ -43,7 +45,7 @@ public class FeatureSettingsTests
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
         switches.Declare(new FeatureDefinition("game.weather", true, "Rain and wind."));
 
-        var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
+        var settings = switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default);
 
         await Assert.That(switches.IsEnabled(s_weather)).IsTrue();
         await Assert.That(settings.Intensity).IsEqualTo(0.6f);
@@ -66,7 +68,7 @@ public class FeatureSettingsTests
             kind = "snow"
             """));
 
-        var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
+        var settings = switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default);
 
         await Assert.That(settings.Kind).IsEqualTo("snow");
         await Assert.That(settings.Intensity).IsEqualTo(1f);
@@ -84,7 +86,7 @@ public class FeatureSettingsTests
 
         await Assert.That(settings.IsEmpty).IsTrue();
         await Assert.That(settings).IsSameReferenceAs(FeatureSettings.None);
-        await Assert.That(settings.Read(GameJson.Default.WeatherSettings)).IsEqualTo(new WeatherSettings());
+        await Assert.That(settings.Read<WeatherSettings>(GameToml.Default)).IsEqualTo(new WeatherSettings());
     }
 
     /// <summary>Settings and the switch are written independently: a feature that ships on only
@@ -101,7 +103,7 @@ public class FeatureSettingsTests
         switches.Declare(new FeatureDefinition("game.weather", true));
 
         await Assert.That(switches.IsEnabled(s_weather)).IsTrue();
-        await Assert.That(switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings).Intensity)
+        await Assert.That(switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default).Intensity)
             .IsEqualTo(0.25f);
     }
 
@@ -113,7 +115,7 @@ public class FeatureSettingsTests
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read(Document));
 
-        var beforeDeclaring = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
+        var beforeDeclaring = switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default);
         switches.Declare(new FeatureDefinition("game.weather", true));
 
         await Assert.That(beforeDeclaring.Intensity).IsEqualTo(0.6f);
@@ -141,7 +143,7 @@ public class FeatureSettingsTests
         switches.Declare(new FeatureDefinition("game.weather", true));
         var announced = new List<float>();
         switches.SettingsChanged += (_, settings) =>
-            announced.Add(settings.Read(GameJson.Default.WeatherSettings).Intensity);
+            announced.Add(settings.Read<WeatherSettings>(GameToml.Default).Intensity);
 
         switches.Apply(TomlEngineConfiguration.Read("""
             [settings."game.weather"]
@@ -154,7 +156,7 @@ public class FeatureSettingsTests
             """));
 
         await Assert.That(announced).IsEquivalentTo([0.9f]);
-        await Assert.That(switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings).Intensity)
+        await Assert.That(switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default).Intensity)
             .IsEqualTo(0.9f);
     }
 
@@ -170,7 +172,7 @@ public class FeatureSettingsTests
                 """));
         var switches = new FeatureSwitches(merged);
 
-        var settings = switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings);
+        var settings = switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default);
 
         await Assert.That(settings.Kind).IsEqualTo("snow");
         await Assert.That(settings.Intensity).IsEqualTo(1f); // the earlier layer's 0.6 is gone, not merged
@@ -187,7 +189,7 @@ public class FeatureSettingsTests
         var switches = new FeatureSwitches(merged);
 
         await Assert.That(switches.IsEnabled(s_weather)).IsFalse();
-        await Assert.That(switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings).Intensity)
+        await Assert.That(switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default).Intensity)
             .IsEqualTo(0.6f);
     }
 
@@ -223,21 +225,21 @@ public class FeatureSettingsTests
             intensity = "a lot"
             """));
 
-        await Assert.That(() => switches.SettingsFor(s_weather).Read(GameJson.Default.WeatherSettings))
+        await Assert.That(() => switches.SettingsFor(s_weather).Read<WeatherSettings>(GameToml.Default))
             .Throws<FormatException>().WithMessageContaining("game.weather");
     }
 
-    /// <summary>The escape hatch for a game whose settings are not a record — the normalized JSON
-    /// payload, not the TOML the file said, which the property name and its docs both say.</summary>
+    /// <summary>The escape hatch for a game whose settings are not a record: the TOML the file
+    /// said, unconverted.</summary>
     [Test]
-    public async Task the_payload_is_reachable_as_json()
+    public async Task the_text_is_reachable_as_the_file_wrote_it()
     {
         var switches = new FeatureSwitches(TomlEngineConfiguration.Read("""
             [settings."game.weather"]
             intensity = 0.5
             """));
 
-        await Assert.That(switches.SettingsFor(s_weather).Json).Contains("\"intensity\"");
-        await Assert.That(FeatureSettings.None.Json).IsEmpty();
+        await Assert.That(switches.SettingsFor(s_weather).Text).Contains("intensity");
+        await Assert.That(FeatureSettings.None.Text).IsEmpty();
     }
 }

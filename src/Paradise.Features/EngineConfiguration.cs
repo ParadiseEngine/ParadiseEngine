@@ -37,8 +37,9 @@ public sealed record EngineConfiguration
     /// and a feature that ships on only ever needs the settings half.</summary>
     public IReadOnlyDictionary<string, FeatureSettings> Settings { get; init; } = EmptySettings;
 
-    /// <summary>A layer holding exactly these settings, for a host building one by hand.</summary>
-    public static EngineConfiguration FromSettings(IEnumerable<KeyValuePair<string, FeatureSettings>> settings)
+    /// <summary>A layer holding exactly these settings. Internal because only a reader can make a
+    /// <see cref="FeatureSettings"/>, and a reader is the only thing that would call this.</summary>
+    internal static EngineConfiguration FromSettings(IEnumerable<KeyValuePair<string, FeatureSettings>> settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
         var builder = EmptySettings.ToBuilder();
