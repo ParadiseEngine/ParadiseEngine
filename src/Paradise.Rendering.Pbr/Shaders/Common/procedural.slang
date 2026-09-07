@@ -8,7 +8,6 @@
 #ifndef PARADISE_PBR_PROCEDURAL_SLANG
 #define PARADISE_PBR_PROCEDURAL_SLANG
 
-#include "uniforms.slang"
 #include "noise.slang"
 
 struct ProcResult { float3 albedo; float3 emissive; float roughness; float metallic; };
