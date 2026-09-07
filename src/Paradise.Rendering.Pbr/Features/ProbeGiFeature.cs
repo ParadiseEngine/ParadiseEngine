@@ -63,6 +63,7 @@ public sealed class ProbeGiFeature : IRenderFeature
     private PbrProbeVolume? _fitted;
     private int _probeCount;
     private bool _reset;
+    private int _framesSinceReset;
     private int _windowStart;
     private uint _frame;
     private ProbeVolumeGpu _volume;
@@ -200,6 +201,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
         _current = next;
         _reset = false;
+        _framesSinceReset++;
         _frame++;
     }
 
@@ -320,6 +322,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         ResetStates();
         _windowStart = 0;
         _reset = true;
+        _framesSinceReset = 0;
     }
 
     private static bool SameVolume(PbrProbeVolume a, PbrProbeVolume b)
@@ -345,12 +348,23 @@ public sealed class ProbeGiFeature : IRenderFeature
             Counts = new Int4 { X = fit.CountX, Y = fit.CountY, Z = fit.CountZ, W = _probeCount },
             Atlas = new Vector4(IrradianceTexels, VisibilityTexels, 1f / irradianceWidth, 1f / irradianceHeight),
             Atlas2 = new Vector4(1f / visibilityWidth, 1f / visibilityHeight, MathF.Max(gi.NormalBias, 0f), MathF.Max(gi.ViewBias, 0f)),
-            // A reset frame writes the atlases outright: hysteresis toward a zero atlas would
-            // otherwise fade the scene in from black over the following second.
-            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, _reset ? 0f : Math.Clamp(gi.Hysteresis, 0f, 0.999f), _frame),
+            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, WarmUpHysteresis(gi.Hysteresis), _frame),
             Rotation = RandomRotation(),
             Window = new Int4 { X = windowStart, Y = windowCount },
         };
+    }
+
+    /// <summary>The configured hysteresis, ramped up from zero over the frames after a reset:
+    /// indirect light converges one bounce per frame, and at 0.97 a closed room takes seconds to
+    /// fill in from black. Averaging the first frames lightly instead reaches the steady state
+    /// in a dozen frames, trading some noise nobody sees under a black-to-lit fade.</summary>
+    private float WarmUpHysteresis(float configured)
+    {
+        var target = Math.Clamp(configured, 0f, 0.999f);
+        if (_reset) return 0f;
+        // Half a frame's weight per frame of age: 0.9 after eighteen frames, 0.97 after sixty.
+        var ramp = 1f - 1f / (_framesSinceReset * 0.5f + 1f);
+        return MathF.Min(target, ramp);
     }
 
     // Shoemake's uniform random unit quaternion.

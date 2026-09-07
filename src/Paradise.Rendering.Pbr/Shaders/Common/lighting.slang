@@ -176,11 +176,11 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
         return 1.0; // no shadow for this light
 
+    // The face is chosen below, from the BIASED sample position: picking it from the surface's own
+    // direction and then projecting a position lifted off the surface can land the sample just
+    // outside that face's 90° frustum, where "outside the frustum" reads as lit — a thin bright
+    // seam along every cube-face boundary, visible wherever the light is the only illumination.
     int face = 0;
-    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5) // point light
-        face = getPointShadowFace(-surfaceToLight);
-    if ((float)face >= light.shadowAtlas.y)
-        return 1.0;
 
     // Normal-offset bias (mechanism 1 above): the centre texel's quantization, more toward
     // grazing, capped — and no more, or the contact strip beside every caster lightens. The
@@ -200,6 +200,11 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
     float liftTexels = min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels);
     float3 samplePos = worldPos + geoN * (texelWorld * liftTexels);
+
+    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5) // point light
+        face = getPointShadowFace(samplePos - light.positionAndType.xyz);
+    if ((float)face >= light.shadowAtlas.y)
+        return 1.0;
 
     int matrixIndex = lightIndex * 6 + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));

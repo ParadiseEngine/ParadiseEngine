@@ -52,7 +52,9 @@ internal sealed class GiDemoScene : IDisposable
         var red = _pbr.Materials.AddDefaultMaterial(new Vector4(0.65f, 0.05f, 0.05f, 1f), metallic: 0f, roughness: 0.9f);
         var green = _pbr.Materials.AddDefaultMaterial(new Vector4(0.12f, 0.45f, 0.15f, 1f), metallic: 0f, roughness: 0.9f);
         var blue = _pbr.Materials.AddDefaultMaterial(new Vector4(0.2f, 0.35f, 0.9f, 1f), metallic: 0f, roughness: 0.6f);
-        var panel = _pbr.Materials.AddMaterial(Emissive(PanelOnly ? new Vector3(30f, 28f, 25f) : new Vector3(6f, 5.6f, 5f)), []);
+        // Panel dominant, sun as a secondary key: the Cornell reference look is a room lit by its
+        // own emitter, not a floor flooded by daylight.
+        var panel = _pbr.Materials.AddMaterial(Emissive(PanelOnly ? new Vector3(12f, 11.2f, 10f) : new Vector3(8f, 7.5f, 6.7f)), []);
 
         PbrMesh Box(int material) => new([_pbr.UploadPrimitive(cube, cubeIndices, material)]);
         var whiteBox = Box(white);
@@ -84,16 +86,16 @@ internal sealed class GiDemoScene : IDisposable
             Equator = new Vector3(0.05f, 0.05f, 0.06f),
             Ground = new Vector3(0.02f, 0.02f, 0.02f),
         };
-        _scene.Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Filmic, Exposure = 0.7f, White = 4f };
+        _scene.Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Filmic, Exposure = 0.6f, White = 4f };
         _scene.Bloom = new PbrBloom { Enabled = true, Threshold = 1.2f, Intensity = 0.25f };
-        _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = 128, Hysteresis = 0.9f, MaxProbes = 4096 };
+        _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = 128, Hysteresis = 0.97f, MaxProbes = 4096 };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
 
         _sunTemplate = new PbrLight
         {
             Type = PbrLightType.Directional,
             Color = new Vector3(1f, 0.95f, 0.85f),
-            Intensity = PanelOnly ? 0f : 2.0f,
+            Intensity = PanelOnly ? 0f : 0.7f,
             CastsShadows = true,
             SoftShadows = true,
             Size = 1.5f,
@@ -102,7 +104,7 @@ internal sealed class GiDemoScene : IDisposable
         {
             Type = PbrLightType.Point,
             Color = new Vector3(1f, 0.55f, 0.25f),
-            Intensity = PanelOnly ? 0f : 4f,
+            Intensity = PanelOnly ? 0f : 2.5f,
             Range = 9f,
             CastsShadows = true,
         };

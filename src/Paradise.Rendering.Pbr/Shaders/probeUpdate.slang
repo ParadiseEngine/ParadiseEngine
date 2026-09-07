@@ -85,8 +85,12 @@ void updateMain(uint3 id: SV_DispatchThreadID)
     else if (dot(offset, offset) > 0.0)
     {
         // Nothing wrong here: relax toward the grid point so a probe freed by a moved prop
-        // returns home, slowly enough not to oscillate into the wall that pushed it.
-        offset *= 0.9;
+        // returns home — but never further than the nearest surface allows, or a probe pushed
+        // out of a wall walks back into it and is pushed out again, a two-frame oscillation
+        // that flickers everything shaded from it.
+        float room = closestFront - MinFrontDistanceFraction * minSpacing;
+        float back = min(room, length(offset));
+        if (back > 0.0) offset -= normalize(offset) * back;
     }
     probeStatesOut[probe] = float4(offset, active);
 }

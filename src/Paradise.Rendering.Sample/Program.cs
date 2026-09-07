@@ -14,8 +14,9 @@ namespace Paradise.Rendering.Sample;
 
 internal static class Program
 {
-    private const int InitialWidth = 640;
-    private const int InitialHeight = 480;
+    // --size WxH overrides the default window / headless target size.
+    private static uint InitialWidth = 640;
+    private static uint InitialHeight = 480;
 
     /// <summary>The sink every engine diagnostic in this sample goes through.</summary>
     /// <remarks>
@@ -40,6 +41,8 @@ internal static class Program
         GiDemo,   // the probe GI test room, static + moving lights (--gi-demo [model.glb])
     }
 
+    private static int s_screenshotEvery;
+
     private static int Main(string[] args)
     {
         if (ParseLogLevel(args) is not { } level) return 1;
@@ -47,6 +50,14 @@ internal static class Program
 
         var headlessFrames = ParseHeadless(args);
         var screenshotPath = ParseValue(args, "--screenshot");
+        if (ParseValue(args, "--size") is { } size && size.Split('x') is [var sw, var sh]
+            && uint.TryParse(sw, out var width) && uint.TryParse(sh, out var height) && width > 0 && height > 0)
+        {
+            InitialWidth = width;
+            InitialHeight = height;
+        }
+        // --screenshot-every N writes <screenshot>-NNNN.png every N frames: how a flicker is found.
+        s_screenshotEvery = int.TryParse(ParseValue(args, "--screenshot-every"), out var every) && every > 0 ? every : 0;
         // Global-illumination switches for the PBR viewer; the scene reads them when it is built.
         PbrViewerScene.RayTracedAo = Array.IndexOf(args, "--rtao") >= 0;
         PbrViewerScene.ProbeGi = Array.IndexOf(args, "--gi") >= 0;
@@ -150,6 +161,18 @@ internal static class Program
         try
         {
             using var renderer = WebGpuRenderer.CreateHeadless(InitialWidth, InitialHeight, s_log.CreateLogger("WebGPU"));
+            Action<int>? afterFrame = null;
+            if (screenshotPath is not null && s_screenshotEvery > 0)
+            {
+                var stem = Path.ChangeExtension(screenshotPath, null);
+                afterFrame = frame =>
+                {
+                    if (frame % s_screenshotEvery != 0) return;
+                    var pixels = renderer.ReadbackColor(out var width, out var height);
+                    using var file = File.Create($"{stem}-{frame:D4}.png");
+                    PngWriter.Write(file, new ColorReadback(pixels, width, height), renderer.ColorFormat);
+                };
+            }
             switch (kind)
             {
                 case SceneKind.Pbr:
@@ -177,7 +200,10 @@ internal static class Program
                 {
                     using var scene = new GiDemoScene(renderer, InitialWidth, InitialHeight, glbPath, s_log.CreateLogger("PbrRenderer"));
                     for (var i = 0; i < frameCount; i++)
+                    {
                         scene.RenderFrame();
+                        afterFrame?.Invoke(i);
+                    }
                     break;
                 }
                 default:
@@ -217,7 +243,7 @@ internal static class Program
         WebGpuRenderer? renderer = null;
         try
         {
-            window = SDL_CreateWindow("Paradise.Rendering — Clear Color", InitialWidth, InitialHeight, SDL_WindowFlags.SDL_WINDOW_RESIZABLE);
+            window = SDL_CreateWindow("Paradise.Rendering — Clear Color", (int)InitialWidth, (int)InitialHeight, SDL_WindowFlags.SDL_WINDOW_RESIZABLE);
             if (window == null)
             {
                 Console.Error.WriteLine($"SDL_CreateWindow failed: {SDL_GetError()}");
