@@ -101,7 +101,8 @@ public struct ShadowDrawUniformsGpu
 }
 
 /// <summary>Mirror of pbr.slang group-3 <c>SsaoUniforms</c>: params (x intensity, y radius, z bias,
-/// w power), screen (xy 1/size, zw size) and rtao (x: ray-traced AO texture bound).</summary>
+/// w power), screen (xy 1/size, zw size) and rtao (x: ray-traced AO texture bound, y: screen-space
+/// reflection bound, z: roughness at which it has faded out).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 48)]
 public struct SsaoUniformsGpu
 {

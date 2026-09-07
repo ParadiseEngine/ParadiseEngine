@@ -639,11 +639,25 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // the sky LUT below is the fallback for surfaces the volume does not cover.
     float f90i = clamp(50.0 * F0.g, metallic, 1.0);
     float3 R = reflect(-V, N);
+    // Screen-space reflection first: where it is confident it replaces the environment lookups
+    // below, and a rough surface fades it out toward them. A fragment in front of the pre-pass
+    // surface (a blended one) is not the surface the ray was traced from, so it takes none.
+    float ssrWeight = 0.0;
+    float3 ssrColor = float3(0.0, 0.0, 0.0);
+    if (ssao.rtao.y > 0.5)
+    {
+        float2 screenUv = input.position.xy * ssao.screen.xy;
+        float4 ssrSample = ssrTexture.SampleLevel(skySpecularSampler, screenUv, 0.0);
+        float opaqueDepth = prepassDepthTexture.Load(int3(int2(input.position.xy), 0)).r;
+        float onSurface = input.position.z >= opaqueDepth - 1e-4 ? 1.0 : 0.0;
+        ssrWeight = ssrSample.a * saturate(1.0 - roughness / max(ssao.rtao.z, 1e-3)) * onSurface;
+        ssrColor = ssrSample.rgb;
+    }
     float3 reflected;
     if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, R, V, reflected))
     {
-        ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
+        ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
     }
     // Sky-reflection specular (Godot reflected_light_source = Sky): GGX-prefiltered sky radiance
     // from the CPU LUT × the split-sum environment BRDF. The LUT has two row halves: the gradient
@@ -674,8 +688,9 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
         // Godot's indirect-specular combine (scene_forward_clustered.glsl): the split-sum pair
         // with the cheap-luminance f90 and the multiscatter energy compensation (envAb/energyComp
         // computed once per fragment above).
-        ambient += prefiltered * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
+        ambient += prefiltered * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
     }
+    ambient += ssrColor * ssrWeight * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion;
 
     float3 color = ambient + Lo;
     float transmission = saturate(material.emissiveFactor.w);

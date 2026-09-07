@@ -31,6 +31,12 @@ public static class PbrTargets
     /// <summary>Ray-traced ambient occlusion, one value per pixel (Rgba16Float, r = visibility).</summary>
     public const string RayTracedAo = "PbrRayTracedAo";
 
+    /// <summary>Screen-space reflection, per pixel (Rgba16Float: rgb reflected radiance, a confidence).</summary>
+    public const string SsrReflection = "PbrSsrReflection";
+
+    /// <summary>The previous frame's HDR scene, copied for the reflection trace to read.</summary>
+    public const string SsrHistory = "PbrSsrHistory";
+
     /// <summary>The two probe irradiance atlases (Rgba16Float octahedral tiles with a 1-texel
     /// border), alternating roles each frame: one is read, the other written.</summary>
     internal static readonly string[] GiIrradiance = ["PbrGiIrradiance0", "PbrGiIrradiance1"];
@@ -62,6 +68,9 @@ public static class PbrResults
 
     /// <summary>The ray-traced ambient occlusion texture, published in frames it is computed.</summary>
     public const string RayTracedAo = "Pbr.RayTracedAo";
+
+    /// <summary>The screen-space reflection texture, published in frames it is traced.</summary>
+    public const string SsrReflection = "Pbr.SsrReflection";
 
     /// <summary>This frame's probe irradiance atlas, published in frames the probes update.</summary>
     public const string GiIrradiance = "Pbr.Gi.Irradiance";

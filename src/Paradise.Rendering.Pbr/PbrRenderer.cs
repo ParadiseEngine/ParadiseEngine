@@ -56,7 +56,8 @@ public sealed partial class PbrRenderer : IDisposable
         // List order is dependency order: the scene reads the shadow plan and the pre-pass
         // result, the capture reads the scene's targets, the composite reads bloom's.
         _shadows = new ShadowFeature(_ctx);
-        var prepass = new PrepassFeature(_ctx);
+        var ssr = new ScreenSpaceReflectionFeature(_ctx);
+        var prepass = new PrepassFeature(_ctx, ssr);
         var rtao = new RayTracedAoFeature(_ctx);
         var gi = new ProbeGiFeature(_ctx, _shadows);
         _scene = new SceneFeature(_ctx, _shadows, prepass, gi, specularAaVariance, specularAaClamp);
@@ -66,6 +67,7 @@ public sealed partial class PbrRenderer : IDisposable
             .Add(_shadows)
             .Add(prepass)
             .Add(rtao)
+            .Add(ssr)
             .Add(gi)
             .Add(_scene)
             .Add(_capture)
