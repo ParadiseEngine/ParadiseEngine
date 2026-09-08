@@ -1,19 +1,27 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Paradise.ECS.Generators;
 
-/// <summary>
-/// Shared utilities for source generators.
-/// </summary>
+/// <summary>Shared utilities for source generators.</summary>
 internal static class GeneratorUtilities
 {
     private const string GuidAttributeName = "GuidAttribute";
     private const string GuidAttributeFullName = "System.Runtime.InteropServices." + GuidAttributeName;
 
-    /// <summary>
-    /// Gets the optimal mask type string based on the number of bits required.
-    /// </summary>
+    // All generators must agree on the namespace of generated component and tag types.
+    public static string GetRootNamespace(Compilation compilation, AnalyzerConfigOptionsProvider options)
+    {
+        var attribute = compilation.Assembly.GetAttributes().FirstOrDefault(a =>
+            a.AttributeClass?.ToDisplayString() == "Paradise.ECS.ComponentRegistryNamespaceAttribute");
+        if (attribute?.ConstructorArguments.FirstOrDefault().Value is string value)
+            return value;
+        options.GlobalOptions.TryGetValue("build_property.RootNamespace", out var rootNamespace);
+        return rootNamespace ?? "Paradise.ECS";
+    }
+
+    /// <summary>The optimal mask type string based on the number of bits required.</summary>
     /// <param name="requiredBits">The number of bits required.</param>
     /// <returns>The fully qualified mask type string.</returns>
     public static string GetOptimalMaskType(int requiredBits)
@@ -29,24 +37,18 @@ internal static class GeneratorUtilities
         return $"global::Paradise.ECS.ImmutableBitSet<global::Paradise.ECS.Bit{capacity}>";
     }
 
-    /// <summary>
-    /// Gets the fully qualified name of a type symbol without the "global::" prefix.
-    /// </summary>
+    /// <summary>The fully qualified name of a type symbol without the "global::" prefix.</summary>
     public static string GetFullyQualifiedName(INamedTypeSymbol symbol)
     {
         var fqn = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         return fqn.StartsWith("global::", StringComparison.Ordinal) ? fqn.Substring(8) : fqn;
     }
 
-    /// <summary>
-    /// Gets the namespace of a type symbol, or null if it's in the global namespace.
-    /// </summary>
+    /// <summary>The namespace of a type symbol, or null if it's in the global namespace.</summary>
     public static string? GetNamespace(INamedTypeSymbol symbol)
         => symbol.ContainingNamespace.IsGlobalNamespace ? null : symbol.ContainingNamespace.ToDisplayString();
 
-    /// <summary>
-    /// Gets the type keyword for a type symbol (class, struct, record class, record struct, interface).
-    /// </summary>
+    /// <summary>The type keyword for a type symbol (class, struct, record class, record struct, interface).</summary>
     public static string GetTypeKeyword(INamedTypeSymbol type) => type.TypeKind switch
     {
         Microsoft.CodeAnalysis.TypeKind.Class => type.IsRecord ? "record class" : "class",
@@ -55,9 +57,7 @@ internal static class GeneratorUtilities
         _ => "struct"
     };
 
-    /// <summary>
-    /// Gets the containing types for a nested type, ordered from outermost to innermost.
-    /// </summary>
+    /// <summary>The containing types for a nested type, ordered from outermost to innermost.</summary>
     public static ImmutableArray<ContainingTypeInfo> GetContainingTypes(INamedTypeSymbol symbol)
     {
         var list = new List<ContainingTypeInfo>();
@@ -67,9 +67,7 @@ internal static class GeneratorUtilities
         return list.ToImmutableArray();
     }
 
-    /// <summary>
-    /// Extracts type information from a generator attribute syntax context.
-    /// </summary>
+    /// <summary>Extracts type information from a generator attribute syntax context.</summary>
     public static TypeInfo? ExtractTypeInfo(GeneratorAttributeSyntaxContext context, TypeKind kind)
     {
         if (context.TargetSymbol is not INamedTypeSymbol typeSymbol || typeSymbol.TypeKind != Microsoft.CodeAnalysis.TypeKind.Struct)
@@ -79,7 +77,6 @@ internal static class GeneratorUtilities
         var ns = GetNamespace(typeSymbol);
         var containingTypes = GetContainingTypes(typeSymbol);
 
-        // Check for invalid generic containing types
         string? invalidContainingType = null;
         for (var parent = typeSymbol.ContainingType; parent != null; parent = parent.ContainingType)
         {
@@ -120,9 +117,7 @@ internal static class GeneratorUtilities
             manualId);
     }
 
-    /// <summary>
-    /// Reads the stable GUID declared by <c>[System.Runtime.InteropServices.Guid]</c> on a type.
-    /// </summary>
+    /// <summary>Reads the stable GUID declared by <c>[System.Runtime.InteropServices.Guid]</c> on a type.</summary>
     /// <remarks>
     /// A malformed value needs no diagnostic of ours: the compiler already rejects it with CS0591
     /// before this generator's output could matter. Parsing is therefore restricted to the exact
@@ -147,9 +142,7 @@ internal static class GeneratorUtilities
         return null;
     }
 
-    /// <summary>
-    /// Processes and validates types, returning valid types and the optimal mask type.
-    /// </summary>
+    /// <summary>Processes and validates types, returning valid types and the optimal mask type.</summary>
     public static (List<TypeInfo> Valid, string MaskType) ProcessTypes(
         SourceProductionContext context,
         ImmutableArray<TypeInfo> types,
@@ -166,7 +159,6 @@ internal static class GeneratorUtilities
         var sorted = types.OrderBy(t => t.FullyQualifiedName, StringComparer.Ordinal).ToList();
         var duplicateManualIds = new HashSet<int>();
 
-        // Report diagnostics
         foreach (var t in sorted)
         {
             if (!t.IsUnmanaged)
@@ -179,7 +171,6 @@ internal static class GeneratorUtilities
                 context.ReportDiagnostic(Diagnostic.Create(desc, t.Location, t.FullyQualifiedName));
         }
 
-        // Check duplicate manual IDs
         foreach (var group in sorted.Where(t => t.ManualId.HasValue).GroupBy(t => t.ManualId!.Value).Where(g => g.Count() > 1))
         {
             duplicateManualIds.Add(group.Key);
@@ -187,14 +178,12 @@ internal static class GeneratorUtilities
                 string.Join(", ", group.Select(t => t.FullyQualifiedName))));
         }
 
-        // Filter valid types
         var valid = sorted.Where(t =>
             t.IsUnmanaged &&
             t.InvalidContainingType == null &&
             (!t.ManualId.HasValue || (t.ManualId.Value <= maxId && !duplicateManualIds.Contains(t.ManualId.Value))) &&
             (t.Kind != TypeKind.Tag || !t.HasInstanceFields)).ToList();
 
-        // Calculate mask type
         var maxAssignedId = CalculateMaxAssignedId(valid);
         var requiredBits = maxAssignedId + 1;
         var maskType = GetOptimalMaskType(requiredBits);
@@ -202,9 +191,7 @@ internal static class GeneratorUtilities
         return (valid, maskType);
     }
 
-    /// <summary>
-    /// Calculates the maximum assigned ID for a list of types, considering manual IDs.
-    /// </summary>
+    /// <summary>Calculates the maximum assigned ID for a list of types, considering manual IDs.</summary>
     public static int CalculateMaxAssignedId(List<TypeInfo> types)
     {
         var manualIds = new HashSet<int>(types.Where(t => t.ManualId.HasValue).Select(t => t.ManualId!.Value));
@@ -220,9 +207,7 @@ internal static class GeneratorUtilities
     }
 }
 
-/// <summary>
-/// Information about a containing type for nested types.
-/// </summary>
+/// <summary>Information about a containing type for nested types.</summary>
 internal readonly struct ContainingTypeInfo
 {
     public string Name { get; }
@@ -235,14 +220,10 @@ internal readonly struct ContainingTypeInfo
     }
 }
 
-/// <summary>
-/// Represents the kind of type being processed.
-/// </summary>
+/// <summary>Represents the kind of type being processed.</summary>
 internal enum TypeKind { Component, Tag }
 
-/// <summary>
-/// Information about a type being processed by the generator.
-/// </summary>
+/// <summary>Information about a type being processed by the generator.</summary>
 internal readonly struct TypeInfo
 {
     public TypeKind Kind { get; }

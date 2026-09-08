@@ -3,7 +3,7 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>The standard mount names every tool agrees on. <c>/assets</c> is read-only as a guard: a consumer that writes sources has made the build tree unreproducible.</summary>
+/// <summary>Standard project mounts, with read-only <c>/assets</c> for reproducible builds.</summary>
 public static class ProjectMounts
 {
     public const string AssetsMountName = "/assets";

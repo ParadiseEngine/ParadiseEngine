@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates entity creation patterns including empty entities, entities with components, and bulk creation.
-/// </summary>
+/// <summary>Demonstrates entity creation patterns including empty entities, entities with components, and bulk creation.</summary>
 public static class EntityCreationSample
 {
     public static (Entity emptyEntity, Entity playerEntity, Entity[] enemies) Run(World world)
@@ -12,7 +10,6 @@ public static class EntityCreationSample
         Console.WriteLine("1. Entity Creation");
         Console.WriteLine("----------------------------");
 
-        // Spawn empty entity
         var emptyEntity = world.Spawn();
         Console.WriteLine($"  Created empty entity: {emptyEntity}");
         Console.WriteLine($"  Entity count: {world.EntityCount}");
@@ -35,7 +32,6 @@ public static class EntityCreationSample
         Debug.Assert(world.EntityCount == 2);
         Debug.Assert(world.IsAlive(playerEntity));
 
-        // Create multiple enemy entities
         var enemies = new Entity[5];
         for (int i = 0; i < enemies.Length; i++)
         {

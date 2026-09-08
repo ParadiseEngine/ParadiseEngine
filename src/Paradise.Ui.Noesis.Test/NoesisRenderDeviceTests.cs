@@ -303,11 +303,9 @@ public class NoesisRenderDeviceTests
         view.Renderer.Shutdown();
     }
 
-    /// <summary>An immediate-mode surface shaped like the game's map: a dense field of solid
-    /// rectangles under a transform, optionally followed by one filled path — the combination the
-    /// map renderer draws, and the one that used to lose the whole frame. 1500 rectangles emit
-    /// 9000 indices (6 each, an even total); the path's triangle fan adds 3, making the frame's
-    /// index block an odd count and so a byte length no multiple of 4.</summary>
+    /// <summary>Produces a dense rectangle field with an optional path.</summary>
+    /// <remarks>The path adds three indices to an even count, exercising a mapped index block whose
+    /// byte length is not a multiple of four.</remarks>
     private sealed class DenseFieldSurface : global::Noesis.FrameworkElement
     {
         private readonly global::Noesis.Brush _fieldBrush =
@@ -359,15 +357,10 @@ public class NoesisRenderDeviceTests
         }
     }
 
-    /// <summary>Regression for the map-renderer frame corruption (issue #129): a dense rectangle
-    /// field plus ONE filled path must render the field exactly as the same frame without the path.
-    ///
-    /// The mechanism was a silently rejected upload — <c>Queue.WriteBuffer</c> refuses a size that
-    /// is not a multiple of 4, and the odd index count contributed by the path made the frame's
-    /// whole index block exactly that. So the assertions are three: no validation error was raised
-    /// (the direct cause, and invisible without an error scope because nothing pumps Dawn's
-    /// uncaptured-error callback), the field pixels are the colour they were drawn in, and the two
-    /// frames agree pixel-for-pixel outside the path's own corner.</summary>
+    /// <summary>Checks that an odd index count preserves uploads and unrelated pixels
+    /// (#129).</summary>
+    /// <remarks>Assert no validation error, expected field colors and matching pixels outside the
+    /// path; the path makes WriteBuffer require padding.</remarks>
     [Test]
     public async Task a_dense_rectangle_field_plus_a_filled_path_renders_without_corrupting_the_frame()
     {

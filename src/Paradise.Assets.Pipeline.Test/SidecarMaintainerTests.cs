@@ -139,7 +139,7 @@ public class SidecarMaintainerTests
         await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Guid).IsEqualTo(before.Guid);
     }
 
-    // ---- the one that matters -----------------------------------------------------------
+    // the one that matters
 
     /// <summary>
     /// A temp-then-rename save whose temp file outlives the debounce: the temp gets a mint, then

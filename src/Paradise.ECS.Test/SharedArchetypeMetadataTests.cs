@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for SharedArchetypeMetadata.
-/// </summary>
+/// <summary>Tests for SharedArchetypeMetadata.</summary>
 public sealed class SharedArchetypeMetadataTests : IDisposable
 {
     private readonly SharedArchetypeMetadata<SmallBitSet<ulong>, DefaultConfig> _metadata;

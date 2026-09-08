@@ -1,12 +1,7 @@
 namespace Paradise.BT;
 
-/// <summary>
-/// Generated, per assembly, for every registrable node: what the node's <c>Tick</c> body touches,
-/// published as metadata so a consuming assembly's binding can read access where no body exists.
-/// This is what makes hand-written <see cref="ReadsAttribute{T}"/> / <see cref="WritesAttribute{T}"/>
-/// optional for cross-assembly nodes rather than required. Written by the BT generator; not
-/// intended to be written by hand.
-/// </summary>
+/// <summary>Publishes generated node access metadata for consumers without the node's source.</summary>
+/// <remarks>Emitted by the BT generator; handwritten Reads/Writes attributes remain optional.</remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class NodeAccessAttribute : Attribute
 {

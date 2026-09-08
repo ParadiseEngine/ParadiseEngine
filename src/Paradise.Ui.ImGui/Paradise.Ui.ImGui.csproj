@@ -20,8 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- IUiInput / WindowEvent: the ImGui core is one implementation of the engine's UI input
-         contract, stackable with the others through CompositeUiInput. -->
+    <!-- Implement the shared UI input contract and CompositeUiInput composition. -->
     <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
   </ItemGroup>
 </Project>

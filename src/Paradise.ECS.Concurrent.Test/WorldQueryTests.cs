@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Concurrent.Test;
 
-/// <summary>
-/// Integration tests for queries with World operations.
-/// </summary>
+/// <summary>Integration tests for queries with World operations.</summary>
 public sealed class WorldQueryTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

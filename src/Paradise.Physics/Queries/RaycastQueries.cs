@@ -85,6 +85,8 @@ internal static class RaycastQueries
 
     private static bool RayBox(Vector3 origin, Vector3 displacement, Vector3 halfExtents, out float fraction, out Vector3 normal)
     {
+        fraction = 0f;
+        normal = default;
         float tMin = float.NegativeInfinity;
         float tMax = float.PositiveInfinity;
         int enterAxis = -1;
@@ -99,8 +101,6 @@ internal static class RaycastQueries
             {
                 if (s < -e || s > e)
                 {
-                    fraction = 0f;
-                    normal = default;
                     return false;
                 }
                 continue;
@@ -119,23 +119,18 @@ internal static class RaycastQueries
             if (t2 < tMax) tMax = t2;
             if (tMin > tMax)
             {
-                fraction = 0f;
-                normal = default;
                 return false;
             }
         }
 
         if (tMax < 0f || tMin > 1f)
         {
-            fraction = 0f;
-            normal = default;
             return false;
         }
 
-        if (tMin < 0f || enterAxis < 0)
+        if (tMin < 0f)
         {
             fraction = -1f; // started inside
-            normal = default;
             return true;
         }
 

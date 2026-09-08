@@ -2,9 +2,7 @@ using ImmutableBitSet32 = Paradise.ECS.SmallBitSet<uint>;
 
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ImmutableBitSet32"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ImmutableBitSet32"/>.</summary>
 public sealed class ImmutableBitSet32Tests
 {
     [Test]

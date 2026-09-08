@@ -6,17 +6,10 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Forward+ light culling at <see cref="RenderPassEvent.BeforeOpaque"/>: a compute pass
-/// that bins every point and spot light into the froxel grid the scene's fragment shader tests
-/// before it shades a light. One thread per froxel, one bit per light.
-///
-/// <para>The grid is Godot's — 32×32 pixel tiles by 32 logarithmic depth slices — and the binning
-/// is conservative: a froxel that claims a light it does not quite touch costs a shading add whose
-/// attenuation is near zero, while one that misses a light it does touch changes pixels. Inclusion
-/// wins wherever the two trade off.</para>
-///
-/// <para>Off, nothing bins and <see cref="SceneFeature"/> retracts the grid, so every light shades
-/// every pixel — the picture is unchanged and only the cost moves.</para></summary>
+/// <summary>Bins point and spot lights into Forward+ froxels before opaque rendering.</summary>
+/// <remarks>One compute thread handles each 32x32-pixel tile and logarithmic depth slice.
+/// Conservative inclusion prevents missing lights; disabling culling shades all lights with the
+/// same output.</remarks>
 public sealed class LightCullingFeature : IRenderFeature
 {
     /// <summary>Mirror of <c>CullUniforms</c> in lightCull.slang.</summary>

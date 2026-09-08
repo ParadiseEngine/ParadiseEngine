@@ -10,24 +10,16 @@ namespace Paradise.ECS;
 public readonly struct SystemMetadata<TMask>
     where TMask : unmanaged, IBitSet<TMask>
 {
-    /// <summary>
-    /// The unique system ID assigned at compile time.
-    /// </summary>
+    /// <summary>The unique system ID assigned at compile time.</summary>
     public int SystemId { get; init; }
 
-    /// <summary>
-    /// The fully qualified type name of the system.
-    /// </summary>
+    /// <summary>The fully qualified type name of the system.</summary>
     public string TypeName { get; init; }
 
-    /// <summary>
-    /// Bitmask of components this system reads (includes both read-only and read-write).
-    /// </summary>
+    /// <summary>Bitmask of components this system reads (includes both read-only and read-write).</summary>
     public TMask ReadMask { get; init; }
 
-    /// <summary>
-    /// Bitmask of components this system writes (read-write access only).
-    /// </summary>
+    /// <summary>Bitmask of components this system writes (read-write access only).</summary>
     public TMask WriteMask { get; init; }
 
     /// <summary>

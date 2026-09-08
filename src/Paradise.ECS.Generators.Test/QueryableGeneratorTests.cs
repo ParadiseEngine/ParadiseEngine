@@ -7,9 +7,7 @@ namespace Paradise.ECS.Generators.Test;
 /// </summary>
 public class QueryableGeneratorStructureTests
 {
-    /// <summary>
-    /// Verifies that nested queryables generate proper Data and ChunkData types.
-    /// </summary>
+    /// <summary>Verifies that nested queryables generate proper Data and ChunkData types.</summary>
     [Test]
     public async Task NestedQueryables_GenerateDataAndChunkDataTypes()
     {
@@ -66,9 +64,7 @@ public class QueryableGeneratorStructureTests
         await Assert.That(containerAGenerated).Contains("public static global::Paradise.ECS.ChunkQueryResult<ChunkData<TMask, TConfig>, global::Paradise.ECS.Archetype<TMask, TConfig>, TMask, TConfig> ChunkQuery<TWorld, TMask, TConfig>");
     }
 
-    /// <summary>
-    /// Verifies that non-nested queryables generate proper Data and ChunkData types.
-    /// </summary>
+    /// <summary>Verifies that non-nested queryables generate proper Data and ChunkData types.</summary>
     [Test]
     public async Task NonNestedQueryable_GeneratesDataAndChunkDataTypes()
     {
@@ -100,9 +96,7 @@ public class QueryableGeneratorStructureTests
         await Assert.That(generated).DoesNotContain("SimpleQueryChunkData");
     }
 
-    /// <summary>
-    /// Verifies deeply nested queryables generate proper types.
-    /// </summary>
+    /// <summary>Verifies deeply nested queryables generate proper types.</summary>
     [Test]
     public async Task DeeplyNestedQueryable_GeneratesDataAndChunkDataTypes()
     {
@@ -192,9 +186,7 @@ public class QueryableGeneratorDuplicateManualIdTests
         await Assert.That(descriptor.IsEnabledByDefault).IsTrue();
     }
 
-    /// <summary>
-    /// Verifies the diagnostic message format contains expected placeholders.
-    /// </summary>
+    /// <summary>Verifies the diagnostic message format contains expected placeholders.</summary>
     [Test]
     public async Task DuplicateQueryableIdDiagnostic_MessageFormat_ContainsPlaceholders()
     {
@@ -207,9 +199,7 @@ public class QueryableGeneratorDuplicateManualIdTests
     }
 }
 
-/// <summary>
-/// Tests for SuppressGlobalUsingsAttribute functionality in QueryableGenerator.
-/// </summary>
+/// <summary>Tests for SuppressGlobalUsingsAttribute functionality in QueryableGenerator.</summary>
 public class QueryableGeneratorSuppressGlobalUsingsTests
 {
     [Test]

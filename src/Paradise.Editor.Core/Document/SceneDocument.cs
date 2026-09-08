@@ -3,29 +3,15 @@ using Paradise.Assets.Documents;
 
 namespace Paradise.Editor.Core.Document;
 
-/// <summary>One component on a scene object: the authored id, the declared type name, and the
-/// payload exactly as the file holds it.</summary>
-/// <remarks><see cref="Data"/> is the authored table, never a deserialized game type: the editor
-/// cannot name the type, which is the whole point of the schema-driven inspector. The table is
-/// treated as frozen once it is inside a document; an edit produces a new table.</remarks>
+/// <summary>An authored component's ID, type name and raw payload.</summary>
+/// <remarks>Treat <see cref="Data"/> as immutable inside a document; edits create a new table.</remarks>
 public sealed record SceneComponent(Guid Id, string? Type, CanonicalTomlTable Data);
 
-/// <summary>One object in a scene: its identity and its components, in document order.</summary>
+/// <summary>A scene object's durable identity and ordered components.</summary>
 /// <remarks>
-/// <para>
-/// Name and parent are READ OUT OF the <c>meta</c> component rather than stored beside it, because
-/// <c>meta</c> is where the file keeps them (<c>PrefabObject.Name</c>, <c>.Parent</c>) and a
-/// component list documented as "exactly as the file holds it" cannot also be shadowed by fields
-/// that drift from it. A renamed object with a stale <c>meta.Name</c> is not a bug anyone would
-/// see until save time, and then only in whichever of the two the writer happened to read.
-/// </para>
-/// <para>
-/// <see cref="Id"/> is the exception and is stored: it is <c>meta.Guid</c>, but it is read on
-/// every lookup and never edited, so it is established once by whoever builds the object — use
-/// <see cref="WithMeta"/> — and treated as an invariant from there. Everything else <c>meta</c>
-/// carries (<c>Target</c>, <c>Dropped</c>, and any field a future format adds) needs no accessor
-/// here: it rides along inside <see cref="Components"/> and survives a round trip untouched.
-/// </para>
+/// Name and parent are read from <c>meta</c> to avoid duplicate state.
+/// <see cref="Id"/> caches the immutable <c>meta.Guid</c>; create it consistently with <see cref="WithMeta"/>.
+/// Other metadata remains in <see cref="Components"/> and survives round trips.
 /// </remarks>
 public sealed record SceneObject(NodeId Id, ImmutableList<SceneComponent> Components)
 {
@@ -65,12 +51,11 @@ public sealed record SceneObject(NodeId Id, ImmutableList<SceneComponent> Compon
     public SceneObject WithParent(NodeId? parent) =>
         WithMetaField(WellKnownComponents.Parent, parent is { } value ? DocumentGuid.Format(value.Value) : null);
 
-    // Rebuilt rather than mutated because a table inside a document is frozen, and rebuilt IN
-    // ORDER because CanonicalTomlTable's key order IS the file's: writing a renamed object would
-    // otherwise move Name to the end and show up as a diff nobody made.
+    // Rebuild the frozen table in key order so editing a value does not reorder the file.
     private SceneObject WithMetaField(string key, object? value)
     {
-        if (Components.FindIndex(component => component.Id == WellKnownComponents.MetaId) is var index && index < 0)
+        var index = Components.FindIndex(component => component.Id == WellKnownComponents.MetaId);
+        if (index < 0)
         {
             throw new InvalidOperationException($"Object '{Id}' has no meta component to write '{key}' into.");
         }
@@ -96,12 +81,11 @@ public sealed record SceneObject(NodeId Id, ImmutableList<SceneComponent> Compon
     }
 }
 
-/// <summary>The editor's working copy of an authored scene, as an immutable value.</summary>
-/// <remarks>Immutability is what makes undo a list of versions instead of a list of inverses: an
-/// edit returns a new document that shares every unchanged object with the previous one, and
-/// undo republishes an earlier document. Nothing mutates in place, so an observer can diff two
-/// versions by reference equality. Object order is preserved because the runtime assigns entity
-/// handles in document order.</remarks>
+/// <summary>An immutable working version of an authored scene.</summary>
+/// <remarks>
+/// Edits share unchanged objects; undo republishes an earlier version.
+/// Reference equality identifies unchanged state. Object order determines runtime entity handles.
+/// </remarks>
 public sealed record SceneDocument(ImmutableList<SceneObject> Objects)
 {
     public static SceneDocument Empty { get; } = new(ImmutableList<SceneObject>.Empty);
@@ -123,6 +107,10 @@ public sealed record SceneDocument(ImmutableList<SceneObject> Objects)
         }
     }
 
-    public SceneDocument Replace(SceneObject updated) =>
-        this with { Objects = Objects.Replace(Find(updated.Id) ?? throw new KeyNotFoundException(updated.Id.ToString()), updated) };
+    public SceneDocument Replace(SceneObject updated)
+    {
+        var index = Objects.FindIndex(candidate => candidate.Id == updated.Id);
+        if (index < 0) throw new KeyNotFoundException(updated.Id.ToString());
+        return this with { Objects = Objects.SetItem(index, updated) };
+    }
 }

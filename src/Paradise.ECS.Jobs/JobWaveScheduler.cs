@@ -9,9 +9,7 @@ public sealed class JobWaveScheduler : IWaveScheduler
 {
     private readonly JobWorkerPool _pool;
 
-    /// <summary>
-    /// Initializes a new <see cref="JobWaveScheduler"/> backed by the specified worker pool.
-    /// </summary>
+    /// <summary>Initializes a new <see cref="JobWaveScheduler"/> backed by the specified worker pool.</summary>
     /// <param name="pool">The worker pool to dispatch work items to. Must outlive this scheduler.</param>
     public JobWaveScheduler(JobWorkerPool pool)
     {

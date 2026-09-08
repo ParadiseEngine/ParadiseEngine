@@ -140,19 +140,8 @@ public class ShaderExtensionTests
         }
     }
 
-    /// <summary>
-    /// The surface seam surface.slang exists for, and the claim the pbrCore split rests on.
-    ///
-    /// Two assertions, and the FIRST is the load-bearing one: a shader that resolves the stock
-    /// surface and shades it, changing nothing, must reproduce the built-in path EXACTLY. That is
-    /// what makes <c>shadePbr = shadeSurface(resolvePbrSurface(input))</c> a refactor rather than a
-    /// rewrite — if the two ever diverge, every stock material in every game shifts and no test
-    /// that only checks "the extension draws something" would notice.
-    ///
-    /// The second proves the seam is actually a seam: modifying one field of the resolved surface
-    /// changes the image. Without it the first assertion would also pass for a fixture that
-    /// silently ignored its surface and called shadePbr.
-    /// </summary>
+    /// <summary>Checks that an unchanged resolved surface matches stock PBR exactly and a modified
+    /// surface changes pixels.</summary>
     [Test]
     public async Task resolved_surface_reproduces_the_stock_path_and_a_modification_changes_it()
     {

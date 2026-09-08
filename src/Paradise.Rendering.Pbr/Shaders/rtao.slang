@@ -1,8 +1,5 @@
-// rtao.slang — ray-traced ambient occlusion, the tracer's proving ground: for every pixel the
-// depth + normal pre-pass covered, a few cosine-distributed rays into the scene's BVH, and the
-// fraction that escape within a radius written as the ambient occlusion the scene pass multiplies
-// its ambient by. It exists so the traversal can be validated against a picture before the probe
-// passes depend on it; a game may also simply prefer it to SSAO.
+// Trace cosine-weighted rays from prepass-covered pixels and write the fraction escaping the radius
+// as ambient occlusion. Also provides a visible check of BVH traversal.
 #include "Common/bvh.slang"
 
 struct RtaoUniforms

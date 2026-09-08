@@ -7,14 +7,10 @@ namespace Paradise.ECS;
 /// </summary>
 public interface IConfig
 {
-    /// <summary>
-    /// Maximum supported archetype ID (20 bits = 1,048,575).
-    /// </summary>
+    /// <summary>Maximum supported archetype ID (20 bits = 1,048,575).</summary>
     public const int MaxArchetypeId = (1 << EdgeKey.ArchetypeBits) - 1;
 
-    /// <summary>
-    /// Maximum supported component type ID (11 bits = 2,047).
-    /// </summary>
+    /// <summary>Maximum supported component type ID (11 bits = 2,047).</summary>
     public const int MaxComponentTypeId = (1 << EdgeKey.ComponentBits) - 1;
 
     /// <summary>
@@ -74,15 +70,11 @@ public interface IConfig
     IAllocator LayoutAllocator { get; }
 }
 
-/// <summary>
-/// Computed configuration values derived from <typeparamref name="T"/>.
-/// </summary>
+/// <summary>Computed configuration values derived from <typeparamref name="T"/>.</summary>
 /// <typeparam name="T">The world configuration type.</typeparam>
 public static class Config<T> where T : IConfig
 {
-    /// <summary>
-    /// Maximum entity ID that can be stored in EntityIdByteSize bytes.
-    /// </summary>
+    /// <summary>Maximum entity ID that can be stored in EntityIdByteSize bytes.</summary>
     // ReSharper disable once StaticMemberInGenericType
     public static int MaxEntityId { get; } = T.EntityIdByteSize >= sizeof(int)
         ? int.MaxValue
@@ -95,9 +87,7 @@ public static class Config<T> where T : IConfig
 /// </summary>
 public readonly struct DefaultConfig : IConfig
 {
-    /// <summary>
-    /// Creates a default configuration with standard settings.
-    /// </summary>
+    /// <summary>Creates a default configuration with standard settings.</summary>
     public DefaultConfig() { }
 
     /// <inheritdoc />
@@ -109,28 +99,18 @@ public readonly struct DefaultConfig : IConfig
     /// <inheritdoc />
     public static int EntityIdByteSize => sizeof(int);
 
-    /// <summary>
-    /// Initial capacity for entity storage. Default: 1024.
-    /// </summary>
+    /// <summary>Initial capacity for entity storage. Default: 1024.</summary>
     public int DefaultEntityCapacity { get; init; } = 1024;
 
-    /// <summary>
-    /// Initial capacity for chunk storage. Default: 256.
-    /// </summary>
+    /// <summary>Initial capacity for chunk storage. Default: 256.</summary>
     public int DefaultChunkCapacity { get; init; } = 256;
 
-    /// <summary>
-    /// Memory allocator for chunk memory operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.
-    /// </summary>
+    /// <summary>Memory allocator for chunk memory operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
     public IAllocator ChunkAllocator { get; init; } = NativeMemoryAllocator.Shared;
 
-    /// <summary>
-    /// Memory allocator for archetype metadata operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.
-    /// </summary>
+    /// <summary>Memory allocator for archetype metadata operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
     public IAllocator MetadataAllocator { get; init; } = NativeMemoryAllocator.Shared;
 
-    /// <summary>
-    /// Memory allocator for archetype layout data. Default: <see cref="NativeMemoryAllocator.Shared"/>.
-    /// </summary>
+    /// <summary>Memory allocator for archetype layout data. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
     public IAllocator LayoutAllocator { get; init; } = NativeMemoryAllocator.Shared;
 }

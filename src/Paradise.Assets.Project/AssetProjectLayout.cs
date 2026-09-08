@@ -2,12 +2,8 @@ using Zio;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>The directory layout of one asset project, rooted at the directory that holds <c>assets/</c>.</summary>
-/// <remarks>
-/// <c>assets/</c> is the committed truth; <c>.editor/</c> and <c>build/</c> are derived, and
-/// deleting either must lose nothing. Anything that would break that — a setting only in
-/// <c>.editor/</c>, an artifact nothing can regenerate — belongs in <c>assets/</c> instead.
-/// </remarks>
+/// <summary>The directories of an asset project.</summary>
+/// <remarks><c>assets/</c> is authored; <c>.editor/</c> and <c>build/</c> must be fully regenerable.</remarks>
 public sealed class AssetProjectLayout
 {
     public const string AssetsDirectoryName = "assets";

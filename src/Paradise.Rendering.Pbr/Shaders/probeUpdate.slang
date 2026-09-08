@@ -1,9 +1,5 @@
-// probeUpdate.slang — probe relocation and classification, one thread per probe. A probe with
-// many back-face hits sits inside geometry: it is pushed out along the direction that reaches open
-// space, within a fraction of the spacing so the grid stays regular; one that cannot get out is
-// switched off, and a lookup then weights it to nothing. Writes the NEXT frame's state buffer in
-// full — probes outside this frame's trace window are copied — so the trace and blend that ran
-// this frame saw one consistent set and the next frame sees another.
+// Relocate/classify probes with excessive back-face hits, disabling those trapped inside geometry.
+// Write the full next-state buffer and copy untraced probes so this frame uses consistent state.
 #include "Common/probes.slang"
 
 [[vk::binding(0, 0)]]
@@ -25,11 +21,8 @@ void updateMain(uint3 id: SV_DispatchThreadID)
     float4 state = probeStates[probe];
     int windowProbe = probe - probeVolume.window.x;
     if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
-    // An inactive probe was not traced: its rays are the trace's placeholder misses, which would
-    // read here as open space and reactivate it at the grid point inside the wall it could not
-    // leave — then it is traced, sees back faces, and is switched off again, a flicker with the
-    // period of a window lap. Static geometry does not move, and a refit resets every state, so
-    // once off a probe stays off.
+    // Inactive probes have placeholder misses, not evidence of open space. Keep them inactive until
+    // a refit resets state; otherwise they repeatedly reactivate inside walls.
     if (windowProbe >= probeVolume.window.y || state.w < 0.5)
     {
         probeStatesOut[probe] = state;

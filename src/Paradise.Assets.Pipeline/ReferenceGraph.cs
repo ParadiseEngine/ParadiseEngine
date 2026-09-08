@@ -82,7 +82,7 @@ public sealed class ReferenceGraph
             {
                 if (site.Reference is { } reference)
                 {
-                    graph.Add([new ReferenceEdge(referrer, path, reference.Guid, site.Where, reference.Path)]);
+                    graph.Add(new ReferenceEdge(referrer, path, reference.Guid, site.Where, reference.Path));
                 }
                 else
                 {
@@ -123,14 +123,11 @@ public sealed class ReferenceGraph
     public IReadOnlyList<UPath> DependentFilesOf(Guid asset)
         => DependentsOf(asset).Select(edge => edge.ReferrerPath).Distinct().ToList();
 
-    private void Add(IEnumerable<ReferenceEdge> edges)
+    private void Add(ReferenceEdge edge)
     {
-        foreach (var edge in edges)
-        {
-            _edges.Add(edge);
-            Bucket(_byTarget, edge.Target).Add(edge);
-            Bucket(_byReferrer, edge.Referrer).Add(edge);
-        }
+        _edges.Add(edge);
+        Bucket(_byTarget, edge.Target).Add(edge);
+        Bucket(_byReferrer, edge.Referrer).Add(edge);
     }
 
     private static List<ReferenceEdge> Bucket(Dictionary<Guid, List<ReferenceEdge>> map, Guid key)

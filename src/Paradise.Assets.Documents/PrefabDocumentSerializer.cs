@@ -6,7 +6,7 @@ using Zio;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>Reads (strictly, because a guessing reader turns a typo into a build that renders the wrong thing) and writes (canonically, so read → write is byte-identical) <c>*.prefab</c> documents.</summary>
+/// <summary>Strictly reads and canonically writes <c>*.prefab</c> documents.</summary>
 public static class PrefabDocumentSerializer
 {
     private static readonly string[] s_documentKeys = ["schema_version", "objects"];

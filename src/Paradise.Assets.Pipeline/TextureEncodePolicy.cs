@@ -4,14 +4,8 @@ using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// What a texture is encoded AS. Every preset is UASTC (high quality, near-lossless) rather
-/// than ETC1S/basis-lz: ETC1S is ~2 bpp and visibly degrades detailed or saturated colour maps
-/// (it lifts dark, saturated texels), which diverged the .NET runtime's albedo from Godot's,
-/// where the source PNG is imported at full quality. UASTC transcodes to the BC7 the engine
-/// already uses and matches Godot's fidelity, so both hosts show one image. Zstd
-/// supercompression keeps the on-disk size reasonable.
-/// </summary>
+/// <summary>Selects UASTC texture encoding with Zstd supercompression.</summary>
+/// <remarks>UASTC preserves detailed and saturated source colors when transcoded to BC7; ETC1S visibly degrades them.</remarks>
 public enum TextureEncodingPreset
 {
     /// <summary>Base colour, emissive.</summary>

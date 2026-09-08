@@ -8,73 +8,23 @@
     <!-- Runtime helpers -->
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
-    <!-- Logging ABSTRACTION ONLY. Engine packages reference this and never a provider: which sink
-         a game logs to is the host's decision, the same way the asset pipeline took an
-         `Action<string>` and let Paradise.Cli.Host decide it meant Console (issue #232).
-
-         The cost is two assemblies and NOTHING else, but only because we are on net10.0. The
-         nuspec's dependency groups differ by TFM and the difference is the whole argument:
-           netstandard2.0 -> DI.Abstractions + DiagnosticSource + System.Buffers + System.Memory
-           net8.0/net9.0  -> DI.Abstractions + DiagnosticSource
-           net10.0        -> DI.Abstractions, whose own net10.0 group is EMPTY
-         DiagnosticSource is in-box from net10. So if anything here is ever retargeted below
-         net10.0, re-run that comparison before assuming this is still nearly free — under the
-         netstandard2.1 targets this repo used to have, a hand-written interface was the better
-         call and this would not have been added.
-
-         DI.Abstractions is IServiceProvider extension types; it contains no container and none
-         of this obliges a host to use one. Engine types take an ILogger where they used to take
-         a delegate and default to NullLogger.Instance where they defaulted to a no-op.
-
-         The [LoggerMessage] source generator ships INSIDE this package
-         (analyzers/dotnet/roslyn*/cs/Microsoft.Extensions.Logging.Generators.dll) — there is no
-         second reference to add. Use it rather than ILogger.Log* at any site that could be hot:
-         it emits the IsEnabled check BEFORE touching arguments, so a disabled level costs no
-         boxing, no object[] and no template parse, and it is compile-time so it survives
-         trimming and NativeAOT with no IL warnings. -->
+    <!-- Libraries reference the logging contract; hosts choose providers. On net10.0 its only
+         dependency is DI.Abstractions; reassess the dependency graph before retargeting lower.
+         LoggerMessage generators are included: use them for allocation-free disabled logging. -->
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
-    <!-- Dear ImGui binding. Hexa, not ImGui.NET: ImGui.NET's last release (2025-01-06) is stuck
-         on Dear ImGui 1.91.6 and exposes no internals, so `ImGuiP.DockBuilder*` — which the
-         editor's layout needs — does not exist there at all. Hexa tracks 1.92.x, ships the
-         internals namespace, and carries natives for every desktop RID we target.
-
-         PINNED, and the pin is load-bearing:
-         - 2.2.10-prerelease and 3.x-experimental exist; 3.x has no release notes and a bus
-           factor of one. Never float this to 3.x — take a version bump deliberately.
-         - Hexa's cimgui build STRIPS Dear ImGui's obsolete API: no GetTexDataAsRGBA32, no
-           Fonts.Build(), no ImFontAtlas.SetTexID, no GetGlyphRanges*. The 1.92 texture protocol
-           (RendererHasTextures + ImTextureData ops) is therefore mandatory, not optional —
-           without it NewFrame asserts "font atlas is not built".
-         - HexaEngine/Hexa.NET.ImGui#90 (ARM64 HVA ABI, open) affects Windows-on-ARM + MSVC only;
-           do NOT add win-arm64 to a publish RID list until it closes. macOS arm64 is verified.
-         - HexaEngine/Hexa.NET.ImGui#130: ImGui.Text(string) goes through cimgui's printf, so an
-           unmatched %s in runtime text segfaults. Call TextUnformatted / ImGuiText instead. -->
+    <!-- Hexa exposes the DockBuilder internals and desktop natives required by the editor.
+         Review upgrades explicitly; do not float to experimental 3.x.
+         Obsolete atlas APIs are stripped, so the ImGui 1.92 texture protocol is required.
+         Do not add win-arm64 until Hexa.NET.ImGui#90 (MSVC HVA ABI) is resolved.
+         Use TextUnformatted / ImGuiText: printf formatting in Text(string) can crash (#130). -->
     <PackageVersion Include="Hexa.NET.ImGui" Version="2.2.9" />
-    <!-- Transform gizmos for the editor's Scene panel: translate/rotate/scale handles, the
-         orientation cube (ViewManipulate) and matrix decompose/recompose. Versioned in LOCKSTEP
-         with the binding above — 2.2.9 depends on Hexa.NET.ImGui 2.2.9 exactly — so the two pins
-         move together or not at all.
-
-         IT SHIPS ITS OWN NATIVE, and that is the thing to know. cimguizmo statically links its
-         own copy of Dear ImGui, so it has its own `GImGui` and cannot see the context cimgui
-         created. `ImGuizmo.SetImGuiContext` is what bridges them, and skipping it is a null
-         dereference in native code rather than an exception. EditorGizmo.Attach owns that call.
-
-         Its three siblings were evaluated (2026-09-04) and deliberately NOT taken:
-         - Hexa.NET.ImPlot — the Stats panel plots frame times, which ImGui's own PlotLines
-           already does. 6 MB of native per platform for nicer axes, plus a second context to
-           create and destroy. Revisit at E2 if PlotLines proves too thin.
-         - Hexa.NET.ImNodes — a node-graph editor with no consumer on the roadmap. The candidate
-           is a Paradise.BT graph panel, and that is not a thing anyone has asked for.
-         - Hexa.NET.ImGui.Widgets — declined on two counts. It pins Hexa.NET.ImGui 2.2.8.4, one
-           release BEHIND the pin above, and 2.2.9 is where the 1.92 texture-protocol surface
-           lands, so its assembly would run against a binding it was not compiled against. And it
-           is a window-manager plus dialogs, which is the layer #222 decided the editor owns; its
-           file dialogs hand back HOST PATHS, while every file the editor touches arrives through
-           a Zio mount. -->
+    <!-- Keep ImGuizmo and ImGui versions in lockstep. Its native library has a separate ImGui
+         context; EditorGizmo.Attach must call SetImGuiContext before use.
+         ImPlot/ImNodes have no current consumer. Widgets uses an incompatible pin and host-path
+         dialogs, while editor state and file access belong to our shell and Zio mounts. -->
     <PackageVersion Include="Hexa.NET.ImGuizmo" Version="2.2.9" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />

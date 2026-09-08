@@ -4,14 +4,7 @@ using System.IO;
 
 namespace Paradise.Export.Paths
 {
-    /// <summary>
-    /// Resolves export output paths under a repository-root <c>data/</c> directory: scenes to
-    /// <c>data/scenes/</c>, materials to <c>data/materials/</c>, prefabs to <c>data/prefabs/</c>.
-    ///
-    /// Ported from ParadiseUnityEditor's SceneExportPaths, but made engine-neutral: instead of
-    /// resolving the root from <c>Application.dataPath</c>, the data directory is supplied by the
-    /// engine adapter (the Godot plugin passes the globalized project root + "/data").
-    /// </summary>
+    /// <summary>Resolves scene, material and prefab output beneath the adapter-supplied <c>data/</c> directory.</summary>
     public sealed class ExportPaths
     {
         private readonly string _dataDir;

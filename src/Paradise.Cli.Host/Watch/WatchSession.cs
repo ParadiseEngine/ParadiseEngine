@@ -2,7 +2,7 @@ using Paradise.Assets.Pipeline;
 
 namespace Paradise.Cli;
 
-/// <summary>The watch loop, extracted from the verb so it can be driven with a fake drain and a recording tray. Rebuilds whenever the drain acted on a change, or on a rebuild request.</summary>
+/// <summary>Coordinates watch drains and rebuild requests through testable callbacks.</summary>
 internal sealed class WatchSession
 {
     private readonly WatchSignals _signals;

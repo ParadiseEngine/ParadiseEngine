@@ -1,17 +1,8 @@
-// surface.slang — how the STOCK surface is resolved: the five material textures, the
-// KHR_texture_transform on the baseColor slot, the procedural override, and the normal map.
-//
-// The layer pbrCore.slang used to keep welded shut. `shadePbr` sampled, overrode, normal-mapped
-// and lit in one body, so a game shader that wanted the stock surface and then ONE change to it —
-// a burn-edge emissive, a wetness tint, a coverage cut — had to copy that body into its own file
-// and re-copy it whenever the engine's changed. `PbrSurface` is that intermediate value given a
-// name, and the reason this file exists:
-//
-//   PbrSurface s = resolvePbrSurface(input);   // the stock surface, sampled exactly as the engine does
-//   s.emissive += burn;                        // the game's one change
-//   return shadeSurface(input, s);             // the stock lighting, unchanged
-//
-// Two seams instead of one, and the middle value is now addressable.
+// Resolve stock textures, UV transforms, procedural factors and normal mapping into PbrSurface.
+// Extensions may change its fields before stock lighting:
+// PbrSurface s = resolvePbrSurface(input);
+// s.emissive += burn;
+// return shadeSurface(input, s);
 #ifndef PARADISE_PBR_SURFACE_SLANG
 #define PARADISE_PBR_SURFACE_SLANG
 
@@ -40,14 +31,9 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
     float3 normalSample = float3(nxy, nz);
 
     float3 N = normalize(worldNormal);
-    // Degenerate tangent guard. Meshes without UVs get the loader's default +X tangent
-    // ("attribute gaps are default-filled"), and any face whose normal PARALLELS the
-    // transformed tangent makes the Gram-Schmidt below normalize a zero vector. That NaN
-    // is invisible in the lighting math (saturate() flushes it) but reaches the shadow
-    // lookup through the normal-offset bias, where a NaN uv slips past the range guards
-    // (NaN compares false) into SampleCmp — undefined, and in practice a per-frame coin
-    // flip that strobed every ±X-facing panel of a rotating caster. No tangent basis
-    // means no normal mapping: shade with the geometric normal instead.
+    // Missing UVs can make the default tangent parallel to the normal. Avoid normalizing that zero
+    // basis: NaNs can reach shadow sampling and cause flicker. Use the geometric normal when no
+    // tangent basis exists.
     float3 tRaw = worldTangent.xyz - N * dot(N, worldTangent.xyz);
     if (dot(tRaw, tRaw) < 1e-8)
         return N;

@@ -1,16 +1,11 @@
-// shading.slang — the PBR lighting path and the maths it stands on: the GGX/Fresnel helpers,
-// punctual light evaluation with shadows, specular anti-aliasing, screen-space AO, and the tone
-// operators kept for parity.
-//
-// Its one public seam is `shadePbrCore`, which takes a RESOLVED surface — the caller owns the
-// shading normal and the material sample. Where that surface comes from is surface.slang's
-// business, and keeping the two apart is what lets a game shader resolve a surface the stock way
-// and light it, or light a surface it built itself, without either half implying the other.
+// PBR lighting and tone math. shadePbrCore accepts a resolved normal and material factors, allowing
+// custom surfaces to use stock lighting independently of surface.slang sampling.
 #ifndef PARADISE_PBR_SHADING_SLANG
 #define PARADISE_PBR_SHADING_SLANG
 
 #include "uniforms.slang"
 #include "probes.slang"
+#include "tonemapping.slang"
 
 // --- PBR helper functions ---
 // GGX/Trowbridge-Reitz NDF from a precomputed (possibly size_A-widened) NdotH.
@@ -87,11 +82,8 @@ float3 evaluateDirectLight(
         }
     }
 
-    // Godot's size_A: an angular widening from the light's physical size — directional carries
-    // 1−cos(angular) precomputed; point/spot derive it from radius/distance per fragment
-    // (scene_forward_lights_inc.glsl: size = max(1 − 1/sqrt(1 + t²), 0), t = size/dist). It is
-    // ADDED to the NdotL / LdotH / NdotH cosines like Godot does, softening highlights (and
-    // slightly wrapping the diffuse terminator) for area-ish lights.
+    // Godot size_A widens lighting cosines by physical light size. Directional lights precompute
+    // 1-cos(angle); point/spot use max(1-1/sqrt(1+(radius/distance)^2),0).
     float sizeA = 0.0;
     if (light.positionAndType.w < 0.5)
     {
@@ -106,23 +98,10 @@ float3 evaluateDirectLight(
     float NdotL = saturate(min(sizeA + dot(N, L), 1.0));
     float NdotV = max(dot(N, V), 0.0);
     float3 H = normalize(V + L);
-    // Cook-Torrance (specular) + Lambert (diffuse), matching Godot's DEFAULT (non-physical light
-    // units) light_compute: roughness feeds GGX directly (alpha = roughness²), specular carries the
-    // 1/(4·NdotV·NdotL) term. Diffuse is albedo WITHOUT the 1/π — in Godot's non-physical mode
-    // light_energy is a raw radiance multiplier that already absorbs the π, so dividing here makes
-    // direct lighting ~π× too dim (measured against Godot). No arbitrary intensity scales — the
-    // exported light_energy is the single source of brightness. Diffuse and specular are on Godot's
-    // non-physical basis (NOT a physically-conserving energy split) — don't reintroduce /π on either
-    // lobe without re-checking pixel-diff captures against Godot.
-    // Specular: an exact port of Godot's light_compute isotropic GGX lobe
-    // (scene_forward_lights_inc.glsl) so the two hosts agree per-pixel:
-    //   D  — GGX with α = roughness² (identical to the standard Trowbridge-Reitz form).
-    //   V  — Hammon's visibility approximation 0.5/mix(2·NL·NV, NL+NV, α), which FOLDS the
-    //        Smith G and the 1/(4·NL·NV) denominator into one term (do not divide again).
-    //   F  — Schlick with Filament's specular-occlusion f90 = clamp(dot(f0, 16.67), metallic, 1).
-    // Godot premultiplies light energy by π (non-physical mode) and divides only the DIFFUSE
-    // lobe back by π — its specular keeps the π, scaled by LIGHT_PARAM_SPECULAR (exported in
-    // shadowAtlas.z; Godot default 0.5).
+    // Match Godot's non-physical light units: Lambert omits 1/pi; specular retains pi scaled by
+    // shadowAtlas.z. Recheck pixel parity before changing either scale.
+    // GGX uses alpha=roughness^2, Hammon visibility 0.5/mix(2*NL*NV,NL+NV,alpha) (already includes
+    // Smith and the denominator), and Schlick f90=clamp(dot(f0,16.67),metallic,1).
     float alphaGgx = roughness * roughness;
     float cNdotH = saturate(sizeA + dot(N, H));
     float D = distributionGGXFromNdotH(cNdotH, roughness);
@@ -155,103 +134,6 @@ float applySpecularAntiAliasing(float roughness, float3 N)
     float kernelRoughness2 = min(2.0 * variance, frame.aaSettings.z);
     float alpha2 = saturate(roughness * roughness + kernelRoughness2);
     return sqrt(alpha2);
-}
-
-// Tone operators ported from Godot's tone_mapping_inc.glsl so an exported scene renders with the
-// same tonemap it was authored under (Environment.tonemap_mode). Each is normalized by the white
-// point where Godot's is. The active operator + exposure + white come from frame.shadowSettings.yzw
-// (exported from the Godot Environment — see PbrTonemap).
-
-// Reinhard (extended, white-point normalized) — Godot mode 1.
-float3 tonemapReinhard(float3 color, float white)
-{
-    return (color * (1.0 + color / (white * white))) / (1.0 + color);
-}
-
-// Filmic (modified Hable/Uncharted-2, fixed exposure_bias = 2) — Godot mode 2.
-float3 tonemapFilmic(float3 color, float white)
-{
-    const float expBias = 2.0;
-    const float A = 0.22 * expBias * expBias;
-    const float B = 0.30 * expBias;
-    const float C = 0.10;
-    const float D = 0.20;
-    const float E = 0.01;
-    const float F = 0.30;
-    float3 c = ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;
-    float w = ((white * (A * white + C * B) + D * E) / (white * (A * white + B) + D * F)) - E / F;
-    return c / w;
-}
-
-// ACES filmic (Narkowicz fit) — a close approximation of Godot mode 3.
-float3 tonemapAces(float3 color)
-{
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
-}
-
-// AgX (mode 4) — the allenwp-curve AgX Godot has used since 4.4 (matches this project's Godot 4.7).
-// Ported from godot/servers/rendering/renderer_rd/shaders/effects/tonemap.glsl (tonemap_agx +
-// allenwp_curve). The curve params are precomputed for DEFAULT AgX (contrast 1.25, white 2.0, SDR
-// output_max 1.0) — exactly the values Godot's environment_storage.cpp computes on the CPU for a
-// default AgX environment. Returns LINEAR (no OETF here; the fragment entry applies it).
-float3 agxAllenwpCurve(float3 x)
-{
-    const float awpCrossover = 0.18;      // 18% middle gray
-    const float awpShoulderMax = 0.82;    // output_max_value(1.0) - crossover
-    const float awpContrast = 1.25;
-    const float awpToeA = 0.534111561;    // CPU-precomputed (see environment_storage.cpp)
-    const float awpSlope = 1.025000000;
-    const float awpW = 4.140500000;
-
-    // Reinhard-like shoulder (x >= crossover).
-    float3 s = x - awpCrossover;
-    float3 slopeS = awpSlope * s;
-    s = slopeS * (1.0 + s / awpW) / (1.0 + slopeS / awpShoulderMax) + awpCrossover;
-    // Sigmoid-power toe (x < crossover).
-    float3 t = pow(max(x, 0.0), awpContrast);
-    t = t / (t + awpToeA);
-    return float3(
-        x.x < awpCrossover ? t.x : s.x,
-        x.y < awpCrossover ? t.y : s.y,
-        x.z < awpCrossover ? t.z : s.z);
-}
-
-float3 tonemapAgx(float3 color)
-{
-    // Combined Rec.709→Rec.2020 + AgX inset (row-major for mul(M, v)).
-    const float3x3 agxInset = float3x3(
-        0.544814746488245, 0.373787398372697,  0.0813978551390581,
-        0.140416948464053, 0.754137554567394,  0.105445496968552,
-        0.0888104196149096, 0.178871756420858, 0.732317823964232);
-    // Combined inverse AgX outset + Rec.2020→Rec.709.
-    const float3x3 agxOutset = float3x3(
-        1.96488741169489,   -0.855988495690215, -0.108898916004672,
-        -0.299313364904742,  1.32639796461980,  -0.0270845997150571,
-        -0.164352742528393, -0.238183969428088,  1.40253671195648);
-
-    color = mul(agxInset, max(color, 0.0));
-    color = agxAllenwpCurve(color);
-    color = min(1.0, color);              // clip to output_max_value (SDR) — kills bright-input cyan
-    color = mul(agxOutset, color);
-    return color;                         // linear; may carry small negatives (as in Godot)
-}
-
-// Apply the exported tone operator. mode: 0 Linear, 1 Reinhard, 2 Filmic (pixel-verified vs Godot),
-// 3 ACES (Narkowicz approx), 4 AgX (Godot 4.4+ allenwp AgX, default params).
-float3 applyTonemap(float3 color, float exposure, float white, float mode)
-{
-    color = max(color * exposure, 0.0);
-    white = max(white, 1e-4);
-    if (mode < 0.5) return color;                        // Linear
-    if (mode < 1.5) return tonemapReinhard(color, white);
-    if (mode < 2.5) return tonemapFilmic(color, white);
-    if (mode < 3.5) return tonemapAces(color);           // ACES (approx)
-    return tonemapAgx(color);                            // AgX
 }
 
 // Screen-space ambient occlusion from the depth pre-pass. A spiral of screen-space taps around the
@@ -421,11 +303,8 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     float exposure = probeLit ? 1.0 : max(frame.ambient.a, 0.0);
     float3 ambient = hemisphereColor * exposure * baseColor.rgb * (1.0 - metallic) * occlusion;
 
-    // Indirect specular. With a probe volume, the probes' irradiance along the reflection
-    // direction stands in for prefiltered radiance: exact for a rough surface, blurred for a
-    // polished one — a probe grid has no sharper answer — and it is what keeps a metal, which has
-    // no diffuse, from going black inside a room. The probes' misses already carry the sky, so
-    // the sky LUT below is the fallback for surfaces the volume does not cover.
+    // Probe irradiance approximates reflected radiance: accurate for rough surfaces, blurred for
+    // polished ones. This prevents unlit metals inside rooms; use sky LUTs outside the volume.
     float f90i = clamp(50.0 * F0.g, metallic, 1.0);
     float3 R = reflect(-V, N);
     // Screen-space reflection first: where it is confident it replaces the environment lookups
@@ -448,13 +327,9 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     {
         ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
     }
-    // Sky-reflection specular (Godot reflected_light_source = Sky): GGX-prefiltered sky radiance
-    // from the CPU LUT × the split-sum environment BRDF. The LUT has two row halves: the gradient
-    // (u = reflection.y, rows 0..7) and the sun disk/halo (u = cos angle to the sun — radially
-    // symmetric around the sun direction, so this is exact; rows 8..15, stored ÷4 for 8-bit HDR
-    // headroom). The sun direction/colour come from the first directional scene light — the same
-    // light the sky background pairs with, so a disabled sun vanishes from reflections too. AO
-    // darkens it all like the diffuse ambient (Godot applies AO to all ambient light).
+    // Split-sum specular uses gradient LUT rows 0..7 and sun rows 8..15 (stored /4 for HDR
+    // headroom). The first directional light supplies the sun; disabling it removes its reflection.
+    // AO affects both specular and diffuse ambient.
     else if (frame.aaSettings.x > 0.5)
     {
         float NdotV = clamp(dot(N, V), 0.0001, 1.0);

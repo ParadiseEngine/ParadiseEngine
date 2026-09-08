@@ -5,19 +5,10 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
-/// <summary>
-/// The persisted form of a skeleton or clip: ozz-animation's archive (one endianness byte, a
-/// null-terminated type tag, a uint32 version, then the payload), read into a native blob and
-/// written back from one. Little-endian only — the archives this engine cooks and reads are its
-/// own, and a big-endian file is refused rather than byte-swapped.
-/// </summary>
-/// <remarks>
-/// Cross-language contract with ozz-animation 0.17 (<c>ozz/base/io/archive.h</c>,
-/// <c>skeleton.cc</c>, <c>animation.cc</c>): a file written by <c>gltf2ozz</c> loads here, and a
-/// file written here loads in ozz's C++ runtime. The archive stores rest poses in
-/// structure-of-arrays groups of four; the blob holds one pose per joint, the shape the
-/// hierarchy walk and the renderer consume.
-/// </remarks>
+/// <summary>Reads and writes little-endian ozz-animation 0.17 archives as native blobs.</summary>
+/// <remarks>Archives contain an endianness byte, null-terminated type tag, uint32 version and payload.
+/// Big-endian files are rejected. The format interoperates with gltf2ozz and the C++ runtime;
+/// archive rest poses use groups of four, while the skeleton blob stores one pose per joint.</remarks>
 public static class OzzArchive
 {
     public const string SkeletonTag = "ozz-skeleton";

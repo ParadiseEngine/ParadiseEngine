@@ -40,45 +40,35 @@ public readonly ref struct TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMa
     internal static TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask> FromWorldEntity(WorldEntity<TMask, TConfig> entity)
         => new(entity);
 
-    /// <summary>
-    /// Gets the entity.
-    /// </summary>
+    /// <summary>The entity.</summary>
     public Entity Entity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _entity.Entity;
     }
 
-    /// <summary>
-    /// Gets a reference to a component on this entity.
-    /// </summary>
+    /// <summary>A reference to a component on this entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>A reference to the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : unmanaged, IComponent
         => ref _entity.Get<T>();
 
-    /// <summary>
-    /// Checks if this entity has a specific component.
-    /// </summary>
+    /// <summary>Checks if this entity has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>True if the entity has the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has<T>() where T : unmanaged, IComponent
         => _entity.Has<T>();
 
-    /// <summary>
-    /// Checks if this entity has a specific tag.
-    /// </summary>
+    /// <summary>Checks if this entity has a specific tag.</summary>
     /// <typeparam name="TTag">The tag type.</typeparam>
     /// <returns>True if the entity has the tag.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasTag<TTag>() where TTag : ITag
         => Get<TEntityTags>().Mask.Get(TTag.TagId);
 
-    /// <summary>
-    /// Sets or clears a specific tag on this entity.
-    /// </summary>
+    /// <summary>Sets or clears a specific tag on this entity.</summary>
     /// <typeparam name="TTag">The tag type.</typeparam>
     /// <param name="value">True to set the tag, false to clear it.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -88,18 +78,14 @@ public readonly ref struct TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMa
         tags.Mask = value ? tags.Mask.Set(TTag.TagId) : tags.Mask.Clear(TTag.TagId);
     }
 
-    /// <summary>
-    /// Gets the tag mask for this entity.
-    /// </summary>
+    /// <summary>The tag mask for this entity.</summary>
     public TTagMask TagMask
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Get<TEntityTags>().Mask;
     }
 
-    /// <summary>
-    /// Implicitly converts a TaggedWorldEntity to its underlying Entity.
-    /// </summary>
+    /// <summary>Implicitly converts a TaggedWorldEntity to its underlying Entity.</summary>
     /// <param name="taggedWorldEntity">The TaggedWorldEntity to convert.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator Entity(TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask> taggedWorldEntity)
@@ -146,36 +132,28 @@ public readonly ref struct TaggedWorldEntityChunk<TMask, TConfig, TEntityTags, T
         get => _chunk.EntityCount;
     }
 
-    /// <summary>
-    /// Gets a TaggedWorldEntity at the specified index within this chunk.
-    /// </summary>
+    /// <summary>A TaggedWorldEntity at the specified index within this chunk.</summary>
     /// <param name="index">The index within this chunk.</param>
     /// <returns>A TaggedWorldEntity providing access to the entity at the specified index.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask> GetEntityAt(int index)
         => TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask>.FromWorldEntity(_chunk.GetEntityAt(index));
 
-    /// <summary>
-    /// Gets a span over all components of type T in this chunk.
-    /// </summary>
+    /// <summary>A span over all components of type T in this chunk.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>A span over the components.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Span<T> Get<T>() where T : unmanaged, IComponent
         => _chunk.Get<T>();
 
-    /// <summary>
-    /// Checks if this chunk's archetype has a specific component.
-    /// </summary>
+    /// <summary>Checks if this chunk's archetype has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>True if the archetype has the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has<T>() where T : unmanaged, IComponent
         => _chunk.Has<T>();
 
-    /// <summary>
-    /// Gets a span over all entity tag masks in this chunk.
-    /// </summary>
+    /// <summary>A span over all entity tag masks in this chunk.</summary>
     public Span<TEntityTags> TagMasks
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -214,11 +192,8 @@ public static class TaggedWorldQueryBuilderExtensions
         where TConfig : IConfig, new()
         where TEntityTags : unmanaged, IComponent, IEntityTags<TTagMask>
         where TTagMask : unmanaged, IBitSet<TTagMask>
-    {
-        var query = world.ArchetypeRegistry.GetOrCreateQuery((HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
-        return new QueryResult<TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask>, Archetype<TMask, TConfig>, TMask, TConfig>(
-            world.ChunkManager, world.EntityManager, query);
-    }
+        => QueryHelpers.CreateQueryResult<TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMask>, TMask, TConfig>(
+            world, (HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
 
     /// <summary>
     /// Builds a chunk query result for batch processing using <see cref="TaggedWorldEntityChunk{TMask, TConfig, TEntityTags, TTagMask}"/>.
@@ -239,9 +214,6 @@ public static class TaggedWorldQueryBuilderExtensions
         where TConfig : IConfig, new()
         where TEntityTags : unmanaged, IComponent, IEntityTags<TTagMask>
         where TTagMask : unmanaged, IBitSet<TTagMask>
-    {
-        var query = world.ArchetypeRegistry.GetOrCreateQuery((HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
-        return new ChunkQueryResult<TaggedWorldEntityChunk<TMask, TConfig, TEntityTags, TTagMask>, Archetype<TMask, TConfig>, TMask, TConfig>(
-            world.ChunkManager, world.EntityManager, query);
-    }
+        => QueryHelpers.CreateChunkQueryResult<TaggedWorldEntityChunk<TMask, TConfig, TEntityTags, TTagMask>, TMask, TConfig>(
+            world, (HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
 }

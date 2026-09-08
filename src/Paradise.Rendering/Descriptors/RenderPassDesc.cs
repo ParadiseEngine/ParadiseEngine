@@ -5,26 +5,17 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering;
 
-/// <summary>Render pass descriptor with up to <see cref="MaxColorAttachments"/> color attachments
-/// and an optional depth attachment. Color attachments live inline (no heap allocation); use the
-/// <see cref="this[int]"/> indexer or <see cref="ColorAttachments"/> span — both honor
-/// <see cref="ColorAttachmentCount"/>.</summary>
-/// <remarks>This is a mutable struct: it must be passed by <c>ref</c> when mutated. Storing one in a
-/// <see cref="System.Collections.Generic.List{T}"/> field, capturing it as a property getter copy,
-/// or assigning to a local before writing through the indexer will silently lose writes to the copy.</remarks>
+/// <summary>Stores up to MaxColorAttachments inline and an optional depth attachment.</summary>
+/// <remarks>Use the count-aware indexer or ColorAttachments span. Mutations must reach the original
+/// struct by ref; changing a copy does not update the stored pass.</remarks>
 public struct RenderPassDesc
 {
     /// <summary>Maximum number of color attachments per pass. Matches WebGPU's required minimum (8).</summary>
     public const int MaxColorAttachments = 8;
 
-    /// <summary>Raw inline storage for the eight color-attachment slots. Prefer the count-aware
-    /// <see cref="this[int]"/> indexer or <see cref="ColorAttachments"/> span — both bound writes
-    /// to <see cref="ColorAttachmentCount"/>. Direct field access is exposed for backends that
-    /// need uniform layout-based marshalling.</summary>
-    /// <remarks>Direct writes to slots <c>[<see cref="ColorAttachmentCount"/>, <see cref="MaxColorAttachments"/>)</c>
-    /// are silently invisible to <see cref="this[int]"/> and <see cref="ColorAttachments"/>; only
-    /// the count-aware paths are guaranteed to surface a written attachment to the backend. Treat
-    /// this field as a marshalling escape hatch, not as a general write surface.</remarks>
+    /// <summary>Exposes raw inline attachment storage for backend marshalling.</summary>
+    /// <remarks>Prefer the count-aware indexer or ColorAttachments span; slots beyond
+    /// ColorAttachmentCount are not submitted.</remarks>
     public ColorAttachmentBuffer Colors;
 
     private int _colorAttachmentCount;

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Sample;
 
-// ============================================================================
 // Queryable Definitions - Demonstrating various query patterns
-// ============================================================================
 
 /// <summary>
 /// Query for player entities with position, health (readonly), and optional velocity.

@@ -1,10 +1,6 @@
-// depthNormalPrepass.slang — the opaque scene's depth and world-space normal, before the main
-// pass: depth into a Depth32Float target and the normal into an Rgba16Float target (xyz = unit
-// world normal, w = 1 coverage; the target is cleared to 0 so the background reads w = 0).
-// Screen-space effects (SSAO) and the ray-traced debug views reconstruct a fragment's world
-// position from the depth through frame.invViewProj instead of storing it in 32-bit float, which
-// is what the previous position pre-pass did at four times the bandwidth. Reuses pbr.slang's
-// DrawUniforms layout so it can share the main draw-UBO ring.
+// Opaque depth/normal prepass: Depth32Float and Rgba16Float (world normal, coverage=1; clear=0).
+// Effects reconstruct world position through frame.invViewProj. Reuses the main draw uniform
+// layout.
 
 struct DrawUniforms
 {

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Concurrent.Test;
 
-/// <summary>
-/// Test components for unit testing with explicit manual IDs.
-/// </summary>
+/// <summary>Test components for unit testing with explicit manual IDs.</summary>
 [System.Runtime.InteropServices.Guid("5B9313BE-CB77-4C8B-A0E4-82A3B369C717")]
 [Component(Id = 0)]
 public partial struct TestHealth

@@ -2,21 +2,10 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The engine's own features, and the one place that knows the list.
-///
-/// <para>It is a file of its own so that adding a built-in feature is adding it HERE — not in
-/// <see cref="PbrRenderer"/>, whose job is uploading geometry and driving a frame, and which
-/// used to have to grow a field, a constructor line and a chained <c>Add</c> for every effect
-/// the engine gained. A game adds its features the same way, through
-/// <see cref="RenderPipeline.Add"/> at a <see cref="PbrFeatureOrder"/> slot, and needs no change
-/// here at all.</para>
-///
-/// <para>The constructor arguments that are not the context — the scene reads the shadow plan and
-/// the froxel grid, the pre-pass reads whether reflections have a history — are the engine
-/// features that are genuinely one thing split in two, or that hand over a BUFFER, which the
-/// blackboard does not carry. Everything else a feature needs from another feature travels by name
-/// on the frame's blackboard, which is what lets any of them be switched off
-/// independently.</para></summary>
+/// <summary>Registers the engine's built-in render features in one place.</summary>
+/// <remarks>Games add features through RenderPipeline.Add at PbrFeatureOrder slots. Cross-feature
+/// textures travel through the blackboard; shared plans and buffers use explicit constructor
+/// dependencies.</remarks>
 internal static class PbrBuiltInFeatures
 {
     public static void AddTo(RenderPipeline pipeline, PbrContext ctx, float specularAaVariance, float specularAaClamp)

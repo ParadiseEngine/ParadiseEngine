@@ -1,27 +1,10 @@
-// pbrCore.slang — the reusable body of the PBR shader, as an UMBRELLA over the four files it was
-// split into. Including this still gives a shader everything it ever gave: `#include
-// "Common/pbrCore.slang"` is unchanged for every existing engine and game shader.
-//
-// What the split buys is being able to include LESS, and to enter the path in the middle:
-//
-//   noise.slang       hash/value-noise/fbm/worley — no bindings, no lighting
-//   procedural.slang  the per-kind recipes evaluated from that noise
-//   shading.slang     the maths and the whole lighting path (shadePbrCore)
-//   surface.slang     the stock texture-sampling path (resolvePbrSurface) + PbrSurface
-//
-// The three extension seams, in the order a frame uses them:
-//
-//   pbrTransformVertex(...)  — the vertex transform, taking an object-space position a custom
-//                              vertex entry may displace first (water waves, wind sway).
-//   resolvePbrSurface(...)   — the stock surface as an addressable PbrSurface value, so a shader
-//                              can take it, change one field, and light it (surface.slang).
-//   shadePbrCore(...)        — the whole lighting path given a RESOLVED surface; shadeSurface is
-//                              its struct-shaped twin (shading.slang).
-//
-// A game shader does `#include "Common/pbrCore.slang"` (resolved via the -I dir the NuGet's build
-// targets add), declares its own group-2 bindings from slot 7 up, and defines its own entry
-// points. See Paradise.Rendering.Pbr.Test/Shaders/waterFixture.slang for the canonical example,
-// and surfaceFixture.slang for the resolve-modify-shade one.
+// PBR shader extension API. Individual includes expose noise, procedural recipes, lighting and
+// surface resolution separately.
+// Extension steps: displace vertices before pbrTransformVertex; modify resolvePbrSurface's
+// PbrSurface; then call shadeSurface (or shadePbrCore for individual values).
+// Games include Common/pbrCore.slang through the packaged Slang include path, add group-2 bindings
+// from slot 7 and define entry points. See waterFixture.slang and surfaceFixture.slang for
+// examples.
 #ifndef PARADISE_PBR_CORE_SLANG
 #define PARADISE_PBR_CORE_SLANG
 
@@ -63,17 +46,6 @@ VertexOutput pbrTransformVertex(VertexInput input, float3 localOffset)
 float4 shadePbr(FragmentInput input)
 {
     return shadeSurface(input, resolvePbrSurface(input));
-}
-
-float3 linearToSrgb(float3 linearColor)
-{
-    // IEC 61966-2-1 OETF, per channel.
-    float3 lo = linearColor * 12.92;
-    float3 hi = 1.055 * pow(max(linearColor, 0.0), 1.0 / 2.4) - 0.055;
-    return float3(
-        linearColor.x <= 0.0031308 ? lo.x : hi.x,
-        linearColor.y <= 0.0031308 ? lo.y : hi.y,
-        linearColor.z <= 0.0031308 ? lo.z : hi.z);
 }
 
 #endif // PARADISE_PBR_CORE_SLANG

@@ -2,16 +2,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Audio.Wwise.Interop;
 
-/// <summary>
-/// P/Invoke declarations for <c>libParadiseWwise</c>, the native shim in
-/// <c>ParadiseEngine/native/wwise</c>. One method per shim export, no policy — everything that
-/// makes a decision lives in the wrapper types.
-///
-/// The library is built from the developer's own Wwise SDK by <c>Wwise.targets</c> and staged
-/// next to the host assembly. It is legitimately ABSENT on a machine with no Wwise install, so
-/// every caller must be prepared for <see cref="DllNotFoundException"/> on the first call —
-/// <see cref="WwiseSoundEngine.TryInitialize"/> is the one place that catches it.
-/// </summary>
+/// <summary>P/Invoke declarations for the local-SDK <c>libParadiseWwise</c> shim.</summary>
+/// <remarks><see cref="WwiseSoundEngine.TryInitialize"/> handles missing native libraries; policy belongs in the wrappers.</remarks>
 internal static partial class WwiseNative
 {
     private const string Library = "ParadiseWwise";
@@ -26,7 +18,7 @@ internal static partial class WwiseNative
     /// <summary>AK_INVALID_PLAYING_ID / AK_INVALID_UNIQUE_ID.</summary>
     public const uint InvalidId = 0u;
 
-    // ---- lifecycle ----------------------------------------------------------------------------
+    // lifecycle
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_Init", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int Init(string soundBankPath, int enableProfiler, int useSubfoldering);
@@ -40,7 +32,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_RenderAudio")]
     public static partial int RenderAudio();
 
-    // ---- soundbanks ---------------------------------------------------------------------------
+    // soundbanks
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_LoadBank", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int LoadBank(string bankName, out uint bankId);
@@ -48,7 +40,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_UnloadBank", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int UnloadBank(string bankName);
 
-    // ---- game objects -------------------------------------------------------------------------
+    // game objects
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_RegisterGameObj", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int RegisterGameObj(ulong gameObject, string? name);
@@ -66,7 +58,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_SetDefaultListener")]
     public static partial int SetDefaultListener(ulong gameObject);
 
-    // ---- playback -----------------------------------------------------------------------------
+    // playback
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_PostEvent")]
     public static partial uint PostEvent(uint eventId, ulong gameObject);
@@ -77,7 +69,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_StopAll")]
     public static partial void StopAll(ulong gameObject);
 
-    // ---- parameters ---------------------------------------------------------------------------
+    // parameters
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_SetRTPCValue")]
     public static partial int SetRtpcValue(uint rtpcId, float value, ulong gameObject);
@@ -88,7 +80,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_SetState")]
     public static partial int SetState(uint stateGroup, uint state);
 
-    // ---- offline capture ------------------------------------------------------------------------
+    // offline capture
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_StartOutputCapture", StringMarshalling = StringMarshalling.Utf8)]
     public static partial int StartOutputCapture(string fileName);
@@ -96,7 +88,7 @@ internal static partial class WwiseNative
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_StopOutputCapture")]
     public static partial int StopOutputCapture();
 
-    // ---- ids ----------------------------------------------------------------------------------
+    // ids
 
     [LibraryImport(Library, EntryPoint = "Pdx_Wwise_GetIDFromString", StringMarshalling = StringMarshalling.Utf8)]
     public static partial uint GetIdFromString(string name);

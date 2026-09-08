@@ -5,13 +5,9 @@ using Paradise.Animation.Offline;
 
 namespace Paradise.Animation.Test;
 
-/// <summary>
-/// The format contract with ozz-animation 0.17, held as bytes: archives its own C++ builders wrote
-/// from a procedural rig load here, and this assembly's builders write the same bytes from the
-/// same raw input. The rest pose is compared within one float ulp rather than byte for byte
-/// because ozz's arm64 build fuses multiply-adds (in the generator's <c>1 + x * 0.1</c> and in
-/// its quaternion normalization); the clip is exact because quantization absorbs that.
-/// </summary>
+/// <summary>Checks archive parity with ozz-animation 0.17's C++ builders.</summary>
+/// <remarks>Clips match byte for byte. Rest poses allow one float ULP because arm64 fused
+/// multiply-adds affect the procedural rig and quaternion normalization.</remarks>
 public class OzzParityTests
 {
     [Test]

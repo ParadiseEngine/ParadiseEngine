@@ -2,12 +2,8 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Support containment for planar movers: a position is "supported" when a downward ray from it
-/// hits support geometry (e.g. the floor layer). <c>Clamp</c> keeps a horizontal move on
-/// supported ground — accept the full move, else try each horizontal axis alone (so movers slide
-/// along slab edges instead of sticking), else stay. Y is never modified.
-/// </summary>
+/// <summary>Keeps horizontal movement over support detected by downward rays.</summary>
+/// <remarks>Clamp tries the full move, then X and Z separately, then stays put; Y is preserved.</remarks>
 public static class PlanarGroundSupport
 {
     public static bool IsSupported(CollisionWorld statics, in CollisionFilter supportFilter,
@@ -33,9 +29,7 @@ public static class PlanarGroundSupport
         Vector3 from, Vector3 to, float probeDepth)
         => Clamp(statics.Handle, supportFilter, from, to, probeDepth);
 
-    /// <summary>Handle-based overload for use inside ECS systems. An invalid (default) handle
-    /// means "no collision world" and accepts the full move — consistent with every other
-    /// handle query (invalid = miss = unobstructed), never "no support anywhere = freeze".</summary>
+    /// <summary>Clamps movement through an ECS-compatible handle, accepting the full move when invalid.</summary>
     public static Vector3 Clamp(CollisionWorldHandle statics, in CollisionFilter supportFilter,
         Vector3 from, Vector3 to, float probeDepth)
     {

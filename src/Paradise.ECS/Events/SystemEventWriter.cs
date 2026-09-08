@@ -15,12 +15,8 @@ internal struct SystemEventRecord
     public int Size;
 }
 
-/// <summary>
-/// Per-work-item handle a system uses to emit events during a wave. Events are appended to a private
-/// byte stream (no cross-thread contention). After the wave, the schedule commits every writer into
-/// the world's event store in SCHEDULE order, so the merged event order is deterministic regardless
-/// of threading — the same mechanism <see cref="EntityCommandBuffer"/> uses for structural changes.
-/// </summary>
+/// <summary>Private event stream for one work item, committed in schedule order.</summary>
+/// <remarks>Each writer stays on its worker thread; merge order is independent of worker completion.</remarks>
 public sealed class SystemEventWriter
 {
     private readonly ArrayBufferWriter<byte> _buffer = new();
@@ -38,8 +34,7 @@ public sealed class SystemEventWriter
         header.TypeId = SystemEventType<T>.Id;
         header.Size = size;
 
-        if (size > 0)
-            MemoryMarshal.Write(dest.Slice(headerSize), in e);
+        MemoryMarshal.Write(dest.Slice(headerSize), in e);
 
         _buffer.Advance(headerSize + size);
     }

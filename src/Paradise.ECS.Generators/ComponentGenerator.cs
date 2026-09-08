@@ -6,14 +6,11 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Paradise.ECS.Generators;
 
-/// <summary>
-/// Source generator that assigns component IDs to types marked with [Component].
-/// </summary>
+/// <summary>Source generator that assigns component IDs to types marked with [Component].</summary>
 [Generator]
 public class ComponentGenerator : IIncrementalGenerator
 {
     private const string ComponentAttributeFullName = "Paradise.ECS.ComponentAttribute";
-    private const string RegistryNamespaceAttributeFullName = "Paradise.ECS.ComponentRegistryNamespaceAttribute";
     private const string DefaultConfigAttributeFullName = "Paradise.ECS.DefaultConfigAttribute";
     private const string SuppressGlobalUsingsAttributeFullName = "Paradise.ECS.SuppressGlobalUsingsAttribute";
     private const string IConfigFullName = "Paradise.ECS.IConfig";
@@ -67,15 +64,7 @@ public class ComponentGenerator : IIncrementalGenerator
 
     private static GeneratorConfig ExtractConfig(Compilation compilation, AnalyzerConfigOptionsProvider options)
     {
-        // Root namespace: attribute > build property > default
-        var nsAttr = compilation.Assembly.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == RegistryNamespaceAttributeFullName);
-        var rootNamespace = nsAttr?.ConstructorArguments.FirstOrDefault().Value as string;
-        if (rootNamespace == null)
-        {
-            options.GlobalOptions.TryGetValue("build_property.RootNamespace", out rootNamespace);
-            rootNamespace ??= "Paradise.ECS";
-        }
+        var rootNamespace = GeneratorUtilities.GetRootNamespace(compilation, options);
 
         // Max component type ID from EdgeKey
         var edgeKeyType = compilation.GetTypeByMetadataName(EdgeKeyFullName);
@@ -83,11 +72,9 @@ public class ComponentGenerator : IIncrementalGenerator
             .OfType<IFieldSymbol>()
             .FirstOrDefault() is { HasConstantValue: true, ConstantValue: int v } ? v : DefaultMaxComponentTypeId;
 
-        // Check assembly attributes
         var suppressGlobalUsings = compilation.Assembly.GetAttributes()
             .Any(a => a.AttributeClass?.ToDisplayString() == SuppressGlobalUsingsAttributeFullName);
 
-        // Check if project references Paradise.ECS.Tag assembly
         var hasTagAssemblyReference = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == TagAssemblyName);
 
@@ -99,9 +86,7 @@ public class ComponentGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not INamedTypeSymbol typeSymbol)
             return null;
 
-        var fullyQualifiedName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        if (fullyQualifiedName.StartsWith("global::", StringComparison.Ordinal))
-            fullyQualifiedName = fullyQualifiedName.Substring(8);
+        var fullyQualifiedName = GeneratorUtilities.GetFullyQualifiedName(typeSymbol);
 
         var iConfigInterface = context.SemanticModel.Compilation.GetTypeByMetadataName(IConfigFullName);
         var implementsIConfig = iConfigInterface != null &&
@@ -120,7 +105,6 @@ public class ComponentGenerator : IIncrementalGenerator
         ImmutableArray<DefaultConfigInfo> defaultConfigs,
         GeneratorConfig config)
     {
-        // Validate and determine config type
         var configType = ValidateDefaultConfig(context, defaultConfigs);
 
         // Calculate tag mask type from tags (for EntityTags component)
@@ -140,7 +124,6 @@ public class ComponentGenerator : IIncrementalGenerator
         var expectedEntityTagsFqn = $"{config.RootNamespace}.EntityTags";
         var userDefinedEntityTags = components.Any(c => c.FullyQualifiedName == expectedEntityTagsFqn);
 
-        // Process and validate components
         var (validComponents, _) = GeneratorUtilities.ProcessTypes(
             context, components, config.MaxComponentTypeId,
             DiagnosticDescriptors.ComponentNotUnmanaged,
@@ -169,7 +152,6 @@ public class ComponentGenerator : IIncrementalGenerator
             validComponents.Sort((a, b) => StringComparer.Ordinal.Compare(a.FullyQualifiedName, b.FullyQualifiedName));
         }
 
-        // Check total component count
         if (validComponents.Count > 0)
         {
             var maxId = GeneratorUtilities.CalculateMaxAssignedId(validComponents);
@@ -181,7 +163,6 @@ public class ComponentGenerator : IIncrementalGenerator
             }
         }
 
-        // Generate component code
         if (validComponents.Count > 0)
         {
             const int MaxBuiltInComponents = 1024;
@@ -384,7 +365,6 @@ public class ComponentGenerator : IIncrementalGenerator
 
         context.AddSource("ComponentAliases.g.cs", sb.ToString());
 
-        // Generate SharedWorld helper class
         GenerateSharedWorldHelper(context, config.RootNamespace, configType, enableTags, maskTypeFull, tagMaskType);
     }
 
@@ -608,9 +588,7 @@ public class ComponentGenerator : IIncrementalGenerator
         }
     }
 
-    /// <summary>
-    /// Calculates the tag mask type based on valid tags, matching TagGenerator's calculation.
-    /// </summary>
+    /// <summary>Calculates the tag mask type based on valid tags, matching TagGenerator's calculation.</summary>
     private static string CalculateTagMaskType(ImmutableArray<TypeInfo> tags)
     {
         if (tags.IsEmpty)
@@ -626,7 +604,6 @@ public class ComponentGenerator : IIncrementalGenerator
         if (validTags.Count == 0)
             return "global::Paradise.ECS.SmallBitSet<uint>";
 
-        // Calculate max assigned ID accounting for manual IDs
         var maxAssignedId = GeneratorUtilities.CalculateMaxAssignedId(validTags);
         var requiredBits = maxAssignedId + 1;
         return GeneratorUtilities.GetOptimalMaskType(requiredBits);

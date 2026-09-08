@@ -1,13 +1,7 @@
 using System.Runtime.InteropServices;
 using Paradise.BT;
 
-// The sample's own nodes. They are ordinary unmanaged structs implementing INode -- which is
-// what every node in this library is now. That includes time: the library ships no clock and no
-// delta-time type, so TickDeltaTime and DelayNode below are the sample's own. The delegate-backed helpers this sample used to lean on
-// (RunAction, CheckCondition wrapping DelegateActionNode/DelegateConditionNode) are gone: a node
-// holding a Func cannot be stored as bytes, so it could never live in an unmanaged blob.
-//
-// [Builder] gives each one a generated builder class, so the DSL below still reads the same.
+// Sample-owned unmanaged nodes, clock data and generated builders.
 
 /// <summary>Succeeds while the blackboard says there is a target.</summary>
 [Guid("3F5A1C08-2B44-4E9A-9D71-6C0E8A2B4D10")]
@@ -70,9 +64,8 @@ namespace Paradise.BT.Sample
         public float Value = value;
     }
 
-    /// <summary>A single-shot timer: Running until <see cref="TimerSeconds"/> counts down to
-    /// zero. Writes to its own field persist because Tick receives a ref to the node's bytes in
-    /// the instance; reset restores the authored default, restarting the timer.</summary>
+    /// <summary>Returns Running until TimerSeconds reaches zero.</summary>
+    /// <remarks>Ticks mutate instance bytes; resetting restores the authored duration.</remarks>
     [Guid("3F5A1C08-2B44-4E9A-9D71-6C0E8A2B4D13")]
     [Reads<TickDeltaTime>]
     [Builder("Delay")]
@@ -90,9 +83,7 @@ namespace Paradise.BT.Sample
     }
 }
 
-/// <summary>Minimal handle-shaped <see cref="IBlackboard"/> for the hand-written half of the
-/// sample — the library ships no blackboard implementation. A struct holding one class
-/// reference, so the by-value copies the VM makes all write to the same storage.</summary>
+/// <summary>Implements a manual blackboard whose value copies share dictionary storage.</summary>
 public struct Blackboard : IBlackboard
 {
     private Dictionary<Type, object>? _data;

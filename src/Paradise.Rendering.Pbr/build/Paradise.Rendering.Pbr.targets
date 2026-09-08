@@ -1,14 +1,7 @@
 <Project>
 
-  <!--
-    NuGet build shim (auto-imported by consumers of the Paradise.Rendering.Pbr package): provides
-    the Slang -> WGSL shader pipeline (SlangShader items, packaged slangc bootstrap) plus the
-    engine's .slang sources on the include path, so a game can author an extension shader that
-    #includes "Common/pbrCore.slang" and register it via PbrRenderer.RegisterMaterialProgram.
-
-    A workspace engine-source override that already imported the repo's Slang.targets wins:
-    everything here is conditioned on the SlangTargetsImported sentinel that file sets.
-  -->
+  <!-- Provide packaged Slang tooling and PBR includes for game shaders. An existing source override
+         takes precedence through SlangTargetsImported. -->
 
   <PropertyGroup Condition="'$(SlangTargetsImported)' != 'true'">
     <ParadisePbrShaderDir Condition="'$(ParadisePbrShaderDir)' == ''">$(MSBuildThisFileDirectory)../shaders/</ParadisePbrShaderDir>
@@ -19,10 +12,8 @@
     <SlangBootstrapOutputRoot Condition="'$(SlangBootstrapOutputRoot)' == ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'slang-bootstrap'))))/</SlangBootstrapOutputRoot>
   </PropertyGroup>
 
-  <!-- NOT sentinel-conditioned: properties evaluate before items, so by item-evaluation time the
-       Import below has already set SlangTargetsImported and the sentinel would drop this item.
-       Keyed on the property instead — unset means another wiring (workspace source override)
-       owns the include dir and adds its own item. -->
+  <!-- Test the shader-directory property: imports set the sentinel before items evaluate. An unset
+         property means the source override supplies its own include path. -->
   <ItemGroup Condition="'$(ParadisePbrShaderDir)' != ''">
     <SlangIncludeDir Include="$(ParadisePbrShaderDir)" />
   </ItemGroup>

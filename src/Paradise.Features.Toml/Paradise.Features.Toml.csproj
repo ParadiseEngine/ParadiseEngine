@@ -12,11 +12,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
-  <!-- A separate assembly for one reader, on purpose. Paradise.Features has NO package
-       references because Paradise.ECS — which references nothing else at all — references it, and
-       a TOML parser in the ECS's dependency closure is a cost every consumer of the ECS pays for a
-       file only a host reads. Same shape as the logging rule in AGENTS.md: the abstraction is
-       dependency-free, the concrete reader is a package the HOST picks. -->
+  <!-- Keep Tomlyn outside Paradise.Features and the ECS dependency graph. -->
   <ItemGroup>
     <PackageReference Include="Tomlyn" />
     <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />

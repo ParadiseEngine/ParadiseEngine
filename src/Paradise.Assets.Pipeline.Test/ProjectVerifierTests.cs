@@ -244,7 +244,7 @@ public class ProjectVerifierTests
         MintDocumentSidecar(fileSystem, path);
     }
 
-    // ---- the ignore list and case (#202, #203) --------------------------------------------
+    // the ignore list and case (#202, #203)
 
     [Test]
     public async Task an_ignored_file_needs_no_sidecar()
@@ -309,7 +309,7 @@ public class ProjectVerifierTests
         await Assert.That(findings[0].Message).Contains("--fix");
     }
 
-    // ---- the path is a hint; the guid decides ---------------------------------------------
+    // the path is a hint; the guid decides
 
     [Test]
     public async Task a_reference_whose_path_a_rename_left_stale_is_a_warning_naming_where_the_asset_went()
@@ -724,9 +724,7 @@ public class ProjectVerifierTests
         MintDocumentSidecar(fileSystem, path);
     }
 
-    /// <summary>
-    /// Writes a text document AND its sidecar.
-    /// </summary>
+    /// <summary>Writes a text document AND its sidecar.</summary>
     /// <remarks>
     /// Every asset carries an identity and identity lives in the sidecar, documents included — so
     /// a fixture that writes a scene without one is not a scene, it is a `verify` error. Which is
@@ -750,9 +748,7 @@ public class ProjectVerifierTests
         return meta.Guid;
     }
 
-    /// <summary>
-    /// Writes a file the pipeline has no opinion about, plus its sidecar.
-    /// </summary>
+    /// <summary>Writes a file the pipeline has no opinion about, plus its sidecar.</summary>
     /// <remarks>
     /// "The pipeline does not process this" and "this is not an asset" are different statements,
     /// and only the first is true of a stray .txt — so it still carries an identity, and a

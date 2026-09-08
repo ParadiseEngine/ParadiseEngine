@@ -3,9 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline.Test;
 
-/// <summary>
-/// The byte-based container pair, and its agreement with the path-based one it now backs.
-/// </summary>
+/// <summary>The byte-based container pair, and its agreement with the path-based one it now backs.</summary>
 public class GlbBinaryTests
 {
     [Test]

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for TaggedWorldEntity and TaggedWorldEntityChunk query data types.
-/// </summary>
+/// <summary>Tests for TaggedWorldEntity and TaggedWorldEntityChunk query data types.</summary>
 public sealed class TaggedWorldEntityQueryTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

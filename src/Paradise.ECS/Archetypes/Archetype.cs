@@ -19,27 +19,21 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
     private readonly ImmutableArray<ComponentTypeInfo> _typeInfos;
     private readonly List<ChunkHandle> _chunks = new();
 
-    /// <summary>
-    /// Gets the unique ID of this archetype.
-    /// </summary>
+    /// <summary>The unique ID of this archetype.</summary>
     public int Id
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get;
     }
 
-    /// <summary>
-    /// Gets the layout describing component offsets within this archetype.
-    /// </summary>
+    /// <summary>The layout describing component offsets within this archetype.</summary>
     public ImmutableArchetypeLayout<TMask, TConfig> Layout
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => new(_layoutData);
     }
 
-    /// <summary>
-    /// Gets the current number of entities in this archetype.
-    /// </summary>
+    /// <summary>The current number of entities in this archetype.</summary>
     public int EntityCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -48,18 +42,14 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         private set;
     }
 
-    /// <summary>
-    /// Gets the current number of chunks in this archetype.
-    /// </summary>
+    /// <summary>The current number of chunks in this archetype.</summary>
     public int ChunkCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _chunks.Count;
     }
 
-    /// <summary>
-    /// Creates a new archetype store.
-    /// </summary>
+    /// <summary>Creates a new archetype store.</summary>
     /// <param name="id">The unique archetype ID.</param>
     /// <param name="layoutData">The layout data pointer (as nint) for this archetype.</param>
     /// <param name="chunkManager">The chunk manager for memory allocation.</param>
@@ -135,21 +125,18 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         var srcChunkHandle = _chunks[srcChunkIdx];
         var dstChunkHandle = _chunks[dstChunkIdx];
 
-        // Read the entity ID being moved from the source chunk
         int movedEntityId = GetEntityId(srcChunkHandle, srcIndexInChunk);
 
         // With SoA, copy each component separately (including entity ID)
         var srcBytes = _chunkManager.GetBytes(srcChunkHandle);
         var dstBytes = _chunkManager.GetBytes(dstChunkHandle);
 
-        // Copy entity ID
         int srcEntityIdOffset = ImmutableArchetypeLayout<TMask, TConfig>.GetEntityIdOffset(srcIndexInChunk);
         int dstEntityIdOffset = ImmutableArchetypeLayout<TMask, TConfig>.GetEntityIdOffset(dstIndexInChunk);
         var srcEntityIdData = srcBytes.GetBytesAt(srcEntityIdOffset, TConfig.EntityIdByteSize);
         var dstEntityIdData = dstBytes.GetBytesAt(dstEntityIdOffset, TConfig.EntityIdByteSize);
         srcEntityIdData.CopyTo(dstEntityIdData);
 
-        // Iterate from min to max component ID in this archetype's layout
         int minId = Layout.MinComponentId;
         int maxId = Layout.MaxComponentId;
         for (int id = minId; id <= maxId; id++)
@@ -176,9 +163,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         return movedEntityId;
     }
 
-    /// <summary>
-    /// Gets a chunk by its index in this archetype.
-    /// </summary>
+    /// <summary>A chunk by its index in this archetype.</summary>
     /// <param name="chunkIndex">The chunk index.</param>
     /// <returns>The chunk handle.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -187,18 +172,14 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         return _chunks[chunkIndex];
     }
 
-    /// <summary>
-    /// Calculates the global entity index from chunk index and index within chunk.
-    /// </summary>
+    /// <summary>Calculates the global entity index from chunk index and index within chunk.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int GetGlobalIndex(int chunkIndex, int indexInChunk)
     {
         return chunkIndex * Layout.EntitiesPerChunk + indexInChunk;
     }
 
-    /// <summary>
-    /// Converts a global entity index to chunk index and index within chunk.
-    /// </summary>
+    /// <summary>Converts a global entity index to chunk index and index within chunk.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public (int ChunkIndex, int IndexInChunk) GetChunkLocation(int globalIndex)
     {
@@ -206,9 +187,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         return (globalIndex / entitiesPerChunk, globalIndex % entitiesPerChunk);
     }
 
-    /// <summary>
-    /// Clears all entities from this archetype, freeing all chunks.
-    /// </summary>
+    /// <summary>Clears all entities from this archetype, freeing all chunks.</summary>
     public void Clear()
     {
         for (int i = 0; i < _chunks.Count; i++)
@@ -238,7 +217,6 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         if (sourceEntityCount == 0)
             return;
 
-        // Allocate required chunks and copy data
         int entitiesPerChunk = Layout.EntitiesPerChunk;
         int requiredChunks = (sourceEntityCount + entitiesPerChunk - 1) / entitiesPerChunk;
 
@@ -247,7 +225,6 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
             var chunk = _chunkManager.Allocate();
             _chunks.Add(chunk);
 
-            // Copy chunk data byte-for-byte
             var srcBytes = sourceChunkManager.GetBytes(source.GetChunk(i));
             var dstBytes = _chunkManager.GetBytes(chunk);
             srcBytes.CopyTo(dstBytes);
@@ -256,12 +233,9 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         EntityCount = sourceEntityCount;
     }
 
-    /// <summary>
-    /// Frees trailing empty chunks.
-    /// </summary>
+    /// <summary>Frees trailing empty chunks.</summary>
     private void TrimEmptyChunks()
     {
-        // Free trailing empty chunks
         int entitiesPerChunk = Layout.EntitiesPerChunk;
         int neededChunks = (EntityCount + entitiesPerChunk - 1) / entitiesPerChunk;
         while (_chunks.Count > neededChunks)
@@ -272,9 +246,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Gets the entity ID stored at a specific position in a chunk.
-    /// </summary>
+    /// <summary>The entity ID stored at a specific position in a chunk.</summary>
     /// <param name="chunkHandle">The chunk handle.</param>
     /// <param name="indexInChunk">The index within the chunk.</param>
     /// <returns>The entity ID at that position.</returns>

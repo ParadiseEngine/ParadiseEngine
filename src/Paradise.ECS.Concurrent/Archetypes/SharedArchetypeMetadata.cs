@@ -30,9 +30,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     private readonly ConcurrentAppendOnlyList<QueryData> _queries = new();
     private readonly Lock _createLock = new();
 
-    /// <summary>
-    /// Holds query description and its matched archetype IDs together for cache locality.
-    /// </summary>
+    /// <summary>Holds query description and its matched archetype IDs together for cache locality.</summary>
     private readonly struct QueryData
     {
         public readonly ImmutableQueryDescription<TMask> Description;
@@ -49,19 +47,13 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     public ImmutableArray<ComponentTypeInfo> TypeInfos { get; }
 
-    /// <summary>
-    /// Gets the number of registered archetypes.
-    /// </summary>
+    /// <summary>The number of registered archetypes.</summary>
     public int ArchetypeCount => _layouts.Count;
 
-    /// <summary>
-    /// Gets the number of registered query descriptions.
-    /// </summary>
+    /// <summary>The number of registered query descriptions.</summary>
     public int QueryDescriptionCount => _queries.Count;
 
-    /// <summary>
-    /// Creates a new shared archetype metadata instance.
-    /// </summary>
+    /// <summary>Creates a new shared archetype metadata instance.</summary>
     /// <param name="typeInfos">The component type information array.</param>
     /// <param name="config">The configuration instance with runtime settings including the allocator.</param>
     public SharedArchetypeMetadata(ImmutableArray<ComponentTypeInfo> typeInfos, TConfig config)
@@ -96,14 +88,12 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        // Fast path: already exists
         if (_maskToArchetypeId.TryGetValue(mask, out int existingId))
         {
             GetMatchedQueryIds(mask.Value, matchedQueries);
             return existingId;
         }
 
-        // Slow path: create new archetype
         // Lock prevents duplicate creation - without it, two threads could both pass the
         // fast path check, create separate layouts for the same mask, and one would be orphaned.
         using var createScope = _createLock.EnterScope();
@@ -120,7 +110,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         ThrowHelper.ThrowIfArchetypeIdExceedsLimit(newId);
         _maskToArchetypeId[mask] = newId;
 
-        // Notify all existing queries about the new archetype
         NotifyQueriesOfNewArchetype(newId, mask.Value, matchedQueries);
 
         return newId;
@@ -153,9 +142,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the IDs of all queries that match the given component mask.
-    /// </summary>
+    /// <summary>The IDs of all queries that match the given component mask.</summary>
     /// <typeparam name="T">A list type to collect the matching query IDs.</typeparam>
     /// <param name="mask">The component mask to match against.</param>
     /// <param name="result">The list to add matching query IDs to.</param>
@@ -176,9 +163,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the layout data pointer for the specified archetype ID.
-    /// </summary>
+    /// <summary>The layout data pointer for the specified archetype ID.</summary>
     /// <param name="archetypeId">The archetype ID.</param>
     /// <returns>The layout data pointer (as nint) for this archetype.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the archetype ID is invalid.</exception>
@@ -189,9 +174,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return _layouts[archetypeId];
     }
 
-    /// <summary>
-    /// Gets the layout for the specified archetype ID.
-    /// </summary>
+    /// <summary>The layout for the specified archetype ID.</summary>
     /// <param name="archetypeId">The archetype ID.</param>
     /// <returns>The layout for this archetype.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the archetype ID is invalid.</exception>
@@ -231,7 +214,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
         var addKey = EdgeKey.ForAdd(sourceArchetypeId, componentId.Value);
 
-        // Fast path: edge already exists
         if (_edges.TryGetValue(addKey, out int targetId))
         {
             var targetLayout = GetLayout(targetId);
@@ -239,7 +221,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
             return targetId;
         }
 
-        // Slow path: compute mask and get/create archetype
         var sourceLayout = GetLayout(sourceArchetypeId);
         // TODO: Use incremental hash computation instead of recomputing from scratch (#14)
         var newMask = (HashedKey<TMask>)sourceLayout.ComponentMask.Set(componentId);
@@ -282,7 +263,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
         var removeKey = EdgeKey.ForRemove(sourceArchetypeId, componentId.Value);
 
-        // Fast path: edge already exists
         if (_edges.TryGetValue(removeKey, out int targetId))
         {
             var targetLayout = GetLayout(targetId);
@@ -290,7 +270,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
             return targetId;
         }
 
-        // Slow path: compute mask and get/create archetype
         var sourceLayout = GetLayout(sourceArchetypeId);
         // TODO: Use incremental hash computation instead of recomputing from scratch (#14)
         var newMask = (HashedKey<TMask>)sourceLayout.ComponentMask.Clear(componentId);
@@ -304,22 +283,18 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return targetId;
     }
 
-    /// <summary>
-    /// Gets or creates a query ID for the given query description.
-    /// </summary>
+    /// <summary>Gets or creates a query ID for the given query description.</summary>
     /// <param name="description">The query description.</param>
     /// <returns>The query ID for this description.</returns>
     public int GetOrCreateQueryId(HashedKey<ImmutableQueryDescription<TMask>> description)
     {
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        // Fast path: already exists
         if (_queryDescToId.TryGetValue(description, out int existingId))
         {
             return existingId;
         }
 
-        // Slow path: create new query ID
         using var createScope = _createLock.EnterScope();
 
         // Double-check after acquiring lock
@@ -328,7 +303,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
             return existingId;
         }
 
-        // Create query data and populate matched archetypes with existing matches
         var queryData = new QueryData(description.Value);
         int archetypeCount = _layouts.Count;
         for (int i = 0; i < archetypeCount; i++)
@@ -346,9 +320,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return newId;
     }
 
-    /// <summary>
-    /// Gets the list of archetype IDs that match the specified query.
-    /// </summary>
+    /// <summary>The list of archetype IDs that match the specified query.</summary>
     /// <param name="queryId">The query ID.</param>
     /// <returns>The list of matching archetype IDs.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the query ID is invalid.</exception>
@@ -359,9 +331,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return _queries[queryId].MatchedArchetypeIds;
     }
 
-    /// <summary>
-    /// Gets the query description for the specified query ID.
-    /// </summary>
+    /// <summary>The query description for the specified query ID.</summary>
     /// <param name="queryId">The query ID.</param>
     /// <returns>A reference to the query description.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the query ID is invalid.</exception>
@@ -372,9 +342,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return ref _queries.GetRef(queryId).Description;
     }
 
-    /// <summary>
-    /// Tries to get an existing archetype ID for the given component mask.
-    /// </summary>
+    /// <summary>Tries to get an existing archetype ID for the given component mask.</summary>
     /// <param name="mask">The component mask.</param>
     /// <param name="archetypeId">The archetype ID if found.</param>
     /// <returns>True if the archetype exists.</returns>
@@ -385,15 +353,12 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         return _maskToArchetypeId.TryGetValue(mask, out archetypeId);
     }
 
-    /// <summary>
-    /// Releases all resources used by this instance.
-    /// </summary>
+    /// <summary>Releases all resources used by this instance.</summary>
     public void Dispose()
     {
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
             return;
 
-        // Free all layouts
         for (int i = 0; i < _layouts.Count; i++)
         {
             ImmutableArchetypeLayout<TMask, TConfig>.Free(_layoutAllocator, _layouts[i]);

@@ -2,9 +2,7 @@ using System.Text;
 
 namespace Paradise.Assets.Project.Test;
 
-/// <summary>
-/// Parity guard for the cache key function.
-/// </summary>
+/// <summary>Parity guard for the cache key function.</summary>
 /// <remarks>
 /// <para>
 /// The digests below are FIXED VECTORS pinning byte-for-byte parity with the Blender addon's

@@ -10,28 +10,11 @@ using Zio;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>The renderer-independent half of Dear ImGui, shared by every host (the SDL/WebGPU
-/// runtime, a Godot play-mode bridge, the editor):
-///
-/// - <see cref="Input"/> (<see cref="IUiInput"/>) runs on the SIM thread and owns the ENTIRE
-///   ImGui frame: events feed <c>io</c>, and each fixed tick runs NewFrame → registered draw
-///   delegates → Render → snapshot. Immediate mode plus sim-thread execution means panels read
-///   and mutate live sim state directly — no marshaling.
-/// - The host's render half never touches ImGui at all. It takes the latest self-contained
-///   <see cref="ImGuiDrawSnapshot"/> from <see cref="AcquireSnapshotForRender"/> (triple-buffered
-///   handoff, so neither thread waits on the other beyond a pointer swap) and applies
-///   its texture ops before drawing it with whatever renderer it owns.
-///
-/// <b>Two handoffs, because they have opposite requirements.</b> Snapshots are droppable — the
-/// newest wins and the rest are recycled. Texture ops are not, and they are ordered; see
-/// <see cref="ImGuiFrameExchange"/>. Both are filled here, on the sim thread, inside
-/// <see cref="IUiInput.Tick"/>.
-///
-/// Context creation happens on the main thread before the sim starts; ImGui's current context
-/// lives in cimgui's process-global <c>GImGui</c>, so there is no thread affinity — only a
-/// no-concurrent-access rule, and after startup only the sim thread calls into it.
-/// Lifetime is normally the process (one global ImGui context), and <see cref="Dispose"/> exists
-/// for the cases that are not — an editor that tears a session down, and the test suite.</summary>
+/// <summary>Owns ImGui input and frame capture independently of the renderer.</summary>
+/// <remarks>The simulation thread runs input, draw callbacks and frame capture; the renderer
+/// consumes snapshots and texture operations through ImGuiFrameExchange. Create the context before
+/// simulation starts, then restrict ImGui access to the simulation thread: its current context is
+/// process-global and cannot be accessed concurrently.</remarks>
 public sealed class ImGuiUiCore : IDisposable
 {
     private readonly ImGuiFrameExchange _exchange = new();
@@ -40,12 +23,9 @@ public sealed class ImGuiUiCore : IDisposable
     private double _lastTickTime;
     private bool _hasTicked;
 
-    // Clipboard bridge. ImGui's callbacks fire on the SIM thread mid-frame, but the real system
-    // clipboard belongs to the host's platform thread (SDL/Godot clipboard APIs are main-thread),
-    // so the two sides meet in a lock-guarded cache: the host pushes the system text in via
-    // SetHostClipboard BEFORE forwarding a paste chord, and drains UI-copied text out via
-    // TryTakeClipboardCopy to publish it. The static instance mirrors the process-global ImGui
-    // context (UnmanagedCallersOnly trampolines need a static hop).
+    // Clipboard callbacks run on simulation; platform clipboard APIs require the main thread. The
+    // host supplies text before paste and drains copied text through the locked cache. Static
+    // trampolines follow ImGui's global context.
     private static ImGuiUiCore? s_clipboardOwner;
     private readonly object _clipboardLock = new();
     private string _clipboardFromHost = string.Empty;
@@ -100,17 +80,9 @@ public sealed class ImGuiUiCore : IDisposable
     /// starts.</summary>
     public void AddDraw(Action draw) => _draw.Add(draw);
 
-    /// <summary>Stop ImGui reading and writing its own <c>imgui.ini</c>.
-    ///
-    /// ImGui persists window layout to a path in the process's WORKING DIRECTORY by default, and
-    /// writes it when the context is DESTROYED as well as on its save timer — so even a context
-    /// that lives for a single frame leaves a file behind, somewhere the host never nominated.
-    /// This is the only file this library still touches outside a mount: fonts already arrive as
-    /// bytes the caller read (see <see cref="UiFonts"/>).
-    ///
-    /// <see cref="SaveLayout"/> and <see cref="TryLoadLayout"/> call this themselves, so a host
-    /// that persists through a mount cannot end up doing both. Call it directly to persist
-    /// nothing at all. Idempotent.</summary>
+    /// <summary>Disables ImGui's automatic imgui.ini reads and writes.</summary>
+    /// <remarks>SaveLayout and TryLoadLayout call this automatically. Call it directly to disable
+    /// persistence; otherwise context destruction can also write the file.</remarks>
     public unsafe void DisableIniFile()
     {
         var io = ImGuiApi.GetIO();
@@ -122,15 +94,10 @@ public sealed class ImGuiUiCore : IDisposable
     /// poll this each frame and call <see cref="SaveLayout"/> only when it says so.</summary>
     public bool WantSaveLayout => ImGuiApi.GetIO().WantSaveIniSettings;
 
-    /// <summary>Write the current window layout into <paramref name="content"/> — the host's
-    /// mount, which may be an archive, a project tree, or memory in a test.
-    ///
-    /// Layout crosses as a STRING rather than through ImGui's file IO, because ImGui's is not
-    /// redirectable: replacing <c>ImFileOpen</c> and friends is a compile-time option in
-    /// <c>imconfig.h</c>, and this binding ships prebuilt natives. Eliminating the file IO is the
-    /// only route, and it is the better one — it is the same shape font loading already uses.
-    ///
-    /// Clears <see cref="WantSaveLayout"/>, so a poll-and-save loop settles.</summary>
+    /// <summary>Saves window layout through the host's filesystem and clears
+    /// WantSaveLayout.</summary>
+    /// <remarks>The prebuilt native binding cannot redirect ImGui file IO, so layout is transferred
+    /// as text.</remarks>
     public void SaveLayout(IFileSystem content, UPath path)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -144,11 +111,9 @@ public sealed class ImGuiUiCore : IDisposable
         io.WantSaveIniSettings = false;
     }
 
-    /// <summary>Restore a layout written by <see cref="SaveLayout"/>. False when
-    /// <paramref name="path"/> holds nothing — a first run, which is not an error.
-    ///
-    /// Call before the first tick: ImGui applies a restored position and size when a window is
-    /// first created, and a restored entry beats a later <c>ImGuiCond.FirstUseEver</c>.</summary>
+    /// <summary>Restores saved layout, returning false when the file is absent.</summary>
+    /// <remarks>Call before the first tick: restored position and size take precedence over
+    /// ImGuiCond.FirstUseEver.</remarks>
     public bool TryLoadLayout(IFileSystem content, UPath path)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -231,12 +196,10 @@ public sealed class ImGuiUiCore : IDisposable
         }
     }
 
-    /// <summary>Render/main-thread half: take the newest frame — the snapshot to draw plus every
-    /// texture operation not yet applied. Null before the first sim tick.
-    ///
-    /// Apply <paramref name="textureOps"/> (<c>ImGuiWebGpuRenderer.ApplyTextureOps</c>) before
-    /// drawing, EVERY frame: a repeat snapshot still needs the glyphs that arrived since. See
-    /// <see cref="ImGuiFrameExchange"/> for why the two travel together.</summary>
+    /// <summary>Acquires the latest snapshot and pending texture operations, or null before the
+    /// first tick.</summary>
+    /// <remarks>Apply texture operations before drawing every frame, including repeated snapshots;
+    /// see ImGuiFrameExchange for ordering.</remarks>
     public ImGuiDrawSnapshot? AcquireSnapshotForRender(List<ImGuiTextureOp> textureOps, out bool isNew) =>
         _exchange.AcquireForRender(textureOps, out isNew);
 

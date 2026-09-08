@@ -2,13 +2,9 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.Rendering.Test;
 
-/// <summary>Locks the actual size of <see cref="RenderCommand"/> against its declared
-/// <c>StructLayoutAttribute.Size</c>. The CLR silently extends an explicit-layout struct when
-/// declared <c>Size</c> is smaller than the field extents — declaring 40 while
-/// <see cref="SetVertexBufferPayload"/> at <c>FieldOffset(8)</c> needs 48 bytes (4 slot + 4 pad
-/// + 16 BufferHandle + 8 offset + 8 size) silently rounds up and produces no diagnostic. This
-/// test catches the mismatch so future payload additions surface size drift immediately rather
-/// than degrading the declared cap into a polite suggestion.</summary>
+/// <summary>Checks the actual RenderCommand size against its declared layout.</summary>
+/// <remarks>The CLR silently expands explicit structs whose fields exceed Size; assert the 48-byte
+/// layout so new payloads cannot change the command stride unnoticed.</remarks>
 public class RenderCommandLayoutTests
 {
     [Test]

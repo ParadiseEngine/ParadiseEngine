@@ -6,14 +6,8 @@ using Zio.FileSystems;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// The <c>paradise</c> command's entry point, callable from any console project. The dotnet
-/// tool is <c>return BuildHost.Run(args);</c>; a game that extends the pipeline is
-/// <c>return BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()]);</c> in its own
-/// <c>tools/assets</c> project, and every verb runs that chain. That is the extension path
-/// (issue #208): a chain is code, so it is passed as code. ONE chain: an importer says how a file
-/// is built AND, when it reads a source container, what that container turns into.
-/// </summary>
+/// <summary>Runs the <c>paradise</c> CLI with the supplied importer chain.</summary>
+/// <remarks>Games can call <c>BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()])</c> to extend every verb.</remarks>
 public static class BuildHost
 {
     /// <summary>Exit codes: 0 clean, 1 findings or failure, 2 usage error — the same trio as contract-check.</summary>

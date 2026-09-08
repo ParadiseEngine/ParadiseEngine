@@ -2,19 +2,9 @@ using Paradise.Features;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The engine's render features as the engine configuration sees them: one declaration
-/// each, naming the switch, the state it ships in, and what turning it off costs.
-///
-/// <para>These are the names a config file writes and a <c>--features</c> flag types. They are
-/// part of the contract — renaming one silently ignores everybody's config — so they change the
-/// way a serialized name changes, not the way a class does.</para>
-///
-/// <para><b>A switch and a scene setting are different questions.</b> The switch is the platform's
-/// answer ("this build does not do probe GI"), applied once from configuration; the scene's own
-/// <c>Enabled</c> (<see cref="PbrGi"/>, <see cref="PbrBloom"/>, …) is the CONTENT's answer ("this
-/// level uses it"), authored per scene and changed per frame. A feature runs when both say yes.
-/// Collapsing them would either make a level able to override a platform decision or make a
-/// platform decision have to be re-made in every level.</para></summary>
+/// <summary>Declares the stable feature names and defaults used by engine configuration.</summary>
+/// <remarks>Names are serialized contracts. Both the process switch and the scene's Enabled setting
+/// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
     /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights

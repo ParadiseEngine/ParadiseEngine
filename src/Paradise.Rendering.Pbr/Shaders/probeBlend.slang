@@ -1,12 +1,6 @@
-// probeBlend.slang — fold this frame's rays into the probe atlases. One workgroup per probe:
-// the interior threads integrate the rays for their octahedral texel and blend it against the
-// previous atlas with hysteresis; the border threads then copy the octahedral wrap from the
-// interior so bilinear filtering reads across a tile edge correctly. Two entry points share the
-// shape: irradiance (8-texel interior) and visibility (14-texel interior, mean and mean-squared
-// distance, so a lookup can ask Chebyshev's inequality whether a probe is behind a wall).
-//
-// Probes outside this frame's trace window carry their old texel forward unchanged, which is what
-// lets a frame trace fewer probes than the volume holds.
+// One workgroup integrates and blends rays per probe, then copies wrapped borders for bilinear
+// filtering. Irradiance uses an 8-texel interior; visibility uses 14 and stores distance moments.
+// Untraced probes retain prior texels.
 #include "Common/probes.slang"
 
 [[vk::binding(0, 0)]]

@@ -5,15 +5,10 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>Font resolution against a mount rather than a host path — memory for the cases that
-/// only need bytes, the real filesystem for the system-font probe that cannot avoid one.
-///
-/// The sniff is the load-bearing part: Hexa's natives rasterize with stb_truetype, which parses
-/// TrueType outlines only, and handing it a CFF font asserts inside native code where no test can
-/// catch it. Every one of these files would have had to exist on disk before the mount.
-///
-/// Serialized with the rest of the ImGui suites: two of these build a real core, and the current
-/// ImGui context is process-global.</summary>
+/// <summary>Checks font lookup and TrueType detection using memory and system-font
+/// mounts.</summary>
+/// <remarks>Reject CFF before stb_truetype can assert in native code. Tests run serially because
+/// some construct the global ImGui context.</remarks>
 [NotInParallel]
 public class UiFontsTests
 {
@@ -147,13 +142,8 @@ public class UiFontsTests
         await Assert.That(UiFonts.FindCjkFont(fonts, 18f)).IsNull();
     }
 
-    /// <summary>The directory list must hold paths THIS platform's mount can express.
-    ///
-    /// Regression test: the list used to carry every platform's directories at once, and
-    /// Zio is asymmetric about a foreign one — a Unix path on Windows converts to an absolute
-    /// path that merely does not exist, while <c>C:\Windows\Fonts</c> on Unix converts to
-    /// <c>C:/Windows/Fonts</c>, which is not absolute, so the next call throws. That passed on
-    /// Windows and failed on Linux CI.</summary>
+    /// <summary>System font paths must be expressible by the current platform mount.</summary>
+    /// <remarks>A Windows path converted on Unix can remain relative and make Zio throw.</remarks>
     [Test]
     public async Task the_platform_font_directories_can_all_be_expressed_by_a_physical_mount()
     {

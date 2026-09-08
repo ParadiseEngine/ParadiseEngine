@@ -36,14 +36,10 @@ public sealed class WorkStealingPool : IDisposable
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
 
-    /// <summary>
-    /// Gets the number of worker threads (excludes the main thread).
-    /// </summary>
+    /// <summary>The number of worker threads (excludes the main thread).</summary>
     public int WorkerCount => _workerCount;
 
-    /// <summary>
-    /// Initializes a new <see cref="WorkStealingPool"/> with the specified number of worker threads.
-    /// </summary>
+    /// <summary>Initializes a new <see cref="WorkStealingPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
     /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
@@ -147,7 +143,6 @@ public sealed class WorkStealingPool : IDisposable
 
     private void DistributeAndProcess(int count, Action<int> invoker)
     {
-        // Setup shared state
         _invoker = invoker;
         _remainingItems = count;
         _exceptions = null;
@@ -159,7 +154,6 @@ public sealed class WorkStealingPool : IDisposable
         for (int i = 0; i < count; i++)
             _deques[i % _totalLanes].PushBottom(i);
 
-        // Wake workers
         _workAvailable.Set();
 
         // Main thread processes lane 0
@@ -173,7 +167,6 @@ public sealed class WorkStealingPool : IDisposable
         // All lanes done — _workAvailable was reset by the barrier's post-phase action
         _invoker = null;
 
-        // Rethrow captured exceptions
         if (_exceptions is { IsEmpty: false })
         {
             throw new AggregateException(_exceptions.Select(e => e.SourceException));
@@ -214,7 +207,6 @@ public sealed class WorkStealingPool : IDisposable
                 }
             }
 
-            // Execute the item
             try
             {
                 _invoker!(item);
@@ -266,9 +258,7 @@ public sealed class WorkStealingPool : IDisposable
         }
     }
 
-    /// <summary>
-    /// Shuts down all worker threads and releases resources.
-    /// </summary>
+    /// <summary>Shuts down all worker threads and releases resources.</summary>
     public void Dispose()
     {
         while (true)
