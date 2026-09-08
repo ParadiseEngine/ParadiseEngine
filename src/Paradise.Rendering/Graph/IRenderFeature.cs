@@ -20,6 +20,9 @@ public enum FrameRequirements
     /// depth + normal pre-pass runs and publishes its targets, whatever the scene's own
     /// screen-space settings say.</summary>
     DepthNormalPrepass = 1 << 1,
+
+    /// <summary>Current-to-previous screen-space motion must be available for temporal effects.</summary>
+    MotionVectors = 1 << 2,
 }
 
 /// <summary>One unit of the frame: a thing that owns its own GPU resources and declares its own

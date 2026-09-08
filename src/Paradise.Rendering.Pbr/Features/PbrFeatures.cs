@@ -17,6 +17,11 @@ namespace Paradise.Rendering.Pbr;
 /// platform decision have to be re-made in every level.</para></summary>
 public static class PbrFeatures
 {
+    /// <summary>Camera, object and skinned-vertex motion for temporal effects.</summary>
+    public static FeatureDefinition MotionVectors { get; } = new(
+        "rendering.motionVectors", true,
+        "Screen-space motion for temporal effects. Off, temporal consumers must reject history.");
+
     /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
     /// everything.</summary>
     public static FeatureDefinition Shadows { get; } = new(
@@ -81,7 +86,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Scene, SceneColorCapture, Bloom, Composite,
     ];
 
@@ -108,6 +113,7 @@ public static class PbrFeatureOrder
 
     public const int Shadows = 100;
     public const int Prepass = 200;
+    public const int MotionVectors = 250;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;

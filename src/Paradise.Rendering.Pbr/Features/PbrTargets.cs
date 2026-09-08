@@ -37,6 +37,11 @@ public static class PbrTargets
     /// <summary>The previous frame's HDR scene, copied for the reflection trace to read.</summary>
     public const string SsrHistory = "PbrSsrHistory";
 
+    /// <summary>Rgba16Float: xy current UV minus previous UV, z previous device depth, w history validity.</summary>
+    public const string MotionVectors = "PbrMotionVectors";
+
+    internal const string MotionDepth = "PbrMotionDepth";
+
     /// <summary>The two probe irradiance atlases (Rgba16Float octahedral tiles with a 1-texel
     /// border), alternating roles each frame: one is read, the other written.</summary>
     internal static readonly string[] GiIrradiance = ["PbrGiIrradiance0", "PbrGiIrradiance1"];
@@ -57,6 +62,9 @@ public static class PbrTargets
 /// produces it did not run this frame; consumers bind the black fallback instead.</summary>
 public static class PbrResults
 {
+    /// <summary>Opaque motion in top-left-origin UVs, including projection jitter: reproject with uv − xy.</summary>
+    public const string MotionVectors = "Pbr.MotionVectors";
+
     /// <summary>Bloom mip 0, published only in frames the chain runs.</summary>
     public const string Bloom = "Pbr.Bloom";
 
