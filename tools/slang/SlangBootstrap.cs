@@ -1,20 +1,7 @@
-// Console app built by tools/slang/SlangBootstrap.csproj and invoked from src/Slang.targets.
-// Resolves a slangc archive from tools/slang/slang.manifest.json for a given RID, verifies SHA256
-// against the manifest (hard fail on mismatch — supply chain trust anchor), extracts to the cache
-// directory passed by the caller, and writes a marker file so the second build is a no-op.
-//
-// Args (positional):
-//   --manifest <path>   tools/slang/slang.manifest.json
-//   --rid <rid>         e.g. linux-x64
-//   --out <dir>         destination cache directory (parent of bin/slangc)
-//
-// Exit codes: 0 = success / already-installed, 1 = failure (SHA mismatch, missing RID, network).
-//
-// History: originally implemented as a `dotnet run --file SlangBootstrap.cs` script. CI's parallel
-// project scheduler raced on the dotnet-runfile shared cache (~/.local/share/dotnet/runfile/...)
-// when two consumer projects invoked RestoreSlang concurrently — surfaced as MSB3491 on
-// AssemblyInfoInputs.cache. Promoted to a real csproj so the build artifacts live in a
-// project-scoped obj/bin under tools/slang/, which MSBuild serializes naturally.
+// Installs the manifest's RID-specific Slang archive after SHA256 verification.
+// Usage: --manifest <path> --rid <rid> --out <cache directory>; exits 0 on success, 1 on failure.
+// The .installed marker skips matching installations. Keep this a csproj: parallel consumers
+// race on dotnet run-file caches, whereas MSBuild coordinates project outputs.
 
 using System.Diagnostics;
 using System.IO.Compression;
@@ -57,15 +44,12 @@ var markerPath = Path.Combine(outDir, ".installed");
 var slangcName = OperatingSystem.IsWindows() ? "slangc.exe" : "slangc";
 var slangcPath = Path.Combine(outDir, "bin", slangcName);
 
-// Cross-process lock — two MSBuild Exec calls (e.g. Sample + WebGPU.Test invoking RestoreSlang
-// in parallel) will both reach this binary at once, both attempt to download `slang-archive.tar.gz`
-// to the same path, and one will throw IOException ("being used by another process"). Hold a
-// FileShare.None handle on a sentinel file in the cache root so the second invocation blocks
-// until the first completes; the second's marker check then short-circuits the work.
+// Serialize concurrent MSBuild installations with a FileShare.None cache lock;
+// the next invocation checks the completed installation's marker.
 var lockDir = Path.GetDirectoryName(outDir) ?? outDir;
 Directory.CreateDirectory(lockDir);
 var lockPath = Path.Combine(lockDir, ".bootstrap.lock");
-FileStream? lockHandle = null;
+FileStream lockHandle;
 var lockAcquireDeadline = DateTime.UtcNow.AddMinutes(15);
 while (true)
 {
@@ -108,11 +92,9 @@ using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
 }
 
 string actualSha;
-using (var sha = SHA256.Create())
 await using (var fs = File.OpenRead(archivePath))
 {
-    var bytes = await sha.ComputeHashAsync(fs);
-    actualSha = Convert.ToHexString(bytes).ToLowerInvariant();
+    actualSha = Convert.ToHexStringLower(await SHA256.HashDataAsync(fs));
 }
 if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase))
 {
@@ -131,12 +113,8 @@ if (string.Equals(format, "zip", StringComparison.OrdinalIgnoreCase))
 }
 else if (string.Equals(format, "tar.gz", StringComparison.OrdinalIgnoreCase))
 {
-    // Extract via the platform `tar` (libarchive on macOS/BSD, GNU tar on Linux) rather than
-    // System.Formats.Tar. macOS slang release tarballs are packed by Apple's bsdtar and carry PAX
-    // extended-header records for extended attributes (e.g. LIBARCHIVE.xattr.com.apple.cs.CodeSignature)
-    // whose values are raw binary. .NET's managed TarReader rejects those with "The extended header
-    // contains invalid records" and aborts the process (SIGABRT). The system tar reads them fine, and
-    // tar.gz is never the Windows archive format here (Windows uses the .zip branch above).
+    // Use system tar: Apple's archives contain binary PAX extended attributes that
+    // System.Formats.Tar rejects. Windows archives use the ZIP branch.
     using var tar = Process.Start(new ProcessStartInfo("tar")
     {
         ArgumentList = { "-xzf", archivePath, "-C", stagingDir },

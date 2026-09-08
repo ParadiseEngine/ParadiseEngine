@@ -1,11 +1,6 @@
-// bvh.slang — the compute ray tracer's scene: the wide quantized BVH nodes Paradise.Geometry
-// builds, the merged triangle and vertex buffers, the per-frame instance table, and a two-level
-// closest-hit traversal over them. Included by every tracing shader; the buffers bind in the
-// group PARADISE_TRACE_GROUP names (default 1), so a shader keeps group 0 for its own uniforms.
-//
-// Layouts mirror the C# side byte for byte: BvhNode is Paradise.Geometry.BvhNode (96 bytes),
-// TraceInstance / TraceMaterial / TraceUniforms are TraceScene's records. A change on either side
-// without the other is a silently wrong traversal, so the C# tests pin the sizes.
+// Shared compute tracer buffers and two-level BVH traversal, bound at PARADISE_TRACE_GROUP (default
+// 1). BvhNode is the 96-byte Paradise.Geometry layout; instance, material and uniform records match
+// TraceScene. Keep CPU/GPU layouts identical.
 #ifndef PARADISE_BVH_SLANG
 #define PARADISE_BVH_SLANG
 

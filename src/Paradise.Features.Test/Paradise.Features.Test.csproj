@@ -11,15 +11,13 @@
 
   <ItemGroup>
     <PackageReference Include="TUnit" />
-    <!-- The settings binder is Tomlyn's, source-generated from the test's own context: what a
-         game declares, declared here too. -->
+    <!-- Test the source-generated settings binder used by games. -->
     <PackageReference Include="Tomlyn" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Features\Paradise.Features.csproj" />
-    <!-- The reader is a separate assembly (see its csproj); its tests live here rather than in a
-         project of their own, because what they check is the model this one owns. -->
+    <!-- Test the TOML reader against the shared configuration model. -->
     <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
   </ItemGroup>
 </Project>

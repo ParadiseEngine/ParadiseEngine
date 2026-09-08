@@ -6,9 +6,7 @@ namespace Paradise.ECS;
 /// </summary>
 public interface ISystem
 {
-    /// <summary>
-    /// The unique system ID assigned at compile time by the source generator.
-    /// </summary>
+    /// <summary>The unique system ID assigned at compile time by the source generator.</summary>
     static abstract int SystemId { get; }
 }
 
@@ -165,14 +163,10 @@ public interface ISystem<TMask, TConfig> : ISystem
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    /// <summary>
-    /// The compile-time metadata for this system, including access masks and dependency edges.
-    /// </summary>
+    /// <summary>The compile-time metadata for this system, including access masks and dependency edges.</summary>
     static abstract SystemMetadata<TMask> Metadata { get; }
 
-    /// <summary>
-    /// Executes this system over a single chunk. Called by the scheduler.
-    /// </summary>
+    /// <summary>Executes this system over a single chunk. Called by the scheduler.</summary>
     /// <param name="world">The world containing the entities (the WRITE world).</param>
     /// <param name="chunk">The chunk handle to process.</param>
     /// <param name="readChunkManager">Chunk memory source for read-only bindings; equals
@@ -212,9 +206,7 @@ public interface IWorldSystemRunner<TMask, TConfig> : ISystem
     /// <summary>The compile-time metadata for this system (masks used for wave scheduling).</summary>
     static abstract SystemMetadata<TMask> Metadata { get; }
 
-    /// <summary>
-    /// Executes this system once over the whole world. Called by the scheduler.
-    /// </summary>
+    /// <summary>Executes this system once over the whole world. Called by the scheduler.</summary>
     /// <param name="world">The WRITE world.</param>
     /// <param name="readWorld">The immutable read world in snapshot mode
     /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c> — generated

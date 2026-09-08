@@ -1,10 +1,7 @@
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// Where <c>paradise tools install</c> puts a tool and where the build probes for it: one
-/// computation, so the two cannot disagree (they did — issue #197). Mirrors the MSBuild
-/// bootstraps: <c>$(NuGetPackageRoot)_&lt;tool&gt;/&lt;version&gt;/&lt;rid&gt;</c>.
-/// </summary>
+/// <summary>Shares tool install and lookup paths with the MSBuild bootstraps.</summary>
+/// <remarks>Layout: <c>$(NuGetPackageRoot)_&lt;tool&gt;/&lt;version&gt;/&lt;rid&gt;</c>.</remarks>
 public static class ToolLocations
 {
     public static string PackagesRoot() =>

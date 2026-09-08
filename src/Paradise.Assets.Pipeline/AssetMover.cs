@@ -68,15 +68,15 @@ public static partial class AssetMover
 
             if (isDirectory)
             {
-                Rename(fileSystem, from, to, fileSystem.MoveDirectory);
+                Rename(from, to, fileSystem.MoveDirectory);
                 moved.AddRange(mapping.Values);
             }
             else
             {
-                Rename(fileSystem, from, to, fileSystem.MoveFile);
+                Rename(from, to, fileSystem.MoveFile);
                 moved.AddRange(mapping.Values);
                 var sidecar = SidecarMeta.PathFor(from);
-                if (fileSystem.FileExists(sidecar)) Rename(fileSystem, sidecar, SidecarMeta.PathFor(to), fileSystem.MoveFile);
+                if (fileSystem.FileExists(sidecar)) Rename(sidecar, SidecarMeta.PathFor(to), fileSystem.MoveFile);
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -96,6 +96,7 @@ public static partial class AssetMover
         var context = new ReferenceContext(fileSystem, layout, after, ignore);
         var rewritten = new List<string>();
         var warnings = new List<string>();
+        var destinations = mapping.Values.ToHashSet(StringComparer.Ordinal);
 
         // Only what points at something that moved, plus the moved assets themselves — a mesh's
         // uris are relative to it, so moving it stales every one of them at once — plus what the
@@ -117,7 +118,7 @@ public static partial class AssetMover
         foreach (var (asset, site) in graph.PathOnly)
         {
             var relative = after.Relative(asset);
-            if (mapping.Values.Contains(relative, StringComparer.Ordinal) || (site.Hint is { } hint && mapping.ContainsKey(hint)))
+            if (destinations.Contains(relative) || (site.Hint is { } hint && mapping.ContainsKey(hint)))
             {
                 affected.Add(asset);
             }
@@ -146,7 +147,7 @@ public static partial class AssetMover
         foreach (var (asset, site) in graph.PathOnly)
         {
             var relative = after.Relative(asset);
-            var holderMoved = mapping.Values.Contains(relative, StringComparer.Ordinal);
+            var holderMoved = destinations.Contains(relative);
             var stillThere = site.Hint is { } hint && after.Contains(after.Root / hint);
             if (stillThere) continue;
             if (!holderMoved && !(site.Hint is { } hinted && mapping.ContainsKey(hinted))) continue;
@@ -160,7 +161,7 @@ public static partial class AssetMover
     }
 
     /// <summary>A case-only rename goes through a temporary name: on a case-insensitive disk the destination "exists" and a direct move is refused, yet it is the rename the case-exact reference rule makes most likely.</summary>
-    private static void Rename(IFileSystem fileSystem, UPath from, UPath to, Action<UPath, UPath> move)
+    private static void Rename(UPath from, UPath to, Action<UPath, UPath> move)
     {
         if (from == to) return;
         if (!IsCaseOnlyRename(from, to))

@@ -5,26 +5,11 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// The source tree as one importer sees it: every read and every existence check is recorded
-/// with the stamp it had, so the index can later ask "would this importer see the same inputs
-/// today" without knowing what the importer does with them.
-/// </summary>
+/// <summary>Records importer reads and existence checks for incremental build reuse.</summary>
 /// <remarks>
-/// Mirrors <see cref="RecordingFileSystem"/> on the read side; together they make the index a
-/// function of what actually happened rather than of a flag an importer had to get right
-/// (issue #201). Three rules:
-/// <list type="bullet">
-/// <item>Under <c>assets/</c> the view is case- and normalisation-exact — a path is present only
-/// when the directory walk returned that spelling — because the OS below may not be, and a build
-/// that passed on macOS ships a reference Linux cannot open (issue #202).</item>
-/// <item>The stamp is taken BEFORE the bytes are read. A write landing between the two leaves the
-/// old stamp beside the new hash, and the next build's hash tier then reuses correctly; the
-/// other order records a stamp the bytes never had.</item>
-/// <item>Writes and directory listings are refused. A written source makes the tree
-/// unreproducible; a listing is an input the index does not track, and an untracked input is
-/// last week's artifact served with a green build.</item>
-/// </list>
+/// Paths beneath <c>assets/</c> must match the index's exact case and normalization.
+/// Take the stamp before reading bytes so concurrent writes cannot associate old bytes with a new stamp.
+/// Writes are forbidden; directory listings are also forbidden because the index cannot track them.
 /// </remarks>
 internal sealed class ObservedSources : ComposeFileSystem
 {

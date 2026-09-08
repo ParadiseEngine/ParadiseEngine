@@ -12,9 +12,7 @@ public interface IArchetypeRegistry<TMask, TConfig, TArchetype>
     where TConfig : IConfig, new()
     where TArchetype : class, IArchetype<TMask, TConfig>
 {
-    /// <summary>
-    /// Gets or creates an archetype for the given component mask.
-    /// </summary>
+    /// <summary>Gets or creates an archetype for the given component mask.</summary>
     /// <param name="mask">The component mask defining the archetype.</param>
     /// <returns>The archetype for this mask.</returns>
     TArchetype GetOrCreate(HashedKey<TMask> mask);
@@ -37,9 +35,7 @@ public interface IArchetypeRegistry<TMask, TConfig, TArchetype>
     /// <returns>The target archetype with the component removed.</returns>
     TArchetype GetOrCreateWithRemove(TArchetype source, ComponentId componentId);
 
-    /// <summary>
-    /// Gets an archetype by its ID.
-    /// </summary>
+    /// <summary>An archetype by its ID.</summary>
     /// <param name="archetypeId">The archetype ID.</param>
     /// <returns>The archetype, or null if not found.</returns>
     TArchetype? GetById(int archetypeId);

@@ -7,33 +7,12 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>The frame-graph migration baseline: for every feature combination that
-/// <c>PbrRenderer.RenderFrame</c>'s pass-index arithmetic distinguishes, freeze the pass table, the
-/// command stream, and the rendered pixels.
-///
-/// <para>The arithmetic under test is a chain in which every index is expressed relative to the
-/// count of the passes before it:</para>
-/// <code>
-/// prepassIndex     = hasPrepass ? _shadowViews.Count : -1
-/// mainPassIndex    = _shadowViews.Count + (hasPrepass ? 1 : 0)
-/// captureBlitIndex = mainPassIndex + 1
-/// bloomStart       = mainPassIndex + 1 + capturePasses
-/// compositeIndex   = bloomStart + (bloomEnabled ? 2 * _bloomLevels - 1 : 0)
-/// </code>
-/// <para>so the axes worth crossing are exactly the four terms: shadow view count, the SSAO
-/// pre-pass, the scene-color capture split, and the bloom chain. Shadows take three values rather
-/// than two because a point light contributes six views where a directional contributes one, and an
-/// off-by-one in the layer loop only shows up above one.</para>
-///
-/// <para>Two assertions per case, doing different jobs. The <b>signature</b> is the contract: it is
-/// computed from the submitted <c>RenderCommandStream</c>, so it is identical on every adapter and
-/// it names the pass and attachment that drifted. The <b>pixels</b> are the backstop for what
-/// structure cannot see — a pass wired to the right target with the wrong bind group — and they are
-/// keyed by runtime identifier, because rasterization is not bit-identical across adapters and a
-/// tolerance wide enough to span Metal and lavapipe would not catch anything worth catching.</para>
-///
-/// <para>Refresh with <c>PARADISE_UPDATE_GOLDEN=1 dotnet test …</c>. Through the migration the
-/// expected diff is empty; a non-empty one is the finding.</para></summary>
+/// <summary>The 24 combinations of shadow type, SSAO, scene-color capture and bloom are held
+/// against both the submitted command stream and the rendered image.</summary>
+/// <remarks>Directional lights contribute four cascade viewports and point lights six cube-face
+/// viewports inside one atlas pass. Signatures are adapter-independent; pixel baselines are
+/// keyed by runtime identifier. Refresh intentional renderer changes with
+/// <c>PARADISE_UPDATE_GOLDEN=1</c>, then inspect the source diff and captures.</remarks>
 public class PassMatrixBaselineTests
 {
     private const uint Size = 128; // → bloom chain of 4 levels (64,32,16,8), i.e. 7 bloom passes
@@ -95,7 +74,7 @@ public class PassMatrixBaselineTests
                 var recorder = new RecordingRenderer(backend);
 
                 // A renderer per case, not one reused across the matrix. Several of its resources
-                // are grow-only (the shadow-map array, the draw ring), so a shared instance would
+                // are persistent (the atlas allocations, the draw ring), so a shared instance would
                 // make each case's structure depend on which cases ran before it — and a golden
                 // that only holds in matrix order is worse than none.
                 var switches = new FeatureSwitches();
@@ -104,8 +83,7 @@ public class PassMatrixBaselineTests
 
                 var scene = BuildScene(pbr, testCase);
 
-                // Warm up: the first frames build pipeline variants lazily and grow the shadow
-                // array, so the steady state is what the baseline should hold.
+                // Warm up lazy pipeline variants so the baseline holds the steady frame.
                 for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
                 recorder.Clear();
                 pbr.RenderFrame(scene);

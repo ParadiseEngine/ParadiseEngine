@@ -38,9 +38,7 @@ public static class AssetWatcherTests
     private static readonly AssetProjectLayout s_layout = new("/game");
     private static readonly DateTimeOffset s_start = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    /// <summary>
-    /// A clock that moves one <see cref="AssetWatcher.Debounce"/> per reading.
-    /// </summary>
+    /// <summary>A clock that moves one <see cref="AssetWatcher.Debounce"/> per reading.</summary>
     /// <remarks>
     /// Time is the thing under test, so it is not left to the wall clock — a real one would make
     /// "was this ripe yet" depend on how long Coyote took to schedule, and the same interleaving
@@ -64,7 +62,8 @@ public static class AssetWatcherTests
 
         var clock = new SteppingClock();
         var maintainer = new SidecarMaintainer(fileSystem, s_layout);
-        return (new AssetWatcher(fileSystem, s_layout, maintainer, now: clock.Now), fileSystem);
+        // Queue tests treat asset contents as opaque.
+        return (new AssetWatcher(fileSystem, s_layout, maintainer, now: clock.Now, importers: []), fileSystem);
     }
 
     private static UPath Asset(MemoryFileSystem fileSystem, string name)
@@ -144,6 +143,10 @@ public static class AssetWatcherTests
         SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(first));
         var second = Asset(fileSystem, "models/old-b.glb");
         SidecarMeta.Mint().Save(fileSystem, SidecarMeta.PathFor(second));
+
+        fileSystem.MoveFile(first, "/game/assets/models/new-a.glb");
+        fileSystem.MoveFile(second, "/game/assets/models/new-b.glb");
+        fileSystem.DeleteFile(removed);
 
         var producers = new[]
         {

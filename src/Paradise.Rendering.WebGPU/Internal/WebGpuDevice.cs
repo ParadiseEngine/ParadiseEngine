@@ -105,14 +105,9 @@ internal sealed partial class WebGpuDevice : IDisposable
     // PipelineCache / the shader-module cache).
     private readonly System.Collections.Generic.Dictionary<string, WgBindGroupLayout> _bindGroupLayoutCache = new();
 
-    // Content-keyed native shader-module cache. Sits BELOW the public ShaderHandle layer so the
-    // renderer can hand out fresh handles per CreateShaderModule call while still deduping the
-    // underlying Dawn shader module by (WGSL source + entry point + stage). Mirrors
-    // PipelineCache's design: insert-only, renderer-lifetime, native survives as long as the
-    // renderer. Two callers that request the same shader-module content get distinct
-    // ShaderHandles that both resolve; destroying one never invalidates the other — same public
-    // contract as every other resource type. Revisited in M2/M3 if/when hot-reload or large
-    // shader libraries make retain/release or LRU eviction worthwhile.
+    // Cache native shader modules by (WGSL, entry point, stage) for the renderer lifetime. Public
+    // handles remain independent: releasing one slot cannot invalidate other users of the same
+    // module.
     private readonly System.Collections.Generic.Dictionary<ShaderModuleCacheKey, WgShaderModule> _shaderModuleCache = new();
 
     private readonly record struct ShaderModuleCacheKey(string Wgsl, string EntryPoint, ShaderStage Stage);
@@ -467,10 +462,11 @@ internal sealed partial class WebGpuDevice : IDisposable
                     };
                     break;
                 case BindingResourceType.SampledTexture:
+                case BindingResourceType.SampledTextureArray:
                     entry.Texture = new WgTextureBindingLayout
                     {
                         SampleType = WgTextureSampleType.Float,
-                        ViewDimension = WgTextureViewDimension.D2,
+                        ViewDimension = e.Type == BindingResourceType.SampledTextureArray ? WgTextureViewDimension.D2Array : WgTextureViewDimension.D2,
                         Multisampled = false,
                     };
                     break;

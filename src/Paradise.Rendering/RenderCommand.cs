@@ -24,6 +24,7 @@ public enum RenderCommandKind : byte
     EndComputePass,
     SetComputePipeline,
     Dispatch,
+    DrawIndexedIndirect,
 }
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
@@ -54,15 +55,10 @@ public readonly record struct SetComputePipelinePayload(ComputePipelineHandle Pi
 /// payload budget.</summary>
 public readonly record struct SetBindGroupPayload(uint GroupIndex, BindGroupHandle Group, uint DynamicOffset, bool HasDynamicOffset);
 
-/// <summary>Discriminated render command. Kind selects one of the payload fields below; reading
-/// any other field is undefined. Encode via <see cref="RenderCommandEncoder"/>.</summary>
-/// <remarks>The struct uses an explicit 8-byte aligned layout: 1 byte kind + 7 bytes padding +
-/// up to 40 bytes of payload (largest is <see cref="SetVertexBuffer"/> at 4+4-pad+16+8+8 = 40
-/// bytes; <c>BufferHandle</c> is <c>Size = 16</c> via <see cref="StructLayoutAttribute"/>). The
-/// declared <c>Size = 48</c> matches what the CLR computes for the field extents, so
-/// <c>Unsafe.SizeOf&lt;RenderCommand&gt;()</c> returns 48 — verified by
-/// <c>RenderCommandLayoutTests</c>. Sequential layout keeps the encoded stream a flat array of
-/// 48-byte cells with no pointer indirection, preserving zero-allocation encoding.</remarks>
+/// <summary>Stores a render command in an explicit 48-byte discriminated layout.</summary>
+/// <remarks>Kind selects the valid payload; use RenderCommandEncoder. Eight-byte alignment leaves
+/// 40 payload bytes, matching SetVertexBuffer and its 16-byte handle. Layout tests pin the
+/// stride.</remarks>
 [StructLayout(LayoutKind.Explicit, Size = 48)]
 public readonly struct RenderCommand
 {
@@ -78,6 +74,7 @@ public readonly struct RenderCommand
     [FieldOffset(8)] public readonly SetViewportPayload SetViewport;
     [FieldOffset(8)] public readonly SetComputePipelinePayload SetComputePipeline;
     [FieldOffset(8)] public readonly DispatchCommand Dispatch;
+    [FieldOffset(8)] public readonly DrawIndexedIndirectCommand DrawIndexedIndirect;
 
     private RenderCommand(RenderCommandKind kind, BeginPassPayload p) : this()
     {
@@ -139,6 +136,12 @@ public readonly struct RenderCommand
         Dispatch = p;
     }
 
+    private RenderCommand(RenderCommandKind kind, DrawIndexedIndirectCommand p) : this()
+    {
+        Kind = kind;
+        DrawIndexedIndirect = p;
+    }
+
     private RenderCommand(RenderCommandKind kind) : this()
     {
         Kind = kind;
@@ -167,6 +170,9 @@ public readonly struct RenderCommand
 
     public static RenderCommand FromDraw(in DrawCommand cmd) =>
         new(RenderCommandKind.Draw, cmd);
+
+    public static RenderCommand FromDrawIndexedIndirect(in DrawIndexedIndirectCommand cmd) =>
+        new(RenderCommandKind.DrawIndexedIndirect, cmd);
 
     public static RenderCommand FromDrawIndexed(in DrawIndexedCommand cmd) =>
         new(RenderCommandKind.DrawIndexed, cmd);

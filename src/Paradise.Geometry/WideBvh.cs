@@ -1,12 +1,8 @@
 namespace Paradise.Geometry;
 
-/// <summary>An 8-wide quantized bounding volume hierarchy over items — triangles of one mesh, or
-/// the instances of a scene — in the layout the compute tracer reads. Root at node 0.
-///
-/// <para>Leaves do not store items; they store runs into <see cref="ItemOrder"/>, which maps each
-/// leaf slot back to the caller's item index. A consumer lays its own item records out in this
-/// order (the renderer writes its triangle buffer in it), so a leaf's items are contiguous in
-/// memory and a node's <see cref="BvhNode.LeafBase"/> is a plain offset.</para></summary>
+/// <summary>Stores an 8-wide quantized BVH with its root at node zero.</summary>
+/// <remarks>Leaves index contiguous runs in ItemOrder, which maps leaf slots to caller item indices.
+/// Consumers arrange their records in that order so LeafBase remains a plain offset.</remarks>
 public sealed class WideBvh
 {
     public WideBvh(BvhNode[] nodes, int[] itemOrder, Aabb bounds)
@@ -23,9 +19,8 @@ public sealed class WideBvh
     /// <summary>Internal levels from the root to the deepest node (a lone root is 1).</summary>
     public int Height { get; }
 
-    /// <summary>The stack a depth-first walk needs: popping a node at each level can leave up to
-    /// seven siblings pending, plus the eight children it pushes. A walk with a shallower stack
-    /// drops children silently, so the consumer checks this against its stack constant.</summary>
+    /// <summary>The stack capacity needed for seven pending siblings per level plus eight pushed children.</summary>
+    /// <remarks>Consumers must compare this bound with their traversal stack capacity.</remarks>
     public int RequiredStackDepth => 7 * Height + 8;
 
     private static int HeightOf(BvhNode[] nodes, int index)
@@ -35,7 +30,7 @@ public sealed class WideBvh
         for (var child = 0; child < BvhNode.ChildCount; child++)
         {
             var meta = node.GetMeta(child);
-            if (meta == BvhNode.EmptyChild || !BvhNode.IsInternal(meta)) continue;
+            if (!BvhNode.IsInternal(meta)) continue;
             deepest = Math.Max(deepest, HeightOf(nodes, (int)node.ChildBase + BvhNode.InternalSlot(meta)));
         }
         return deepest + 1;

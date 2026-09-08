@@ -26,15 +26,9 @@ public class PbrRendererGpuTests
         }
     }
 
-    /// <summary>
-    /// GPU skinning moves the mesh: the same uploaded buffers, rendered twice, differ only by the
-    /// joint palette.
-    ///
-    /// This is the assertion that actually distinguishes working skinning from a shader that
-    /// compiles and ignores its joints — the failure mode is a character that renders perfectly
-    /// and never moves, which no compile or validation error catches. Every vertex is bound to
-    /// joint 0 at full weight, so translating that one matrix must translate the whole cube.
-    /// </summary>
+    /// <summary>Checks that changing only the joint palette moves the rendered mesh.</summary>
+    /// <remarks>All vertices use joint zero at full weight, so its translation must move the entire
+    /// cube.</remarks>
     [Test]
     public async Task skinned_geometry_follows_its_joint_palette()
     {
@@ -288,8 +282,8 @@ public class PbrRendererGpuTests
             // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
             // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
             // detaching). Point light: perspective texels are metres PER METRE of distance,
-            // 2·tan(45°)/mapSize at the default 1024 map.
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
+            // 2·tan(45°)/(tileSize - 2), excluding the atlas guard.
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1022f);
         }
         finally
         {
@@ -297,18 +291,8 @@ public class PbrRendererGpuTests
         }
     }
 
-    /// <summary>
-    /// The DIRECTIONAL shadow texel size — the value all the actual fit arithmetic feeds, and the
-    /// one whose silent corruption reproduces the original bug class (a wrong bias scale, no test
-    /// failure, acne or detached shadows in-game). Both fits are pinned:
-    ///
-    /// * LEGACY whole-scene fit (scene smaller than DirectionalShadowRadius): a unit cube under a
-    ///   straight-down sun projects to a 1x1 light-space footprint, padded by xyPad = 1 on each
-    ///   side — texel = 3/mapSize. The straight-down direction makes the light basis axis-aligned,
-    ///   so the expected span is exact whatever the LookAt handedness.
-    /// * CAMERA-CENTRED fit (scene larger than the radius): texel = 2·(radius + xyPad)/mapSize,
-    ///   the same value the fit snaps its focus grid to.
-    /// </summary>
+    /// <summary>The uploaded bias follows the first cascade's actual texel density; growing the
+    /// caster bounds extends depth coverage without reducing camera-frustum resolution.</summary>
     [Test]
     public async Task directional_shadow_texel_size_tracks_the_active_fit()
     {
@@ -341,16 +325,21 @@ public class PbrRendererGpuTests
             scene.Instances.Add(instance);
             pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
 
-            // Unit cube → sceneRadius clamps to 4 < DirectionalShadowRadius (50) → legacy fit.
             pbr.RenderFrame(scene);
+            var shadow = pbr.Pipeline.Find<ShadowFeature>()!;
+            var first = shadow.Views[0];
+            var projectedScale = new Vector3(first.Vp.M11, first.Vp.M21, first.Vp.M31).Length();
+            var expectedTexel = 2f / ((first.Tile.Size - 2) * projectedScale);
             await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
-                .IsEqualTo(3f / 1024f).Within(1e-7f);
+                .IsEqualTo(expectedTexel).Within(1e-6f);
 
-            // 300 m cube → sceneRadius ≈ 130 > 50 → camera-centred fit at radius + xyPad = 51.
             instance.Model = Matrix4x4.CreateScale(300f);
             pbr.RenderFrame(scene);
+            await Assert.That(shadow.Views[0].TexelWorld).IsEqualTo(first.TexelWorld).Within(1e-6f);
+            await Assert.That(shadow.Views[0].DepthRange.Y - shadow.Views[0].DepthRange.X)
+                .IsGreaterThan(first.DepthRange.Y - first.DepthRange.X);
             await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
-                .IsEqualTo(2f * 51f / 1024f).Within(1e-7f);
+                .IsEqualTo(expectedTexel).Within(1e-6f);
         }
         finally
         {

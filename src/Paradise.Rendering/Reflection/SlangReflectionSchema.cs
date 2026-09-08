@@ -2,21 +2,9 @@ using System.Text.Json.Serialization;
 
 namespace Paradise.Rendering;
 
-// Records mirroring the subset of `slangc -reflection-json` output the loader consumes:
-// (a) entry points, split per [shader("...")] attribute, with varying inputs driving the vertex
-//     buffer layout;
-// (b) top-level global parameters ("parameters"), driving bind-group layouts and uniform-block
-//     byte layouts — constant buffers ("constantBuffer" with per-field {kind:"uniform", offset,
-//     size} bindings and total size at elementVarLayout.binding.size), textures ("resource" with
-//     baseShape "texture2D"), and samplers ("samplerState"). Binding slots come from
-//     {kind:"descriptorTableSlot", space, index}; `space` is OMITTED for group 0.
-// The shape is pinned by the bindings.slang golden test in Paradise.Rendering.WebGPU.Test —
-// schema drift breaks that test, and only this file plus ShaderProgramLoader absorb the change.
-//
-// This is the *raw Slang JSON* schema, not the engine-canonical ShaderProgramDesc shape these
-// types sit beside. The loader transforms one to the other so the engine surface stays stable
-// even if Slang's reflection schema evolves — hence `internal`: the schema records are the
-// absorbing layer, never part of the package's public contract.
+// Internal Slang reflection schema: entry points supply vertex inputs; global parameters supply
+// bindings and uniform offsets. Group-zero space may be omitted. ShaderProgramLoader converts these
+// records to the public engine shape; bindings.slang tests detect schema drift.
 
 internal sealed record SlangReflection(
     [property: JsonPropertyName("entryPoints")] SlangEntryPoint[]? EntryPoints,
@@ -59,7 +47,8 @@ internal sealed record SlangTypeNode(
     [property: JsonPropertyName("elementVarLayout")] SlangVarLayout? ElementVarLayout = null,
     // RW resource access: "write" (WTexture2D), "readWrite" (RWTexture2D / RWStructuredBuffer),
     // "read", or absent for ordinary read-only resources.
-    [property: JsonPropertyName("access")] string? Access = null);
+    [property: JsonPropertyName("access")] string? Access = null,
+    [property: JsonPropertyName("array")] bool Array = false);
 
 internal sealed record SlangVarLayout(
     [property: JsonPropertyName("type")] SlangTypeNode? Type,

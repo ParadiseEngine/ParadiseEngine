@@ -1,592 +1,287 @@
-# ParadiseEngine — agent guide
+# ParadiseEngine agent guide
 
-A .NET game engine: an ECS, a WebGPU renderer, an unmanaged behavior-tree runtime, an asset
-pipeline and the packages a game consumes them through. This file is the canonical guidance for
-AI agents; `CLAUDE.md` imports it.
+A .NET 10 / C# 14 game engine with ECS, WebGPU rendering, behavior trees and an asset pipeline.
+This is the canonical agent guide; `CLAUDE.md` imports it.
 
-## Build and Test Commands
+## Build and test
 
 ```bash
-# Build all projects
 dotnet build ParadiseEngine.slnx
-
-# Run all tests
 dotnet test --solution ParadiseEngine.slnx --output normal
-
-# Build/test a single project
 dotnet build src/Paradise.BT/Paradise.BT.csproj
 dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
-
-# Run the sample app
 dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 ```
 
-AOT compatibility of tree construction and ticking is verified via `Paradise.BT.Sample`, which sets `<PublishAot>true</PublishAot>`. Test projects do not enable AOT so the analyzer-testing harness can use `Reflection.Emit`. The `Paradise.BT` serialization surface (`Serialize`/`Deserialize`) and `Paradise.BLOB`'s `ManagedBlobAssetReference` are not currently covered by an AOT build; adding a dedicated AOT publish-and-run CI job for those paths is a known follow-up.
+Use .NET SDK 10.0.400+ (`global.json`, `rollForward: latestMinor`). Older compilers cannot load
+the Roslyn 5.9 analyzers (CS9057). Shared properties and package versions live in
+`src/Directory.Build.props` and `src/Directory.Packages.props`.
 
-### Concurrent code gets a Coyote test
+`Paradise.BT.Sample` enables `PublishAot` to check tree construction and ticking. Tests allow
+`Reflection.Emit` for the analyzer harness. BT serialization and BLOB's
+`ManagedBlobAssetReference` still need dedicated AOT publish-and-run coverage.
 
-**Anything with cross-thread rules — a lock, a shared flag, a queue two threads touch — gets a
-systematic test in the matching `*.CoyoteTest` project, not only a stress loop.** Coyote schedules
-interleavings deliberately; a stress loop reaches the bad one by luck or not at all. This is not
-theoretical: a hand-written race test for the renderer's capture queue passed **three runs out of
-three** against code with a real check-then-enqueue defect, while the Coyote test on the same
-broken build failed inside 200 iterations.
+### Concurrent code
+
+Changes to locks, shared flags or queues require systematic tests in the matching Coyote suite;
+stress tests alone do not cover interleavings. Suites are standalone runners, skipped by
+`dotnet test`: ECS, Rendering.WebGPU, Assets.Pipeline, Assets.Project, Cli, Ui.ImGui and Features.
 
 ```bash
-# Release, because the `coyote rewrite` target only runs there (needs the coyote CLI)
-dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest/... -c Release
+# Rewriting runs only in Release and requires the coyote CLI.
+dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest -c Release
 dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
-Existing suites: `Paradise.ECS.CoyoteTest`, `Paradise.Rendering.WebGPU.CoyoteTest`,
-`Paradise.Assets.Pipeline.CoyoteTest`, `Paradise.Assets.Project.CoyoteTest`, `Paradise.Cli.CoyoteTest`,
-`Paradise.Ui.ImGui.CoyoteTest`, `Paradise.Features.CoyoteTest`.
+- Lock on `object`: Coyote 1.7.11 rewrites `Monitor`, not `System.Threading.Lock.EnterScope`.
+- Separate managed coordination from native calls; `CaptureQueue` is the renderer example.
+- Await joins; `Task.WaitAll` can appear as a deadlock. Keep hang detection enabled.
+- For regressions, reintroduce the defect, confirm the test fails, then restore the fix.
+- Zio `CopyFileCross` resolves to the physical filesystem and bypasses wrapper `OpenFileImpl`.
+  Memory filesystems can permit operations the OS refuses; see `.claude/lessons.md`.
 
-A fourth thing, learned from the asset watcher: **lock on an `object`, not on
-`System.Threading.Lock`, in anything a Coyote suite covers.** Coyote (1.7.11) rewrites
-`Monitor.Enter`/`Exit` and does not intercept `Lock.EnterScope`, so with the newer type it cannot
-control the lock — every iteration reports the wait as a potential hang, and silencing that would
-only hide the fact that the interleavings around that lock are never explored. The newer type is
-worth having where a lock is hot; it is not worth a suite that cannot see it.
+## Coordinates
 
-Three things worth knowing before writing one:
+The data contract is **right-handed, Y-up, −Z forward, +X right**, in meters, with column-major
+matrices. Consume Godot/glTF values without a Z mirror. ECS and rendering core are otherwise
+coordinate-agnostic; conversions belong where transforms, projections or navmesh geometry form.
 
-- **Extract the managed part first.** Coyote schedules `Task`, `lock` and concurrent collections —
-  it cannot see inside a native call. The renderer's capture path is mostly Dawn
-  (`OnSubmittedWorkSync`, `MapSync`, `RequestAdapterSync`), so the queue, its flag and its drain
-  were pulled into `CaptureQueue`, which has no native calls at all. Testability was the reason,
-  and it is usually the reason such an extraction is worth it.
-- **Await joins; do not block on them.** `Task.WaitAll` parks a thread, which Coyote cannot
-  distinguish from a deadlock — it reports every such test as a potential hang even when the code
-  is correct. Making the tests `async` keeps hang detection ON and meaningful, instead of switching
-  it off with `WithPotentialDeadlocksReportedAsBugs(false)`.
-- **Prove the test fails without the fix.** Reintroduce the defect, watch it fail, restore. A
-  concurrency test that has never failed is a guard nobody has checked the lock on.
+## Behavior trees and blobs
 
-These projects are deliberately NOT `IsTestProject` — they are standalone runners with their own
-`Main`, so `dotnet test` skips them and they must be run explicitly.
+`Paradise.BLOB` provides unmanaged blob builders with no external dependencies. `Paradise.BT`
+builds the runtime on it; `Paradise.BT.Sample` demonstrates usage and `*.Test` holds TUnit tests.
 
-## Project Overview
+1. `[Builder]` generates builders; `LeafNode<T>`, `DecoratorNode<T>` and `CompositeNode<T>` also
+   compose a `BTreeNode` graph directly.
+2. `BTreeNode.Build()` validates arity (leaf 0, decorator 1; no attribute implies leaf) and
+   compiles a shared `BehaviorTreeLayout`: end indices, GUIDs, aligned data offsets (up to 16)
+   and defaults. `BehaviorTrees.Compile<TTree>()` returns its typed form. Trees compile from code.
+3. Instances use caller-owned state/data buffers: `BehaviorTreeRef` for spans or
+   `FixedBehaviorTree<TTree, TStates, TData>` for inline component storage. Pass the blackboard
+   to each `Tick`; generated blackboards may be `ref struct`.
+4. `VirtualMachine.Tick()` dispatches by node GUID through `NodeTypeRegistry`; the generator
+   emits per-assembly registration in a module initializer.
+5. Generated `IBlackboardFor<TTree>` bindings make mismatched tree/blackboard types compile errors.
 
-Paradise Engine is a .NET behavior tree runtime library inspired by EntitiesBT, with a companion binary blob serialization library. It targets `net10.0`, uses C# 14, and is NativeAOT/trimming compatible.
+Custom nodes are unmanaged structs implementing `INode`, identified by `[Guid]`, optionally
+with `[Builder]`. `Tick<TBehaviorTree, TBlackboard>` permits `ref struct` arguments; `Reset` is
+optional. Read node data through `blob.GetNodeData<MyNode>(index)` and shared state through
+`bb.GetData<T>()`. `IBlackboard` uses `HasData`/`GetData`/`SetData`, without ref returns, so
+read/write intent is statically checkable. `NodeState.None` means never ticked or reset.
 
-### Coordinate convention
+BLOB's `BlobArray`, `BlobString`, `BlobPtr` and builders use relative pointers. Access every
+`BlobArray`/`BlobString` through a **mutable `ref`**: copying a header, including through a readonly
+reference, redirects its relative offset into the stack. In hot loops, take `field.ToSpan()` once.
 
-The engine and its data contract are **right-handed: Y-up, −Z forward, +X right** (Godot / glTF
-standard), in meters, with **column-major** matrices. This matches what the editor tools
-(`ParadiseGodotEditor`) export — the exporter writes Godot values verbatim, with no handedness
-conversion. Any future scene/navmesh/level loader must consume right-handed data directly (no
-Z-mirror). The engine core (`Paradise.ECS`, `Paradise.Rendering`) is otherwise coordinate-agnostic;
-handedness only enters where transforms, camera/projection matrices, or navmesh geometry are built.
+## Rendering
 
-### Monorepo Layout
+### Compute ray tracing and probe GI
 
-- `src/Paradise.BLOB` — Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr, builders). No external dependencies. Target: `net10.0`.
-- `src/Paradise.Features` — Engine-wide feature configuration: the features a build declares and the switches that turn each on or off at runtime. No package dependencies at all, because the renderer and the ECS both reference it.
-- `src/Paradise.Features.Toml` — Reads `engine.toml` into that. A separate assembly so Tomlyn stays out of the ECS's dependency closure.
-- `src/Paradise.BT` — Behavior tree runtime built on top of Paradise.BLOB. Target: `net10.0`.
-- `src/Paradise.BT.Sample` — Console sample demonstrating tree construction, blackboard usage, and ticking.
-- `src/Paradise.BT.Test` / `src/Paradise.BLOB.Test` — TUnit test suites.
-- `src/Directory.Build.props` — Shared build properties (C# 14, nullable, unsafe, warnings-as-errors).
-- `src/Directory.Packages.props` — Centralized NuGet package versions.
-- `ParadiseEngine.slnx` — Solution file (modern slnx format).
+`PbrScene.Gi.Enabled` enables runtime probe lighting; `PbrGi.Volume` can override the static-scene
+bounds. This uses WebGPU compute, without baking or hardware ray tracing:
 
-## Architecture
+- `Paradise.Geometry` builds binned-SAH BVHs, collapsed to eight-wide `BvhNode` records (96 bytes)
+  with conservative 8-bit bounds. `Common/bvh.slang` mirrors the layout; CPU traversal is the oracle.
+- `TraceScene` merges nodes, triangles and vertices into one buffer per kind, rebasing primitive
+  indices on upload. Its per-frame top-level BVH uses opaque `PbrGiMode.Static` instances in leaf
+  order and rebuilds only when a frame traces.
+- `ProbeGiFeature` traces rays, blends ping-ponged octahedral irradiance/distance atlases and
+  relocates/classifies probes. Irradiance tiles are 8×8, distance tiles 14×14, each with a one-texel
+  wrap border. Hits use current lights/shadows and previous probes for multiple bounces; misses
+  use sky ambient. `pbrCore.slang` samples probes inside the volume with Chebyshev visibility.
+  `RayTracedAoFeature` provides a simpler visible tracer check.
 
-### Behavior Tree Pipeline
+Preserve these contracts:
 
-1. **Authoring** — generated builder classes (from `[Builder]` via `BTreeNodeGenerator`) or the raw generic wrappers (`LeafNode<T>` / `DecoratorNode<T>` / `CompositeNode<T>`) compose a `BTreeNode` graph (`Paradise.BT.Builder`).
-2. **Compilation** — `BTreeNode.Build()` validates each builder's arity against its node's `[Builder]` cardinality (Leaf = 0, Decorator = 1; no attribute claims Leaf) and flattens straight into a `BehaviorTreeLayout`: one shared native blob of end indices, a GUID table, per-node data offsets (natural alignment, capped at 16) and authored defaults. `BehaviorTrees.Compile<TTree>()` does the same from a tree TYPE and returns a typed `BehaviorTreeLayout<TTree>`. A thousand agents share one layout; there is no serialization — trees compile from code.
-3. **Instantiation** — an instance is two caller-owned buffers over the layout: `BehaviorTreeRef` (a ref struct view) for arbitrary spans, or `FixedBehaviorTree<TTree, TStates, TData>` for inline-in-a-component storage. The blackboard is passed per `Tick(bb)` call, so `ref struct` (generated) blackboards work.
-4. **Execution** — `VirtualMachine.Tick()` dispatches each node by its GUID through `NodeTypeRegistry` and ticks it through its bytes. Registration is emitted per assembly by the generator as a module initializer.
-5. **Type safety** — the binding generator stamps each generated blackboard `IBlackboardFor<TTree>`; the typed layout/ref and `FixedBehaviorTree` only accept that tree's blackboard, so a mismatch is a compile error.
+- Slang retains unused globals from includes. Compute shaders should include `Common/lighting.slang`
+  rather than raster `pbrCore.slang`; inspect `obj/…/shaders/<name>.reflection.json` bind groups.
+- Layout entries must include compute visibility. Name-based overrides inherit the file default.
+  Dawn can report a dropped dispatch asynchronously; verify a compute pass with a changed image.
+- Declare compute dependencies through `AddComputePass`, `GraphBinding.StorageTexture` (write),
+  `ImportBuffer` and `GraphBinding.TrackedBuffer(..., write:)`. Private outputs with no readers
+  are culled. Reading last frame's atlas needs no writer in the current frame.
+- Probes and sky use **E/π**, a cosine-weighted radiance mean. Direct hit lighting follows raster's
+  no-1/π convention; sky carries exposure, which must not be applied again on the probe path.
+- The depth/normal prepass declares the **whole vertex stream**; reflection derives stride from
+  the struct even when the shader reads only position and normal.
+- Forward+ `lightCull.slang` stays independent of `lighting.slang`: one thread per froxel tests
+  view-space light spheres without atomics. Upload slice boundaries because WGSL `pow` and
+  `MathF.Pow` may differ by an ULP and change boundary masks.
+- Keep CPU oracles (`ClusterBinning`, `BvhTraversal.ClosestHit`). Test binning against brute-force
+  inclusion and ensure masks are not all full. Attenuation is zero at/beyond range, so correct
+  binned/unbinned frames are bit-identical; pass-matrix pixel goldens check this.
 
-### Key Abstractions
+### Profiling
 
-- **`INode`** — The core node contract: unmanaged struct with generic `Tick<TBehaviorTree, TBlackboard>(int index, blob, bb)`; optional `static virtual Reset`. Identity is `[Guid]`.
-- **`IBehaviorTree` / `BehaviorTreeRef`** — The instance view over the shared `LayoutBlob` plus caller-owned spans (states + runtime data). Data is reached by `ref byte`, so buffers may be managed arrays or native/chunk memory.
-- **`NodeTypeRegistry`** — Process-wide GUID → invoker table; the GUID is the whole identity.
-- **`IBlackboard`** — Three members (`HasData`/`GetData`/`SetData`), no ref returns, which is what makes read/write intent statically checkable by the generators.
-- **`NodeState`** — Flags enum (`None`, `Success`, `Failure`, `Running`); `None` means "never ticked / reset".
+Build with `-p:ParadiseProfiling=true` to enable `PARADISE_PROFILING` timestamps, CPU phase laps
+and the sample benchmark. API members remain present otherwise but report no timings.
+`WebGpuRenderer.PassTimingEnabled` and `ReadPassTimings` use `FrameGraph.LivePassNames`.
 
-### Custom Node Pattern
+Run the sample's `--gi-demo --bench`; `--pbr --bench` reports nothing. On Apple GPUs, overlapping
+passes inflate per-pass wall times: trust the idle-to-idle GPU frame total and compare feature
+toggles (`--no-gi`, `--rtao`, `--no-bloom`, `--gi-rays`, `--gi-max-probes`, `--gi-probes-per-frame`,
+`--lights`). Workgroup ray staging, any-hit traversal and half-resolution AO helped; nearest-first
+child sorting cost more than it saved. Verify optimization images as well as frame totals.
 
-Implement `INode` on an unmanaged struct, tag with `[Guid("...")]` (and `[Builder]` for a generated builder class), then compose it via its builder or `new LeafNode<MyNode>(...)`:
+`LightCull.Bin` scales linearly: on an Apple M-series at 1280×960 it measured 0.039, 0.093,
+0.312 and 1.229 ms at 64, 256, 1024 and 4096 lights. Two-level culling and per-tile workgroups
+were no faster; raising the tile-list capacity from 256 to 2048 also had no effect. Measure
+this pass separately before restructuring it: its current frame cost is small.
 
-```csharp
-[Guid("...")]
-public struct MyNode : INode
-{
-    public NodeState Tick<TBehaviorTree, TBlackboard>(int index, TBehaviorTree blob, TBlackboard bb)
-        where TBehaviorTree : struct, IBehaviorTree, allows ref struct
-        where TBlackboard : struct, IBlackboard, allows ref struct
-    {
-        // access runtime/default data via blob.GetNodeData<MyNode>(index)
-        // access shared state via bb.GetData<T>()
-        return NodeState.Success;
-    }
-}
-```
+## Feature configuration
 
-### Paradise.BLOB
+Every switchable subsystem declares a `FeatureDefinition` and reads `IFeatureSwitches`.
+`Paradise.Features` has no package dependencies; `Paradise.Features.Toml` isolates Tomlyn from
+ECS consumers. Keep this name: `Paradise.Configuration` would shadow Coyote's `Configuration`.
 
-Low-level unmanaged binary blob library backing the BT layout. Key types: `BlobArray<T>`, `BlobString<TEncoding>`, `BlobPtr<T>`, `ManagedBlobAssetReference<T>`. Builders (`ValueBuilder`, `StructBuilder`, `ArrayBuilder`, `TreeBuilder`, `SortedArrayBuilder`) produce pinned memory blocks.
-
-### Runtime global illumination: probes over a compute ray tracer
-
-**Indirect light is a probe volume, updated every frame by rays traced in compute against the
-scene's own geometry — no bake, no hardware ray tracing, WebGPU only.** `PbrScene.Gi.Enabled`
-turns it on; the volume fits the static scene unless `PbrGi.Volume` authors one. Three layers,
-each testable on its own:
-
-- **`Paradise.Geometry`** builds the hierarchy: `TriangleBvh.Build` (binned SAH, collapsed to
-  8-wide nodes with 8-bit quantized child bounds — `BvhNode`, 96 bytes, mirrored byte for byte by
-  `Common/bvh.slang`) and `BvhTraversal.ClosestHit`, the CPU twin of the shader walk that the
-  tests hold the builder against. Decoded child boxes are always conservative; a test proves it.
-- **`TraceScene`** (in `Paradise.Rendering.Pbr`) is the scene as the tracer sees it: ONE merged
-  buffer per kind — nodes, triangles, vertices — with every primitive's hierarchy rebased to
-  absolute indices at `UploadPrimitive` (there is no bindless, so a mesh cannot be a buffer of its
-  own), plus a per-frame top-level hierarchy over the opaque `PbrGiMode.Static` instances whose
-  instance table is laid out in leaf order. It is rebuilt only in frames something traces.
-- **`ProbeGiFeature`** runs four compute passes at `RenderPassEvent.GlobalIllumination`: trace
-  (`probeTrace.slang`, hits shaded with the frame's lights and shadow maps, the material's
-  factors, and LAST frame's probes — the infinite bounce; misses take the sky ambient), two
-  blends into ping-ponged octahedral atlases (`probeBlend.slang`: irradiance at 8×8 per probe,
-  distance moments at 14×14, each tile with a 1-texel wrap border so bilinear reads cross edges),
-  and relocation/classification for the next frame (`probeUpdate.slang`). `pbrCore.slang` replaces
-  the sky ambient with `sampleProbeIrradiance` for surfaces inside the volume (Chebyshev
-  visibility keeps a probe behind a wall from leaking through it) unless the draw's GI mode is
-  disabled. `RayTracedAoFeature` is the tracer's proving ground: a picture that must darken.
-
-Things that bit, so they are rules:
-
-- **slangc keeps every global an included file declares, referenced or not.** A compute shader
-  that includes `pbrCore.slang` inherits the whole raster layout and collides with its own group
-  0. `Common/lighting.slang` holds exactly what shading a hit needs (frame UBO, shadow array and
-  sampler at group 1 bindings 0–2, attenuation and shadow lookup); `uniforms.slang` adds the
-  raster-only bindings on top. Check a new program's bind groups in
-  `obj/…/shaders/<name>.reflection.json` before trusting them.
-- **A compute pass fails silently when a layout entry is not visible to it.** Dawn reports the
-  pipeline error asynchronously and the dispatch is dropped; the loader's name-based overrides
-  (`shadowTexture`, `prepassDepthTexture`, …) therefore take the file's default visibility. Prove
-  a compute pass with a picture that must change, never with "it ran".
-- **The frame graph knows compute:** `AddComputePass`, `GraphBinding.StorageTexture` (a WRITE
-  edge), `ImportBuffer` + `GraphBinding.TrackedBuffer(…, write:)` for tracked buffers (named
-  apart from the raw `Buffer` so a tracked buffer cannot lose its edge by overload). A trace whose
-  only output is a private hit buffer is culled the moment nothing binds that buffer for
-  reading — the same switch-off rule textures have. A pass reading last frame's atlas declares a
-  plain read of a resource nothing writes this frame, which the graph allows.
-- **The probes and the sky share one irradiance convention: E/π.** A probe texel is the
-  cosine-weighted mean of its rays' radiance, which is what the SH sky ambient already is, so a
-  scene under a flat sky renders the same with the probes on or off (a test pins this, within the
-  darkening the probes correctly see below the horizon). Direct light at a hit follows the
-  raster's non-physical convention (no 1/π); the sky term carries the exposure, so exposure is
-  applied nowhere else on the probe path.
-- **The depth + normal pre-pass declares the WHOLE vertex stream** even though it reads two
-  attributes: the reflected stride comes from the struct, and a position-only struct once
-  sampled interleaved normals as positions for as long as SSAO existed.
-- **Profile with the sample's `--bench` in a profiling build (`dotnet build
-  -p:ParadiseProfiling=true`, which defines `PARADISE_PROFILING` in every project), and trust the
-  frame total, not the per-pass rows, on Apple GPUs.** The timestamp plumbing, the CPU phase
-  laps and the bench compile only then; the members stay in the API and report nothing
-  otherwise. `WebGpuRenderer.PassTimingEnabled` + `ReadPassTimings` give per-pass timestamp
-  pairs (names from `FrameGraph.LivePassNames`), but Apple GPUs run passes concurrently and a
-  timestamp pair measures wall time while other work is in flight — every bloom mip "took" 3 ms
-  beside a compute trace, for a 5 ms frame. The bench also prints the GPU idle-to-idle frame time
-  (submit, then wait); attribute cost by toggling features (`--no-gi`, `--rtao`, `--no-bloom`,
-  `--gi-rays N`, `--gi-max-probes N`, `--gi-probes-per-frame N`, `--lights N`). `--bench` is wired
-  into the `--gi-demo` scene only; `--pbr --bench` silently reports nothing. Measured on an Apple
-  M-series at
-  1280×960 in the Cornell room: base 2.1 ms (bloom 0.8), probes +2.3 ms at 3072 probes × 128 rays
-  (linear in rays), RT-AO +2.6 ms at half resolution with 8 rays. Two things that paid: staging a
-  probe's rays and directions in workgroup memory once per blend workgroup (halved the blend), and
-  an early-out any-hit walk plus half resolution for RT-AO (9.5 → 2.6 ms). One that did not:
-  nearest-first child ordering in the traversal (+0.3 ms; the sort outweighed the skipped nodes).
-  Moving Forward+ binning off the CPU paid twice at `--lights 62` (64 lights, the mask width): the
-  `setup` phase went 0.63 → 0.045 ms because the per-frame clear and 300 KB mask upload went with
-  it, and the GPU frame went 3.8 → 2.9 ms because a gather against the froxel box is tighter than
-  the screen-AABB scatter it replaced and fewer zero-contribution lights get shaded. The picture is
-  byte-identical across the change.
-- **The froxel cull pass is 0.05 ms and scales linearly; it is not worth optimising.** Measured on
-  an Apple M-series at 1280×960, `LightCull.Bin` costs 0.039 ms at 64 lights, 0.093 at 256, 0.312
-  at 1024 and 1.229 at 4096 — 1.8% of a 2.8 ms frame today, and 0.3 ms at the light count lifting
-  the cap aims for. Two restructurings were tried against it and BOTH measured neutral-to-worse, in
-  interleaved A/B runs: a two-level cull (a tile pass listing the lights whose spheres reach the
-  tile frustum, then a froxel pass over that short list) was slower at 64, 256, 1024 and 4096
-  lights, and raising the per-tile capacity from 256 to 2048 changed nothing, which ruled out list
-  overflow; and one workgroup per TILE with the four corner rays staged in groupshared memory —
-  32× less unprojection — was within noise of a thread per froxel. Neither is in the tree. The pass
-  is too small a share of the frame for its shape to matter, so measure this pass in isolation
-  before rewriting it, and treat "froxels × lights looks quadratic" as the trap it is.
-
-### A feature is switched by engine configuration, not by a flag of its own
-
-**Anything a build can turn off declares a `FeatureDefinition` and asks `IFeatureSwitches`
-whether it is on — the renderer's features, an ECS schedule's systems, and whatever a game adds
-next.** `Paradise.Features` holds that: `FeatureId` (a validated dotted name — `rendering.bloom`,
-`gameplay.weather`), the declaration that gives it a default and a description, and
-`FeatureSwitches`, the one object per process that answers. `TomlEngineConfiguration.Read` parses
-`engine.toml`; `FeatureOverrides.Parse` reads a `--features +a,-b` flag or `PARADISE_FEATURES`.
-Layers merge nearest-last: declarations, then the file, then the environment, then the command
-line. `dotnet run --project src/Paradise.Rendering.Sample -- --list-features` prints what a build
-has.
-
-A feature is also configured, not only switched. The file's second section carries a settings
-table per feature, and `switches.SettingsFor(id).Read(GameJson.Default.WeatherSettings)` binds it
-to the caller's own record. Nothing engine-side uses it: an engine feature's parameters are
-scene-authored, and this exists for the game feature the engine has never heard of.
+Overrides merge in order: declarations, `engine.toml`, environment (`PARADISE_FEATURES`), then
+CLI (`--features +a,-b`). `FeatureId` is a validated dotted name. Overrides may precede declaration;
+retain unknown names in `FeatureSwitches.Unknown` so hosts can report typos.
 
 ```toml
-# engine.toml — one entry per feature, holding everything about it
 [[features]]
 name = "rendering.globalIllumination"
-enabled = false                      # the integrated GPU cannot afford the probe trace
+enabled = false
 
 [[features]]
 name = "game.weather"
 enabled = true
-intensity = 0.6                      # everything but name/enabled is the feature's settings
+intensity = 0.6
 windMetresPerSecond = 3.5
 ```
 
-**The reader is a second assembly, `Paradise.Features.Toml`.** Reading TOML needs Tomlyn, and
-`Paradise.Features` has no package references because `Paradise.ECS` — which references nothing
-else at all — references it; a TOML parser in the ECS's closure is a cost every consumer of the
-ECS pays for a file only a host reads. Same shape as the logging rule below: the abstraction is
-dependency-free, the concrete reader is a package the host picks. What crosses the seam is
-`EngineConfiguration`, a bag of names and values that depends on nothing.
+- Use one `[[features]]` entry per feature; `name` and optional `enabled` are reserved. Reject
+  duplicates. Other keys are settings; later layers replace the entire settings table.
+- Carry settings as text and bind through the producing reader (`FeatureSettingsToml.Read<T>`)
+  with the caller's source-generated `TomlSerializerContext`. Do not convert to JSON or reflect.
+- Settings use `get; set;` and a context naming policy. `init` can lose omitted-value initializers;
+  without `PropertyNamingPolicy`, camelCase keys may not bind. `FeatureSettingsTests` covers both.
+- Require host-provided switches in `PbrRenderer` and `RenderPipeline`; an unconfigured host
+  explicitly passes `new FeatureSwitches()`.
+- Both the build switch and scene `Enabled` must allow a feature. Scene-disabled bloom may still
+  declare a chain for graph culling; a disabled switch prevents the feature from running.
+- Snapshot switches once per frame/schedule run. Mid-run changes apply next time. Do not subscribe
+  the pipeline to `Changed`, which may run on another thread and race GPU state; hosts can call
+  `BeginFrame` for an immediate transition before the next frame.
+- Persistent render state implements `IRenderFeature.OnEnabledChanged`: retract shadows, SSAO,
+  probe volumes and froxels on disable, including when already disabled at `Add`.
+- Register engine features only in `PbrBuiltInFeatures`; games add features at spaced
+  `PbrFeatureOrder` slots. Keep feature APIs on their features, without renderer forwarding or
+  `…ForTest` accessors. The renderer exposes frame/output state and uploads.
+- Upload buffers filled during graph recording in `BeforeSubmit`, after `Setup` and compilation.
+- Serialize switch writes and `Changed` notifications in one critical section to preserve order;
+  `Paradise.Features.CoyoteTest` covers this.
 
-The assembly has **no package references at all**, deliberately: `Paradise.ECS`, which otherwise
-references nothing, references this. Its one diagnostic — a configured name no declaration claims,
-`FeatureSwitches.Unknown` — is reported as data rather than logged, so it needs no logging
-abstraction to say it. It is called `Paradise.Features` rather than `Paradise.Configuration`
-because a namespace of the latter name is in scope for every file under `Paradise.*` and then beats
-an imported type called `Configuration` — every Coyote suite here says `Configuration.Create()`
-meaning Microsoft.Coyote's, and all six stopped compiling.
+List declarations with `dotnet run --project src/Paradise.Rendering.Sample -- --list-features`.
 
-Thirteen things that are not obvious:
+## Logging and filesystems
 
-- **A switch and a scene setting are different questions, and both have to say yes.** The switch is
-  the platform's answer ("this build does not do probe GI"), applied once from configuration; a
-  scene's own `Enabled` (`PbrGi`, `PbrBloom`, …) is the content's answer ("this level uses it"),
-  authored per level. Collapsing them either lets a level override a platform decision or forces
-  the platform decision to be re-made in every level. They behave differently too, and a test pins
-  it: a scene that wants no bloom leaves the chain DECLARED and the graph culls it; a switch that
-  is off means the feature never runs and there is nothing to cull.
-- **Order does not matter, and that is load-bearing.** The config file is read before the renderer
-  exists, so an override lands on a name nothing has declared yet. It is kept by NAME and still
-  wins when the declaration arrives — and a name no declaration ever claims stays in `Unknown`
-  instead of vanishing, because a typo in a config file must not read as a feature that is off.
-- **A switch is read ONCE per frame and once per schedule run, and a transition is announced
-  there.** `RenderPipeline.BeginFrame` takes the frame's answer for every feature; requirements,
-  setup and `BeforeSubmit` all read it, so a switch flipped mid-frame lands on the next one.
-  `SystemSchedule` does the same before its first wave. Read live at each phase instead — which
-  is how both were first written — and a frame can set the shadow pass up, let it stage its
-  caster ring while the graph records, and then skip the `BeforeSubmit` that uploads it; and a
-  tick can run half of a gameplay feature's systems and skip the rest, with which half depending
-  on another thread's timing. That is also why the pipeline does NOT subscribe to
-  `FeatureSwitches.Changed`: a handler releasing a target on the flipping thread would be doing
-  it while the render thread recorded with it. A host that flips a switch and needs the feature
-  to have caught up before the next frame calls `BeginFrame` itself. Both are pinned by tests
-  that flip a switch from INSIDE the frame or run, which is the race made deterministic.
-- **A feature that leaves state behind must implement `IRenderFeature.OnEnabledChanged`.** Being
-  switched off is not the same as declaring no passes: the shadow plan, the pre-pass's SSAO
-  uniforms and the probe volume are all read by the SCENE every frame whether or not the feature
-  that owns them ran. Left alone they repeat the last enabled frame — a light keeps sampling a
-  shadow layer nothing fills, ambient is multiplied by a black occlusion texture the flags still
-  call real, a moving camera shades against the froxels of whatever frame binned last and lights
-  that have since come into view go missing. The pipeline calls the hook on the transition only,
-  including once at `Add` when configuration already said off. Each of the four is guarded by a
-  test that fails without it.
-- **Forward+ binning is a compute pass whose shader stays off `lighting.slang`.** `lightCull.slang`
-  gathers — one thread per froxel, every light's sphere against that froxel's view-space box — so
-  nothing needs an atomic. Including `Common/lighting.slang` to reach `frame.sceneLights` would
-  make the frame UBO, the shadow array and its comparison sampler mandatory bindings of a program
-  that reads none of them, and the feature would then satisfy three group-1 slots with stand-ins
-  and take a dependency on `ShadowFeature` to do it; the centres and radii are uploaded instead, in
-  view space, as the only light data binning needs. The slice boundaries are uploaded too: WGSL's
-  `pow` is `exp2(y·log2(x))` to a few ULP and `MathF.Pow` is not, so a shader deriving its own
-  would disagree with `ClusterBinning` by an ULP and flip a light that straddles one — which is
-  exactly the bit-exact agreement the CPU twin exists to let a test assert.
-- **`ClusterBinning` is to `lightCull.slang` what `BvhTraversal.ClosestHit` is to `bvh.slang`:**
-  production code nothing calls in a frame, mirroring the shader line for line so the tests can
-  hold it against a brute-force oracle and hold the shader against it. The oracle is one-sided on
-  purpose — a point inside a froxel within a light's range proves the bit must be set — with a
-  second test proving the masks are not simply full, which inclusion alone would satisfy. Because
-  the attenuation window is `saturate(1 − (d/range)⁴)`, exactly zero at and beyond the range, a
-  correctly binned frame and an unbinned one are bit-identical: the culling switch moves cost and
-  never pixels, and the pass-matrix PIXEL goldens did not move when binning left the CPU.
-- **Adding a feature touches no renderer.** `PbrBuiltInFeatures` is the whole list of engine
-  features and the only place a new one goes; a game calls `RenderPipeline.Add(feature, order)`
-  at a `PbrFeatureOrder` slot and needs nothing here. Order is a spaced integer for the same
-  reason `RenderPassEvent`'s is — a game feature that must publish before the scene reads it
-  cannot say so with a list position when the engine does all the adding.
-- **Nothing on the renderer names a particular feature.** `PbrRenderer` used to publish
-  `ShadowMapSize`, `ShadowBlurTexels`, `DirectionalShadowRadius`, `SetSpecularAa`,
-  `SceneColorCapture`, `SceneColorView` and `SceneColorViewChanged`, each forwarding into the
-  built-in that owns it, plus four internal `…ForTest` accessors doing the same. That is the
-  renderer saying three of its nine features are special, and the only thing making them so was
-  the forwarding — a game's feature could never have any of it. All gone. A host writes
-  `pipeline.Find<ShadowFeature>()!.MapSize = …` or
-  `pipeline.Find<SceneColorCaptureFeature>()!.View`, which is exactly what it already writes for
-  a feature it added itself, and a test asks the pipeline like everybody else. What is left is
-  the frame and what the frame produced: `RenderFrame`, `LastPassNames`, `LastCpuTimings`,
-  `Materials`, `Pipeline`, `Switches`, `AspectRatio`, and the upload surface. A shortcut that
-  seems worth adding back is a sign the FEATURE's own API is missing something.
-- **A feature that fills a buffer while RECORDING uploads it in `BeforeSubmit`.** A recorder runs
-  inside the compile, so the shadow pass's caster ring has nothing in it when `Setup` returns and
-  no moment left after the submit. That upload used to be a line in `PbrRenderer.RenderFrame`
-  reaching into `ShadowFeature`, which meant the frame loop knew that one built-in stages draws
-  and a GAME's feature with the same need could not be uploaded at all. The hook is on the
-  interface so both are served by the same call; the pass-matrix baseline goes red if the pipeline
-  stops making it.
-- **A feature is one `[[features]]` entry, and its name is a VALUE.** `name = "game.weather"`
-  needs no quoting rule and cannot be confused with table nesting, which a key would: TOML reads
-  `rendering.bloom = false` as a table `rendering` holding `bloom`. It is also the shape an
-  authored component already has in a `*.prefab` — reserved keys and a payload
-  (`PrefabComponent.ReservedKeys`) — so `TomlEngineConfiguration.ReservedKeys` follows that
-  vocabulary. `name` and `enabled` are the reader's; every other key is the feature's settings,
-  which costs a game the ability to have a setting called either, exactly as a prefab component
-  cannot have one called `id`. `enabled` is optional: an entry may configure a feature without
-  saying whether it runs. Two entries for one feature are refused rather than last-wins — that
-  silent drop is a failure this repo has already been bitten by in TOML.
-- **The settings payload is carried as text and bound by the reader that produced it.**
-  `FeatureSettings` holds `Text`, and `FeatureSettingsToml.Read<T>(context)` binds it through the
-  GAME's own source-generated `TomlSerializerContext` — so nothing reflects over a type it was not
-  handed, and nothing is converted on the way through. The binding cannot live on `FeatureSettings`
-  itself because that assembly may not name a Tomlyn type; it lives on the same seam the reader
-  does. An earlier version normalized the payload to JSON to keep the binder in the base assembly,
-  on the strength of a probe that showed Tomlyn binding nothing from a camelCase file. The probe
-  was wrong about the cause: `TomlSourceGenerationOptions` carries `PropertyNamingPolicy` exactly
-  like the JSON attribute does, and setting it makes the file bind as written. The conversion was
-  deleted.
-- **A settings type needs `get; set;` properties AND a naming policy on its context.** Both are
-  silent when missing. An `init` accessor makes the serializer build the object WITHOUT running
-  the parameterless constructor, so every property the file leaves out reads as `default` — 0, not
-  the `= 1f` the initializer says (it is the accessor and not `record` vs `class`; all four
-  combinations were probed). And a source-generated context matches the C# property name EXACTLY
-  unless given `PropertyNamingPolicy`, so a camelCase file binds nothing at all and every value
-  reads as its default. Both are pinned by `FeatureSettingsTests`, and both are the same trap in
-  the JSON and the TOML generators — they share the attribute shape.
-- **Settings merge WHOLESALE between layers, not deep.** A deep merge reads well in the two-file
-  case and has no answer for "which layer owns element 3" the moment an array is involved; a later
-  file that means to change one field writes the table it wants.
-- **`PbrRenderer` and `RenderPipeline` take the switchboard as a REQUIRED argument.** It was a
-  defaulted last parameter for about a day, and that is a host getting a private switchboard, every
-  feature at its declared default, and a config file that reached nothing — no error, and a frame
-  that still renders. A caller that configures nothing writes `new FeatureSwitches()` and has said
-  so.
-- **Writes are serialized and `Changed` is raised inside that same critical section.** Deciding
-  "did this change?" and announcing it is a check-then-act, and a subscriber ACTS on the
-  announcement; with two writers the last announcement could otherwise contradict the state
-  everyone now reads, leaving a feature switched on with its state retracted.
-  `Paradise.Features.CoyoteTest` pins it — three of its five specs fail within 200 iterations
-  against the unlocked version.
+Libraries take `ILogger` and depend only on `Microsoft.Extensions.Logging.Abstractions`; hosts
+choose providers. Use `[LoggerMessage]` on partial classes for checked, allocation-free disabled
+logging. Logger parameters are non-nullable; use `NullLogger.Instance`. Pass `UPath` values intact
+so hosts can render them through `ParadiseConsoleOptions.RenderValue`. Sinks must be thread-safe
+for Dawn, Noesis and SDL callbacks. `Console` is reserved for program output such as verb results
+and schema dumps, never library diagnostics.
 
-### Diagnostics go through `ILogger`, never `Console`
+Content readers take Zio `IFileSystem` and `UPath`, including pipeline/documents, `AuthoredDocument`
+and Noesis XAML/texture/font providers. Hosts select archive, play-tree or memory mounts.
 
-**An engine library takes an `ILogger` and references `Microsoft.Extensions.Logging.Abstractions`
-and nothing else.** Which sink a game logs to is the host's decision, the same way the mount is
-(above). `Paradise.Diagnostics` is one sink, used by `Paradise.Cli.Host`; adding a *provider* —
-ZLogger, Serilog, `Microsoft.Extensions.Logging.Console` — to a `Paradise.*` library decides for
-every host at once and is the mistake the rule exists to prevent.
+- Keep `/` separators verbatim. Let the mount enforce containment; confine untrusted relative
+  URIs, such as GLB images, with `SubFileSystem` over the source directory.
+- Use `MemoryFileSystem` in tests; mount disk fixtures relative to the test output directory.
+- Wwise's native bank loader requires host paths; document equivalent exceptions explicitly.
 
-Three things that are not obvious, all of which the build will teach you the hard way:
+## Asset pipeline
 
-- **Use `[LoggerMessage]`, not `logger.LogInformation(...)`.** The generator ships inside the
-  Abstractions package and emits the `IsEnabled` check BEFORE touching arguments, so a disabled
-  level costs no boxing and no template parse. It needs a `partial` class, and its `ILogger`
-  parameter **cannot be nullable** — the generated body calls `IsEnabled` unguarded, so `ILogger?`
-  fails with CS8602 inside generated code. Carry `NullLogger.Instance` instead.
-- **Log a `UPath` as an argument, never a pre-rendered string.** The reader does not know what its
-  filesystem is mounted over and must not guess; the host does, and installs a renderer
-  (`ParadiseConsoleOptions.RenderValue`). A `Display`-style helper that shortens a path inside a
-  library is one host's preference in the layer that cannot know it.
-- **Thread safety is the sink's job.** Dawn, Noesis and SDL all call back on threads the engine did
-  not create, and `ILogger` promises no affinity.
+### Identity and outputs
 
-Program output is not a diagnostic: `Verbs` printing `verify: 3 error(s)` and
-`Paradise.Authoring.SchemaDump` writing its dump keep `Console.WriteLine`.
+`AssetReference` is `{ guid, path }`: **GUID identifies; path is a readable hint**.
+Pass `AssetReference` across reference APIs, not a raw path.
+Share one `AssetIndex` scan across build, bake, resolve, verify and repair. Resolve with
+`AssetIndex.AssetOf`, never `assetsRoot / reference.Path`; key caches and cycle checks by GUID.
+Stale paths after external renames are warnings, repairable with `verify --fix`; missing GUIDs are
+errors. `assets mv` updates hints eagerly while retaining sidecar identity.
 
-### Everything that reads content takes an `IFileSystem`, not a path
+A GLB is source only and builds no output. Tool-owned `.mesh`, `.skinnedmesh`, `.skeleton` and
+`.anim` documents name its parts with `{ source, slot, name, index, hash, skeleton }`. Prefabs
+reference those documents, not the GLB. Meshes cook to aligned native MeshBlob data (magic/version
+first); skeletons and clips cook to ozz archives. Clip lookup uses name, then content hash, then index.
 
-**A reader takes a Zio `IFileSystem` and a `UPath`; the HOST decides what that is mounted over.**
-This is one vocabulary across both halves of the engine — the asset pipeline was already on Zio
-(`Paradise.Assets.Pipeline`, `Paradise.Assets.Documents`), and the runtime readers
-(`AuthoredDocument.Load`, `Paradise.Ui.Noesis`'s XAML/texture/font providers) now are too. A
-shipped build can mount an archive, the editor mounts its play tree, a test mounts memory.
+The GLB determines rigid versus skinned kind. A skinned document names its `.skeleton`; MeshBlob
+v3 stores that skeleton's **built path**. Kind mismatches are build errors; when the GLB gains or
+loses its rig, replace the stale document with a fresh identity.
 
-Three things follow, and each replaced code somebody had written by hand:
+`ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
+become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
+retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
+Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
-- **Do not translate separators.** A `UPath` is `/`-separated on every platform, which is exactly
-  how the asset contract spells a field, so a field combines onto its root verbatim. Every
-  `Replace('/', Path.DirectorySeparatorChar)` in a reader is a sign the mount was not used.
-- **Containment is the mount's, not a check you write.** Combining a `..` that climbs past the
-  root throws, and an absolute uri resolves INSIDE the mount rather than escaping it — so
-  untrusted content (a GLB's image uris) is confined by a `SubFileSystem` over the file's own
-  directory. Wrap the refusal only to name what asked for it; do not re-implement the rule.
-- **A test mounts memory rather than a temp directory.** `MemoryFileSystem` needs no cleanup, so
-  no fixture survives a test that throws before its `finally`. `SubFileSystem` over the test's
-  output directory is what makes fixture paths read like a shipped tree.
+### Animation contracts
 
-**The exception, and why it is one:** `Paradise.Audio.Wwise` keeps host paths. The native loader
-opens the bank file itself, so no mount can back it, and an abstraction that lies at that layer is
-worse than none. When a reader genuinely cannot go through the mount, say so where it does not.
+`Paradise.Animation` is a managed ozz-animation port pinned to 0.17: `ozz-skeleton` v2 and
+`ozz-animation` v7. Archives are persisted; runtime blobs are not. Builders/optimizer/converter
+are managed; runtime skeletons, animations, poses and sampling contexts are unmanaged BLOB layouts.
 
-Two things a wrapper must respect, both learned the hard way (see `.claude/lessons.md`):
-`CopyFileCross` resolves through a composed filesystem down to the physical one and never reaches
-a subclass's `OpenFileImpl`, and a Coyote spec over `MemoryFileSystem` can pass against a missing
-lock because memory tolerates what the OS refuses.
+`SamplingContext.Sample` and `LocalToModel.Compute` allocate nothing. Four-track `Vector128`
+interpolation retains ozz's SoA layout; cursor walking remains scalar and variable-index lane
+extraction uses a stack store. `AnimationPlayer` keeps clip references and playback/fade state in
+the class; one native blob per character owns sampling contexts, poses and matrices. Hosts call `Advance` then
+`Evaluate`, and use `SkinningPalette.Compute` for GPU palettes. Use `JointPoses` batch operations
+in hot paths; its indexer gathers one joint for attachments/tests.
 
-### An asset reference resolves by GUID, never by path
+The skeleton contains the GLB's whole node tree in depth-first, parents-first order, with siblings
+ordered by glTF index. Mesh skins map palette slots to joints and inverse binds. Unanimated joints
+hold rest pose. `ClipConverter` fills it before the ozz builder's identity padding, bakes STEP holds
+and inserts slerped keys for rotation arcs wider than 15°. Quantization is 16-bit; optional sidecar
+`[glb] optimize = { tolerance, distance }` uses ozz's 1 mm / 10 cm defaults.
 
-**An `AssetReference` is `{ guid, path }`, and only the guid names the asset.** Resolution goes
-through `AssetIndex` — the one ordinal scan of `assets/`, holding both what exists and which
-asset carries which guid — which every consumer (build, bake, prefab resolution, verify, `--fix`)
-shares. It is deliberately ONE object: the file set and the guid map come from the same walk, so
-splitting them only invites passing a mismatched pair. Pass an `AssetReference` wherever a
-reference travels; a raw path string as a parameter is the shape this rule exists to keep out.
+`OzzParityTests` compares generated archives byte-for-byte against native fixtures. The glTF
+reference sampler lives only in pipeline tests. `Paradise.Animation.Benchmarks` compares blob,
+managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
+`PARADISE_BENCHMARK_GLB` selects a character asset.
 
-The path half is carried for the diff and the grep, and it is allowed to be wrong. A rename in
-Finder or with `git mv` leaves it stale while the identity is intact, so `verify` reports that as
-a **warning** (with `--fix` to catch it up) and only a guid no asset carries is an error.
-`paradise assets mv` still rewrites eagerly; that keeps the tree tidy, it is not what keeps it
-working. Two ways to reintroduce the bug: resolving a reference with `assetsRoot / reference.Path`
-(use `AssetIndex.AssetOf`), and keying a cache or a cycle check on `reference.Path` (key on
-`reference.Guid`, and carry the path only to phrase the message).
+### Importers and extraction
 
-**A GLB ships nothing; documents name its parts and the build cooks them.** `GlbImporter.Import`
-writes no output. A `.mesh`, `.skinnedmesh`, `.skeleton` or `.anim` under `assets/` is a
-`MeshReferenceDocument` — `{ source = { guid, path }, slot, name, index, hash, skeleton }` — and
-`MeshImporter`/`SkinnedMeshImporter`/`AnimationImporter` cook the named part of the GLB (`GltfCook`)
-to the file at the document's own path: the mesh to a `Paradise.BLOB` blob (`Paradise.Assets.Mesh`,
-one aligned native copy, magic and version first), the skeleton and clips to **ozz-animation
-archives**. **A skinned mesh is its own kind.** The extractor mints a `.skinnedmesh` for a GLB with
-a skin and a `.mesh` otherwise — the GLB decides, never the author — and the skinned document
-names the `.skeleton` minted beside it; MeshBlob v3's skin carries that skeleton's BUILT path, so
-the runtime opens a mesh and reads where its rig is. A game's authoring accepts `.skinnedmesh` where
-a rig is required and `.mesh` where one is not, so the picker cannot offer the wrong kind. A `.mesh`
-over a rigged GLB, or a `.skinnedmesh` over a rigid one, is a build error naming the watcher; a GLB
-that gains or loses its rig has its stale document replaced under a fresh identity.
-A clip is found by name, then by the hash
-of its channels, then by index. **A built document names assets where the build PUT them.**
-`ImportContext.BuiltPath` resolves a reference and asks the referenced asset's own importer
-(`IAssetImporter.BuiltPath`, default: the asset's own path) — the importer that writes a texture
-as KTX2 is the one that knows it does. So a texture reference bakes to its `.ktx2`, prefabs and
-configs to the profile's extension, and mesh, skeleton, clip, material, audio and binary references
-to their own path (a built `.material` keeps its suffix and carries TOML or JSON by profile;
-`ExportDocumentReader.ReadMaterial` tells them apart by the first character). A GLB ships nothing,
-so a reference to one is a build ERROR naming the `.mesh` document to reference instead: an authored
-document references the document the watcher minted, the way it references a `.skeleton` or an
-`.anim`, and the GLB is source the way a `.png` is source to its `.ktx2`. Both the prefab bake and
-the material bake go through it, so a runtime opens the path a built document spells and never
-derives one by convention, and a game's own importer answers for its own kinds.
+- `ImporterChain` alone walks importers. `Claims` reads only path/header data; sidecar creation
+  records the chosen importer. Never overwrite a recorded name or fall back from an unknown name.
+  Keep importer extension guards for hand-edited sidecars; a declined import is a build error.
+- Builds must not edit committed sidecars to choose an importer. Build-time reconciliation uses
+  `RewriteSources = false`: sidecar identity repair may not move authored paths or container URIs.
+- Watchers mint tool-owned GLB part documents; `extract` may overwrite a stale part belonging to
+  that GLB, never one belonging to another. Materials, textures and prefabs become authored when
+  created and only `extract` writes them.
+- Sidecar extraction fingerprints track both container and document state; material fingerprints
+  cover only glTF-expressible fields. Refuse extraction when both sides changed.
+- KTX2 is build output only; `verify` rejects it beneath `assets/`.
+- Read sidecar inline tables through both `CanonicalTomlTable` and `CanonicalInlineTable` because
+  root-level inline tables may deserialize as generic tables.
 
-**Animation is a managed port of ozz-animation, pinned to its 0.17 archive format.**
-`Paradise.Animation` reads and writes `ozz-skeleton` (v2) and `ozz-animation` (v7) archives
-(`OzzArchive.ReadSkeleton/WriteSkeleton/ReadAnimation/WriteAnimation`) and carries both halves in
-C#: the runtime and the offline side (`SkeletonBuilder`, `AnimationBuilder`, `AnimationOptimizer`,
-`ClipConverter`). No native code anywhere, so NativeAOT and browser hosts get it for free. The
-RUNTIME is unmanaged: `SkeletonBlob`, `AnimationBlob` and `SamplingContext` are `Paradise.BLOB`
-layouts opened as `NativeBlobAssetReference<T>` (one native allocation each, at load), and
-`SamplingContext.Sample(ref clip, ratio, poses)` plus `LocalToModel.Compute(ref skeleton, ...)`
-allocate nothing — reach every blob through a `ref`, never a copy (see the BLOB README). The
-sampler keeps ozz's structure-of-arrays half: keys are decoded and interpolated four tracks per
-`Vector128` lane; the cursor walk is scalar on purpose (its search hits within an entry or two,
-so a vectorized `IndexOf` costs more than it saves), and lanes leave a vector through a stack
-store, never `GetElement` with a variable index (a software path). On Enemy it matches native
-ozz per frame. `AnimationPlayer` is the per-character layer on top: current and outgoing clip,
-time, rate, loop or clamp, cross-fade, `Advance(dt)` then `Evaluate()` into `LocalPose` and
-`ModelMatrices`; its cursors, pose sets and matrices are ONE blob (`AnimationPlayerState`), so a
-character is one native allocation and the class only holds the clip and skeleton references.
-`SkinningPalette.Compute` turns those plus a mesh's skin (as spans) into the GPU palette. A game host (ShiningPie's `ActorAnimator`) should hold a player per actor and
-nothing more. Poses travel as `JointPoses`, a native blob in ozz's structure-of-arrays layout
-(groups of four joints, one `Vector128` per component with a joint per lane): the sampler writes
-it without a transpose, `JointPoses.Blend` and the hierarchy walk take four joints per
-instruction, and the indexer gathers one `JointPose` for per-joint code (attachments, tests),
-which is not the hot path. The
-archive is the only persisted format; blobs exist in memory only. The offline builders are
-managed (lists, sorting) because they run in the cook, not the player, and hand back native blobs.
-Inside a blob's hot loop take `field.ToSpan()` ONCE and index the span: the `BlobArray` indexer
-re-derives its pointer and bounds-checks on every access, and doing that per key doubled the
-sampler's cost. `src/Paradise.Animation.Benchmarks` (BenchmarkDotNet) measures one frame of one
-character for the blob runtime, the frozen managed-class copy it replaced, the glTF reference
-sampler, and ozz's own C++ when `PARADISE_OZZ_NATIVE` points at the spike's shim library;
-`PARADISE_BENCHMARK_GLB` swaps the procedural rig for a real character. The contract is held as bytes:
-`OzzParityTests` regenerates a procedural rig and checks this builder writes exactly what ozz's
-C++ builder wrote (`Paradise.Animation.Test/Fixtures`), so a change to key sorting, quantization
-or i-frames that still "works" fails there. The skeleton is the GLB's WHOLE node tree in ozz's
-depth-first order (parents first, siblings by ascending glTF node index); skins, clips and draws
-address joints by that index, and the mesh blob carries its own skin (palette slot → joint +
-inverse bind) so one skeleton can drive many meshes. Unanimated joints hold the REST pose, not
-identity — ozz's builder pads an empty track with identity, `ClipConverter` fills rest first.
-STEP channels are baked into held keys and rotation arcs wider than 15° get slerped keys inserted
-(ozz only lerps — normalized lerp for rotations — where glTF means slerp, and a 90° arc puts the
-two a degree apart mid-way). A clip is then lossless but for ozz's 16-bit quantization unless the GLB's sidecar sets `[glb] optimize = { tolerance, distance }`
-(`AnimationOptimizer`; ozz's defaults are 1 mm at 10 cm). The reference sampler that plays the
-source glTF (`GltfAnimationRig`) lives in `Paradise.Assets.Pipeline.Test` only, as the golden
-test's oracle. The documents are tool-owned: the watcher mints
-them for any GLB with geometry, and `extract` overwrites one that disagrees with the GLB without a
-conflict rule — but never one that names ANOTHER GLB. Materials, textures and the prefab are
-authored the moment they exist, so only the `extract` verb writes them, and the GLB's `[glb]`
-sidecar domain records a material's or image's entry with a fingerprint of BOTH sides (the GLB
-side is what the GLB would extract to now; a material's is over the glTF-expressible subset only)
-so `extract` tells a re-export from an edit and refuses when both moved. KTX2 is never authored:
-`verify` errors on one under `assets/`. Two traps: reach every `BlobArray`/`BlobString` through a
-mutable `ref` (a readonly reference copies the header and its relative offset points at the
-stack), and read a sidecar domain's inline tables through both `CanonicalTomlTable` and
-`CanonicalInlineTable` (the reader hands a root-level inline table back as a plain one).
+### References
 
-**The sidecar names the importer; nothing walks the chain except `ImporterChain`.** `Claims` is
-the one claim point — cheap, a path and at most a header — and the maintainer records the answer
-when it mints the sidecar. `Import` keeps its extension guard only as a defence: a hand-edited
-`importer` line can name it for anything, and the build reports a decline as an error rather than
-skipping the asset. A recorded name is never overwritten by the tooling, and a name the chain lacks
-is never silently replaced by a claim — both are what recording it is for. Decided at mint, not at
-first build: a build that edits committed sidecars is the dirty-tree failure the recorded hash
-already taught. Two ways to reintroduce the old search: walking `importers` anywhere but
-`ImporterChain`, and a `Claims` that reads more than a header.
+`ReferenceGraph` is derived from `AssetIndex` and importer-declared `References`, never persisted.
+Document reference lists stay in documents. Container references live in `MeshImportSettings`
+sidecar data because source containers cannot always be rewritten. Preserve edges to missing
+identities and their paths so diagnostics can identify their referrers.
 
-**"Who references X" is `ReferenceGraph`, and it is derived.** Built from `AssetIndex` plus what
-each importer declares through `IAssetImporter.References` (a prefab's document, a mesh's `[mesh]`
-sidecar entries — and a game's own kind, with no format list anywhere in the pipeline); never persisted, and a DOCUMENT's
-reference list never goes in a sidecar (a second copy of the document, kept in sync by a watcher that
-may not be running, dirtying two files per edit). A mesh container's references DO live in its
-sidecar (`MeshImportSettings`), because that is derived data the tooling resolves from bytes it
-cannot author — the container is read, never written, so FBX and GLB get one mechanism; the uri
-is rewritten only where the format allows, and only for the DCC's benefit. Nodes are guids; an edge into an identity nothing
-carries is KEPT with its path, because that is the moment someone asks who pointed there. `mv`
-rewrites `DependentsOf` the moved guids (plus what the graph lists as `Unreadable`, walked the old
-way), `rm` refuses on non-empty dependents unless forced and never nulls a slot, and the watcher
-follows a carried identity's dependents after a rename — skipping one still inside its debounce
-and retrying it next drain. All of them go through `ReferenceChain` and `IAssetImporter.Rewrite`;
-a verb that branches on an asset's extension is the shape this rule exists to keep out. A
-reconcile at build time passes `RewriteSources = false`: sidecars only, never a path or a uri
-moved under the author's feet. A container uri with no entry recorded is the one path-only reference
-left: it is in `PathOnly`, and a move follows it only when the move touched it, and otherwise warns.
+- `mv` follows `DependentsOf` plus `Unreadable` assets through the importer rewrite API.
+- `rm` refuses referenced assets unless forced; it never clears a reference slot.
+- Watchers follow moved identities' dependents, deferring and retrying files still in debounce.
+- Use `ReferenceChain` and `IAssetImporter.Rewrite`; verbs must not branch on extensions.
+- Unrecorded container URIs remain `PathOnly`; moves follow only those they touched and report
+  unresolved cases without rewriting unrelated sources.
 
-## Code Style
+## Style and Git
 
-Enforced via `.editorconfig` with warnings-as-errors:
-- **Naming**: private/internal fields `_camelCase`, statics `s_camelCase`, constants `PascalCase`, public fields/properties `PascalCase`
-- **Layout**: Allman braces, 4-space indent, file-scoped namespaces, LF line endings
-- **Types**: Prefer language keywords (`int` not `Int32`), avoid `this.` qualification
-- **Performance**: Struct-based nodes, `ref` parameters throughout, zero-allocation design, `System.Runtime.CompilerServices.Unsafe` for low-level ops
-- **Collections**: prefer empty over null. A method whose result is a list, set, or a record of them returns an empty one (a shared static like `AssetReferences.None` where the type is a class); null is reserved for "there is no such thing" on a single object, never for "nothing in it". A caller iterates an empty result with no branch; a null forces one at every call site and is the shape of the next `NullReferenceException`.
-- **Comments**: Code explains itself; comments explain why. Prefer a name, a type, a small method, or a guard over a comment that says what the code does, and restructure before commenting. A comment is for what code cannot say: a constraint, a decision and its rejected alternative, a failure mode someone would reintroduce, a cross-repo or cross-language contract. XML `<summary>` is one sentence; `<remarks>` only when it carries such a why. Delete comments that narrate control flow or restate the next line.
+`.editorconfig` is enforced with warnings-as-errors: Allman braces, four spaces, file-scoped
+namespaces, LF; `_camelCase` private/internal fields, `s_camelCase` statics and PascalCase constants
+and public members. Prefer keyword types, omit `this.`, and preserve zero-allocation unmanaged
+paths with structs, `ref` and `Unsafe` where required.
 
-## Git conventions
+Return empty collections instead of null, using shared instances such as `AssetReferences.None`.
+Null represents an absent single object. Comments explain constraints, decisions, failure modes
+and cross-language contracts; delete control-flow narration. XML summaries are one sentence;
+remarks hold rationale. Prefer clear names and small methods over explanatory prose.
 
-- Feature branches off `main`; PRs assigned to quabug; squash-merge, matching the history style.
-- A PR that fixes an issue carries `Closes #NNN` (one line per issue) at the top of its body,
-  and the commit message says it too, so merging closes the issue. Use `Towards #NNN` only for
-  deliberately partial work, and when a second fix joins an existing PR, add its `Closes` line.
-- Never commit or push without being asked.
-
-## SDK
-
-Requires .NET SDK 10.0.400+ (specified in `global.json` with `rollForward: latestMinor`). The
-floor is the compiler, not a preference: the Roslyn analyzers this repo builds against are
-compiled for 5.9.0.0, and an older SDK's `csc` refuses to load them with CS9057. `latestMinor`
-rolls forward, never back, so an older SDK does not satisfy this and the build stops with a
-version message rather than an analyzer one.
+Feature branches start from `main`; PRs go to quabug and squash-merge. Issue fixes put
+`Closes #NNN` at the top of the PR body and in the commit message, one line per issue; use
+`Towards #NNN` only for deliberately partial work. Never commit or push unless asked.

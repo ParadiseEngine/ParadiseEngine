@@ -3,25 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BT;
 
-/// <summary>
-/// An UNMANAGED, TYPED instance: the two per-agent buffers inline, capacity fixed by the buffer
-/// type parameters (typically <c>[InlineArray]</c> structs), and the tree's identity carried as a
-/// phantom — <see cref="Initialize"/> only accepts a layout compiled from
-/// <typeparamref name="TTree"/>, <see cref="Tick{TBlackboard}"/> only that tree's generated
-/// blackboard. A plain struct, so it can sit inside an ECS component and ride a snapshot memcpy;
-/// the phantom rides the field's type and costs no bytes.
-///
-/// <b>Lifecycle is the caller's.</b> This holds a raw pointer into the layout's blob, so whoever
-/// owns the <see cref="BehaviorTreeLayout"/> must keep it alive and undisposed for as long as any
-/// of these ticks against it. Tick through a <c>ref</c> to the real storage — the tree runs over
-/// this struct's own bytes, so ticking a copy advances the copy.
-/// </summary>
-/// <typeparam name="TTree">The tree type this instance runs — the phantom the blackboard is
-/// checked against.</typeparam>
-/// <typeparam name="TStateBuffer">Inline storage for the per-node states; its size in
-/// <see cref="NodeState"/> units is the node capacity.</typeparam>
-/// <typeparam name="TDataBuffer">Inline storage for the node data; its size in bytes is the data
-/// capacity.</typeparam>
+/// <summary>Stores a typed tree instance in inline unmanaged buffers suitable for ECS snapshots.</summary>
+/// <remarks>Keep the layout alive while instances use its pointer. Tick the actual storage by ref;
+/// ticking a copy advances only that copy. Tree types enforce layout and blackboard compatibility.</remarks>
+/// <typeparam name="TTree">The tree type, used for compile-time identity without storage.</typeparam>
+/// <typeparam name="TStateBuffer">Inline states; size in NodeState units determines node capacity.</typeparam>
+/// <typeparam name="TDataBuffer">Inline node data; size in bytes determines data capacity.</typeparam>
 public unsafe struct FixedBehaviorTree<TTree, TStateBuffer, TDataBuffer>
     where TStateBuffer : unmanaged
     where TDataBuffer : unmanaged

@@ -24,11 +24,11 @@ struct DecalUniforms { float4 settings; };
 void applyDecals(FragmentInput input, float3 geometricNormal, inout float3 N,
                  inout float4 baseColor, inout float metallic, inout float roughness, inout float3 emissive)
 {
-    if (decalFrame.settings.x < 1.0 || draw.highlight.w > 0.5) return;
     // Derivatives must be evaluated before any per-fragment volume/facing branch. Explicit
     // gradients also make mip selection independent of alpha, volume boundaries and layer order.
     float3 positionDx = ddx(input.worldPos);
     float3 positionDy = ddy(input.worldPos);
+    if (decalFrame.settings.x < 1.0 || input.instanceHighlight.w > 0.5) return;
     uint count = min((uint)decalFrame.settings.x, 32u);
     for (uint i = 0; i < count; i++)
     {

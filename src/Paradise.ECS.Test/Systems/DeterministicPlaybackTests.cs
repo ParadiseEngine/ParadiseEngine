@@ -2,13 +2,11 @@ using System.Text;
 
 namespace Paradise.ECS.Test;
 
-// ============================================================================
 // Deterministic ECB playback test systems.
 // Wave 1: three independent read-only systems recording spawns / despawns /
 // component sets. Wave 2 (via [After<>]): a conflicting SetComponent writer and
 // a structural RemoveComponent system. All structural work goes through the
 // per-work-item ECB, so any wave scheduler must produce an identical world.
-// ============================================================================
 
 /// <summary>Wave 1: spawns one entity per Health holder through a placeholder chain
 /// (Spawn → AddComponent → SetComponent → tag), exercising in-buffer remapping.</summary>
@@ -82,9 +80,7 @@ public ref partial struct DetRemoveVelocitySystem : IEntitySystem
     }
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
 /// <summary>
 /// The point of deterministic ECB playback: the SAME scenario run under

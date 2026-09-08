@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for generated Queryable types and QueryableRegistry.
-/// </summary>
+/// <summary>Tests for generated Queryable types and QueryableRegistry.</summary>
 public sealed class QueryableRegistryTests
 {
     [Test]

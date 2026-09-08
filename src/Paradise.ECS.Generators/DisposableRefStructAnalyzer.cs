@@ -42,7 +42,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (localDeclaration.UsingKeyword != default)
             return;
 
-        // Check if it's inside a using statement
         if (localDeclaration.Parent is BlockSyntax { Parent: UsingStatementSyntax })
             return;
 
@@ -58,7 +57,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
             if (!IsDisposableRefStruct(typeSymbol))
                 continue;
 
-            // Check if the variable is disposed later in the same scope
             var symbol = context.SemanticModel.GetDeclaredSymbol(variable, context.CancellationToken);
             if (symbol != null && IsDisposedInScope(localDeclaration, symbol, context.SemanticModel, context.CancellationToken))
                 continue;
@@ -74,7 +72,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
     {
         var expressionStatement = (ExpressionStatementSyntax)context.Node;
 
-        // Check if the expression is an invocation whose return value is discarded
         if (expressionStatement.Expression is not InvocationExpressionSyntax invocation)
             return;
 
@@ -100,7 +97,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (assignment.Parent is EqualsValueClauseSyntax)
             return;
 
-        // Check for discard pattern: _ = SomeMethod()
         if (assignment.Left is IdentifierNameSyntax { Identifier.ValueText: "_" })
         {
             var typeInfo = context.SemanticModel.GetTypeInfo(assignment.Right, context.CancellationToken);
@@ -132,7 +128,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (containingBlock == null)
             return;
 
-        // Check if the variable is disposed after this assignment
         if (IsDisposedAfterStatement(assignment, lhsSymbol, containingBlock, context.SemanticModel, context.CancellationToken))
             return;
 
@@ -155,7 +150,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (memberAccess.Name.Identifier.ValueText == "Dispose")
             return;
 
-        // Check if the invocation returns a disposable ref struct
         var typeInfo = context.SemanticModel.GetTypeInfo(invocation, context.CancellationToken);
         if (typeInfo.Type is not INamedTypeSymbol typeSymbol)
             return;
@@ -173,11 +167,9 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
 
     private static bool IsDisposableRefStruct(INamedTypeSymbol typeSymbol)
     {
-        // Check if it's a ref struct
         if (!typeSymbol.IsRefLikeType)
             return false;
 
-        // Check if it has a Dispose method (with no parameters)
         foreach (var member in typeSymbol.GetMembers("Dispose"))
         {
             if (member is IMethodSymbol { Parameters.Length: 0, ReturnsVoid: true })
@@ -238,7 +230,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
     {
         foreach (var invocation in node.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>())
         {
-            // Check for variable.Dispose() pattern
             if (invocation.Expression is MemberAccessExpressionSyntax memberAccess &&
                 memberAccess.Name.Identifier.ValueText == "Dispose")
             {

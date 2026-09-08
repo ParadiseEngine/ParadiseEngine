@@ -25,7 +25,7 @@ public class UniformLayoutTests
     public async Task struct_sizes_match_wgsl_totals()
     {
         await Assert.That(Unsafe.SizeOf<DrawUniformsGpu>()).IsEqualTo(208);
-        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(31088);
+        await Assert.That(Unsafe.SizeOf<FrameUniformsGpu>()).IsEqualTo(49600);
         await Assert.That(Unsafe.SizeOf<MaterialUniformsGpu>()).IsEqualTo(128);
         await Assert.That(Unsafe.SizeOf<SceneLightGpu>()).IsEqualTo(96);
     }
@@ -63,7 +63,8 @@ public class UniformLayoutTests
         var program = LoadProgram();
         await Assert.That(program.Layout.Groups.Length).IsEqualTo(4);
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
-        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(9); // frame UBO + shadow depth texture + comparison sampler + cluster masks + joint palettes
+        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(9); // frame UBO + shadow depth texture + comparison sampler + cluster masks + joint palettes + four decal bindings
+        await Assert.That(program.Layout.Groups[1].Entries.Single(e => e.Binding == 7).Type).IsEqualTo(BindingResourceType.SampledTextureArray);
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
         await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(13); // SSAO UBO, pre-pass normal, sky-specular LUT + sampler, DFG LUT, pre-pass depth, ray-traced AO, probe atlases (2), probe volume, probe states, probe sampler, screen-space reflection
     }

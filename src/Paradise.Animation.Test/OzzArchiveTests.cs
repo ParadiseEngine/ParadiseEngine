@@ -97,8 +97,8 @@ public class OzzArchiveTests
         using var built = AnimationBuilder.Build(raw, iframeInterval: 0.5f);
         var bytes = OzzArchive.WriteAnimation(ref built.Value);
 
-        // Each stream's block is ratios, back-links, i-frame entries, i-frame table, interval, values; the
-        // translation stream (rest keys only) has no i-frames, the rotation stream after it does.
+        // Streams store ratios, back-links, i-frame entries/table/interval, then values.
+        // Only the rotation stream has i-frames in this fixture.
         var header = 1 + OzzArchive.AnimationTag.Length + 1 + 4 + 13 * 4;
         var stream = header + built.Value.Name.Length + built.Value.Timepoints.Length * 4;
         var translationBlock = built.Value.Translations.Ratios.Length + built.Value.Translations.Previouses.Length * 2 + built.Value.Translations.IframeEntries.Length

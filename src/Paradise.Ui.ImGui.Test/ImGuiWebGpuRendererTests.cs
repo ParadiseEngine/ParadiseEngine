@@ -7,11 +7,10 @@ using WebGpuSharp;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>Snapshot capture against a real ImGui frame (offset rebasing, totals) and the
-/// WebGPU renderer end-to-end: a real ImGui window rendered to an offscreen target must produce
-/// pixels where the window is, none where the scissor excludes it, and leave the composited
-/// background elsewhere. GPU tests skip without an adapter; ImGui work is serialized (one
-/// process-global current context).</summary>
+/// <summary>Checks snapshot offsets, clipping and overlay pixels against real ImGui and
+/// WebGPU.</summary>
+/// <remarks>GPU tests skip without an adapter; ImGui tests run serially because its current context
+/// is global.</remarks>
 [NotInParallel]
 public class ImGuiWebGpuRendererTests
 {
@@ -109,15 +108,9 @@ public class ImGuiWebGpuRendererTests
         await Assert.That(outside.B).IsEqualTo((byte)0);
     }
 
-    /// <summary>A Destroy op must not blind the snapshots that still name the texture.
-    ///
-    /// Regression test. The renderer deferred the GPU object by
-    /// <c>DestroyDelayFrames</c> but dropped the id's lookup entry immediately, and a command
-    /// whose id resolves to nothing is skipped — so a snapshot still in hand lost every glyph the
-    /// moment ImGui asked for the old atlas to go, which is the silent-vanish failure the ops
-    /// queue exists to prevent. <c>AcquireForRender</c> returns the same snapshot when nothing new
-    /// was published and drains the queue anyway, so this is reachable on any frame where the sim
-    /// has captured its ops and not yet published.</summary>
+    /// <summary>A retired texture must remain resolvable by snapshots still being drawn.</summary>
+    /// <remarks>AcquireForRender may reuse a snapshot while draining its texture Destroy operation;
+    /// retain both the GPU resource and lookup during the delay.</remarks>
     [Test]
     public async Task a_destroyed_texture_keeps_drawing_until_the_snapshots_naming_it_are_gone()
     {

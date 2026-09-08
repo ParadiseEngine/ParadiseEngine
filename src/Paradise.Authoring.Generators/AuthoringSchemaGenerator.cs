@@ -7,24 +7,12 @@ using Microsoft.CodeAnalysis;
 
 namespace Paradise.Authoring.Generators;
 
-/// <summary>
-/// Emits the engine-neutral authoring schema as a <c>const string</c> on an
-/// <c>AuthoringSchema</c> class in the compiling assembly's own namespace.
-///
-/// This is the half that serves the editors a C# generator cannot reach. The Blender addon
-/// (Python) and the browser editor (TypeScript) do not get generated code — they read this
-/// document and build their own UI from it, which means adding a field is a data change to them,
-/// with no build step and no generated artefact to commit.
-///
-/// A const rather than a file written at build time, so there is no reflection over a compiled
-/// assembly and exactly one view of the definitions: whatever the generator saw. A CLI that dumps
-/// it to disk for a non-C# editor is then trivial.
-///
-/// Deliberately the ONLY emitter. An earlier attempt also generated the Godot node's [Export]
-/// properties; it cannot work, because Godot's own ScriptPropertiesGenerator is a source generator
-/// and two Roslyn generators cannot observe each other's output — the properties never reach the
-/// inspector and the scene's values are silently dropped.
-/// </summary>
+/// <summary>Emits <c>AuthoringSchema.Json</c> as a constant in the consuming assembly's namespace.</summary>
+/// <remarks>
+/// Editors read the schema as data; metadata-only tools can dump the constant without loading assemblies.
+/// Do not generate editor properties for another source generator: Roslyn generators cannot observe
+/// one another's output, so Godot's property generator would silently miss them.
+/// </remarks>
 [Generator]
 public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 {
@@ -202,16 +190,10 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                     ? AuthoredModel.Read(type)
                     : null)
             .Where(static x => x is not null)
+            .Select(static (x, _) => x!)
             .Collect();
 
-        // The namespace is the project's own, never a literal: this generator runs inside
-        // Paradise.Export and inside every game that declares authored data, and a hardcoded
-        // namespace would collide the moment two of them are loaded together.
-        //
-        // RootNamespace first, because that is where a project's hand-written code lives and
-        // generated PUBLIC API belongs beside it. Assembly name only as a fallback: a project named
-        // Game.Core with RootNamespace `Game` would otherwise publish `Game.Core.AuthoringSchema`,
-        // which no file in it can see without qualifying.
+        // Generated public APIs use RootNamespace, falling back to the assembly name.
         var namespaceName = context.AnalyzerConfigOptionsProvider
             .Combine(context.CompilationProvider)
             .Select(static (pair, _) =>
@@ -220,10 +202,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                 return Sanitize(string.IsNullOrWhiteSpace(root) ? pair.Right.AssemblyName : root);
             });
 
-        // What referenced assemblies already published, when this project asked for an aggregate.
-        // Gated INSIDE the select rather than by not building the provider, because an incremental
-        // generator's pipeline shape is fixed at Initialize: the property is read per compilation
-        // like any other, and a project that never opts in pays one bool comparison.
+        // The incremental pipeline shape is fixed; evaluate the reference-scan opt-in per compilation.
         var referenced = context.CompilationProvider
             .Combine(context.AnalyzerConfigOptionsProvider)
             .Select(static (pair, cancellation) =>
@@ -238,7 +217,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(
             authored.Combine(namespaceName).Combine(referenced),
-            static (ctx, pair) => Emit(ctx, pair.Left.Left!, pair.Left.Right, pair.Right));
+            static (ctx, pair) => Emit(ctx, pair.Left.Left, pair.Left.Right, pair.Right));
     }
 
     /// <summary>An assembly name is not necessarily a legal namespace (it may contain dashes, or
@@ -267,18 +246,17 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 
     private static void Emit(
         SourceProductionContext context,
-        ImmutableArray<AuthoredType?> types,
+        ImmutableArray<AuthoredType> types,
         string namespaceName,
         ImmutableArray<ReferencedSchema> referenced)
     {
-        var candidates = types.Where(t => t is not null).Select(t => t!)
+        var candidates = types
             // Ordered so the schema is stable: an unordered generator makes every rebuild a diff.
             // By type name rather than by id, so the document a human reviews is in an order they
             // can predict and a regenerated GUID does not reshuffle it. It also fixes WHICH of two
             // types sharing an id is reported as the duplicate, rather than leaving it to
             // whichever order the compiler happened to hand them over in.
-            .OrderBy(t => t.TypeName, System.StringComparer.Ordinal)
-            .ToList();
+            .OrderBy(t => t.TypeName, System.StringComparer.Ordinal);
 
         var present = new List<AuthoredType>();
         var claimed = new Dictionary<string, AuthoredType>(System.StringComparer.Ordinal);

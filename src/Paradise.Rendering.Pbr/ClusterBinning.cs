@@ -38,14 +38,9 @@ internal readonly record struct ClusterGrid(
     }
 }
 
-/// <summary>The CPU twin of lightCull.slang: the froxel bounds and the sphere test, in managed
-/// code, so the tests can hold the shader against something they can also hold against brute
-/// force. It is the same relationship <c>BvhTraversal.ClosestHit</c> has with bvh.slang, and the
-/// same rule applies — a change here is a change there, or the agreement test is the one that
-/// says so.
-///
-/// <para>Nothing calls this in a frame. Binning happens on the GPU; this exists to be compared
-/// with it.</para></summary>
+/// <summary>Provides the CPU reference for lightCull.slang bounds and sphere tests.</summary>
+/// <remarks>Used by tests against the shader and a brute-force oracle; production binning runs on
+/// the GPU.</remarks>
 internal static class ClusterBinning
 {
     /// <summary>Froxel tile edge in pixels. Godot's cluster shape.</summary>

@@ -32,6 +32,7 @@ public sealed class DecalFeature : IRenderFeature
 
     public FeatureDefinition Definition => PbrFeatures.Decals;
     public FrameRequirements Requires => FrameRequirements.None;
+    public void Resize(uint width, uint height) { }
     /// <summary>Number of valid, enabled decal volumes in the current frame.</summary>
     public int ActiveDecalCount { get; private set; }
     /// <summary>Number of distinct materials in the resident array, useful for tracking upload and memory cost.</summary>

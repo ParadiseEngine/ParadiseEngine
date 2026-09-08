@@ -12,9 +12,7 @@ public class GroundSupportTests
         return CollisionWorld.Build(colliders, transforms);
     }
 
-    // NOTE: PlanarGroundSupport.Clamp is still used for CHARACTER (capsule) ground containment.
-    // The old sphere-dynamics "RequireSupport" ground clamp is gone — under gravity a sphere that
-    // rolls off an edge simply falls (real 3D), so those sphere-edge tests were removed.
+    // Capsules use planar support containment; spheres leaving an edge fall under gravity.
 
     [Test]
     public async Task clamp_accepts_supported_moves_verbatim()

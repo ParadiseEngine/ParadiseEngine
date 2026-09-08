@@ -2,42 +2,52 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The engine's own features, and the one place that knows the list.
-///
-/// <para>It is a file of its own so that adding a built-in feature is adding it HERE — not in
-/// <see cref="PbrRenderer"/>, whose job is uploading geometry and driving a frame, and which
-/// used to have to grow a field, a constructor line and a chained <c>Add</c> for every effect
-/// the engine gained. A game adds its features the same way, through
-/// <see cref="RenderPipeline.Add"/> at a <see cref="PbrFeatureOrder"/> slot, and needs no change
-/// here at all.</para>
-///
-/// <para>The constructor arguments that are not the context — the scene reads the shadow plan and
-/// the froxel grid, the pre-pass reads whether reflections have a history — are the engine
-/// features that are genuinely one thing split in two, or that hand over a BUFFER, which the
-/// blackboard does not carry. Everything else a feature needs from another feature travels by name
-/// on the frame's blackboard, which is what lets any of them be switched off
-/// independently.</para></summary>
+/// <summary>Registers the engine's built-in render features in one place.</summary>
+/// <remarks>Games add features through RenderPipeline.Add at PbrFeatureOrder slots. Cross-feature
+/// textures travel through the blackboard; shared plans and buffers use explicit constructor
+/// dependencies.</remarks>
 internal static class PbrBuiltInFeatures
 {
     public static void AddTo(RenderPipeline pipeline, PbrContext ctx, float specularAaVariance, float specularAaClamp)
     {
+        var frustum = new FrustumCullingFeature(ctx);
+        var occlusion = new OcclusionCullingFeature(ctx, frustum);
         var shadows = new ShadowFeature(ctx);
         var ssr = new ScreenSpaceReflectionFeature(ctx);
-        var prepass = new PrepassFeature(ctx, ssr);
+        var prepass = new PrepassFeature(ctx, ssr, frustum);
         var gi = new ProbeGiFeature(ctx, shadows);
         var lightCulling = new LightCullingFeature(ctx);
         var decals = new DecalFeature(ctx);
+        var instancing = new InstancingFeature(ctx);
         pipeline
+            .Add(frustum, PbrFeatureOrder.FrustumCulling)
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
+            .Add(occlusion, PbrFeatureOrder.OcclusionCulling)
+            .Add(new MotionVectorsFeature(ctx), PbrFeatureOrder.MotionVectors)
+            .Add(new ContactShadowFeature(ctx), PbrFeatureOrder.ContactShadows)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
             .Add(decals, PbrFeatureOrder.Decals)
-            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, decals, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
+            .Add(instancing, PbrFeatureOrder.Instancing)
+            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, frustum, occlusion, instancing, decals, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
+            .Add(new FogFeature(ctx, shadows), PbrFeatureOrder.Fog)
+            .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
+            .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)
+            .Add(new DepthOfFieldFeature(ctx), PbrFeatureOrder.DepthOfField)
+            .Add(new MotionBlurFeature(ctx), PbrFeatureOrder.MotionBlur)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
-            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);
+            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite)
+            .Add(new ColorGradingFeature(ctx), PbrFeatureOrder.ColorGrading)
+            .Add(new LensDistortionFeature(ctx), PbrFeatureOrder.LensDistortion)
+            .Add(new ChromaticAberrationFeature(ctx), PbrFeatureOrder.ChromaticAberration)
+            .Add(new VignetteFeature(ctx), PbrFeatureOrder.Vignette)
+            .Add(new FilmGrainFeature(ctx), PbrFeatureOrder.FilmGrain)
+            .Add(new SharpeningFeature(ctx), PbrFeatureOrder.Sharpening)
+            .Add(new FxaaFeature(ctx), PbrFeatureOrder.AntiAliasing)
+            .Add(new PresentationFeature(ctx), PbrFeatureOrder.Presentation);
     }
 }

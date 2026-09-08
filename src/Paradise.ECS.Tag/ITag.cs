@@ -29,14 +29,10 @@ namespace Paradise.ECS;
 /// </example>
 public interface ITag
 {
-    /// <summary>
-    /// The unique tag type ID assigned at compile time.
-    /// </summary>
+    /// <summary>The unique tag type ID assigned at compile time.</summary>
     static abstract TagId TagId { get; }
 
-    /// <summary>
-    /// The stable GUID for this tag type, or <see cref="System.Guid.Empty"/> if not specified.
-    /// </summary>
+    /// <summary>The stable GUID for this tag type, or <see cref="System.Guid.Empty"/> if not specified.</summary>
     /// <remarks>
     /// Unlike <see cref="TagId"/> which changes based on alphabetical ordering,
     /// this GUID provides stable identification across compilations when specified

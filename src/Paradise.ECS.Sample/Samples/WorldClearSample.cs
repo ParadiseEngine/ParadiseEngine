@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates clearing all entities from the world.
-/// </summary>
+/// <summary>Demonstrates clearing all entities from the world.</summary>
 public static class WorldClearSample
 {
     public static void Run(World world, Entity playerEntity)

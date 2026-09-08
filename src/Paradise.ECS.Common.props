@@ -1,14 +1,6 @@
 <Project>
 
-  <!--
-    Common settings for Paradise.ECS.* projects.
-    Imported explicitly by each ECS csproj so its analyzer rules stay
-    scoped to ECS and do NOT leak into BT/BLOB (which are tuned to a
-    different analyzer baseline).
-
-    TargetFramework is intentionally NOT set here — each ECS csproj
-    declares its own (most are net10.0; Generators is netstandard2.0).
-  -->
+  <!-- Scope analyzer rules to ECS projects; each project sets its target framework. -->
 
   <PropertyGroup>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

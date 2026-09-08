@@ -49,6 +49,9 @@ public ref struct RenderCommandEncoder
     public void Draw(in DrawCommand cmd) =>
         Write(RenderCommand.FromDraw(cmd));
 
+    public void DrawIndexedIndirect(in DrawIndexedIndirectCommand cmd) =>
+        Write(RenderCommand.FromDrawIndexedIndirect(cmd));
+
     public void DrawIndexed(in DrawIndexedCommand cmd) =>
         Write(RenderCommand.FromDrawIndexed(cmd));
 

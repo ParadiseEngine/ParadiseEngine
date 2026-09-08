@@ -9,15 +9,8 @@ namespace Paradise.Cli;
 // build (warnings-as-errors) for every entry point.
 #pragma warning disable SYSLIB1054
 
-/// <summary>
-/// A notify icon via <c>Shell_NotifyIconW</c>. Lives on its own STA thread because the shell
-/// delivers clicks through a window procedure, and a console's main thread has no message pump.
-/// </summary>
-/// <remarks>
-/// Failure anywhere in startup (no explorer, session 0, RegisterClass refused) returns
-/// <see langword="null"/> from <see cref="TryStart"/> and the watch continues without an icon.
-/// That is the additive contract: the tray is allowed to not exist.
-/// </remarks>
+/// <summary>A <c>Shell_NotifyIconW</c> tray with a dedicated STA message pump.</summary>
+/// <remarks><see cref="TryStart"/> returns null on native startup failure so console watching can continue.</remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsWatchTray : IWatchTray
 {

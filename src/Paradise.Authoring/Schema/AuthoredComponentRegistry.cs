@@ -2,16 +2,8 @@ using System.Text.Json;
 
 namespace Paradise.Authoring;
 
-/// <summary>
-/// Turns an exported payload back into the <c>[Authored]</c> record it was written from.
-///
-/// The other half of the mechanism. Authoring goes record → schema → editor → JSON; loading has to
-/// come back the same way, or a component can be authored, exported, and then silently never read
-/// — which is exactly what happened to Pingu's ice ledge, whose payload only a test ever looked at.
-///
-/// An implementation is GENERATED per assembly from its <c>[Authored]</c> types, so filling an
-/// instance is no longer a hand-written accessor per component that someone has to remember.
-/// </summary>
+/// <summary>Materializes exported payloads into the assembly's authored records.</summary>
+/// <remarks>Implementations are generated from <c>[Authored]</c> types when the assembly opts in.</remarks>
 public interface IAuthoredComponentRegistry
 {
     /// <summary>Component ids this registry can materialize.</summary>

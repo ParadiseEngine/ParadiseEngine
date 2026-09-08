@@ -4,19 +4,10 @@ using System.Runtime.Versioning;
 
 namespace Paradise.Rendering.Browser;
 
-/// <summary>Frame submission: the whole <see cref="RenderCommandStream"/> is re-encoded into one
-/// flat little-endian buffer and handed to the shim in a SINGLE interop call, which then walks it
-/// with a decoder loop.</summary>
-/// <remarks>
-/// <para>Why re-encode rather than ship <c>RenderCommand</c>'s own 48-byte cells: the JS side must
-/// address GPU objects by table index, and only this side can turn an <c>(Index, Generation)</c>
-/// handle into one — resolving here keeps the stale-handle contract intact (a destroyed handle
-/// throws instead of silently addressing whatever now occupies its slot) and keeps the shim free of
-/// any dependency on the managed struct layout. The walk that re-encodes is the same walk that
-/// validates, so it costs one pass over the stream, not two.</para>
-/// <para>The alternative — one interop call per render command, as the spike did — costs a JS
-/// boundary crossing per draw; a PBR frame issues thousands.</para>
-/// </remarks>
+/// <summary>Submits a validated command stream to JavaScript as one little-endian buffer.</summary>
+/// <remarks>Managed handles resolve to JS resource indices while encoding, preserving stale-handle
+/// checks without exposing the managed struct layout. One interop call avoids per-draw boundary
+/// crossings.</remarks>
 [SupportedOSPlatform("browser")]
 public sealed partial class BrowserRenderer
 {
@@ -193,6 +184,14 @@ public sealed partial class BrowserRenderer
                     WriteU32(op, 12, d.FirstIndex);
                     WriteI32(op, 16, d.BaseVertex);
                     WriteU32(op, 20, d.FirstInstance);
+                    break;
+                }
+                case RenderCommandKind.DrawIndexedIndirect:
+                {
+                    RequireRenderPass(inPass);
+                    var d = cmd.DrawIndexedIndirect;
+                    WriteU32(op, 4, _buffers.Resolve(d.Buffer.Index, d.Buffer.Generation, "Buffer"));
+                    WriteF64(op, 32, d.Offset);
                     break;
                 }
                 case RenderCommandKind.SetViewport:

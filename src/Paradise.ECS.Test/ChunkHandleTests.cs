@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ChunkHandle"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ChunkHandle"/>.</summary>
 public sealed class ChunkHandleTests
 {
     [Test]

@@ -1,13 +1,10 @@
 version = 1
 
-# ──────────────────────────────────────────────
-# PR Review (only OpenCara feature in use)
-# ──────────────────────────────────────────────
+# Pull request review
 [review]
-prompt = """Review this pull request for Paradise Engine — a pure .NET behavior tree runtime and binary blob serialization library.
+prompt = """Review this pull request for Paradise Engine.
 
-Tech stack: C# 14 (.NET Standard 2.1 + .NET 10), unsafe/unmanaged code,
-NativeAOT compatible, TUnit tests.
+Stack: C# 14 / .NET 10, unsafe code, NativeAOT and TUnit; generators target netstandard2.0.
 
 Focus on:
 - Logic and correctness errors in unsafe pointer arithmetic (self-relative offsets, BlobPtr/BlobArray)
@@ -15,7 +12,7 @@ Focus on:
 - Builder pattern correctness (stream positioning, patch area integrity)
 - Behavior tree node semantics (Tick/Reset contracts, NodeState transitions)
 - Serialization round-trip correctness (BLOB binary format, alignment)
-- Dual-target compatibility (netstandard2.1 + net10.0)
+- Generator compatibility with netstandard2.0
 - Test coverage for modified systems
 
 Be concise. Flag real issues, skip nitpicks.

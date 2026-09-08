@@ -2,11 +2,8 @@ using System.Collections;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// The ordered document model: keys are written as added, never sorted, so a builder adding in
-/// schema order is canonical by construction. The vocabulary is what both toolchains handle
-/// losslessly; no dates, where TOML implementations disagree most.
-/// </summary>
+/// <summary>An ordered document model shared with the Python writer.</summary>
+/// <remarks>Keys retain insertion order; dates are excluded because TOML implementations disagree on them.</remarks>
 public sealed class CanonicalTomlTable : IEnumerable<KeyValuePair<string, object>>
 {
     private readonly List<KeyValuePair<string, object>> _pairs = [];

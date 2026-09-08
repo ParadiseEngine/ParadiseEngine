@@ -4,15 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BT.Test;
 
-/// <summary>
-/// The unmanaged blob must be a drop-in for the managed one. These run both side by side rather
-/// than asserting expected values: the claim is EQUIVALENCE, and a hardcoded answer would still
-/// pass if both drifted the same way.
-///
-/// Three further claims the design rests on: node data mutated in place persists, two instances
-/// over one layout do not share state, and an instance survives a memcpy — which is what "can ride
-/// a world snapshot" means.
-/// </summary>
+/// <summary>Compares managed and unmanaged instances and checks persistence, isolation and memcpy snapshots.</summary>
 public sealed class UnmanagedBlobTests
 {
     /// <summary>An instance's two buffers, allocated natively so the pointers the blob keeps stay

@@ -37,18 +37,16 @@ public class TreeBuilder<T> : Builder<BlobTree<T>> where T : unmanaged
     {
         var endIndices = new List<int>();
         var valueBuilders = new List<IBuilder<T>>();
-        FlattenAndReturnEndIndex(root, 0);
+        Visit(root);
         return (endIndices, valueBuilders);
 
-        int /*endIndex*/ FlattenAndReturnEndIndex(ITreeNode<T> node, int index)
+        void Visit(ITreeNode<T> node)
         {
             var valueIndex = valueBuilders.Count;
             valueBuilders.Add(node.ValueBuilder);
             endIndices.Add(-1);
-            var endIndex = index + 1;
-            foreach (var child in node.Children) endIndex = FlattenAndReturnEndIndex(child, endIndex);
-            endIndices[valueIndex] = endIndex;
-            return endIndex;
+            foreach (var child in node.Children) Visit(child);
+            endIndices[valueIndex] = valueBuilders.Count;
         }
     }
 }

@@ -1,19 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--
-    The HOST half of the logging seam (issue #232). Engine libraries reference
-    Microsoft.Extensions.Logging.Abstractions and nothing else — they say what happened and never
-    where it goes. This package is one answer to "where it goes", for hosts that want a console
-    and do not want to take a dependency on the full Microsoft.Extensions.Logging stack to get
-    one: Paradise.Cli.Host, the samples, and a game that has no other logging opinion.
-
-    It is deliberately NOT referenced by any engine library. A host that already has a logging
-    stack ignores this package entirely and installs ZLogger or Serilog behind the same ILogger.
-
-    Abstractions-only, so this adds no transitive dependency of its own: ILogger, ILoggerProvider
-    and ILoggerFactory all live there. The concrete LoggerFactory does not, which is why
-    ParadiseConsole.CreateFactory exists — see its remarks.
-  -->
+  <!-- Host-only console sink; engine libraries depend on logging abstractions.
+       Uses a custom ILoggerFactory to avoid the full logging package. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>Paradise.Diagnostics</AssemblyName>

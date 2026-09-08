@@ -141,10 +141,7 @@ public class EngineConfigurationTests
             .Throws<FormatException>().WithMessageContaining("not valid TOML");
     }
 
-    /// <summary>The layer a host starts from before it has read anything, and the one every test
-    /// above happens to skip because the reader fills both sections in. It has to be usable: its
-    /// sections are empty, not null. They were null once — a static initializer above the field it
-    /// reads — and nothing noticed until a real host merged onto it and iterated the result.</summary>
+    /// <summary>Verifies empty configuration sections are initialized before hosts merge or enumerate them.</summary>
     [Test]
     public async Task the_empty_layer_is_usable_as_a_starting_point()
     {
@@ -256,9 +253,7 @@ public class FeatureIdTests
         await Assert.That(FeatureId.TryParse(name, out _)).IsFalse();
     }
 
-    /// <summary>A record's own equality would compare the wrapped string ordinally, so this checks
-    /// every door into it goes through the case-insensitive one the type promises — the
-    /// synthesized <c>==</c> included, which is the one the record would quietly take over.</summary>
+    /// <summary>Verifies case-insensitive feature identity through Equals, hashing and generated operators.</summary>
     [Test]
     public async Task two_spellings_of_one_name_are_the_same_id()
     {

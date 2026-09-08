@@ -7,18 +7,9 @@ using static SDL.SDL3;
 
 namespace Paradise.Windowing.Sdl;
 
-/// <summary>
-/// The SDL3 backend's platform half: initializes SDL's video subsystem for its lifetime,
-/// creates <see cref="SdlWindow"/>s, and PUMPS them.
-///
-/// The pump is here because SDL's event queue is per-PROCESS: one drain, routed to the window
-/// each event names by its <c>windowID</c>. Two windows each polling that queue would consume
-/// each other's events, so routing is the only correct shape — not a filter bolted onto a
-/// per-window pump.
-///
-/// One instance per process; dispose windows before it. Main thread throughout — see the
-/// contract on <see cref="IWindowPlatform"/>.
-/// </summary>
+/// <summary>Owns SDL video initialization, windows and process-wide event routing.</summary>
+/// <remarks>One instance per process, used on the main thread. Dispose windows first; separate
+/// per-window drains would consume each other's events.</remarks>
 public sealed unsafe partial class SdlWindowPlatform : IWindowPlatform
 {
     /// <summary>One clock for every window this platform creates, so timestamps from two
@@ -138,14 +129,8 @@ public sealed unsafe partial class SdlWindowPlatform : IWindowPlatform
                         ev.tfinger.fingerID, TouchPhase.Up, ev.tfinger.x, ev.tfinger.y, now);
                     break;
 
-                // ---- gamepad -------------------------------------------------------------
-                //
-                // These name a JOYSTICK, not a window — SDL puts no windowID on them, so the
-                // routing every case above uses has nothing to route on. They go to whichever
-                // window holds keyboard focus, which is the same answer the OS already gives
-                // for typing: an unfocused game stops receiving stick input, and with nothing
-                // focused the event is dropped exactly as Route() drops a keystroke for
-                // window 0.
+                // Gamepad events identify a joystick, not a window. Route to keyboard focus; drop
+                // events when no window is focused.
 
                 case SDL_EventType.SDL_EVENT_GAMEPAD_ADDED:
                     OpenGamepad(ev.gdevice.which);

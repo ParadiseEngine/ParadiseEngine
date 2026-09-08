@@ -2,15 +2,8 @@ using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// The authoring document — the committed source of truth a <c>*.prefab</c> holds, whether a game
-/// calls it a level, a prop, or a piece of one.
-/// </summary>
-/// <remarks>
-/// Not the export contract: that is a bake, and this keeps exactly what baking destroys. Identity,
-/// name, parent and placement are components (<see cref="WellKnownComponents"/>) so that one
-/// override mechanism covers everything.
-/// </remarks>
+/// <summary>The committed authoring model for a <c>*.prefab</c>.</summary>
+/// <remarks>Identity, name, parent and placement are components so the same override rules apply to all of them.</remarks>
 public sealed class PrefabDocument
 {
     /// <summary>The only <c>schema_version</c> this build reads or writes.</summary>

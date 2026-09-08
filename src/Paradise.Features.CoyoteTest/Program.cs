@@ -2,13 +2,9 @@ using Microsoft.Coyote.SystematicTesting;
 
 namespace Paradise.Features.CoyoteTest;
 
-/// <summary>
-/// Entry point for the feature switchboard's Coyote tests. Run with: <c>dotnet run [iterations]</c>.
-///
-/// Not a <c>dotnet test</c> project on purpose — see the csproj. For real systematic exploration
-/// build Release first so the <c>coyote rewrite</c> target runs; without rewriting these still
-/// execute, but as ordinary concurrent code rather than scheduled interleavings.
-/// </summary>
+/// <summary>Runs the feature switchboard's Coyote tests.</summary>
+/// <remarks>Build Release to rewrite binaries, then run with dotnet run -- [iterations].
+/// Without rewriting, execution is ordinary concurrency, not systematic exploration.</remarks>
 public static class Program
 {
     public static int Main(string[] args)

@@ -5,14 +5,9 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>What the PBR features share: the backend, the graph's collaborators, the draw ring
-/// every geometry pass fills, the joint palettes, and the frame's scene once
-/// <see cref="PbrRenderer.RenderFrame"/> has partitioned it.
-///
-/// <para>A feature reaches nothing of another feature through here. What one feature produces
-/// for another travels by name on the blackboard or, for the two engine features that are
-/// genuinely one thing split in two (scene lighting reads the shadow plan), as a constructor
-/// argument the renderer supplies.</para></summary>
+/// <summary>Holds renderer resources and frame data shared by PBR features.</summary>
+/// <remarks>Feature outputs travel through the blackboard or explicit constructor dependencies,
+/// keeping the context free of feature-to-feature access.</remarks>
 internal sealed class PbrContext : IDisposable
 {
     public const int MaxDrawsPerFrame = 4096;
@@ -105,14 +100,27 @@ internal sealed class PbrContext : IDisposable
     // Frame-local: set by RenderFrame before any feature runs, read by every recorder.
     public PbrScene Scene { get; private set; } = null!;
     public Matrix4x4 View { get; private set; }
+    public Matrix4x4 Projection { get; private set; }
+    private Vector2 _previousProjectionJitterUv;
+    public Vector2 ProjectionJitterUv { get; private set; }
+    public Vector2 MotionJitterDelta => ProjectionJitterUv - _previousProjectionJitterUv;
     public Matrix4x4 ViewProjection { get; private set; }
 
-    public void BeginFrame(PbrScene scene, in Matrix4x4 view, in Matrix4x4 viewProjection)
+    public void BeginFrame(PbrScene scene)
     {
         Scene = scene;
-        View = view;
-        ViewProjection = viewProjection;
+        View = scene.Camera.View;
+        _previousProjectionJitterUv = ProjectionJitterUv;
+        SetProjection(scene.Camera.Projection);
         DrawIndex = 0;
+    }
+
+    /// <summary>Sets the frame's projection without changing the authored camera.</summary>
+    public void SetProjection(in Matrix4x4 projection, Vector2 jitterUv = default)
+    {
+        Projection = projection;
+        ProjectionJitterUv = jitterUv;
+        ViewProjection = PbrMath.ViewProjection(View, Projection);
     }
 
     public void Resize(uint width, uint height)

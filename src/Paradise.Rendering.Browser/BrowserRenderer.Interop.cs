@@ -104,11 +104,7 @@ public sealed partial class BrowserRenderer
     private static partial void SubmitFrameJs(
         [JSMarshalAs<JSType.MemoryView>] ArraySegment<byte> frame, int passCount, int opCount);
 
-    // ---- enum mapping ----
-    //
-    // Explicit switches rather than ToString(): the WebGPU names are a wire contract, and a new
-    // enum member must surface as a build break here, not as a string the browser rejects at
-    // pipeline-creation time.
+    // Explicit WebGPU wire names avoid depending on enum ToString spellings.
 
     private static string FormatName(TextureFormat format) => format switch
     {

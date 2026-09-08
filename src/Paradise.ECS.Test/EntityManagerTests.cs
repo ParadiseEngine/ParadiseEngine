@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for EntityManager.
-/// </summary>
+/// <summary>Tests for EntityManager.</summary>
 public sealed class EntityManagerTests
 {
     [Test]

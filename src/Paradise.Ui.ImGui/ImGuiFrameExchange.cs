@@ -3,37 +3,12 @@ using System.Collections.Generic;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>The whole sim-thread → render-thread handoff for one ImGui frame: the triple-buffered
-/// snapshot slot and the texture-op queue, together, because their ORDER relative to each other
-/// is the invariant neither can state alone.
-///
-/// <b>The rule: take the snapshot first, then drain the ops.</b> A frame is published as ops
-/// first, snapshot second (<see cref="TextureOps"/>.Enqueue then <see cref="Publish"/>), so every op
-/// a given snapshot depends on was already in the queue before that snapshot became visible.
-/// Draining after the swap therefore guarantees the render thread holds every texture its
-/// snapshot names. Draining BEFORE the swap does not: the sim thread can publish a whole new
-/// frame in between, and the renderer then draws a texture id it has never allocated — a draw
-/// that silently disappears, with nothing in the geometry path to say why. That is why
-/// <see cref="AcquireForRender"/> does both steps rather than leaving the order to the host.
-///
-/// Snapshots are droppable and ops are not, and both facts live here: a superseded snapshot goes
-/// back to the free pool to be overwritten, while its ops stay queued until the render thread has
-/// applied them.
-///
-/// <b>Why a lock, where <see cref="ImGuiTextureOps"/> needs none.</b> This is not a queue but a
-/// three-slot state machine, and every transition touches more than one slot at once: publishing
-/// recycles the old latest AND installs the new one; acquiring retires the current rendering AND
-/// promotes AND clears latest. Making each slot individually atomic — a <c>ConcurrentStack</c>
-/// for the pool — would leave the race intact: a publish that reads <c>_latest</c>, loses the
-/// thread to an acquire that promotes that same snapshot, and then recycles it, hands the sim
-/// thread the buffer the render thread is drawing. An <c>Interlocked.Exchange</c> pair would in
-/// fact be correct here, and is not used: it buys nothing at two pointer swaps per frame, and it
-/// would rest on an unwritten "render thread only" rule for <c>_rendering</c> that the lock makes
-/// unnecessary to argue.
-///
-/// The lock is a plain <c>object</c> rather than <c>System.Threading.Lock</c> so that
-/// <c>Paradise.Ui.ImGui.CoyoteTest</c> can schedule it — Coyote 1.7.11 rewrites
-/// <c>Monitor.Enter</c>/<c>Exit</c> and does not intercept <c>Lock.EnterScope</c>.</summary>
+/// <summary>Transfers frame snapshots and their ordered texture operations between
+/// threads.</summary>
+/// <remarks>Publish texture operations before the snapshot; acquire the snapshot before draining
+/// operations so every referenced texture is available. Superseded snapshots may be recycled, but
+/// operations must never be dropped. A single lock protects all slot transitions; an object lock
+/// lets Coyote schedule Monitor.Enter/Exit.</remarks>
 public sealed class ImGuiFrameExchange
 {
     private readonly object _lock = new();
@@ -69,12 +44,10 @@ public sealed class ImGuiFrameExchange
         }
     }
 
-    /// <summary>Render thread: take the newest frame and everything needed to draw it.
-    ///
-    /// Apply <paramref name="textureOps"/> before drawing the returned snapshot. Ops are APPENDED
-    /// to it, and <c>ImGuiWebGpuRenderer.ApplyTextureOps</c> is what clears it — so a host that
-    /// acquires a frame and then does not render it keeps them rather than dropping the only copy.
-    /// Pass the same list every frame and never clear it yourself.</summary>
+    /// <summary>Acquires the newest snapshot and appends its pending texture operations.</summary>
+    /// <remarks>Render thread only. Reuse the same operation list and apply it before drawing, even
+    /// for a repeated snapshot; only ApplyTextureOps clears it so skipped frames retain pending
+    /// work.</remarks>
     /// <param name="textureOps">Receives every texture operation not yet applied, in order,
     /// appended after anything already in it.</param>
     /// <param name="isNew">False when this is the same snapshot as the previous call — hosts with

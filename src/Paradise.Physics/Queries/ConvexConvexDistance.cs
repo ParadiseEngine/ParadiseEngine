@@ -102,7 +102,7 @@ internal static class ConvexConvexDistance
         };
     }
 
-    // ---- support functions -------------------------------------------------
+    // support functions
 
     internal static float CoreRadius(in Collider collider) => collider.Type switch
     {
@@ -145,7 +145,7 @@ internal static class ConvexConvexDistance
         return new Vertex { W = supportA - supportB, A = supportA, B = supportB };
     }
 
-    // ---- simplex solver ----------------------------------------------------
+    // simplex solver
 
     private static Vector3 ClosestOnSimplex(Span<Vertex> simplex, ref int count, out bool containsOrigin)
     {
@@ -318,7 +318,7 @@ internal static class ConvexConvexDistance
         return signOrigin * signD < 0f;
     }
 
-    // ---- result extraction -------------------------------------------------
+    // result extraction
 
     private static (Vector3 CoreA, Vector3 CoreB) RecombineClosestPoints(ReadOnlySpan<Vertex> simplex, int count, Vector3 v)
     {
@@ -356,7 +356,7 @@ internal static class ConvexConvexDistance
         }
     }
 
-    // ---- deep-penetration fallback (no EPA in phase 1) ----------------------
+    // deep-penetration fallback (no EPA in phase 1)
 
     private static DistanceResult PenetrationFallback(in Collider a, in RigidTransform ta, in Collider b, in RigidTransform tb, float radiusA, float radiusB)
     {

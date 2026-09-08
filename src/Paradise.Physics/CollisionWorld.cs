@@ -3,19 +3,10 @@ using Paradise.BLOB;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Immutable set of static colliders with closest-hit queries. Stateless by design
-/// (Unity Physics philosophy): <see cref="Build"/> is a pure function of its inputs, there are
-/// no caches and no incremental updates — rebuild when the set changes. Queries allocate
-/// nothing, are safe to run concurrently from any thread, and break fraction/distance ties by
-/// the lowest body index so results are order-deterministic.
-///
-/// Storage is a single Paradise.BLOB blob in unmanaged memory (NativeMemory — no GC-heap
-/// pinning): parallel <see cref="BlobArray{T}"/>s of colliders/transforms/AABBs plus a preorder
-/// <see cref="BlobTree{T}"/> BVH (median split on the longest axis of the node's AABB-union
-/// extent, deterministic construction). Disposing frees the allocation; the blob finalizer is
-/// the backstop if the owner never does.
-/// </summary>
+/// <summary>Owns an immutable static-collider set with allocation-free, concurrent closest-hit queries.</summary>
+/// <remarks>Rebuild when bodies change. Equal distances/fractions select the lowest body index.
+/// One native blob stores colliders, transforms, AABBs and a deterministic median-split BVH.
+/// Dispose releases that allocation; its finalizer is a fallback.</remarks>
 public sealed class CollisionWorld : IDisposable
 {
     /// <summary>BVH node: internal nodes bound their subtree, leaves reference one body.</summary>
@@ -94,7 +85,7 @@ public sealed class CollisionWorld : IDisposable
     public bool CalculateDistance(in ColliderDistanceInput input, out DistanceHit closestHit)
         => Handle.CalculateDistance(input, out closestHit);
 
-    // ---- BVH construction (deterministic median split) -----------------------
+    // BVH construction (deterministic median split)
 
     private sealed class BuildNode : ITreeNode<BvhNode>
     {
@@ -117,22 +108,18 @@ public sealed class CollisionWorld : IDisposable
             };
         }
 
-        // Median split on the longest axis of this node's AABB-union extent; the split point
-        // itself sorts bodies by centroid on that axis, with ties falling back to the body
-        // index so construction is fully deterministic.
+        // Split on the longest bounds axis; body indices break centroid ties deterministically.
         Vector3 extent = bounds.Max - bounds.Min;
         int axis = extent.X >= extent.Y
             ? (extent.X >= extent.Z ? 0 : 2)
             : (extent.Y >= extent.Z ? 1 : 2);
-        int[] sorted = indices.ToArray();
-        Array.Sort(sorted, (a, b) =>
+        span.Sort((a, b) =>
         {
             float ca = Centroid(aabbs[a], axis);
             float cb = Centroid(aabbs[b], axis);
             int compare = ca.CompareTo(cb);
             return compare != 0 ? compare : a.CompareTo(b);
         });
-        sorted.CopyTo(indices);
 
         int mid = span.Length / 2;
         return new BuildNode

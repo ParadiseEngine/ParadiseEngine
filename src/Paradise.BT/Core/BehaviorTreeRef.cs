@@ -3,15 +3,9 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BT;
 
-/// <summary>
-/// The only <see cref="IBehaviorTree"/>: a borrowed <see cref="BehaviorTreeLayout.LayoutBlob"/> for the
-/// shared layout, plus two caller-owned spans for what one instance owns — a
-/// <see cref="NodeState"/> per node, and each node's runtime data. Instance state as plain bytes
-/// is what lets an instance live in an ECS component and ride a snapshot memcpy.
-///
-/// A <c>ref struct</c>, so the compiler checks the spans' lifetime: build one where it is used —
-/// it cannot be a field or cross an <c>await</c> (CS4007).
-/// </summary>
+/// <summary>Views a borrowed layout and caller-owned spans of node states and runtime bytes.</summary>
+/// <remarks>The state can live in ECS components and memcpy snapshots. This ref struct must
+/// remain within the lifetime of its spans and cannot cross await.</remarks>
 public readonly ref struct BehaviorTreeRef : IBehaviorTree
 {
     private readonly ref BehaviorTreeLayout.LayoutBlob _layout;
@@ -20,9 +14,7 @@ public readonly ref struct BehaviorTreeRef : IBehaviorTree
 
     public BehaviorTreeRef(ref BehaviorTreeLayout.LayoutBlob layout, Span<NodeState> states, Span<byte> runtime)
     {
-        // The one unguarded entry: RuntimeData reaches past span bounds checks on purpose
-        // (Unsafe.Add over an offset), so an undersized buffer here is a SILENT write into
-        // whatever sits next to it — for chunk memory, another entity's components.
+        // RuntimeData uses unchecked offsets; validate buffer sizes here to prevent adjacent-memory writes.
         if (states.Length < layout.Count)
         {
             throw new ArgumentException(

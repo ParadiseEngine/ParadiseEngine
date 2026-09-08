@@ -18,8 +18,7 @@
     <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
   </ItemGroup>
 
-  <!-- The reference glTF sampler and the GLB builder are test code by design; the benchmark
-       borrows them the way Paradise.Assets.Pipeline.Test does, rather than making them ship. -->
+  <!-- Share test-only glTF helpers without shipping them in the runtime. -->
   <ItemGroup>
     <Compile Include="..\Paradise.Assets.Pipeline.Test\GltfAnimationRig.cs" Link="Borrowed\GltfAnimationRig.cs" />
     <Compile Include="..\Paradise.Assets.Gltf.Test\GlbTestBuilder.cs" Link="Borrowed\GlbTestBuilder.cs" />

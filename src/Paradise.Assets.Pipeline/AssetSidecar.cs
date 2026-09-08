@@ -4,12 +4,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// An asset's sidecar as the pipeline holds it: the format's <see cref="SidecarMeta"/> with the
-/// importer it names RESOLVED against the chain, so every consumer has the object and nothing
-/// in the pipeline handles the name as text. The format layer keeps the name — it cannot know
-/// the pipeline's types — and this is the one place it becomes an importer.
-/// </summary>
+/// <summary>A sidecar paired with its importer, resolved once against the active chain.</summary>
 public sealed class AssetSidecar
 {
     private AssetSidecar(UPath asset, UPath path, SidecarMeta meta, IAssetImporter? importer)

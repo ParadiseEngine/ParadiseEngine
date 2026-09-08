@@ -38,16 +38,9 @@ public sealed partial class PbrRenderer : IDisposable
 #endif
 
     /// <param name="renderer">The backend the frame is submitted to.</param>
-    /// <param name="switches">The engine's feature configuration — the same object the rest of
-    /// the process is switched by. The built-in features declare themselves into it and read it
-    /// every frame, so a config file that says <c>"rendering.bloom": false</c> reaches this
-    /// renderer without the host writing any renderer-specific code.
-    ///
-    /// <para>REQUIRED, and second in the list, because the alternative was a defaulted last
-    /// parameter: a host that forgot it got a private switchboard, every feature at its declared
-    /// default, and a config file that reached nothing — with no error and a frame that still
-    /// renders. A caller that configures nothing writes <c>new FeatureSwitches()</c> and has said
-    /// so.</para></param>
+    /// <param name="switches">The process-wide feature configuration, read each frame.
+    /// Required so this renderer cannot silently ignore host configuration by creating a private
+    /// switchboard; unconfigured hosts explicitly pass <c>new FeatureSwitches()</c>.</param>
     /// <param name="width">Frame width in pixels.</param>
     /// <param name="height">Frame height in pixels.</param>
     /// <param name="maxAnisotropy">Anisotropic filtering cap for material textures.</param>
@@ -106,25 +99,13 @@ public sealed partial class PbrRenderer : IDisposable
         Pipeline.Resize(width, height);
     }
 
-    /// <summary>Register a game-supplied shader program for use by materials. The program is
-    /// typically an extension shader that <c>#include</c>s <c>Common/pbrCore.slang</c>, compiled
-    /// by the game's build (the NuGet ships the sources and the Slang targets) and loaded via
-    /// <see cref="ShaderProgramLoader"/> from the game assembly. It must consume the standard
-    /// rigid vertex stream and may declare extra group-2 bindings from slot
-    /// <see cref="MaterialResourceCache.StandardMaterialEntryCount"/> up (bind them per material
-    /// via the extraEntries overload of <see cref="MaterialResourceCache.AddMaterial(in GltfMaterialData, GltfImageData[], int, ReadOnlySpan{BindGroupEntryDesc})"/>).
-    /// Returns a programId (&gt; 0; 0 is the built-in PBR program).
-    ///
-    /// The pipeline is created with the BUILT-IN layout for groups 0/1/3 so the engine's draw-ring,
-    /// frame and SSAO bind groups stay compatible — WebGPU permits a pipeline layout to declare
-    /// bindings the shader never uses, and slangc dead-code-eliminates unreferenced globals from
-    /// the extension's reflection (e.g. jointMatrices when it has no skinned entry point).
-    /// Validation is therefore a subset check, and it throws here — at registration, not at first
-    /// draw, where a mismatch would only surface as an async pipeline error that silently drops
-    /// draws. Custom programs are rigid-only; shadow and SSAO-prepass passes always run the
-    /// built-in vertex shaders — for a BLEND material that is moot (excluded from both), but an
-    /// OPAQUE custom material casts shadows and writes prepass positions from its UNDISPLACED
-    /// geometry, so a vertex-displaced opaque surface will self-shadow as if flat.</summary>
+    /// <summary>Registers a custom rigid material shader and returns its positive program
+    /// ID.</summary>
+    /// <remarks>Compile game shaders against Common/pbrCore.slang and load them through
+    /// ShaderProgramLoader. Extra group-2 bindings start at StandardMaterialEntryCount; groups
+    /// 0/1/3 must be compatible subsets of the built-in layout. Validate at registration to avoid
+    /// asynchronous GPU errors. Shadows and prepass use built-in vertices, so opaque vertex
+    /// displacement is not reflected in those passes.</remarks>
     public int RegisterMaterialProgram(
         ShaderProgramDesc program,
         string vertexEntryPoint = "vertexMain",
@@ -142,9 +123,7 @@ public sealed partial class PbrRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (offset < 0 || offset + matrices.Length > _ctx.JointCapacity)
         {
-            // Loud, and once per frame rather than per instance: silently skipping would draw the
-            // character folded into the origin, which looks like a broken rig rather than a full
-            // palette buffer.
+            // Report overflow once per frame; missing palettes otherwise resemble broken rigs.
             if (!_jointOverflowReported)
             {
                 _jointOverflowReported = true;
@@ -187,13 +166,10 @@ public sealed partial class PbrRenderer : IDisposable
         return meshes;
     }
 
-    /// <summary>Upload a skinned primitive: the 12-float mesh stream interleaved with the 8-float
-    /// joints/weights stream into the 20 floats <c>vertexMainSkinned</c> reads.
-    ///
-    /// The two arrive separately from glTF (<c>GltfPrimitive.Vertices</c> and
-    /// <c>.JointsWeights</c>) and are woven together here, ONCE, at upload. That is the whole
-    /// difference from CPU skinning: the pose then costs a joint palette per frame — 65 matrices —
-    /// instead of rewriting every vertex.</summary>
+    /// <summary>Uploads a skinned primitive by interleaving 12 vertex floats with 8 joint/weight floats.</summary>
+    /// <remarks><c>GltfPrimitive.Vertices</c> and <c>.JointsWeights</c> are combined once into the
+    /// 20-float <c>vertexMainSkinned</c> stream. Subsequent poses upload joint palettes rather than
+    /// rewriting every vertex.</remarks>
     public PbrPrimitive UploadSkinnedPrimitive(float[] vertices, float[] jointsWeights, uint[] indices, int materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -251,7 +227,7 @@ public sealed partial class PbrRenderer : IDisposable
         return new PbrPrimitive(
             vb, ib, (uint)indices.Length,
             (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
-            min, max, TraceMesh: traceMesh);
+            min, max, TraceMesh: traceMesh, Dynamic: dynamic);
     }
 
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
@@ -279,9 +255,10 @@ public sealed partial class PbrRenderer : IDisposable
         // Before anything reads a switch: this fixes which features run in THIS frame and is the
         // only place a transition is announced, so the trace-hierarchy decision below and the
         // features' own setup cannot disagree about what is on.
+        _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
-        var view = scene.Camera.View;
-        var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
+        Pipeline.PrepareFrame();
+        var view = _ctx.View;
 
         // Partition + sort. View-space depth of the instance origin orders blended draws
         // back-to-front (larger distance first). Opaque stays in submission order (depth
@@ -308,7 +285,6 @@ public sealed partial class PbrRenderer : IDisposable
             throw new InvalidOperationException(
                 $"{totalDraws} draws exceed the {PbrContext.MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
 
-        _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
         timings.Partition = Lap();
         // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it —

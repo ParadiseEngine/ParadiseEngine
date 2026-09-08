@@ -1,6 +1,6 @@
 namespace Paradise.Assets.Documents;
 
-/// <summary>The components the authoring format itself defines; their ids are written into every document and are FIXED FOREVER.</summary>
+/// <summary>Authoring-format components whose persisted IDs must never change.</summary>
 public static class WellKnownComponents
 {
     /// <summary>The parent link lives here, not on transform: a reparent changes what an object IS, so moving and re-hanging differ in a diff.</summary>
