@@ -24,6 +24,10 @@ public ref struct RenderCommandEncoder
     public void BeginPass(int passIndex) =>
         Write(RenderCommand.FromBeginPass(passIndex));
 
+    /// <summary>Execute a native callback outside any render or compute pass.</summary>
+    public void HostPass(int callbackIndex) =>
+        Write(RenderCommand.FromHostPass(callbackIndex));
+
     public void EndPass() =>
         Write(RenderCommand.FromEndPass());
 

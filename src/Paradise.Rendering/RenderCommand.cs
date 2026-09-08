@@ -25,6 +25,7 @@ public enum RenderCommandKind : byte
     SetComputePipeline,
     Dispatch,
     DrawIndexedIndirect,
+    HostPass,
 }
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
@@ -35,6 +36,9 @@ public readonly record struct SetViewportPayload(float X, float Y, float Width, 
 /// <summary>Payload for <see cref="RenderCommandKind.BeginPass"/>: index into
 /// <see cref="RenderCommandStream.Passes"/>.</summary>
 public readonly record struct BeginPassPayload(int PassIndex);
+
+/// <summary>Index into the stream's native callback table.</summary>
+public readonly record struct HostPassPayload(int CallbackIndex);
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetPipeline"/>.</summary>
 public readonly record struct SetPipelinePayload(PipelineHandle Pipeline);
@@ -65,6 +69,7 @@ public readonly struct RenderCommand
     [FieldOffset(0)] public readonly RenderCommandKind Kind;
 
     [FieldOffset(8)] public readonly BeginPassPayload BeginPass;
+    [FieldOffset(8)] public readonly HostPassPayload HostPass;
     [FieldOffset(8)] public readonly SetPipelinePayload SetPipeline;
     [FieldOffset(8)] public readonly SetVertexBufferPayload SetVertexBuffer;
     [FieldOffset(8)] public readonly SetIndexBufferPayload SetIndexBuffer;
@@ -80,6 +85,12 @@ public readonly struct RenderCommand
     {
         Kind = kind;
         BeginPass = p;
+    }
+
+    private RenderCommand(RenderCommandKind kind, HostPassPayload p) : this()
+    {
+        Kind = kind;
+        HostPass = p;
     }
 
     private RenderCommand(RenderCommandKind kind, SetPipelinePayload p) : this()
@@ -150,6 +161,9 @@ public readonly struct RenderCommand
     public static RenderCommand FromBeginPass(int passIndex) =>
         new(RenderCommandKind.BeginPass, new BeginPassPayload(passIndex));
 
+    public static RenderCommand FromHostPass(int index) =>
+        new(RenderCommandKind.HostPass, new HostPassPayload(index));
+
     public static RenderCommand FromEndPass() =>
         new(RenderCommandKind.EndPass);
 
@@ -198,6 +212,9 @@ public readonly struct RenderCommand
 public readonly struct RenderCommandStream
 {
     public ReadOnlyMemory<RenderCommand> Commands { get; init; }
+
+    /// <summary>Native callbacks borrowed for the lifetime of this stream, executed only on a compatible host backend.</summary>
+    public ReadOnlyMemory<HostPassInvocation> HostPasses { get; init; }
 
     /// <summary>Render passes referenced by <see cref="RenderCommandKind.BeginPass"/> via index.
     /// Pass descriptors hold inline color attachment storage and live separately so the command

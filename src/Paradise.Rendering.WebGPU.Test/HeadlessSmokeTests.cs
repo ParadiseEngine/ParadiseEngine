@@ -1,4 +1,5 @@
 using Paradise.Windowing;
+using Paradise.Rendering.Graph;
 using TUnit.Core;
 
 namespace Paradise.Rendering.WebGPU.Test;
@@ -18,6 +19,59 @@ namespace Paradise.Rendering.WebGPU.Test;
 /// the load-bearing M0 acceptance signal; these are belt-and-suspenders.</summary>
 public class HeadlessSmokeTests
 {
+    [Test]
+    public async Task host_pass_executes_at_its_graph_position_and_is_included_in_capture()
+    {
+        using var renderer = TryCreateHeadlessOrSkip(16, 16);
+        if (renderer is null) return;
+        renderer.PassTimingEnabled = true;
+        var frame = new ClearFrame(new ColorRgba(1, 0, 0, 1));
+        var calls = 0;
+        frame.Graph.AddHostPass("native", RenderPassEvent.Overlay, new WebGpuHostPass((encoder, target) =>
+        {
+            calls++;
+            var descriptor = new WebGpuSharp.RenderPassDescriptor
+            {
+                ColorAttachments = new WebGpuSharp.RenderPassColorAttachment[]
+                {
+                    new()
+                    {
+                        View = target,
+                        LoadOp = WebGpuSharp.LoadOp.Clear,
+                        StoreOp = WebGpuSharp.StoreOp.Store,
+                        ClearValue = new WebGpuSharp.Color(0, 0, 1, 1),
+                        DepthSlice = null,
+                    },
+                },
+            };
+            var pass = encoder.BeginRenderPass(in descriptor);
+            pass.End();
+        }), FrameGraph.Backbuffer);
+        var stream = frame.Record();
+        await Assert.That(calls).IsEqualTo(0);
+        var capture = renderer.CaptureFrameAsync();
+        renderer.Submit(stream);
+        var image = await capture.ConfigureAwait(false);
+        await Assert.That(calls).IsEqualTo(1);
+        await Assert.That(image.Pixels[0]).IsEqualTo((byte)255);
+        await Assert.That(image.Pixels[2]).IsEqualTo((byte)0);
+
+        frame.Graph.AddRasterPass("after overlay", RenderPassEvent.Overlay, 1)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: new ColorRgba(0, 1, 0, 1))
+            .Record(frame, static (ClearFrame _, ref PassRecording _, int _) => { });
+        renderer.Submit(frame.Record());
+        var pixels = renderer.ReadbackColor(out _, out _);
+        await Assert.That(calls).IsEqualTo(2);
+        await Assert.That(pixels[0]).IsEqualTo((byte)0);
+        await Assert.That(pixels[1]).IsEqualTo((byte)255);
+        if (renderer.SupportsPassTiming)
+        {
+            var timings = renderer.ReadPassTimings();
+            await Assert.That(timings.Length).IsEqualTo(3);
+            await Assert.That(timings[1]).IsEqualTo(0d);
+        }
+    }
+
     private static WebGpuRenderer? TryCreateHeadlessOrSkip(uint width, uint height)
     {
         try

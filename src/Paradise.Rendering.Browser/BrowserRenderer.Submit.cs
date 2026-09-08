@@ -58,6 +58,12 @@ public sealed partial class BrowserRenderer
             op[0] = (byte)cmd.Kind;
             switch (cmd.Kind)
             {
+                case RenderCommandKind.HostPass:
+                    if (inPass != PassKind.None)
+                        throw new InvalidOperationException("Host callback issued inside an open pass.");
+                    if ((uint)cmd.HostPass.CallbackIndex >= (uint)stream.HostPasses.Length)
+                        throw new InvalidOperationException("Host callback index is outside the stream's callback table.");
+                    break;
                 case RenderCommandKind.BeginPass:
                 {
                     if (inPass == PassKind.Render)

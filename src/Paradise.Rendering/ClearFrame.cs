@@ -1,34 +1,27 @@
 using System.Buffers;
+using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering;
 
-/// <summary>Records a reusable frame that clears the backbuffer.</summary>
-/// <remarks>Submit the recorded commands so normal presentation and overlay paths run; a pass
-/// descriptor without commands performs no clear. Record reuses its buffer without steady-state
-/// allocations.</remarks>
+/// <summary>Records a reusable frame graph that clears the backbuffer.</summary>
 public sealed class ClearFrame
 {
     private readonly ArrayBufferWriter<RenderCommand> _commands = new(2);
-    private readonly RenderPassDesc[] _passes;
 
     public ClearFrame(ColorRgba color)
     {
-        _passes = new RenderPassDesc[1];
-        _passes[0] = new RenderPassDesc(colorAttachmentCount: 1);
-        _passes[0].Colors.Slot0 = new ColorAttachmentDesc(
-            View: RenderViewHandle.Invalid, // backbuffer
-            Load: LoadOp.Clear,
-            Store: StoreOp.Store,
-            ClearValue: color);
+        Graph.AddRasterPass("Clear", RenderPassEvent.Opaque)
+            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: color)
+            .Record(this, static (ClearFrame _, ref PassRecording _, int _) => { });
     }
 
-    /// <summary>The stream to hand to <c>Submit</c>. Valid until the next call.</summary>
+    /// <summary>The persistent graph, to which hosts can append overlay passes before recording.</summary>
+    public FrameGraph Graph { get; } = new();
+
+    /// <summary>The stream to hand to Submit, valid until the next call.</summary>
     public RenderCommandStream Record()
     {
         _commands.ResetWrittenCount();
-        var encoder = new RenderCommandEncoder(_commands);
-        encoder.BeginPass(0);
-        encoder.EndPass();
-        return new RenderCommandStream(_commands.WrittenMemory, _passes);
+        return Graph.Compile(_commands);
     }
 }
