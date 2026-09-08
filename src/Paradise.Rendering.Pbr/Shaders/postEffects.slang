@@ -70,7 +70,8 @@ float4 depthOfFieldFragment(Varyings input) : SV_Target
         if (any(uv < 0.0) || any(uv > 1.0)) continue;
         float sampleCoc = cocAt(uv);
         float cover = sampleCoc < -0.5 ? -sampleCoc : max(centerCoc, 0.0);
-        float weight = saturate(cover - radius + 1.0);
+        // A zero CoC has no aperture coverage, even inside the one-pixel filter fringe.
+        float weight = cover > 0.0001 ? saturate(cover - radius + 1.0) : 0.0;
         // A sharply focused foreground must not be pulled across a defocused background.
         if (sampleCoc >= -0.5 && sampleCoc < centerCoc - 1.0) weight = 0.0;
         sum += colorAt(uv) * weight;
@@ -133,9 +134,13 @@ float4 colorGradingFragment(Varyings input) : SV_Target
     color = max((color - 0.18) * post.a.z + 0.18, 0.0);
     float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
     color = max(lerp(float3(luma), color, post.a.w), 0.0);
-    color = pow(max(color * post.d.xyz + post.b.xyz * (1.0 - color), 0.0), 1.0 / post.c.xyz);
+    // Bound the base before exponentiation: clamping an overflowing pow afterward is too late.
+    // Gamma is constrained to [0.01, 8], keeping this upper base within float32 range.
+    float3 upperBase = exp2(log2(65504.0) * post.c.xyz);
+    float3 lifted = max(color * post.d.xyz + post.b.xyz * (1.0 - color), 0.0);
+    color = min(pow(min(lifted, upperBase), 1.0 / post.c.xyz), 65504.0);
     if (post.e.x >= 2.0) color = lerp(color, lookupColor(color), post.e.y);
-    return float4(max(color, 0.0), 1.0);
+    return float4(clamp(color, 0.0, 65504.0), 1.0);
 }
 
 [shader("fragment")]

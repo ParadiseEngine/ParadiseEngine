@@ -51,7 +51,9 @@ public class PostProcessingGpuTests
         {
             frame.Textures.Ensure("PostTestPattern", PbrTargets.RenderTarget(frame.Width, frame.Height, PbrTargets.HdrFormat));
             var target = frame.Graph.Texture("PostTestPattern");
+            // Keep scene recording live: it fills the draw uniforms consumed by the depth prepass.
             frame.Graph.AddRasterPass("Test.PostPattern", RenderPassEvent.AfterTransparent, 40)
+                .Reads(frame.Blackboard.GetOrDefault(PbrResults.SceneColor, default))
                 .Color(0, target, LoadOp.Clear).Record(this, Record);
             frame.Blackboard.Advance(PbrResults.SceneColor,
                 frame.Blackboard.GetOrDefault(PbrResults.SceneColor, default), target);
@@ -219,6 +221,83 @@ public class PostProcessingGpuTests
         pbr.Switches.Set(PbrFeatures.MotionVectors.Id, false);
         await Assert.That(Difference(first, Render(backend, pbr, scene))).IsEqualTo(0d);
         await Assert.That(pbr.LastPassNames.Contains("Post.MotionBlur")).IsFalse();
+    }
+
+    [Test]
+    public async Task Focused_surface_is_unchanged_with_a_one_pixel_dof_cap()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Pattern(pbr, backend);
+        scene.Camera = new PbrCamera
+        {
+            View = PbrMath.LookAt(new Vector3(0, 0, 2), Vector3.Zero, Vector3.UnitY),
+            Projection = PbrMath.Orthographic(2, 1, 0.1f, 10),
+            Position = new Vector3(0, 0, 2),
+        };
+        var baseline = Render(backend, pbr, scene);
+        scene.DepthOfField = new PbrDepthOfField { Enabled = true, FocusDistance = 1.5f, MaxRadiusPixels = 1 };
+        var actual = Render(backend, pbr, scene);
+        // The inner rectangle lies entirely on the focused plane, away from background edges.
+        for (var y = 8; y < 56; y++)
+        for (var x = 8; x < 56; x++)
+        for (var channel = 0; channel < 3; channel++)
+            await Assert.That(actual[(y * (int)Size + x) * 4 + channel])
+                .IsEqualTo(baseline[(y * (int)Size + x) * 4 + channel]);
+    }
+
+    private sealed class FiniteGradingFeature : IRenderFeature
+    {
+        private readonly WebGpuRenderer _backend;
+        private readonly PipelineHandle _pipeline;
+        private readonly BindGroupLayoutDesc _layout;
+        public FiniteGradingFeature(WebGpuRenderer backend)
+        {
+            _backend = backend;
+            var program = ShaderProgramLoader.Load(typeof(PostProcessingGpuTests).Assembly, "Shaders.postFiniteFixture");
+            _pipeline = backend.CreatePipeline(program, PbrTargets.HdrFormat);
+            _layout = ShaderPrograms.FindGroup(program, 0);
+        }
+        public FeatureDefinition Definition { get; } = new("test.finiteGrading", true, "Checks finite intermediate colors.");
+        public FrameRequirements Requires => FrameRequirements.DisplayColor;
+        public void Resize(uint width, uint height) { }
+        public void Setup(in FrameContext frame)
+        {
+            frame.Textures.Ensure("FiniteGrading", PbrTargets.RenderTarget(frame.Width, frame.Height, PbrTargets.HdrFormat));
+            var target = frame.Graph.Texture("FiniteGrading");
+            frame.Blackboard.TryGet(PbrResults.DisplayColor, out var source);
+            frame.Graph.AddRasterPass("Test.FiniteGrading", RenderPassEvent.Composite, 11)
+                .Color(0, target, LoadOp.Clear)
+                .BindGroup(0, "FiniteGrading", _layout, [GraphBinding.Texture(0, source)])
+                .Record(this, Record);
+            frame.Blackboard.Advance(PbrResults.DisplayColor, source, target);
+        }
+        private static void Record(FiniteGradingFeature self, ref PassRecording pass, int _)
+        {
+            pass.Encoder.SetPipeline(self._pipeline);
+            pass.SetBindGroup(0);
+            pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
+        }
+        public void Dispose() => _backend.DestroyPipeline(_pipeline);
+    }
+
+    [Test]
+    public async Task Extreme_grading_stays_finite_before_downstream_filtering()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        pbr.Pipeline.Add(new FiniteGradingFeature(backend), PbrFeatureOrder.ColorGrading + 1);
+        var scene = Flat(1);
+        scene.ColorGrading = new PbrColorGrading { Enabled = true, Gain = new Vector3(8), Gamma = new Vector3(0.01f) };
+        var pixels = Render(backend, pbr, scene);
+        for (var i = 0; i < pixels.Length; i += 4)
+        {
+            await Assert.That(pixels[i]).IsEqualTo((byte)255);
+            await Assert.That(pixels[i + 1]).IsEqualTo((byte)255);
+            await Assert.That(pixels[i + 2]).IsEqualTo((byte)255);
+        }
     }
 
     [Test]
