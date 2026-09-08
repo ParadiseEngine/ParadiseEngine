@@ -33,6 +33,14 @@ public sealed record PbrLight
     public bool CastsShadows { get; init; }
     public float ShadowStrength { get; init; } = 1f;
     public bool SoftShadows { get; init; }
+    /// <summary>Local shadow tile resolution. Zero selects it from projected light extent.</summary>
+    public uint ShadowResolution { get; init; }
+    /// <summary>Atlas admission priority; larger values retain quality before smaller ones.</summary>
+    public int ShadowPriority { get; init; }
+    /// <summary>PCSS local emitter radius in metres.</summary>
+    public float ShadowSourceRadius { get; init; } = 0.1f;
+    /// <summary>PCSS directional emitter angular diameter in degrees (the sun is about 0.53°).</summary>
+    public float ShadowAngularDiameter { get; init; } = 0.53f;
     // Godot LIGHT_PARAM_SPECULAR: scales the specular lobe only (default 0.5 — Godot's own).
     public float Specular { get; init; } = 0.5f;
     // Godot LIGHT_PARAM_SIZE: directional = angular diameter in DEGREES; point/spot = world
@@ -239,6 +247,12 @@ public struct PbrCamera
     public Vector3 Position;
 }
 
+/// <summary>Explicitly produces motion even when no temporal effect requests it.</summary>
+public sealed record PbrMotionVectors
+{
+    public bool Enabled { get; init; }
+}
+
 /// <summary>One uploaded draw batch: geometry handles plus the material it binds.</summary>
 public sealed record PbrPrimitive(
     BufferHandle VertexBuffer,
@@ -257,7 +271,9 @@ public sealed record PbrPrimitive(
     bool Skinned = false,
     // The primitive's mesh in the renderer's trace scene, or -1 when it has none (a dynamic
     // primitive keeps the hierarchy of the geometry it was uploaded with).
-    int TraceMesh = -1);
+    int TraceMesh = -1,
+    // Mutable vertex streams cannot be culled against their upload-time bounds.
+    bool Dynamic = false);
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);
@@ -288,10 +304,25 @@ public sealed record PbrInstancing
 public sealed class PbrScene
 {
     public PbrInstancing Instancing = new();
+    public PbrFog Fog = new();
+    public List<PbrFogVolume> FogVolumes { get; } = [];
     public PbrCamera Camera;
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public PbrBloom Bloom = new();
+    public PbrExposure Exposure = new();
+    public PbrDepthOfField DepthOfField = new();
+    public PbrMotionBlur MotionBlur = new();
+    public PbrColorGrading ColorGrading = new();
+    public PbrLensDistortion LensDistortion = new();
+    public PbrChromaticAberration ChromaticAberration = new();
+    public PbrVignette Vignette = new();
+    public PbrFilmGrain FilmGrain = new();
+    public PbrSharpening Sharpening = new();
+    public PbrTaa Taa = new();
+    public PbrFxaa Fxaa = new();
+    /// <summary>Simulation seconds since the previous frame, clamped by temporal post effects.</summary>
+    public float DeltaSeconds = 1f / 60f;
     /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned
     /// via <c>--anim-time</c> for deterministic screenshots/parity).</summary>
     public float ElapsedSeconds;
@@ -322,9 +353,32 @@ public sealed class PbrScene
     // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
     // and the shader darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();
+    public PbrContactShadows ContactShadows = new();
     public PbrRayTracedAo RayTracedAo = new();
     public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
+    public PbrVisibility Visibility = new();
+    public PbrMotionVectors MotionVectors = new();
+    /// <summary>Increment on camera cuts, teleports or discontinuous scene edits to reject temporal history.</summary>
+    public ulong TemporalHistoryVersion;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
+}
+
+/// <summary>Conservative scene visibility; GPU occlusion uses the current frame and costs an additional depth pass.</summary>
+public sealed class PbrVisibility
+{
+    public bool FrustumEnabled = true;
+    public bool OcclusionEnabled;
+}
+
+/// <summary>Fine direct-light shadows from the visible depth buffer, complementing shadow maps.
+/// Off-screen or hidden blockers cannot contribute. The engine switch must also permit them.</summary>
+public sealed record PbrContactShadows
+{
+    public bool Enabled { get; init; }
+    public float Length { get; init; } = 0.5f;
+    public float Thickness { get; init; } = 0.05f;
+    public int Steps { get; init; } = 16;
+    public float Strength { get; init; } = 1f;
 }

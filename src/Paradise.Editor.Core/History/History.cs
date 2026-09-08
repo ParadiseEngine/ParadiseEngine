@@ -3,23 +3,11 @@ using Zio;
 
 namespace Paradise.Editor.Core.History;
 
-/// <summary>The reference <see cref="IHistory"/>: versions and file operations in one list,
-/// published through the scene provider.</summary>
-/// <remarks>
-/// <para>
-/// Every document step goes out through <see cref="ISceneProvider.Accept"/>, which is what makes
-/// one history serve both hosts: standalone the provider holds the file's document, in-game it
-/// applies the version to the live world. Nothing here keeps its own copy to diverge from that.
-/// </para>
-/// <para>
-/// Deliberately without a byte budget or grouping yet; those are the first things E1 adds, and
-/// the shape here is what they extend.
-/// </para>
-/// </remarks>
+/// <summary>Tracks document versions and reversible file operations for undo and redo.</summary>
+/// <remarks>Publishes versions through <see cref="ISceneProvider.Accept"/> for both file-backed and live-world hosts.</remarks>
 public sealed class History(ISceneProvider scene, IFileSystem fileSystem) : IHistory
 {
-    // Read through the field, never the parameter: a primary-constructor parameter used BOTH in a
-    // field initializer and in a method body is CS9124.
+    // Keep method access on the field to avoid primary-constructor double capture (CS9124).
     private readonly ISceneProvider _scene = scene;
     private readonly SceneDocument _initial = scene.Current;
     private readonly List<IHistoryEntry> _entries = [];
@@ -31,8 +19,7 @@ public sealed class History(ISceneProvider scene, IFileSystem fileSystem) : IHis
 
     public void Commit(IHistoryEntry entry)
     {
-        // Published BEFORE the entry is recorded: a provider that refuses must leave the history
-        // exactly as it was, not holding a step that never happened.
+        // Publish first so a rejected version leaves history unchanged.
         if (entry is DocumentVersion version) Publish(version.Document);
 
         _entries.RemoveRange(_cursor, _entries.Count - _cursor);
@@ -55,9 +42,7 @@ public sealed class History(ISceneProvider scene, IFileSystem fileSystem) : IHis
                 break;
         }
 
-        // Moved only once the side effect succeeded. A Revert that throws — the file deleted
-        // outside the editor, a read-only mount — would otherwise leave the cursor past a step
-        // that is still applied, and the next Redo would Reapply something never reverted.
+        // Advance the cursor only after the operation succeeds.
         _cursor = index;
         return entry;
     }

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Generators.Test;
 
-/// <summary>
-/// Tests for TagGenerator functionality.
-/// </summary>
+/// <summary>Tests for TagGenerator functionality.</summary>
 public class TagGeneratorBasicTests
 {
     [Test]
@@ -74,9 +72,7 @@ public class TagGeneratorBasicTests
     }
 }
 
-/// <summary>
-/// Tests for TagMask sizing based on maximum TagId.
-/// </summary>
+/// <summary>Tests for TagMask sizing based on maximum TagId.</summary>
 public class TagGeneratorMaskSizingTests
 {
     /// <summary>
@@ -103,9 +99,7 @@ public class TagGeneratorMaskSizingTests
         await Assert.That(tagAliases).Contains("ImmutableBitSet<global::Paradise.ECS.Bit128>");
     }
 
-    /// <summary>
-    /// Tag with Id=33 requires 34 bits, so SmallBitSet&lt;ulong&gt; is needed.
-    /// </summary>
+    /// <summary>Tag with Id=33 requires 34 bits, so SmallBitSet&lt;ulong&gt; is needed.</summary>
     [Test]
     public async Task Tag_WithId33_UsesSmallBitSetUlong()
     {
@@ -126,9 +120,7 @@ public class TagGeneratorMaskSizingTests
         await Assert.That(tagAliases).Contains("SmallBitSet<ulong>");
     }
 
-    /// <summary>
-    /// Tag with Id=31 (max for 32-bit) should use SmallBitSet&lt;uint&gt;.
-    /// </summary>
+    /// <summary>Tag with Id=31 (max for 32-bit) should use SmallBitSet&lt;uint&gt;.</summary>
     [Test]
     public async Task Tag_WithId31_UsesSmallBitSetUint()
     {
@@ -149,9 +141,7 @@ public class TagGeneratorMaskSizingTests
         await Assert.That(tagAliases).Contains("SmallBitSet<uint>");
     }
 
-    /// <summary>
-    /// Multiple tags with one having high Id should size mask appropriately.
-    /// </summary>
+    /// <summary>Multiple tags with one having high Id should size mask appropriately.</summary>
     [Test]
     public async Task MixedTags_WithOneHighId_UsesMaskForHighestId()
     {

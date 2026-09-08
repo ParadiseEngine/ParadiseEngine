@@ -3,14 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Default allocator using <see cref="NativeMemory"/> for unmanaged heap allocations.
-/// </summary>
+/// <summary>Default allocator using <see cref="NativeMemory"/> for unmanaged heap allocations.</summary>
 public sealed unsafe class NativeMemoryAllocator : IAllocator
 {
-    /// <summary>
-    /// Shared singleton instance for convenience.
-    /// </summary>
+    /// <summary>Shared singleton instance for convenience.</summary>
     public static NativeMemoryAllocator Shared { get; } = new();
 
     /// <inheritdoc />

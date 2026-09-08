@@ -124,6 +124,33 @@ public class InstancingTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task visibility_preserves_original_slots_and_splits_batches(bool occlusion)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        var recording = new RecordingRenderer(backend);
+        using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, false);
+        scene.Instances[2].Model = Matrix4x4.CreateTranslation(100, 0, 0);
+        scene.Visibility.OcclusionEnabled = occlusion;
+        pbr.RenderFrame(scene);
+        var pixels = backend.ReadbackColor(out _, out _).ToArray();
+        var feature = pbr.Pipeline.Find<InstancingFeature>()!;
+        await Assert.That(pbr.Pipeline.Find<FrustumCullingFeature>()!.CulledDrawCount).IsEqualTo(1);
+        await Assert.That(feature.DrawCalls).IsEqualTo(occlusion ? 5 : 2);
+        await Assert.That(feature.SavedDrawCalls).IsEqualTo(occlusion ? 0 : 3);
+        await Assert.That(recording.LastPresentedFrame.Commands.Count(c => c.Kind == RenderCommandKind.DrawIndexedIndirect))
+            .IsEqualTo(occlusion ? 5 : 0);
+        scene.Instancing = new PbrInstancing { Enabled = false };
+        scene.Visibility.FrustumEnabled = false;
+        scene.Visibility.OcclusionEnabled = false;
+        pbr.RenderFrame(scene);
+        AssertPixels(pixels, backend.ReadbackColor(out _, out _));
+    }
+
+    [Test]
     public async Task disabling_scene_clears_draw_statistics_when_instancing_is_already_off()
     {
         using var backend = Backend();

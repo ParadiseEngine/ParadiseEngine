@@ -5,12 +5,8 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// The game a running <c>paradise assets watch</c> can play from its tray: one at a time, on the
-/// manifest's <c>[host]</c> scene, from the play tree the watch itself keeps fresh — so no asset
-/// build of its own, since two builders writing one tree at once is what the watch's single
-/// drainer rule exists to prevent. A Play replaces the running game; stopping the watch stops it.
-/// </summary>
+/// <summary>Runs one tray-launched game against the watcher's current play tree.</summary>
+/// <remarks>Play replaces the game; watch shutdown stops it. Asset builds remain with the watcher's single drainer.</remarks>
 internal sealed class TrayGameSession : IDisposable
 {
     private readonly IFileSystem _fileSystem;

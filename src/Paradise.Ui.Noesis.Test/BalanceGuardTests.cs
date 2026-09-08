@@ -3,16 +3,9 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis.Test;
 
-/// <summary>
-/// The documented pairing rule: "Update never blocks and allocates memory when not synchronized
-/// with UpdateRenderTree", so an Update that returns true and is never matched by an
-/// UpdateRenderTree queues a snapshot nobody collects.
-///
-/// A host drops frames for ordinary reasons — a minimized window, a lost swapchain, any frame
-/// that returns before its overlay pass — so the guard has to hold without the host noticing.
-/// These pin the two halves of it: ticking repeatedly with no render must not keep producing
-/// snapshots, and a render must let the next one through.
-/// </summary>
+/// <summary>Checks that view updates wait for the previous render-tree update.</summary>
+/// <remarks>Unmatched successful Update calls queue snapshots; the guard prevents accumulation
+/// while rendering is skipped.</remarks>
 [NotInParallel]
 public class BalanceGuardTests
 {

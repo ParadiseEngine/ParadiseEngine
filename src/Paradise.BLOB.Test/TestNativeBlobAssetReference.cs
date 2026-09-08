@@ -58,9 +58,7 @@ public class TestNativeBlobAssetReference
         long before = (long)reference.UnsafePtr;
         Assert.AreEqual((nuint)0, (nuint)before % 64);
 
-        // Native allocations are invisible to the GC: the pointer must not move and the data
-        // must survive a full collection (a pinned-managed-array reference relies on pinning
-        // for the same guarantee — this one needs none).
+        // Native pointers and contents must survive a full GC unchanged.
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();

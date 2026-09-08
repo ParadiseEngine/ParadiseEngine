@@ -14,20 +14,9 @@
 // Wwise ships it as source rather than a library precisely so integrations can own the instance.
 #include <AkFilePackageLowLevelIODeferred.h>
 
-// ---- plug-in registration ----------------------------------------------------------------------
-//
-// THESE INCLUDES ARE NOT OPTIONAL AND THEY ARE NOT DOCUMENTATION. Wwise's codecs and effects live
-// in static libraries and register themselves from static initializers. A linker drops any object
-// file in a .a that nothing references, so linking libAkVorbisDecoder.a alone achieves nothing —
-// the registration never makes it into the binary. Each *Factory.h below emits the reference that
-// forces its object file to be kept.
-//
-// The failure mode is why this comment is long: everything links, the engine initializes, banks
-// load, events post and return valid playing ids, and then nothing is audible except
-// "Codec plug-in not registered" on stderr. It reads as a broken integration rather than a
-// missing link-time reference.
-//
-// Codecs are mandatory — a bank encoded in Vorbis or Opus cannot be decoded without them.
+// Factory headers force static codec/effect registration objects into the linked binary. Linking
+// their libraries alone lets the linker discard registration; banks then load but playback reports
+// an unregistered codec. Keep these includes.
 #include <AK/Plugin/AkVorbisDecoderFactory.h>
 #include <AK/Plugin/AkOpusDecoderFactory.h>
 

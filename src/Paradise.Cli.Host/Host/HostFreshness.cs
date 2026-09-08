@@ -5,22 +5,12 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// Whether a launcher's last build is still current, answered from the filesystem in milliseconds
-/// so the common Play — nothing changed — skips MSBuild's several-second no-op.
-/// </summary>
+/// <summary>Checks launcher inputs to skip MSBuild when nothing changed.</summary>
 /// <remarks>
-/// The reference closure comes from <c>obj/project.assets.json</c>, which restore already
-/// flattened — including ProjectReferences a <c>Directory.Build.targets</c> injected that the
-/// csproj never mentions, which is exactly how a workspace builds a game against engine source.
-/// Deliberately no MSBuild evaluation and no attempt to be exact: a newer source anywhere in the
-/// closure means "build", and MSBuild then decides what that build actually is.
-///
-/// "Newer" is against <see cref="StampFileName"/>, written by <see cref="HostSession"/> after a
-/// build it ran succeeded — NOT against the launcher's own dll. An incremental build that touched
-/// one library leaves the launcher dll where it was, so a dll-relative check reports the tree
-/// stale after every edit forever. A build made elsewhere (an IDE, a shell) leaves the stamp
-/// behind and costs one no-op MSBuild pass, after which the stamp is current again.
+/// Read the restored reference closure from <c>obj/project.assets.json</c>, including injected references.
+/// Compare inputs against <see cref="StampFileName"/>, written after a successful CLI build:
+/// a dependency-only rebuild may leave the launcher DLL unchanged.
+/// An external build requires one no-op MSBuild pass to refresh that stamp.
 /// </remarks>
 internal sealed record HostFreshness(
     UPath Csproj,

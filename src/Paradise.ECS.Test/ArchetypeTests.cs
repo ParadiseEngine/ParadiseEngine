@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for Archetype.
-/// </summary>
+/// <summary>Tests for Archetype.</summary>
 public sealed class ArchetypeTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

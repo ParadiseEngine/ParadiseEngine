@@ -32,9 +32,7 @@ public class NativeAotConfig : ManualConfig
     }
 }
 
-/// <summary>
-/// Configuration comparing both runtime and NativeAOT toolchains.
-/// </summary>
+/// <summary>Configuration comparing both runtime and NativeAOT toolchains.</summary>
 public class MultiToolchainConfig : ManualConfig
 {
     public MultiToolchainConfig()

@@ -6,17 +6,14 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The scene itself: the sky background, then every opaque draw, then every blended draw,
-/// in linear HDR at <see cref="RenderPassEvent.Opaque"/>. Owns the HDR and depth targets, the
-/// frame uniforms and their bind group, and the environment lookup tables; reads the shadow plan,
-/// the SSAO uniforms and the Forward+ froxel grid from the features that produce them.
-///
-/// <para>When the frame requires <see cref="FrameRequirements.SceneColorCapture"/> the blended
-/// half moves to its own pass at <see cref="RenderPassEvent.Transparent"/>, after whatever pass
-/// captured the opaque result.</para></summary>
+/// <summary>Renders sky, opaque and blended geometry into linear HDR targets.</summary>
+/// <remarks>Owns frame resources and reads shadow, SSAO and Forward+ results. SceneColorCapture
+/// moves blended geometry to the Transparent stage after capture.</remarks>
 public sealed partial class SceneFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
+    private readonly FrustumCullingFeature _frustum;
+    private readonly OcclusionCullingFeature _occlusion;
     private readonly ShadowFeature _shadows;
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
@@ -29,9 +26,12 @@ public sealed partial class SceneFeature : IRenderFeature
     private float _specularAaClamp;
 
     internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
-        LightCullingFeature lightCulling, InstancingFeature instancing, float specularAaVariance, float specularAaClamp)
+        LightCullingFeature lightCulling, FrustumCullingFeature frustum, OcclusionCullingFeature occlusion,
+        InstancingFeature instancing, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
+        _frustum = frustum;
+        _occlusion = occlusion;
         _shadows = shadows;
         _prepass = prepass;
         _gi = gi;
@@ -74,11 +74,12 @@ public sealed partial class SceneFeature : IRenderFeature
     {
         _instancing.ResetStatistics();
         var scene = _ctx.Scene;
-        UploadFrameUniforms(scene);
+        UploadFrameUniforms(scene, frame.Blackboard.TryGet(ContactShadowFeature.Result, out _));
         if (scene.HasSkyBackground) UploadSky(scene);
 
         var graph = frame.Graph;
         var hdr = graph.Texture(PbrTargets.Hdr);
+        frame.Blackboard.Publish(PbrResults.SceneColor, hdr);
         var depth = graph.Texture(PbrTargets.Depth);
         var shadows = graph.Texture(PbrTargets.ShadowArray);
         // The one place the pre-pass is switched off from this side: bind black instead of its
@@ -97,6 +98,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
+        _occlusion.DeclareRead(main);
         DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
         if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
@@ -205,7 +207,11 @@ public sealed partial class SceneFeature : IRenderFeature
         for (var first = 0; first < bucket.Count;)
         {
             var (instance, primitive, _) = bucket[first];
-            var count = _instancing.RunLength(bucket, first);
+            var visible = blend == BlendMode.Opaque ? _frustum.OpaqueVisible(first) : _frustum.BlendVisible(first);
+            // GPU arguments address individual original draws. Keep that mapping while occlusion
+            // is active; otherwise batch only contiguous visible instances without moving slots.
+            var indirect = blend == BlendMode.Opaque && _occlusion.Active;
+            var count = !visible || indirect ? 1 : _instancing.RunLength(bucket, first, _frustum, blend == BlendMode.Opaque);
             var skinned = primitive.Skinned && instance.JointOffset >= 0;
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
@@ -236,15 +242,20 @@ public sealed partial class SceneFeature : IRenderFeature
                 ctx.DrawIndex++;
             }
 
+            var originalIndex = first;
+            first += count;
+            if (!visible) continue;
             if (count > 1) encoder.SetBindGroup(0, _instancing.Group);
             else encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(slot * ctx.DrawStride));
             encoder.SetBindGroup(2, materials.GetBindGroup(primitive.MaterialId));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, (uint)count, 0, 0,
-                count > 1 ? (uint)slot : 0));
+            if (indirect)
+                encoder.DrawIndexedIndirect(new DrawIndexedIndirectCommand(_occlusion.IndirectBuffer, (ulong)originalIndex * OcclusionCullingFeature.IndirectStride));
+            else
+                encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, (uint)count, 0, 0,
+                    count > 1 ? (uint)slot : 0));
             _instancing.CountDraw(count);
-            first += count;
         }
     }
 

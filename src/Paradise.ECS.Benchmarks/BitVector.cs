@@ -37,18 +37,14 @@ public struct BitVector<TStorage> : IEquatable<BitVector<TStorage>>
     private static bool UseVector128 => Vector128.IsHardwareAccelerated && ByteCount % 16 == 0;
     private static bool UseVector64 => Vector64.IsHardwareAccelerated && ByteCount % 8 == 0;
 
-    /// <summary>
-    /// Creates a mutable copy from an immutable bit vector.
-    /// </summary>
+    /// <summary>Creates a mutable copy from an immutable bit vector.</summary>
     /// <param name="immutable">The immutable bit vector to copy from.</param>
     public BitVector(in ImmutableBitVector<TStorage> immutable)
     {
         _storage = Unsafe.As<ImmutableBitVector<TStorage>, TStorage>(ref Unsafe.AsRef(in immutable));
     }
 
-    /// <summary>
-    /// Converts this mutable bit vector to an immutable one.
-    /// </summary>
+    /// <summary>Converts this mutable bit vector to an immutable one.</summary>
     /// <returns>An immutable copy of this bit vector.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly ImmutableBitVector<TStorage> ToImmutable()
@@ -83,9 +79,7 @@ public struct BitVector<TStorage> : IEquatable<BitVector<TStorage>>
         Unsafe.Add(ref ulongs, wordIndex) &= ~(1UL << bitIndex);
     }
 
-    /// <summary>
-    /// Clears all bits in this bit vector.
-    /// </summary>
+    /// <summary>Clears all bits in this bit vector.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ClearAll()
     {
@@ -591,14 +585,10 @@ public struct BitVector<TStorage> : IEquatable<BitVector<TStorage>>
 
     public static bool operator !=(in BitVector<TStorage> left, in BitVector<TStorage> right) => !left.Equals(in right);
 
-    /// <summary>
-    /// Implicit conversion from mutable to immutable bit vector.
-    /// </summary>
+    /// <summary>Implicit conversion from mutable to immutable bit vector.</summary>
     public static implicit operator ImmutableBitVector<TStorage>(in BitVector<TStorage> bitVector) => bitVector.ToImmutable();
 
-    /// <summary>
-    /// Explicit conversion from immutable to mutable bit vector.
-    /// </summary>
+    /// <summary>Explicit conversion from immutable to mutable bit vector.</summary>
     public static explicit operator BitVector<TStorage>(in ImmutableBitVector<TStorage> immutable) => new(in immutable);
 
     public readonly Enumerator GetEnumerator() => new(this);

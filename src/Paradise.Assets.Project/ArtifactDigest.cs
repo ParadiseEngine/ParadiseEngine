@@ -4,13 +4,11 @@ using System.Text;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>
-/// The cache key: SHA-256 over 8-byte little-endian length-prefixed parts, a byte-for-byte port
-/// of <c>paradise_blender/pipeline/cache.py:digest</c> pinned by fixed test vectors. Length
-/// prefixes keep <c>("ab", "c")</c> and <c>("a", "bc")</c> distinct, which for an image plus its
-/// argv is the difference between two inputs and one cache entry. A key must be the COMPLETE
-/// input of the step it skips: a key missing an input serves last week's artifact as a hit.
-/// </summary>
+/// <summary>Hashes eight-byte little-endian length-prefixed parts with SHA-256.</summary>
+/// <remarks>
+/// Matches the Blender cache's digest and fixed test vectors; length prefixes distinguish
+/// <c>("ab", "c")</c> from <c>("a", "bc")</c>. Include every input to the cached operation.
+/// </remarks>
 public static class ArtifactDigest
 {
     private const int LengthPrefixBytes = 8;

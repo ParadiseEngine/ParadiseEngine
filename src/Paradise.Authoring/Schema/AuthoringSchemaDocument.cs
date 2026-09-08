@@ -3,14 +3,8 @@ using System.Text.Json.Serialization;
 
 namespace Paradise.Authoring;
 
-/// <summary>
-/// The engine-neutral description of every <see cref="AuthoredAttribute"/> type in an assembly:
-/// what an editor needs in order to build a UI for data it cannot link against.
-///
-/// A C# editor host gets this typed, through <see cref="AuthoringSchemaReader"/>. Hosts that are
-/// not C# — the Blender addon, the browser editor — parse the same document themselves, which is
-/// the entire reason it exists rather than the generator emitting per-editor code.
-/// </summary>
+/// <summary>Describes authored records for editors that cannot link to their CLR types.</summary>
+/// <remarks>C# hosts use <see cref="AuthoringSchemaReader"/>; other hosts parse the same JSON schema.</remarks>
 public sealed record AuthoringSchemaDocument
 {
     /// <summary>Bumped when the SHAPE of this document changes in a way an existing reader would

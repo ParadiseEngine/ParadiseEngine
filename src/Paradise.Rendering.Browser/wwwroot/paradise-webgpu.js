@@ -1,15 +1,7 @@
-// WebGPU shim for Paradise.Rendering.Browser's BrowserRenderer.
-//
-// Every GPU object lives in a JS table indexed by an integer SLOT that the C# side allocates
-// (BrowserRenderer.Internal.ResourceTable owns the free list and the generation counter, so a
-// destroyed handle stops resolving in C# before it ever reaches this file). Creation functions
-// therefore take the slot to fill rather than returning one; destruction nulls the slot.
-//
-// All orchestration stays in C#: this module translates descriptors into browser WebGPU calls and
-// nothing else. Descriptors arrive as JSON for the one-off creation paths, and as a single binary
-// buffer for per-frame submission (see submitFrame) so a frame costs ONE interop crossing rather
-// than one per render command. The binary layout is defined by BrowserRenderer.Submit.cs; the two
-// must be changed together.
+// Browser WebGPU resource tables use slots allocated and validated by C# ResourceTable. Creation
+// fills a supplied slot; destruction clears it.
+// Resource descriptors arrive as JSON. Frames arrive as one binary buffer to avoid per-command
+// interop; its layout must match BrowserRenderer.Submit.cs.
 
 const G = {
     device: null,
@@ -437,6 +429,9 @@ export function submitFrame(frame, passCount, opCount) {
             case 12: // Dispatch
                 pass.dispatchWorkgroups(
                     dv.getUint32(o + 4, true), dv.getUint32(o + 8, true), dv.getUint32(o + 12, true));
+                break;
+            case 13: // DrawIndexedIndirect
+                pass.drawIndexedIndirect(G.buffers[dv.getUint32(o + 4, true)], dv.getFloat64(o + 32, true));
                 break;
             default:
                 throw new Error(`Unknown render command opcode ${dv.getUint8(o)}.`);

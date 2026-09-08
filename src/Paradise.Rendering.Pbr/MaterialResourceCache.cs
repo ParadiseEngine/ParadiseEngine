@@ -34,6 +34,7 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
     // What a ray hit reads of a material: the factors alone, since a hit samples no textures.
     private readonly List<TraceSurface> _surfaces = [];
+    private readonly List<bool> _occluders = [];
     // Materials with target-following entries, and the view each entry was last built with.
     private readonly Dictionary<int, TargetSet> _targets = new();
     private readonly GraphTextureRegistry? _registry;
@@ -82,14 +83,11 @@ public sealed class MaterialResourceCache : IDisposable
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images)
         => AddMaterial(in material, images, programId: 0);
 
-    /// <summary>Create a material bound to a shader program registered via
-    /// <c>PbrRenderer.RegisterMaterialProgram</c> (programId 0 = the built-in PBR program). The
-    /// group-2 bind group is built from THAT program's layout: the standard seven entries first,
-    /// then <paramref name="extraEntries"/> in binding order (e.g.
-    /// <c>BindGroupEntryDesc.ForTextureView(7, heightfieldView)</c>). Extra-bound resources are
-    /// OWNED BY THE CALLER (never disposed here), and per-frame <c>IRenderer.WriteTexture</c> into
-    /// them is the caller's channel for dynamic shader data — the material UBO itself stays
-    /// immutable after creation.</summary>
+    /// <summary>Creates a material using a registered shader program and optional extra group-2
+    /// bindings.</summary>
+    /// <remarks>Program zero is built-in PBR. Extra entries follow the seven standard bindings and
+    /// remain caller-owned; update their resources for dynamic data while the material uniform
+    /// stays immutable.</remarks>
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
         int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
         => AddMaterial(in material, images, programId, extraEntries, targets: default);
@@ -202,6 +200,7 @@ public sealed class MaterialResourceCache : IDisposable
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
         // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
+        _occluders.Add(programId == 0 && !blend && material.AlphaMode == GltfAlphaMode.Opaque);
         _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
         var materialId = _materials.Count - 1;
         if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
@@ -253,13 +252,10 @@ public sealed class MaterialResourceCache : IDisposable
     private TextureViewHandle ResolveTarget(string name) =>
         _registry!.Contains(name) ? _registry.View(name) : _registry.View(_registry.Black);
 
-    /// <summary>Replace one EXTRA entry (binding >= <see cref="StandardMaterialEntryCount"/>) of a
-    /// material and rebuild its bind group. For a caller-owned resource that changed. An
-    /// engine-owned target is better bound as a <see cref="MaterialTarget"/>, which the cache
-    /// keeps current itself; this remains the path for a view handle bound by hand, rebound from
-    /// <c>PbrRenderer.SceneColorViewChanged</c>. The old group is destroyed synchronously (in-flight
-    /// GPU work stays valid, the same contract every engine-side rebuild relies on);
-    /// <see cref="GetBindGroup"/> returns the new group from the next frame.</summary>
+    /// <summary>Replaces an extra material binding and rebuilds its bind group.</summary>
+    /// <remarks>Use MaterialTarget for engine targets that should track resize automatically. For
+    /// manually bound views, rebind from SceneColorCaptureFeature.ViewChanged; in-flight work
+    /// retains the previous native group.</remarks>
     public void UpdateExtraEntry(int materialId, in BindGroupEntryDesc entry)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -329,6 +325,8 @@ public sealed class MaterialResourceCache : IDisposable
     public BindGroupHandle GetBindGroup(int materialId) => _materials[materialId].Group;
 
     public bool IsBlend(int materialId) => _materials[materialId].Blend;
+
+    internal bool IsOccluder(int materialId) => _occluders[materialId];
 
     /// <summary>The factor-only surface the tracer shades a hit on this material with.</summary>
     public TraceSurface GetTraceSurface(int materialId) => _surfaces[materialId];

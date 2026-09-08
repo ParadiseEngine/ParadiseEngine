@@ -4,16 +4,11 @@ using Zio;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>
-/// The project's own list of files under <c>assets/</c> the pipeline pretends are not there —
-/// <c>[assets] ignore</c> in <c>project.toml</c>. The engine ships no list of its own: which
-/// scratch files an editor leaves beside the assets is the project's to know, and a rule the
-/// project cannot see is a file that silently never builds.
-/// </summary>
+/// <summary>The project's <c>[assets] ignore</c> patterns for files beneath <c>assets/</c>.</summary>
 /// <remarks>
-/// A pattern without a <c>/</c> matches the file name; one with a <c>/</c> matches the path
-/// relative to <c>assets/</c>. <c>*</c> and <c>?</c> stay within one segment, <c>**</c> crosses
-/// them. Matching is ordinal and case-sensitive, as the paths are.
+/// Patterns without <c>/</c> match filenames; others match assets-relative paths.
+/// <c>*</c> and <c>?</c> stay within a segment; <c>**</c> crosses segments.
+/// Matching is ordinal and case-sensitive; the engine adds no implicit ignore rules.
 /// </remarks>
 public sealed class AssetIgnoreRules
 {

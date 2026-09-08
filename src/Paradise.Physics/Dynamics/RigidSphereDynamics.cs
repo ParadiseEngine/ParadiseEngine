@@ -2,19 +2,10 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Stateless 3D rigid-body dynamics for spheres (the resolver pipeline on top of the query
-/// library): gravity + damping → swept move with cast-and-resolve against statics → pairwise
-/// sphere impulses → resting depenetration/support. Every contact applies a NORMAL impulse
-/// (central → no torque on a sphere) and a Coulomb FRICTION impulse at the contact point with a
-/// lever arm (<c>ω += I⁻¹·(r×j)</c>) — so draw, follow, throw, rolling and english all EMERGE
-/// from one solver. Mutates the caller's spans in place; the library keeps no state, so the step
-/// is a pure function of its inputs and deterministic for a fixed span order.
-///
-/// The sphere's ORIENTATION is not owned here (this struct has only angular VELOCITY); the caller
-/// integrates the quaternion from <see cref="DynamicSphere.AngularVelocity"/>.
-/// (Type name is historical — the model is fully 3D now, not planar.)
-/// </summary>
+/// <summary>Steps caller-owned spheres through gravity, damping, static casts and contact resolution.</summary>
+/// <remarks>Normal impulses change velocity; Coulomb friction at the contact point couples spin
+/// and linear motion. Pair impulses precede resting depenetration and support checks.
+/// Results are deterministic for a fixed span order. The caller integrates orientation from angular velocity.</remarks>
 public static class RigidSphereDynamics
 {
     private const int MaxSlideIterations = 4;
@@ -46,7 +37,7 @@ public static class RigidSphereDynamics
         {
             Integrate(ref spheres[i], statics, settings, deltaSeconds);
         }
-        ResolvePairs(spheres, settings);
+        ResolvePairs(spheres);
 
         int iterations = Math.Max(1, settings.SolverIterations);
         for (int iter = 0; iter < iterations; iter++)
@@ -81,10 +72,7 @@ public static class RigidSphereDynamics
                     capsule, capsulePose, out DistanceHit hit);
                 if (hit.Distance >= settings.Skin) continue;
 
-                // Deliberately use the horizontal center-to-center direction, NOT hit.SurfaceNormal:
-                // for a Y-aligned capsule pushing a ball at similar height the two are equal, and
-                // this keeps the push strictly horizontal (a pusher never lifts a ball) even at an
-                // end-cap/vertically-offset contact.
+                // Horizontal center-to-center normals keep capsule pushes from lifting spheres at offset contacts.
                 Vector3 normal = Horizontal(sphere.Position - pusher.Position);
                 if (normal == Vector3.Zero) continue;
 
@@ -151,8 +139,7 @@ public static class RigidSphereDynamics
 
             // Resolve this contact's velocity (normal restitution + Coulomb friction with torque).
             ResolveStaticContact(ref velocity, ref sphere.AngularVelocity, sphere.Radius, sphere.InverseMass,
-                sphere.InverseInertia, normal, settings.StaticRestitution, CombineFriction(sphere.Friction, settings.StaticFriction),
-                settings);
+                sphere.InverseInertia, normal, settings.StaticRestitution, CombineFriction(sphere.Friction, settings.StaticFriction));
 
             // Slide the leftover displacement along the surface for the rest of this tick.
             Vector3 rest = direction * (length - MathF.Max(travel, 0f));
@@ -167,7 +154,7 @@ public static class RigidSphereDynamics
     /// <summary>Pairwise sphere-sphere: depenetrate half/half along the center axis, exchange the
     /// central normal impulse (no torque), then a tangential friction impulse at the contact =
     /// "throw" (transfers spin to both).</summary>
-    private static void ResolvePairs(Span<DynamicSphere> spheres, in SphereDynamicsSettings settings)
+    private static void ResolvePairs(Span<DynamicSphere> spheres)
     {
         for (int i = 0; i < spheres.Length; i++)
         {
@@ -227,18 +214,14 @@ public static class RigidSphereDynamics
         }
     }
 
-    /// <summary>Resting/penetration pass: push a sphere out of the nearest static to skin clearance
-    /// and resolve the contact velocity (support against gravity + friction). Reports whether the
-    /// contact supports the sphere (upward normal) for sleeping.</summary>
+    /// <summary>Depenetrates to skin clearance, resolves static contact and reports support for sleeping.</summary>
     private static void DepenetrateAndSupport(ref DynamicSphere sphere, CollisionWorldHandle statics,
         in SphereDynamicsSettings settings, out bool supported)
     {
         supported = false;
         if (!statics.IsValid) return;
 
-        // Probe a bit past the skin band: a resting ball hovers at ~skin clearance, so support
-        // (and sleeping) must be detected slightly beyond it, while depenetration/reflection only
-        // act when genuinely inside the band.
+        // Probe beyond skin clearance for sleeping support; resolve penetration only inside the skin band.
         float supportProbe = settings.Skin * 2f;
         var input = new ColliderDistanceInput
         {
@@ -263,16 +246,14 @@ public static class RigidSphereDynamics
         {
             ResolveStaticContact(ref sphere.Velocity, ref sphere.AngularVelocity, sphere.Radius, sphere.InverseMass,
                 sphere.InverseInertia, normal, settings.StaticRestitution,
-                CombineFriction(sphere.Friction, settings.StaticFriction), settings);
+                CombineFriction(sphere.Friction, settings.StaticFriction));
         }
     }
 
-    /// <summary>Apply a static contact to (velocity, angular velocity): central normal impulse with
-    /// restitution (suppressed at rest), then a Coulomb friction impulse at the contact point that
-    /// torques the sphere. <paramref name="normal"/> points from the surface toward the sphere.</summary>
+    /// <summary>Applies normal restitution and tangential Coulomb friction to a static contact.</summary>
+    /// <remarks>The normal points from the surface to the sphere; restitution is suppressed at rest.</remarks>
     private static void ResolveStaticContact(ref Vector3 velocity, ref Vector3 angular, float radius,
-        float invMass, float invInertia, Vector3 normal, float restitution, float friction,
-        in SphereDynamicsSettings settings)
+        float invMass, float invInertia, Vector3 normal, float restitution, float friction)
     {
         Vector3 r = -normal * radius; // center → contact point
         Vector3 vContact = velocity + Vector3.Cross(angular, r);

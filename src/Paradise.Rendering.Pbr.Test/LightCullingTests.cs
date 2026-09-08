@@ -4,19 +4,11 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>Forward+ binning, held from both ends: <see cref="ClusterBinning"/> against a
-/// brute-force oracle, and lightCull.slang against <see cref="ClusterBinning"/>.
-///
-/// <para>The property that matters is one-sided. A froxel that claims a light it does not quite
-/// touch costs a shading add the attenuation window zeroes anyway; a froxel that MISSES a light it
-/// does touch drops that light from every pixel in it. So the oracle proves inclusion — a point
-/// inside the froxel within the light's range means the bit must be set — and a second test proves
-/// the masks are not simply full, which inclusion alone would satisfy.</para>
-///
-/// <para>The picture assertions are exact rather than approximate on purpose: the attenuation
-/// window is <c>saturate(1 − (d/range)⁴)</c>, which is exactly zero at and beyond the range, so a
-/// correctly binned frame and an unbinned one shade the same lights to the same bits. Any pixel
-/// difference between culling on and off is a dropped light, not rounding.</para></summary>
+/// <summary>Checks CPU Forward+ binning against an inclusion oracle and GPU binning against the
+/// CPU.</summary>
+/// <remarks>Every in-range point must retain its light bit; separate checks reject all-full masks.
+/// Attenuation is exactly zero outside range, so culling on/off images must match
+/// exactly.</remarks>
 public class LightCullingTests
 {
     private const uint Size = 128;
@@ -279,11 +271,8 @@ public class LightCullingTests
         await Assert.That(passesOff).IsEqualTo(0);
         await Assert.That(passesBack).IsEqualTo(1);
 
-        // The switch moves cost, never pixels. This is also what catches a retraction that did not
-        // happen: switched off with a stale mask buffer still bound, lights would go missing.
-        //
-        // Compared BY INDEX, not with IsEquivalentTo, which tests membership only — a frame whose
-        // pixels were shuffled satisfies it, and this is the assertion carrying the claim.
+        // Disabling culling must preserve pixel order and values, including after mask retraction.
+        // Membership-only comparisons would miss shuffled pixels.
         await Assert.That(pixelsOff.Length).IsEqualTo(pixelsOn.Length);
         for (var i = 0; i < pixelsOn.Length; i++)
         {

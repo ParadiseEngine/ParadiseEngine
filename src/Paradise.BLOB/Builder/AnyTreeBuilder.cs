@@ -35,18 +35,16 @@ public class AnyTreeBuilder : Builder<BlobTreeAny>
     {
         var endIndices = new List<int>();
         var values = new List<IBuilder>();
-        FlattenAndReturnEndIndex(root, 0);
+        Visit(root);
         return (endIndices, values);
 
-        int /*endIndex*/ FlattenAndReturnEndIndex(ITreeNode node, int index)
+        void Visit(ITreeNode node)
         {
             var valueIndex = values.Count;
             values.Add(node.ValueBuilder);
             endIndices.Add(-1);
-            var endIndex = index + 1;
-            foreach (var child in node.Children) endIndex = FlattenAndReturnEndIndex(child, endIndex);
-            endIndices[valueIndex] = endIndex;
-            return endIndex;
+            foreach (var child in node.Children) Visit(child);
+            endIndices[valueIndex] = values.Count;
         }
     }
 }

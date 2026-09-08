@@ -12,14 +12,10 @@ namespace Paradise.ECS;
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false)]
 public sealed class ComponentRegistryNamespaceAttribute : Attribute
 {
-    /// <summary>
-    /// Gets the namespace for the generated ComponentRegistry.
-    /// </summary>
+    /// <summary>The namespace for the generated ComponentRegistry.</summary>
     public string Namespace { get; }
 
-    /// <summary>
-    /// Initializes a new instance with the specified namespace.
-    /// </summary>
+    /// <summary>Initializes a new instance with the specified namespace.</summary>
     /// <param name="namespace">The namespace for the generated ComponentRegistry class.</param>
     public ComponentRegistryNamespaceAttribute(string @namespace)
     {

@@ -4,7 +4,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>The <c>clean</c> verb. Wholesale deletion is safe because the derived trees are pure functions of <c>assets/</c>; this is what retires the addon's prune apparatus, which existed because export output was committed.</summary>
+/// <summary>Deletes regenerable build and editor output trees for the <c>clean</c> verb.</summary>
 public static class ProjectCleaner
 {
     public static IReadOnlyList<UPath> Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor = false)

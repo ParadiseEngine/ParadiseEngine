@@ -7,37 +7,18 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace Paradise.Authoring.Generators;
 
-/// <summary>
-/// Emits <c>AuthoredComponents</c>: the registry mapping component ids to the records they
-/// deserialize into, with a generated reader per record. This is the LOADING half of
-/// <c>[Authored]</c> — without it, filling an instance from an exported payload is a hand-written
-/// accessor per component, and forgetting one means a component that authors, exports, and is then
-/// silently never read.
-///
-/// The readers parse <c>System.Text.Json.JsonElement</c> directly rather than delegating to
-/// a <c>JsonSerializerContext</c>. Delegating required every [Authored] record to ALSO be listed as
-/// [JsonSerializable] on the game's context — a registration this generator could neither add (a
-/// generator's output is invisible to System.Text.Json's generator; dotnet/roslyn#57239) nor
-/// verify cheaply, and forgetting it failed the build with CS1061 inside the generated file.
-/// Authored fields are a closed vocabulary the schema already enforces, so reading them directly
-/// is a switch per field, and the whole registration ceremony — a context class, a
-/// [JsonSerializable] line per record, an assembly attribute naming the context — is gone.
-/// Emission is opted into with [assembly: AuthoredRegistry].
-///
-/// The wire contract matches what the Godot addon writes (AuthoredEntityCore.ValueOf): property
-/// names are the schema's field names (compared case-insensitively, as the previous
-/// PropertyNameCaseInsensitive contexts did), composed groups are nested objects, enums travel by
-/// member name (a JSON string, parsed case-insensitively, matching JsonStringEnumConverter; the
-/// underlying integer value is also accepted), Vector2/3 and Quaternion are float arrays, and
-/// Vector4 and Color32 author as a color and travel as the {r,g,b,a} object. A property absent
-/// from the payload keeps the record's own initializer — the constructor has already run.
-/// </summary>
+/// <summary>Emits an opt-in registry and direct JSON readers for authored records.</summary>
+/// <remarks>
+/// Enable with <c>[assembly: AuthoredRegistry]</c>. Direct readers avoid requiring a second
+/// <c>JsonSerializable</c> registration that source generators cannot emit for one another.
+/// Field names and enum names compare case-insensitively; enum integers are also accepted.
+/// Groups are nested objects, Vector2/3 and Quaternion use float arrays, and Vector4/Color32
+/// use <c>{r,g,b,a}</c>. Omitted properties retain constructor initializers.
+/// </remarks>
 [Generator]
 public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
 {
-    /// <summary>
-    /// PAUT002: the reader must construct the record, and cannot.
-    /// </summary>
+    /// <summary>PAUT002: the reader must construct the record, and cannot.</summary>
     public static readonly DiagnosticDescriptor NotConstructible = new(
         id: "PAUT002",
         title: "Authored type needs a public parameterless constructor",
@@ -72,9 +53,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
     // would otherwise publish a component with no identity and never hear a word about it.
     // Types they reject are skipped here silently rather than diagnosed twice.
 
-    /// <summary>
-    /// PAUT003: a property the reader cannot assign.
-    /// </summary>
+    /// <summary>PAUT003: a property the reader cannot assign.</summary>
     public static readonly DiagnosticDescriptor NotAssignable = new(
         id: "PAUT003",
         title: "Authored property cannot be assigned by the generated reader",
@@ -97,6 +76,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
                     ? AuthoredModel.Read(type)
                     : null)
             .Where(static x => x is not null)
+            .Select(static (x, _) => x!)
             .Collect();
 
         var settings = context.CompilationProvider
@@ -106,19 +86,9 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
                 pair.Right.GlobalOptions.TryGetValue("build_property.RootNamespace", out var root);
                 var ns = string.IsNullOrWhiteSpace(root) ? pair.Left.AssemblyName : root;
 
-                // The registry is opt-in: it is public surface, and an assembly that only
-                // publishes a schema for editors declares [Authored] types with no business
-                // shipping a loader for them. (Paradise.Export was that example until v3 gave its
-                // own components payloads to read; it opts in now.)
-                var optedIn = false;
-                foreach (var attribute in pair.Left.Assembly.GetAttributes())
-                {
-                    if (attribute.AttributeClass?.ToDisplayString()
-                        == "Paradise.Authoring.AuthoredRegistryAttribute")
-                    {
-                        optedIn = true;
-                    }
-                }
+                // Generate a public loader only when the assembly opts in.
+                var optedIn = pair.Left.Assembly.GetAttributes().Any(attribute =>
+                    attribute.AttributeClass?.ToDisplayString() == "Paradise.Authoring.AuthoredRegistryAttribute");
                 return (Namespace: AuthoringSchemaGenerator.Sanitize(ns), OptedIn: optedIn);
             });
 
@@ -126,24 +96,22 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             authored.Combine(settings),
             static (ctx, pair) =>
             {
-                // PAUT002/003/004 are also gated on the opt-in, deliberately: they diagnose
-                // shapes the READER cannot handle, and a schema-only assembly (no registry, no
-                // reader) has nothing to be incompatible with.
+                // Reader-only diagnostics apply only to assemblies that request a registry.
                 if (pair.Right.OptedIn)
                 {
-                    Emit(ctx, pair.Left!, pair.Right.Namespace);
+                    Emit(ctx, pair.Left, pair.Right.Namespace);
                 }
             });
     }
 
     private static void Emit(
         SourceProductionContext context,
-        ImmutableArray<AuthoredType?> types,
+        ImmutableArray<AuthoredType> types,
         string namespaceName)
     {
         var present = new List<AuthoredType>();
         var claimed = new HashSet<string>(System.StringComparer.Ordinal);
-        foreach (var type in types.Where(t => t is not null).Select(t => t!)
+        foreach (var type in types
                      // By TYPE NAME, not by id: the emitted file should reorder when the code does,
                      // not when someone regenerates a GUID.
                      .OrderBy(t => t.TypeName, System.StringComparer.Ordinal))

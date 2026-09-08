@@ -4,9 +4,7 @@ using Paradise.ECS.CoyoteTest;
 
 namespace Paradise.ECS.Concurrent.ConcurrentTest;
 
-// ============================================================================
 // Test Components
-// ============================================================================
 
 [System.Runtime.InteropServices.Guid("2E9B1C4B-F50F-4D76-A16F-478E3098F4AA")]
 [Component(Id = 0)]
@@ -29,13 +27,9 @@ public partial struct CoyoteHealth
     public int Current;
 }
 
-// ============================================================================
 // Test Systems
-// ============================================================================
 
-/// <summary>
-/// Writes Position only. Adds 1 to all axes.
-/// </summary>
+/// <summary>Writes Position only. Adds 1 to all axes.</summary>
 public ref partial struct IncrementPositionSystem : IEntitySystem
 {
     public ref CoyotePosition Position;
@@ -60,9 +54,7 @@ public ref partial struct ScaleVelocitySystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Reads Velocity, writes Position. Conflicts with both systems above → later wave.
-/// </summary>
+/// <summary>Reads Velocity, writes Position. Conflicts with both systems above → later wave.</summary>
 [After<IncrementPositionSystem>]
 [After<ScaleVelocitySystem>]
 public ref partial struct ApplyVelocitySystem : IEntitySystem
@@ -81,9 +73,7 @@ public ref partial struct ApplyVelocitySystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Writes Health only. Independent of position/velocity → same wave as IncrementPosition and ScaleVelocity.
-/// </summary>
+/// <summary>Writes Health only. Independent of position/velocity → same wave as IncrementPosition and ScaleVelocity.</summary>
 public ref partial struct HealSystem : IEntitySystem
 {
     public ref CoyoteHealth Health;
@@ -94,9 +84,7 @@ public ref partial struct HealSystem : IEntitySystem
     }
 }
 
-// ============================================================================
 // Coyote Tests
-// ============================================================================
 
 /// <summary>
 /// Concurrent tests for parallel system execution using Coyote systematic testing.
@@ -125,9 +113,7 @@ public static class ParallelSystemTests
         return (shared, world);
     }
 
-    /// <summary>
-    /// Runs a schedule sequentially and collects all component values for comparison.
-    /// </summary>
+    /// <summary>Runs a schedule sequentially and collects all component values for comparison.</summary>
     private static (float[] posX, float[] velY, int[] health) CollectResults(World world, int entityCount)
     {
         var posX = new float[entityCount];
@@ -228,9 +214,7 @@ public static class ParallelSystemTests
         }
     }
 
-    /// <summary>
-    /// Multiple RunParallel iterations accumulate correctly.
-    /// </summary>
+    /// <summary>Multiple RunParallel iterations accumulate correctly.</summary>
     [Test]
     public static void ParallelMultipleIterations_AccumulatesCorrectly()
     {
@@ -268,9 +252,7 @@ public static class ParallelSystemTests
         }
     }
 
-    /// <summary>
-    /// All systems together via AddAll, parallel vs sequential.
-    /// </summary>
+    /// <summary>All systems together via AddAll, parallel vs sequential.</summary>
     [Test]
     public static void ParallelMatchesSequential_AllSystems()
     {
@@ -305,9 +287,7 @@ public static class ParallelSystemTests
         }
     }
 
-    /// <summary>
-    /// Stress test: many entities across many chunks, all run in parallel.
-    /// </summary>
+    /// <summary>Stress test: many entities across many chunks, all run in parallel.</summary>
     [Test]
     public static void ParallelStress_ManyEntities()
     {

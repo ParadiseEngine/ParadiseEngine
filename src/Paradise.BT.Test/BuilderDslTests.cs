@@ -160,9 +160,7 @@ public sealed class BuilderDslTests
         await Assert.That(instance.ProbeCount(1)).IsEqualTo(1);
     }
 
-    // Counts into a blackboard slot. It used to hold an Action and say "not serializable due to
-    // delegate, but fine for tests" — it was the last node in the library whose data was managed,
-    // and so could not live in a blob at all.
+    // Counts ticks in a blackboard slot using unmanaged node data.
     [System.Runtime.InteropServices.Guid("E1234567-ABCD-4321-FEDC-BA9876543210")]
     [Writes<ProbeData>]
     internal struct CounterNode : INode

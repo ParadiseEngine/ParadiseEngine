@@ -112,7 +112,6 @@ public class AuthoredReaderTests
     private static object? Prop(object target, string name) =>
         target.GetType().GetProperty(name)!.GetValue(target);
 
-    // ----------------------------------------------------------------------------------------
 
     private const string PrimitivesSource = $$"""
         using System.Runtime.InteropServices;
@@ -227,9 +226,7 @@ public class AuthoredReaderTests
         await Assert.That((string?)Prop(thing, "Label")).IsNull();
     }
 
-    /// <summary>
-    /// A nullable VALUE leaf reads its number, rather than materializing null.
-    /// </summary>
+    /// <summary>A nullable VALUE leaf reads its number, rather than materializing null.</summary>
     /// <remarks>The first nullable value types to reach the schema arrived with HostEnvironment's
     /// ShadowMapSize and ShadowBlur, and the model names the unwrap they depend on as a path where
     /// a value once came through null. The schema half was pinned when they landed; this is the
@@ -700,7 +697,7 @@ public class AuthoredReaderTests
         await Assert.That(message).Contains("Game.Ui.Health");
     }
 
-    // ---- typed host kinds ------------------------------------------------------------------
+    // typed host kinds
 
     private const string HostBoundId = "d0000000-0000-4000-8000-000000000010";
 

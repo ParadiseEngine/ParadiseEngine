@@ -2,13 +2,7 @@ using System.Text.Json;
 
 namespace Paradise.Authoring;
 
-/// <summary>
-/// Parses schema documents, and merges several into one.
-///
-/// An editor faces more than one source: the engine publishes a schema for its own components, and
-/// the game publishes another for its. <see cref="Merge"/> exists so the editor presents a single
-/// list rather than making every host reimplement the join.
-/// </summary>
+/// <summary>Reads, writes and merges authoring schemas from multiple assemblies.</summary>
 public static class AuthoringSchemaReader
 {
     /// <summary>Parse one document. Throws <see cref="JsonException"/> on malformed input — a

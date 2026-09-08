@@ -53,7 +53,8 @@ public sealed class InstancingFeature : IRenderFeature
         SavedDrawCalls = 0;
     }
 
-    internal int RunLength(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket, int first)
+    internal int RunLength(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
+        int first, FrustumCullingFeature frustum, bool opaque)
     {
         var (instance, primitive, _) = bucket[first];
         if (!_active || _ctx.Materials.GetProgramId(primitive.MaterialId) != 0) return 1;
@@ -62,7 +63,7 @@ public sealed class InstancingFeature : IRenderFeature
         while (end < bucket.Count)
         {
             var next = bucket[end];
-            if (next.Primitive != primitive ||
+            if (!(opaque ? frustum.OpaqueVisible(end) : frustum.BlendVisible(end)) || next.Primitive != primitive ||
                 (next.Primitive.Skinned && next.Instance.JointOffset >= 0) != skinned) break;
             end++;
         }

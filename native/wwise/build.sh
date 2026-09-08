@@ -1,23 +1,10 @@
 #!/usr/bin/env bash
-# Build libParadiseWwise — the native half of Paradise.Audio.Wwise.
-#
-# WHY A SHELL SCRIPT AND NOT CMAKE. This is six translation units and one fixed link line. CMake
-# would add a toolchain every contributor must install to build the engine, in exchange for
-# nothing this needs. If a second platform or a real dependency graph ever shows up, revisit.
-#
-# WHY IT IS NOT COMMITTED AS A BINARY. The engine repo is MIT-licensed and published to GitHub;
-# the Wwise SDK is commercial and its libraries cannot be redistributed. So the dylib is built
-# from the DEVELOPER'S OWN install, on their machine, and never checked in. `Wwise.targets`
-# invokes this script and degrades to a warning when no SDK is found.
-#
+# Build the native Paradise.Audio.Wwise shim from the developer's Wwise SDK.
+# Wwise libraries are commercial and must not be committed to this MIT repository.
+# Wwise.targets invokes this script and warns when the SDK is unavailable.
 # Usage: build.sh --out <dir> [--config Profile|Release|Debug] [--sdk <path>]
-#
-# Configurations are not interchangeable:
-#   Debug    asserts on, slow
-#   Profile  optimized, and the ONLY one Wwise Authoring's profiler can attach to
-#   Release  optimized, AK_OPTIMIZED, comms compiled out entirely
-# Profile is the default: attaching the profiler is worth far more during development than the
-# marginal speed of Release, and audio is not what the frame budget is spent on.
+# Debug enables assertions; Profile is optimized with profiler support (default);
+# Release defines AK_OPTIMIZED and excludes profiler communication.
 
 set -euo pipefail
 
@@ -120,14 +107,9 @@ INCLUDES=(
     -I"$SDK_ROOT/source/StreamManager/$STREAM_PLATFORM"
 )
 
-# 2026 notes worth keeping: the music engine is folded into AkSoundEngine (no libAkMusicEngine
-# any more), and Spatial Audio is now libAkAcoustics — deliberately not linked, since rooms and
-# portals are out of scope for this integration.
-#
-# Codecs and effects must be linked AND referenced from ParadiseWwise.cpp (see the plug-in
-# registration block there): they register themselves from static initializers, and a linker
-# discards any object file in a .a that nothing references. Linking without the factory include
-# produces a binary that loads banks fine and then cannot decode or process a thing.
+# Wwise 2026 includes music in AkSoundEngine; spatial audio (AkAcoustics) is unused.
+# Keep codec/effect libraries and their Factory.h references together: static registration
+# objects are otherwise discarded by the linker and playback produces no audio.
 LIBS=(
     -lAkSoundEngine -lAkMemoryMgr -lAkStreamMgr
     # Codecs — mandatory, banks are encoded with these.
@@ -166,9 +148,7 @@ fi
 
 echo "libParadiseWwise: building $CONFIG from $SDK_ROOT"
 
-# The ${arr[@]+"${arr[@]}"} guard is not noise: macOS ships bash 3.2, where expanding an EMPTY
-# array under `set -u` is an "unbound variable" error. ARCH_FLAGS, DEFINES and FRAMEWORKS are all
-# legitimately empty on some configuration/platform combination.
+# Bash 3.2 treats empty arrays as unbound under set -u; preserve these guarded expansions.
 clang++ -std=c++17 -O2 -fvisibility=hidden "$SHARED_FLAG" \
     ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} \
     -o "$OUTPUT" \

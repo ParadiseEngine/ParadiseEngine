@@ -9,14 +9,9 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Sample;
 
-/// <summary>The global-illumination test scene: a Cornell-style room — white floor, ceiling and
-/// back wall, a red wall on the left and a green one on the right, the classic two boxes — lit
-/// by an emissive ceiling panel (static), a sun that swings across the open front (dynamic) and a
-/// warm point light circling inside (dynamic), with a small dynamic prop orbiting the tall box.
-/// The red and green bleed onto the boxes and the white walls is what probe GI is for, and a
-/// light that moves is what a runtime solution is for. An optional GLB's geometry stands on the
-/// short box (factor materials only: the downloaded models carry PNG textures the KTX2 contract
-/// does not admit, so the demo reads geometry alone).</summary>
+/// <summary>Demonstrates probe GI in a Cornell room with emissive and moving lights.</summary>
+/// <remarks>Colored walls expose indirect light bleed. Optional GLB geometry uses material factors
+/// because its PNG textures do not satisfy the cooked KTX2 contract.</remarks>
 internal sealed class GiDemoScene : IDisposable
 {
     private readonly PbrRenderer _pbr;
@@ -36,6 +31,7 @@ internal sealed class GiDemoScene : IDisposable
     public static bool ProbeGi { get; set; } = true;
     public static bool RayTracedAo { get; set; }
     public static bool Reflections { get; set; }
+    public static bool Fog { get; set; }
     public static bool AnimateLights { get; set; } = true;
 
     /// <summary>Only the emissive ceiling panel lights the room: it is not a light, so with the
@@ -58,6 +54,8 @@ internal sealed class GiDemoScene : IDisposable
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         _pbr = new PbrRenderer(renderer, Program.Features, _width, _height, logger: logger);
+        _scene.Taa = new PbrTaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--taa") >= 0 };
+        _scene.Fxaa = new PbrFxaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--fxaa") >= 0 };
 
         var (cube, cubeIndices) = Procedural.UnitCube();
         var white = _pbr.Materials.AddDefaultMaterial(new Vector4(0.73f, 0.73f, 0.73f, 1f), metallic: 0f, roughness: 0.9f);
@@ -103,6 +101,18 @@ internal sealed class GiDemoScene : IDisposable
         _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = RaysPerProbe, Hysteresis = 0.97f, MaxProbes = MaxProbes, ProbesPerFrame = ProbesPerFrame };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
         _scene.Ssr = new PbrScreenSpaceReflection { Enabled = Reflections, MaxDistance = 12f };
+        _scene.Fog = new PbrFog
+        {
+            Enabled = Fog, Density = 0.035f, HeightFalloff = 0.5f, BaseHeight = 1,
+            Color = new Vector3(0.08f, 0.1f, 0.14f), Albedo = new Vector3(0.9f),
+            Anisotropy = 0.3f, MaxDistance = 20, Steps = 48,
+        };
+        if (Fog)
+            _scene.FogVolumes.Add(new PbrFogVolume
+            {
+                Transform = Matrix4x4.CreateScale(5.8f, 1.4f, 5.8f) * Matrix4x4.CreateTranslation(0, 0.7f, 0),
+                Density = 0.16f, Albedo = new Vector3(0.75f, 0.85f, 1),
+            });
 
         _sunTemplate = new PbrLight
         {

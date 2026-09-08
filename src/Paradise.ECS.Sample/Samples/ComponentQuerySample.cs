@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates component-based queries using QueryBuilder.
-/// </summary>
+/// <summary>Demonstrates component-based queries using QueryBuilder.</summary>
 public static class ComponentQuerySample
 {
     public static EntityQueryResult Run(World world)
@@ -12,7 +10,6 @@ public static class ComponentQuerySample
         Console.WriteLine("6. Component-based Query");
         Console.WriteLine("----------------------------");
 
-        // Create a query for movable entities
         var movableQuery = QueryBuilder
             .Create()
             .With<Position>()

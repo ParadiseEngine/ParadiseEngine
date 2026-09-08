@@ -19,12 +19,9 @@ public class PbrMathTests
     [Test]
     public async Task normal_matrix_keeps_a_transformed_tangent_and_normal_perpendicular()
     {
-        // Independent invariant (does not pin the implementation against itself): a tangent
-        // transformed by the model's linear part and a normal transformed by NormalMatrix must
-        // stay perpendicular. The model mixes rotation with non-uniform scale so the linear
-        // part is non-orthogonal — a NormalMatrix missing its transpose (plain inverse) breaks
-        // this for exactly such shapes, even though it agrees with the correct value for pure
-        // rotations composed with uniform scale.
+        // Under rotation and nonuniform scale, transformed tangent and normal must remain
+        // perpendicular. This catches a missing inverse-transpose independently of the
+        // implementation.
         var model = Matrix4x4.CreateScale(2f, 1f, 0.5f) * Matrix4x4.CreateRotationY(0.7f) *
                     Matrix4x4.CreateTranslation(3f, 4f, 5f);
         // Both vectors lie in the XZ plane, where the non-uniform scale (x=2, z=0.5) combined

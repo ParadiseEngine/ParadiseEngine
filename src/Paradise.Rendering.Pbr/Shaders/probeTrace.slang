@@ -1,9 +1,6 @@
-// probeTrace.slang — one ray per thread from each probe traced this frame into the scene's BVH.
-// A hit is shaded with the frame's lights (Lambert, shadow-mapped like the raster path), the
-// material's emissive, and the previous frame's probe irradiance for the bounce — which is what
-// makes the bounce infinite: every frame carries last frame's light one step further. A miss
-// samples the sky the raster ambient already uses, so a scene with nothing but sky converges to
-// exactly the ambient it had. Results land in probeRays for the blend passes.
+// Trace one ray per thread into the scene BVH. Hits combine direct light, emissive and
+// previous-frame probe irradiance for successive bounces; misses use sky ambient. Write probeRays
+// for blending.
 #define PARADISE_TRACE_GROUP 2
 #include "Common/lighting.slang"
 #include "Common/probes.slang"

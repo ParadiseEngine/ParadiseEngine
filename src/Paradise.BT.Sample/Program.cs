@@ -5,16 +5,13 @@ using Paradise.BT.Nodes.Builder;
 using Paradise.BT.Sample;
 using Paradise.BT.Sample.Builder;
 
-// ---------------------------------------------------------------------------------------------
-// 1. The builder DSL, over a hand-written blackboard.
-// ---------------------------------------------------------------------------------------------
+// 1. Builder DSL with a manual blackboard.
 
 var blackboard = new Blackboard();
 blackboard.SetData(new HasTargetData { Value = true });
 blackboard.SetData(new ShotsFiredData());
 
-// Every leaf is an unmanaged struct declared in SampleNodes.cs; the builder classes around them
-// are generated from [Builder]. Build() compiles straight to the shared layout.
+// Builder attributes generate wrappers; Build compiles them into a shared layout.
 using var tree = new Selector(
     new Sequence(
         new HasTarget(),
@@ -26,9 +23,7 @@ using var tree = new Selector(
     new Idle()
 ).Build();
 
-// An instance is just two caller-owned buffers over the shared layout; a BehaviorTreeRef is
-// built where it is used and the blackboard is passed per tick — the shape that also fits the
-// generated ref-struct blackboards below.
+// Each instance owns two buffers; the borrowed view and blackboard are passed per tick.
 var states = new NodeState[tree.Blob.Count];
 var data = new byte[tree.Blob.DataSize];
 BehaviorTreeRef Tree() => new(ref tree.Blob, states, data);
@@ -47,25 +42,16 @@ for (int i = 0; i < 10; i++)
     Console.WriteLine($"Tick {i + 1}: {status}");
 }
 
-// ---------------------------------------------------------------------------------------------
-// 2. The GENERATED blackboard, over an ECS row.
-//
-// Nothing below names a blackboard type that anyone wrote. ForagerTreeBlackboard was emitted from
-// what the tree's node types touch — the union of their access is the whole contract. It holds a
-// ref to each value, so a write lands in the local passed to Bind.
-//
-// Running it under PublishAot is the part worth having: generated code plus trimming plus native
-// compilation is where this would break first if it were going to.
-// ---------------------------------------------------------------------------------------------
+// 2. Generated blackboard over ECS data. Ref fields write directly into Bind arguments.
+// PublishAot validates generation, trimming and native compilation together.
 
 Console.WriteLine();
 Console.WriteLine("Forager — the generated blackboard, over a row:");
 
 BehaviorTreeLayout<ForagerTree> layout = BehaviorTrees.Compile<ForagerTree>();
 
-// The two per-agent buffers; the blackboard is bound per tick, because a generated blackboard
-// is a ref struct no field can hold. The layout is TYPED — Compile<ForagerTree> proved it — so
-// Tick below only accepts ForagerTreeBlackboard; handing it the enemy's would not compile.
+// Inline buffers hold instance state; the generated blackboard binds per tick.
+// The typed layout accepts only ForagerTreeBlackboard.
 var foragerStates = new NodeState[layout.Untyped.Blob.Count];
 var foragerData = new byte[layout.Untyped.Blob.DataSize];
 BehaviorTreeRef<ForagerTree> Forager() => layout.Ref(foragerStates, foragerData);
@@ -117,17 +103,7 @@ foreach ((string label, Senses senses, float energy) in situations)
         + $"  (decisions so far: {decisions.Count})");
 }
 
-// ---------------------------------------------------------------------------------------------
-// 3. How a tree CHANGES anything, given that components are read-only to it.
-//
-// A node cannot write Position: it is a component, and components bind read-only by value
-// (PBT0008). What these nodes write is a CONCLUSION, Intent, which the caller applies. In the
-// game that caller is EnemySystem, turning the goal into a steering intent; here it is this
-// loop, walking the forager toward whatever the tree decided.
-//
-// That round trip is the point: read, conclude, apply, read again — and it is why the same tree
-// can drive a body steered any way you like.
-// ---------------------------------------------------------------------------------------------
+// 3. Nodes read components and write Intent; this loop applies the chosen movement.
 
 Console.WriteLine();
 Console.WriteLine("Walking toward what the tree decides:");

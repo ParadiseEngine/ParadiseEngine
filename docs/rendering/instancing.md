@@ -33,8 +33,13 @@ batches: doing so would change the winner for coplanar surfaces. Place repeated 
 to each other to batch them. Geometry uploads are shared through `PbrMesh`; instancing does not
 merge different meshes into one vertex buffer.
 
-Validation: five `InstancingTests` run on WebGPU. Four prove that six objects become one
-scene draw with byte-identical output to instancing disabled, including skin palette offsets,
-nonuniform scale, transparency, nonzero first-instance offsets, and runtime changes. The fifth
-checks that disabling the scene clears statistics even when instancing is already off. The full
-80-test PBR suite, including the pass/pixel baselines, passes on macOS arm64 with no skipped tests.
+Frustum-culled draws split batches while retaining every original uniform slot. When GPU
+occlusion is active, opaque draws use their individual indirect arguments; transparent draws
+can still batch. `DrawCalls` counts submitted commands, including indirect commands whose GPU
+instance count may be zero.
+
+Validation covers rigid and skinned instances, nonuniform scale, per-instance highlight and GI
+mode, transparent order, nonzero first-instance offsets, runtime switches, and frustum gaps
+with GPU occlusion both on and off. It checks actual submitted commands and byte-identical
+pixels against individual draws. The visibility suite also compares eight moving-camera TAA
+frames with fog and directional shadows against unculled rendering.

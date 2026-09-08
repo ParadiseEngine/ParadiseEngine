@@ -10,16 +10,8 @@ using DotRecast.Detour.Io;
 
 namespace Paradise.Export.NavMesh
 {
-    /// <summary>
-    /// Converts a baked navmesh triangulation (vertices + triangle indices) into a DotRecast
-    /// <see cref="DtNavMesh"/> and serializes it as the runtime's <c>MeshSet</c> binary
-    /// (<c>data/scenes/&lt;Scene&gt;.navmesh.bin</c>).
-    ///
-    /// Ported from ParadiseUnityEditor's NavMeshExporter — the quantization/adjacency logic is
-    /// engine-neutral and coordinate-agnostic. The contract is right-handed (Godot-native), so inputs
-    /// are the baked vertices/winding verbatim, with no handedness mirror (see CONVENTIONS.md). The
-    /// same builder is reused at runtime by Paradise.Sample.Game.Navigation.Detour to query the mesh in-memory.
-    /// </summary>
+    /// <summary>Builds a DotRecast <see cref="DtNavMesh"/> from triangulation and writes its <c>MeshSet</c> binary.</summary>
+    /// <remarks>Uses the source vertices and winding without a handedness conversion; the same builder supports runtime queries.</remarks>
     public static class NavMeshBinaryWriter
     {
         private const float CellSize = 0.1f;

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Jobs.Test;
 
-/// <summary>
-/// Tests for <see cref="JobWorkerPool"/> — persistent worker thread pool.
-/// </summary>
+/// <summary>Tests for <see cref="JobWorkerPool"/> — persistent worker thread pool.</summary>
 public sealed class JobWorkerPoolTests
 {
     // ---- Basic Functionality ----

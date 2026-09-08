@@ -4,57 +4,37 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Paradise.Features;
 
-/// <summary>The read half of the engine's feature configuration: which features this build has,
-/// and whether each is on RIGHT NOW.
-///
-/// <para>This is the abstraction a subsystem depends on. A renderer, an ECS schedule or a debug
-/// UI takes an <see cref="IFeatureSwitches"/> and asks; it never learns where the answer came
-/// from — a declaration's default, a config file, an environment variable, a command-line flag,
-/// or a switch a debug panel flipped a frame ago. The same reason every engine library takes an
-/// <c>ILogger</c> and not a console.</para>
-///
-/// <para>Ask every time you would act on the answer. <see cref="IsEnabled"/> is a dictionary
-/// lookup and is meant to be called per frame; caching it in a field is how a runtime toggle
-/// stops working.</para></summary>
+/// <summary>Exposes declared features, current switches and settings to engine subsystems.</summary>
+/// <remarks>Consumers need not know whether values came from defaults, files, environment,
+/// command-line flags or runtime changes. Read switches at each frame or schedule boundary;
+/// caching them permanently prevents runtime toggles.</remarks>
 public interface IFeatureSwitches
 {
-    /// <summary>Whether <paramref name="id"/> is on. A feature nothing declared and nothing
-    /// overrode is off — a build without a feature answers the same way as a build that turned
-    /// it off, which is what a caller can actually act on.</summary>
+    /// <summary>Returns whether <paramref name="id"/> is enabled; undeclared, unoverridden features are off.</summary>
     bool IsEnabled(FeatureId id);
 
     /// <summary>What the build declared about <paramref name="id"/>, if anything.</summary>
     bool TryGetDefinition(FeatureId id, [MaybeNullWhen(false)] out FeatureDefinition definition);
 
-    /// <summary>What <paramref name="id"/> is configured with — the table written under its name
-    /// in the configuration's <c>settings</c> section, bound to the caller's own type by the
-    /// reader that produced it (<c>FeatureSettingsToml.Read</c> for <c>engine.toml</c>).
-    ///
-    /// <para>Never null: a feature nobody configured gets <see cref="FeatureSettings.None"/>,
-    /// which reads as the type's defaults, so a caller needs no branch.</para></summary>
+    /// <summary>Gets settings for <paramref name="id"/>, or <see cref="FeatureSettings.None"/> if absent.</summary>
+    /// <remarks>Bind with the producing reader, such as <c>FeatureSettingsToml.Read</c> for
+    /// <c>engine.toml</c>; absent settings bind to the caller type's defaults.</remarks>
     FeatureSettings SettingsFor(FeatureId id);
 
-    /// <summary>Every feature this build declared, for a listing, a debug UI, or a config file
-    /// written from what actually exists rather than from memory.</summary>
+    /// <summary>Gets all declared features for listings, debug UIs and configuration generation.</summary>
     IReadOnlyCollection<FeatureDefinition> Definitions { get; }
 
-    /// <summary>Raised when a feature's effective state changes, with its new state.
-    ///
-    /// <para>Handlers run on the thread that made the change, and while writes are held off — so
-    /// the last thing a handler was told about a feature is what <see cref="IsEnabled"/> now
-    /// answers for it.</para>
-    ///
-    /// <para><b>That thread is whoever flipped the switch, which is why a subscriber that owns
-    /// GPU or per-frame state does not use this event.</b> <c>RenderPipeline</c> polls instead,
-    /// once as it begins a frame, and announces the transition there: a handler releasing a
-    /// target from a debug panel's thread would be doing it while the render thread recorded
-    /// with it, and a frame that read the switch again at each phase could set a feature up and
-    /// then skip the submit half of it.</para></summary>
+    /// <summary>Reports a feature's changed effective state.</summary>
+    /// <remarks>
+    /// <para>Handlers run on the writer's thread under the write lock, preserving notification order.</para>
+    /// <para>GPU and per-frame state owners must poll at frame start instead. <c>RenderPipeline</c>
+    /// announces transitions there and uses one snapshot throughout the frame, preventing cross-thread
+    /// resource disposal and partial setup/submission.</para>
+    /// </remarks>
     event Action<FeatureId, bool>? Changed;
 
-    /// <summary>Raised when a feature's settings are replaced, with the new ones — how a re-read
-    /// of <c>engine.json</c> reaches a feature that read its settings once at construction.
-    /// Raised under the same rule as <see cref="Changed"/>: what a handler is told last is what
-    /// <see cref="SettingsFor"/> now returns.</summary>
+    /// <summary>Reports replacement settings, allowing consumers to respond to configuration reloads.</summary>
+    /// <remarks>Uses the thread and ordering rules of <see cref="Changed"/>; the last notification
+    /// matches <see cref="SettingsFor"/>.</remarks>
     event Action<FeatureId, FeatureSettings>? SettingsChanged;
 }

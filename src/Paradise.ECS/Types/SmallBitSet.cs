@@ -13,23 +13,17 @@ public readonly record struct SmallBitSet<T> : IBitSet<SmallBitSet<T>>
 {
     private readonly T _bits;
 
-    /// <summary>
-    /// Gets the maximum number of bits this bitset can store.
-    /// </summary>
+    /// <summary>The maximum number of bits this bitset can store.</summary>
     public static int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Unsafe.SizeOf<T>() * 8;
     }
 
-    /// <summary>
-    /// Gets an empty bitset with all bits cleared.
-    /// </summary>
+    /// <summary>An empty bitset with all bits cleared.</summary>
     public static SmallBitSet<T> Empty => default;
 
-    /// <summary>
-    /// Gets a value indicating whether all bits are cleared.
-    /// </summary>
+    /// <summary>Whether all bits are cleared.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

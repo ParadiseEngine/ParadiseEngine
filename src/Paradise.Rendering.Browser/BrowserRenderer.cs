@@ -8,21 +8,11 @@ using Paradise.Rendering.Browser.Internal;
 
 namespace Paradise.Rendering.Browser;
 
-/// <summary>The browser <see cref="IRenderer"/> backend: drives the host browser's own WebGPU
-/// implementation from WebAssembly through the <c>paradise-webgpu.js</c> shim this package ships.
-/// Same contract as the desktop Dawn backend, so <c>PbrRenderer</c> and anything else written
-/// against <see cref="IRenderer"/> runs unchanged in a browser tab.</summary>
-/// <remarks>
-/// <para>Construction is asynchronous (<see cref="CreateAsync"/>): a browser cannot block on
-/// adapter/device acquisition, so the synchronous constructor the Dawn backend offers has no
-/// counterpart here.</para>
-/// <para>Handles follow the same stale-handle contract as the Dawn backend: a <c>Destroy*</c>
-/// invalidates its handle synchronously and any later use throws <see cref="StaleHandleException"/>
-/// rather than resolving to a recycled resource. There is no deferred-destruction queue — WebGPU's
-/// JS API keeps a destroyed object's in-flight GPU work valid on its own, so releasing the slot
-/// immediately is safe.</para>
-/// <para>Everything here runs on the single browser thread that created the renderer.</para>
-/// </remarks>
+/// <summary>Implements IRenderer using browser WebGPU through the packaged JavaScript
+/// shim.</summary>
+/// <remarks>CreateAsync acquires the device without blocking. Use the renderer on its creating
+/// browser thread. Destroy calls invalidate handles immediately; WebGPU retains resources needed by
+/// in-flight work.</remarks>
 [SupportedOSPlatform("browser")]
 public sealed partial class BrowserRenderer : IRenderer, IDisposable
 {

@@ -2,16 +2,13 @@ using System.Numerics;
 
 namespace Paradise.Animation.Offline;
 
-/// <summary>
-/// Drops keys a linear interpolation of their neighbours reproduces within a tolerance, measured
-/// where it matters: as world-space distance at the end of the joint's hierarchy, so a hip's
-/// rotation is held to a tighter angle than a fingertip's. ozz's <c>AnimationOptimizer</c>.
-/// </summary>
+/// <summary>Removes interpolable keys within a world-space tolerance at the end of each joint's hierarchy.</summary>
+/// <remarks>Matches ozz's AnimationOptimizer, with tighter angular limits for longer joint chains.</remarks>
 public static class AnimationOptimizer
 {
-    /// <param name="Tolerance">Metres of error allowed at <paramref name="Distance"/> from the joint.</param>
-    /// <param name="Distance">How far from the joint the error is measured, metres; the joint's own hierarchy length is used when longer.</param>
-    /// <remarks>No parameter defaults: <c>new Setting()</c> on a struct is all zeros, which is a tolerance that keeps nothing. Start from <see cref="Default"/>.</remarks>
+    /// <param name="Tolerance">Allowed error in metres.</param>
+    /// <param name="Distance">Distance from the joint where error is measured, or its hierarchy length if longer.</param>
+    /// <remarks>Use Default; a default-initialized Setting has zero tolerance and distance.</remarks>
     public readonly record struct Setting(float Tolerance, float Distance)
     {
         /// <summary>ozz's defaults: 1 mm of error measured 10 cm from the joint.</summary>
@@ -66,17 +63,10 @@ public static class AnimationOptimizer
         for (var joint = 0; joint < count; joint++)
         {
             var track = raw.Tracks[joint];
-            var maxScale = 0f;
-            if (track.Scales.Count != 0)
+            var maxScale = track.Scales.Count == 0 ? 1f : 0f;
+            foreach (var key in track.Scales)
             {
-                foreach (var key in track.Scales)
-                {
-                    maxScale = MathF.Max(maxScale, MathF.Max(MathF.Max(MathF.Abs(key.Value.X), MathF.Abs(key.Value.Y)), MathF.Abs(key.Value.Z)));
-                }
-            }
-            else
-            {
-                maxScale = 1f;
+                maxScale = MathF.Max(maxScale, MathF.Max(MathF.Max(MathF.Abs(key.Value.X), MathF.Abs(key.Value.Y)), MathF.Abs(key.Value.Z)));
             }
 
             specs[joint].Scale = maxScale;

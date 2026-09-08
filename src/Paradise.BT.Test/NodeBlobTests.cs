@@ -3,16 +3,8 @@ using Paradise.BT.Nodes.Builder;
 
 namespace Paradise.BT.Test;
 
-/// <summary>
-/// The layout is now a Paradise.BLOB asset rather than a hand-rolled block, so what needs guarding
-/// is the WIRING: that each array landed in the right field, that the offsets still describe the
-/// same layout, and that the defaults are still aligned. Everything about how a tree BEHAVES over
-/// this blob is covered by <see cref="UnmanagedBlobTests"/>.
-///
-/// Values are read through a <c>BehaviorTreeLayout.LayoutBlob*</c> and copied out before any assertion: the blob's
-/// arrays resolve against their own address, so a copy of the struct would read whatever follows
-/// the copy, and a pointer cannot live across an <c>await</c>.
-/// </summary>
+/// <summary>Verifies layout array wiring, offsets and default-data alignment.</summary>
+/// <remarks>Copy values out before await; copying blob headers invalidates their relative offsets.</remarks>
 public sealed class NodeBlobTests
 {
     private static BTreeNode SampleTree() =>

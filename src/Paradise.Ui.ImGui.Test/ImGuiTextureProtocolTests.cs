@@ -7,14 +7,9 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>Dear ImGui 1.92's texture protocol, against the real natives.
-///
-/// This is the load-bearing test of the Hexa migration. Hexa's cimgui build strips the obsolete
-/// static-atlas API, so a context that does not answer <c>ImTextureData</c> requests asserts at
-/// <c>NewFrame</c> with "font atlas is not built" — meaning the whole UI stack either speaks this
-/// protocol or does not start at all. It also guards the by-value <c>Vector2</c>/<c>Vector4</c>
-/// ABI, which is where a binding-level mismatch would show up as silently wrong geometry rather
-/// than a crash.</summary>
+/// <summary>Checks the native ImGui 1.92 texture protocol and by-value vector ABI.</summary>
+/// <remarks>Missing texture acknowledgements abort NewFrame; an ABI mismatch corrupts draw
+/// geometry.</remarks>
 [NotInParallel]
 public class ImGuiTextureProtocolTests
 {

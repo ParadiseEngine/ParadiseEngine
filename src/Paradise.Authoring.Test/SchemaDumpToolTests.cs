@@ -129,9 +129,7 @@ public class SchemaDumpToolTests
         }
     }
 
-    /// <summary>
-    /// Best-effort cleanup of a temp directory holding an assembly this test LOADED.
-    /// </summary>
+    /// <summary>Best-effort cleanup of a temp directory holding an assembly this test LOADED.</summary>
     /// <remarks>
     /// Windows locks a file for as long as it is loaded and <see cref="System.Reflection.Assembly.LoadFile"/>
     /// gives no way to unload it, so a plain recursive delete throws

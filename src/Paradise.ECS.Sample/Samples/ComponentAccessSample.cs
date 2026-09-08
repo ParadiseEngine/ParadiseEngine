@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates component read/write operations and component existence checks.
-/// </summary>
+/// <summary>Demonstrates component read/write operations and component existence checks.</summary>
 public static class ComponentAccessSample
 {
     public static void Run(World world, Entity playerEntity)
@@ -12,7 +10,6 @@ public static class ComponentAccessSample
         Console.WriteLine("2. Component Access");
         Console.WriteLine("----------------------------");
 
-        // Read components
         var playerPos = world.GetComponent<Position>(playerEntity);
         var playerHealth = world.GetComponent<Health>(playerEntity);
         var playerName = world.GetComponent<Name>(playerEntity);
@@ -23,13 +20,11 @@ public static class ComponentAccessSample
         Debug.Assert(playerHealth.Current == 100 && playerHealth.Max == 100);
         Debug.Assert(playerName.ToString() == "Hero");
 
-        // Modify component
         world.GetComponent<Position>(playerEntity) = new Position(150, 250);
         playerPos = world.GetComponent<Position>(playerEntity);
         Console.WriteLine($"  Updated player position: {playerPos}");
         Debug.Assert(playerPos.X == 150 && playerPos.Y == 250);
 
-        // Check for components
         Console.WriteLine($"  Player has Position: {world.HasComponent<Position>(playerEntity)}");
         Console.WriteLine($"  Player has PlayerTag: {world.HasTag<PlayerTag>(playerEntity)}");
         Console.WriteLine($"  Player has EnemyTag: {world.HasTag<EnemyTag>(playerEntity)}");

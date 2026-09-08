@@ -29,22 +29,10 @@ using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
 namespace Paradise.Rendering.WebGPU;
 
-/// <summary>WebGPU (Dawn) backend entry point. Constructed from a <see cref="SurfaceDescriptor"/>,
-/// which decides what it draws INTO: a window's swapchain, or — for
-/// <see cref="SurfacePlatform.Headless"/> — an offscreen texture it owns. Exposes resource
-/// Create/Destroy plus the <see cref="Submit(in RenderCommandStream)"/> path that drives a real
-/// frame.
-///
-/// That difference lives in one place, <c>IPresentationTarget</c>, and nothing in the frame path
-/// consults it: acquire a view, draw, present. "Headless" is a kind of TARGET, not a kind of
-/// renderer — this class used to carry a <c>bool</c> for it and branch at six points (colour
-/// format, resize, both presents, the readback guard, the backbuffer acquire).</summary>
-/// <remarks>Implements <see cref="IRenderer"/>, the backend-agnostic slice consumed by
-/// <c>Paradise.Rendering.Pbr</c>. The members beyond it — <see cref="OverlayPass"/>,
-/// <see cref="NativeDevice"/>, <see cref="ReadbackColor"/>, <see cref="RenderClearFrame"/>, and
-/// the raw <see cref="CreateShader(in ShaderDesc)"/> / <see cref="CreatePipeline(in PipelineDesc)"/>
-/// descriptor paths — are Dawn-specific and reached through this concrete type; see
-/// <see cref="IRenderer"/> for why each is excluded.</remarks>
+/// <summary>Implements IRenderer on Dawn using a window surface or owned offscreen
+/// target.</summary>
+/// <remarks>IPresentationTarget handles acquisition and presentation. Native overlay, capture and
+/// raw descriptor APIs remain on this concrete backend.</remarks>
 public sealed class WebGpuRenderer : IRenderer, IDisposable
 {
     private const int DefaultFramesInFlight = 2;
@@ -72,13 +60,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private WgBuffer? _timingReadback;
     private int _timedPasses;
 #endif
-    /// <summary>Volatile because it is read on any thread that calls in and written by whichever
-    /// thread disposes. It is an ADVISORY guard: every <c>ObjectDisposedException.ThrowIf</c> in
-    /// this file reads it, and each of those is a check-then-act that a concurrent disposal can
-    /// still slip through. The two places where that would actually strand something do not rely
-    /// on it — a capture request is accepted or refused atomically by
-    /// <see cref="Internal.CaptureQueue"/>, and teardown runs once by way of
-    /// <see cref="_disposeGate"/>.</summary>
+    /// <summary>Provides an advisory disposed check visible across threads.</summary>
+    /// <remarks>It cannot make check-then-act atomic. CaptureQueue serializes request acceptance;
+    /// _disposeGate ensures teardown runs once.</remarks>
     private volatile bool _disposed;
 
     /// <summary>Claimed exactly once, by whichever thread reaches <see cref="Dispose"/> first.
@@ -86,17 +70,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// file reads it as one.</summary>
     private int _disposeGate;
 
-    /// <summary>
-    /// Build a renderer for whatever the descriptor DESCRIBES: a swapchain over a native window,
-    /// or — for <see cref="SurfacePlatform.Headless"/> — an offscreen <c>BGRA8Unorm</c> target of
-    /// the descriptor's size, with no surface created at all.
-    ///
-    /// This used to refuse the headless descriptor and point callers at
-    /// <see cref="CreateHeadless"/>, which left <see cref="SurfaceDescriptor"/> able to STATE a
-    /// case the only constructor taking one would not build. Every host holding a descriptor then
-    /// had to know the rule and branch on it — so the branch lived in as many places as there were
-    /// hosts, instead of here, in the type that owns the distinction.
-    /// </summary>
+    /// <summary>Creates a renderer for a window surface or a headless BGRA8Unorm target.</summary>
     /// <param name="allowCapture">Configure a window's swapchain so its frames can be copied
     /// (<see cref="CaptureFrameAsync"/>). OFF by default and a CONSTRUCTION-time choice, both
     /// deliberately: a backbuffer that must be copyable can cost the driver optimisations on every
@@ -128,13 +102,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
     }
 
-    /// <summary>Construct the renderer using the headless adapter path. No native surface is
-    /// created; clear frames render into an offscreen <c>BGRA8Unorm</c> texture sized
-    /// <paramref name="width"/> x <paramref name="height"/>. The CI smoke test driver consumes
-    /// this path with <c>SDL_VIDEODRIVER=dummy</c>.
-    ///
-    /// Kept as the NAME for that intent — it reads better than a descriptor at a call site that
-    /// only wants an offscreen target — but it is now the same constructor underneath.</summary>
+    /// <summary>Creates a headless renderer with an owned BGRA8Unorm target.</summary>
     public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1, ILogger? logger = null) =>
         new(SurfaceDescriptor.Headless(width, height), logger: logger);
 
@@ -223,21 +191,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyShader(ShaderHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Stale-handle contract: the public slot MUST stop resolving the instant DestroyShader
-        // returns. Detach is pure slot invalidation — it does NOT touch the content-keyed
-        // _shaderModuleCache because another live handle may still share the same native, and
-        // the cache is renderer-lifetime like PipelineCache. The native object is kept alive by
-        // (a) other slots that still reference it, (b) the module cache, and (c) the closure
-        // below for the N-frame deferred window so any in-flight GPU work referencing THIS
-        // handle's slot value finishes safely.
+        // Invalidate the public slot immediately. The native module stays rooted by its cache,
+        // other slots and the deferred release closure while submitted work finishes.
         if (!_device.DetachShader(handle, out var native))
             return;
-        // The closure captures `native` by reference — that capture alone roots the WebGPUSharp
-        // wrapper until the deferred frame fires and the closure is dequeued. `_ = native;` is
-        // a no-op that documents the intent: we want the capture, nothing more. Do NOT use
-        // GC.KeepAlive here — it only prevents elision of stack-allocated locals inside the
-        // enclosing method, and `native` is a field on the heap-allocated closure, not a stack
-        // local. Calling GC.KeepAlive inside the lambda is misleading (no runtime effect).
+        // Capture the native wrapper in this deferred closure to keep it alive until the release
+        // frame.
         _destructionQueue.Schedule(() => { _ = native; });
     }
 
@@ -528,13 +487,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         return handle;
     }
 
-    /// <summary>Build a <see cref="PipelineDesc"/> from a Slang-reflected program plus a target
-    /// color format, then route through <see cref="CreatePipeline(in PipelineDesc)"/> (and its
-    /// pipeline cache). Vertex layout is taken verbatim from the program's reflection record —
-    /// the M1 design contract's "no hand-coded layout" rule lives in this method's body. The
-    /// <paramref name="topology"/> and <paramref name="stripIndexFormat"/> parameters default to
-    /// triangle-list / uint16 (the M1 sample's triangle path); line / point / strip callers
-    /// pass their own values rather than getting silently wrong primitive assembly.</summary>
+    /// <summary>Creates a cached pipeline using the shader's reflected vertex layout and requested
+    /// primitive topology.</summary>
     public PipelineHandle CreatePipeline(
         in ShaderProgramDesc program,
         TextureFormat colorFormat,
@@ -586,20 +540,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 ? "ShaderProgramDesc has no fragment module."
                 : $"ShaderProgramDesc has no fragment module named '{fragmentEntryPoint}'.");
 
-        // CreateShaderModule dedupes the underlying native WgShaderModule by (Wgsl, EntryPoint,
-        // Stage) inside _shaderModuleCache, but mints a FRESH ShaderHandle per call (iter-5
-        // public-handle split — matches the pipeline and buffer contracts). These two handles
-        // are consumed locally by the PipelineDesc below and never reach the caller, so we must
-        // destroy them after CreatePipeline(in pipelineDesc) returns — otherwise every call
-        // leaks two _device.Shaders slot entries for the renderer's lifetime (the native module
-        // is safe — the content cache AND the native WgRenderPipeline both retain it).
-        //
-        // Both CreateShaderModule calls AND the inner CreatePipeline live inside the try so the
-        // cleanup covers every exception site: the second CreateShaderModule can throw
-        // InvalidOperationException if Dawn fails to compile the WGSL, and the inner
-        // CreatePipeline can throw NotSupportedException from BuildNativePipeline's Layout /
-        // DepthStencilFormat guards. The finally guards each DestroyShader with IsValid so it
-        // skips handles that never got allocated (default(ShaderHandle).Generation == 0).
+        // Temporary shader handles belong to this helper; release them after pipeline creation.
+        // Keep both module allocations inside try so partial failures are cleaned up. Native
+        // modules remain cache/pipeline-owned.
         ShaderHandle vsHandle = default;
         ShaderHandle fsHandle = default;
         try
@@ -697,12 +640,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyPipeline(PipelineHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Stale-handle contract: invalidate the public slot synchronously. The native pipeline is
-        // owned by PipelineCache (shared across every handle that resolved to the same content-hash
-        // entry) and outlives individual DestroyPipeline calls — destroying one handle never yanks
-        // the underlying resource out from under another. The cache is renderer-lifetime; revisit
-        // when M2/M3 introduces dynamic pipeline rebuilds (need refcount or LRU eviction then).
-        // No native teardown to defer — detach is pure slot invalidation, so it happens inline.
+        // Invalidate the public pipeline slot immediately; the renderer-lifetime cache retains its
+        // shared native resource.
         _device.DetachPipeline(handle);
         _pipelineHasDepth.Remove(handle);
     }
@@ -809,15 +748,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _destructionQueue.AdvanceFrame();
     }
 
-    /// <summary>Read the color target back to CPU memory as tightly-packed,
-    /// top-down <c>BGRA8</c> (4 bytes/pixel, <see cref="ColorFormat"/> = <see cref="TextureFormat.Bgra8Unorm"/>).
-    /// Blocks on GPU completion — intended for screenshots and image-based tests, not per-frame use.
-    /// Requires a target the renderer OWNS, because it reads AFTER the frame: a swapchain's texture
-    /// is valid only until its present, so a windowed run has nothing left to copy by the time this
-    /// is called — so this needs a renderer built from a headless <see cref="SurfaceDescriptor"/>,
-    /// and callers that know they did so want the throw when they did not. A caller that does NOT
-    /// know which kind of run it is in should ask for a frame instead, with
-    /// <see cref="CaptureFrameAsync"/>, which works either way.</summary>
+    /// <summary>Synchronously reads a persistent headless target as top-down, tightly packed
+    /// BGRA8.</summary>
+    /// <remarks>Blocks on GPU completion. Swapchain textures expire at presentation; use
+    /// CaptureFrameAsync for windowed captures.</remarks>
     public byte[] ReadbackColor(out uint width, out uint height)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -887,23 +821,14 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         return pixels;
     }
 
-    /// <summary>
-    /// Ask for the next frame, as an image.
-    ///
-    /// Callable from ANY thread and at any time. The request is queued and serviced by the render
-    /// thread inside its next frame — the copy is recorded onto that frame's own command buffer,
-    /// after the overlay and before the present — so what comes back is exactly what was shown,
-    /// UI included. That deferral is the point: a caller reading the target itself would race the
-    /// frame in progress, and for a swapchain there is no texture left to read once the frame is
-    /// over.
-    ///
-    /// The task completes when the GPU copy lands and the staging buffer maps, which is at least
-    /// one frame away and possibly more.
-    /// </summary>
+    /// <summary>Queues capture of the next rendered frame, including its overlay.</summary>
+    /// <remarks>Callable from any thread. The render thread records the copy before presentation;
+    /// the task completes after GPU completion and staging-buffer mapping.</remarks>
     /// <exception cref="NotSupportedException">This renderer's target cannot be copied from. For a
     /// window that means it was not constructed with <c>allowCapture: true</c>, or the surface does
     /// not advertise <c>CopySrc</c>. Thrown rather than returned as a faulted task, because it is a
-    /// fact about the renderer that is true before the call and will not change by retrying.</exception>
+    /// fact about the renderer that is true before the call and will not change by
+    /// retrying.</exception>
     public Task<ColorReadback> CaptureFrameAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -931,11 +856,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 TaskScheduler.Default);
         }
 
-        // Refused rather than stranded: the queue closes atomically with its drain, so a request
-        // that loses the race to Dispose is told, not left holding a task nothing will complete.
-        // The analyser wants ObjectDisposedException.ThrowIf here, which cannot express this: the
-        // authority is the queue's own closed state, taken atomically with the enqueue, not a
-        // separately-read flag. Reading _disposed again would be the very race this replaced.
+        // Queue acceptance is atomic with closure; checking _disposed separately could strand the
+        // request. Throw from the queue result rather than an advisory flag.
 #pragma warning disable CA1513
         if (!_captureRequests.TryEnqueue(request))
         {
@@ -1093,11 +1015,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         if (activeComputePass is not null)
                             throw new InvalidOperationException(
                                 "EndPass inside a compute pass — compute passes close with EndComputePass.");
-                        // Null activePass BEFORE calling End() so the finally-block safety net
-                        // becomes idempotent: if End() throws (Dawn validation error at pass end),
-                        // activePass is already null and the finally won't double-End the same
-                        // native encoder. Dawn considers calling End() twice on the same pass an
-                        // invariant violation and may trigger a native assertion.
+                        // Clear activePass before End: if End throws, finally must not end the same
+                        // native encoder twice.
                         var passToEnd = activePass;
                         activePass = null;
                         passToEnd?.End();
@@ -1175,6 +1094,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var d = cmd.DrawIndexed;
                         pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
+                        break;
+                    }
+                    case RenderCommandKind.DrawIndexedIndirect:
+                    {
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
+                        var d = cmd.DrawIndexedIndirect;
+                        pass.DrawIndexedIndirect(_device.ResolveBuffer(d.Buffer), d.Offset);
                         break;
                     }
                     case RenderCommandKind.SetViewport:
@@ -1366,14 +1292,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void Dispose()
     {
         DisposeTimings();
-        // ONE-SHOT. Check-then-set was two steps, so two threads could both pass it and both tear
-        // down — and teardown ends in _target.Dispose() and _device.Dispose(), which is a native
-        // double-free rather than a harmless second pass. IDisposable is not conventionally
-        // thread-safe, but this class invites cross-thread use (CaptureFrameAsync says so), and an
-        // atomic exchange costs nothing.
-        //
-        // A separate gate from _disposed because Interlocked has no bool overload, and _disposed
-        // stays a volatile bool for the ObjectDisposedException guards that read it everywhere.
+        // An atomic gate prevents concurrent native teardown. Keep _disposed as the volatile
+        // advisory bool used by public guards.
         if (Interlocked.Exchange(ref _disposeGate, 1) != 0) return;
         _disposed = true;
         // Closed before anything else is torn down: nothing queued can ever be served now, and the

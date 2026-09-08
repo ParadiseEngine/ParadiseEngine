@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ChunkManager"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ChunkManager"/>.</summary>
 public sealed class ChunkManagerTests
 {
     [Test]
