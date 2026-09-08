@@ -6,17 +6,9 @@ using Paradise.Rendering;
 
 namespace Paradise.Rendering.Pbr.Test.Baseline;
 
-/// <summary>Renders a captured <see cref="RenderCommandStream"/> as deterministic, reviewable text:
-/// the pass table with its attachment wiring, and each pass's command sequence.
-///
-/// This is the load-bearing half of the frame-graph baseline. Pixels can only say "something
-/// changed"; the signature says which pass, which attachment, which load op — and it is identical
-/// on every adapter, because nothing in it comes from the GPU.
-///
-/// Handles are printed as first-appearance ordinals (<c>pipeline#0</c>, <c>bg#3</c>) rather than
-/// raw <c>(Index, Generation)</c> pairs. Raw values churn whenever an unrelated resource is created
-/// earlier in construction, which would make every golden file conflict on every change; ordinals
-/// keep exactly the property worth asserting — that pass 5 binds the same pipeline pass 3 did.</summary>
+/// <summary>Formats pass attachments and commands as a deterministic frame signature.</summary>
+/// <remarks>First-use handle ordinals preserve resource-sharing relationships without depending on
+/// allocation order or GPU output.</remarks>
 internal static class FrameSignature
 {
     /// <summary>Format one captured frame. <paramref name="label"/> heads the file so a golden is

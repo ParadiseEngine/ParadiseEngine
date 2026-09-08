@@ -153,11 +153,8 @@ internal sealed class PbrViewerScene : IDisposable
 
     public void Dispose() => _pbr.Dispose();
 
-    // The uri comes from untrusted GLB content, and the mount is the confinement: an absolute uri
-    // is a path INSIDE the mount rather than one that escapes it, and a ".." that climbs past the
-    // root is refused by UPath itself. Neither failure is re-implemented here — both are only
-    // dressed, so the message names the URI THE GLB ASKED FOR. A raw IO error names the resolved
-    // path, which is not the string anyone can find in the file they are debugging.
+    // The GLB submount enforces URI containment. Wrap path errors only to name the source URI the
+    // author can find in the GLB.
     private static byte[] ReadSidecarImage(IFileSystem sidecars, string uri)
     {
         UPath path;

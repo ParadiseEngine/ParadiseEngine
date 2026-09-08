@@ -3,21 +3,8 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// A block-based list that stores unmanaged elements in fixed-size native memory blocks.
-/// Provides O(1) indexed access with lazy block allocation.
-/// </summary>
-/// <typeparam name="T">The unmanaged element type.</typeparam>
-/// <remarks>
-/// <para>
-/// Memory is organized into fixed-size blocks, each containing multiple entries.
-/// Blocks are allocated lazily when first accessed for writes.
-/// This pattern is cache-friendly and avoids large contiguous allocations.
-/// </para>
-/// <para>
-/// Used internally by ChunkManager and ChunkTagRegistry for consistent memory management.
-/// </para>
-/// </remarks>
+/// <summary>Stores unmanaged elements in lazily allocated native blocks with O(1) indexed access.</summary>
+/// <remarks>Blocks avoid large contiguous allocations; callers must allocate a block before reading it.</remarks>
 public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
 {
     private readonly IAllocator _allocator;
@@ -28,24 +15,16 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
     private readonly int _blockByteSize;
     private bool _disposed;
 
-    /// <summary>
-    /// Gets the maximum number of blocks.
-    /// </summary>
+    /// <summary>The maximum number of blocks.</summary>
     public int MaxBlocks => _blocks.Length;
 
-    /// <summary>
-    /// Gets the number of entries per block.
-    /// </summary>
+    /// <summary>The number of entries per block.</summary>
     public int EntriesPerBlock => _entriesPerBlock;
 
-    /// <summary>
-    /// Gets the maximum capacity (MaxBlocks * EntriesPerBlock).
-    /// </summary>
+    /// <summary>The maximum capacity (MaxBlocks * EntriesPerBlock).</summary>
     public int MaxCapacity => _blocks.Length * _entriesPerBlock;
 
-    /// <summary>
-    /// Creates a new ChunkArray with the specified configuration.
-    /// </summary>
+    /// <summary>Creates a new ChunkArray with the specified configuration.</summary>
     /// <param name="allocator">The memory allocator to use.</param>
     /// <param name="blockByteSize">The size of each block in bytes (should be power of 2).</param>
     /// <param name="maxBlocks">The maximum number of blocks.</param>
@@ -59,7 +38,6 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         _entriesPerBlockShift = BitOperations.Log2((uint)_entriesPerBlock);
         _entriesPerBlockMask = _entriesPerBlock - 1;
 
-        // Pre-allocate initial blocks if requested
         int blocksToAllocate = Math.Min(initialBlocks, maxBlocks);
         for (int i = 0; i < blocksToAllocate; i++)
         {
@@ -67,21 +45,15 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         }
     }
 
-    /// <summary>
-    /// Gets a pointer to the block at the given index, or null if not allocated.
-    /// </summary>
+    /// <summary>A pointer to the block at the given index, or null if not allocated.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private T* GetBlock(int blockIndex) => (T*)_blocks[blockIndex];
 
-    /// <summary>
-    /// Checks if the block at the given index is allocated.
-    /// </summary>
+    /// <summary>Checks if the block at the given index is allocated.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsBlockAllocated(int blockIndex) => _blocks[blockIndex] != 0;
 
-    /// <summary>
-    /// Ensures the block for the given element index is allocated.
-    /// </summary>
+    /// <summary>Ensures the block for the given element index is allocated.</summary>
     /// <param name="index">The element index.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnsureCapacity(int index)
@@ -90,9 +62,7 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         EnsureBlockAllocated(blockIndex);
     }
 
-    /// <summary>
-    /// Ensures the block at the given index is allocated.
-    /// </summary>
+    /// <summary>Ensures the block at the given index is allocated.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnsureBlockAllocated(int blockIndex)
     {
@@ -116,9 +86,7 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         return ref GetBlock(blockIndex)[indexInBlock];
     }
 
-    /// <summary>
-    /// Gets a reference to the element at the given index, allocating the block if needed.
-    /// </summary>
+    /// <summary>A reference to the element at the given index, allocating the block if needed.</summary>
     /// <param name="index">The element index.</param>
     /// <returns>A reference to the element.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -145,9 +113,7 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         return block == null ? default : block[indexInBlock];
     }
 
-    /// <summary>
-    /// Sets the value at the given index, allocating the block if needed.
-    /// </summary>
+    /// <summary>Sets the value at the given index, allocating the block if needed.</summary>
     /// <param name="index">The element index.</param>
     /// <param name="value">The value to set.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -172,9 +138,7 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
         }
     }
 
-    /// <summary>
-    /// Disposes of all native memory used by this list.
-    /// </summary>
+    /// <summary>Disposes of all native memory used by this list.</summary>
     public void Dispose()
     {
         if (_disposed) return;

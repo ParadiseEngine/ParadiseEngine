@@ -3,19 +3,9 @@ using System.Collections.Generic;
 
 namespace Paradise.Rendering.Graph;
 
-/// <summary>The frame's render targets, owned by name.
-///
-/// <para>A renderer used to hold one field per target — the texture, its sampled view, the
-/// per-layer views — and a resize was a hand-ordered list of destroys and recreates that each
-/// bind group had to be rebuilt after. Here a target is declared by <see cref="Ensure"/> with the
-/// descriptor it should have; the call is idempotent, so the same declaration every resize
-/// recreates only what changed and leaves every bind group over an unchanged target valid.
-/// Views are minted on demand and cached with the texture, so two readers of one target share
-/// one view and a view never outlives its texture.</para>
-///
-/// <para>Ownership is what makes a resource's scope knowable: a target that lives here is private
-/// to the graph unless <see cref="Export"/> hands it out, which is the fact
-/// <see cref="FrameGraph"/> used to have to be told with <see cref="GraphResourceScope"/>.</para></summary>
+/// <summary>Owns named render targets and lazily cached views.</summary>
+/// <remarks>Ensure recreates only changed descriptors, preserving unchanged targets and bindings.
+/// Views share the texture's lifetime; Export marks a target visible outside the graph.</remarks>
 public sealed class GraphTextureRegistry : IDisposable
 {
     private readonly ITextureFactory _factory;

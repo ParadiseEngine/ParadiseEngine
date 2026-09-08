@@ -2,10 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Type-erased handle to a typed event buffer, so <see cref="WorldEventStore"/> can store, copy,
-/// and commit buffers of many event types uniformly.
-/// </summary>
+/// <summary>Untyped access to buffers held by <see cref="WorldEventStore"/>.</summary>
 internal interface ISystemEvents
 {
     /// <summary>Begins a new commit: discards any previously staged (outgoing) events.</summary>
@@ -24,12 +21,7 @@ internal interface ISystemEvents
     void Clear();
 }
 
-/// <summary>
-/// World-owned buffer for one unmanaged event type. Holds the INCOMING events (produced last frame,
-/// read-many by systems this frame). Outgoing events are staged during the post-wave commit and
-/// published to incoming atomically, so last frame's events auto-expire.
-/// </summary>
-/// <typeparam name="T">The unmanaged event type.</typeparam>
+/// <summary>Stores last tick's incoming events and stages replacements for the next tick.</summary>
 internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged
 {
     private T[] _incoming = Array.Empty<T>();
@@ -45,11 +37,6 @@ internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged
     public void StageRaw(ReadOnlySpan<byte> data)
     {
         var e = MemoryMarshal.Read<T>(data);
-        StageOne(in e);
-    }
-
-    public void StageOne(in T e)
-    {
         if (_stagingCount == _staging.Length)
             Array.Resize(ref _staging, Math.Max(4, _staging.Length * 2));
         _staging[_stagingCount++] = e;
@@ -57,8 +44,7 @@ internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged
 
     public void PublishStaging()
     {
-        // Swap staging <-> incoming: incoming becomes exactly this frame's produced set, and the old
-        // incoming array is retained as next frame's staging scratch (no steady-state allocation).
+        // Reuse the old incoming array as next tick's staging buffer.
         (_incoming, _staging) = (_staging, _incoming);
         _incomingCount = _stagingCount;
         _stagingCount = 0;
@@ -73,13 +59,7 @@ internal sealed class SystemEvents<T> : ISystemEvents where T : unmanaged
     }
 
     public void CopyIncomingFrom(ISystemEvents source)
-    {
-        var src = (SystemEvents<T>)source;
-        if (_incoming.Length < src._incomingCount)
-            _incoming = new T[src._incomingCount];
-        Array.Copy(src._incoming, _incoming, src._incomingCount);
-        _incomingCount = src._incomingCount;
-    }
+        => SetIncoming(((SystemEvents<T>)source).Incoming);
 
     public void Clear()
     {

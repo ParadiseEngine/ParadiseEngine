@@ -1,16 +1,7 @@
-// ssr.slang — screen-space reflection: for every pixel the depth + normal pre-pass covered, the
-// mirror ray is marched through the pre-pass depth until it dips behind a surface, and the color
-// LAST frame's HDR scene held there (reprojected through last frame's view-projection, so a
-// moving camera does not smear) is written with a confidence the scene pass blends its indirect
-// specular by. Rays that leave the screen, hit nothing, or hit a surface from behind write
-// confidence 0, and the probes or the sky answer instead.
-//
-// The march is in screen space (McGuire & Mara's parameterisation): the ray's ends are projected
-// once and the walk interpolates pixels and 1/w between them, so a step is whole texels and a
-// surface the ray crosses on screen cannot fall between two samples. A world-space walk did
-// exactly that — a ray leaving a thin block through its top between two samples never saw it.
-// No include: slangc keeps every global an included file declares, and this pass needs none of
-// the frame's lighting bindings.
+// Trace reflections in screen space using projected pixels and reciprocal w (McGuire/Mara),
+// avoiding gaps from world-space stepping. Reproject hits into prior-frame HDR. Misses and
+// back-face hits return zero confidence for probe/sky fallback. Keep lighting bindings out of this
+// compute program.
 
 struct SsrUniforms
 {

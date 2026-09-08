@@ -1,14 +1,12 @@
 # Paradise.BT
 
-A generic behavior tree framework for .NET. Nodes are unmanaged structs, a compiled tree is one
-shared, position-independent binary blob, and a running instance is two plain buffers — small
-enough to live in an ECS component, dumb enough to survive a memcpy, and deterministic enough to
-ride a world snapshot. NativeAOT and trimming compatible; zero allocation on the tick path.
+A .NET behavior tree framework with unmanaged struct nodes, one shared position-independent
+blob per compiled tree, and two buffers per instance. Instances fit in ECS components and
+support memcpy snapshots. NativeAOT and trimming compatible; ticking allocates nothing.
 
-It is engine-agnostic: no Unity, no Godot, no ECS dependency. Inspired by
-[EntitiesBT](https://github.com/quabug/EntitiesBT), keeping its best mechanics (the flat
-pre-order layout, the default/runtime data split) and replacing its reflection-built dispatch
-with static generics.
+It has no Unity, Godot or ECS dependency. Inspired by
+[EntitiesBT](https://github.com/quabug/EntitiesBT), it keeps the flat pre-order layout and
+default/runtime data split, with static-generic dispatch replacing reflection.
 
 ## Packages
 
@@ -20,15 +18,13 @@ with static generics.
 | `Paradise.BT.Generators` | source generators + analyzers — **reference as an analyzer from every project that declares node types or trees** |
 | `Paradise.BLOB` | the binary blob primitives the layout is built on (transitive) |
 
-The generator reference is load-bearing, not optional tooling: it registers every node type via a
-module initializer, emits the builder classes and per-tree blackboards, publishes access
-metadata, and enforces the diagnostics below. A node type it cannot see is refused by name when a
-layout is built from it.
+The generator reference is required: it registers node types through module initializers,
+emits builders and per-tree blackboards, publishes access metadata, and enforces diagnostics.
+Layout construction rejects unregistered node types by name.
 
 ## The model
 
-A behavior tree is ticked once per frame (or however often you like) and every node answers with
-a `NodeState`:
+Each tick returns a `NodeState`:
 
 | state | meaning |
 |---|---|
@@ -50,11 +46,9 @@ route among many. The built-in composites give the classic semantics:
 | `Succeeder(child)` | `SucceederNode` | any completion becomes `Success` |
 | `Success()` / `Failure()` / `Running()` | — | constants, for shaping a tree |
 
-Two semantics worth knowing before writing a tree:
+Execution rules:
 
-- **Completed children are not re-ticked.** A composite skips a child already at
-  `Success`/`Failure`, which is what gives a sequence resume behavior across frames — a
-  three-step sequence whose second step is `Running` picks up at step two next tick.
+- **Completed children are skipped.** A sequence resumes at its first unfinished child.
 - **Reset restores authored data.** Resetting a subtree clears its states and memcpys the
   authored defaults back over its runtime data — one copy, because a subtree is contiguous. A
   finished tree is restarted by its owner's next tick (`FixedBehaviorTree` does this
@@ -134,9 +128,8 @@ explicit `NodeTypeRegistry.Register<T>()`.
 
 ## The blackboard
 
-Nodes read and write external data through three methods, and the restraint is deliberate — no
-ref returns means a read and a write are statically distinguishable, which is what the whole
-generated-contract story stands on:
+Nodes access external data through three methods. Without ref returns, generators can
+distinguish reads from writes and derive the tree's data contract:
 
 ```csharp
 public interface IBlackboard
@@ -147,12 +140,11 @@ public interface IBlackboard
 }
 ```
 
-Two implementations ship, for two situations:
+Choose a manual or generated blackboard:
 
-**A hand-written blackboard** is a handle-shaped struct implementing the three-member
-`IBlackboard` — the library ships no implementation, no clock, and no delta-time type; time, when
-a tree needs it, is caller data read by the caller's own node. A minimal one is a struct holding
-one dictionary reference:
+**A hand-written blackboard** is a handle struct implementing `IBlackboard`. The library
+provides no implementation, clock or delta-time type; callers supply time through their own
+data and nodes. A minimal blackboard holds a dictionary reference:
 
 ```csharp
 public struct Blackboard : IBlackboard
@@ -204,25 +196,21 @@ agent.Initialize(layout);   // refuses another tree's layout — the layout is T
 NodeState state = agent.Tick(PatrolTreeBlackboard.Bind(/* one named ref per accessed type */));
 ```
 
-`Compile<TTree>` is where type safety is born: the generated blackboard is stamped
-`IBlackboardFor<PatrolTree>`, and the typed layout, `BehaviorTreeRef<PatrolTree>` and
-`FixedBehaviorTree` all refuse any other tree's blackboard at compile time. Hand-built trees
-(`BTreeNode.Build()`) stay on the untyped path — they have no generated blackboard to check.
+The source generator emits a blackboard implementing `IBlackboardFor<PatrolTree>`; the typed
+layout, `BehaviorTreeRef<PatrolTree>` and `FixedBehaviorTree` reject other trees' blackboards at
+compile time. `BTreeNode.Build()` uses the untyped path without a generated blackboard.
 
-The generator sweeps the tree type for the nodes it composes — through builders, factories
-returning builders, `[Builds<T>]`-annotated factories, or `[BehaviorTreeBinding(Also = […])]` as
-the last resort — reads each node's `GetData`/`SetData` calls, and emits `PatrolTreeBlackboard`:
+The generator finds nodes through builders, factories returning builders, or explicit
+`[BehaviorTreeBinding(Also = […])]` entries, reads their `GetData`/`SetData` calls, and emits a blackboard:
 a `ref struct` holding `ref readonly` to everything the tree reads and `ref` to everything it
-writes, so a write lands in the caller's own storage. **The union of the nodes' access IS the
-tree's contract.** Nothing is declared and nothing hand-maintained can drift: remove the last
-node reading a type and it leaves the blackboard, and any `Bind` call that no longer matches
-fails to compile at the call site.
+writes, directly accessing caller storage. **The union of node access defines the tree's
+contract.** Removing the last node that reads a type removes it from the blackboard; mismatched
+`Bind` calls then fail to compile.
 
-`PatrolTreeBlackboard` above has exactly one entry — the delay's delta time — including access
-from another assembly: a node's declaring assembly publishes its body-scanned access as
-`[assembly: NodeAccess]` metadata, so cross-assembly nodes need no `[Reads<T>]`/`[Writes<T>]`
-either. The hand-written attributes remain honored for the one case the scan cannot follow — a
-node handing its blackboard to a helper method (`PBT0010`).
+`PatrolTreeBlackboard` above has no entries because its nodes access no external data. For
+referenced nodes, the declaring assembly publishes body access as `[assembly: NodeAccess]`
+metadata. Explicit `[Reads<T>]`/`[Writes<T>]` attributes can describe access hidden behind
+helper calls (`PBT0010`).
 
 Pass a generated blackboard **per `Tick` call** (it is a `ref struct`; no field can hold one),
 and pass `Bind` arguments **by name** — parameters are ordered by type name, so adding a node
@@ -257,7 +245,6 @@ All enforced at compile time by `Paradise.BT.Generators`:
 | `PBT0001` | a `[Builder]` node is missing `[Guid]` |
 | `PBT0002` | a `[Builder]` node contains managed references (warning) |
 | `PBT0003` | two node types share a GUID |
-| `PBT0006` | `[OptionalReads<T>]` is not supported |
 | `PBT0008` | a node writes a component — components bind read-only by value; write a conclusion |
 | `PBT0009` | a node's body touches something its declared access omits |
 | `PBT0010` | a blackboard handed to a method the access scan cannot follow (warning) |
@@ -267,9 +254,7 @@ All enforced at compile time by `Paradise.BT.Generators`:
 
 ## Design notes
 
-- Instances are unmanaged so trees can live *inside* a simulation — in components, in snapshots
-  — rather than beside it in a managed side table where timers escape every snapshot and
-  decisions arrive a frame late.
+- Unmanaged instances keep tree state, including timers, in simulation components and snapshots.
 - The tick path allocates nothing: dispatch is a lock-free GUID lookup into static-generic invokers,
   and the generated blackboard's `GetData<T>`/`SetData<T>` fold to direct field access at JIT
   time.

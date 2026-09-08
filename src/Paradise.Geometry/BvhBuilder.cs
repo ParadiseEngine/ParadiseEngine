@@ -2,15 +2,9 @@ using System.Numerics;
 
 namespace Paradise.Geometry;
 
-/// <summary>Builds a <see cref="WideBvh"/> from item bounds: a binned-SAH binary tree, collapsed
-/// greedily into 8-wide nodes, then quantized.
-///
-/// <para>Binned SAH rather than a median split because the tracer's cost is the number of nodes a
-/// ray visits, and SAH is the estimate of exactly that; twelve bins keep the build linear in the
-/// item count so a mesh can be built at load. The collapse takes the widest internal child first,
-/// which is the usual heuristic for turning a binary tree into a wide one without a second SAH
-/// pass. Everything here is deterministic for a given input, so a cooked hierarchy and a
-/// load-time one are byte-identical.</para></summary>
+/// <summary>Builds a deterministic quantized 8-wide BVH from a binned-SAH binary tree.</summary>
+/// <remarks>Twelve bins bound split-search cost; opening the widest internal child reduces expected
+/// ray visits without another SAH pass. Identical input produces identical hierarchy bytes.</remarks>
 public static class BvhBuilder
 {
     /// <summary>Items per leaf child the meta word's offset field can address: eight leaf children
@@ -267,10 +261,8 @@ public static class BvhBuilder
         }
     }
 
-    /// <summary>Encode child bounds against the node's origin at a power-of-two step per axis,
-    /// rounding outward, and verify the decoded box still contains the exact one — float rounding
-    /// in the decode can lose an ulp, and a hierarchy that misses a triangle by an ulp is a
-    /// hierarchy that misses it.</summary>
+    /// <summary>Quantizes child bounds outward with power-of-two scales.</summary>
+    /// <remarks>Check decoded bounds too: float rounding must not exclude a child by one ULP.</remarks>
     private static void Quantize(ref BvhNode node, in Aabb nodeBounds, ReadOnlySpan<Aabb> children)
     {
         node.Origin = nodeBounds.Min;

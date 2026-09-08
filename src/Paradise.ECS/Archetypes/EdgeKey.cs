@@ -2,24 +2,16 @@ using System.Diagnostics;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Key for archetype graph edges. Packed into 32 bits.
-/// </summary>
+/// <summary>Key for archetype graph edges. Packed into 32 bits.</summary>
 internal readonly struct EdgeKey : IEquatable<EdgeKey>
 {
-    /// <summary>
-    /// Number of bits used for component type ID (including remove flag).
-    /// </summary>
+    /// <summary>Number of bits used for component type ID (including remove flag).</summary>
     internal const int TypeBits = 12;
 
-    /// <summary>
-    /// Number of bits used for component ID (excluding remove flag).
-    /// </summary>
+    /// <summary>Number of bits used for component ID (excluding remove flag).</summary>
     internal const int ComponentBits = TypeBits - 1;
 
-    /// <summary>
-    /// Number of bits used for archetype ID.
-    /// </summary>
+    /// <summary>Number of bits used for archetype ID.</summary>
     internal const int ArchetypeBits = sizeof(uint) * 8 - TypeBits;
 
     private const uint RemoveFlag = 1u << ComponentBits;

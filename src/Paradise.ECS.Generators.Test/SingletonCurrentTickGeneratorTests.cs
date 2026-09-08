@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Generators.Test;
 
-/// <summary>
-/// Tests for [Queryable(Singleton = true)] type emission by the QueryableGenerator.
-/// </summary>
+/// <summary>Tests for [Queryable(Singleton = true)] type emission by the QueryableGenerator.</summary>
 public sealed class SingletonQueryableEmissionTests
 {
     [Test]
@@ -85,9 +83,7 @@ public sealed class SingletonQueryableEmissionTests
     }
 }
 
-/// <summary>
-/// Tests for nested Singleton field recognition and codegen in the SystemGenerator.
-/// </summary>
+/// <summary>Tests for nested Singleton field recognition and codegen in the SystemGenerator.</summary>
 public sealed class SingletonSystemFieldTests
 {
     private const string SingletonPreamble = """
@@ -317,9 +313,7 @@ public sealed class SingletonSystemFieldTests
     }
 }
 
-/// <summary>
-/// Tests for [CurrentTick] field validation and fresh-read mask emission.
-/// </summary>
+/// <summary>Tests for [CurrentTick] field validation and fresh-read mask emission.</summary>
 public sealed class CurrentTickFieldTests
 {
     private const string Components = """

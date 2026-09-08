@@ -13,8 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
     <ProjectReference Include="../Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
-    <!-- The window is reached through IWindow, so the sample forwards the same WindowEvent
-         stream a real host does rather than hand-mapping SDL into the UI contract. -->
+    <!-- Forward the window backend's WindowEvent stream through IWindow. -->
     <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
   </ItemGroup>
 

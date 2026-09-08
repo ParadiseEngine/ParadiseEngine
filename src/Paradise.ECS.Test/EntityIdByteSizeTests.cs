@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Configuration with 1-byte entity IDs (max 255 entities).
-/// </summary>
+/// <summary>Configuration with 1-byte entity IDs (max 255 entities).</summary>
 public readonly struct ByteEntityIdConfig : IConfig
 {
     public ByteEntityIdConfig() { }
@@ -20,9 +18,7 @@ public readonly struct ByteEntityIdConfig : IConfig
     public IAllocator LayoutAllocator { get; init; } = NativeMemoryAllocator.Shared;
 }
 
-/// <summary>
-/// Configuration with 2-byte entity IDs (max 65535 entities).
-/// </summary>
+/// <summary>Configuration with 2-byte entity IDs (max 65535 entities).</summary>
 public readonly struct ShortEntityIdConfig : IConfig
 {
     public ShortEntityIdConfig() { }
@@ -40,9 +36,7 @@ public readonly struct ShortEntityIdConfig : IConfig
     public IAllocator LayoutAllocator { get; init; } = NativeMemoryAllocator.Shared;
 }
 
-/// <summary>
-/// Tests for different EntityIdByteSize configurations.
-/// </summary>
+/// <summary>Tests for different EntityIdByteSize configurations.</summary>
 public sealed class EntityIdByteSizeTests
 {
     #region MaxEntityId Computation Tests

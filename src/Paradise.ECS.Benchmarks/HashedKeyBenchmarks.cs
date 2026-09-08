@@ -111,9 +111,7 @@ public class HashedKeyBenchmarks
         _bitSetDictHashedFrozen = _bitSetDictHashed.ToFrozenDictionary();
     }
 
-    // ============================================================================
     // Single GetHashCode call comparison
-    // ============================================================================
 
     [Benchmark]
     public int SimpleKey_GetHashCode() => _simpleKeys[500].GetHashCode();
@@ -133,9 +131,7 @@ public class HashedKeyBenchmarks
     [Benchmark]
     public int BitSetKey_HashedKey_GetHashCode() => _hashedBitSetKeys[500].GetHashCode();
 
-    // ============================================================================
     // Dictionary lookup comparison (TryGetValue computes hash internally)
-    // ============================================================================
 
     [Benchmark]
     public int SimpleKey_DictLookup()
@@ -209,9 +205,7 @@ public class HashedKeyBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // FrozenDictionary lookup comparison (optimized for read-heavy scenarios)
-    // ============================================================================
 
     [Benchmark]
     public int SimpleKey_FrozenDictLookup()
@@ -249,9 +243,7 @@ public class HashedKeyBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // FrozenDictionary with HashedKey (combining both optimizations)
-    // ============================================================================
 
     [Benchmark]
     public int SimpleKey_HashedKey_FrozenDictLookup()

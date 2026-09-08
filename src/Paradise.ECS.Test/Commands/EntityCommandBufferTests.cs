@@ -2,9 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for EntityCommandBuffer deferred command recording and playback.
-/// </summary>
+/// <summary>Tests for EntityCommandBuffer deferred command recording and playback.</summary>
 public sealed class EntityCommandBufferTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

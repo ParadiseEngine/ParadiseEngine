@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Jobs.Test;
 
-/// <summary>
-/// Test system: adds velocity to position per entity.
-/// </summary>
+/// <summary>Test system: adds velocity to position per entity.</summary>
 public ref partial struct TestMovementSystem : IEntitySystem
 {
     public ref TestPosition Position;
@@ -14,9 +12,7 @@ public ref partial struct TestMovementSystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Test system: multiplies velocity Y by 2.
-/// </summary>
+/// <summary>Test system: multiplies velocity Y by 2.</summary>
 public ref partial struct TestGravitySystem : IEntitySystem
 {
     public ref TestVelocity Velocity;

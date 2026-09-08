@@ -9,14 +9,9 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Sample;
 
-/// <summary>The global-illumination test scene: a Cornell-style room — white floor, ceiling and
-/// back wall, a red wall on the left and a green one on the right, the classic two boxes — lit
-/// by an emissive ceiling panel (static), a sun that swings across the open front (dynamic) and a
-/// warm point light circling inside (dynamic), with a small dynamic prop orbiting the tall box.
-/// The red and green bleed onto the boxes and the white walls is what probe GI is for, and a
-/// light that moves is what a runtime solution is for. An optional GLB's geometry stands on the
-/// short box (factor materials only: the downloaded models carry PNG textures the KTX2 contract
-/// does not admit, so the demo reads geometry alone).</summary>
+/// <summary>Demonstrates probe GI in a Cornell room with emissive and moving lights.</summary>
+/// <remarks>Colored walls expose indirect light bleed. Optional GLB geometry uses material factors
+/// because its PNG textures do not satisfy the cooked KTX2 contract.</remarks>
 internal sealed class GiDemoScene : IDisposable
 {
     private readonly PbrRenderer _pbr;

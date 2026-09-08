@@ -1,13 +1,9 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// A self-contained unit of work that can be executed by a thread pool.
-/// </summary>
+/// <summary>A self-contained unit of work that can be executed by a thread pool.</summary>
 public interface IWorkItem
 {
-    /// <summary>
-    /// Executes this work item.
-    /// </summary>
+    /// <summary>Executes this work item.</summary>
     void Invoke();
 }
 
@@ -122,9 +118,7 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
 /// </remarks>
 public interface IWaveScheduler
 {
-    /// <summary>
-    /// Executes all work items for a single wave. Must complete before returning.
-    /// </summary>
+    /// <summary>Executes all work items for a single wave. Must complete before returning.</summary>
     /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <param name="items">The work items for a single wave to execute.</param>

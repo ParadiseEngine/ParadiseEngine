@@ -23,7 +23,7 @@ public class AuthoredDocumentTests
     private static AuthoredDocument Parse(string json) =>
         AuthoredDocument.Parse(json, new LedgeRegistry(), "config.json");
 
-    // ---- reading ------------------------------------------------------------------------
+    // reading
 
     [Test]
     public async Task a_document_reads_engine_and_game_components_alike()
@@ -115,7 +115,7 @@ public class AuthoredDocumentTests
         await Assert.That(document.Unresolved).IsEmpty();
     }
 
-    // ---- what it refuses, and what it merely reports -------------------------------------
+    // what it refuses, and what it merely reports
 
     /// <summary>Refused because the document cannot REPRESENT it: this is a map keyed by type, so
     /// a second payload has nowhere to go and quietly keeping the last is the edit that looks
@@ -204,7 +204,7 @@ public class AuthoredDocumentTests
         await Assert.That(thrown!.Message).Contains("must be an array");
     }
 
-    // ---- With ---------------------------------------------------------------------------
+    // With
 
     [Test]
     public async Task with_replaces_a_component_and_leaves_the_original_alone()
@@ -230,7 +230,7 @@ public class AuthoredDocumentTests
             .IsEqualTo("boxed");
     }
 
-    // ---- Load ---------------------------------------------------------------------------
+    // Load
 
     [Test]
     public async Task load_reads_from_the_mounted_filesystem_and_names_the_file_in_an_error()

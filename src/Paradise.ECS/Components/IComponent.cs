@@ -25,14 +25,10 @@ namespace Paradise.ECS;
 /// </example>
 public interface IComponent
 {
-    /// <summary>
-    /// The unique component type ID assigned at compile time.
-    /// </summary>
+    /// <summary>The unique component type ID assigned at compile time.</summary>
     static abstract ComponentId TypeId { get; }
 
-    /// <summary>
-    /// The stable GUID for this component type, or <see cref="System.Guid.Empty"/> if not specified.
-    /// </summary>
+    /// <summary>The stable GUID for this component type, or <see cref="System.Guid.Empty"/> if not specified.</summary>
     /// <remarks>
     /// Unlike <see cref="TypeId"/> which changes based on alphabetical ordering,
     /// this GUID provides stable identification across compilations when specified
@@ -40,13 +36,9 @@ public interface IComponent
     /// </remarks>
     static abstract Guid Guid { get; }
 
-    /// <summary>
-    /// The size of this component in bytes.
-    /// </summary>
+    /// <summary>The size of this component in bytes.</summary>
     static abstract int Size { get; }
 
-    /// <summary>
-    /// The alignment of this component in bytes.
-    /// </summary>
+    /// <summary>The alignment of this component in bytes.</summary>
     static abstract int Alignment { get; }
 }

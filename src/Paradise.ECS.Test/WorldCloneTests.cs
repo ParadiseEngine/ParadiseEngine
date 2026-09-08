@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for World.CopyFrom() functionality.
-/// </summary>
+/// <summary>Tests for World.CopyFrom() functionality.</summary>
 public sealed class WorldCloneTests : IDisposable
 {
     private readonly SharedWorld<SmallBitSet<ulong>, DefaultConfig> _sharedWorld;
@@ -26,27 +24,22 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_CopiesAllEntities()
     {
-        // Arrange
         _sourceWorld.Spawn();
         _sourceWorld.Spawn();
         _sourceWorld.Spawn();
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(3);
     }
 
     [Test]
     public async Task CopyFrom_CopiesComponentData()
     {
-        // Arrange
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 10.5f, Y = 20.5f, Z = 30.5f });
         _sourceWorld.AddComponent(entity, new TestVelocity { X = 1.0f, Y = 2.0f, Z = 3.0f });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Entity handles from source world are valid in target after clone
@@ -64,13 +57,11 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_EntityHandlesRemainValid()
     {
-        // Arrange
         var entity1 = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity1, new TestPosition { X = 100, Y = 200 });
         var entity2 = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity2, new TestHealth { Current = 50, Max = 100 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Original entity handles work in target world
@@ -96,7 +87,6 @@ public sealed class WorldCloneTests : IDisposable
 
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(3);
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Target should only have source entities
@@ -124,10 +114,8 @@ public sealed class WorldCloneTests : IDisposable
         _targetWorld.Spawn();
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(2);
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(0);
     }
 
@@ -150,10 +138,8 @@ public sealed class WorldCloneTests : IDisposable
 
         var entity5 = _sourceWorld.Spawn(); // Empty archetype
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(5);
 
         await Assert.That(_targetWorld.HasComponent<TestPosition>(entity1)).IsTrue();
@@ -198,10 +184,8 @@ public sealed class WorldCloneTests : IDisposable
 
         _sourceWorld.Despawn(e2); // Create a free slot in the middle
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(2);
         await Assert.That(_targetWorld.IsAlive(e1)).IsTrue();
         await Assert.That(_targetWorld.IsAlive(e2)).IsFalse(); // e2 was despawned
@@ -218,10 +202,8 @@ public sealed class WorldCloneTests : IDisposable
         var e2 = _sourceWorld.Spawn(); // Should reuse e1's slot with bumped version
         _sourceWorld.AddComponent(e2, new TestPosition { X = 42, Y = 42 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.IsAlive(e1)).IsFalse(); // Old version should be invalid
         await Assert.That(_targetWorld.IsAlive(e2)).IsTrue(); // New version should be valid
         var pos = _targetWorld.GetComponent<TestPosition>(e2);
@@ -279,10 +261,8 @@ public sealed class WorldCloneTests : IDisposable
             _sourceWorld.AddComponent(entities[i], new TestPosition { X = i, Y = i * 2, Z = i * 3 });
         }
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(entityCount);
 
         // Verify some entities across the range
@@ -303,7 +283,6 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_QueriesWorkOnClonedWorld()
     {
-        // Arrange
         for (int i = 0; i < 5; i++)
         {
             var entity = _sourceWorld.Spawn();
@@ -316,7 +295,6 @@ public sealed class WorldCloneTests : IDisposable
             _sourceWorld.AddComponent(entity, new TestVelocity { X = i, Y = i });
         }
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Query should work on cloned world
@@ -342,11 +320,9 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_SourceAndTargetAreIndependent()
     {
-        // Arrange
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 10, Y = 20 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Modify source after clone
@@ -365,11 +341,9 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_ModifyingTargetDoesNotAffectSource()
     {
-        // Arrange
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 10, Y = 20 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Modify target after clone
@@ -388,18 +362,15 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_NewEntitiesInTargetAreIndependent()
     {
-        // Arrange
         var sourceEntity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(sourceEntity, new TestPosition { X = 1, Y = 2 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Create new entity in target after clone
         var newEntity = _targetWorld.Spawn();
         _targetWorld.AddComponent(newEntity, new TestVelocity { X = 5, Y = 6 });
 
-        // Assert
         await Assert.That(_sourceWorld.EntityCount).IsEqualTo(1);
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(2);
         await Assert.That(_sourceWorld.IsAlive(newEntity)).IsFalse();
@@ -413,7 +384,6 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_CanCloneMultipleTimes()
     {
-        // Arrange
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 1, Y = 1 });
 
@@ -439,13 +409,11 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_CanCopyToMultipleTargets()
     {
-        // Arrange
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 10, Y = 20 });
 
         var target2 = _sharedWorld.CreateWorld();
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
         target2.CopyFrom(_sourceWorld);
 
@@ -483,10 +451,8 @@ public sealed class WorldCloneTests : IDisposable
         var sourceEntity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(sourceEntity, new TestPosition { X = 42, Y = 42 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(1);
         await Assert.That(_targetWorld.IsAlive(sourceEntity)).IsTrue();
         var pos = _targetWorld.GetComponent<TestPosition>(sourceEntity);
@@ -506,7 +472,6 @@ public sealed class WorldCloneTests : IDisposable
         var targetEntity = _targetWorld.Spawn();
         _targetWorld.AddComponent(targetEntity, new TestVelocity { X = 5, Y = 5 });
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Target should be cleared
@@ -527,10 +492,8 @@ public sealed class WorldCloneTests : IDisposable
             _sourceWorld.AddComponent(entities[i], new TestVelocity { X = i * 0.1f, Y = i * 0.2f, Z = i * 0.3f });
         }
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(entityCount);
 
         // Verify first, middle, and last entities
@@ -555,10 +518,8 @@ public sealed class WorldCloneTests : IDisposable
         _sourceWorld.AddComponent(entity, new TestPosition { X = 10, Y = 20 });
         _sourceWorld.AddComponent<TestTag>(entity);
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
-        // Assert
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(1);
         await Assert.That(_targetWorld.HasComponent<TestPosition>(entity)).IsTrue();
         await Assert.That(_targetWorld.HasComponent<TestTag>(entity)).IsTrue();
@@ -577,7 +538,6 @@ public sealed class WorldCloneTests : IDisposable
                 _sourceWorld.Despawn(temp);
         }
 
-        // Act
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - New entities in target should get correct IDs

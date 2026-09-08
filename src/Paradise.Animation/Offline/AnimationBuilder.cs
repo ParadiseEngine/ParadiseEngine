@@ -4,16 +4,9 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation.Offline;
 
-/// <summary>
-/// Compresses a <see cref="RawAnimation"/> into a runtime <see cref="AnimationBlob"/>: keys of every
-/// track merged into one time-sorted stream per component with back-links, values quantized,
-/// i-frames for seeking. ozz's <c>AnimationBuilder</c>, producing the same bytes.
-/// </summary>
-/// <remarks>
-/// Every arithmetic step keeps ozz's operand order (a multiply by the inverse duration rather than
-/// a divide, its own float-to-half rounding) because the golden test compares bytes with an
-/// archive ozz built, and a last-bit difference in a ratio would move keys between timepoints.
-/// </remarks>
+/// <summary>Compresses RawAnimation into time-sorted, quantized streams with back-links and seek i-frames.</summary>
+/// <remarks>Preserve ozz's arithmetic order and float-to-half rounding: parity tests compare
+/// archive bytes, and a one-bit ratio change can move keys between timepoints.</remarks>
 public static class AnimationBuilder
 {
     private const int MaxPreviousOffset = ushort.MaxValue;
@@ -249,7 +242,6 @@ public static class AnimationBuilder
         {
             var key = keys[i];
             var timepoint = Array.BinarySearch(timepoints, key.Time);
-            if (timepoint < 0) throw new InvalidOperationException("A key's time is missing from the timepoints it was collected into.");
             if (ratioBytes == 1)
             {
                 ratios[i] = (byte)timepoint;

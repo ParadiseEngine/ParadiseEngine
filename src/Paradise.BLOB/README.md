@@ -1,8 +1,8 @@
 # Paradise.BLOB
 
-`Paradise.BLOB` is a .NET blob builder for immutable unmanaged data layouts. It provides Unity-style blob primitives and builders that work in plain .NET code: you declare the layout as an unmanaged `struct`, a builder writes it as one contiguous byte array with relative offsets, and a reader hands the same struct back over those bytes with no parse and no copy.
+`Paradise.BLOB` builds immutable unmanaged data with Unity-style blob primitives in plain .NET. Declare an unmanaged `struct`; a builder writes contiguous bytes with relative offsets, and a reader exposes the struct over those bytes without parsing or copying.
 
-The engine ships several asset formats on it — the collision world (`Paradise.Physics`), behaviour trees (`Paradise.BT`), mesh blobs (`Paradise.Assets.Mesh`) and skeletons and animation clips (`Paradise.Animation`) — so the conventions below are the ones those follow.
+Used by collision worlds, behavior trees, mesh blobs, skeletons and animation clips.
 
 ## Install
 
@@ -16,7 +16,7 @@ dotnet add package Paradise.BLOB
 - Store arrays, strings, pointers, trees, sorted arrays, and dynamically typed payloads — including arrays whose elements themselves hold arrays and strings.
 - Read blobs from one aligned native copy (`NativeBlobAssetReference<T>`) or over a pinned managed array (`ManagedBlobAssetReference<T>`).
 - Keep offsets and alignment correct without hand-rolling binary layouts.
-- Friendly to regular .NET apps and NativeAOT-oriented workflows: no reflection, no serializer.
+- Supports .NET and NativeAOT without reflection.
 
 ## Quick start
 
@@ -48,7 +48,7 @@ Console.WriteLine(root.MaxValue.Value);
 
 ## Reading: native or managed
 
-- `NativeBlobAssetReference<T>(ReadOnlySpan<byte>, int alignment = 16)` copies the bytes once into aligned native memory. Prefer it at runtime: the root and every array in it are aligned however you asked, nothing is pinned in the GC heap, and the source span can be a file read or a slice of something larger. Dispose it when the data has been uploaded or is no longer needed; a finalizer frees it otherwise.
+- `NativeBlobAssetReference<T>(ReadOnlySpan<byte>, int alignment = 16)` makes one aligned native copy, with no GC pinning. Prefer it at runtime; the input can be a file read or a larger span's slice. Dispose it after upload or use; a finalizer frees undisposed memory.
 - `ManagedBlobAssetReference<T>(byte[])` pins a managed array in place and reads through the pin. Use it when the bytes must stay a `byte[]` you also hand elsewhere. Dispose it, or the array stays pinned.
 
 Both hand back `ref T Value` — a reference into the blob, not a copy.
@@ -90,12 +90,12 @@ mesh.SetArray(ref mesh.Value.Draws, draws.Select(d =>
 ## Conventions the engine's formats follow
 
 - **Magic and version first.** The first two fields of a root are a `uint` magic and a `uint` version, so a reader can refuse a foreign or newer blob by name before touching an offset. Check them on the bytes (`BitConverter.ToUInt32(bytes)`) before constructing a reference.
-- **Validate after opening.** A blob is trusted memory once opened; a reader that will index into arrays checks the counts and indices it depends on (a draw that runs past the index buffer, a joint that names a node outside the tree) right after opening, and disposes the reference before throwing.
+- **Validate after opening.** Before indexing trusted blob memory, check required counts and indices, such as draw ranges and joint indices. Dispose the reference before throwing on invalid data.
 - **Deterministic bytes.** The same input builds the same bytes, so a blob can live in a source tree beside what it was made from and be fingerprinted by hash.
 
-## The one rule when reading: never through a copy
+## Read blob headers by reference
 
-`BlobArray<T>`, `BlobString<TEncoding>` and `BlobPtr<T>` are small headers holding an offset **relative to their own address**. Anything that copies the header moves that address and the offset then points at the stack, not the blob — with no error, just wrong data. Three ways to copy one by accident:
+`BlobArray<T>`, `BlobString<TEncoding>` and `BlobPtr<T>` hold offsets **relative to their own address**. Copying a header makes its offset point outside the blob, silently returning wrong data. Avoid these accidental copies:
 
 ```csharp
 // WRONG: `in` makes `blob` a readonly reference; calling a non-readonly member on
@@ -103,7 +103,7 @@ mesh.SetArray(ref mesh.Value.Draws, draws.Select(d =>
 static void Check(in MeshBlob blob) { var n = blob.Draws[0].IndexCount; }
 
 // WRONG: a `readonly` member on the struct does the same to every array it touches.
-public readonly int VertexCount => Vertices.Length / 12;
+public readonly float FirstVertex => Vertices[0];
 
 // WRONG: passing a BlobString (or BlobArray) by value to a helper.
 static string? NameOf(BlobString<UTF8Encoding> name) => name.ToString();
@@ -113,11 +113,11 @@ Do this instead:
 
 ```csharp
 static void Check(ref MeshBlob blob) { ref var draw = ref blob.Draws[0]; var n = draw.IndexCount; }
-public int VertexCount => Vertices.Length / 12;                 // not readonly
+public float FirstVertex => Vertices[0];                      // mutable receiver
 var name = node.Name.ToString();                               // read in place
 ```
 
-Reach every blob member through a mutable `ref`, do not mark members that touch one `readonly`, and do not hand one to a method by value. A by-value read can pass a test by luck and fail elsewhere.
+Access relative-offset data through a mutable `ref`; avoid readonly receivers and by-value helpers.
 
 ## Common builders
 

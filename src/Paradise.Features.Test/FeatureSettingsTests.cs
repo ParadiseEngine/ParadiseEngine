@@ -4,16 +4,8 @@ using Tomlyn.Serialization;
 
 namespace Paradise.Features.Test;
 
-/// <summary>A game's own settings record, and the source-generated metadata that binds it. Four
-/// lines in a game, and the reason nothing here ever reflects over a type it was not handed: this
-/// stays AOT- and trim-clean.
-///
-/// <para>Both attributes earn their place, and both are silent when missing: without the naming
-/// policy the generator matches the C# property name exactly, so a camelCase file binds NOTHING;
-/// and with <c>init</c> instead of <c>set</c> a property the file leaves out loses its
-/// initializer. <see cref="FeatureSettingsTests.an_unwritten_property_keeps_its_initializer"/> and
-/// <see cref="FeatureSettingsTests.a_game_feature_reads_what_the_file_configured_it_with"/> are
-/// the guards.</para></summary>
+/// <summary>Models game settings with source-generated, camelCase TOML binding.</summary>
+/// <remarks>Use get/set properties to preserve defaults for omitted keys; tests cover both requirements.</remarks>
 public sealed record WeatherSettings
 {
     public float Intensity { get; set; } = 1f;
@@ -55,11 +47,7 @@ public class FeatureSettingsTests
         await Assert.That(switches.Unknown).IsEmpty();
     }
 
-    /// <summary>A settings object that writes some of the properties leaves the rest at the
-    /// type's own defaults — which holds ONLY while those properties are <c>get; set;</c>. An
-    /// <c>init</c> accessor makes System.Text.Json build the object without running the
-    /// initializers, and an unwritten <c>float</c> then reads 0 rather than the default, silently.
-    /// Both halves are pinned here because the second is invisible until a scene looks wrong.</summary>
+    /// <summary>Verifies get/set settings retain initializers for omitted keys.</summary>
     [Test]
     public async Task an_unwritten_property_keeps_its_initializer()
     {
@@ -202,10 +190,7 @@ public class FeatureSettingsTests
             .IsEqualTo(0.6f);
     }
 
-    /// <summary>The cost of one entry per feature: the reader's own keys cannot also be
-    /// settings. A prefab component pays the same price for the same shape
-    /// (<c>PrefabComponent.ReservedKeys</c>), and a game that wants a setting called
-    /// <c>name</c> has to call it something else.</summary>
+    /// <summary>Verifies reader-reserved keys cannot also become feature settings.</summary>
     [Test]
     public async Task the_reserved_keys_are_not_settings()
     {

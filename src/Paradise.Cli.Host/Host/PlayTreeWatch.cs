@@ -1,17 +1,10 @@
 namespace Paradise.Cli;
 
-/// <summary>
-/// Restarts the game under <c>dotnet watch</c> when the play tree changes: an asset build rewrites
-/// a couple of hundred files in half a second, so the watch waits for <see cref="Quiet"/> after the
-/// last one, kills the game (only the game: <c>dotnet watch</c> stays, parked on "waiting for a
-/// file to change"), then touches one file it is known to watch, which is what makes it start the
-/// game again — no rebuild, no workspace reload.
-/// </summary>
+/// <summary>Restarts the watched game after a quiet interval following play-tree changes.</summary>
 /// <remarks>
-/// <c>dotnet watch</c> itself reports a content-only change as "no managed code changes to apply"
-/// and keeps the old process running; a scene save would otherwise reach a game that never reads
-/// its scene again. The launcher must list the play tree as a <c>Watch</c> item for the touch to
-/// be seen.
+/// Kill only the game, then touch a watched file to restart it without rebuilding.
+/// Dotnet watch otherwise ignores content-only changes; the launcher must include the play tree
+/// as a <c>Watch</c> item.
 /// </remarks>
 internal sealed class PlayTreeWatch : IDisposable
 {

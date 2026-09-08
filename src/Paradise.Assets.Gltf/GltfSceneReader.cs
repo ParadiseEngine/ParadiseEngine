@@ -49,7 +49,7 @@ public static class GltfSceneReader
         return new GltfAsset(instances, meshes, materials, images, nodes, skins, animations);
     }
 
-    // -------- images --------
+    // images
 
     private static GltfImageData[] ReadImages(GltfRoot root, ReadOnlyMemory<byte> bin, Func<string, byte[]>? externalImageResolver)
     {
@@ -141,7 +141,7 @@ public static class GltfSceneReader
         return "an unrecognized format";
     }
 
-    // -------- materials --------
+    // materials
 
     private static GltfMaterialData[] ReadMaterials(GltfRoot root)
     {
@@ -215,7 +215,7 @@ public static class GltfSceneReader
         return image;
     }
 
-    // -------- meshes --------
+    // meshes
 
     private static GltfMeshData[] ReadMeshes(GltfRoot root, ReadOnlyMemory<byte> bin)
     {
@@ -386,7 +386,7 @@ public static class GltfSceneReader
         return indices;
     }
 
-    // -------- scene graph --------
+    // scene graph
 
     private static GltfMeshInstance[] BakeInstances(GltfRoot root)
     {
@@ -447,7 +447,7 @@ public static class GltfSceneReader
         return instances.ToArray();
     }
 
-    // -------- animation data --------
+    // animation data
 
     /// <summary>The full node hierarchy with rest-pose TRS. Matrix-form nodes are decomposed;
     /// a non-decomposable (skewed) matrix keeps identity TRS — animation would misbehave on

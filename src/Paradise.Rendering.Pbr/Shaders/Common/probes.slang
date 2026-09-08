@@ -1,11 +1,5 @@
-// probes.slang — the probe volume as every shader sees it: its uniforms, the two octahedral
-// atlases (irradiance and visibility), the per-probe offsets and states, and the trilinear,
-// visibility-weighted irradiance lookup the scene shades its ambient with. Included by
-// pbrCore.slang (the raster side) and by the probe compute passes, all through group 3.
-//
-// The volume is an ARRAY in spirit even though one entry is uploaded today: every lookup goes
-// through probeVolume's fields rather than constants, so cascades later are more entries and a
-// selection function, not a rewrite of the lookup.
+// Shared group-3 probe uniforms, octahedral atlases, offsets and visibility-weighted irradiance
+// lookup. Lookups use volume fields so future cascades can select another volume.
 #ifndef PARADISE_PROBES_SLANG
 #define PARADISE_PROBES_SLANG
 

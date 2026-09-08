@@ -9,13 +9,9 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>Window layout persisted through a MOUNT instead of ImGui's own file IO.
-///
-/// ImGui cannot be pointed at an <c>IFileSystem</c> — replacing <c>ImFileOpen</c> is a
-/// compile-time option in <c>imconfig.h</c> and this binding ships prebuilt natives — so layout
-/// crosses as a string and the host decides where it lands. These tests mount memory, which means
-/// the whole round trip happens with nothing on disk: no fixture, no temp directory, no file left
-/// behind by a test that throws.</summary>
+/// <summary>Checks window layout round trips through a memory filesystem.</summary>
+/// <remarks>The prebuilt ImGui binding cannot redirect native file IO, so layout crosses the
+/// boundary as text.</remarks>
 [NotInParallel]
 public class ImGuiLayoutTests
 {

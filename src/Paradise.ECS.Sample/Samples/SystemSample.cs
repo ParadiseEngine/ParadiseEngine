@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates system scheduling with inline, queryable entity, and queryable chunk systems.
-/// </summary>
+/// <summary>Demonstrates system scheduling with inline, queryable entity, and queryable chunk systems.</summary>
 public static class SystemSample
 {
     public static void Run(World world)

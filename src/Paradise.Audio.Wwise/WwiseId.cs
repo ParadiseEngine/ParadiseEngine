@@ -3,21 +3,11 @@ using Paradise.Audio.Wwise.Interop;
 
 namespace Paradise.Audio.Wwise;
 
-/// <summary>
-/// A Wwise object identifier — an event, RTPC, switch group, switch, state group, or state.
-///
-/// Wwise names everything by a 32-bit FNV hash of its lowercased name, and the authoring tool
-/// writes those numbers into <c>Wwise_IDs.h</c> at bank-generation time. There are therefore two
-/// honest ways to name a sound from game code, and this type supports both:
-///
-///   - <see cref="FromName"/>, which hashes at runtime. Convenient, and correct by construction
-///     because it calls the sound engine's own hash rather than reimplementing it.
-///   - the generated numeric constants, passed to the constructor. No string work per call, and a
-///     renamed event becomes a compile error instead of a sound that silently stops playing.
-///
-/// Prefer the generated constants in shipping paths. <see cref="FromName"/> earns its place while
-/// bringing a feature up, before the generated header is wired in.
-/// </summary>
+/// <summary>A Wwise event, RTPC, switch or state identifier.</summary>
+/// <remarks>
+/// Prefer generated <c>Wwise_IDs.h</c> constants in shipping code.
+/// <see cref="FromName"/> calls Wwise's lowercase-name hash for runtime lookup.
+/// </remarks>
 public readonly record struct WwiseId(uint Value)
 {
     /// <summary>The id Wwise assigns to nothing — what a failed lookup returns.</summary>

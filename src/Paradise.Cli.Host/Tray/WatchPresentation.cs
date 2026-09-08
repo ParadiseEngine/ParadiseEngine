@@ -1,10 +1,6 @@
 namespace Paradise.Cli;
 
-/// <summary>
-/// Tooltip, menu copy, and the macOS menu-bar title for the watch tray. Kept as pure functions
-/// so the words can be pinned without standing up a notify icon — each OS rendering (Win32
-/// dots, AppKit emoji) is a view of this, not the source of it.
-/// </summary>
+/// <summary>Shared watch-tray labels and status text, independent of native UI.</summary>
 internal static class WatchPresentation
 {
     public static string Tooltip(WatchStatus status, int errorCount) => status switch
@@ -16,9 +12,7 @@ internal static class WatchPresentation
         _ => "paradise watch",
     };
 
-    /// <summary>
-    /// Menu-bar title on macOS. An emoji is enough to glance at; the tooltip carries the words.
-    /// </summary>
+    /// <summary>Menu-bar title on macOS. An emoji is enough to glance at; the tooltip carries the words.</summary>
     public static string MenuBarTitle(WatchStatus status) => status switch
     {
         WatchStatus.Idle => "🟢",

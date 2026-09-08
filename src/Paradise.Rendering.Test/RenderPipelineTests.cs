@@ -149,14 +149,9 @@ public class RenderPipelineTests
             .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"], CollectionOrdering.Matching);
     }
 
-    /// <summary>A switch flipped WHILE the frame is being built does not take effect until the
-    /// next one. Every phase — requirements, setup, BeforeSubmit — reads the answer the frame
-    /// began with.
-    ///
-    /// <para>Read live at each phase instead, this is a half-configured frame: the shadow pass
-    /// sets up, stages its caster ring while the graph records, and then never gets the
-    /// BeforeSubmit that uploads it, so the submitted stream draws from a buffer nobody
-    /// filled.</para></summary>
+    /// <summary>A switch changed during a frame applies to the next frame.</summary>
+    /// <remarks>Requirements, setup and BeforeSubmit must share one snapshot, or recorded data may
+    /// never be uploaded.</remarks>
     [Test]
     public async Task a_switch_flipped_during_a_frame_lands_on_the_next_one()
     {

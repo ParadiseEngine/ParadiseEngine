@@ -5,12 +5,7 @@ using Zio;
 namespace Paradise.Assets.Project;
 
 /// <summary>A validated <c>assets/project.toml</c>.</summary>
-/// <remarks>
-/// Unknown keys and values are refused rather than defaulted, because a <c>document_format</c>
-/// typo that quietly built TOML into a release tree is found on ship day. Unknown profile names
-/// are the game's to invent. <c>blob</c> and <c>pack</c> are refused until a writer exists: a
-/// strict loader that accepts a value nothing implements only moves the failure to the build.
-/// </remarks>
+/// <remarks>Rejects unknown settings and unsupported <c>blob</c>/<c>pack</c> modes; projects may choose their own profile names.</remarks>
 public sealed class ProjectManifest
 {
     public const int SupportedSchemaVersion = 1;

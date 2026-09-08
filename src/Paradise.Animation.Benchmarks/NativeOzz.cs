@@ -3,13 +3,9 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Animation.Benchmarks;
 
-/// <summary>
-/// ozz-animation's own C++ sampler behind the twelve-function shim the spike built
-/// (<c>.spike/shim/ParadiseOzz.cpp</c>: SamplingJob + LocalToModelJob, 16 floats per joint).
-/// The engine ships no native ozz, so the library is found only through
-/// <c>PARADISE_OZZ_NATIVE</c> — the path to <c>libParadiseOzz.dylib</c>/<c>.so</c>/<c>.dll</c> — and
-/// the native rows are absent from a run without it.
-/// </summary>
+/// <summary>Calls native ozz SamplingJob and LocalToModelJob through the benchmark shim.</summary>
+/// <remarks>PARADISE_OZZ_NATIVE must name libParadiseOzz.dylib, .so or .dll.
+/// The shim in .spike/shim/ParadiseOzz.cpp returns 16 floats per joint; native rows are omitted without it.</remarks>
 internal static unsafe partial class NativeOzz
 {
     public const string EnvironmentVariable = "PARADISE_OZZ_NATIVE";

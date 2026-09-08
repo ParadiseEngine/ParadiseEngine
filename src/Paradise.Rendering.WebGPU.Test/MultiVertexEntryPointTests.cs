@@ -2,14 +2,9 @@ using System.Buffers;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>
-/// A single WGSL module authoring TWO vertex entry points, drawing through each. Written while
-/// bisecting the GPU-skinning black-frame: the PBR shader's rigid path renders and its skinned
-/// twin silently draws nothing, with every layer above this one (reflection, layouts, pipeline
-/// creation, command replay) verified correct. This strips the question to its minimum — if the
-/// second-entry-point draw is black HERE, the fault lives in the WebGPU layer (or Dawn) and has
-/// nothing to do with skinning.
-/// </summary>
+/// <summary>Checks both vertex entry points of a minimal WGSL module.</summary>
+/// <remarks>The fixture isolates backend entry-point selection from skinning, reflection and mesh
+/// data.</remarks>
 public class MultiVertexEntryPointTests
 {
     // vsWide reads a second attribute the narrow entry point does not, mirroring the rigid/skinned

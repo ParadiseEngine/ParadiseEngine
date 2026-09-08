@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates overwriting entity components using EntityBuilder.Overwrite().
-/// </summary>
+/// <summary>Demonstrates overwriting entity components using EntityBuilder.Overwrite().</summary>
 public static class EntityOverwriteSample
 {
     public static void Run(World world, Entity playerEntity)

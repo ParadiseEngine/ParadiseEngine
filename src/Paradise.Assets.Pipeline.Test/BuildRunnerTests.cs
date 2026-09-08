@@ -306,9 +306,7 @@ public class BuildRunnerTests
         await Assert.That(result.Errors[0]).Contains("no build profile 'release'");
     }
 
-    /// <summary>
-    /// No name is privileged, <c>dev</c> included.
-    /// </summary>
+    /// <summary>No name is privileged, <c>dev</c> included.</summary>
     /// <remarks>
     /// The runner used to fall back to the defaults for an undeclared profile CALLED "dev",
     /// which made one English word mean something to a library that has no business having an
@@ -404,7 +402,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/manifest.json")).IsFalse();
     }
 
-    // ---- the import chain ---------------------------------------------------------------
+    // the import chain
 
     /// <summary>An importer that answers whatever it is told, so a chain can be arranged.</summary>
     private sealed class StubImporter(string name, string extension, bool handles) : IAssetImporter
@@ -557,7 +555,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/project.toml")).IsFalse();
     }
 
-    // ---- identity in the built tree -----------------------------------------------------
+    // identity in the built tree
 
     [Test]
     public async Task neither_tree_copies_source_sidecars_the_manifest_is_the_database()
@@ -588,7 +586,7 @@ public class BuildRunnerTests
             .Contains($"\"{guid}\":");
     }
 
-    // ---- the build index ----------------------------------------------------------------
+    // the build index
 
     [Test]
     public async Task an_unchanged_source_is_not_rebuilt()
@@ -669,7 +667,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/audio/crate.bnk")).IsTrue();
     }
 
-    // ---- the index tracks every input, not a flag (#201) ---------------------------------
+    // the index tracks every input, not a flag (#201)
 
     /// <summary>Incremental and clean builds must agree: a mesh whose texture vanished is an error either way, not a reused stale copy.</summary>
     [Test]
@@ -844,7 +842,7 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).Contains("\"path\": \"textures/fire.ktx2\"");
     }
 
-    // ---- the tree holds exactly what the build produced (#201, #202) ---------------------
+    // the tree holds exactly what the build produced (#201, #202)
 
     [Test]
     public async Task the_output_of_a_deleted_source_is_swept()
@@ -1056,7 +1054,7 @@ public class BuildRunnerTests
         await Assert.That(result.Errors[0]).Contains("textures/fire.ktx2");
     }
 
-    // ---- references are case-exact and stay inside assets/ (#202) ----------------------
+    // references are case-exact and stay inside assets/ (#202)
 
     [Test]
     public async Task a_reference_with_the_wrong_case_is_refused_naming_the_real_file()
@@ -1120,7 +1118,7 @@ public class BuildRunnerTests
         await Assert.That(result.Errors[0]).Contains("outside assets/");
     }
 
-    // ---- the build survives its importers (#203) -----------------------------------------
+    // the build survives its importers (#203)
 
     private sealed class ThrowingImporter : IAssetImporter
     {

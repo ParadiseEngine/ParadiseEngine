@@ -4,17 +4,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering.Pbr;
 
-// CPU mirrors of pbr.slang's uniform blocks. Layout rules:
-//
-// - Every [FieldOffset] is cross-checked against the slangc reflection at PbrRenderer init AND
-//   in tests (UniformLayoutValidator) — the offsets below are never hand-trusted.
-// - Matrix4x4 fields upload RAW BYTES: System.Numerics' row-major storage of its row-vector
-//   convention read column-major by WGSL IS the transpose, which is exactly what mul(M, v)
-//   needs for numerics-convention (v·M) math. No element shuffling anywhere.
-// - Consequence for the normal matrix: WGSL wants inverse-transpose of the column-major model
-//   matrix. The raw-byte duality already supplies one transpose, so the numerics-side value to
-//   upload needs an explicit second transpose to cancel it: transpose(inverse(model)) — see
-//   PbrMath.NormalMatrix.
+// CPU uniform layouts match Slang reflection, checked at renderer initialization and in tests.
+// Upload Matrix4x4 bytes unchanged: row-major numerics data read column-major supplies the
+// transpose needed by shader mul(M,v). Normal matrices still require transpose(inverse(model)); see
+// PbrMath.NormalMatrix.
 
 /// <summary>Mirror of pbr.slang <c>SceneLight</c> (64 B, array stride 64).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 96)]

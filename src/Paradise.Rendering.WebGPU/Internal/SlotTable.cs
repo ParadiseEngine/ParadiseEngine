@@ -53,22 +53,7 @@ internal sealed class SlotTable<T> where T : class
         return true;
     }
 
-    public bool Remove(uint index, uint generation)
-    {
-        if (index >= (uint)_slots.Count) return false;
-        ref var slot = ref System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_slots)[(int)index];
-        if (slot.Generation != generation || slot.Value is null) return false;
-
-        slot.Value = null;
-        // Bump generation so a future allocation in this slot produces a distinct handle and stale
-        // handles to the removed entry stop resolving. Skip generation 0 on wraparound — that
-        // value is the invalid sentinel for handle structs.
-        unchecked { slot.Generation++; }
-        if (slot.Generation == 0) slot.Generation = 1;
-
-        _free.Push(index);
-        return true;
-    }
+    public bool Remove(uint index, uint generation) => Detach(index, generation, out _);
 
     /// <summary>Atomically extract the slot's current value and invalidate the slot. Returns
     /// <c>false</c> if the handle is already stale. The caller takes ownership of <paramref name="value"/>

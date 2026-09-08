@@ -7,12 +7,8 @@ using Microsoft.CodeAnalysis.Operations;
 
 namespace Paradise.BT.Generators;
 
-/// <summary>
-/// Enforces <c>[RequireNamedArguments]</c>: a call passing two or more VALUE arguments must name
-/// them all. Generated builder parameters mirror a node's surface, so two positional floats
-/// transpose silently when that surface changes; one value argument cannot, and child arguments
-/// are type-distinct, so both stay positional.
-/// </summary>
+/// <summary>Requires names when a builder call supplies two or more value arguments.</summary>
+/// <remarks>One value and type-distinct child arguments may remain positional.</remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class RequireNamedArgumentsAnalyzer : DiagnosticAnalyzer
 {

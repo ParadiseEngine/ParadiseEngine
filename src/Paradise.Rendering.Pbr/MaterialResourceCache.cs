@@ -82,14 +82,11 @@ public sealed class MaterialResourceCache : IDisposable
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images)
         => AddMaterial(in material, images, programId: 0);
 
-    /// <summary>Create a material bound to a shader program registered via
-    /// <c>PbrRenderer.RegisterMaterialProgram</c> (programId 0 = the built-in PBR program). The
-    /// group-2 bind group is built from THAT program's layout: the standard seven entries first,
-    /// then <paramref name="extraEntries"/> in binding order (e.g.
-    /// <c>BindGroupEntryDesc.ForTextureView(7, heightfieldView)</c>). Extra-bound resources are
-    /// OWNED BY THE CALLER (never disposed here), and per-frame <c>IRenderer.WriteTexture</c> into
-    /// them is the caller's channel for dynamic shader data — the material UBO itself stays
-    /// immutable after creation.</summary>
+    /// <summary>Creates a material using a registered shader program and optional extra group-2
+    /// bindings.</summary>
+    /// <remarks>Program zero is built-in PBR. Extra entries follow the seven standard bindings and
+    /// remain caller-owned; update their resources for dynamic data while the material uniform
+    /// stays immutable.</remarks>
     public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
         int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
         => AddMaterial(in material, images, programId, extraEntries, targets: default);
@@ -253,13 +250,10 @@ public sealed class MaterialResourceCache : IDisposable
     private TextureViewHandle ResolveTarget(string name) =>
         _registry!.Contains(name) ? _registry.View(name) : _registry.View(_registry.Black);
 
-    /// <summary>Replace one EXTRA entry (binding >= <see cref="StandardMaterialEntryCount"/>) of a
-    /// material and rebuild its bind group. For a caller-owned resource that changed. An
-    /// engine-owned target is better bound as a <see cref="MaterialTarget"/>, which the cache
-    /// keeps current itself; this remains the path for a view handle bound by hand, rebound from
-    /// <c>PbrRenderer.SceneColorViewChanged</c>. The old group is destroyed synchronously (in-flight
-    /// GPU work stays valid, the same contract every engine-side rebuild relies on);
-    /// <see cref="GetBindGroup"/> returns the new group from the next frame.</summary>
+    /// <summary>Replaces an extra material binding and rebuilds its bind group.</summary>
+    /// <remarks>Use MaterialTarget for engine targets that should track resize automatically. For
+    /// manually bound views, rebind from SceneColorCaptureFeature.ViewChanged; in-flight work
+    /// retains the previous native group.</remarks>
     public void UpdateExtraEntry(int materialId, in BindGroupEntryDesc entry)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

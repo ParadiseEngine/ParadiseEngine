@@ -4,21 +4,13 @@ using WgRenderPipeline = WebGpuSharp.RenderPipeline;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>Internal cache of native WebGPUSharp <see cref="WgRenderPipeline"/> instances keyed
-/// by <see cref="PipelineDesc.ContentHash"/>. Lives below the public <see cref="PipelineHandle"/>
-/// layer: each call to <see cref="GetOrCreateNative"/> returns a shared native pipeline reference,
-/// but the handle minting + slot-table allocation happens above this cache so that two
-/// <c>CreatePipeline</c> calls with structurally-equal descriptors get distinct
-/// <see cref="PipelineHandle"/> values. Destroying one of those handles never invalidates the
-/// other — the underlying native pipeline stays live until the renderer disposes.</summary>
-/// <remarks>M1 keeps cache entries for the renderer's lifetime (no refcount, no eviction). M2/M3
-/// will revisit when dynamic pipeline rebuilds become common; the cache will need a refcount or
-/// LRU eviction at that point. The current design intentionally trades a small amount of native
-/// memory for a clean public-handle contract that matches every other resource type.</remarks>
+/// <summary>Caches native pipelines by descriptor content hash.</summary>
+/// <remarks>Public handles are allocated separately so destroying one does not invalidate another.
+/// Native entries remain cached for the renderer lifetime, without eviction or reference
+/// counting.</remarks>
 internal sealed class PipelineCache
 {
     private readonly Dictionary<int, Entry> _byHash = new();
-    private readonly List<WgRenderPipeline> _all = new();
 
     private readonly struct Entry
     {
@@ -37,11 +29,8 @@ internal sealed class PipelineCache
         if (_byHash.TryGetValue(hash, out var entry))
         {
             if (entry.Desc.Equals(desc)) return entry.Native;
-            // Hash collision with a different desc — treated as programmer error. Cache cannot
-            // silently overwrite (orphans the displaced native pipeline) or evict via callback
-            // (leaks a "caller must release" contract into the public surface). M1's PipelineDesc
-            // surface is small enough that real collisions are vanishingly unlikely; if one occurs
-            // it warrants investigation, not silent fall-through.
+            // Do not overwrite a colliding descriptor: the cache owns the displaced native pipeline
+            // for the renderer lifetime.
             throw new InvalidOperationException(
                 $"PipelineCache: hash collision (0x{hash:X8}) between two structurally-different " +
                 $"PipelineDesc instances. Investigate the descriptor difference rather than " +
@@ -49,7 +38,6 @@ internal sealed class PipelineCache
         }
         var created = factory(desc);
         _byHash[hash] = new Entry(in desc, created);
-        _all.Add(created);
         return created;
     }
 
@@ -72,6 +60,5 @@ internal sealed class PipelineCache
     public void Clear()
     {
         _byHash.Clear();
-        _all.Clear();
     }
 }

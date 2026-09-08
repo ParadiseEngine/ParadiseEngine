@@ -3,11 +3,7 @@ namespace Paradise.BLOB;
 
 public interface IBuilder
 {
-    /// <summary>
-    /// serialize builder value into BLOB stream
-    /// </summary>
-    /// <param name="stream">BLOB stream</param>
-    /// <returns>patch position after building</returns>
+    /// <summary>Writes the builder value to the blob stream.</summary>
     void Build(IBlobStream stream);
 
     public int DataPosition { get; }

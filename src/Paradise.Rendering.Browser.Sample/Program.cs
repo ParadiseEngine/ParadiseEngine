@@ -10,17 +10,11 @@ using Paradise.Diagnostics;
 
 namespace Paradise.Rendering.Browser.Sample;
 
-/// <summary>Acceptance harness for <see cref="BrowserRenderer"/>: renders one of two scenes into a
-/// canvas, driven by the page's <c>requestAnimationFrame</c> (never a timer — a timer would hide
-/// exactly the stalls a browser backend is judged on), and writes a machine-readable marker into
-/// the DOM so a headless driver can wait on a real outcome rather than a fixed sleep.</summary>
-/// <remarks>
-/// <para><c>?scene=cube</c> (default) runs the engine sample's lit cube; <c>?scene=pbr</c> runs the
-/// PBR procedural scene with a shadow-casting directional light.</para>
-/// <para>There is no <c>Main</c> body: the page calls <see cref="InitAsync"/> and then pumps
-/// <see cref="OnAnimationFrame"/>, so the runtime is driven entirely through exports and never has
-/// to keep a managed loop alive.</para>
-/// </remarks>
+/// <summary>Renders browser sample scenes through requestAnimationFrame and publishes DOM status
+/// markers.</summary>
+/// <remarks>The page calls InitAsync and OnAnimationFrame directly. ?scene=cube selects the lit
+/// cube; ?scene=pbr selects the PBR shadow scene. DOM markers let automated drivers wait for
+/// completed frames.</remarks>
 [SupportedOSPlatform("browser")]
 public static partial class Program
 {

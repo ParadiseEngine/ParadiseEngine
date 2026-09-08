@@ -4,16 +4,11 @@ using Paradise.Export.Data;
 
 namespace Paradise.Export.Serialization
 {
-    /// <summary>
-    /// System.Text.Json source-generated metadata for the exported document roots. Source generation
-    /// keeps serialization reflection-free (AOT-compatible) and, importantly, free of the static
-    /// reflection caches that made Newtonsoft.Json pin Godot's collectible AssemblyLoadContext and
-    /// break C# hot-reload (godotengine/godot#78513).
-    ///
-    /// The System.Numerics / Color32 shapes and enum-by-name are supplied by the converters added in
-    /// <see cref="ExportJsonWriter"/>'s options (the net8 source-gen attribute can't register
-    /// converter instances directly).
-    /// </summary>
+    /// <summary>Source-generated JSON metadata for exported document roots.</summary>
+    /// <remarks>
+    /// Avoids reflection caches that pin collectible editor assemblies (godotengine/godot#78513).
+    /// <see cref="ExportJsonWriter"/> supplies the vector, matrix, Color32 and enum converters.
+    /// </remarks>
     [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
     [JsonSerializable(typeof(PrefabData))]
     [JsonSerializable(typeof(ProjectSettingsData))]

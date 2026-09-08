@@ -11,35 +11,13 @@ using Zio;
 
 namespace Paradise.Export.Data
 {
-    /// <summary>
-    /// A file of authored components, keyed by the record type each payload turned out to be.
-    ///
-    /// The same <c>Components</c> array of <c>{"Id", "Data"}</c> pairs an entity carries, in a
-    /// document of its own: a game's tuning, a level's settings, a difficulty table. Nothing here
-    /// knows what any particular document is FOR — it reads the ids a file declares, materializes
-    /// what the registries know, and hands back records the caller asks for by type.
-    ///
-    /// This exists because every game was writing it. Reading such a file meant hand-rolling a
-    /// loop over <see cref="IAuthoredComponentRegistry"/>, and a hand-rolled loop is where the
-    /// <see cref="AuthoredComponentData.Type"/> fallback goes missing — so a document whose ids
-    /// were regenerated became unreadable while the identical payloads on an entity still loaded.
-    /// One reader, one set of rules.
-    ///
-    /// WHAT IT REFUSES, AND WHY ONLY THIS MUCH. Two things, both because the document cannot
-    /// represent them rather than because they are bad style: an id that is not a GUID, and two
-    /// payloads for the same component. This is a map keyed by type — a second payload has nowhere
-    /// to go, and silently keeping the last one is exactly the edit that looks applied and is not.
-    ///
-    /// Everything else is the caller's to decide, and is reported rather than thrown:
-    /// <see cref="Unresolved"/> holds the payloads no registry could read. Whether that is fatal
-    /// depends on the document — a game's tuning file refuses to start, a level's settings may not
-    /// care — and this type cannot know which. The same reason
-    /// <see cref="AuthoredComponentRouter.Materialize(IEnumerable{AuthoredComponentData},
-    /// IAuthoredComponentRegistry, IList{AuthoredComponentData})"/> reports instead of enforcing.
-    ///
-    /// Hand-edited by design, so the parser tolerates comments and a trailing comma. These files
-    /// are read by people and written by people at least as often as by an editor.
-    /// </summary>
+    /// <summary>Reads a file of authored <c>{ Id, Data }</c> components into a map keyed by record type.</summary>
+    /// <remarks>
+    /// Registry lookup uses the same ID and type fallback as entity components.
+    /// Invalid GUIDs and duplicate components are rejected; unknown payloads are reported through
+    /// <see cref="Unresolved"/> so the caller can decide whether they are fatal.
+    /// Hand-edited JSON may contain comments and trailing commas.
+    /// </remarks>
     public sealed class AuthoredDocument
     {
         /// <summary>The array every authored document carries its payloads in.</summary>
@@ -126,9 +104,7 @@ namespace Paradise.Export.Data
             return Parse(text, registry, path.FullName);
         }
 
-        /// <summary>
-        /// Read a document from text.
-        /// </summary>
+        /// <summary>Read a document from text.</summary>
         /// <param name="json">The document.</param>
         /// <param name="registry">The game's generated registry. The engine's own is always
         /// consulted first, so a caller that passes none still gets the engine's components.</param>

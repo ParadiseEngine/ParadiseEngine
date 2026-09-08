@@ -4,19 +4,12 @@ using System.Numerics;
 
 namespace Paradise.Export.Geometry
 {
-    /// <summary>
-    /// Engine-neutral collider scale-folding, ported from ParadiseUnityEditor's
-    /// ColliderExportUtility. The export contract bakes the collider's lossy scale (relative to
-    /// the entity root) into the shape's dimensions; the root's OWN scale stays in the entity
-    /// WorldMatrix, so a data consumer folds it in with these same rules (see
-    /// Paradise.Sample.Runtime.SceneAssembler.AppendCollider).
-    ///
-    /// Godot's <c>CapsuleShape3D</c> is always Y-axis aligned (unlike Unity's <c>direction</c>
-    /// enum), so only the Y-aligned capsule case is modeled here — it matches Unity's
-    /// <c>direction = 1</c> path exactly (radius from max(|x|,|z|), height from |y|). Non-Y
-    /// capsule orientation in Godot is achieved by rotating the node, captured separately in the
-    /// collider's local rotation.
-    /// </summary>
+    /// <summary>Folds collider-relative scale into shape dimensions using the Unity export rules.</summary>
+    /// <remarks>
+    /// Entity scale remains in the entity transform and is folded by the consumer.
+    /// Y-aligned capsules use max(|x|, |z|) for radius and |y| for height;
+    /// other orientations are represented by the collider's local rotation.
+    /// </remarks>
     public static class ColliderScaleFold
     {
         /// <summary>Per-component lossy scale of a collider relative to the export root, with a

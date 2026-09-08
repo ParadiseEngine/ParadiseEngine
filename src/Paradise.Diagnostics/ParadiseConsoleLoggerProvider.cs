@@ -9,22 +9,14 @@ namespace Paradise.Diagnostics;
 /// An <see cref="ILoggerProvider"/> that writes engine diagnostics to a pair of text writers,
 /// routing by level and rendering logged values through <see cref="ParadiseConsoleOptions.RenderValue"/>.
 /// </summary>
-/// <remarks>
-/// Every logger this hands out shares one lock, because the engine logs from threads it did not
-/// create — Dawn's uncaptured-error callback, Noesis's log callback and SDL all arrive on foreign
-/// threads, and two of them interleaving mid-line is how a device-lost report becomes unreadable.
-/// <see cref="ILogger"/> itself promises no thread affinity, so this is a property every sink
-/// behind this seam has to supply; a host installing its own is responsible for the same.
-/// </remarks>
+/// <remarks>Loggers share a lock so concurrent callbacks cannot interleave output lines.</remarks>
 public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
 {
     private readonly ParadiseConsoleOptions _options;
     private readonly TextWriter _out;
     private readonly TextWriter _error;
 
-    // `object`, not System.Threading.Lock: this type is reachable from the Coyote suites through
-    // the pipeline's logger, and Coyote (1.7.11) rewrites Monitor.Enter/Exit but not
-    // Lock.EnterScope. See AGENTS.md. Do not "modernize" it.
+    // Coyote 1.7.11 intercepts Monitor, but not System.Threading.Lock.EnterScope.
     private readonly object _gate = new();
 
     /// <summary>Creates a provider over <see cref="Console"/>, or over the writers the options name.</summary>
@@ -41,8 +33,7 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
     /// <inheritdoc />
     public void Dispose()
     {
-        // The writers are the host's — Console.Out must outlive us, and an injected writer is the
-        // test's to dispose. Nothing here owns anything.
+        // Writers belong to the host.
     }
 
     private void Write(LogLevel level, string category, string message, Exception? exception)
@@ -50,10 +41,7 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         var writer = level >= _options.ErrorStreamThreshold ? _error : _out;
         var prefix = _options.IncludeCategory && category.Length > 0;
 
-        // The prefix is WRITTEN rather than concatenated onto the message. `$"[{category}] {message}"`
-        // copied the whole formatted message a second time, which measured as roughly half of this
-        // path's allocation on a typical line — and it bought nothing, because everything between
-        // the lock and its close is already atomic against other threads.
+        // Write the prefix separately to avoid copying the message again.
         lock (_gate)
         {
             if (prefix)
@@ -73,37 +61,17 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
     /// first refusal on each argument.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Returns <see langword="null"/> when the caller's own formatter should be used instead —
-    /// when no renderer is installed, when the state is not the name/value list that
-    /// <c>FormattedLogValues</c> and the <c>[LoggerMessage]</c> generator both produce, or when the
-    /// renderer declined every argument. That last check is what keeps the common case exactly
-    /// correct: a message whose values the host has no opinion about is formatted by the code that
-    /// owns the template, not by this re-implementation of it.
-    /// </para>
-    /// <para>
-    /// MEL substitutes holes BY POSITION — a hole's name is a label for structured sinks, not a
-    /// lookup key — so this walks holes and values in lockstep rather than matching names.
-    /// </para>
-    /// <para>
-    /// The one case where that is not the whole truth: <c>FormattedLogValues</c> is positional and
-    /// counts HOLES, so <c>"{A} and {A}"</c> consumes two arguments there, while the
-    /// <c>[LoggerMessage]</c> generator maps holes to PARAMETERS by name and needs only one. A
-    /// template repeating a hole would therefore render its second occurrence as empty here while
-    /// the generated formatter renders it in full — a disagreement visible only when a renderer is
-    /// installed and claims something. No engine template repeats a hole, and matching by name
-    /// instead would break the positional case the engine does rely on, so this is recorded rather
-    /// than papered over. Do not add a repeated hole to a template without revisiting it.
-    /// </para>
+    /// Returns null when no renderer is installed, state is not structured, or no argument is claimed.
+    /// Arguments are positional, matching FormattedLogValues. LoggerMessage handles repeated holes
+    /// by parameter name instead; do not use repeated holes without adding support for that case.
     /// </remarks>
     private string? TryRender<TState>(TState state)
     {
         var render = _options.RenderValue;
         if (render is null) return null;
-        if (state is not IReadOnlyList<KeyValuePair<string, object?>> values || values.Count == 0) return null;
+        if (state is not IReadOnlyList<KeyValuePair<string, object?>> values) return null;
 
-        // The template lives in a trailing "{OriginalFormat}" entry; the preceding entries are the
-        // arguments, in template order.
+        // Arguments precede the trailing OriginalFormat entry.
         string? template = null;
         var formatIndex = -1;
         for (var i = values.Count - 1; i >= 0; i--)
@@ -117,15 +85,7 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         }
         if (template is null) return null;
 
-        // ONE pass over the arguments, keeping what the renderer said. The previous shape asked
-        // the renderer once to find out whether anything was claimed and then AGAIN for each hole
-        // while substituting — so a four-argument message invoked host code five times and threw
-        // the first answer away. That is not merely wasted work: RenderValue is arbitrary host
-        // code, and the CLI's calls ConvertPathToInternal, so the duplicate was a real path
-        // conversion per path per message.
-        //
-        // The arguments are the entries BEFORE the template, which is why this stops at
-        // formatIndex rather than walking the whole list and skipping one entry by name.
+        // Invoke host rendering once per argument; callbacks may be expensive or stateful.
         var rendered = new string?[formatIndex];
         var claimed = false;
         for (var i = 0; i < formatIndex; i++)
@@ -144,9 +104,7 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
             var c = template[i];
             if (c != '{' && c != '}') continue;
 
-            // Literal text goes in RUNS, not a char at a time: Append(string, start, count) is one
-            // copy where the per-char loop was one call per character, and templates are mostly
-            // literal.
+            // Copy literal runs in one append.
             if (i > run) builder.Append(template, run, i - run);
 
             if (c == '}')
@@ -195,17 +153,8 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         ref int argument,
         string? format)
     {
-        // Bounded by the ARGUMENTS, which end where the template entry begins — not by
-        // values.Count, which includes that entry. Bounding by Count would let a hole with no
-        // argument behind it append the template string as though it were a value: wrong output,
-        // silently, which is worse than the nothing appended here.
-        //
-        // This does not make a malformed template safe, and it is not trying to. A template with
-        // more holes than arguments throws — `FormattedLogValues.Count` is holes + 1, so MEL is
-        // asked for an argument that does not exist — and it throws through MEL's own formatter
-        // too (FormatException), with or without this sink. CA2017 catches it at build time. A
-        // sink that quietly rendered something here would disagree with every other provider and
-        // hide a bug the analyzer already reports.
+        // Exclude the OriginalFormat entry; unmatched holes must not append the template itself.
+        // Malformed FormattedLogValues can still throw, as they do through the default formatter.
         if (argument >= rendered.Length) return;
 
         var index = argument++;
@@ -245,9 +194,7 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
         }
 
         /// <summary>Scopes are not supported; this returns a disposable that does nothing.</summary>
-        /// <remarks>A scope is a per-message property bag for a structured sink. This one renders
-        /// a line of text, and the engine opens no scopes. A host that wants them wants a real
-        /// structured sink behind the same <see cref="ILogger"/>, not this.</remarks>
+        /// <remarks>Use a structured sink when scope properties are needed.</remarks>
         public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
     }
 

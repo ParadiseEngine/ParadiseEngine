@@ -1,16 +1,10 @@
 using System.Collections;
 
-using Paradise.Authoring;
-
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// A table written on one line (spec item 11). A distinct TYPE so the model, not the data, decides
-/// the written form in both writers. Exists because an <see cref="AssetReference"/> must sit inside
-/// an array, where <c>[[header]]</c> form has no spelling for a null slot. Never nests a table: an
-/// arbitrarily deep one-line table is neither readable nor diffable.
-/// </summary>
-public sealed class CanonicalInlineTable : IEnumerable<KeyValuePair<string, object>>
+/// <summary>A one-line table of scalars and scalar arrays (spec item 11).</summary>
+/// <remarks>The type selects inline form; <c>{}</c> preserves absent asset-reference slots in arrays.</remarks>
+public sealed class CanonicalInlineTable : IReadOnlyCollection<KeyValuePair<string, object>>
 {
     private readonly List<KeyValuePair<string, object>> _pairs = [];
     private readonly HashSet<string> _keys = new(StringComparer.Ordinal);

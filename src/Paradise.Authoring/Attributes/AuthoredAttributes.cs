@@ -2,52 +2,16 @@ using System;
 
 namespace Paradise.Authoring;
 
-/// <summary>
-/// Marks a plain record as AUTHORED data: something a human edits in an editor, which travels into
-/// the scene export and comes back out as this same type at runtime.
-///
-/// One definition, many editors. A Roslyn generator turns every marked type in an assembly into an
-/// engine-neutral SCHEMA document, and the editors read that document to build their own UI — the
-/// Godot addon with one data-driven node, the Blender addon with <c>bpy.props</c>, the browser
-/// editor with a form. None of them needs generated code, and adding a component is a record plus a
-/// re-dump rather than editor work in three places.
-///
-/// This does NOT mean untyped. The record stays the runtime type: the game (or the engine)
-/// deserializes the exported payload straight back into it through its own source-generated
-/// <c>JsonSerializerContext</c>. The schema is an ADDITIONAL publication of the same declaration,
-/// for hosts that cannot link against the type. Both, not either.
-/// </summary>
+/// <summary>Publishes a record's authoring schema for editors while retaining its runtime type.</summary>
 /// <remarks>
-/// <para>
-/// The component's IDENTITY is not declared here. It comes from the BCL's own
-/// <see cref="System.Runtime.InteropServices.GuidAttribute"/> on the same type:
-/// </para>
+/// Use a stable BCL <see cref="System.Runtime.InteropServices.GuidAttribute"/> for identity:
 /// <code>
 /// [Guid("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11")]
 /// [Authored(DisplayName = "Rigidbody")]
 /// public sealed record RigidbodyComponentData { ... }
 /// </code>
-/// <para>
-/// Generate that value with <c>uuidgen</c> or <c>Guid.NewGuid()</c>. Do not hand-type one, and do
-/// not derive it from the id of the component next to it — a readable pattern invites the next
-/// person to continue it, and two components that continue the same pattern collide.
-/// </para>
-/// <para>
-/// A GUID rather than a name, because a name is two things at once and they have different
-/// lifetimes: <c>paradise.rigidbody</c> was both "which component is this" and "what do we call
-/// it", so renaming the component to something clearer orphaned every document that had already
-/// authored it. The GUID is only the first of those, and is free to never change while the
-/// <see cref="DisplayName"/> above it does.
-/// </para>
-/// <para>
-/// <c>[Guid]</c> rather than an id parameter of our own, because .NET already has exactly this
-/// attribute — "the stable GUID of this type" — and every tool that generates one already knows
-/// where to put it. A second spelling would mean a type could carry two different GUIDs and be
-/// right about neither.
-/// </para>
-/// <para>
-/// A missing or malformed <c>[Guid]</c> is PAUT005, reported at compile time.
-/// </para>
+/// Generate GUIDs with <c>uuidgen</c> or <c>Guid.NewGuid()</c>; never derive a pattern from neighboring
+/// components. Renaming a display name must not change the GUID. Missing or malformed IDs produce PAUT005.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, Inherited = false)]
 public sealed class AuthoredAttribute : Attribute
@@ -57,14 +21,12 @@ public sealed class AuthoredAttribute : Attribute
     public string? DisplayName { get; set; }
 }
 
-// ---------------------------------------------------------------------------------------------
 // Semantic hints. Deliberately NOT editor hints.
 //
 // A definition may never say `PropertyHint.Range` or `subtype='DISTANCE'` — the moment it names
 // Godot's vocabulary, Blender and the web editor inherit Godot's vocabulary forever. It says what
 // the number MEANS, and each editor maps that to its own widget: metres become a distance spinner
 // in Blender, a plain float with a suffix in Godot, a number input with a unit label on the web.
-// ---------------------------------------------------------------------------------------------
 
 /// <summary>A length in metres.</summary>
 [AttributeUsage(AttributeTargets.Property)]

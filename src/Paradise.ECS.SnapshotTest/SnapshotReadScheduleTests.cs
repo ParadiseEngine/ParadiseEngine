@@ -4,9 +4,7 @@
 
 namespace Paradise.ECS.SnapshotTest;
 
-// ============================================================================
 // Components & systems (generated with snapshot-read bindings)
-// ============================================================================
 
 [Component]
 public partial struct SnapPosition
@@ -237,9 +235,7 @@ public ref partial struct SnapQueryableAccessorWriterGraphSystem : IEntitySystem
     public void Execute() => _ = Target.TryGet(Entity, out _);
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
 public sealed class SnapshotReadScheduleTests : IDisposable
 {
@@ -645,10 +641,8 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         await Assert.That(results[0].SequenceEqual(results[1])).IsTrue();
     }
 
-    // ========================================================================
     // A schedule is a PURE program over systems: it stores no world, and every run names the
     // worlds it acts on. These pin that the same schedule object can be pointed anywhere.
-    // ========================================================================
 
     [Test]
     public async Task two_world_run_reads_the_snapshot_and_writes_the_other()

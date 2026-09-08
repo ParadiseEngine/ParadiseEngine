@@ -140,6 +140,67 @@ public class ShaderExtensionTests
         }
     }
 
+    /// <summary>Checks that an unchanged resolved surface matches stock PBR exactly and a modified
+    /// surface changes pixels.</summary>
+    [Test]
+    public async Task resolved_surface_reproduces_the_stock_path_and_a_modification_changes_it()
+    {
+        var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        try
+        {
+            using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+            var programId = pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(
+                typeof(ShaderExtensionTests).Assembly, "Shaders.surfaceFixture"));
+
+            var baseColor = new Vector4(0.6f, 0.5f, 0.4f, 1f);
+            var stockId = pbr.Materials.AddMaterial(FactorMaterial(baseColor), []);
+            // The fixture adds procColorA to the resolved emissive: zero is "change nothing".
+            var untouchedId = pbr.Materials.AddMaterial(
+                FactorMaterial(baseColor) with { ProcColorA = Vector3.Zero }, [], programId);
+            var tintedId = pbr.Materials.AddMaterial(
+                FactorMaterial(baseColor) with { ProcColorA = new Vector3(0f, 0f, 4f) }, [], programId);
+
+            var (vertices, indices) = Procedural.UnitCube();
+
+            byte[] RenderWith(int materialId)
+            {
+                var scene = new PbrScene
+                {
+                    Camera = new PbrCamera
+                    {
+                        View = PbrMath.LookAt(new Vector3(0f, 1.5f, 3f), Vector3.Zero, Vector3.UnitY),
+                        Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                        Position = new Vector3(0f, 1.5f, 3f),
+                    },
+                };
+                scene.Lights.Add(new PbrLight
+                {
+                    Type = PbrLightType.Directional,
+                    Direction = Vector3.Normalize(new Vector3(0.4f, 1f, 0.5f)),
+                    Intensity = 1.2f,
+                });
+                scene.Instances.Add(new PbrInstance
+                {
+                    Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]),
+                });
+                for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+                return (byte[])renderer.ReadbackColor(out _, out _).Clone();
+            }
+
+            var stock = RenderWith(stockId);
+            var assembled = RenderWith(untouchedId);
+            var tinted = RenderWith(tintedId);
+
+            await Assert.That(assembled.AsSpan().SequenceEqual(stock)).IsTrue();
+            await Assert.That(tinted.AsSpan().SequenceEqual(stock)).IsFalse();
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
     [Test]
     public async Task incompatible_program_layout_throws_at_registration()
     {

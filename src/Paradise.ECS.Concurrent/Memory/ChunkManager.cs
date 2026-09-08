@@ -6,17 +6,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS.Concurrent;
 
-/// <summary>
-/// Thread-safe manager for Chunk memory allocations.
-/// Owns native memory and issues safe handles with version-based stale detection.
-/// Uses fully lock-free CAS operations for thread safety.
-///
-/// Memory layout:
-/// - MetaBlocks: Fixed-size array of pointers to native memory blocks storing ChunkMeta entries
-/// - Each MetaBlock can hold entries based on ChunkSize / 16 bytes per entry
-/// - Meta blocks are lazily allocated on-demand using CAS
-/// - Maximum capacity: MaxMetaBlocks * EntriesPerMetaBlock
-/// </summary>
+/// <summary>Allocates native chunks with atomic operations and versioned stale-handle detection.</summary>
+/// <remarks>Meta blocks are allocated lazily by CAS; capacity is MaxMetaBlocks × EntriesPerMetaBlock.</remarks>
 public sealed unsafe class ChunkManager : IChunkManager
 {
     /// <summary>
@@ -46,9 +37,7 @@ public sealed unsafe class ChunkManager : IChunkManager
     /// <inheritdoc />
     public int ChunkSize => _chunkSize;
 
-    /// <summary>
-    /// Creates a new ChunkManager with the specified configuration.
-    /// </summary>
+    /// <summary>Creates a new ChunkManager with the specified configuration.</summary>
     /// <param name="allocator">The memory allocator to use.</param>
     /// <param name="chunkSize">The size of each chunk in bytes.</param>
     /// <param name="maxMetaBlocks">The maximum number of meta blocks.</param>
@@ -74,16 +63,12 @@ public sealed unsafe class ChunkManager : IChunkManager
         }
     }
 
-    /// <summary>
-    /// Creates a new ChunkManager using the specified configuration type.
-    /// </summary>
+    /// <summary>Creates a new ChunkManager using the specified configuration type.</summary>
     /// <typeparam name="TConfig">The configuration type.</typeparam>
     /// <returns>A new ChunkManager instance.</returns>
     public static ChunkManager Create<TConfig>() where TConfig : IConfig, new() => Create(new TConfig());
 
-    /// <summary>
-    /// Creates a new ChunkManager using the specified configuration instance.
-    /// </summary>
+    /// <summary>Creates a new ChunkManager using the specified configuration instance.</summary>
     /// <typeparam name="TConfig">The configuration type.</typeparam>
     /// <param name="config">The configuration instance.</param>
     /// <returns>A new ChunkManager instance.</returns>
@@ -96,9 +81,7 @@ public sealed unsafe class ChunkManager : IChunkManager
             initializeChunkCapacity: config.DefaultChunkCapacity);
     }
 
-    /// <summary>
-    /// Gets a reference to the metadata for a given slot id.
-    /// </summary>
+    /// <summary>A reference to the metadata for a given slot id.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref ChunkMeta GetMeta(int id)
     {
@@ -192,7 +175,6 @@ public sealed unsafe class ChunkManager : IChunkManager
             if (packed.Version != handle.Version)
                 return; // Already freed or stale handle
 
-            // Check if chunk is borrowed
             if (packed.Index != 0)
                 ThrowHelper.ThrowChunkInUse(handle);
 

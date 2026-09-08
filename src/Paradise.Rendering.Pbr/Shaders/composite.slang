@@ -1,14 +1,7 @@
-// composite.slang — the final post-process pass. Samples the linear-HDR scene target (the main
-// pass now renders LINEAR HDR into an Rgba16Float texture instead of tonemapping in-shader),
-// optionally adds bloom, applies the exported tone operator ONCE, and writes to the swapchain.
-//
-// Tonemapping moved OUT of pbr.slang / sky.slang into here so the whole frame is composited in
-// linear HDR first (enabling bloom + a single consistent tone curve). The tone operators are
-// duplicated verbatim from pbr.slang — the build compiles every .slang standalone, so shared
-// includes aren't available; keep the blocks in sync.
-//
-// Two fragment entry points mirror pbr.slang: linear output for *UnormSrgb swapchains (hardware
-// encodes), in-shader sRGB OETF otherwise.
+// Adds bloom to linear HDR, applies tone mapping once, and writes the swapchain. Use linear output
+// for sRGB formats; otherwise select the fragment entry that applies the sRGB OETF.
+
+#include "Common/tonemapping.slang"
 
 struct CompositeUniforms
 {
@@ -41,8 +34,6 @@ Varyings compositeVertex(uint vertexId : SV_VertexID)
     output.uv = float2(p.x, 1.0 - p.y);
     return output;
 }
-
-#include "Common/tonemapping.slang"
 
 float3 composite(float2 uv)
 {

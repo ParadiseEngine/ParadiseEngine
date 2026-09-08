@@ -2,23 +2,16 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Mutable state of a dynamic sphere, owned by the caller (e.g. ECS components in a game).
-/// The library never stores it — every step is a pure function over caller-owned spans.
-/// This is a FULL 3D rigid body: it carries linear AND angular velocity, feels gravity, and
-/// resolves contacts with Coulomb friction at the contact point (lever arm). All fields
-/// zero-initialize; an unset sphere is undamped, frictionless, plastic, and non-spinning — set
-/// the material params (<see cref="Restitution"/>, <see cref="Friction"/>, damping) explicitly.
-/// (Type name is historical — the model is no longer planar; Y and angular state are live.)
-/// </summary>
+/// <summary>Stores caller-owned sphere position, linear/angular velocity and material properties.</summary>
+/// <remarks>Defaults are undamped, frictionless, plastic and non-spinning; set restitution,
+/// friction and damping explicitly.</remarks>
 public struct DynamicSphere
 {
     public Vector3 Position;
     public Vector3 Velocity;
 
-    /// <summary>Angular velocity (rad/s), full 3D. Sidespin ("english") is the Y component; a
-    /// horizontal-axis component is top/back-spin (follow/draw). Coupled to linear motion only
-    /// through the friction impulse at contacts — draw, follow, throw and rolling all emerge.</summary>
+    /// <summary>Angular velocity in rad/s, coupled to linear motion by contact friction.</summary>
+    /// <remarks>Y is sidespin; horizontal components provide top/back-spin.</remarks>
     public Vector3 AngularVelocity;
 
     public float Radius;
@@ -34,9 +27,8 @@ public struct DynamicSphere
     /// both spheres' values (0 = plastic, 1 = elastic).</summary>
     public float Restitution;
 
-    /// <summary>Coulomb friction coefficient μ. The tangential contact impulse is clamped to
-    /// μ·|normal impulse|; this is the ONLY coupling between spin and linear motion (a central
-    /// normal impulse produces no torque on a sphere). 0 = frictionless (spin never transfers).</summary>
+    /// <summary>Coulomb friction coefficient, limiting tangential impulse to μ times the normal impulse.</summary>
+    /// <remarks>Zero prevents spin transfer; a sphere's central normal impulse creates no torque.</remarks>
     public float Friction;
 
     /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
@@ -89,10 +81,8 @@ public struct SphereDynamicsSettings
     /// Sphere ↔ sphere bounce is per-body: <see cref="DynamicSphere.Restitution"/>.</summary>
     public float StaticRestitution;
 
-    /// <summary>Coulomb friction coefficient for sphere ↔ static contacts (cushions, cloth).
-    /// Combined with the sphere's own <see cref="DynamicSphere.Friction"/> via the GEOMETRIC MEAN —
-    /// so a sphere that leaves <see cref="DynamicSphere.Friction"/> at its 0 default cancels this
-    /// entirely (√(0·x)=0, frictionless): set per-sphere Friction when you want static friction.</summary>
+    /// <summary>Static-contact friction, combined with the sphere coefficient by geometric mean.</summary>
+    /// <remarks>A sphere's default zero friction disables this too; set both coefficients for friction.</remarks>
     public float StaticFriction;
 
     /// <summary>Scale applied to a kinematic pusher's velocity when injected into a sphere.</summary>
@@ -101,9 +91,8 @@ public struct SphereDynamicsSettings
     /// <summary>Clearance kept between surfaces (meters).</summary>
     public float Skin;
 
-    /// <summary>Contact-resolution iterations per step (re-query + resolve). A sphere resting in a
-    /// corner touches several statics at once but <c>CalculateDistance</c> returns one at a time,
-    /// so a few passes are needed to settle. 1 is fine for open-table motion.</summary>
+    /// <summary>Contact-resolution passes per step.</summary>
+    /// <remarks>Distance queries return one static at a time, so corners may need several passes.</remarks>
     public int SolverIterations;
 
     /// <summary>Filter used for sphere-vs-static casts and depenetration queries. Must include the

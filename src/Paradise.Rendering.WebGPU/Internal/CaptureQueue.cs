@@ -4,26 +4,10 @@ using System.Threading.Tasks;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>
-/// Capture requests waiting for a frame, and the one piece of genuine cross-thread coordination in
-/// the renderer.
-///
-/// It is its own type for two reasons, and the second is why it is worth the file. The first is
-/// ordinary: requests arrive from any thread while the render thread services them, so the rules
-/// belong together rather than scattered across a class whose every other member is single-threaded.
-///
-/// The second is that this is the part that can be TESTED. Everything else in the capture path is
-/// Dawn calls a systematic-testing tool cannot schedule; this is plain managed concurrency, so
-/// <c>Paradise.Rendering.WebGPU.CoyoteTest</c> can explore its interleavings deliberately instead
-/// of hoping a stress loop lands on the bad one. It was extracted precisely because a hand-written
-/// race test could not reproduce the defect below — it passed against the broken code every time.
-///
-/// <b>The invariant: a request is either served, or faulted — never left pending.</b> A task nobody
-/// will ever complete is a caller hung for the life of the process, which is the failure this whole
-/// capture path exists to avoid. That is why closing and enqueueing share a lock: without it a
-/// caller can pass the "still open?" check, lose the race to a close that drains everything it can
-/// see, and then enqueue into a queue nothing will look at again.
-/// </summary>
+/// <summary>Coordinates capture requests between callers and the render thread.</summary>
+/// <remarks>Every accepted request must be served or faulted. Enqueue and close share a lock so no
+/// request can arrive after the final drain. Native calls stay outside this managed type so Coyote
+/// can schedule its interleavings.</remarks>
 internal sealed class CaptureQueue
 {
     private readonly ConcurrentQueue<TaskCompletionSource<ColorReadback>> _requests = new();
