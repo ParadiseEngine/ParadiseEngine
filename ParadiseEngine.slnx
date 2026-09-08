@@ -61,7 +61,6 @@
     <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
     <Project Path="src/Paradise.Features.Test/Paradise.Features.Test.csproj" />
     <Project Path="src/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
-    <Project Path="src/Paradise.Hosting.Desktop.Test/Paradise.Hosting.Desktop.Test.csproj" />
     <Project Path="src/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Diagnostics.Test/Paradise.Diagnostics.Test.csproj" />
     <Project Path="src/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />

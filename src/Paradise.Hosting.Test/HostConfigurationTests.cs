@@ -2,7 +2,7 @@ using Paradise.Features;
 using Zio;
 using Zio.FileSystems;
 
-namespace Paradise.Hosting.Desktop.Test;
+namespace Paradise.Hosting.Test;
 
 public class HostConfigurationTests
 {

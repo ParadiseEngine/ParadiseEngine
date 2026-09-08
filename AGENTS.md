@@ -132,7 +132,7 @@ this pass separately before restructuring it: its current frame cost is small.
 ## Feature configuration
 
 `Paradise.Hosting` runs window, simulation and presentation loops through `IHostApplication`.
-`Paradise.Hosting.Desktop` selects SDL/offscreen surfaces and loads layered configuration. Games
+`Paradise.Hosting` loads layered configuration; `Paradise.Hosting.Desktop` selects SDL/offscreen surfaces. Games
 provide owner-thread factories and per-tick/per-frame callbacks; see `src/Paradise.Hosting/README.md`.
 Presentation must finish and release snapshots before the simulation disposes worlds. A timed-out
 worker retains its borrowed resources until it exits; host failure must propagate to the process.

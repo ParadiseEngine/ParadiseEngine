@@ -1,7 +1,7 @@
 # Game hosting
 
-`Paradise.Hosting` owns the application loops. `Paradise.Hosting.Desktop` supplies the SDL or
-offscreen platform and reads feature configuration. Neither package requires PBR or a UI toolkit.
+`Paradise.Hosting` owns the application loops and loads layered feature configuration. `Paradise.Hosting.Desktop` supplies the SDL or
+offscreen platform. Neither package requires PBR or a UI toolkit.
 The first consumer is ShiningPie: its application implements factories for simulation and
 presentation while the engine owns timing, threads, resize delivery, capture scheduling and shutdown.
 
@@ -66,7 +66,6 @@ a five-digit frame suffix to the filename. Invalid or impossible capture options
 
 ```sh
 dotnet test --project src/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj --output normal
-dotnet test --project src/Paradise.Hosting.Desktop.Test/Paradise.Hosting.Desktop.Test.csproj --output normal
 dotnet build src/Paradise.Hosting.CoyoteTest -c Release
 dotnet run --project src/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
 ```

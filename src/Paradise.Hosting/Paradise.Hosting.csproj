@@ -9,5 +9,7 @@
     <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
     <ProjectReference Include="../Paradise.Features/Paradise.Features.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <ProjectReference Include="../Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
+    <PackageReference Include="Zio" />
   </ItemGroup>
 </Project>

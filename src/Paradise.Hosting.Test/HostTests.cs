@@ -177,6 +177,26 @@ public sealed class HostTests
         await Assert.That(clock.Advance(TimeSpan.FromMilliseconds(-50))).IsEqualTo(0);
     }
 
+    [Test]
+    public async Task FixedStepClock_AcceptsLargestBatchAndRejectsFirstOverflow()
+    {
+        var clock = new FixedStepClock(TimeSpan.FromTicks(2), TimeSpan.FromTicks(2L * int.MaxValue));
+        await Assert.That(clock.Advance(TimeSpan.FromTicks(1))).IsEqualTo(0);
+        await Assert.That(clock.Advance(TimeSpan.MaxValue)).IsEqualTo(int.MaxValue);
+        await Assert.That(clock.Advance(TimeSpan.FromTicks(1))).IsEqualTo(1);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new FixedStepClock(TimeSpan.FromTicks(2), TimeSpan.FromTicks(2L * int.MaxValue + 1)));
+    }
+
+    [Test]
+    public async Task FixedStepClock_AccumulatesBeyondSignedInt64WithoutLosingRemainder()
+    {
+        var clock = new FixedStepClock(TimeSpan.MaxValue, TimeSpan.MaxValue);
+        await Assert.That(clock.Advance(TimeSpan.FromTicks(long.MaxValue - 1))).IsEqualTo(0);
+        await Assert.That(clock.Advance(TimeSpan.MaxValue)).IsEqualTo(1);
+        await Assert.That(clock.Advance(TimeSpan.FromTicks(1))).IsEqualTo(1);
+    }
+
     private sealed class TestApplication : IHostApplication, IHostSimulation, IHostPresentation
     {
         private readonly TaskCompletionSource _capture = new(TaskCreationOptions.RunContinuationsAsynchronously);
