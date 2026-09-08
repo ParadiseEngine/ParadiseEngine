@@ -1,9 +1,7 @@
 namespace Paradise.ECS.Test;
 
-// ============================================================================
 // World-system test definitions (IWorldSystem: one Execute per schedule run,
 // whole-query flat segment access)
-// ============================================================================
 
 [Queryable]
 [With<TestPosition>]
@@ -58,9 +56,7 @@ public ref partial struct TestWorldSpawnSystem : IWorldSystem
     }
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
 public sealed class WorldSystemTests : IDisposable
 {

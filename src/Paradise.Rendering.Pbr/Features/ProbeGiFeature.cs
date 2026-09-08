@@ -7,18 +7,10 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Probe global illumination at <see cref="RenderPassEvent.GlobalIllumination"/>: a grid
-/// of irradiance probes over the static scene, each updated by rays traced into the scene's BVH,
-/// blended into two octahedral atlases (irradiance, and distance moments for visibility) that the
-/// scene pass samples in place of its sky ambient. Four compute passes a frame: trace, blend
-/// irradiance, blend visibility, and relocate-and-classify for the next frame.
-///
-/// <para>The volume is fitted to the static scene unless <see cref="PbrGi.Volume"/> authors one,
-/// and is a value the shader indexes rather than a set of constants, so a second cascade later is
-/// another entry. The atlases and the probe-state buffer are ping-ponged: a frame reads last
-/// frame's and writes its own, which is what lets the trace light its hits with the previous
-/// bounce and the blend read the old texel while writing the new — WebGPU allows no read-write
-/// storage on these formats.</para></summary>
+/// <summary>Updates probe irradiance and visibility by tracing the static scene's BVH.</summary>
+/// <remarks>Each frame traces, blends irradiance and distance moments, then relocates/classifies
+/// probes. The volume fits static geometry unless authored. Ping-pong atlases and state preserve
+/// the previous bounce and avoid unsupported read/write storage.</remarks>
 public sealed class ProbeGiFeature : IRenderFeature
 {
     // Must match probeBlend.slang's IrradianceTexels / VisibilityTexels.

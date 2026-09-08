@@ -5,9 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Types of deferred commands that can be recorded in an <see cref="EntityCommandBuffer"/>.
-/// </summary>
+/// <summary>Types of deferred commands that can be recorded in an <see cref="EntityCommandBuffer"/>.</summary>
 public enum CommandType
 {
     /// <summary>Spawn a new entity.</summary>
@@ -106,18 +104,14 @@ public sealed class EntityCommandBuffer : IDisposable
     private bool _playedBack;
     private bool _disposed;
 
-    /// <summary>
-    /// Gets the number of recorded commands.
-    /// </summary>
+    /// <summary>The number of recorded commands.</summary>
     public int CommandCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _commandCount;
     }
 
-    /// <summary>
-    /// Gets whether the buffer contains no commands.
-    /// </summary>
+    /// <summary>Whether the buffer contains no commands.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -148,9 +142,7 @@ public sealed class EntityCommandBuffer : IDisposable
         return placeholder;
     }
 
-    /// <summary>
-    /// Records a deferred entity despawn.
-    /// </summary>
+    /// <summary>Records a deferred entity despawn.</summary>
     /// <param name="entity">The entity to despawn. Can be a real entity or a placeholder from this buffer.</param>
     public void Despawn(Entity entity)
     {
@@ -159,9 +151,7 @@ public sealed class EntityCommandBuffer : IDisposable
         WriteCommand(CommandType.Despawn, entity.Id, entity.Version, -1, ReadOnlySpan<byte>.Empty);
     }
 
-    /// <summary>
-    /// Records a deferred component addition.
-    /// </summary>
+    /// <summary>Records a deferred component addition.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity to add the component to. Can be a real entity or a placeholder from this buffer.</param>
     /// <param name="value">The component value.</param>
@@ -175,9 +165,7 @@ public sealed class EntityCommandBuffer : IDisposable
         WriteCommand(CommandType.AddComponent, entity.Id, entity.Version, T.TypeId.Value, data);
     }
 
-    /// <summary>
-    /// Records a deferred component removal.
-    /// </summary>
+    /// <summary>Records a deferred component removal.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity to remove the component from. Can be a real entity or a placeholder from this buffer.</param>
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
@@ -187,9 +175,7 @@ public sealed class EntityCommandBuffer : IDisposable
         WriteCommand(CommandType.RemoveComponent, entity.Id, entity.Version, T.TypeId.Value, ReadOnlySpan<byte>.Empty);
     }
 
-    /// <summary>
-    /// Records a deferred component value set (non-structural).
-    /// </summary>
+    /// <summary>Records a deferred component value set (non-structural).</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity to set the component on. Can be a real entity or a placeholder from this buffer.</param>
     /// <param name="value">The new component value.</param>

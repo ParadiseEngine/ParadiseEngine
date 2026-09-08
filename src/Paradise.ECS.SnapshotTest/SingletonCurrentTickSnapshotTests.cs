@@ -1,9 +1,7 @@
 namespace Paradise.ECS.SnapshotTest;
 
-// ============================================================================
 // Singleton + [CurrentTick] definitions (snapshot codegen — see assembly
 // attribute in SnapshotReadScheduleTests.cs)
-// ============================================================================
 
 /// <summary>World-level data owned by a single entity (the SimulationContext pattern).</summary>
 [Component]
@@ -77,9 +75,7 @@ public ref partial struct SnapCtxWorldWriterSystem : IWorldSystem
     public void Execute() => Ctx.SnapContext.Value += 1000f;
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
 public sealed class SingletonCurrentTickSnapshotTests : IDisposable
 {

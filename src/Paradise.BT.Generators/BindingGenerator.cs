@@ -7,20 +7,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Paradise.BT.Generators;
 
-/// <summary>
-/// Emits each tree's blackboard: collects the node types an <c>IBehaviorTreeBuilder</c>
-/// implementation names, unions their access, and emits a <c>{Type}Blackboard</c> plus its
-/// <c>Bind</c>. The interface rather than an attribute, so the shape is compile-checked — a tree
-/// type must have a <c>Build</c> — and a tree can be a type parameter.
-///
-/// The union of the nodes' access IS the tree's contract — there is no hand-maintained row to
-/// check against, so nothing can drift stale when a node is added or removed. The one rule left
-/// is that a component may not be written (PBT0008): components bind read-only by value.
-///
-/// Takes no reference on Paradise.ECS and could not: a type is a component when it carries
-/// [Component] or implements an interface NAMED Paradise.ECS.IComponent. Everything else is a
-/// caller-supplied extra.
-/// </summary>
+/// <summary>Generates a blackboard and Bind method from each tree's combined node access.</summary>
+/// <remarks>Components bind read-only by value; writes report PBT0008.
+/// Components are recognized by ECS attribute/interface names without referencing the ECS assembly.</remarks>
 [Generator]
 public sealed class BindingGenerator : IIncrementalGenerator
 {
@@ -49,9 +38,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             .Where(static b => b.HasValue)
             .Select(static (b, _) => b!.Value);
 
-        // The builders BTreeNodeGenerator will emit for nodes declared here. Derived from the same
-        // [Builder] declarations it reads, because its output is not visible to this generator —
-        // so a tree saying `new ThreatNear(0.1f)` is recovered by name against this table.
+        // Recover local builders by name: this generator cannot see BTreeNodeGenerator's output.
         var builders = context.SyntaxProvider.CreateSyntaxProvider(
                 predicate: static (node, _) =>
                     BTreeNodeGenerator.IsStructDeclaration(node)
@@ -65,16 +52,10 @@ public sealed class BindingGenerator : IIncrementalGenerator
             static (spc, data) => Emit(spc, data.Left, data.Right));
     }
 
-    // ===================== collection =====================
+    // collection
 
-    /// <summary>
-    /// What one node type declares it touches, read straight off the SYMBOL.
-    ///
-    /// Off the symbol, not off a syntax scan of the compilation, and that distinction is the whole
-    /// point: a node can live in a referenced assembly. <c>DelayTimerNode</c> ships in
-    /// Paradise.BT.Nodes and has no declaration syntax here at all, so a source-only pass would
-    /// silently give it no access and leave its delta time out of the blackboard.
-    /// </summary>
+    /// <summary>Collects node access from its body and metadata.</summary>
+    /// <remarks>Referenced nodes have no source here, so their access must be read from symbols.</remarks>
     private static ImmutableArray<Access> CollectAccess(
         INamedTypeSymbol symbol, Compilation compilation, System.Threading.CancellationToken ct)
     {
@@ -108,10 +89,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 symbol.Name, t.ToDisplayString(), t.Name, kind, IsComponent(t)));
         }
 
-        // The generated counterpart of those attributes: the node's DECLARING assembly publishes
-        // its body-scanned access as [assembly: NodeAccess(...)], so a cross-assembly node needs
-        // no hand-written declarations at all. Duplicates with the sources above are harmless —
-        // the blackboard merges per type.
+        // Read body-scanned access published by the declaring assembly; duplicate access merges per type.
         foreach (AttributeData attr in symbol.ContainingAssembly.GetAttributes())
         {
             ct.ThrowIfCancellationRequested();
@@ -158,13 +136,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return access.ToImmutable();
     }
 
-    /// <summary>
-    /// The builder BTreeNodeGenerator will emit for a <c>[Builder]</c> node, as (name, access).
-    ///
-    /// The naming rule is duplicated from that generator — an optional name argument, else the
-    /// type name with a trailing "Node" removed — because the two cannot share a computed value
-    /// across the generator boundary. If that rule changes there, it changes here.
-    /// </summary>
+    /// <summary>Resolves the name and access of a builder that BTreeNodeGenerator will emit.</summary>
+    /// <remarks>Uses its shared suffix rule when the Builder attribute does not override the name.</remarks>
     private static BuilderModel? GetBuilder(
         GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
@@ -201,22 +174,14 @@ public sealed class BindingGenerator : IIncrementalGenerator
             return null;
         }
 
-        name ??= symbol.Name.EndsWith("Node", System.StringComparison.Ordinal)
-            ? symbol.Name.Substring(0, symbol.Name.Length - 4)
-            : symbol.Name;
+        name ??= BTreeNodeGenerator.StripNodeSuffix(symbol.Name);
 
         return new BuilderModel(
             name, CollectAccess(symbol, ctx.SemanticModel.Compilation, ct));
     }
 
-    /// <summary>
-    /// Read a node's access out of its BODY: <c>GetData</c> is a read, <c>SetData</c> a write.
-    ///
-    /// Only where the body EXISTS, which is the rule: a node declared here is scanned and needs no
-    /// attributes; one from a referenced assembly has no syntax and is read from its attributes.
-    /// <c>DeclaringSyntaxReferences</c> is that test. The two are unioned, so a node reaching the
-    /// blackboard somewhere this cannot follow (PBT0010) can still say so by hand.
-    /// </summary>
+    /// <summary>Collects GetData reads and SetData writes from locally declared node bodies.</summary>
+    /// <remarks>Referenced nodes use metadata instead; explicit attributes supplement access hidden behind helpers.</remarks>
     private static void ScanBody(
         INamedTypeSymbol symbol,
         Compilation compilation,
@@ -281,9 +246,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             return null;
         }
 
-        // Every node type the type MENTIONS, in any spelling: `new StrikeNode()`, `Node<T>(...)`,
-        // a `typeof`. All of them surface as a TypeSyntax, so one sweep catches each. Deliberately
-        // an over-approximation: a stray mention widens the blackboard, never silently misses.
+        // Scan all type mentions, including typeof and generic arguments; extra mentions may widen access.
         var access = ImmutableArray.CreateBuilder<Access>();
         var unresolved = ImmutableArray.CreateBuilder<string>();
         var seen = new HashSet<string>(System.StringComparer.Ordinal);
@@ -291,23 +254,13 @@ public sealed class BindingGenerator : IIncrementalGenerator
         {
             ct.ThrowIfCancellationRequested();
 
-            // GetSymbolInfo, not GetTypeInfo: an identifier standing in TYPE position is not an
-            // expression, so GetTypeInfo returns null for the `SeekNode` in `new SeekNode()` — the
-            // single most common way a tree names a node. GetTypeInfo is still worth asking as a
-            // fallback, for positions where the type is inferred rather than named.
+            // Resolve type-position names through GetSymbolInfo; use GetTypeInfo for inferred types.
             ITypeSymbol? resolved = ctx.SemanticModel.GetSymbolInfo(ts, ct).Symbol as ITypeSymbol
                 ?? ctx.SemanticModel.GetTypeInfo(ts, ct).Type;
 
             if (resolved is not INamedTypeSymbol t || t.TypeKind == TypeKind.Error)
             {
-                // An unresolvable name in a tree is very often a builder GENERATED for a node in
-                // this same compilation — `new ThreatNear(0.1f)`. BTreeNodeGenerator emits it,
-                // this generator cannot see it, and the reference is an error type here even
-                // though the finished compilation is fine.
-                //
-                // Recovered by NAME against the builder table below, which is derived from the
-                // same [Builder] declarations BTreeNodeGenerator reads. Paradise.ECS does exactly
-                // this where SystemGenerator meets QueryableGenerator's output.
+                // Local generated builders are unresolved until other generators finish; recover them by name.
                 if (ts is IdentifierNameSyntax or GenericNameSyntax)
                 {
                     unresolved.Add(((SimpleNameSyntax)ts).Identifier.ValueText);
@@ -316,9 +269,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 continue;
             }
 
-            // A builder wraps its node as a generic argument — `Sequence : CompositeNode<SequenceNode>`
-            // — so the DSL names the node type after all, in metadata rather than in the tree's
-            // source. Following it is what lets a tree written with the builder DSL be bound.
+            // The builder's generic base carries its node type into the binding scan.
             INamedTypeSymbol? node = Implements(t, NodeDataInterface) ? t : BuiltNodeOf(t);
 
             if (node is not null && seen.Add(node.ToDisplayString()))
@@ -327,10 +278,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
             }
         }
 
-        // Nodes a FACTORY builds: a factory returning a concrete builder keeps the node type in
-        // its return type, so the sweep can follow it — even for a factory in a referenced
-        // assembly. One returning the bare BTreeNode base discards it; name such nodes in
-        // [BehaviorTreeBinding(Also = ...)].
+        // Concrete factory return types preserve node identity, including across assemblies.
+        // Use BehaviorTreeBinding.Also when a factory returns only BTreeNode.
         foreach (InvocationExpressionSyntax invocation in
             decl.DescendantNodes().OfType<InvocationExpressionSyntax>())
         {
@@ -340,9 +289,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
                 continue;
             }
 
-            // A factory RETURNING a builder keeps the node type: `Seq(…)` is typed Sequence, which
-            // is CompositeNode<SequenceNode>. That is the difference between this and the factories
-            // that were deleted, which returned a bare definition and told you nothing.
+            // Follow the node type carried by a concrete builder return type.
             if (factory.ReturnType is INamedTypeSymbol returned
                 && BuiltNodeOf(returned) is INamedTypeSymbol returnedNode
                 && seen.Add(returnedNode.ToDisplayString()))
@@ -410,12 +357,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return false;
     }
 
-    /// <summary>
-    /// Is this type an ECS component? Two tests, because neither alone is enough: one declared
-    /// HERE gets its <c>: IComponent</c> from the ECS generator, which this generator cannot see,
-    /// so it is recognised by the [Component] attribute; one from a REFERENCED assembly is already
-    /// compiled, so there the interface is real metadata.
-    /// </summary>
+    /// <summary>Recognizes ECS components by their attribute or implemented interface.</summary>
+    /// <remarks>Local interfaces may still await generation; referenced components already carry them.</remarks>
     private static bool IsComponent(ITypeSymbol type)
     {
         foreach (AttributeData attr in type.GetAttributes())
@@ -431,17 +374,12 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return Implements(type, ComponentInterface);
     }
 
-    /// <summary>
-    /// The node a builder class wraps, or null if this is not one. Builders derive from
-    /// <c>LeafNode&lt;T&gt;</c> and friends, so the node survives as a generic argument on the base
-    /// — which a factory returning a bare definition does not.
-    /// </summary>
+    /// <summary>Finds the node type carried by a builder's generic base, or returns null.</summary>
     private static INamedTypeSymbol? BuiltNodeOf(INamedTypeSymbol type)
     {
         for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
         {
-            if (current.IsGenericType
-                && current.TypeArguments.Length == 1
+            if (current.TypeArguments.Length == 1
                 && current.ContainingNamespace?.ToDisplayString() == "Paradise.BT.Builder"
                 && current.TypeArguments[0] is INamedTypeSymbol node
                 && Implements(node, NodeDataInterface))
@@ -466,7 +404,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return false;
     }
 
-    // ===================== verification + emit =====================
+    // verification + emit
 
     private static void Emit(
         SourceProductionContext spc,
@@ -549,17 +487,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         }
 
         string bb = binding.ClassName + "Blackboard";
-        string extras = binding.ClassName + "Extras";
-        // What flows IN is a parameter; what comes BACK is Extras. A component is always an input,
-        // and so is a non-component the tree only reads — delta time, a sensed value the caller
-        // computed. Only what a node WRITES needs somewhere the caller can read it from, which is
-        // the one thing a by-value parameter cannot be.
-        ImmutableArray<Access> inputs = access
-            .Where(a => a.IsComponent || a.Kind != AccessKind.Write)
-            .ToImmutableArray();
-        ImmutableArray<Access> outputs = access
-            .Where(a => !a.IsComponent && a.Kind == AccessKind.Write)
-            .ToImmutableArray();
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -572,7 +499,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        // ----- blackboard -----
+        // blackboard
         sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard — the union of its nodes' access.");
         sb.AppendLine("///");
         sb.AppendLine("/// Holds a REFERENCE to everything it touches: what the tree reads by");
@@ -671,9 +598,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        // Held by `ref readonly`, so there is nowhere for a write to go. PBT0009 refuses a node
-        // that performs one and PBT0008 one that declares it, leaving this reachable only through
-        // a hand-written blackboard — where silence would be a write that vanishes.
+        // Readonly bindings must reject writes that bypass the compile-time diagnostics.
         foreach (Access a in access.Where(a => a.Kind != AccessKind.Write))
         {
             sb.AppendLine("        if (typeof(T) == typeof(global::" + a.TypeFqn + "))");
@@ -699,12 +624,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    /// <summary>
-    /// One identifier per access entry, keyed by FQN. Simple names are the readable default;
-    /// two same-named types from different namespaces both survive the FQN-keyed merge, so a
-    /// colliding GROUP is suffixed with each member's namespace — emitting two `_target` fields
-    /// would be CS0102 in a file the user cannot edit.
-    /// </summary>
+    /// <summary>Maps fully qualified access types to identifiers, adding namespace suffixes for name collisions.</summary>
     private static Dictionary<string, string> NameIdentifiers(ImmutableArray<Access> access)
     {
         var map = new Dictionary<string, string>(System.StringComparer.Ordinal);
@@ -731,7 +651,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return map;
     }
 
-    // ===================== models =====================
+    // models
 
     private enum AccessKind
     {
@@ -739,10 +659,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
         Write,
     }
 
-    // Plain structs with explicit IEquatable, matching BTreeNodeGenerator. Not records: the
-    // generator targets netstandard2.0, which has no IsExternalInit. Value equality is also what
-    // makes the incremental cache work at all — ImmutableArray compares by REFERENCE by default,
-    // so every member holding one has to be compared with SequenceEqual by hand.
+    // Explicit equality supports netstandard2.0 and compares ImmutableArray contents for incremental caching.
     private readonly struct Access : System.IEquatable<Access>
     {
         /// <summary>The node that declared it — carried so a diagnostic can name the culprit.</summary>
@@ -807,10 +724,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
         public readonly string Namespace;
         public readonly string ClassName;
 
-        /// <summary>The tree type's fully qualified name (with <c>global::</c>) — the identity
-        /// the generated blackboard's <c>IBlackboardFor&lt;&gt;</c> names. Never assembled from
-        /// <see cref="Namespace"/> + <see cref="ClassName"/>, which mangles nested and generic
-        /// trees.</summary>
+        /// <summary>The tree symbol's fully qualified name for IBlackboardFor.</summary>
+        /// <remarks>Namespace/name concatenation would misidentify nested and generic trees.</remarks>
         public readonly string TreeFqn;
 
         /// <summary>Every access every node in this tree declares, already resolved. Flattened

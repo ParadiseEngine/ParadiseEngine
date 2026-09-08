@@ -11,18 +11,14 @@ public readonly record struct ChunkHandle
 {
     private readonly PackedVersion _packed;
 
-    /// <summary>
-    /// Creates a new ChunkHandle from an Id and Version.
-    /// </summary>
+    /// <summary>Creates a new ChunkHandle from an Id and Version.</summary>
     /// <param name="id">The index of the chunk in the ChunkManager (0 to ~1M-1).</param>
     /// <param name="version">Incrementing version for stale handle detection (must be >= 1 for valid handles).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ChunkHandle(int id, ulong version)
         => _packed = new PackedVersion(version, id);
 
-    /// <summary>
-    /// The index of the chunk in the ChunkManager.
-    /// </summary>
+    /// <summary>The index of the chunk in the ChunkManager.</summary>
     public int Id
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -39,9 +35,7 @@ public readonly record struct ChunkHandle
         get => _packed.Version;
     }
 
-    /// <summary>
-    /// The Invalid handle (default value, all zeros).
-    /// </summary>
+    /// <summary>The Invalid handle (default value, all zeros).</summary>
     public static readonly ChunkHandle Invalid = default;
 
     /// <summary>

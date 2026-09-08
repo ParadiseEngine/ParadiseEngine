@@ -2,19 +2,8 @@ using Microsoft.Coyote.Specifications;
 
 namespace Paradise.Features.CoyoteTest;
 
-/// <summary>The switchboard's cross-thread rule, systematically: <b>the last thing
-/// <see cref="FeatureSwitches.Changed"/> said about a feature is what
-/// <see cref="FeatureSwitches.IsEnabled"/> now answers for it.</b>
-///
-/// <para>That is not a nicety. A subscriber ACTS on the announcement — a render feature releases
-/// a target, retracts a shadow plan, or zeroes a uniform buffer another feature binds every
-/// frame. If the last announcement can contradict the state everyone reads, the feature is left
-/// switched on with its state retracted (a black picture) or switched off with a target still
-/// bound. The window is a check-then-act: read the current state, write the new one, decide
-/// whether that was a change. Two writers can interleave inside it.</para>
-///
-/// <para>Written as awaited joins rather than <c>Task.WaitAll</c>, so Coyote's hang detection
-/// stays on and means something.</para></summary>
+/// <summary>Checks that Changed notifications agree with the current switch state under concurrent writes.</summary>
+/// <remarks>Awaited joins keep Coyote deadlock detection enabled.</remarks>
 public static class FeatureSwitchesTests
 {
     private static readonly FeatureDefinition s_bloom = new("rendering.bloom", true, "The HDR bloom chain.");
@@ -102,9 +91,7 @@ public static class FeatureSwitchesTests
         watcher.AssertAgreesWith(switches, s_bloom.Id);
     }
 
-    /// <summary>A subsystem declaring its features while a config layer is being applied to names
-    /// it has not claimed yet — the startup order the switchboard promises to be indifferent to.
-    /// The override must win, and no read may throw or see a torn declaration.</summary>
+    /// <summary>Verifies overrides win when configuration and feature declaration run concurrently.</summary>
     public static async Task DeclareRacingApply_LeavesTheOverrideInForce()
     {
         var switches = new FeatureSwitches();

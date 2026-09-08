@@ -292,6 +292,10 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public PbrBloom Bloom = new();
+    public PbrTaa Taa = new();
+    public PbrFxaa Fxaa = new();
+    /// <summary>Simulation seconds since the previous frame, clamped by temporal post effects.</summary>
+    public float DeltaSeconds = 1f / 60f;
     /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned
     /// via <c>--anim-time</c> for deterministic screenshots/parity).</summary>
     public float ElapsedSeconds;

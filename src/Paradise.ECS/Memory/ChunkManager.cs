@@ -4,22 +4,11 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Manager for Chunk memory allocations.
-/// Owns native memory and issues safe handles with version-based stale detection.
-/// Single-threaded version without concurrent access support.
-///
-/// Memory layout:
-/// - Uses ChunkArray to store ChunkMeta entries in fixed-size blocks
-/// - Each block can hold multiple entries (ChunkSize / sizeof(ChunkMeta))
-/// - Blocks are lazily allocated on-demand
-/// - Maximum capacity: MaxBlocks * EntriesPerBlock
-/// </summary>
+/// <summary>Owns native chunks and issues versioned handles for stale-handle detection.</summary>
+/// <remarks>Single-threaded; metadata uses lazy ChunkArray blocks with capacity MaxBlocks × EntriesPerBlock.</remarks>
 public sealed unsafe class ChunkManager : IChunkManager
 {
-    /// <summary>
-    /// Metadata for a single chunk slot.
-    /// </summary>
+    /// <summary>Metadata for a single chunk slot.</summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct ChunkMeta
     {
@@ -38,9 +27,7 @@ public sealed unsafe class ChunkManager : IChunkManager
     /// <inheritdoc />
     public int ChunkSize => _chunkSize;
 
-    /// <summary>
-    /// Creates a new ChunkManager with the specified configuration.
-    /// </summary>
+    /// <summary>Creates a new ChunkManager with the specified configuration.</summary>
     /// <param name="allocator">The memory allocator to use.</param>
     /// <param name="chunkSize">The size of each chunk in bytes.</param>
     /// <param name="maxMetaBlocks">The maximum number of meta blocks.</param>
@@ -64,15 +51,11 @@ public sealed unsafe class ChunkManager : IChunkManager
         return new ChunkManager(config.ChunkAllocator, chunkSize: TConfig.ChunkSize, maxMetaBlocks: TConfig.MaxMetaBlocks, initializeChunkCapacity: config.DefaultChunkCapacity);
     }
 
-    /// <summary>
-    /// Gets a reference to the metadata for a given slot id.
-    /// </summary>
+    /// <summary>A reference to the metadata for a given slot id.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref ChunkMeta GetMeta(int id) => ref _metas.GetRef(id);
 
-    /// <summary>
-    /// Allocates a new Chunk and returns a handle to it.
-    /// </summary>
+    /// <summary>Allocates a new Chunk and returns a handle to it.</summary>
     public ChunkHandle Allocate()
     {
         ThrowHelper.ThrowIfDisposed(_disposed, this);
@@ -120,7 +103,6 @@ public sealed unsafe class ChunkManager : IChunkManager
         if (packed.Version != handle.Version)
             return; // Already freed or stale handle
 
-        // Check if chunk is borrowed
         if (packed.Index != 0)
             ThrowHelper.ThrowChunkInUse(handle);
 
@@ -188,9 +170,7 @@ public sealed unsafe class ChunkManager : IChunkManager
         return true;
     }
 
-    /// <summary>
-    /// Releases a borrow on a chunk acquired via <see cref="Acquire(ChunkHandle)"/>.
-    /// </summary>
+    /// <summary>Releases a borrow on a chunk acquired via <see cref="Acquire(ChunkHandle)"/>.</summary>
     /// <param name="handle">The chunk handle.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Release(ChunkHandle handle)
@@ -199,9 +179,7 @@ public sealed unsafe class ChunkManager : IChunkManager
         Release(handle.Id);
     }
 
-    /// <summary>
-    /// Releases the borrow on a chunk by ID.
-    /// </summary>
+    /// <summary>Releases the borrow on a chunk by ID.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Release(int id)
     {

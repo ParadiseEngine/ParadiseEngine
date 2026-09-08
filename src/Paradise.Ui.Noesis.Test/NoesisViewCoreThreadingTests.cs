@@ -4,21 +4,9 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis.Test;
 
-/// <summary>
-/// The threading invariant a two-thread host depends on: a View created and updated on one
-/// thread still routes input delivered from ANOTHER thread, correctly and without tearing,
-/// because <see cref="NoesisViewCore"/> serializes the two behind its sync lock.
-///
-/// This is what lets a host put the UI's view and <c>View.Update</c> on the RENDER thread —
-/// where its ViewModel can read presentation state directly — while the GAME thread keeps
-/// asking "did the UI consume this?" synchronously as it drains raw input. Without it, that
-/// split silently stops blocking input and every click reaches the game twice.
-///
-/// Read the verdict carefully: <c>View.MouseButtonDown</c> reports HANDLED, not HIT. A bare
-/// Grid or Rectangle is hit-testable but handles nothing, so it returns false — which is why
-/// the handlers below mark the event handled, and why a host relying on this for input blocking
-/// must put something that actually handles input under the pointer.
-/// </summary>
+/// <summary>Checks synchronized input and view updates from different host threads.</summary>
+/// <remarks>The core lock serializes input against view updates. Routed handlers establish
+/// delivery; pointer-press consumption follows the hit-test contract on IUiInput.</remarks>
 [NotInParallel]
 public class NoesisViewCoreThreadingTests
 {

@@ -5,9 +5,7 @@ using Zio;
 
 namespace Paradise.Cli.Test;
 
-/// <summary>
-/// The watch loop's state machine, driven without a filesystem and without a notify icon.
-/// </summary>
+/// <summary>The watch loop's state machine, driven without a filesystem and without a notify icon.</summary>
 public class WatchSessionTests
 {
     private static readonly UPath s_output = "/game/build";

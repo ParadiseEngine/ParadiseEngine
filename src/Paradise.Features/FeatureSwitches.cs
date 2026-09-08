@@ -5,49 +5,29 @@ using System.Linq;
 
 namespace Paradise.Features;
 
-/// <summary>The engine's feature configuration: the features a build declares and the switch on
-/// each one. One object per process, handed to every subsystem that has something to switch.
-///
-/// <para><b>Declarations and switches are ONE object deliberately.</b> A switch means nothing
-/// without the declaration that gives it a default and a description, and a declaration nobody
-/// can flip is documentation. Splitting them only creates a pair that must be passed together
-/// and can be passed mismatched.</para>
-///
-/// <para><b>Order does not matter.</b> Overrides are applied by NAME and kept whether or not the
-/// feature has been declared yet, because a config file is read at startup and the subsystems
-/// that own the features are constructed after it. A name no declaration ever claims stays
-/// visible in <see cref="Unknown"/> instead of disappearing, so a typo in a config file does not
-/// read as a feature that is simply off.</para>
-///
-/// <para>Reads are lock-free and safe from any thread — a render thread asks per frame while a
-/// debug panel flips a switch on another. Writes are serialized against each other, and
-/// <see cref="Changed"/> is raised inside that same critical section on the thread that made the
-/// change, so the last announcement always describes the state everyone can now read (see
-/// <c>_writeLock</c>, and <c>Paradise.Features.CoyoteTest</c> for the interleavings that
-/// pins).</para></summary>
+/// <summary>Shares feature declarations, overrides and settings across the process.</summary>
+/// <remarks>
+/// <para>Declarations and switches stay together so subsystems cannot receive mismatched
+/// configuration. Overrides are retained by name before declaration; unclaimed names appear in
+/// <see cref="Unknown"/> so stale entries and typos remain visible.</para>
+/// <para>Reads are lock-free and thread-safe. Writes and <see cref="Changed"/> notifications
+/// share a critical section on the writer's thread, preserving notification order.
+/// See <c>Paradise.Features.CoyoteTest</c> for concurrency coverage.</para>
+/// </remarks>
 public sealed class FeatureSwitches : IFeatureSwitches
 {
     private readonly ConcurrentDictionary<FeatureId, FeatureDefinition> _declared = new();
     private readonly ConcurrentDictionary<string, bool> _overrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FeatureSettings> _settings = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Serializes WRITES, and holds while <see cref="Changed"/> is raised. Reads never
-    /// take it — a render thread asking per frame must not queue behind a debug panel.
-    ///
-    /// <para><b>The event is raised inside it on purpose.</b> Deciding "did this change?" and
-    /// announcing it are one step: two threads setting the same feature to different values
-    /// would otherwise both decide, then announce in whichever order they were scheduled, and the
-    /// LAST announcement could contradict the state everybody now reads. A feature that acts on
-    /// the announcement — releasing a target, retracting a plan — would be left disagreeing with
-    /// its own switch, which is precisely the class of bug
-    /// <c>IRenderFeature.OnEnabledChanged</c> exists to prevent. Handlers therefore run under the
-    /// lock; <c>Monitor</c> is reentrant, so a handler that flips another switch nests rather
-    /// than deadlocks.</para>
-    ///
-    /// <para>An <c>object</c> rather than a <c>System.Threading.Lock</c>: Coyote (1.7.11) rewrites
-    /// <c>Monitor.Enter</c>/<c>Exit</c> and cannot intercept <c>Lock.EnterScope</c>, so the newer
-    /// type would make the interleavings around this lock invisible to
-    /// <c>Paradise.Features.CoyoteTest</c>.</para></summary>
+    /// <summary>Serializes writes and their <see cref="Changed"/> notifications without blocking reads.</summary>
+    /// <remarks>
+    /// <para>Keep notifications inside the lock so concurrent writers cannot announce stale state.
+    /// Subscribers may retract state in response, as <c>IRenderFeature.OnEnabledChanged</c> does.
+    /// <c>Monitor</c> is reentrant, allowing handlers to set other switches.</para>
+    /// <para>Use <c>object</c>: Coyote 1.7.11 intercepts <c>Monitor.Enter</c>/<c>Exit</c>, but not
+    /// <c>System.Threading.Lock.EnterScope</c>.</para>
+    /// </remarks>
     private readonly object _writeLock = new();
 
     /// <summary>An empty configuration: nothing declared, nothing overridden.</summary>
@@ -72,21 +52,18 @@ public sealed class FeatureSwitches : IFeatureSwitches
     /// <inheritdoc/>
     public IReadOnlyCollection<FeatureDefinition> Definitions => _declared.Values.ToArray();
 
-    /// <summary>The overridden names no declaration claims: a feature from another build, a
-    /// feature that was removed, or a typo. Reported rather than thrown, because only the host
-    /// knows whether a stale line in its config file is worth failing over — and reported rather
-    /// than logged, so this assembly needs no logging dependency to say it.</summary>
+    /// <summary>Gets overridden or configured names without a matching declaration.</summary>
+    /// <remarks>Hosts decide whether stale entries or typos are fatal; returning them as data keeps
+    /// this assembly independent of logging.</remarks>
     public IReadOnlyCollection<string> Unknown =>
         _overrides.Keys.Concat(_settings.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(name => !FeatureId.TryParse(name, out var id) || !_declared.ContainsKey(id))
             .ToArray();
 
-    /// <summary>Declares a feature. Idempotent for an identical declaration, so a switchboard
-    /// shared by two renderers sees the built-ins declared twice and minds neither.</summary>
+    /// <summary>Declares a feature, accepting repeated identical declarations from shared consumers.</summary>
     /// <exception cref="InvalidOperationException">The same name is already declared with a
-    /// different default or summary — two owners for one switch, which no runtime rule can
-    /// resolve.</exception>
+    /// different default or summary.</exception>
     public FeatureDefinition Declare(FeatureDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -122,9 +99,9 @@ public sealed class FeatureSwitches : IFeatureSwitches
         id.IsEmpty ? FeatureSettings.None
             : _settings.TryGetValue(id.Value, out var settings) ? settings : FeatureSettings.None;
 
-    /// <summary>Turns <paramref name="id"/> on or off now. The next thing that asks sees the new
-    /// state — a render feature stops declaring its passes on the next frame, a gated system
-    /// stops running on the next schedule run.</summary>
+    /// <summary>Sets <paramref name="id"/> immediately for subsequent reads.</summary>
+    /// <remarks>Render features observe changes next frame; gated systems observe them next
+    /// schedule run.</remarks>
     public void Set(FeatureId id, bool enabled)
     {
         if (id.IsEmpty) throw new ArgumentException("A switch needs a feature name.", nameof(id));
@@ -152,12 +129,9 @@ public sealed class FeatureSwitches : IFeatureSwitches
         }
     }
 
-    /// <summary>Applies a whole configuration layer: its switches and its settings, as one write.
-    /// Every name it mentions takes its value; names it does not mention keep theirs.
-    ///
-    /// <para>Callable at runtime, which is what makes an <c>engine.json</c> re-read a live
-    /// change: <see cref="Changed"/> and <see cref="SettingsChanged"/> both fire for what
-    /// actually moved.</para></summary>
+    /// <summary>Applies a layer's switches and settings under one write lock, preserving unmentioned names.</summary>
+    /// <remarks>Runtime reloads raise <see cref="Changed"/> and <see cref="SettingsChanged"/> for
+    /// changed values.</remarks>
     public void Apply(EngineConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -183,8 +157,7 @@ public sealed class FeatureSwitches : IFeatureSwitches
         {
             var before = _settings.TryGetValue(name, out var existing) ? existing : FeatureSettings.None;
             _settings[name] = settings;
-            // A malformed name has no id to announce with; it is still kept, so Unknown reports it
-            // rather than a stale line disappearing — the same rule the switches follow.
+            // Retain malformed names for Unknown; they have no id for notifications.
             if (!ReferenceEquals(before, settings) && !string.Equals(before.Text, settings.Text, StringComparison.Ordinal)
                 && FeatureId.TryParse(name, out var id))
             {
@@ -198,14 +171,12 @@ public sealed class FeatureSwitches : IFeatureSwitches
     public void Apply(FeatureOverrides overrides)
     {
         ArgumentNullException.ThrowIfNull(overrides);
-        // One lock for the whole layer, not one per name: a layer is applied as a unit, and half
-        // of a config file is not a state anybody should be able to observe or react to.
+        // Hold the lock across the layer so other writers cannot interleave changes.
         lock (_writeLock)
         {
             foreach (var (name, enabled) in overrides)
             {
-                // A malformed name has no id to raise Changed with and no feature to reach; it is
-                // kept so Unknown can report it, which is the whole reason it is not dropped here.
+                // Preserve invalid names for Unknown; they cannot raise Changed.
                 if (!FeatureId.TryParse(name, out var id))
                 {
                     _overrides[name] = enabled;

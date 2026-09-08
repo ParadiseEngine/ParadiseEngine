@@ -2,32 +2,14 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Stateless, order-independent deterministic hashing for seeded randomness.
-/// <para>
-/// Intended use: per-(seed, entity, tick) random streams for parallel systems. Because every
-/// draw is a pure function of its inputs — <c>Hash01(worldSeed, entity.Id, tick)</c> — the
-/// result does not depend on iteration order, thread count, or how many other draws happened
-/// first. This makes it the precondition for fully-parallel system execution: two systems (or
-/// two chunks of the same system) can consume "random" values concurrently and still produce
-/// bit-identical simulations. Extra values distinguish independent streams for the same entity
-/// and tick (e.g. a stream index per decision).
-/// </para>
-/// <para>
-/// STABILITY PROMISE: the output of every method in this class is a PERSISTENT CONTRACT.
-/// Values are derived from SplitMix64 mixing and must NEVER change across engine versions once
-/// shipped — save files, replays, and cross-machine lockstep all depend on replaying the exact
-/// same streams. Do not "improve" the mixing function, the combining order, the floating-point
-/// scaling, or the range mapping; any change is a save/replay-breaking event.
-/// </para>
-/// <para>
-/// Inputs are combined by mixing each value in sequence (<c>Mix(Mix(seed) + a)</c> …), never by
-/// pre-folding them together, so argument order matters: <c>Hash(s, 1, 0) != Hash(s, 0, 1)</c>.
-/// Signed <see cref="long"/> (and therefore <see cref="int"/>, which implicitly widens to
-/// <see cref="long"/>) inputs are sign-extended and reinterpreted as <see cref="ulong"/>, so
-/// <c>Hash(s, -1)</c> equals <c>Hash(s, 0xFFFF_FFFF_FFFF_FFFF)</c>.
-/// </para>
-/// </summary>
+/// <summary>Stateless seeded randomness independent of iteration order and threading.</summary>
+/// <remarks>
+/// Use seed, entity ID, tick, and an optional stream index to identify each draw.
+/// <para>Outputs are a persistent save/replay contract: never change SplitMix64 mixing, argument
+/// combination order, floating-point scaling, or range mapping across shipped versions.</para>
+/// <para>Arguments mix sequentially, so their order matters. Signed inputs are sign-extended and
+/// reinterpreted as ulong: -1 matches 0xFFFF_FFFF_FFFF_FFFF.</para>
+/// </remarks>
 public static class DeterministicHash
 {
     /// <summary>SplitMix64 increment (2^64 / golden ratio); part of the persistent contract.</summary>

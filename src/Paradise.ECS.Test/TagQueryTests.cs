@@ -170,9 +170,7 @@ public sealed class TagQueryTests : IDisposable
         await Assert.That(count).IsEqualTo(2);
     }
 
-    // ---------------------------------------------------------------------------------------
     // Singletons — "exactly one" has to mean exactly one TAGGED entity.
-    // ---------------------------------------------------------------------------------------
 
     private TestTaggedSingleton.Singleton<ComponentMask, DefaultConfig> ResolveSingleton()
         => TestTaggedSingleton.Singleton<ComponentMask, DefaultConfig>.Resolve(_world, null);
@@ -263,9 +261,7 @@ public sealed class TagQueryTests : IDisposable
         await Assert.That(ResolveSingleton().TestPosition.X).IsEqualTo(2f);
     }
 
-    // ---------------------------------------------------------------------------------------
     // [WithoutTag] — the invert: the row is kept when the bit is clear.
-    // ---------------------------------------------------------------------------------------
 
     private int CountUntagged()
     {

@@ -45,9 +45,7 @@ public static class WatchSignalsTests
             "A rebuild requested around a wait must still be pending: either the wait woke and consumed it, or the flag remains for the next loop.");
     }
 
-    /// <summary>
-    /// Stop racing a wait: the wait must return, and the loop must see that it is stopping.
-    /// </summary>
+    /// <summary>Stop racing a wait: the wait must return, and the loop must see that it is stopping.</summary>
     [Test]
     public static async Task StopRacingWait_IsVisibleAndUnblocks()
     {

@@ -2,9 +2,7 @@ using System.Diagnostics;
 
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates tag-based queries using QueryBuilder with manual tag filtering.
-/// </summary>
+/// <summary>Demonstrates tag-based queries using QueryBuilder with manual tag filtering.</summary>
 public static class TagQuerySample
 {
     public static void Run(World world, Entity playerEntity)
@@ -18,7 +16,6 @@ public static class TagQuerySample
             .With<EntityTags>()
             .Build(world);
 
-        // Define required tag masks
         var activeTagMask = TagMask.Empty.Set(IsActive.TagId);
         var visibleTagMask = TagMask.Empty.Set(IsVisible.TagId);
         var activeAndVisibleMask = activeTagMask.Or(visibleTagMask);
@@ -36,7 +33,6 @@ public static class TagQuerySample
         Console.WriteLine($"  Total active entities: {activeCount}");
         Debug.Assert(activeCount == 5); // player + 4 enemies (1 despawned)
 
-        // Query entities with multiple tags
         world.AddTag<IsVisible>(playerEntity);
 
         Console.WriteLine($"  Active AND visible entities:");
@@ -53,7 +49,6 @@ public static class TagQuerySample
         Console.WriteLine($"  Total: {activeVisibleCount}");
         Debug.Assert(activeVisibleCount == 1); // only player
 
-        // Query with both tags and components
         var movableQuery = QueryBuilder
             .Create()
             .With<Position>()

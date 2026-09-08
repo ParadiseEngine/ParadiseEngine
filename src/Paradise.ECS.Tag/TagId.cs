@@ -12,18 +12,14 @@ namespace Paradise.ECS;
 /// </remarks>
 public readonly record struct TagId
 {
-    /// <summary>
-    /// The unique value for this tag.
-    /// </summary>
+    /// <summary>The unique value for this tag.</summary>
     public int Value
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get;
     }
 
-    /// <summary>
-    /// Creates a TagId with the specified value.
-    /// </summary>
+    /// <summary>Creates a TagId with the specified value.</summary>
     /// <param name="value">The tag ID value.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TagId(int value)
@@ -31,23 +27,17 @@ public readonly record struct TagId
         Value = value;
     }
 
-    /// <summary>
-    /// Invalid tag ID representing no tag.
-    /// </summary>
+    /// <summary>Invalid tag ID representing no tag.</summary>
     public static readonly TagId Invalid = new(-1);
 
-    /// <summary>
-    /// Gets whether this ID is valid (non-negative).
-    /// </summary>
+    /// <summary>Whether this ID is valid (non-negative).</summary>
     public bool IsValid
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Value >= 0;
     }
 
-    /// <summary>
-    /// Implicitly converts a TagId to its integer value.
-    /// </summary>
+    /// <summary>Implicitly converts a TagId to its integer value.</summary>
     /// <param name="id">The tag ID.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator int(TagId id) => id.Value;

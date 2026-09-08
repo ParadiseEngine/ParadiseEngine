@@ -1,9 +1,6 @@
 namespace Paradise.Cli;
 
-/// <summary>
-/// What the tray icon is saying. A glance at the icon is supposed to answer "did my save get
-/// built", so the four states are the four answers, not a progress bar.
-/// </summary>
+/// <summary>The watcher's build state displayed by the tray.</summary>
 internal enum WatchStatus
 {
     /// <summary>The process is up and watching; no rebuild has finished this session yet.</summary>

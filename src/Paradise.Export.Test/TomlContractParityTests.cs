@@ -10,9 +10,7 @@ using Paradise.Export.Tests;
 
 namespace Paradise.Export.Test;
 
-/// <summary>
-/// The contract's TOML form against its JSON one.
-/// </summary>
+/// <summary>The contract's TOML form against its JSON one.</summary>
 /// <remarks>
 /// <para>
 /// <b>The assertion is value equality, not byte equality, and that is not a shortcut.</b> The

@@ -12,9 +12,7 @@ namespace Paradise.ECS;
 /// </summary>
 public sealed class JobWorkerPool : IDisposable
 {
-    /// <summary>
-    /// Number of work items claimed per atomic operation to reduce contention.
-    /// </summary>
+    /// <summary>Number of work items claimed per atomic operation to reduce contention.</summary>
     private const int BatchSize = 8;
 
     private const int StateIdle = 0;
@@ -62,14 +60,10 @@ public sealed class JobWorkerPool : IDisposable
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
 
-    /// <summary>
-    /// Gets the number of worker threads (excludes the main thread).
-    /// </summary>
+    /// <summary>The number of worker threads (excludes the main thread).</summary>
     public int WorkerCount => _workerCount;
 
-    /// <summary>
-    /// Initializes a new <see cref="JobWorkerPool"/> with the specified number of worker threads.
-    /// </summary>
+    /// <summary>Initializes a new <see cref="JobWorkerPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
     /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
@@ -193,7 +187,6 @@ public sealed class JobWorkerPool : IDisposable
 
         _invoker = null;
 
-        // Rethrow captured exceptions
         if (_exceptions is { IsEmpty: false })
         {
             throw new AggregateException(_exceptions.Select(e => e.SourceException));

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for EntityLocation 64-bit packed struct.
-/// </summary>
+/// <summary>Tests for EntityLocation 64-bit packed struct.</summary>
 public sealed class EntityLocationTests
 {
     #region Constructor and Property Tests

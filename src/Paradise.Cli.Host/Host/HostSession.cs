@@ -2,18 +2,8 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// The launcher's build and run, as the sequence of processes it takes. Every decision — build or
-/// not, restore or not, run the dll or hand the project to <c>dotnet watch</c> — is made here
-/// against an <see cref="IFileSystem"/> and executed through an <see cref="IProcessRunner"/>, so
-/// the sequence is what the tests assert on.
-/// </summary>
-/// <remarks>
-/// The game is a CHILD that this process waits on, not a detached launch: the caller (a terminal,
-/// Blender's supervised job) then has one handle whose exit is the game's exit, and whose stop —
-/// SIGTERM from Blender, Ctrl+C from a shell — the runner turns into a kill of the whole tree,
-/// <c>dotnet watch</c> included.
-/// </remarks>
+/// <summary>Chooses and executes launcher build, restore and run steps.</summary>
+/// <remarks>The runner waits for the game and forwards cancellation to its entire process tree, including dotnet watch.</remarks>
 internal sealed class HostSession
 {
     private readonly IFileSystem _fileSystem;

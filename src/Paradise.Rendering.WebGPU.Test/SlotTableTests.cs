@@ -77,11 +77,7 @@ public class SlotTableTests
     [Test]
     public async Task detach_then_count_reports_zero()
     {
-        // Regression for the iteration-4 OpenCara finding that claimed Detach forgot to decrement
-        // a _count field. SlotTable.Count is actually derived — `_slots.Count - _free.Count` —
-        // and both Remove and Detach push onto _free, so the counter is consistent across paths.
-        // This test pins that invariant so any future refactor that introduces a stored _count
-        // field won't reintroduce the drift the finding imagined.
+        // Detach must reduce the live count immediately and make the slot reusable.
         var table = new SlotTable<Probe>();
         var (i, g) = table.Add(new Probe());
         await Assert.That(table.Count).IsEqualTo(1);

@@ -10,22 +10,9 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.ImGui.Sample;
 
-/// <summary>The ImGui stack end to end, through the seams a real host uses: an
-/// <see cref="IWindow"/> for input, <c>WebGpuRenderer.OverlayPass</c> for composition, and a
-/// system-font mount for glyphs.
-///
-/// <code>
-/// dotnet run --project src/Paradise.Ui.ImGui.Sample                      # windowed
-/// dotnet run --project src/Paradise.Ui.ImGui.Sample -- --capture ui.png  # offscreen, writes a PNG
-/// </code>
-///
-/// The capture mode exists so this is verifiable without a display — and without a human. It
-/// renders a fixed number of frames offscreen and writes the last one out, which is the only way
-/// to check that what the texture protocol uploaded actually LOOKS like text.
-///
-/// Sim and render run on one thread here, which is both the simplest thing a sample can do and
-/// the configuration the editor uses. The handoff still goes through
-/// <see cref="ImGuiFrameExchange"/> exactly as it would across two.</summary>
+/// <summary>Demonstrates ImGui input, texture transfer and WebGPU overlay rendering.</summary>
+/// <remarks>Run normally for a window, or with --capture ui.png for an offscreen PNG. Simulation
+/// and rendering share a thread but use the same ImGuiFrameExchange as a threaded host.</remarks>
 internal static class Program
 {
     private const uint Width = 1280;
@@ -69,11 +56,8 @@ internal static class Program
         Console.WriteLine($"[sample] {description}");
         var core = new ImGuiUiCore(width, height, font);
 
-        // ImGui persists window layout to "imgui.ini" in the WORKING DIRECTORY by default, which
-        // for a sample run from the repo means dropping a file in the repo. Off here so a run
-        // leaves nothing behind — and so the capture is reproducible rather than restoring
-        // whatever size the window was dragged to last time. A host that wants remembered layout
-        // sets a path of its own choosing instead.
+        // Disable imgui.ini so sample runs leave no file and captures do not restore previous
+        // window positions.
         var io = Hexa.NET.ImGui.ImGui.GetIO();
         io.IniFilename = null;
         return core;

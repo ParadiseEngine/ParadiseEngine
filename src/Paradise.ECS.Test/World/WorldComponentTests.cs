@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for World component operations.
-/// </summary>
+/// <summary>Tests for World component operations.</summary>
 public sealed class WorldComponentTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ThrowHelper"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ThrowHelper"/>.</summary>
 public sealed class ThrowHelperTests
 {
     [Test]

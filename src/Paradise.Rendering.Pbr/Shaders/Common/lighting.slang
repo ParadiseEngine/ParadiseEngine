@@ -1,21 +1,14 @@
-// lighting.slang — the frame's lights and shadows as every shader that shades a point sees them:
-// the light records, the frame uniforms, the shadow-map array with its comparison sampler, the
-// attenuation models, and the shadow lookup. Shared by pbrCore.slang (the raster path) and the
-// probe tracer (which shades ray hits), so the two agree on what a light does to a surface.
-//
-// slangc keeps EVERY global an included file declares, referenced or not, so what is here is
-// exactly what a compute pass shading a hit must also bind: the frame UBO, the shadow array and
-// its sampler, in group 1 at bindings 0..2. The raster-only bindings live in uniforms.slang.
+// Shared raster and probe-tracer lighting: frame uniforms, attenuation and shadow lookup. Only
+// group-1 bindings 0..2 belong here; Slang retains included globals, so raster-only bindings stay
+// in uniforms.slang.
 #ifndef PARADISE_LIGHTING_SLANG
 #define PARADISE_LIGHTING_SLANG
 
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 64;
 
-// Shadow views the frame can carry — one array layer each, one matrix each. Its OWN number, not
-// MaxSceneLights * 6: a light that only shades costs no layer, and raising the light cap must not
-// enlarge this array. Mirrored by FrameUniformsGpu.MaxShadowViews, and a divergence between the
-// two is what UniformLayoutValidator throws on at renderer init.
+// Each shadow view uses one layer and matrix, with a budget independent of MaxSceneLights.
+// Match FrameUniformsGpu.MaxShadowViews; UniformLayoutValidator checks this at renderer init.
 static const int MaxShadowViews = 384;
 
 struct SceneLight
@@ -59,12 +52,9 @@ struct FrameUniforms
 [[vk::binding(0, 1)]]
 ConstantBuffer<FrameUniforms> frame;
 
-// Shadow map array (a single Depth32Float 2D array, one layer per shadow view) + comparison
-// sampler, on the group-1 slots reserved when shadow mapping was removed. NOTE: the generated WGSL
-// declares shadowTexture as texture_2d_array<f32>; a build-time patch (Slang.targets) rewrites it
-// to texture_depth_2d_array, which WGSL requires for textureSampleCompareLevel (Slang issue #6942).
-// The loader forces the matching bind-group layout (DepthTextureArray + ComparisonSampler) by these
-// exact names.
+// Shadow depth array and comparison sampler. Slang.targets patches shadowTexture to
+// texture_depth_2d_array for SampleCmp (Slang #6942); the reflection loader recognizes these exact
+// names.
 [[vk::binding(1, 1)]]
 Texture2DArray<float> shadowTexture;
 
@@ -94,11 +84,8 @@ float getDistanceAttenuation(float distanceToLight, float range, float decay)
 
 float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
 {
-    // Godot's spot cone (light_process_spot): a smooth radial falloff from the cone axis (full) to the
-    // edge (zero) — NOT a hard-edged disc. spotRim is 0 on-axis, 1 at the cone boundary; Godot raises it
-    // to spot_angle_attenuation (default 1.0, assumed here → linear rim). The previous inner/outer blend
-    // drew a hard "circle" on the ground whenever no inner angle was authored (Godot has no inner angle),
-    // because it fell back to inner == outer. spotAngles.y (inner angle) is unused in this model.
+    // Match Godot's linear spot-angle attenuation: full on-axis, zero at the outer cone. The
+    // inner-angle field is unused; using equal inner/outer angles creates a hard disc.
     float3 lightToSurface = -surfaceToLight;
     float3 coneDirection = -normalize(light.directionAndRange.xyz);
     float cosTheta = dot(lightToSurface, coneDirection);
@@ -109,46 +96,19 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
 }
 
-// Shadow bias — two mechanisms, each sized by the map's ACTUAL texel world size (per light in
-// sizeParams.y: directional = metres, point/spot = metres per metre of receiver distance, since
-// perspective texels grow with range). A fixed world-space bias is only ever correct for one texel
-// size — the old 0.05 m constant was tuned when the camera-fitted 4096 sun map made ~2.5 cm texels,
-// and any coarser map (a scene authoring a smaller ShadowMapSize, a wider legacy fit) outgrew it and
-// flat ground self-shadowed in diagonal bands.
-//
-// 1. NORMAL-OFFSET bias: lift the receiver sample along its surface normal, scaled up toward
-//    grazing incidence (capped — the tan() blow-up at N·L → 0 must not push the sample outside
-//    the light's footprint). With the plane bias below covering the PCF disk, this only has to
-//    cover the CENTRE texel's own depth quantization — half a texel times the slope — and it must
-//    stay that small: every texel of lift is a strip of CONTACT LIGHT-LEAK beside each caster
-//    (near a wall's base the occluder's stored depth is nearly the receiver's own, so any lift
-//    reads the base as non-occluding and the shadow fades toward the contact line — visibly, on
-//    a coarse map, where a texel is tens of centimetres). Perpendicular to the surface, so unlike
-//    a large depth bias it does not shift the sample along the light and does not detach object
-//    shadows from their contact point.
-// 2. RECEIVER-PLANE depth bias (Isidoro): each PCF tap compares against the receiver PLANE's depth
-//    at the tap's own location — the plane's depth gradient in light NDC is solved from two
-//    projected surface tangents — instead of the centre depth. Without it the disk's outer taps
-//    need the normal offset to cover the WHOLE disk radius (blur × texel × slope), which at coarse
-//    resolutions is metres of lift and visibly eats every short shadow; with it the offset stays
-//    at ~1 texel no matter the blur.
-//
-// ShadowDepthBias is a small constant NDC residual on top. Together these keep flat ground
-// acne-free at every map resolution while contact shadows stay attached (matching Godot).
+// Shadow bias scales with actual texel size: directional uses meters; point/spot use meters per
+// receiver-distance meter.
+// Normal offset covers center-texel quantization, with a grazing-angle cap to limit contact light
+// leaks. Receiver-plane bias adjusts each PCF tap to its own projected depth, keeping normal offset
+// small even for wide filters. ShadowDepthBias adds a small residual NDC offset.
 static const float ShadowDepthBias = 0.0004;
-// Lift in texels = ShadowNormalBiasTexels · (1 + tan(angle to light)), capped: the half-texel
-// centre quantization needs ~0.5·tan texels of lift (the geometry works out to 0.5·sinθ/cos²θ),
-// and every texel beyond that widens the contact light-leak strip. The cap bounds the grazing
-// blow-up; past it the surface is nearly edge-on to the light and receives little direct light
-// anyway, so residual acne there stays invisible.
+// Lift is ShadowNormalBiasTexels*(1+tan(angle)), capped at grazing angles. Larger offsets widen
+// contact light leaks; capped residual acne occurs where direct light is weak.
 static const float ShadowNormalBiasTexels = 0.5;      // soft path: plane bias covers the disk
 static const float ShadowNormalBiasTexelsHard = 1.0;  // hard path: no plane bias, hw 2x2 footprint
 static const float ShadowMaxSlopeTexels = 2.0;    // cap on the total lift, in texels
-// NDC cap on the per-tap plane adjustment. It bounds SILHOUETTE light-leak: at a shadow edge the
-// receiver plane extends past the caster, and an unbounded gradient there would tilt taps into
-// accepting the caster's own depth. Sized against the camera-fit sun's depth range (~0.5-1.5 m of
-// depth per 0.01 NDC); the legacy whole-scene fit's larger range makes the cap proportionally
-// looser, which errs toward more bias on the path whose texels are also proportionally coarser.
+// Cap receiver-plane NDC adjustment to limit leaks at caster silhouettes. A larger legacy-fit depth
+// range makes the same cap looser where texels are also coarser.
 static const float ShadowPlaneBiasClamp = 0.01;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.
@@ -170,18 +130,10 @@ float shadowDiskHash(float2 pos)
     return frac(magic.z * frac(dot(pos, magic.xy)));
 }
 
-// geoN is the GEOMETRIC normal (front-face-corrected interpolated vertex normal), not the
-// normal-mapped shading normal: every quantity here — the lift direction, the slope factor, the
-// receiver-plane basis — describes the real surface the shadow map rasterized. A normal-mapped
-// floor's shading normal tilts the solved plane away from the actual geometry, turning the
-// per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
-// the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
-// out of the shadow lookup entirely.)
-// lightIndex is unread since the shadow matrices became layer-keyed: the light record carries its
-// own base layer in spotAngles.z. It stays in the signature because a GAME's material shader calls
-// this (Pingu's poolInterior.slang does), and dropping a parameter would break that source for no
-// gain while the light cap is unchanged. It goes with the cap lift, which breaks those shaders
-// anyway.
+// Use the geometric normal for receiver lift and plane bias. A normal-map perturbation does not
+// describe the rasterized surface and would corrupt shadow depth comparisons.
+// Keep the unused lightIndex parameter for existing game material shaders; the light record
+// supplies the shadow base layer through spotAngles.z.
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
@@ -193,11 +145,8 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     // seam along every cube-face boundary, visible wherever the light is the only illumination.
     int face = 0;
 
-    // Normal-offset bias (mechanism 1 above): the centre texel's quantization, more toward
-    // grazing, capped — and no more, or the contact strip beside every caster lightens. The
-    // hard-shadow path carries a larger base: it has no receiver-plane bias (a single tap has no
-    // offsets to adjust), and its hardware 2x2 comparison footprint needs up to ~sqrt(2)·tan
-    // texels of depth coverage that the soft path's per-tap plane adjustment provides instead.
+    // Cover center-texel quantization with capped normal offset. Hard shadows need a larger offset
+    // because their hardware 2x2 comparisons lack per-tap plane bias.
     float texelWorld = light.sizeParams.y;
     if (light.positionAndType.w > 0.5)
     {
@@ -217,9 +166,7 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     if ((float)face >= light.shadowAtlas.y)
         return 1.0;
 
-    // The matrix lives at the view's ARRAY LAYER, which is exactly the slice sampled below — one
-    // index for both, rather than a second lightIndex * 6 addressing scheme that reserved six
-    // slots per light and tied the matrix budget to the light budget.
+    // Index the matrix by the same array layer sampled below.
     int matrixIndex = (int)light.spotAngles.z + face;
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
     if (shadowPos.w <= 0.0)
@@ -236,17 +183,9 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
     float lit;
     if (light.shadowAtlas.w > 0.5)
     {
-        // Soft shadows: Godot's SOFT_HIGH-class PCF — a 16-sample Vogel disk
-        // (r = sqrt((i+0.5)/16), theta = 2.4i), disk radius frame.shadowFilter.x shadow texels
-        // (scene-authored; see Lighting.ShadowBlur in the export contract), randomly rotated
-        // per pixel with interleaved gradient noise like sample_directional_pcf_shadow. The
-        // rotation trades fixed-kernel banding for fine noise — but the noise AMPLITUDE goes as
-        // 1/sqrt(taps), and it stops averaging out once the penumbra is WIDE on screen: on a
-        // coarse map (a texel is tens of centimetres) 8 taps rendered every shadow edge as
-        // visible diagonal stipple, IGN's own dither pattern. 16 taps is the tier that reads
-        // as smooth there while the per-tap hardware 2x2 comparison (the sampler is Linear)
-        // keeps the narrow-penumbra case dense. 4 taps at radius 2 (the old SOFT_LOW tier)
-        // visibly sawtoothed even at fine texel sizes.
+        // Soft shadows use a 16-tap Vogel disk at the authored blur radius, rotated by interleaved
+        // gradient noise. Fewer taps produce visible stippling on coarse maps; linear comparison
+        // sampling covers narrow penumbrae.
         static const float2 kVogel16[16] = {
             float2(+0.176777, +0.000000),
             float2(-0.225780, +0.206818),
@@ -270,11 +209,9 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
         float cr = cos(r);
         float sr = sin(r);
 
-        // Receiver-plane depth bias (mechanism 2 in the bias comment): the plane's NDC depth
-        // gradient, solved from two surface tangents projected through this face's matrix. Each
-        // tap then compares against the PLANE's depth at its own offset rather than the centre's,
-        // which is what lets the normal offset above stay at ~1 texel instead of covering the
-        // whole disk. Exact for the ortho sun; first-order (and ample) for spot/point perspective.
+        // Solve receiver-plane depth gradients from projected tangents and adjust each tap at its
+        // offset. Exact for orthographic light, first-order for perspective; avoids bias sized to
+        // the whole PCF disk.
         float3 tan1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
         float3 tan2 = cross(geoN, tan1);
         float planeStep = max(texelWorld, 1e-4);

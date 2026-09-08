@@ -12,9 +12,7 @@ public interface IQueryData<TSelf, TMask, TConfig>
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    /// <summary>
-    /// Creates a new instance of the data type for the specified entity location.
-    /// </summary>
+    /// <summary>Creates a new instance of the data type for the specified entity location.</summary>
     /// <param name="chunkManager">The chunk manager for memory access.</param>
     /// <param name="entityManager">The entity manager for looking up entity versions.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
@@ -73,9 +71,7 @@ public interface IQueryData<TSelf, TMask, TConfig>
     /// </remarks>
     static virtual bool IsFiltered => false;
 
-    /// <summary>
-    /// Whether a whole CHUNK can be passed over without inspecting any of its rows.
-    /// </summary>
+    /// <summary>Whether a whole CHUNK can be passed over without inspecting any of its rows.</summary>
     /// <remarks>
     /// <para>
     /// The coarse half of <see cref="Matches"/>. Where that answers "does this row belong", this
@@ -117,9 +113,7 @@ public interface IQueryChunkData<TSelf, TMask, TConfig>
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    /// <summary>
-    /// Creates a new instance of the chunk data type for the specified chunk.
-    /// </summary>
+    /// <summary>Creates a new instance of the chunk data type for the specified chunk.</summary>
     /// <param name="chunkManager">The chunk manager for memory access.</param>
     /// <param name="entityManager">The entity manager for looking up entity versions.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>

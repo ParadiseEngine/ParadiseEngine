@@ -17,9 +17,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
 {
     private readonly List<TArchetype> _matchingArchetypes;
 
-    /// <summary>
-    /// Creates a new query wrapping the specified archetype list.
-    /// </summary>
+    /// <summary>Creates a new query wrapping the specified archetype list.</summary>
     /// <param name="matchingArchetypes">The list of matching archetypes, owned by the registry.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal Query(List<TArchetype> matchingArchetypes)
@@ -27,9 +25,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
         _matchingArchetypes = matchingArchetypes;
     }
 
-    /// <summary>
-    /// Gets the total number of entities matching this query across all archetypes.
-    /// </summary>
+    /// <summary>The total number of entities matching this query across all archetypes.</summary>
     public int EntityCount
     {
         get
@@ -43,9 +39,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
         }
     }
 
-    /// <summary>
-    /// Gets whether this query has any matching entities.
-    /// </summary>
+    /// <summary>Whether this query has no matching entities.</summary>
     public bool IsEmpty
     {
         get
@@ -58,48 +52,36 @@ public readonly struct Query<TMask, TConfig, TArchetype>
         }
     }
 
-    /// <summary>
-    /// Gets the number of matching archetypes.
-    /// </summary>
+    /// <summary>The number of matching archetypes.</summary>
     public int ArchetypeCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _matchingArchetypes.Count;
     }
 
-    /// <summary>
-    /// Returns an enumerator that iterates through all entity IDs in the matching archetypes.
-    /// </summary>
+    /// <summary>Returns an enumerator that iterates through all entity IDs in the matching archetypes.</summary>
     /// <returns>A struct enumerator for entity IDs.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public EntityIdEnumerator GetEnumerator() => new(_matchingArchetypes);
 
-    /// <summary>
-    /// Gets the list of all matching archetypes.
-    /// </summary>
+    /// <summary>The list of all matching archetypes.</summary>
     public IReadOnlyList<TArchetype> Archetypes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _matchingArchetypes;
     }
 
-    /// <summary>
-    /// Gets an enumerable for iterating over all chunks in the matching archetypes.
-    /// </summary>
+    /// <summary>An enumerable for iterating over all chunks in the matching archetypes.</summary>
     public ChunkEnumerable Chunks
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => new(_matchingArchetypes);
     }
 
-    /// <summary>
-    /// Represents a chunk with its associated archetype and entity count.
-    /// </summary>
+    /// <summary>Represents a chunk with its associated archetype and entity count.</summary>
     public readonly struct ChunkInfo
     {
-        /// <summary>
-        /// The archetype this chunk belongs to.
-        /// </summary>
+        /// <summary>The archetype this chunk belongs to.</summary>
         public TArchetype Archetype
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -108,9 +90,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             init;
         }
 
-        /// <summary>
-        /// The chunk handle for memory access.
-        /// </summary>
+        /// <summary>The chunk handle for memory access.</summary>
         public ChunkHandle Handle
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -119,9 +99,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             init;
         }
 
-        /// <summary>
-        /// The number of entities in this chunk.
-        /// </summary>
+        /// <summary>The number of entities in this chunk.</summary>
         public int EntityCount
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -144,9 +122,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
         }
     }
 
-    /// <summary>
-    /// Enumerable for iterating over chunks in the query.
-    /// </summary>
+    /// <summary>Enumerable for iterating over chunks in the query.</summary>
     public readonly ref struct ChunkEnumerable
     {
         private readonly List<TArchetype> _archetypes;
@@ -157,16 +133,12 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             _archetypes = archetypes;
         }
 
-        /// <summary>
-        /// Returns an enumerator for iterating over chunks.
-        /// </summary>
+        /// <summary>Returns an enumerator for iterating over chunks.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ChunkEnumerator GetEnumerator() => new ChunkEnumerator(_archetypes);
     }
 
-    /// <summary>
-    /// Enumerator for iterating over chunks in the query.
-    /// </summary>
+    /// <summary>Enumerator for iterating over chunks in the query.</summary>
     public ref struct ChunkEnumerator
     {
         private readonly List<TArchetype> _archetypes;
@@ -183,18 +155,14 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             _current = default;
         }
 
-        /// <summary>
-        /// Gets the current chunk info.
-        /// </summary>
+        /// <summary>The current chunk info.</summary>
         public ChunkInfo Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _current;
         }
 
-        /// <summary>
-        /// Advances to the next chunk.
-        /// </summary>
+        /// <summary>Advances to the next chunk.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
@@ -220,7 +188,6 @@ public readonly struct Query<TMask, TConfig, TArchetype>
                     return true;
                 }
 
-                // Move to next archetype
                 _archetypeIndex++;
                 _chunkIndex = -1;
             }
@@ -229,9 +196,7 @@ public readonly struct Query<TMask, TConfig, TArchetype>
         }
     }
 
-    /// <summary>
-    /// Enumerator for iterating over entity IDs in the query.
-    /// </summary>
+    /// <summary>Enumerator for iterating over entity IDs in the query.</summary>
     public ref struct EntityIdEnumerator
     {
         private readonly List<TArchetype> _archetypes;
@@ -259,18 +224,14 @@ public readonly struct Query<TMask, TConfig, TArchetype>
             InitializeCurrentChunk();
         }
 
-        /// <summary>
-        /// Gets the current entity ID.
-        /// </summary>
+        /// <summary>The current entity ID.</summary>
         public int Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _current;
         }
 
-        /// <summary>
-        /// Advances to the next entity.
-        /// </summary>
+        /// <summary>Advances to the next entity.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
@@ -284,7 +245,6 @@ public readonly struct Query<TMask, TConfig, TArchetype>
                     return true;
                 }
 
-                // Move to next chunk
                 _chunkIndex++;
                 _indexInChunk = 0;
 
@@ -293,7 +253,6 @@ public readonly struct Query<TMask, TConfig, TArchetype>
 
                 if (_chunkIndex >= _currentArchetype.ChunkCount)
                 {
-                    // Move to next archetype
                     _archetypeIndex++;
                     _chunkIndex = 0;
 

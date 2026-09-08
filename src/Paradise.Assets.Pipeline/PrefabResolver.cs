@@ -5,15 +5,8 @@ using Paradise.Assets.Documents;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// Expands prefab instances into plain objects.
-/// </summary>
-/// <remarks>
-/// Prefabs are an authoring concept only: the contract carried prefab provenance once and it was
-/// deleted in schema v5 as "written by a host, read by nobody". The instance IS the prefab's root
-/// (its components override the root's by id). Every order and identity rule below is specified
-/// rather than incidental, because the Python mirror must produce the same bytes.
-/// </remarks>
+/// <summary>Expands prefab instances into plain objects.</summary>
+/// <remarks>An instance overrides the prefab root's components by ID; order and generated identities must match the Python mirror.</remarks>
 public static class PrefabResolver
 {
     /// <summary>A problem that stopped one instance resolving, phrased for the author.</summary>

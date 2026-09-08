@@ -148,16 +148,9 @@ public class FeatureSwitchesTests
         await Assert.That(snapshot.TryGet("rendering.gone", out var gone) && !gone).IsTrue();
     }
 
-    /// <summary>A render thread asks per frame while a debug panel flips switches: every read
-    /// returns, nothing throws, and the state the single writer left is the state everyone reads.
-    ///
-    /// <para>Counting the reads that saw TRUE and asserting some did was the first version of
-    /// this, and it is not something the test can promise — under a loaded machine the writer can
-    /// finish all its iterations before a reader is scheduled at all, leaving the last written
-    /// value (false) for every read. It went red once in a full-solution run and never alone.
-    /// What IS guaranteed is that every read completed and the last write stands; the
-    /// interleavings themselves belong to Paradise.Features.CoyoteTest, which explores them
-    /// deliberately rather than hoping for them.</para></summary>
+    /// <summary>Verifies reads complete and observe the final state while one writer toggles switches.</summary>
+    /// <remarks>Do not require a reader to observe intermediate true values: the writer may finish
+    /// first. Paradise.Features.CoyoteTest explores the interleavings systematically.</remarks>
     [Test]
     public async Task reads_and_writes_from_many_threads_do_not_break_it()
     {

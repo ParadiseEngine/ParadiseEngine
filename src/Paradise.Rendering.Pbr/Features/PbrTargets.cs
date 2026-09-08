@@ -10,6 +10,9 @@ public static class PbrTargets
     /// <summary>Linear HDR scene color, the main pass's output and every post pass's input.</summary>
     public const string Hdr = "PbrHdrScene";
 
+    /// <summary>Linear tonemapped color before display effects and the output transfer function.</summary>
+    public const string DisplayColor = "PbrDisplayColor";
+
     /// <summary>The scene depth buffer.</summary>
     public const string Depth = "PbrDepth";
 
@@ -62,6 +65,12 @@ public static class PbrTargets
 /// produces it did not run this frame; consumers bind the black fallback instead.</summary>
 public static class PbrResults
 {
+    /// <summary>The current linear HDR stage, advanced by effects before bloom and tonemapping.</summary>
+    public const string SceneColor = "Pbr.SceneColor";
+
+    /// <summary>The current linear tonemapped stage, advanced before presentation encodes sRGB.</summary>
+    public const string DisplayColor = "Pbr.DisplayColor";
+
     /// <summary>Opaque motion in top-left-origin UVs, including projection jitter: reproject with uv − xy.</summary>
     public const string MotionVectors = "Pbr.MotionVectors";
 

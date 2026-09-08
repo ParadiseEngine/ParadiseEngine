@@ -2,20 +2,13 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// The set of typed event buffers owned by a <see cref="World{TMask,TConfig}"/>, indexed by event-type
-/// id. Holds each type's INCOMING buffer (events produced last frame). It rides
-/// <see cref="World{TMask,TConfig}.CopyFrom"/>, so events participate in the immutable snapshot — the
-/// property that lets one-frame-deferred events survive a save and replay identically.
-/// </summary>
+/// <summary>World-owned event buffers delivered one tick after emission.</summary>
+/// <remarks>Incoming events participate in <c>World.CopyFrom</c> snapshots and survive save/replay.</remarks>
 public sealed class WorldEventStore
 {
     private ISystemEvents?[] _byType = Array.Empty<ISystemEvents?>();
 
-    // Managed (non-system) emit staging. Managed code — command handlers, a host post-pass — appends
-    // here via Emit; Commit dispatches it alongside the per-work-item system writers (after them, so
-    // the merge stays deterministic) and clears it. It is transient like a system writer: drained
-    // every commit, never part of the snapshot. See Emit / Commit.
+    // Owner-thread emissions merge after system writers and are never snapshotted.
     private readonly SystemEventWriter _managed = new();
 
     internal WorldEventStore()
@@ -33,12 +26,8 @@ public sealed class WorldEventStore
         return events.Incoming;
     }
 
-    /// <summary>
-    /// Directly replaces the incoming buffer for event type <typeparamref name="T"/> — used to
-    /// RE-SEED events on load (a save taken while an event was in-flight, produced tick N but not yet
-    /// consumed until N+1, must restore it here). Call OUTSIDE a schedule run; the next tick's readers
-    /// observe it exactly as if it had been committed by the previous frame.
-    /// </summary>
+    /// <summary>Restores incoming events from a save for the next tick's readers.</summary>
+    /// <remarks>Call outside a schedule run.</remarks>
     /// <typeparam name="T">The unmanaged event type.</typeparam>
     /// <param name="events">The incoming events to restore (copied in).</param>
     public void SetIncoming<T>(ReadOnlySpan<T> events) where T : unmanaged
@@ -49,25 +38,13 @@ public sealed class WorldEventStore
         buffer.SetIncoming(events);
     }
 
-    /// <summary>
-    /// Emits one event of type <typeparamref name="T"/> from MANAGED code (outside a schedule run) —
-    /// the non-system sibling of <see cref="SystemEventWriter.Append{T}"/>. Staged now, dispatched by
-    /// the next <see cref="Commit"/> after all system writers, so it is delivered to next frame's
-    /// readers with identical one-frame-deferred, deterministic semantics.
-    /// <para>NOT thread-safe: call on the world's owner thread only (the same contract as
-    /// <c>world.GetComponent&lt;T&gt;().Value = …</c>), and outside a schedule run so it never races the
-    /// per-work-item writers.</para>
-    /// </summary>
+    /// <summary>Stages an event for next tick, after all system-writer events.</summary>
+    /// <remarks>Call on the world's owner thread, outside a schedule run.</remarks>
     /// <typeparam name="T">The unmanaged event type.</typeparam>
     /// <param name="e">The event value.</param>
     public void Emit<T>(in T e) where T : unmanaged => _managed.Append(in e);
 
-    /// <summary>
-    /// Post-wave commit: replaces every type's incoming buffer with the events the writers recorded
-    /// this frame, walked in schedule order (so the merge is deterministic in <paramref name="writers"/>
-    /// order). Managed events emitted via <see cref="Emit"/> this frame merge last (also deterministic).
-    /// Types with no new events this frame get an empty incoming — last frame's events expire.
-    /// </summary>
+    /// <summary>Publishes writers in schedule order, then managed events, replacing last tick's events.</summary>
     internal void Commit(ReadOnlySpan<SystemEventWriter> writers)
     {
         for (int i = 0; i < _byType.Length; i++)
@@ -87,8 +64,7 @@ public sealed class WorldEventStore
     /// <summary>Copies every type's incoming set from <paramref name="source"/> (snapshot copy).</summary>
     internal void CopyFrom(WorldEventStore source)
     {
-        // Managed staging is transient (never snapshotted); a write world adopting a snapshot starts
-        // the tick with an empty outgoing buffer, before any ProcessCommands Emit.
+        // Snapshot copies discard outgoing events.
         _managed.Clear();
         EnsureCapacity(source._byType.Length);
         for (int id = 0; id < _byType.Length; id++)
@@ -120,7 +96,7 @@ public sealed class WorldEventStore
             ref readonly var header = ref Unsafe.As<byte, SystemEventRecord>(ref Unsafe.AsRef(in stream[offset]));
             int typeId = header.TypeId;
             int size = header.Size;
-            var payload = size > 0 ? stream.Slice(offset + headerSize, size) : ReadOnlySpan<byte>.Empty;
+            var payload = stream.Slice(offset + headerSize, size);
             EnsureBuffer(typeId).StageRaw(payload);
             offset += headerSize + size;
         }

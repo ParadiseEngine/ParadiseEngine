@@ -14,9 +14,7 @@ public readonly struct HashedKey<T> : IEquatable<HashedKey<T>> where T : IEquata
     private readonly T _value;
     private readonly int _cachedHash;
 
-    /// <summary>
-    /// Gets the underlying value.
-    /// </summary>
+    /// <summary>The underlying value.</summary>
     public T Value
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -35,9 +33,7 @@ public readonly struct HashedKey<T> : IEquatable<HashedKey<T>> where T : IEquata
         _cachedHash = EqualityComparer<T>.Default.GetHashCode(value);
     }
 
-    /// <summary>
-    /// Determines whether this key equals another key by comparing the underlying values.
-    /// </summary>
+    /// <summary>Determines whether this key equals another key by comparing the underlying values.</summary>
     /// <param name="other">The other key to compare.</param>
     /// <returns><c>true</c> if the values are equal; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -51,35 +47,25 @@ public readonly struct HashedKey<T> : IEquatable<HashedKey<T>> where T : IEquata
     /// <inheritdoc/>
     public override bool Equals(object? obj) => obj is HashedKey<T> other && Equals(other);
 
-    /// <summary>
-    /// Returns the cached hash code. This is O(1) since the hash is computed once at construction.
-    /// </summary>
+    /// <summary>Returns the cached hash code. This is O(1) since the hash is computed once at construction.</summary>
     /// <returns>The cached hash code.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode() => _cachedHash;
 
-    /// <summary>
-    /// Equality operator.
-    /// </summary>
+    /// <summary>Equality operator.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(HashedKey<T> left, HashedKey<T> right) => left.Equals(right);
 
-    /// <summary>
-    /// Inequality operator.
-    /// </summary>
+    /// <summary>Inequality operator.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(HashedKey<T> left, HashedKey<T> right) => !left.Equals(right);
 
-    /// <summary>
-    /// Explicit conversion from <typeparamref name="T"/> to <see cref="HashedKey{T}"/>.
-    /// </summary>
+    /// <summary>Explicit conversion from <typeparamref name="T"/> to <see cref="HashedKey{T}"/>.</summary>
     /// <param name="value">The value to convert.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static explicit operator HashedKey<T>(T value) => new(value);
 
-    /// <summary>
-    /// Implicit conversion from <see cref="HashedKey{T}"/> to <typeparamref name="T"/>.
-    /// </summary>
+    /// <summary>Implicit conversion from <see cref="HashedKey{T}"/> to <typeparamref name="T"/>.</summary>
     /// <param name="key">The key to convert.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator T(HashedKey<T> key) => key._value;

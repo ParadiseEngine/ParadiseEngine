@@ -3,23 +3,10 @@ using System;
 
 namespace Paradise.Export.Data
 {
-    /// <summary>
-    /// The two authoring-format components a v6 document ships for every entity: <c>meta</c>
-    /// (identity, name, parent) and <c>transform</c> (local TRS). The RUNTIME-VISIBLE copy of
-    /// the authoring format's well-known ids.
-    /// </summary>
+    /// <summary>The runtime IDs for the format's <c>meta</c> and <c>transform</c> components.</summary>
     /// <remarks>
-    /// <para>
-    /// A copy, because this assembly cannot reference <c>Paradise.Assets.Documents</c> (the
-    /// pipeline depends on the contract, not the other way round). A test in
-    /// <c>Paradise.Assets.Pipeline.Test</c> pins these against
-    /// <c>WellKnownComponents</c> so the two spellings cannot drift.
-    /// </para>
-    /// <para>
-    /// These are NOT engine authored components — v6's whole point is that the engine declares
-    /// none. They are format vocabulary: the loader reads them to seed identity, hierarchy and
-    /// placement, and everything else in an entity's list is the game's own declaration.
-    /// </para>
+    /// The loader uses them for identity, hierarchy and local placement; games declare all other components.
+    /// The pipeline test pins these IDs to <c>WellKnownComponents</c>, avoiding a dependency on the authoring package.
     /// </remarks>
     public static class WellKnownEntityComponents
     {
@@ -35,7 +22,7 @@ namespace Paradise.Export.Data
         /// <summary>The readable name of <see cref="TransformId"/>.</summary>
         public const string TransformType = "transform";
 
-        // ---- meta fields (guid values travel as canonical guid strings) ----------------------
+        // meta fields (guid values travel as canonical guid strings)
 
         /// <summary>The entity's identity. Unique per document.</summary>
         public const string Guid = "Guid";
@@ -46,7 +33,7 @@ namespace Paradise.Export.Data
         /// <summary>The parent entity's <see cref="Guid"/>, or absent for a root.</summary>
         public const string Parent = "Parent";
 
-        // ---- transform fields (JSON number arrays) --------------------------------------------
+        // transform fields (JSON number arrays)
 
         /// <summary>Local translation as <c>[x, y, z]</c>, engine convention (Y-up, metres).</summary>
         public const string Position = "Position";

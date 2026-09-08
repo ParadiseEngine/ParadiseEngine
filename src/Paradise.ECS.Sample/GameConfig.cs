@@ -7,9 +7,7 @@ namespace Paradise.ECS.Sample;
 [DefaultConfig]
 public readonly struct GameConfig : IConfig
 {
-    /// <summary>
-    /// Creates default game configuration.
-    /// </summary>
+    /// <summary>Creates default game configuration.</summary>
     public GameConfig() { }
 
     /// <inheritdoc />

@@ -39,7 +39,7 @@ public class AuthoringSchemaTests
         });
     }
 
-    // ---- typed host kinds ------------------------------------------------------------------
+    // typed host kinds
 
     private static AuthoredComponentSchema HostBound() =>
         Schema().Components.Single(c => c.Id == FixtureIds.HostBoundId);

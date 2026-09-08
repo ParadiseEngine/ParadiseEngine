@@ -60,28 +60,10 @@ public readonly record struct GraphBuffer(int Index)
     public static readonly GraphBuffer Invalid = new(-1);
 }
 
-/// <summary>Builds one frame's pass list, then lowers it to a <see cref="RenderCommandStream"/>.
-///
-/// <para>The graph replaces hand-computed pass indices. Declaring a pass at a
-/// <see cref="RenderPassEvent"/> says where it belongs; nothing is expressed relative to how many
-/// passes precede it, so adding or removing one cannot silently shift another. Passes are sorted
-/// before anything is recorded, which is what makes the index available at record time — and is
-/// also the shape that lets recording move onto worker threads later, since each pass's commands
-/// occupy their own contiguous run.</para>
-///
-/// <para>Between sorting and recording the graph culls: a pass whose every output is
-/// <see cref="GraphResourceScope.GraphOnly"/> and read by nobody does not run. That moves the
-/// decision to switch a feature off from the producer — which had to know how many passes to skip —
-/// to the consumer, which only has to stop asking for the result.</para>
-///
-/// <para>An attachment declared without a store op gets one inferred: stored if anything after
-/// the pass reads the resource or the resource is visible outside the graph, discarded otherwise.
-/// On a tile GPU a discarded attachment is a tile flush that never happens, and it is the one
-/// decision the declaring code is worst placed to make, since it depends on every pass that
-/// follows.</para>
-///
-/// <para>One instance per renderer, reused every frame: <see cref="Reset"/> clears without
-/// releasing, so a steady-state frame allocates nothing.</para></summary>
+/// <summary>Builds, sorts and culls passes before recording a frame command stream.</summary>
+/// <remarks>Pass events replace manual index arithmetic. Unread graph-only outputs are culled;
+/// store operations are inferred from later reads and external visibility. Reset reuses storage for
+/// allocation-free steady-state frames.</remarks>
 public sealed partial class FrameGraph
 {
     private const int MaxColorAttachments = RenderPassDesc.MaxColorAttachments;
@@ -366,14 +348,10 @@ public sealed partial class FrameGraph
         }
     }
 
-    /// <summary>Reachability: start from the passes whose output somebody outside the graph can
-    /// see, then walk backwards through declared reads to whatever produced what they consume.
-    ///
-    /// <para>Writing an <see cref="GraphResourceScope.External"/> resource roots a pass because the
-    /// graph cannot know who else reads it — the same rule Filament states as "calling write() on
-    /// an imported resource automatically adds a side-effect". A renderer that imports every target
-    /// therefore culls nothing, which is correct rather than useless: culling only removes work
-    /// once the declaring code has said which resources are its own.</para></summary>
+    /// <summary>Marks passes reachable from externally visible outputs by following their input
+    /// dependencies.</summary>
+    /// <remarks>Writes to external resources root a pass because consumers may exist outside this
+    /// graph; importing every target intentionally prevents culling.</remarks>
     private void MarkLive(Span<Pass> passes, int count)
     {
         for (var i = 0; i < count; i++) passes[i].Live = false;
@@ -469,15 +447,10 @@ public sealed partial class FrameGraph
         return new DepthAttachmentDesc(resource.Texture, a.Load, store, a.ClearDepth, view);
     }
 
-    /// <summary>The edges checking the events: a pass placed before the pass that writes what it
-    /// reads gets last frame's contents, and the event key is the only thing that put it there.
-    ///
-    /// <para>Three reads are exempt. A resource nothing writes at all may be legitimately bound
-    /// and never sampled — the shadow array in a frame with no shadowed light. An imported
-    /// resource or the backbuffer may have been written by the host before the frame, so the
-    /// first pass loading it is not reading ahead of anyone; an owned target is checked even when
-    /// exported, because its writers are all in this graph. And a
-    /// <see cref="PassBuilder.ReadsHistory"/> read wants last frame's contents by definition.</para></summary>
+    /// <summary>Rejects reads ordered before the graph's first write.</summary>
+    /// <remarks>Exempt history reads, resources with no writer, and imported resources or
+    /// backbuffers that the host may have initialized. Owned targets remain checked even when
+    /// exported.</remarks>
     private void CheckReadsFollowWrites(Span<Pass> passes, int count)
     {
         for (var slot = 0; slot < count; slot++)

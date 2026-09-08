@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Jobs.Test;
 
-/// <summary>
-/// Tests for <see cref="WorkStealingWaveScheduler"/> — system scheduling with work-stealing pool.
-/// </summary>
+/// <summary>Tests for <see cref="WorkStealingWaveScheduler"/> — system scheduling with work-stealing pool.</summary>
 public sealed class WorkStealingWaveSchedulerTests : IDisposable
 {
     private readonly SharedWorld _sharedWorld;

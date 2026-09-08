@@ -6,11 +6,7 @@
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!--
-      Intentionally NOT an IsTestProject — a standalone Coyote runner with its own Main, not a
-      TUnit suite. Marking it IsTestProject makes `dotnet test` try to host it under
-      Microsoft.Testing.Platform, which it does not support. Run it with `dotnet run`.
-    -->
+    <!-- Run this standalone Coyote runner with dotnet run; IsTestProject requires MTP support. -->
     <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
   </PropertyGroup>
 
@@ -26,7 +22,7 @@
     <None Include="coyote-rewrite.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- Coyote Rewriting: rewrite binaries after build for systematic testing (Release only; requires coyote CLI) -->
+  <!-- Release builds require the Coyote CLI to rewrite binaries for systematic testing. -->
   <Target Name="CoyoteRewrite" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
   </Target>

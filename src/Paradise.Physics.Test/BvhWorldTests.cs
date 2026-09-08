@@ -2,11 +2,7 @@ using System.Numerics;
 
 namespace Paradise.Physics.Test;
 
-/// <summary>
-/// Differential guard for the BLOB/BVH-backed <see cref="CollisionWorld"/>: world queries over a
-/// large random body set must agree exactly with brute-force per-collider narrowphase loops
-/// (same hits, same fractions, lowest-index tie-break).
-/// </summary>
+/// <summary>Compares BVH world queries with brute-force queries over random bodies, including hit ties.</summary>
 public class BvhWorldTests
 {
     private static (CollisionWorld World, Collider[] Colliders, RigidTransform[] Transforms) RandomWorld(int count, int seed)

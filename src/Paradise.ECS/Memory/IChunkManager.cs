@@ -6,14 +6,10 @@ namespace Paradise.ECS;
 /// </summary>
 public interface IChunkManager : IDisposable
 {
-    /// <summary>
-    /// Gets the size of each chunk in bytes.
-    /// </summary>
+    /// <summary>The size of each chunk in bytes.</summary>
     int ChunkSize { get; }
 
-    /// <summary>
-    /// Allocates a new chunk and returns a handle to it.
-    /// </summary>
+    /// <summary>Allocates a new chunk and returns a handle to it.</summary>
     /// <returns>A valid handle to the newly allocated chunk.</returns>
     ChunkHandle Allocate();
 
@@ -40,9 +36,7 @@ public interface IChunkManager : IDisposable
     /// <returns>True if the borrow was acquired, false if the handle is invalid or stale.</returns>
     bool Acquire(ChunkHandle handle);
 
-    /// <summary>
-    /// Releases a borrow on a chunk acquired via <see cref="Acquire(ChunkHandle)"/>.
-    /// </summary>
+    /// <summary>Releases a borrow on a chunk acquired via <see cref="Acquire(ChunkHandle)"/>.</summary>
     /// <param name="handle">The chunk handle.</param>
     void Release(ChunkHandle handle);
 }

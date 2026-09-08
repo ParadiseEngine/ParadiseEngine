@@ -7,13 +7,8 @@ namespace Paradise.Rendering.Pbr;
 /// description of the Forward+ froxel grid <see cref="LightCullingFeature"/> filled.</summary>
 public sealed partial class SceneFeature
 {
-    // The frame UBO's CPU mirror lives in a FIELD, never in a local. FrameUniformsGpu is 31 KB (64
-    // lights + 384 shadow matrices), and Mono's wasm interpreter aborts the ENTIRE runtime when it
-    // tiers up a method whose locals exceed its frame budget: "Unable to run method
-    // UploadFrameUniforms: locals size too big". The abort lands a couple of seconds into steady
-    // rendering — long after the method has been interpreting happily, and long after any short
-    // smoke test has reported success — so it reads as a random browser crash rather than a struct
-    // size problem. Filling this in place also saves a 31 KB stack copy per frame on every backend.
+    // Keep this 31 KB uniform struct in a field: large locals exceed Mono wasm tier-up limits and
+    // abort the runtime. Filling it in place also avoids a stack copy.
     private FrameUniformsGpu _frameUniforms;
 
     // Test-only readback of the per-frame packed light array (e.g. to assert ShadowAtlas.X survives
@@ -50,7 +45,7 @@ public sealed partial class SceneFeature
         // while light culling is switched off: clusterParams.x < 1 is the shader's "test every
         // light" fallback, and without it a stale mask buffer would keep culling lights that
         // nothing is binning any more.
-        frame.CameraForward = new Vector4(CameraForward(scene.Camera.View), _lightCulling.Near);
+        frame.CameraForward = new Vector4(CameraForward(_ctx.View), _lightCulling.Near);
         frame.ClusterParams = _lightCulling.Active
             ? new Vector4(_lightCulling.TilesX, _lightCulling.TilesY, LightCullingFeature.ZSlices, _lightCulling.Far)
             : default;
@@ -87,11 +82,8 @@ public sealed partial class SceneFeature
         {
             frame.SceneLightShadowMatrices[(int)layer] = vp;
         }
-        // Per-light shadow params: base array layer (spotAngles.z), strength (spotAngles.w),
-        // face count (shadowAtlas.y), soft-shadow flag (shadowAtlas.w) and shadow texel world
-        // size (sizeParams.y — the bias scale, see ShadowFeature). shadowAtlas.x carries
-        // the distance-attenuation decay, .z the LIGHT_PARAM_SPECULAR amount and sizeParams.x
-        // the light's angular/world size (all set by ToGpu) and must be preserved here.
+        // Update shadow layer/strength, face count/soft flag and texel scale. Preserve attenuation
+        // in shadowAtlas.x, specular in .z and light size in sizeParams.x.
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
             if (_shadows.BaseLayer(i) < 0) continue;

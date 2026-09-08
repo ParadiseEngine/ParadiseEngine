@@ -3,17 +3,13 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Extension methods for Span&lt;byte&gt; to access typed data at byte offsets.
-/// </summary>
+/// <summary>Extension methods for Span&lt;byte&gt; to access typed data at byte offsets.</summary>
 public static class SpanExtensions
 {
     /// <param name="span">The byte span.</param>
     extension(Span<byte> span)
     {
-        /// <summary>
-        /// Gets a reference to a value at the specified byte offset.
-        /// </summary>
+        /// <summary>A reference to a value at the specified byte offset.</summary>
         /// <typeparam name="T">The unmanaged type.</typeparam>
         /// <param name="byteOffset">The offset from the start.</param>
         /// <returns>A reference to the value.</returns>
@@ -23,9 +19,7 @@ public static class SpanExtensions
             return ref Unsafe.As<byte, T>(ref span[byteOffset]);
         }
 
-        /// <summary>
-        /// Gets a span over data at the specified byte offset.
-        /// </summary>
+        /// <summary>A span over data at the specified byte offset.</summary>
         /// <typeparam name="T">The unmanaged type.</typeparam>
         /// <param name="byteOffset">The offset from the start.</param>
         /// <param name="count">The number of elements.</param>
@@ -36,9 +30,7 @@ public static class SpanExtensions
             return MemoryMarshal.Cast<byte, T>(span.Slice(byteOffset, count * Unsafe.SizeOf<T>()));
         }
 
-        /// <summary>
-        /// Gets raw bytes at a specific offset.
-        /// </summary>
+        /// <summary>Gets raw bytes at a specific offset.</summary>
         /// <param name="byteOffset">The offset from the start.</param>
         /// <param name="size">The number of bytes.</param>
         /// <returns>A span over the bytes.</returns>
