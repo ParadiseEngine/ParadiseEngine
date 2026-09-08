@@ -20,3 +20,6 @@ public readonly record struct DispatchCommand(
     uint WorkgroupCountX,
     uint WorkgroupCountY,
     uint WorkgroupCountZ);
+
+/// <summary>Indexed draw arguments read by the GPU from a 20-byte indirect buffer record.</summary>
+public readonly record struct DrawIndexedIndirectCommand(BufferHandle Buffer, ulong Offset);

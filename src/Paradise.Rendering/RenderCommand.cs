@@ -24,6 +24,7 @@ public enum RenderCommandKind : byte
     EndComputePass,
     SetComputePipeline,
     Dispatch,
+    DrawIndexedIndirect,
 }
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
@@ -78,6 +79,7 @@ public readonly struct RenderCommand
     [FieldOffset(8)] public readonly SetViewportPayload SetViewport;
     [FieldOffset(8)] public readonly SetComputePipelinePayload SetComputePipeline;
     [FieldOffset(8)] public readonly DispatchCommand Dispatch;
+    [FieldOffset(8)] public readonly DrawIndexedIndirectCommand DrawIndexedIndirect;
 
     private RenderCommand(RenderCommandKind kind, BeginPassPayload p) : this()
     {
@@ -139,6 +141,12 @@ public readonly struct RenderCommand
         Dispatch = p;
     }
 
+    private RenderCommand(RenderCommandKind kind, DrawIndexedIndirectCommand p) : this()
+    {
+        Kind = kind;
+        DrawIndexedIndirect = p;
+    }
+
     private RenderCommand(RenderCommandKind kind) : this()
     {
         Kind = kind;
@@ -167,6 +175,9 @@ public readonly struct RenderCommand
 
     public static RenderCommand FromDraw(in DrawCommand cmd) =>
         new(RenderCommandKind.Draw, cmd);
+
+    public static RenderCommand FromDrawIndexedIndirect(in DrawIndexedIndirectCommand cmd) =>
+        new(RenderCommandKind.DrawIndexedIndirect, cmd);
 
     public static RenderCommand FromDrawIndexed(in DrawIndexedCommand cmd) =>
         new(RenderCommandKind.DrawIndexed, cmd);

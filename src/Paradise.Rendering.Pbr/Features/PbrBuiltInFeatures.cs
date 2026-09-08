@@ -21,19 +21,23 @@ internal static class PbrBuiltInFeatures
 {
     public static void AddTo(RenderPipeline pipeline, PbrContext ctx, float specularAaVariance, float specularAaClamp)
     {
+        var frustum = new FrustumCullingFeature(ctx);
+        var occlusion = new OcclusionCullingFeature(ctx, frustum);
         var shadows = new ShadowFeature(ctx);
         var ssr = new ScreenSpaceReflectionFeature(ctx);
-        var prepass = new PrepassFeature(ctx, ssr);
+        var prepass = new PrepassFeature(ctx, ssr, frustum);
         var gi = new ProbeGiFeature(ctx, shadows);
         var lightCulling = new LightCullingFeature(ctx);
         pipeline
+            .Add(frustum, PbrFeatureOrder.FrustumCulling)
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
+            .Add(occlusion, PbrFeatureOrder.OcclusionCulling)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
-            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
+            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, frustum, occlusion, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
             .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);

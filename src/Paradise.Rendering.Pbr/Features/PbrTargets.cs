@@ -13,6 +13,8 @@ public static class PbrTargets
     /// <summary>The scene depth buffer.</summary>
     public const string Depth = "PbrDepth";
 
+    public const string OccluderDepth = "PbrOccluderDepth";
+
     /// <summary>The opaque scene captured before transparent geometry draws; exported, because a
     /// game's blend material samples it. Exists only while capture is on.</summary>
     public const string SceneColor = "PbrSceneColor";

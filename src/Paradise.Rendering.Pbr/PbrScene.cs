@@ -257,7 +257,9 @@ public sealed record PbrPrimitive(
     bool Skinned = false,
     // The primitive's mesh in the renderer's trace scene, or -1 when it has none (a dynamic
     // primitive keeps the hierarchy of the geometry it was uploaded with).
-    int TraceMesh = -1);
+    int TraceMesh = -1,
+    // Mutable vertex streams cannot be culled against their upload-time bounds.
+    bool Dynamic = false);
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);
@@ -319,6 +321,14 @@ public sealed class PbrScene
     public PbrRayTracedAo RayTracedAo = new();
     public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
+    public PbrVisibility Visibility = new();
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
+}
+
+/// <summary>Conservative scene visibility; GPU occlusion uses the current frame and costs an additional depth pass.</summary>
+public sealed class PbrVisibility
+{
+    public bool FrustumEnabled = true;
+    public bool OcclusionEnabled;
 }

@@ -251,7 +251,7 @@ public sealed partial class PbrRenderer : IDisposable
         return new PbrPrimitive(
             vb, ib, (uint)indices.Length,
             (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
-            min, max, TraceMesh: traceMesh);
+            min, max, TraceMesh: traceMesh, Dynamic: dynamic);
     }
 
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must

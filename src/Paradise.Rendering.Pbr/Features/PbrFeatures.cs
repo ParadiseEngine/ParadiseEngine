@@ -17,6 +17,12 @@ namespace Paradise.Rendering.Pbr;
 /// platform decision have to be re-made in every level.</para></summary>
 public static class PbrFeatures
 {
+    public static FeatureDefinition FrustumCulling { get; } = new(
+        "rendering.frustumCulling", true, "Conservative camera frustum culling. Off, all scene draws are submitted.");
+
+    public static FeatureDefinition OcclusionCulling { get; } = new(
+        "rendering.occlusionCulling", true, "Current-frame GPU occlusion and indirect draws when enabled by the scene.");
+
     /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
     /// everything.</summary>
     public static FeatureDefinition Shadows { get; } = new(
@@ -81,7 +87,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        FrustumCulling, Shadows, Prepass, OcclusionCulling, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Scene, SceneColorCapture, Bloom, Composite,
     ];
 
@@ -106,8 +112,10 @@ public static class PbrFeatureOrder
     /// scene consumes.</summary>
     public const int First = 0;
 
+    public const int FrustumCulling = 50;
     public const int Shadows = 100;
     public const int Prepass = 200;
+    public const int OcclusionCulling = 250;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;

@@ -34,6 +34,7 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
     // What a ray hit reads of a material: the factors alone, since a hit samples no textures.
     private readonly List<TraceSurface> _surfaces = [];
+    private readonly List<bool> _occluders = [];
     // Materials with target-following entries, and the view each entry was last built with.
     private readonly Dictionary<int, TargetSet> _targets = new();
     private readonly GraphTextureRegistry? _registry;
@@ -202,6 +203,7 @@ public sealed class MaterialResourceCache : IDisposable
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
         // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
+        _occluders.Add(programId == 0 && !blend && material.AlphaMode == GltfAlphaMode.Opaque);
         _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
         var materialId = _materials.Count - 1;
         if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
@@ -329,6 +331,8 @@ public sealed class MaterialResourceCache : IDisposable
     public BindGroupHandle GetBindGroup(int materialId) => _materials[materialId].Group;
 
     public bool IsBlend(int materialId) => _materials[materialId].Blend;
+
+    internal bool IsOccluder(int materialId) => _occluders[materialId];
 
     /// <summary>The factor-only surface the tracer shades a hit on this material with.</summary>
     public TraceSurface GetTraceSurface(int materialId) => _surfaces[materialId];
