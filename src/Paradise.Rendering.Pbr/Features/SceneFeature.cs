@@ -74,6 +74,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
         var graph = frame.Graph;
         var hdr = graph.Texture(PbrTargets.Hdr);
+        frame.Blackboard.Publish(PbrResults.SceneColor, hdr);
         var depth = graph.Texture(PbrTargets.Depth);
         var shadows = graph.Texture(PbrTargets.ShadowArray);
         // The one place the pre-pass is switched off from this side: bind black instead of its

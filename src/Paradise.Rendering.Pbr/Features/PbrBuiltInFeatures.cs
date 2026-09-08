@@ -29,13 +29,24 @@ internal static class PbrBuiltInFeatures
         pipeline
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
+            .Add(new MotionVectorsFeature(ctx), PbrFeatureOrder.MotionVectors)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
             .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
+            .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)
+            .Add(new DepthOfFieldFeature(ctx), PbrFeatureOrder.DepthOfField)
+            .Add(new MotionBlurFeature(ctx), PbrFeatureOrder.MotionBlur)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
-            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);
+            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite)
+            .Add(new ColorGradingFeature(ctx), PbrFeatureOrder.ColorGrading)
+            .Add(new LensDistortionFeature(ctx), PbrFeatureOrder.LensDistortion)
+            .Add(new ChromaticAberrationFeature(ctx), PbrFeatureOrder.ChromaticAberration)
+            .Add(new VignetteFeature(ctx), PbrFeatureOrder.Vignette)
+            .Add(new FilmGrainFeature(ctx), PbrFeatureOrder.FilmGrain)
+            .Add(new SharpeningFeature(ctx), PbrFeatureOrder.Sharpening)
+            .Add(new PresentationFeature(ctx), PbrFeatureOrder.Presentation);
     }
 }

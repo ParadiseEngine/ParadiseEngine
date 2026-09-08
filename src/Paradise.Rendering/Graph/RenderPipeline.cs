@@ -177,6 +177,15 @@ public sealed class RenderPipeline : IDisposable
         _snapshotFresh = true;
     }
 
+    /// <summary>Prepare enabled features in order using the same switch snapshot as setup.</summary>
+    public void PrepareFrame()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_snapshotFresh) BeginFrame();
+        foreach (var entry in _entries)
+            if (entry.EnabledThisFrame) entry.Feature.PrepareFrame();
+    }
+
     /// <summary>The union of the requirements of the features running this frame.</summary>
     public FrameRequirements Requirements()
     {

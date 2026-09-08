@@ -25,6 +25,19 @@ public sealed class FrameBlackboard
             throw new InvalidOperationException($"'{name}' was already published this frame.");
     }
 
+    /// <summary>Replace the current stage of a texture chain after consuming exactly that stage.</summary>
+    public void Advance(string name, GraphTexture previous, GraphTexture next)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (!_textures.TryGetValue(name, out var current) || current != previous)
+            throw new InvalidOperationException($"'{name}' no longer refers to the consumed texture.");
+        if (!next.IsValid)
+            throw new ArgumentException("A texture chain needs a valid next target.", nameof(next));
+        if (previous == next)
+            throw new ArgumentException("A texture chain must advance to a distinct target.", nameof(next));
+        _textures[name] = next;
+    }
+
     public bool TryGet(string name, out GraphTexture texture) => _textures.TryGetValue(name, out texture);
 
     /// <summary>The texture published under <paramref name="name"/>, or

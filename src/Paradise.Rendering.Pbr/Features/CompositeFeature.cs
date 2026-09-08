@@ -6,13 +6,13 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The frame's last word: tonemap the linear HDR scene, add bloom if any was produced,
-/// and write the backbuffer at <see cref="RenderPassEvent.Composite"/>. The one place the
-/// surface format's sRGB decision is made.</summary>
+/// <summary>Tonemap the current HDR scene with bloom into the backbuffer or a linear display
+/// intermediate when later effects request one.</summary>
 public sealed class CompositeFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private readonly PipelineHandle _pipeline;
+    private readonly PipelineHandle _linearPipeline;
     private readonly BufferHandle _uniformBuffer;
     private readonly BindGroupLayoutDesc _groupLayout;
 
@@ -27,6 +27,7 @@ public sealed class CompositeFeature : IRenderFeature
         _pipeline = renderer.CreatePipeline(
             program, renderer.ColorFormat,
             fragmentEntryPoint: UsesSrgbEntryPoint ? "compositeFragmentSrgb" : "compositeFragment");
+        _linearPipeline = renderer.CreatePipeline(program, PbrTargets.HdrFormat, fragmentEntryPoint: "compositeFragment");
         _uniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrCompositeUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
     }
@@ -46,6 +47,18 @@ public sealed class CompositeFeature : IRenderFeature
         var graph = frame.Graph;
         // The one place bloom is switched off: with nothing published the binding is black, the
         // whole chain is unreachable, and the shader still samples it scaled by zero.
+        var intermediate = (frame.Requirements & FrameRequirements.DisplayColor) != 0;
+        var output = FrameGraph.Backbuffer;
+        if (intermediate)
+        {
+            _ctx.Targets.Ensure(PbrTargets.DisplayColor, _ctx.FrameTarget(PbrTargets.HdrFormat));
+            output = graph.Texture(PbrTargets.DisplayColor);
+            frame.Blackboard.Publish(PbrResults.DisplayColor, output);
+        }
+        else
+        {
+            _ctx.Targets.Release(PbrTargets.DisplayColor);
+        }
         var hasBloom = frame.Blackboard.TryGet(PbrResults.Bloom, out var bloom);
         var uniforms = new CompositeUniformsGpu
         {
@@ -55,19 +68,22 @@ public sealed class CompositeFeature : IRenderFeature
         _ctx.Renderer.UpdateBuffer<CompositeUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 
         graph.AddRasterPass("Composite", RenderPassEvent.Composite)
-            .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 1f))
+            .Color(0, output, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 1f))
             .BindGroup(0, "PbrCompositeGroup", _groupLayout,
             [
-                GraphBinding.Texture(0, graph.Texture(PbrTargets.Hdr)),
+                GraphBinding.Texture(0, frame.Blackboard.GetOrDefault(PbrResults.SceneColor, graph.Texture(PbrTargets.Hdr))),
                 GraphBinding.Sampler(1, _ctx.LinearClampSampler),
                 GraphBinding.Texture(2, hasBloom ? bloom : frame.Black),
                 GraphBinding.Buffer(3, _uniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
             ])
-            .Record(this, RecordComposite);
+            .Record(this, intermediate ? RecordLinear : RecordComposite);
     }
 
     private static void RecordComposite(CompositeFeature self, ref PassRecording pass, int _) =>
         Fullscreen.Record(ref pass, self._pipeline);
+
+    private static void RecordLinear(CompositeFeature self, ref PassRecording pass, int _) =>
+        Fullscreen.Record(ref pass, self._linearPipeline);
 
     private static bool IsSrgbFormat(TextureFormat format) =>
         format is TextureFormat.Rgba8UnormSrgb or TextureFormat.Bgra8UnormSrgb;
@@ -75,6 +91,7 @@ public sealed class CompositeFeature : IRenderFeature
     public void Dispose()
     {
         _ctx.Renderer.DestroyPipeline(_pipeline);
+        _ctx.Renderer.DestroyPipeline(_linearPipeline);
         _ctx.Renderer.DestroyBuffer(_uniformBuffer);
     }
 }

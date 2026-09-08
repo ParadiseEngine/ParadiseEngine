@@ -279,9 +279,10 @@ public sealed partial class PbrRenderer : IDisposable
         // Before anything reads a switch: this fixes which features run in THIS frame and is the
         // only place a transition is announced, so the trace-hierarchy decision below and the
         // features' own setup cannot disagree about what is on.
+        _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
-        var view = scene.Camera.View;
-        var viewProjection = PbrMath.ViewProjection(scene.Camera.View, scene.Camera.Projection);
+        Pipeline.PrepareFrame();
+        var view = _ctx.View;
 
         // Partition + sort. View-space depth of the instance origin orders blended draws
         // back-to-front (larger distance first). Opaque stays in submission order (depth
@@ -308,7 +309,6 @@ public sealed partial class PbrRenderer : IDisposable
             throw new InvalidOperationException(
                 $"{totalDraws} draws exceed the {PbrContext.MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
 
-        _ctx.BeginFrame(scene, in view, in viewProjection);
         Materials.ResolveTargets();
         timings.Partition = Lap();
         // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it —
