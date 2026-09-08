@@ -49,8 +49,8 @@ public struct TraceTriangleGpu
 
 /// <summary>Merges primitive BVHs and geometry into buffers used by the compute tracer.</summary>
 /// <remarks>WebGPU lacks bindless buffers, so upload rebases nodes, triangles and vertices to
-/// absolute merged indices. Each frame rewrites only the appended instance hierarchy, whose leaf
-/// order indexes the instance table.</remarks>
+/// absolute merged indices. The appended instance hierarchy is rebuilt when its inputs change;
+/// its leaf order indexes the instance table.</remarks>
 internal sealed partial class TraceScene : IDisposable
 {
     private const int NodeSize = 96;
@@ -65,10 +65,14 @@ internal sealed partial class TraceScene : IDisposable
     private readonly List<(uint RootNode, Aabb Bounds)> _meshes = [];
     private readonly List<TraceInstanceGpu> _instances = [];
     private readonly List<Aabb> _instanceBounds = [];
-    private readonly List<(PbrInstance Instance, PbrPrimitive Primitive)> _instanceSources = [];
+    private readonly List<InstanceSource> _instanceSources = [];
+    private readonly List<InstanceSource> _previousSources = [];
     private TraceMaterialGpu[] _materials = [];
     private BvhNode[] _tlasNodes = [];
     private bool _geometryDirty = true;
+
+    // Copy values: scene instances and primitive arrays may be edited in place by the host.
+    private readonly record struct InstanceSource(Matrix4x4 Model, int TraceMesh, int MaterialId);
 
     private BufferHandle _nodeBuffer;
     private BufferHandle _triangleBuffer;
@@ -180,33 +184,16 @@ internal sealed partial class TraceScene : IDisposable
             // A singular model (a zero scale) cannot take a ray into object space; the instance is
             // flat or degenerate on screen too, so it is left out rather than traced at rest pose.
             if (!Matrix4x4.Invert(instance.Model, out _)) continue;
-            _instanceSources.Add((instance, primitive));
-            _instanceBounds.Add(Aabb.Transform(bounds, instance.Model));
+            _instanceSources.Add(new InstanceSource(instance.Model, primitive.TraceMesh, primitive.MaterialId));
         }
 
-        var tlas = BvhBuilder.Build(CollectionsMarshal.AsSpan(_instanceBounds), maxLeafItems: 1);
-        if (tlas.RequiredStackDepth > BvhTraversal.StackDepth)
-            throw new InvalidOperationException(
-                $"Instance hierarchy over {_instanceSources.Count} instances needs a traversal stack of {tlas.RequiredStackDepth}, above the shader's {BvhTraversal.StackDepth}.");
-        SceneBounds = tlas.Bounds;
-        var meshNodeCount = (uint)_meshNodes.Count;
-        _tlasNodes = tlas.Nodes;
-        for (var i = 0; i < _tlasNodes.Length; i++) _tlasNodes[i].ChildBase += meshNodeCount;
-        TlasRoot = meshNodeCount;
-
-        _instances.Clear();
-        foreach (var slot in tlas.ItemOrder)
+        var hierarchyChanged = _geometryDirty || !CollectionsMarshal.AsSpan(_instanceSources)
+            .SequenceEqual(CollectionsMarshal.AsSpan(_previousSources));
+        if (hierarchyChanged)
         {
-            var (instance, primitive) = _instanceSources[slot];
-            var model = instance.Model;
-            Matrix4x4.Invert(model, out var worldToObject); // singular models were skipped above
-            _instances.Add(new TraceInstanceGpu
-            {
-                WorldToObject = worldToObject,
-                NormalMatrix = PbrMath.NormalMatrix(model),
-                RootNode = _meshes[primitive.TraceMesh].RootNode,
-                Material = (uint)primitive.MaterialId,
-            });
+            BuildHierarchy();
+            _previousSources.Clear();
+            _previousSources.AddRange(_instanceSources);
         }
 
         if (_materials.Length < materials.MaterialCount) _materials = new TraceMaterialGpu[materials.MaterialCount];
@@ -220,10 +207,39 @@ internal sealed partial class TraceScene : IDisposable
             };
         }
 
-        Upload(materials.MaterialCount);
+        Upload(materials.MaterialCount, hierarchyChanged);
     }
 
-    private void Upload(int materialCount)
+    private void BuildHierarchy()
+    {
+        foreach (var source in _instanceSources)
+            _instanceBounds.Add(Aabb.Transform(_meshes[source.TraceMesh].Bounds, source.Model));
+        var tlas = BvhBuilder.Build(CollectionsMarshal.AsSpan(_instanceBounds), maxLeafItems: 1);
+        if (tlas.RequiredStackDepth > BvhTraversal.StackDepth)
+            throw new InvalidOperationException(
+                $"Instance hierarchy over {_instanceSources.Count} instances needs a traversal stack of {tlas.RequiredStackDepth}, above the shader's {BvhTraversal.StackDepth}.");
+        SceneBounds = tlas.Bounds;
+        var meshNodeCount = (uint)_meshNodes.Count;
+        _tlasNodes = tlas.Nodes;
+        for (var i = 0; i < _tlasNodes.Length; i++) _tlasNodes[i].ChildBase += meshNodeCount;
+        TlasRoot = meshNodeCount;
+
+        _instances.Clear();
+        foreach (var slot in tlas.ItemOrder)
+        {
+            var (model, traceMesh, materialId) = _instanceSources[slot];
+            Matrix4x4.Invert(model, out var worldToObject); // singular models were skipped above
+            _instances.Add(new TraceInstanceGpu
+            {
+                WorldToObject = worldToObject,
+                NormalMatrix = PbrMath.NormalMatrix(model),
+                RootNode = _meshes[traceMesh].RootNode,
+                Material = (uint)materialId,
+            });
+        }
+    }
+
+    private void Upload(int materialCount, bool hierarchyChanged)
     {
         var totalNodes = _meshNodes.Count + _tlasNodes.Length;
         var nodesGrew = EnsureBuffer(ref _nodeBuffer, ref _nodeCapacity, totalNodes, NodeSize, "PbrTraceNodes");
@@ -232,7 +248,8 @@ internal sealed partial class TraceScene : IDisposable
             if (_meshNodes.Count > 0)
                 _renderer.UpdateBuffer<BvhNode>(_nodeBuffer, 0, CollectionsMarshal.AsSpan(_meshNodes));
         }
-        _renderer.UpdateBuffer<BvhNode>(_nodeBuffer, (ulong)_meshNodes.Count * NodeSize, _tlasNodes);
+        if (nodesGrew || hierarchyChanged)
+            _renderer.UpdateBuffer<BvhNode>(_nodeBuffer, (ulong)_meshNodes.Count * NodeSize, _tlasNodes);
 
         if (EnsureBuffer(ref _triangleBuffer, ref _triangleCapacity, _triangles.Count, 16, "PbrTraceTriangles") || _geometryDirty)
         {
@@ -247,15 +264,18 @@ internal sealed partial class TraceScene : IDisposable
         _geometryDirty = false;
 
         EnsureBuffer(ref _instanceBuffer, ref _instanceCapacity, _instances.Count, InstanceSize, "PbrTraceInstances");
-        if (_instances.Count > 0)
+        if (hierarchyChanged && _instances.Count > 0)
             _renderer.UpdateBuffer<TraceInstanceGpu>(_instanceBuffer, 0, CollectionsMarshal.AsSpan(_instances));
 
         EnsureBuffer(ref _materialBuffer, ref _materialCapacity, materialCount, MaterialSize, "PbrTraceMaterials");
         if (materialCount > 0)
             _renderer.UpdateBuffer<TraceMaterialGpu>(_materialBuffer, 0, _materials.AsSpan(0, materialCount));
 
-        var uniforms = new TraceUniformsGpu { TlasRoot = TlasRoot, InstanceCount = (uint)_instances.Count };
-        _renderer.UpdateBuffer<TraceUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
+        if (hierarchyChanged)
+        {
+            var uniforms = new TraceUniformsGpu { TlasRoot = TlasRoot, InstanceCount = (uint)_instances.Count };
+            _renderer.UpdateBuffer<TraceUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
+        }
     }
 
     /// <summary>(Re)create <paramref name="buffer"/> when <paramref name="count"/> elements exceed its

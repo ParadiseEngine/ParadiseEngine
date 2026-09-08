@@ -23,6 +23,8 @@ internal sealed class RecordingRenderer : IRenderer
         bool Presenting);
 
     internal IReadOnlyList<CapturedFrame> Frames => _frames;
+    internal List<(BufferHandle Buffer, Type ElementType, byte[] Data)> BufferUpdates { get; } = [];
+    internal bool RecordBufferUpdates { get; set; }
 
     /// <summary>The last presenting submit — the frame a pixel readback corresponds to.</summary>
     internal CapturedFrame LastPresentedFrame
@@ -66,8 +68,12 @@ internal sealed class RecordingRenderer : IRenderer
     public BufferHandle CreateBufferWithData<T>(in BufferDesc desc, ReadOnlySpan<T> data) where T : unmanaged =>
         _inner.CreateBufferWithData(in desc, data);
 
-    public void UpdateBuffer<T>(BufferHandle handle, ulong offset, ReadOnlySpan<T> data) where T : unmanaged =>
+    public void UpdateBuffer<T>(BufferHandle handle, ulong offset, ReadOnlySpan<T> data) where T : unmanaged
+    {
+        if (RecordBufferUpdates)
+            BufferUpdates.Add((handle, typeof(T), System.Runtime.InteropServices.MemoryMarshal.AsBytes(data).ToArray()));
         _inner.UpdateBuffer(handle, offset, data);
+    }
 
     public void DestroyBuffer(BufferHandle handle) => _inner.DestroyBuffer(handle);
 

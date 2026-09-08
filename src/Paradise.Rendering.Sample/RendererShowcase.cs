@@ -22,6 +22,9 @@ internal sealed class RendererShowcase : IDisposable
     private readonly FeatureDefinition[] _definitions = PbrFeatures.All.ToArray();
     private readonly bool[] _initial;
     private readonly Dictionary<string, double> _passMilliseconds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _passOwners = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _featureMilliseconds = new(StringComparer.Ordinal);
+    private readonly string[] _featureLabels;
     private bool _timingSupported;
     private bool _profile = true;
     private double _renderMilliseconds;
@@ -68,6 +71,7 @@ internal sealed class RendererShowcase : IDisposable
         Renderer.Pipeline.Find<ShadowFeature>()!.MapSize = 2048;
         AddGeometry();
         _initial = _definitions.Select(d => Program.Features.IsEnabled(d.Id)).ToArray();
+        _featureLabels = _definitions.Select(d => d.Name["rendering.".Length..]).ToArray();
     }
 
     private void AddGeometry()
@@ -129,10 +133,11 @@ internal sealed class RendererShowcase : IDisposable
         ImGuiText.Disabled("Feature");
         ImGuiApi.SameLine(310);
         ImGuiText.Disabled("GPU pass sum");
-        foreach (var definition in _definitions)
+        for (var index = 0; index < _definitions.Length; index++)
         {
+            var definition = _definitions[index];
             var enabled = Program.Features.IsEnabled(definition.Id);
-            var label = definition.Name.Replace("rendering.", "", StringComparison.Ordinal);
+            var label = _featureLabels[index];
             if (ImGuiApi.Checkbox(label, ref enabled)) Program.Features.Set(definition.Id, enabled);
             if (ImGuiApi.IsItemHovered())
             {
@@ -147,7 +152,7 @@ internal sealed class RendererShowcase : IDisposable
                 ImGuiApi.EndTooltip();
             }
             ImGuiApi.SameLine(310);
-            ImGuiText.Disabled(FeatureTiming(definition, enabled));
+            ImGuiText.Disabled(FeatureTiming(label, enabled));
         }
         ImGuiApi.EndChild();
         var ssao = Scene.Ssao.Enabled;
@@ -186,15 +191,13 @@ internal sealed class RendererShowcase : IDisposable
         _ => null,
     };
 
-    private string FeatureTiming(FeatureDefinition definition, bool enabled)
+    private string FeatureTiming(string name, bool enabled)
     {
         if (!enabled) return "off";
-        var name = definition.Name["rendering.".Length..];
         if (name is "frustumCulling" or "instancing") return "CPU / draws";
         if (name is "contactShadows" or "decals") return "shared: Main";
         if (!_timingSupported || !_profile) return "unavailable";
-        var matches = _passMilliseconds.Where(p => PassOwner(p.Key) == name).ToArray();
-        return matches.Length == 0 ? "no pass" : $"{matches.Sum(p => p.Value):F3} ms";
+        return _featureMilliseconds.TryGetValue(name, out var milliseconds) ? $"{milliseconds:F3} ms" : "no pass";
     }
 
     private void Restore()
@@ -214,6 +217,7 @@ internal sealed class RendererShowcase : IDisposable
         if (!_paused) _frame++;
         _submitMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         _passMilliseconds.Clear();
+        _featureMilliseconds.Clear();
         if (backend.PassTimingEnabled)
         {
             var values = backend.ReadPassTimings();
@@ -222,6 +226,13 @@ internal sealed class RendererShowcase : IDisposable
                 {
                     var pass = Renderer.LastPassNames[i];
                     _passMilliseconds[pass] = _passMilliseconds.GetValueOrDefault(pass) + values[i];
+                    if (!_passOwners.TryGetValue(pass, out var owner))
+                    {
+                        owner = PassOwner(pass);
+                        _passOwners.Add(pass, owner);
+                    }
+                    if (owner is not null)
+                        _featureMilliseconds[owner] = _featureMilliseconds.GetValueOrDefault(owner) + values[i];
                 }
         }
         _renderMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
