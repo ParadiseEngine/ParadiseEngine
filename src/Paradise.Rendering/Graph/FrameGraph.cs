@@ -77,9 +77,14 @@ public sealed partial class FrameGraph
     private readonly List<GraphBinding> _bindings = [];
     private readonly Stack<int> _liveStack = new();
     private readonly ILogger _log;
-    private RenderPassDesc[] _descs = [];
     private int[] _order = [];
-    private HostPassInvocation[] _hostPasses = [];
+    private readonly ConditionalWeakTable<ArrayBufferWriter<RenderCommand>, CompiledTables> _compiledTables = new();
+
+    private sealed class CompiledTables
+    {
+        public RenderPassDesc[] Descriptions { get; set; } = [];
+        public HostPassInvocation[] HostPasses { get; set; } = [];
+    }
 
     /// <param name="textures">The targets this graph owns. Null for a graph that only routes
     /// imported resources.</param>
@@ -230,11 +235,19 @@ public sealed partial class FrameGraph
     {
         ArgumentNullException.ThrowIfNull(writer);
 
-        Array.Clear(_hostPasses);
+        var tables = _compiledTables.GetValue(writer, static _ => new CompiledTables());
+        // Only a reset writer releases its previous stream's tables. Another writer gets its
+        // own storage, and appending without a reset leaves the earlier arrays untouched.
+        if (writer.WrittenCount != 0)
+        {
+            tables.Descriptions = [];
+            tables.HostPasses = [];
+        }
+        Array.Clear(tables.HostPasses);
         var declared = _passes.Count;
-        if (_hostPasses.Length < declared) _hostPasses = new HostPassInvocation[Math.Max(declared, 16)];
+        if (tables.HostPasses.Length < declared) tables.HostPasses = new HostPassInvocation[Math.Max(declared, 16)];
         if (_order.Length < declared) _order = new int[Math.Max(declared, 16)];
-        if (_descs.Length < declared) _descs = new RenderPassDesc[Math.Max(declared, 16)];
+        if (tables.Descriptions.Length < declared) tables.Descriptions = new RenderPassDesc[Math.Max(declared, 16)];
 
         var passes = CollectionsMarshal.AsSpan(_passes);
         Validate(passes, declared);
@@ -271,7 +284,7 @@ public sealed partial class FrameGraph
         {
             ref var pass = ref passes[_order[slot]];
             if (pass.Kind != PassKind.Raster) continue;
-            ref var desc = ref _descs[rasterCount++];
+            ref var desc = ref tables.Descriptions[rasterCount++];
             desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(passes, slot, count));
             for (var c = 0; c < pass.ColorCount; c++)
                 desc[c] = ResolveColor(passes, slot, count, c);
@@ -294,7 +307,7 @@ public sealed partial class FrameGraph
             if (pass.Kind == PassKind.Host)
             {
                 var target = ResolveColor(passes, slot, count, 0).ColorView;
-                _hostPasses[hostSlot] = new HostPassInvocation(pass.HostCallback!, target);
+                tables.HostPasses[hostSlot] = new HostPassInvocation(pass.HostCallback!, target);
                 encoder.HostPass(hostSlot++);
             }
             else if (pass.Kind == PassKind.Compute)
@@ -311,9 +324,9 @@ public sealed partial class FrameGraph
             }
         }
 
-        return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, rasterCount))
+        return new RenderCommandStream(writer.WrittenMemory, tables.Descriptions.AsMemory(0, rasterCount))
         {
-            HostPasses = _hostPasses.AsMemory(0, hostSlot),
+            HostPasses = tables.HostPasses.AsMemory(0, hostSlot),
         };
     }
 

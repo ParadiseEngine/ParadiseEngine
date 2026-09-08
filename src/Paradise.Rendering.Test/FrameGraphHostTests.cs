@@ -9,6 +9,47 @@ public class FrameGraphHostTests
     private static readonly PassRecorder Nothing = static (object _, ref PassRecording _, int _) => { };
 
     [Test]
+    public async Task compiling_another_writer_preserves_prior_callbacks_and_attachments()
+    {
+        var graph = new FrameGraph();
+        var firstCallback = new Callback();
+        var firstView = new TextureViewHandle(7, 1);
+        var target = graph.ImportColor(firstView);
+        graph.AddRasterPass("scene", RenderPassEvent.Opaque)
+            .Color(0, target, LoadOp.Clear).Record(graph, Nothing);
+        graph.AddHostPass("overlay", RenderPassEvent.Overlay, firstCallback, target);
+        var firstWriter = new ArrayBufferWriter<RenderCommand>();
+        var first = graph.Compile(firstWriter);
+
+        graph.Reset();
+        var secondCallback = new Callback();
+        var secondView = new TextureViewHandle(8, 1);
+        target = graph.ImportColor(secondView);
+        graph.AddRasterPass("other scene", RenderPassEvent.Opaque)
+            .Color(0, target, LoadOp.Clear).Record(graph, Nothing);
+        graph.AddHostPass("other overlay", RenderPassEvent.Overlay, secondCallback, target);
+        var secondWriter = new ArrayBufferWriter<RenderCommand>();
+        var second = graph.Compile(secondWriter);
+
+        await Assert.That(first.HostPasses.Span[0].Callback).IsSameReferenceAs(firstCallback);
+        await Assert.That(first.HostPasses.Span[0].Target).IsEqualTo(firstView);
+        await Assert.That(first.Passes.Span[0][0].ColorView).IsEqualTo(firstView);
+        await Assert.That(second.HostPasses.Span[0].Callback).IsSameReferenceAs(secondCallback);
+        await Assert.That(second.Passes.Span[0][0].ColorView).IsEqualTo(secondView);
+
+        // Appending another compilation without resetting the writer cannot invalidate its old tables.
+        graph.Compile(firstWriter);
+        await Assert.That(first.HostPasses.Span[0].Callback).IsSameReferenceAs(firstCallback);
+        await Assert.That(first.Passes.Span[0][0].ColorView).IsEqualTo(firstView);
+
+        firstWriter.ResetWrittenCount();
+        graph.Reset();
+        graph.Compile(firstWriter);
+        await Assert.That(second.HostPasses.Span[0].Callback).IsSameReferenceAs(secondCallback);
+        await Assert.That(second.Passes.Span[0][0].ColorView).IsEqualTo(secondView);
+    }
+
+    [Test]
     public async Task host_callbacks_are_sorted_between_closed_stream_passes()
     {
         var graph = new FrameGraph();

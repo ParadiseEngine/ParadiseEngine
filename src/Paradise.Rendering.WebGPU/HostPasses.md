@@ -34,7 +34,8 @@ and buffer dependencies through `Reads` and `Writes`. A private target with no c
 is culled, including its callback. `SubmitOffscreen` supports explicit imported targets.
 
 Callbacks and their captured state remain caller-owned until submission completes.
-The stream borrows its callback table just as it borrows commands and attachments.
+The stream borrows commands, attachments and callbacks until its command writer is reset.
+Compiling the graph into a different writer leaves earlier streams intact.
 Keep per-frame state valid until submit; do not allocate a callback every frame.
 
 The browser accepts and skips the HostPass opcode. Native UI needs a separate browser
