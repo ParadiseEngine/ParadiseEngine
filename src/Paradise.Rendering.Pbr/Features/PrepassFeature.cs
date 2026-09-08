@@ -14,17 +14,17 @@ public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private readonly FrustumCullingFeature _frustum;
-    private readonly ScreenSpaceReflectionFeature _ssr;
+    private FrameBlackboard? _frameBlackboard;
+    private SsaoUniformsGpu _uniforms;
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal PrepassFeature(PbrContext ctx, ScreenSpaceReflectionFeature ssr, FrustumCullingFeature frustum)
+    internal PrepassFeature(PbrContext ctx, FrustumCullingFeature frustum)
     {
         _ctx = ctx;
         _frustum = frustum;
-        _ssr = ssr;
         var renderer = ctx.Renderer;
 
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
@@ -83,17 +83,13 @@ public sealed class PrepassFeature : IRenderFeature
         var hasOpaque = _ctx.Opaque.Count > 0;
         // Intensity 0 (SSAO off, or nothing opaque this frame) makes the shader skip its taps.
         var ssaoRuns = s.Enabled && hasOpaque;
-        // The ray-traced AO pass publishes exactly when it is enabled and the pre-pass ran, which
-        // is this condition; the flag tells the shader the bound texture is real rather than black.
-        var rtaoRuns = scene.RayTracedAo.Enabled && hasOpaque;
-        // Likewise the reflection pass, which additionally needs last frame's picture to exist.
-        var ssrRuns = scene.Ssr.Enabled && hasOpaque && _ssr.HistoryReady;
-        UploadSsaoUniforms(new SsaoUniformsGpu
+        _frameBlackboard = frame.Blackboard;
+        _uniforms = new SsaoUniformsGpu
         {
             Params = new Vector4(ssaoRuns ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
             Screen = ScreenParams(),
-            Rtao = new Vector4(rtaoRuns ? 1f : 0f, ssrRuns ? 1f : 0f, scene.Ssr.MaxRoughness, 0f),
-        });
+            Rtao = new Vector4(0f, 0f, scene.Ssr.MaxRoughness, 0f),
+        };
 
         var normal = frame.Graph.Texture(PbrTargets.PrepassNormal);
         var depth = frame.Graph.Texture(PbrTargets.PrepassDepth);
@@ -110,6 +106,16 @@ public sealed class PrepassFeature : IRenderFeature
             frame.Blackboard.Publish(PbrResults.PrepassNormal, normal);
             frame.Blackboard.Publish(PbrResults.PrepassDepth, depth);
         }
+    }
+
+    public void BeforeSubmit()
+    {
+        // These producers set up after the prepass. Only sample textures they actually
+        // published this frame, including switch transitions and SSR history warm-up.
+        if (_frameBlackboard is null) return;
+        _uniforms.Rtao.X = _frameBlackboard.TryGet(PbrResults.RayTracedAo, out _) ? 1f : 0f;
+        _uniforms.Rtao.Y = _frameBlackboard.TryGet(PbrResults.SsrReflection, out _) ? 1f : 0f;
+        UploadSsaoUniforms(_uniforms);
     }
 
     // opaque[i] uses the same dynamic offset EncodeBucket fills for it, so no extra ring space or

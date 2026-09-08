@@ -50,11 +50,6 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
             "PbrSsrUniforms", (ulong)Unsafe.SizeOf<SsrUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
     }
 
-    /// <summary>Whether last frame's HDR copy exists to read: false before the first frame the
-    /// feature ran and in the frame after a resize. The pre-pass reads it to tell the scene shader
-    /// whether the bound reflection texture is real.</summary>
-    internal bool HistoryReady => _historyValid;
-
     public FeatureDefinition Definition => PbrFeatures.ScreenSpaceReflection;
     public FrameRequirements Requires =>
         _ctx.Scene.Ssr.Enabled ? FrameRequirements.DepthNormalPrepass : FrameRequirements.None;
@@ -68,10 +63,7 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
         _historyValid = false;
     }
 
-    /// <summary>The pre-pass asks <see cref="HistoryReady"/> whether the reflection texture the
-    /// scene binds holds anything; switched off, this feature stops copying the frame but the
-    /// last copy is still there, so the answer has to be retracted here rather than in a
-    /// <see cref="Setup"/> that no longer runs.</summary>
+    /// <summary>Discard stale history when disabled so re-enabling starts with a fresh copy.</summary>
     public void OnEnabledChanged(bool enabled)
     {
         if (!enabled) _historyValid = false;

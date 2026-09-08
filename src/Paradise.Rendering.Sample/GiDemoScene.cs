@@ -286,7 +286,11 @@ internal sealed class GiDemoScene : IDisposable
         _scene.ElapsedSeconds = time;
     }
 
-    public void RenderFrame()
+    internal PbrScene Scene => _scene;
+
+    internal bool? SoftShadowsOverride { get; set; }
+
+    public void RenderFrame(bool advance = true)
     {
         if (_autoOrbit) _yaw = 0.25f * MathF.Sin(_frame / 60f * 0.2f);
         var target = new Vector3(0f, 1.8f, -0.5f);
@@ -301,8 +305,11 @@ internal sealed class GiDemoScene : IDisposable
             Position = eye,
         };
         Animate();
+        if (SoftShadowsOverride is { } soft)
+            for (var i = 0; i < _scene.Lights.Count; i++)
+                _scene.Lights[i] = _scene.Lights[i] with { SoftShadows = soft };
         _pbr.RenderFrame(_scene);
-        _frame++;
+        if (advance) _frame++;
     }
 
     /// <summary>The renderer, for the benchmark's pass names and CPU timings.</summary>

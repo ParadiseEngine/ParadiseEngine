@@ -1,0 +1,125 @@
+# Balanced renderer preset, profiled in the 1280x800 showcase on this device.
+# Full PbrFeatures.All list. Load explicitly with --config engine.toml.
+# Environment and command-line feature overrides take precedence.
+# Scene Enabled settings must also allow a feature; this file controls switches only.
+
+[[features]]
+name = "rendering.frustumCulling"
+enabled = true
+
+[[features]]
+name = "rendering.shadows"
+enabled = true
+
+# Required by SSAO and other screen-space effects. SSAO itself is scene-authored.
+[[features]]
+name = "rendering.depthNormalPrepass"
+enabled = true
+
+# Off for this small scene so opaque draws can use instancing. Reassess for larger scenes.
+[[features]]
+name = "rendering.occlusionCulling"
+enabled = false
+
+[[features]]
+name = "rendering.motionVectors"
+enabled = true
+
+[[features]]
+name = "rendering.contactShadows"
+enabled = true
+
+[[features]]
+name = "rendering.rayTracedAo"
+enabled = false
+
+[[features]]
+name = "rendering.screenSpaceReflection"
+enabled = false
+
+# Keep the showcase budget of 512 probes x 32 rays; GI quality is scene-authored.
+[[features]]
+name = "rendering.globalIllumination"
+enabled = true
+
+[[features]]
+name = "rendering.lightCulling"
+enabled = true
+
+[[features]]
+name = "rendering.decals"
+enabled = true
+
+[[features]]
+name = "rendering.instancing"
+enabled = true
+
+[[features]]
+name = "rendering.scene"
+enabled = true
+
+# Enable when a material needs opaque scene color for refraction.
+[[features]]
+name = "rendering.sceneColorCapture"
+enabled = false
+
+[[features]]
+name = "rendering.fog"
+enabled = false
+
+[[features]]
+name = "rendering.temporalAntiAliasing"
+enabled = true
+
+[[features]]
+name = "rendering.exposure"
+enabled = true
+
+[[features]]
+name = "rendering.depthOfField"
+enabled = false
+
+[[features]]
+name = "rendering.motionBlur"
+enabled = false
+
+[[features]]
+name = "rendering.bloom"
+enabled = true
+
+[[features]]
+name = "rendering.composite"
+enabled = true
+
+[[features]]
+name = "rendering.colorGrading"
+enabled = true
+
+[[features]]
+name = "rendering.lensDistortion"
+enabled = false
+
+[[features]]
+name = "rendering.chromaticAberration"
+enabled = false
+
+[[features]]
+name = "rendering.vignette"
+enabled = true
+
+[[features]]
+name = "rendering.filmGrain"
+enabled = false
+
+[[features]]
+name = "rendering.sharpening"
+enabled = true
+
+# Use TAA for this preset; FXAA is an alternative when TAA is disabled.
+[[features]]
+name = "rendering.fxaa"
+enabled = false
+
+[[features]]
+name = "rendering.presentation"
+enabled = true

@@ -9,6 +9,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+    <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
     <!-- The sample supplies a diagnostic sink for renderer and device errors. -->
     <ProjectReference Include="../Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
@@ -28,6 +30,8 @@
 
   <ItemGroup>
     <SlangShader Include="Shaders/**/*.slang" />
+    <SlangIncludeDir Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/" />
+    <SlangShaderInclude Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/Common/**/*.slang" />
   </ItemGroup>
 
 </Project>
