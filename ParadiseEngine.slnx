@@ -31,6 +31,8 @@
     <Project Path="src/Paradise.Authoring/Paradise.Authoring.csproj" />
     <Project Path="src/Paradise.Features/Paradise.Features.csproj" />
     <Project Path="src/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
+    <Project Path="src/Paradise.Hosting/Paradise.Hosting.csproj" />
+    <Project Path="src/Paradise.Hosting.Desktop/Paradise.Hosting.Desktop.csproj" />
     <Project Path="src/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <Project Path="src/Paradise.Export/Paradise.Export.csproj" />
     <Project Path="src/Paradise.Physics/Paradise.Physics.csproj" />
@@ -58,6 +60,8 @@
     <Project Path="src/Paradise.Cli.CoyoteTest/Paradise.Cli.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
     <Project Path="src/Paradise.Features.Test/Paradise.Features.Test.csproj" />
+    <Project Path="src/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
+    <Project Path="src/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Diagnostics.Test/Paradise.Diagnostics.Test.csproj" />
     <Project Path="src/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />
     <Project Path="src/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Game application lifetime, fixed-step execution and snapshot transport.</Description>
+    <PackageTags>game;hosting;ecs;nativeaot</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
+    <ProjectReference Include="../Paradise.Features/Paradise.Features.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <ProjectReference Include="../Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+</Project>

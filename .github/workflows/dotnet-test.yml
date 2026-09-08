@@ -11,6 +11,20 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  hosting-concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Install Coyote
+        run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
+      - name: Build and rewrite host concurrency tests
+        run: dotnet build src/Paradise.Hosting.CoyoteTest -c Release
+      - name: Explore host and snapshot interleavings
+        run: dotnet run --project src/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
+
   test:
     runs-on: ubuntu-latest
 

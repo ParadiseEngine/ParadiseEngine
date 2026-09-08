@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>SDL and offscreen application hosting adapters.</Description>
+    <PackageTags>game;hosting;sdl;nativeaot</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Hosting/Paradise.Hosting.csproj" />
+    <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
+  </ItemGroup>
+</Project>

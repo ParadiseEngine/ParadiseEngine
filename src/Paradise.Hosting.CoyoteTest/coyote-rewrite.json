@@ -1,0 +1,12 @@
+{
+  "AssembliesPath": ".",
+  "Assemblies": [
+    "Paradise.Hosting.CoyoteTest.dll",
+    "Paradise.Hosting.dll"
+  ],
+  "OutputPath": ".",
+  "IsRewritingConcurrentCollections": true,
+  "IsRewritingUnitTests": false,
+  "IsRewritingThreads": true,
+  "IsDataRaceCheckingEnabled": true
+}
