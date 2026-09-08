@@ -38,7 +38,26 @@ float phase(float cosine)
     float denominator = max(1 + g * g - 2 * g * cosine, 0.0001);
     return (1 - g * g) / (4 * PI * denominator * sqrt(denominator));
 }
-float3 incidentLight(float3 position, float3 rayDirection, float2 screen)
+// Participating media have no receiver surface: applying raster normal/plane bias moves
+// samples across thin blockers. Hardware PCF compares the actual volume point without
+// the raster depth offset either: there is no coplanar receiver to cause surface acne.
+float volumeShadow(SceneLight light, float3 position)
+{
+    if (light.spotAngles.w <= 0 || light.shadowAtlas.y <= 0 || light.spotAngles.z < 0) return 1;
+    int face = 0;
+    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5)
+        face = getPointShadowFace(position - light.positionAndType.xyz);
+    if (face >= (int)light.shadowAtlas.y) return 1;
+    int layer = (int)light.spotAngles.z + face;
+    float4 projected = mul(frame.sceneLightShadowMatrices[layer], float4(position, 1));
+    if (projected.w <= 0) return 1;
+    float3 ndc = projected.xyz / projected.w;
+    float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5;
+    if (any(uv < 0) || any(uv > 1) || ndc.z < 0 || ndc.z > 1) return 1;
+    float visibility = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), ndc.z);
+    return lerp(1, visibility, light.spotAngles.w);
+}
+float3 incidentLight(float3 position, float3 rayDirection)
 {
     float3 result = float3(0);
     for (int i = 0; i < min((int)frame.ambientEquator.w, MaxSceneLights); i++)
@@ -55,7 +74,7 @@ float3 incidentLight(float3 position, float3 rayDirection, float2 screen)
             if (light.positionAndType.w > 1.5) attenuation *= getSpotAttenuation(light, L);
         }
         if (attenuation <= 0) continue;
-        float visibility = sampleSceneLightShadow(light, i, position, L, L, screen);
+        float visibility = volumeShadow(light, position);
         result += light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation * visibility
             * phase(clamp(dot(L, rayDirection), -1, 1));
     }
@@ -133,7 +152,7 @@ float4 fragmentMain(Varyings input) : SV_Target
         float segmentTransmission = exp(-density * stepLength);
         float3 source = fog.colorDensity.rgb;
         if (fog.scattering.z > 0.5 && density > 0.000001)
-            source += albedoDensity / density * incidentLight(position, direction, input.position.xy);
+            source += albedoDensity / density * incidentLight(position, direction);
         scattered += transmission * (1 - segmentTransmission) * source;
         transmission *= segmentTransmission;
         if (transmission < 0.001) break;

@@ -31,6 +31,7 @@ internal sealed class GiDemoScene : IDisposable
     public static bool ProbeGi { get; set; } = true;
     public static bool RayTracedAo { get; set; }
     public static bool Reflections { get; set; }
+    public static bool Fog { get; set; }
     public static bool AnimateLights { get; set; } = true;
 
     /// <summary>Only the emissive ceiling panel lights the room: it is not a light, so with the
@@ -100,6 +101,18 @@ internal sealed class GiDemoScene : IDisposable
         _scene.Gi = new PbrGi { Enabled = ProbeGi, RaysPerProbe = RaysPerProbe, Hysteresis = 0.97f, MaxProbes = MaxProbes, ProbesPerFrame = ProbesPerFrame };
         _scene.RayTracedAo = new PbrRayTracedAo { Enabled = RayTracedAo, RaysPerPixel = 8, MaxDistance = 1.5f };
         _scene.Ssr = new PbrScreenSpaceReflection { Enabled = Reflections, MaxDistance = 12f };
+        _scene.Fog = new PbrFog
+        {
+            Enabled = Fog, Density = 0.035f, HeightFalloff = 0.5f, BaseHeight = 1,
+            Color = new Vector3(0.08f, 0.1f, 0.14f), Albedo = new Vector3(0.9f),
+            Anisotropy = 0.3f, MaxDistance = 20, Steps = 48,
+        };
+        if (Fog)
+            _scene.FogVolumes.Add(new PbrFogVolume
+            {
+                Transform = Matrix4x4.CreateScale(5.8f, 1.4f, 5.8f) * Matrix4x4.CreateTranslation(0, 0.7f, 0),
+                Density = 0.16f, Albedo = new Vector3(0.75f, 0.85f, 1),
+            });
 
         _sunTemplate = new PbrLight
         {

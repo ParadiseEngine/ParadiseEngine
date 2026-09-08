@@ -287,21 +287,49 @@ public class FogTests
         var scene = Scene();
         scene.ClearColor = new ColorRgba(0, 0, 0, 1);
         scene.Fog = scene.Fog with { Density = 0.5f, LightScattering = true, Albedo = Vector3.One, Anisotropy = 0 };
-        scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.UnitX,
-            Intensity = 4, CastsShadows = true });
+
         AddWall(pbr, scene, Matrix4x4.CreateRotationY(MathF.PI / 2) * Matrix4x4.CreateTranslation(0.5f, 0, 0));
         var shadows = pbr.Pipeline.Find<ShadowFeature>()!;
         shadows.DirectionalRadius = 4;
         shadows.MapSize = 512;
+        foreach (var type in new[] { PbrLightType.Directional, PbrLightType.Point, PbrLightType.Spot })
+        {
+            scene.Lights.Clear();
+            scene.Lights.Add(new PbrLight { Type = type, Direction = Vector3.UnitX,
+                Position = new Vector3(2, 0, 0), Range = 8, SpotOuterDegrees = 120,
+                Intensity = 8, CastsShadows = true });
+            pbr.RenderFrame(scene);
+            var shadowed = Pixel(Pixels(backend, $"{type}-shadowed"), Size / 2, Size / 2);
+            pbr.Switches.Set(PbrFeatures.Shadows.Id, false);
+            pbr.RenderFrame(scene);
+            var lit = Pixel(Pixels(backend, $"{type}-unshadowed"), Size / 2, Size / 2);
+            await Assert.That((int)lit - shadowed).IsGreaterThan(50);
+            pbr.Switches.Set(PbrFeatures.Shadows.Id, true);
+            pbr.RenderFrame(scene);
+            await Assert.That((int)Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo(shadowed).Within(2);
+        }
+    }
+
+    [Test]
+    public async Task coarse_shadow_maps_do_not_lift_volume_samples_through_a_blocker()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.ClearColor = new ColorRgba(0, 0, 0, 1);
+        scene.Fog = scene.Fog with { Density = 0.5f, LightScattering = true, Albedo = Vector3.One, Anisotropy = 0 };
+        scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.UnitX,
+            Intensity = 4, CastsShadows = true });
+        AddWall(pbr, scene, Matrix4x4.CreateRotationY(MathF.PI / 2) * Matrix4x4.CreateTranslation(0.045f, 0, 0));
+        var shadows = pbr.Pipeline.Find<ShadowFeature>()!;
+        shadows.DirectionalRadius = 4;
+        shadows.MapSize = 256;
         pbr.RenderFrame(scene);
-        var shadowed = Pixel(Pixels(backend, "shadowed"), Size / 2, Size / 2);
+        var shadowed = Pixel(Pixels(backend), Size / 2, Size / 2);
         pbr.Switches.Set(PbrFeatures.Shadows.Id, false);
         pbr.RenderFrame(scene);
-        var lit = Pixel(Pixels(backend, "unshadowed"), Size / 2, Size / 2);
-        await Assert.That((int)lit - shadowed).IsGreaterThan(50);
-        pbr.Switches.Set(PbrFeatures.Shadows.Id, true);
-        pbr.RenderFrame(scene);
-        await Assert.That((int)Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo(shadowed).Within(2);
+        await Assert.That((int)Pixel(Pixels(backend), Size / 2, Size / 2) - shadowed).IsGreaterThan(50);
     }
 
     [Test]
@@ -325,6 +353,58 @@ public class FogTests
                 : scene.Lights[0] with { Direction = -Vector3.UnitY };
             pbr.RenderFrame(scene);
             await Assert.That(Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo((byte)0);
+        }
+    }
+
+    [Test]
+    public async Task overlapping_rotated_volumes_add_extinction_without_step_dependence()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Fog = scene.Fog with { Density = 0, MaxDistance = 6, Steps = 1 };
+        // Rotation around Z preserves the two-metre depth while exercising local-space clipping.
+        scene.FogVolumes.Add(new PbrFogVolume { Density = 0.2f,
+            Transform = Matrix4x4.CreateScale(2, 2, 2) * Matrix4x4.CreateRotationZ(0.7f) });
+        scene.FogVolumes.Add(new PbrFogVolume { Density = 0.3f,
+            Transform = Matrix4x4.CreateScale(2, 2, 1) * Matrix4x4.CreateTranslation(0, 0, -0.5f) });
+        foreach (var steps in new[] { 1, 32, 128 })
+        {
+            scene.Fog = scene.Fog with { Steps = steps };
+            pbr.RenderFrame(scene);
+            await Assert.That((float)Pixel(Pixels(backend), Size / 2, Size / 2))
+                .IsEqualTo(ToSrgb(MathF.Exp(-0.7f)) * 255).Within(2);
+        }
+        pbr.Switches.Set(PbrFeatures.Fog.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.Pipeline.Find<FogFeature>()!.VolumeCount).IsEqualTo(0);
+        pbr.Switches.Set(PbrFeatures.Fog.Id, true);
+        scene.Fog = scene.Fog with { Enabled = false };
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.Pipeline.Find<FogFeature>()!.VolumeCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task infinite_far_projection_preserves_sky_and_surface_fog_distances()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        foreach (var geometry in new[] { false, true })
+        {
+            if (geometry)
+            {
+                scene.Ambient = new PbrAmbient { Flat = true, Sky = Vector3.One };
+                AddWall(pbr, scene);
+            }
+            scene.Camera = scene.Camera with { Projection = PbrMath.Perspective(MathF.PI / 3, 1, 0.1f, 100) };
+            pbr.RenderFrame(scene);
+            var finite = Pixel(Pixels(backend), Size / 2, Size / 2);
+            scene.Camera = scene.Camera with { Projection = PbrMath.Perspective(MathF.PI / 3, 1, 0.1f, float.PositiveInfinity) };
+            pbr.RenderFrame(scene);
+            await Assert.That((int)Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo(finite).Within(2);
         }
     }
 

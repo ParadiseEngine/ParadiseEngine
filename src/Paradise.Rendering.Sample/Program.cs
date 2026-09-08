@@ -96,6 +96,7 @@ internal static class Program
             GiDemoScene.ProbeGi = Array.IndexOf(args, "--no-gi") < 0;
             GiDemoScene.RayTracedAo = PbrViewerScene.RayTracedAo;
             GiDemoScene.Reflections = PbrViewerScene.Reflections;
+            GiDemoScene.Fog = Array.IndexOf(args, "--fog") >= 0;
             GiDemoScene.AnimateLights = Array.IndexOf(args, "--static-lights") < 0;
             GiDemoScene.PanelOnly = Array.IndexOf(args, "--panel-only") >= 0;
             if (int.TryParse(ParseValue(args, "--gi-rays"), out var giRays)) GiDemoScene.RaysPerProbe = giRays;
