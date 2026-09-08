@@ -6,9 +6,8 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The frame's last word: tonemap the linear HDR scene, add bloom if any was produced,
-/// and write the backbuffer at <see cref="RenderPassEvent.Composite"/>. The one place the
-/// surface format's sRGB decision is made.</summary>
+/// <summary>Tonemap the current HDR scene with bloom into the backbuffer or a linear display
+/// intermediate when later effects request one.</summary>
 public sealed class CompositeFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;

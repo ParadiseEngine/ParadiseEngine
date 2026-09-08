@@ -59,6 +59,41 @@ public static class PbrFeatures
         "rendering.sceneColorCapture", false,
         "Copy the opaque scene so blend materials can refract it. Costs a blit and a reload per frame.");
 
+    /// <summary>GPU luminance metering and bounded automatic or manual exposure.</summary>
+    public static FeatureDefinition Exposure { get; } = new(
+        "rendering.exposure", true, "GPU luminance metering and bounded automatic or manual exposure.");
+
+    /// <summary>Thin-lens opaque depth of field.</summary>
+    public static FeatureDefinition DepthOfField { get; } = new(
+        "rendering.depthOfField", true, "Thin-lens opaque depth of field.");
+
+    /// <summary>Camera and per-object motion blur from motion vectors.</summary>
+    public static FeatureDefinition MotionBlur { get; } = new(
+        "rendering.motionBlur", true, "Camera and per-object motion blur from motion vectors.");
+
+    /// <summary>White balance, contrast, saturation, lift/gamma/gain and color LUT.</summary>
+    public static FeatureDefinition ColorGrading { get; } = new(
+        "rendering.colorGrading", true, "White balance, contrast, saturation, lift/gamma/gain and color LUT.");
+
+    /// <summary>Radial barrel and pincushion lens distortion.</summary>
+    public static FeatureDefinition LensDistortion { get; } = new(
+        "rendering.lensDistortion", true, "Radial barrel and pincushion lens distortion.");
+
+    /// <summary>Radial red and blue chromatic separation.</summary>
+    public static FeatureDefinition ChromaticAberration { get; } = new(
+        "rendering.chromaticAberration", true, "Radial red and blue chromatic separation.");
+
+    /// <summary>Soft colored vignette.</summary>
+    public static FeatureDefinition Vignette { get; } = new(
+        "rendering.vignette", true, "Soft colored vignette.");
+
+    /// <summary>Deterministic time-animated film grain.</summary>
+    public static FeatureDefinition FilmGrain { get; } = new(
+        "rendering.filmGrain", true, "Deterministic time-animated film grain.");
+
+    /// <summary>Neighborhood-limited sharpening.</summary>
+    public static FeatureDefinition Sharpening { get; } = new(
+        "rendering.sharpening", true, "Neighborhood-limited sharpening.");
     /// <summary>Height fog and local participating media.</summary>
     public static FeatureDefinition Fog { get; } = new(
         "rendering.fog", true, "Height fog and shadowed participating-medium scattering.");
@@ -95,7 +130,8 @@ public static class PbrFeatures
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
         Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Bloom, Composite, Fxaa, Presentation,
+        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
+        ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
 
     /// <summary>Declares every built-in into <paramref name="switches"/>. A renderer does this

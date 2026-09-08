@@ -332,6 +332,24 @@ public class RenderPipelineTests
             .WithMessageContaining("hdr");
     }
 
+    [Test]
+    public async Task advancing_a_texture_chain_requires_the_current_input_and_a_distinct_valid_output()
+    {
+        var blackboard = new FrameBlackboard();
+        var first = new GraphTexture(1);
+        var second = new GraphTexture(2);
+        await Assert.That(() => blackboard.Advance("hdr", first, second)).Throws<InvalidOperationException>();
+        blackboard.Publish("hdr", first);
+        blackboard.Advance("hdr", first, second);
+        await Assert.That(blackboard.GetOrDefault("hdr", GraphTexture.Invalid)).IsEqualTo(second);
+        await Assert.That(() => blackboard.Advance("hdr", first, new GraphTexture(3))).Throws<InvalidOperationException>();
+        await Assert.That(() => blackboard.Advance("hdr", second, second)).Throws<ArgumentException>();
+        await Assert.That(() => blackboard.Advance("hdr", second, GraphTexture.Invalid)).Throws<ArgumentException>();
+        await Assert.That(() => blackboard.Publish("hdr", first)).Throws<InvalidOperationException>();
+        blackboard.Clear();
+        await Assert.That(blackboard.TryGet("hdr", out _)).IsFalse();
+    }
+
     /// <summary>Including the features that are off: one switched back on after a resize would
     /// otherwise hand out a target sized for the old frame.</summary>
     [Test]

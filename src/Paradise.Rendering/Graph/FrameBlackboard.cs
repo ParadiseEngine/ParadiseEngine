@@ -31,6 +31,8 @@ public sealed class FrameBlackboard
         ArgumentException.ThrowIfNullOrEmpty(name);
         if (!_textures.TryGetValue(name, out var current) || current != previous)
             throw new InvalidOperationException($"'{name}' no longer refers to the consumed texture.");
+        if (!next.IsValid)
+            throw new ArgumentException("A texture chain needs a valid next target.", nameof(next));
         if (previous == next)
             throw new ArgumentException("A texture chain must advance to a distinct target.", nameof(next));
         _textures[name] = next;

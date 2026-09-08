@@ -27,8 +27,17 @@ internal static class PbrBuiltInFeatures
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
             .Add(new FogFeature(ctx, shadows), PbrFeatureOrder.Fog)
             .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
+            .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)
+            .Add(new DepthOfFieldFeature(ctx), PbrFeatureOrder.DepthOfField)
+            .Add(new MotionBlurFeature(ctx), PbrFeatureOrder.MotionBlur)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
             .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite)
+            .Add(new ColorGradingFeature(ctx), PbrFeatureOrder.ColorGrading)
+            .Add(new LensDistortionFeature(ctx), PbrFeatureOrder.LensDistortion)
+            .Add(new ChromaticAberrationFeature(ctx), PbrFeatureOrder.ChromaticAberration)
+            .Add(new VignetteFeature(ctx), PbrFeatureOrder.Vignette)
+            .Add(new FilmGrainFeature(ctx), PbrFeatureOrder.FilmGrain)
+            .Add(new SharpeningFeature(ctx), PbrFeatureOrder.Sharpening)
             .Add(new FxaaFeature(ctx), PbrFeatureOrder.AntiAliasing)
             .Add(new PresentationFeature(ctx), PbrFeatureOrder.Presentation);
     }

@@ -294,6 +294,15 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public PbrBloom Bloom = new();
+    public PbrExposure Exposure = new();
+    public PbrDepthOfField DepthOfField = new();
+    public PbrMotionBlur MotionBlur = new();
+    public PbrColorGrading ColorGrading = new();
+    public PbrLensDistortion LensDistortion = new();
+    public PbrChromaticAberration ChromaticAberration = new();
+    public PbrVignette Vignette = new();
+    public PbrFilmGrain FilmGrain = new();
+    public PbrSharpening Sharpening = new();
     public PbrTaa Taa = new();
     public PbrFxaa Fxaa = new();
     /// <summary>Simulation seconds since the previous frame, clamped by temporal post effects.</summary>
