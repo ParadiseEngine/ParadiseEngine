@@ -1,15 +1,8 @@
 namespace Paradise.Ui.Noesis;
 
-/// <summary>The WebGPU render half of a NoesisGUI overlay: lazily initializes a
-/// <see cref="NoesisRenderDevice"/> against the shared <see cref="NoesisViewCore"/> once the
-/// sim thread has published the view, then records the UI passes (offscreen surfaces + the
-/// onscreen composite, LoadOp.Load) into the host's frame encoder — the shape an engine
-/// <c>OverlayPass</c> callback expects. Takes the raw WebGPU device and color format so this
-/// package stays free of Paradise.Rendering dependencies; hosts on
-/// <c>Paradise.Rendering.WebGPU</c> pass <c>renderer.NativeDevice</c> and the swapchain
-/// format. Render-thread only, matching Noesis's threading contract
-/// (<c>Renderer.Init</c>/<c>Render*</c> on the render thread, the View on its sim
-/// thread).</summary>
+/// <summary>Records Noesis offscreen and overlay passes on the render thread.</summary>
+/// <remarks>Initialization waits for the simulation thread to publish the view. Hosts supply the
+/// native WebGPU device and format; LoadOp.Load composites the UI over the scene.</remarks>
 public sealed class NoesisOverlayRenderer(
     NoesisViewCore core,
     WebGpuSharp.Device device,
@@ -39,11 +32,8 @@ public sealed class NoesisOverlayRenderer(
             _device.PrewarmPipelines();
         }
 
-        // Deliberately ignores the changed-flag and re-records every frame. The backbuffer is a
-        // fresh swapchain texture each time and the scene passes have just painted over it, so
-        // "nothing changed in the UI" does NOT mean the last UI image is still there — skipping
-        // would present a frame with no UI on it. The flag is for hosts drawing into a target
-        // that persists; see NoesisViewCore.TryUpdateRenderTree(out bool).
+        // Always redraw into a fresh swapchain target. The unchanged flag can skip rendering only
+        // when the target preserves the previous UI image.
         if (!core.TryUpdateRenderTree()) return;
         _device.BeginFrame(encoder, backbuffer, core.Width, core.Height);
         view.Renderer.RenderOffscreen();

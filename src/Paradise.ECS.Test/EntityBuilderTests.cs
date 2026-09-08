@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for EntityBuilder.
-/// </summary>
+/// <summary>Tests for EntityBuilder.</summary>
 public sealed class EntityBuilderTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

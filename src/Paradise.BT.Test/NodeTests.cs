@@ -4,9 +4,7 @@ namespace Paradise.BT.Test;
 
 public sealed class NodeTests
 {
-    // ============================
     // SequenceNode
-    // ============================
 
     [Test]
     public async Task Sequence_All_Children_Succeed_Returns_Success()
@@ -71,9 +69,7 @@ public sealed class NodeTests
         await Assert.That(instance.ProbeCount(1)).IsEqualTo(2);
     }
 
-    // ============================
     // SelectorNode
-    // ============================
 
     [Test]
     public async Task Selector_All_Children_Fail_Returns_Failure()
@@ -131,9 +127,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
-    // ============================
     // ParallelNode
-    // ============================
 
     [Test]
     public async Task Parallel_All_Children_Succeed_Returns_Success()
@@ -176,9 +170,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
     }
 
-    // ============================
     // RepeatTimesNode
-    // ============================
 
     [Test]
     public async Task RepeatTimes_Zero_Repeats_Returns_Success_Immediately()
@@ -225,9 +217,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
-    // ============================
     // RepeatForeverNode
-    // ============================
 
     [Test]
     public async Task RepeatForever_Keeps_Running_On_Child_Success()
@@ -289,9 +279,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
-    // ============================
     // InverterNode
-    // ============================
 
     [Test]
     public async Task Inverter_Inverts_Success_To_Failure()
@@ -326,9 +314,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
     }
 
-    // ============================
     // SucceederNode
-    // ============================
 
     [Test]
     public async Task Succeeder_Converts_Failure_To_Success()
@@ -363,9 +349,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
     }
 
-    // ============================
     // SuccessNode, FailedNode, RunningNode
-    // ============================
 
     [Test]
     public async Task SuccessNode_Always_Returns_Success()
@@ -394,9 +378,7 @@ public sealed class NodeTests
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
     }
 
-    // ============================
     // NodeState Extensions
-    // ============================
 
     [Test]
     public async Task NodeState_IsCompleted_True_For_Success_And_Failure()

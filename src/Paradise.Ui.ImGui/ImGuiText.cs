@@ -4,19 +4,10 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>Text helpers that render a string as a string.
-///
-/// <b>Why these exist.</b> <c>ImGui.Text</c>, <c>TextColored</c>, <c>TextWrapped</c> and
-/// <c>TextDisabled</c> take a printf FORMAT, and the binding passes it straight to cimgui's
-/// varargs entry point. Any runtime string containing a percent sign is then interpreted:
-/// "50% done" prints garbage, and an unmatched <c>%s</c> reads a pointer that was never pushed
-/// and segfaults the process (HexaEngine/Hexa.NET.ImGui#130 — ImGui.NET had the identical
-/// hazard). Only <c>TextUnformatted</c> is safe, and it has no colored/wrapped/disabled
-/// variants — so these rebuild them from the style stack, which is what Dear ImGui's own
-/// implementations do underneath the formatting.
-///
-/// Call these instead of <c>ImGui.Text*</c> for anything that is not a compile-time literal
-/// under your own control.</summary>
+/// <summary>Renders runtime strings without printf interpretation.</summary>
+/// <remarks>ImGui.Text variants pass strings to native varargs: percent sequences can print garbage
+/// or dereference missing arguments. These helpers use TextUnformatted and the style stack; use
+/// them for runtime text.</remarks>
 public static class ImGuiText
 {
     /// <summary>Draw <paramref name="text"/> verbatim.</summary>

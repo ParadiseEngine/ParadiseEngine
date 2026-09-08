@@ -7,25 +7,8 @@ using Paradise.Export.Serialization;
 
 namespace Paradise.Export.Data
 {
-    /// <summary>
-    /// Reads authored payloads back into the records they were written from.
-    ///
-    /// <b>There is one destination now, and it is "the list".</b> This class used to have two: a
-    /// payload was either an <c>Identity</c> component — spread onto the entity's own
-    /// fields, because identity was what an entity WAS rather than something it had — or it was
-    /// appended to the entity's component list. Schema v5 removed the entity record entirely, so
-    /// there is nothing left to spread onto and nothing left to route: an object IS its
-    /// components. What remains is the READING, which is the part callers actually wanted.
-    ///
-    /// Before that there was a third destination: nine typed slots the engine's own components
-    /// were unpacked into. That tier bought typed access at the cost of a GUID-to-slot mapping
-    /// duplicated in this file, in the Godot editor, and again in the Blender addon's Python
-    /// mirror — so an engine component could not be added without editing all three.
-    ///
-    /// Reflection-free throughout: the dispatch selects a source-generated
-    /// <c>JsonTypeInfo&lt;T&gt;</c>, because a reflection deserializer would pin Godot's
-    /// collectible AssemblyLoadContext and break C# hot-reload (godotengine/godot#78513).
-    /// </summary>
+    /// <summary>Materializes authored payloads into their component records.</summary>
+    /// <remarks>Source-generated JSON metadata avoids reflection caches that pin collectible editor assemblies (godotengine/godot#78513).</remarks>
     public static class AuthoredComponentRouter
     {
         /// <summary>

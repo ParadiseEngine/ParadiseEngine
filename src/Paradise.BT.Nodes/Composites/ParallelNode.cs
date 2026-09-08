@@ -20,7 +20,6 @@ public struct ParallelNode : INode
 
         if (flags.HasFlagFast(NodeState.Running)) return NodeState.Running;
         if (flags.HasFlagFast(NodeState.Failure)) return NodeState.Failure;
-        if (flags.HasFlagFast(NodeState.Success)) return NodeState.Success;
         return NodeState.Success;
     }
 }

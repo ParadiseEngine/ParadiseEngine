@@ -18,7 +18,6 @@ public class QueryableGenerator : IIncrementalGenerator
     private const string DefaultConfigAttributeFullName = "Paradise.ECS.DefaultConfigAttribute";
     private const string IConfigFullName = "Paradise.ECS.IConfig";
     private const string SuppressGlobalUsingsAttributeFullName = "Paradise.ECS.SuppressGlobalUsingsAttribute";
-    private const string RegistryNamespaceAttributeFullName = "Paradise.ECS.ComponentRegistryNamespaceAttribute";
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -40,7 +39,6 @@ public class QueryableGenerator : IIncrementalGenerator
             .Collect()
             .Select(static (components, _) => components.Length);
 
-        // Check for [assembly: SuppressGlobalUsings] attribute
         var suppressGlobalUsings = context.CompilationProvider
             .Select(static (compilation, _) =>
             {
@@ -69,15 +67,7 @@ public class QueryableGenerator : IIncrementalGenerator
         // name that type and generators cannot see each other's output.
         var rootNamespace = context.CompilationProvider
             .Combine(context.AnalyzerConfigOptionsProvider)
-            .Select(static (pair, _) =>
-            {
-                var nsAttr = pair.Left.Assembly.GetAttributes()
-                    .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == RegistryNamespaceAttributeFullName);
-                if (nsAttr?.ConstructorArguments.FirstOrDefault().Value is string fromAttribute)
-                    return fromAttribute;
-                pair.Right.GlobalOptions.TryGetValue("build_property.RootNamespace", out var fromBuild);
-                return fromBuild ?? "Paradise.ECS";
-            });
+            .Select(static (pair, _) => GeneratorUtilities.GetRootNamespace(pair.Left, pair.Right));
 
         // Collect all queryables with component count, suppress flag, config, and root namespace
         var collected = queryableTypes.Collect()
@@ -104,7 +94,6 @@ public class QueryableGenerator : IIncrementalGenerator
         var fullyQualifiedName = GeneratorUtilities.GetFullyQualifiedName(typeSymbol);
         var isRefStruct = typeSymbol.IsRefLikeType;
 
-        // Check if it's partial
         var isPartial = typeSymbol.DeclaringSyntaxReferences
             .Select(r => r.GetSyntax())
             .OfType<StructDeclarationSyntax>()
@@ -148,7 +137,6 @@ public class QueryableGenerator : IIncrementalGenerator
             var attrClass = attr.AttributeClass;
             if (attrClass is null) continue;
 
-            // Check if it's a generic attribute
             if (attrClass.IsGenericType && attrClass.OriginalDefinition is { } originalDef)
             {
                 var metadataName = originalDef.ToDisplayString();
@@ -256,7 +244,6 @@ public class QueryableGenerator : IIncrementalGenerator
             }
         }
 
-        // Find duplicates
         var duplicates = componentUsages
             .Where(kvp => kvp.Value.Count > 1)
             .Select(kvp => (Component: kvp.Key, Attributes: kvp.Value))
@@ -298,7 +285,6 @@ public class QueryableGenerator : IIncrementalGenerator
             .OrderBy(static q => q.FullyQualifiedName, StringComparer.Ordinal)
             .ToList();
 
-        // Report diagnostics for invalid queryables
         foreach (var queryable in sorted)
         {
             if (!queryable.IsRefStruct)
@@ -317,7 +303,6 @@ public class QueryableGenerator : IIncrementalGenerator
                     queryable.FullyQualifiedName));
             }
 
-            // Report duplicate component diagnostics
             foreach (var (component, attrs) in queryable.DuplicateComponents)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
@@ -344,14 +329,12 @@ public class QueryableGenerator : IIncrementalGenerator
         if (validQueryables.Count == 0)
             return;
 
-        // Detect duplicate manual IDs
         var manualIdGroups = validQueryables
             .Where(q => q.ManualId.HasValue)
             .GroupBy(q => q.ManualId!.Value)
             .Where(g => g.Count() > 1)
             .ToList();
 
-        // Report diagnostics for duplicate manual IDs
         var duplicateManualIds = new HashSet<int>();
         foreach (var group in manualIdGroups)
         {
@@ -394,17 +377,14 @@ public class QueryableGenerator : IIncrementalGenerator
             }
         }
 
-        // Compute mask/config types for aliases
         var maskTypeFullyQualified = GeneratorUtilities.GetOptimalMaskType(componentCount);
         var configTypeFull = $"global::{defaultConfigFQN ?? "Paradise.ECS.DefaultConfig"}";
 
-        // Generate partial struct implementations with TypeId
         foreach (var (info, typeId) in queryableWithIds)
         {
             GeneratePartialStruct(context, info, typeId, maskTypeFullyQualified, configTypeFull, rootNamespace);
         }
 
-        // Generate QueryableRegistry
         GenerateQueryableRegistry(context, queryableWithIds, componentCount, suppressGlobalUsings);
     }
 
@@ -433,7 +413,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine("{");
         }
 
-        // Open containing types if nested
         var indent = baseIndent;
         foreach (var containingType in queryable.ContainingTypes)
         {
@@ -454,7 +433,6 @@ public class QueryableGenerator : IIncrementalGenerator
 
         GenerateCollectComponentTypes(sb, queryable, indent + "    ", rootNamespace);
 
-        // Generate static Query method
         sb.AppendLine($"{indent}    /// <summary>Builds a query that iterates over {queryable.TypeName}.Data instances.</summary>");
         sb.AppendLine($"{indent}    /// <typeparam name=\"TWorld\">The world type implementing IWorld.</typeparam>");
         sb.AppendLine($"{indent}    /// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
@@ -470,7 +448,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        => global::Paradise.ECS.QueryHelpers.CreateQueryResult<Data<TMask, TConfig>, TMask, TConfig>(world, global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[QueryableId]);");
         sb.AppendLine();
 
-        // Generate static ChunkQuery method
         sb.AppendLine($"{indent}    /// <summary>Builds a chunk query that iterates over {queryable.TypeName}.ChunkData instances for batch processing.</summary>");
         sb.AppendLine($"{indent}    /// <typeparam name=\"TWorld\">The world type implementing IWorld.</typeparam>");
         sb.AppendLine($"{indent}    /// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
@@ -486,7 +463,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        => global::Paradise.ECS.QueryHelpers.CreateChunkQueryResult<ChunkData<TMask, TConfig>, TMask, TConfig>(world, global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[QueryableId]);");
         sb.AppendLine();
 
-        // Generate nested Data<TMask, TConfig> struct implementing IQueryData
         GenerateNestedDataStruct(sb, queryable, indent + "    ", rootNamespace);
 
         // Generate a readonly arbitrary-entity view that never exposes writable refs.
@@ -495,13 +471,10 @@ public class QueryableGenerator : IIncrementalGenerator
         // Generate arbitrary-entity accessors for systems that need a target by handle.
         GenerateNestedEntityAccessorStructs(sb, queryable, indent + "    ");
 
-        // Generate nested ChunkData<TMask, TConfig> struct implementing IQueryChunkData
         GenerateNestedChunkDataStruct(sb, queryable, indent + "    ");
 
-        // Generate nested Segments<TMask, TConfig> struct for world systems
         GenerateNestedSegmentsStruct(sb, queryable, indent + "    ");
 
-        // Generate nested Singleton<TMask, TConfig> struct for [Queryable(Singleton = true)]
         if (queryable.IsSingleton)
         {
             GenerateNestedSingletonStruct(sb, queryable, indent + "    ");
@@ -514,24 +487,20 @@ public class QueryableGenerator : IIncrementalGenerator
 
         sb.AppendLine($"{indent}}}");
 
-        // Close containing types
         for (int i = queryable.ContainingTypes.Length - 1; i >= 0; i--)
         {
             indent = baseIndent + new string(' ', i * 4);
             sb.AppendLine($"{indent}}}");
         }
 
-        // Close namespace
         if (hasNamespace)
         {
             sb.AppendLine("}");
         }
 
-        // Generate extension methods in Paradise.ECS namespace
         sb.AppendLine();
         GenerateQueryableExtensionMethods(sb, queryable);
 
-        // Generate filename
         var filename = "Queryable_" + queryable.FullyQualifiedName.Replace(".", "_").Replace("+", "_") + ".g.cs";
         context.AddSource(filename, sb.ToString());
     }
@@ -734,7 +703,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    private readonly int _indexInChunk;");
         sb.AppendLine();
 
-        // Generate static Create method (required by IQueryData)
         sb.AppendLine($"{indent}    /// <summary>Creates a new Data instance. Required by IQueryData interface.</summary>");
         sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}    public static Data<TMask, TConfig> Create(");
@@ -760,7 +728,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, readChunkManager, readChunk, indexInChunk);");
         sb.AppendLine();
 
-        // Generate internal constructor
         sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}    internal Data(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
@@ -780,7 +747,6 @@ public class QueryableGenerator : IIncrementalGenerator
 
         GenerateRowFilter(sb, queryable, indent + "    ", rootNamespace);
 
-        // Generate component properties for With<T> components (unless QueryOnly)
         foreach (var comp in queryable.WithComponentsAccess)
         {
             if (comp.QueryOnly)
@@ -805,7 +771,6 @@ public class QueryableGenerator : IIncrementalGenerator
         foreach (var opt in queryable.OptionalComponents)
         {
             sb.AppendLine();
-            // HasXxx property
             sb.AppendLine($"{indent}    /// <summary>Gets whether the {opt.ComponentTypeName} component is present.</summary>");
             sb.AppendLine($"{indent}    public bool Has{opt.PropertyName}");
             sb.AppendLine($"{indent}    {{");
@@ -814,7 +779,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    }}");
 
             sb.AppendLine();
-            // GetXxx() method
             var refType = opt.IsReadOnly ? "ref readonly" : "ref";
             sb.AppendLine($"{indent}    /// <summary>Gets a {(opt.IsReadOnly ? "read-only " : "")}reference to the {opt.ComponentTypeName} component.</summary>");
             sb.AppendLine($"{indent}    /// <exception cref=\"global::System.InvalidOperationException\">Thrown when the component is not present. Check Has{opt.PropertyName} first.</exception>");
@@ -857,7 +821,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    private readonly int _entityCount;");
         sb.AppendLine();
 
-        // Generate static Create method (required by IQueryChunkData)
         sb.AppendLine($"{indent}    /// <summary>Creates a new ChunkData instance. Required by IQueryChunkData interface.</summary>");
         sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}    public static ChunkData<TMask, TConfig> Create(");
@@ -883,7 +846,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        => new(chunkManager, layout, chunk, readChunkManager, readChunk, entityCount);");
         sb.AppendLine();
 
-        // Generate internal constructor
         sb.AppendLine($"{indent}    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"{indent}    internal ChunkData(");
         sb.AppendLine($"{indent}        global::Paradise.ECS.ChunkManager chunkManager,");
@@ -902,7 +864,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    }}");
         sb.AppendLine();
 
-        // EntityCount property
         sb.AppendLine($"{indent}    /// <summary>Gets the number of entities in this chunk.</summary>");
         sb.AppendLine($"{indent}    public int EntityCount");
         sb.AppendLine($"{indent}    {{");
@@ -910,7 +871,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}        get => _entityCount;");
         sb.AppendLine($"{indent}    }}");
 
-        // Generate span properties for With<T> components (unless QueryOnly)
         foreach (var comp in queryable.WithComponentsAccess)
         {
             if (comp.QueryOnly)
@@ -937,7 +897,6 @@ public class QueryableGenerator : IIncrementalGenerator
         foreach (var opt in queryable.OptionalComponents)
         {
             sb.AppendLine();
-            // HasXxx property
             sb.AppendLine($"{indent}    /// <summary>Gets whether this chunk's archetype has the {opt.ComponentTypeName} component.</summary>");
             sb.AppendLine($"{indent}    public bool Has{opt.PropertyName}");
             sb.AppendLine($"{indent}    {{");
@@ -946,7 +905,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    }}");
 
             sb.AppendLine();
-            // GetXxxSpan() method - pluralize name
             var spanMethodName = "Get" + opt.PropertyName + "Span";
             var optSpanType = opt.IsReadOnly ? "ReadOnlySpan" : "Span";
             sb.AppendLine($"{indent}    /// <summary>Gets a {(opt.IsReadOnly ? "read-only " : "")}span over all {opt.ComponentTypeName} components in this chunk.</summary>");
@@ -1846,9 +1804,7 @@ public class QueryableGenerator : IIncrementalGenerator
         }
     }
 
-    /// <summary>
-    /// Information about a component access from With&lt;T&gt; or Optional&lt;T&gt; attribute.
-    /// </summary>
+    /// <summary>Information about a component access from With&lt;T&gt; or Optional&lt;T&gt; attribute.</summary>
     private readonly struct ComponentInfo
     {
         /// <summary>Fully qualified component type name.</summary>

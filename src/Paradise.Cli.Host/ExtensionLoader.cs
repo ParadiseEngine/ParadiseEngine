@@ -8,24 +8,11 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// Loads a project's own importers out of the assemblies its manifest names, so the one
-/// <c>paradise</c> command — and the watcher and its tray — run the game's chain without the
-/// author remembering to invoke a different binary.
-/// </summary>
+/// <summary>Loads importer assemblies declared by a project manifest.</summary>
 /// <remarks>
-/// <para>
-/// The alternative is a game's own console project over <see cref="BuildHost.Run(string[], IReadOnlyList{IAssetImporter})"/>,
-/// which is still supported and is what CI should prefer: MSBuild guarantees the game's importers
-/// and the pipeline they compile against are one coherent closure, which nothing here can promise.
-/// This trades that guarantee for a single command.
-/// </para>
-/// <para>
-/// Because of this, <c>Paradise.Cli</c> cannot be NativeAOT-published or trimmed: the importers are
-/// found by reflection over an assembly the tool has never seen. That is a deliberate cost of the
-/// single command, not an oversight — issue #208 chose the other side of it, when the CLI's own AOT
-/// was still on the table.
-/// </para>
+/// Reflection loading prevents CLI trimming and NativeAOT publishing.
+/// A game-owned console entry point using <see cref="BuildHost.Run(string[], IReadOnlyList{IAssetImporter})"/>
+/// lets MSBuild verify the dependency graph and is preferred for CI.
 /// </remarks>
 internal static class ExtensionLoader
 {

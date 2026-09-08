@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Sample;
 
-// ============================================================================
 // System Definitions - Demonstrating various system patterns
-// ============================================================================
 
 // ---- Inline Entity Systems ----
 
@@ -21,9 +19,7 @@ public ref partial struct MovementSystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Applies gravity to velocity. Demonstrates inline entity system with single writable ref.
-/// </summary>
+/// <summary>Applies gravity to velocity. Demonstrates inline entity system with single writable ref.</summary>
 public ref partial struct GravitySystem : IEntitySystem
 {
     public ref Velocity Velocity;
@@ -68,9 +64,7 @@ public ref partial struct QueryableMovementSystem : IEntitySystem
 
 // ---- Inline Chunk Systems ----
 
-/// <summary>
-/// Applies gravity in batch using span access. Demonstrates inline chunk system.
-/// </summary>
+/// <summary>Applies gravity in batch using span access. Demonstrates inline chunk system.</summary>
 public ref partial struct GravityBatchSystem : IChunkSystem
 {
     public Span<Velocity> Velocities;

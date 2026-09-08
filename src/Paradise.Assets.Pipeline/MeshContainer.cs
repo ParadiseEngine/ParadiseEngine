@@ -92,7 +92,7 @@ public static class MeshContainer
         return parts.Length == 0 ? [] : parts[..^1];
     }
 
-    // ---- glTF binary --------------------------------------------------------------------------
+    // glTF binary
 
     private static IReadOnlyList<ContainerReference> ReadGlb(byte[] glb)
     {

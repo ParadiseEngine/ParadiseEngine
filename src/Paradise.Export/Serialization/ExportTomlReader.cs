@@ -12,15 +12,8 @@ using Tomlyn.Model;
 
 namespace Paradise.Export.Serialization
 {
-    /// <summary>
-    /// The read half of the contract's TOML form, mirroring <see cref="ExportJsonReader"/>.
-    /// </summary>
-    /// <remarks>
-    /// Parses to Tomlyn's untyped model, converts to a node tree, and deserializes with
-    /// <see cref="ExportJsonReader"/>'s own options — the same source-generated resolver and the
-    /// same converters the JSON path uses, so a document read either way yields the same value.
-    /// Reflection-free, and AOT-clean on both halves.
-    /// </remarks>
+    /// <summary>Reads exported TOML through the JSON reader's metadata and converters.</summary>
+    /// <remarks>Bridges Tomlyn's untyped model to a JSON node tree for equivalent, reflection-free deserialization.</remarks>
     public static class ExportTomlReader
     {
         /// <summary>Reads a prefab document.</summary>

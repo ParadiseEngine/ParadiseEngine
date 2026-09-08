@@ -1,9 +1,6 @@
 namespace Paradise.Cli;
 
-/// <summary>
-/// A live flag for a watch session (<c>--editor</c>, restart-on-scene-save). The tray checkbox
-/// flips it; the loop reads it on each change so a click takes effect without restarting the watch.
-/// </summary>
+/// <summary>An atomic watch-session flag controlled by the tray.</summary>
 internal sealed class WatchToggle
 {
     private int _on;

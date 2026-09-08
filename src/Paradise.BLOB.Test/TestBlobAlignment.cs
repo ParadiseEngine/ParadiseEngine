@@ -279,10 +279,7 @@ public class TestBlobAlignment
         Assert.AreEqual(200, blob.Value.IntPtrArray[1].Value);
         Assert.AreEqual(300, blob.Value.IntPtrArray[2].Value);
 
-        // Note: LongArrayPtr pointing to external array data is a complex pattern
-        // that requires careful builder setup. The alignment and structure are preserved,
-        // but the exact data validation would need a different builder pattern.
-        // Checking that the pointer itself is valid (non-null)
+        // This setup checks pointer presence and alignment, not the external array payload.
         Assert.IsNotNull(blob.Value.LongArrayPtr);
 
         Assert.AreEqual("Test alignment string", blob.Value.String.ToString());
@@ -293,9 +290,7 @@ public class TestBlobAlignment
         Assert.That(blob.Value.ByteArray2D[1].ToArray(), Is.EquivalentTo(new byte[] { 4, 5, 6, 7 }));
         Assert.That(blob.Value.ByteArray2D[2].ToArray(), Is.EquivalentTo(new byte[] { 8, 9 }));
 
-        // Note: NestedStructArrayPtrPtr is a complex double-pointer-to-array pattern
-        // The test verifies that the structure can be built with proper alignment.
-        // Accessing deeply nested pointer data requires specific builder patterns.
+        // This setup verifies alignment of the nested pointer structure, not its target payload.
         Assert.IsNotNull(blob.Value.NestedStructArrayPtrPtr);
 
         Assert.AreEqual(Math.E, blob.Value.Footer);
@@ -335,9 +330,7 @@ public class TestBlobAlignment
         Assert.AreEqual(222, blob.Value.Short1);
         Assert.That(blob.Value.DoubleArray.ToArray(), Is.EquivalentTo(new[] { Math.PI, Math.E, Math.Sqrt(2) }));
         Assert.AreEqual(133, blob.Value.Byte2);
-        // Note: IntArrayPtr pointing to external array data requires specific builder patterns.
-        // The alignment and structure are preserved in the test.
-        // Checking that the pointer itself is valid (non-null)
+        // This setup checks pointer presence and alignment, not the external array payload.
         Assert.IsNotNull(blob.Value.IntArrayPtr);
         Assert.AreEqual(999999, blob.Value.Int1);
     }

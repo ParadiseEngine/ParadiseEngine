@@ -22,20 +22,14 @@
   <Import Project="$(MSBuildThisFileDirectory)../Slang.targets" />
 
   <ItemGroup>
-    <!-- Top-level only: Shaders/Common/ holds include-only files (uniforms, pbrCore) that have no
-         entry points and must never be compiled standalone. They participate as SlangShaderInclude
-         so editing one still recompiles every dependent shader. -->
+    <!-- Compile entry-point files only; shared includes are inputs that trigger dependent rebuilds. -->
     <SlangShader Include="Shaders/*.slang" />
     <SlangShaderInclude Include="Shaders/Common/**/*.slang" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Backend-agnostic: this project consumes Paradise.Rendering's IRenderer (the resource +
-         submit surface PbrRenderer and MaterialResourceCache actually call) and never names a
-         concrete backend. The interface was extracted once a second one arrived; hosts pick the
-         backend package (Paradise.Rendering.WebGPU for desktop/Dawn) and hand the instance in.
-         Consumers upgrading past 0.6.x no longer get Paradise.Rendering.WebGPU transitively and
-         must reference it themselves. -->
+    <!-- Hosts explicitly reference and provide an IRenderer backend; PBR has no concrete backend
+         dependency. -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
     <ProjectReference Include="..\Paradise.Geometry\Paradise.Geometry.csproj" />
@@ -48,9 +42,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Ship the shader sources plus the Slang toolchain so package consumers can compile
-         extension shaders against Common/pbrCore.slang; build/Paradise.Rendering.Pbr.targets is
-         NuGet-auto-imported and wires SlangShader items + the include path for them. -->
+    <!-- Package shader sources and Slang tooling for game extensions; the build target adds their
+         include path. -->
     <!-- NuGet appends the glob's recursive dir itself, so the path is the bare folder. -->
     <None Include="Shaders/**/*.slang" Pack="true" PackagePath="shaders" />
     <None Include="build/Paradise.Rendering.Pbr.targets" Pack="true" PackagePath="build/" />

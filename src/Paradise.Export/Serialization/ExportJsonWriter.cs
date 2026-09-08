@@ -9,17 +9,12 @@ using Paradise.Export.Serialization.Converters;
 
 namespace Paradise.Export.Serialization
 {
-    /// <summary>
-    /// Serializes exported documents (scenes, materials, prefabs, project settings) with
-    /// System.Text.Json. Uses source-generated metadata (<see cref="ParadiseJsonContext"/>) plus
-    /// hand-written converters for the System.Numerics vector/matrix shapes and Color32 — so the
-    /// output is the contract's shape (vectors/matrices as float arrays, matrices column-major,
-    /// Color32 as { r, g, b, a }, enums by name, nulls included), without any reflection-based
-    /// serializer that would pin Godot's collectible AssemblyLoadContext (godotengine/godot#78513).
-    ///
-    /// Note: numeric formatting is STJ-native (e.g. <c>5</c> not <c>5.0</c>) — the export contract is
-    /// value-based, not byte-based. Writes are atomic (temp file + rename).
-    /// </summary>
+    /// <summary>Atomically writes exported documents using source-generated JSON metadata.</summary>
+    /// <remarks>
+    /// Converters provide vector and column-major matrix arrays, hex Color32 values and named enums;
+    /// nulls are retained. Numeric formatting follows System.Text.Json, so equality is value-based.
+    /// Reflection-free serialization preserves AOT support and collectible editor assembly unloading.
+    /// </remarks>
     public static class ExportJsonWriter
     {
         private static readonly JsonSerializerOptions Options = CreateOptions();

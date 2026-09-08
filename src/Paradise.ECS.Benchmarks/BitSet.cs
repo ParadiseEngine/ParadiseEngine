@@ -31,23 +31,17 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         get;
     } = ValidateAndGetULongCount();
 
-    /// <summary>
-    /// Gets the maximum number of bits this bitset can store.
-    /// </summary>
+    /// <summary>The maximum number of bits this bitset can store.</summary>
     public static int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => ULongCount * 64;
     }
 
-    /// <summary>
-    /// Gets an empty bitset with all bits cleared.
-    /// </summary>
+    /// <summary>An empty bitset with all bits cleared.</summary>
     public static BitSet<TBits> Empty => default;
 
-    /// <summary>
-    /// Gets a value indicating whether all bits in this bitset are cleared.
-    /// </summary>
+    /// <summary>Whether all bits in this bitset are cleared.</summary>
     public readonly bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -62,24 +56,18 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         }
     }
 
-    /// <summary>
-    /// Creates a new bitset from the specified bits.
-    /// </summary>
+    /// <summary>Creates a new bitset from the specified bits.</summary>
     /// <param name="bits">The backing storage.</param>
     public BitSet(TBits bits) => _bits = bits;
 
-    /// <summary>
-    /// Creates a mutable copy from an immutable bitset.
-    /// </summary>
+    /// <summary>Creates a mutable copy from an immutable bitset.</summary>
     /// <param name="immutable">The immutable bitset to copy from.</param>
     public BitSet(in ImmutableBitSet<TBits> immutable)
     {
         _bits = Unsafe.As<ImmutableBitSet<TBits>, TBits>(ref Unsafe.AsRef(in immutable));
     }
 
-    /// <summary>
-    /// Converts this mutable bitset to an immutable one.
-    /// </summary>
+    /// <summary>Converts this mutable bitset to an immutable one.</summary>
     /// <returns>An immutable copy of this bitset.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly ImmutableBitSet<TBits> ToImmutable()
@@ -87,9 +75,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return Unsafe.As<TBits, ImmutableBitSet<TBits>>(ref Unsafe.AsRef(in _bits));
     }
 
-    /// <summary>
-    /// Determines whether the specified bitset is equal to this bitset.
-    /// </summary>
+    /// <summary>Determines whether the specified bitset is equal to this bitset.</summary>
     /// <param name="other">The bitset to compare with this bitset.</param>
     /// <returns><c>true</c> if all bits match; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -133,9 +119,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             ULongCount);
     }
 
-    /// <summary>
-    /// Gets the value of the bit at the specified index.
-    /// </summary>
+    /// <summary>The value of the bit at the specified index.</summary>
     /// <param name="index">The zero-based index of the bit to get.</param>
     /// <returns><c>true</c> if the bit is set; otherwise, <c>false</c>.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
@@ -148,9 +132,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return (span[index >> 6] & (1UL << (index & 63))) != 0;
     }
 
-    /// <summary>
-    /// Sets the bit at the specified index to 1.
-    /// </summary>
+    /// <summary>Sets the bit at the specified index to 1.</summary>
     /// <param name="index">The zero-based index of the bit to set.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -162,9 +144,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         span[index >> 6] |= 1UL << (index & 63);
     }
 
-    /// <summary>
-    /// Clears the bit at the specified index to 0.
-    /// </summary>
+    /// <summary>Clears the bit at the specified index to 0.</summary>
     /// <param name="index">The zero-based index of the bit to clear.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -176,18 +156,14 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         span[index >> 6] &= ~(1UL << (index & 63));
     }
 
-    /// <summary>
-    /// Clears all bits in this bitset.
-    /// </summary>
+    /// <summary>Clears all bits in this bitset.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ClearAll()
     {
         _bits = default;
     }
 
-    /// <summary>
-    /// Performs a bitwise AND operation with another bitset, modifying this instance.
-    /// </summary>
+    /// <summary>Performs a bitwise AND operation with another bitset, modifying this instance.</summary>
     /// <param name="other">The bitset to AND with.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void And(in BitSet<TBits> other)
@@ -199,9 +175,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             a[i] &= b[i];
     }
 
-    /// <summary>
-    /// Performs a bitwise OR operation with another bitset, modifying this instance.
-    /// </summary>
+    /// <summary>Performs a bitwise OR operation with another bitset, modifying this instance.</summary>
     /// <param name="other">The bitset to OR with.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Or(in BitSet<TBits> other)
@@ -213,9 +187,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             a[i] |= b[i];
     }
 
-    /// <summary>
-    /// Performs a bitwise AND-NOT operation (this AND NOT other), modifying this instance.
-    /// </summary>
+    /// <summary>Performs a bitwise AND-NOT operation (this AND NOT other), modifying this instance.</summary>
     /// <param name="other">The bitset to AND-NOT with.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AndNot(in BitSet<TBits> other)
@@ -227,9 +199,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             a[i] &= ~b[i];
     }
 
-    /// <summary>
-    /// Performs a bitwise XOR operation with another bitset, modifying this instance.
-    /// </summary>
+    /// <summary>Performs a bitwise XOR operation with another bitset, modifying this instance.</summary>
     /// <param name="other">The bitset to XOR with.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Xor(in BitSet<TBits> other)
@@ -241,9 +211,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             a[i] ^= b[i];
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains all bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains all bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if this bitset is a superset of the other; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -259,9 +227,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return true;
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains any bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains any bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if the bitsets have any overlapping bits; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -277,17 +243,13 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return false;
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains none of the bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains none of the bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if the bitsets have no overlapping bits; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly bool ContainsNone(in BitSet<TBits> other) => !ContainsAny(other);
 
-    /// <summary>
-    /// Returns the number of bits that are set in this bitset.
-    /// </summary>
+    /// <summary>Returns the number of bits that are set in this bitset.</summary>
     /// <returns>The population count (number of 1 bits).</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly int PopCount()
@@ -299,9 +261,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return count;
     }
 
-    /// <summary>
-    /// Returns the index of the first (lowest) bit that is set.
-    /// </summary>
+    /// <summary>Returns the index of the first (lowest) bit that is set.</summary>
     /// <returns>The zero-based index of the first set bit, or -1 if no bits are set.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly int FirstSetBit()
@@ -318,9 +278,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return -1;
     }
 
-    /// <summary>
-    /// Returns the index of the last (highest) bit that is set.
-    /// </summary>
+    /// <summary>Returns the index of the last (highest) bit that is set.</summary>
     /// <returns>The zero-based index of the last set bit, or -1 if no bits are set.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly int LastSetBit()
@@ -337,9 +295,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return -1;
     }
 
-    /// <summary>
-    /// Performs a bitwise AND operation between two bitsets.
-    /// </summary>
+    /// <summary>Performs a bitwise AND operation between two bitsets.</summary>
     /// <param name="left">The first bitset.</param>
     /// <param name="right">The second bitset.</param>
     /// <returns>A new bitset containing the result of the AND operation.</returns>
@@ -351,9 +307,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return result;
     }
 
-    /// <summary>
-    /// Performs a bitwise OR operation between two bitsets.
-    /// </summary>
+    /// <summary>Performs a bitwise OR operation between two bitsets.</summary>
     /// <param name="left">The first bitset.</param>
     /// <param name="right">The second bitset.</param>
     /// <returns>A new bitset containing the result of the OR operation.</returns>
@@ -365,9 +319,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return result;
     }
 
-    /// <summary>
-    /// Performs a bitwise XOR operation between two bitsets.
-    /// </summary>
+    /// <summary>Performs a bitwise XOR operation between two bitsets.</summary>
     /// <param name="left">The first bitset.</param>
     /// <param name="right">The second bitset.</param>
     /// <returns>A new bitset containing the result of the XOR operation.</returns>
@@ -379,29 +331,19 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
         return result;
     }
 
-    /// <summary>
-    /// Equality operator.
-    /// </summary>
+    /// <summary>Equality operator.</summary>
     public static bool operator ==(in BitSet<TBits> left, in BitSet<TBits> right) => left.Equals(right);
 
-    /// <summary>
-    /// Inequality operator.
-    /// </summary>
+    /// <summary>Inequality operator.</summary>
     public static bool operator !=(in BitSet<TBits> left, in BitSet<TBits> right) => !left.Equals(right);
 
-    /// <summary>
-    /// Implicit conversion from mutable to immutable bitset.
-    /// </summary>
+    /// <summary>Implicit conversion from mutable to immutable bitset.</summary>
     public static implicit operator ImmutableBitSet<TBits>(in BitSet<TBits> bitSet) => bitSet.ToImmutable();
 
-    /// <summary>
-    /// Explicit conversion from immutable to mutable bitset.
-    /// </summary>
+    /// <summary>Explicit conversion from immutable to mutable bitset.</summary>
     public static explicit operator BitSet<TBits>(in ImmutableBitSet<TBits> immutable) => new(in immutable);
 
-    /// <summary>
-    /// Returns an enumerator that iterates through the indices of all set bits.
-    /// </summary>
+    /// <summary>Returns an enumerator that iterates through the indices of all set bits.</summary>
     /// <returns>An enumerator for the set bit indices.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public readonly SetBitEnumerator GetEnumerator() => new(this);
@@ -409,9 +351,7 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
     /// <inheritdoc/>
     public override readonly string ToString() => $"BitSet<{typeof(TBits).Name}>({PopCount()} bits set)";
 
-    /// <summary>
-    /// Enumerator for iterating through set bit indices in a <see cref="BitSet{TBits}"/>.
-    /// </summary>
+    /// <summary>Enumerator for iterating through set bit indices in a <see cref="BitSet{TBits}"/>.</summary>
     public ref struct SetBitEnumerator
     {
         private readonly BitSet<TBits> _bitset;
@@ -439,18 +379,14 @@ public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
             }
         }
 
-        /// <summary>
-        /// Gets the current set bit index.
-        /// </summary>
+        /// <summary>The current set bit index.</summary>
         public readonly int Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _current;
         }
 
-        /// <summary>
-        /// Advances the enumerator to the next set bit.
-        /// </summary>
+        /// <summary>Advances the enumerator to the next set bit.</summary>
         /// <returns><c>true</c> if there is another set bit; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()

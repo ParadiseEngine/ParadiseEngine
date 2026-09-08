@@ -6,14 +6,9 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The scene itself: the sky background, then every opaque draw, then every blended draw,
-/// in linear HDR at <see cref="RenderPassEvent.Opaque"/>. Owns the HDR and depth targets, the
-/// frame uniforms and their bind group, and the environment lookup tables; reads the shadow plan,
-/// the SSAO uniforms and the Forward+ froxel grid from the features that produce them.
-///
-/// <para>When the frame requires <see cref="FrameRequirements.SceneColorCapture"/> the blended
-/// half moves to its own pass at <see cref="RenderPassEvent.Transparent"/>, after whatever pass
-/// captured the opaque result.</para></summary>
+/// <summary>Renders sky, opaque and blended geometry into linear HDR targets.</summary>
+/// <remarks>Owns frame resources and reads shadow, SSAO and Forward+ results. SceneColorCapture
+/// moves blended geometry to the Transparent stage after capture.</remarks>
 public sealed partial class SceneFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
@@ -74,6 +69,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
         var graph = frame.Graph;
         var hdr = graph.Texture(PbrTargets.Hdr);
+        frame.Blackboard.Publish(PbrResults.SceneColor, hdr);
         var depth = graph.Texture(PbrTargets.Depth);
         var shadows = graph.Texture(PbrTargets.ShadowArray);
         // The one place the pre-pass is switched off from this side: bind black instead of its

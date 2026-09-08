@@ -26,15 +26,9 @@ public class PbrRendererGpuTests
         }
     }
 
-    /// <summary>
-    /// GPU skinning moves the mesh: the same uploaded buffers, rendered twice, differ only by the
-    /// joint palette.
-    ///
-    /// This is the assertion that actually distinguishes working skinning from a shader that
-    /// compiles and ignores its joints — the failure mode is a character that renders perfectly
-    /// and never moves, which no compile or validation error catches. Every vertex is bound to
-    /// joint 0 at full weight, so translating that one matrix must translate the whole cube.
-    /// </summary>
+    /// <summary>Checks that changing only the joint palette moves the rendered mesh.</summary>
+    /// <remarks>All vertices use joint zero at full weight, so its translation must move the entire
+    /// cube.</remarks>
     [Test]
     public async Task skinned_geometry_follows_its_joint_palette()
     {

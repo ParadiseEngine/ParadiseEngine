@@ -5,17 +5,9 @@ using Microsoft.CodeAnalysis.Operations;
 
 namespace Paradise.BT.Generators;
 
-/// <summary>
-/// Checks a node's DECLARED access against what its body does, closing the one gap in making the
-/// attributes the contract: they can disagree with the code beside them, and only a
-/// <c>KeyNotFoundException</c> on the first tick would say so.
-///
-/// Runs in whichever assembly DECLARES the node, so each body is checked once, where it exists.
-///
-/// One-directional: it reports access performed but not declared, never a declaration the body
-/// does not use — a node may reach something down one branch only. A node that reaches the
-/// blackboard through a helper is not followed; PBT0010 says so rather than guessing.
-/// </summary>
+/// <summary>Checks declared node access against its body in the declaring assembly.</summary>
+/// <remarks>Reports undeclared access, not unused declarations. Helper calls are not followed;
+/// PBT0010 reports when the blackboard escapes the checked body.</remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
 {
@@ -92,10 +84,7 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // A node that declares NOTHING is read from its body by the generator, so there is nothing
-        // for it to disagree with and nothing to report. Declaring even one access opts into the
-        // stricter reading: if you write the contract down, it has to be complete, because that is
-        // the only version a consumer in another assembly can see.
+        // Without declarations, infer access from the body. Any explicit declaration opts into a complete contract.
         if (!DeclaresAnyAccess(node))
         {
             return;
@@ -124,11 +113,7 @@ public sealed class BlackboardAccessAnalyzer : DiagnosticAnalyzer
             attribute));
     }
 
-    /// <summary>
-    /// A node handing its blackboard to another method takes its access out of view. Reported
-    /// rather than followed: resolving it properly means propagating an access set along the call
-    /// graph, and the honest answer until then is to say the check stopped here.
-    /// </summary>
+    /// <summary>Reports blackboards passed to helpers whose access cannot be attributed to this node.</summary>
     private static void CheckDoesNotEscape(
         OperationAnalysisContext context,
         INamedTypeSymbol node,

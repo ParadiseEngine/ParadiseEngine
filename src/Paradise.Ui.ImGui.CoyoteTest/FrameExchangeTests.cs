@@ -3,26 +3,17 @@ using Paradise.Ui.ImGui;
 
 namespace Paradise.Ui.ImGui.CoyoteTest;
 
-/// <summary>Systematic interleavings of <see cref="ImGuiFrameExchange"/>, the sim → render handoff.
-///
-/// The property under test is that <b>a snapshot never reaches the renderer ahead of the texture
-/// ops it depends on</b>. That is not a memory-safety property and no stress loop reliably finds
-/// its violation: it needs the sim thread to publish a whole new frame in the window between the
-/// render thread's two steps, which is one specific interleaving out of many. Reverse the two
-/// lines inside <c>AcquireForRender</c> — drain the ops, then swap the snapshot — and these tests
-/// fail; that is the defect they were written against.
-///
-/// Async with awaited joins so Coyote's hang detection stays meaningful, per the repo's notes.</summary>
+/// <summary>Checks that acquired snapshots never precede their texture operations.</summary>
+/// <remarks>Reversing the swap and drain in AcquireForRender makes these Coyote tests fail; joins
+/// are awaited so hang detection remains effective.</remarks>
 public static class FrameExchangeTests
 {
     private const int Frames = 4;
 
-    /// <summary>Every snapshot the render thread draws names only textures whose Create op it has
-    /// already been handed.
-    ///
-    /// The model is one frame per texture: frame <c>f</c> enqueues a Create for texture <c>f</c>
-    /// and publishes a snapshot whose single command samples it. Frames may be dropped — that is
-    /// the point of the snapshot buffer — but a snapshot that IS drawn must have its texture.</summary>
+    /// <summary>Every drawn snapshot must reference textures whose Create operations have
+    /// arrived.</summary>
+    /// <remarks>Each frame creates one texture and samples it; superseded snapshots may be
+    /// dropped.</remarks>
     public static async Task DrawnSnapshotsNeverNameAnUncreatedTexture()
     {
         var exchange = new ImGuiFrameExchange();
@@ -71,12 +62,9 @@ public static class FrameExchangeTests
         Specification.Assert(drawn > 0, "the render loop never drew anything, so nothing was checked.");
     }
 
-    /// <summary>A snapshot handed to the render thread is never simultaneously back in the free
-    /// pool: the sim thread must not be able to rent and overwrite the very buffer being drawn.
-    ///
-    /// Modelled by a tear marker — the sim writes <c>CommandCount = 0</c>, fills the commands, then
-    /// sets the real count. A render thread that ever observes the intermediate state has been
-    /// given a snapshot the sim still owns.</summary>
+    /// <summary>A snapshot being rendered must never return to the producer pool.</summary>
+    /// <remarks>The producer clears CommandCount while writing; observing that marker on the render
+    /// thread detects a torn snapshot.</remarks>
     public static async Task RecycledSnapshotsAreNeverHandedOutWhileBeingWritten()
     {
         var exchange = new ImGuiFrameExchange();

@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>Canonical form is hyphenated lowercase, what Python's <c>str(uuid)</c> and .NET's <c>Guid.ToString()</c> both produce; parsing also accepts the undashed form the Godot host stored, so migrated scenes keep their identities.</summary>
+/// <summary>Formats GUIDs as hyphenated lowercase; also reads legacy undashed Godot GUIDs.</summary>
 public static class DocumentGuid
 {
     public static string Format(Guid guid) => guid.ToString("D", CultureInfo.InvariantCulture);

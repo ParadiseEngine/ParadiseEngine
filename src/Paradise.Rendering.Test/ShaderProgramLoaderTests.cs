@@ -1,13 +1,8 @@
 namespace Paradise.Rendering.Test;
 
-/// <summary>Guards the property that moved <see cref="ShaderProgramLoader"/> out of the WebGPU
-/// backend and into this package: loading a build-time-compiled WGSL + reflection-JSON resource
-/// pair needs NOTHING but Paradise.Rendering. This test project references no backend at all, so
-/// if the loader ever regains a backend dependency, this suite stops compiling — which is the
-/// whole point of it living here.</summary>
-/// <remarks>The fixture pair under <c>Shaders/</c> is hand-written rather than slangc output; the
-/// schema-drift golden tests that need real slangc output stay in Paradise.Rendering.WebGPU.Test,
-/// next to the .slang sources and the headless renderer that consumes them.</remarks>
+/// <summary>Checks shader loading without any rendering-backend dependency.</summary>
+/// <remarks>Handwritten resources test the contract package alone; real slangc schema goldens
+/// remain in WebGPU tests.</remarks>
 public class ShaderProgramLoaderTests
 {
     private static ShaderProgramDesc Load() =>

@@ -20,21 +20,18 @@ public enum FrameRequirements
     /// depth + normal pre-pass runs and publishes its targets, whatever the scene's own
     /// screen-space settings say.</summary>
     DepthNormalPrepass = 1 << 1,
+
+    /// <summary>Current-to-previous screen-space motion must be available for temporal effects.</summary>
+    MotionVectors = 1 << 2,
+
+    /// <summary>Tonemapping must publish display-linear color for effects before presentation.</summary>
+    DisplayColor = 1 << 3,
 }
 
-/// <summary>One unit of the frame: a thing that owns its own GPU resources and declares its own
-/// passes into the graph each frame.
-///
-/// <para>A feature is the extension seam. It sees the graph, the registry behind it, the frame's
-/// requirements and the <see cref="FrameBlackboard"/>, and nothing of any other feature — a
-/// result another feature needs is published by name. Features run in the order their
-/// <see cref="RenderPipeline"/> sorted them into, which is what the composer of that pipeline is
-/// responsible for.</para>
-///
-/// <para>A feature does not decide whether it runs. Its <see cref="Definition"/> names the switch
-/// that does, and the pipeline reads that switch every frame from the engine's
-/// <see cref="IFeatureSwitches"/> — so a game feature is turned off from a config file exactly
-/// the way a built-in one is, and neither had to write any code for it.</para></summary>
+/// <summary>Owns one render feature's resources and declares its passes.</summary>
+/// <remarks>Pipeline order controls setup dependencies; outputs travel through the frame
+/// blackboard. Definition connects each built-in or game feature to the shared configuration
+/// switches.</remarks>
 public interface IRenderFeature : IDisposable
 {
     /// <summary>This feature's identity: the switch that turns it on and off, whether it is on
@@ -50,35 +47,27 @@ public interface IRenderFeature : IDisposable
     /// a feature need not create its targets in its constructor.</summary>
     void Resize(uint width, uint height);
 
+    /// <summary>Prepare frame-local camera or scene state before partitioning and GPU uploads.</summary>
+    /// <remarks>Runs after the pipeline snapshots switches and before requirements and setup;
+    /// changes must stay in frame-local state rather than modifying authored scene data.</remarks>
+    void PrepareFrame()
+    {
+    }
+
     /// <summary>Declare this frame's passes and publish what other features may consume.</summary>
     void Setup(in FrameContext frame);
 
-    /// <summary>Between compile and submit, once per frame, for every enabled feature.
-    ///
-    /// <para><b>For what RECORDING staged.</b> A pass's recorder runs inside the compile, so a
-    /// feature that fills a uniform ring while recording — the shadow pass writes one caster's
-    /// matrix per draw — has nothing uploaded when <see cref="Setup"/> returns and no other
-    /// moment to do it: after this the command stream is submitted and the GPU reads the buffer.
-    /// Without the hook the only thing that CAN do the upload is whatever owns the frame loop,
-    /// which then has to know that this particular feature stages draws — and a game's feature,
-    /// which that loop has never heard of, cannot be uploaded at all.</para>
-    ///
-    /// <para>Most features have nothing to do here. Setting up a pass and recording it are the
-    /// whole job unless a resource the stream reads is filled during recording.</para></summary>
+    /// <summary>Uploads data staged during recording, after compilation and before
+    /// submission.</summary>
+    /// <remarks>Called once for every enabled feature. Uniform rings filled by pass recorders are
+    /// not ready during Setup and must be uploaded here.</remarks>
     void BeforeSubmit()
     {
     }
 
-    /// <summary>Called when this feature's switch flips, and only then — never once per frame.
-    ///
-    /// <para><b>Override it when being off is not the same as declaring no passes.</b> A feature
-    /// whose whole contribution is the passes it declares needs nothing here: stop declaring
-    /// them, its results stop appearing on the blackboard, and every consumer falls back. But a
-    /// feature that leaves state BEHIND — a uniform buffer another feature binds, a plan another
-    /// feature reads, a texture a material samples — is still being read after its last frame,
-    /// and that state must say "off" rather than repeat whatever the last enabled frame put
-    /// there. Skipping this is how a disabled feature keeps darkening the picture with the
-    /// occlusion it computed a hundred frames ago.</para></summary>
+    /// <summary>Updates persistent feature state when its enabled switch changes.</summary>
+    /// <remarks>Override to retract plans, uniforms or textures that other features still read
+    /// while this feature is disabled.</remarks>
     void OnEnabledChanged(bool enabled)
     {
     }

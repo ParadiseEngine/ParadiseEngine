@@ -3,7 +3,9 @@
 `ShadowFeature` renders directional cascades, point-light cube faces, and spot-light views into
 one bounded `Depth32Float` atlas in `Shadow.Atlas`. The scene and probe GI shade from the same
 matrices, tile rectangles, depth ranges, and Poisson PCSS implementation. The array binding stays
-compatible with custom material layouts; the physical atlas has one layer.
+compatible with custom material layouts; the physical atlas has one layer. Fog uses the same
+atlas rectangles, cascade selection and fade, with unbiased hardware-PCF sampling at volume
+points. Contact-shadow sampling lives in the shared raster shading header.
 
 ```csharp
 var shadows = renderer.Pipeline.Find<ShadowFeature>()!;

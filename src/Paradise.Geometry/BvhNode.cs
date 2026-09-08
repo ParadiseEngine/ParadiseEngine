@@ -4,19 +4,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Geometry;
 
-/// <summary>One 8-wide node of a <see cref="WideBvh"/>, in the exact layout the compute tracer
-/// reads (<c>Common/bvh.slang</c>: 96 bytes, 16-byte aligned fields).
-///
-/// <para>Child bounds are quantized to 8 bits per axis against the node's own bounds: the node
-/// stores its origin and one power-of-two scale per axis, each child six bytes. That is the
-/// format decision the plan fixed on day one — a node that decodes to floats on the GPU rather
-/// than storing them costs a fifth of the memory reads of a full-float wide node, and the
-/// traversal is bound by those reads. Quantized bounds are conservative: a child's decoded box
-/// always contains its exact box, so the hierarchy never misses a hit; it only tests a few more.</para>
-///
-/// <para>Internal children are contiguous from <see cref="ChildBase"/>; the items of leaf children
-/// (triangles, or instances in a top-level hierarchy) are contiguous from <see cref="LeafBase"/>.
-/// Each child's <see cref="Meta"/> word says which it is and where it sits in those runs.</para></summary>
+/// <summary>Stores an 8-wide BVH node in the 96-byte layout read by Common/bvh.slang.</summary>
+/// <remarks>Child bounds use six bytes with per-axis power-of-two scales and conservative rounding.
+/// Internal children are contiguous from ChildBase; leaf items are contiguous from LeafBase.
+/// Meta encodes each child's kind and offset. Fields match the shader's alignment.</remarks>
 [StructLayout(LayoutKind.Sequential, Size = 96)]
 public struct BvhNode
 {
@@ -69,9 +60,7 @@ public struct BvhNode
         private uint _element0;
     }
 
-    // The xy words and the z words are separate fields so the WGSL struct — where a four-word
-    // vector aligns to 16 bytes and a two-word one to 8 — packs into the same 96 bytes with no
-    // padding: uint4 meta, uint4 loXY, uint4 hiXY, uint2 loZ, uint2 hiZ.
+    // Separate XY/Z fields match WGSL uint4/uint2 alignment in the 96-byte node layout.
     [InlineArray(4)]
     public struct QuantizedXY
     {

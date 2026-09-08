@@ -2,32 +2,11 @@ using System;
 
 namespace Paradise.Rendering;
 
-/// <summary>The backend-agnostic renderer contract: GPU resource lifetime plus command-stream
-/// submission, expressed entirely in this package's handle and descriptor types. A backend
-/// (Dawn/WebGPU natively, WebGPU through the browser) implements it; renderers built on top —
-/// <c>PbrRenderer</c> and its material cache — consume nothing else, so they compose with any
-/// backend without a compile-time reference to one.</summary>
-/// <remarks>
-/// <para>The surface is deliberately exactly what those consumers call, not everything a backend
-/// can do. Three families of member stay off it on purpose:</para>
-/// <list type="bullet">
-/// <item><description><b>Overlay composition</b> (<c>WebGpuRenderer.OverlayPass</c>) is
-/// backend-specific for now: it hands the subscriber a native Dawn command encoder and texture
-/// view, and its subscribers (the Noesis render device, the ImGui host) are written against those
-/// native types. Browser hosts composite UI in the DOM instead, so there is no shared shape to
-/// abstract yet. Hosts that record an overlay hold the concrete backend type.</description></item>
-/// <item><description><b>Native escape hatches</b> (<c>NativeDevice</c>, <c>ReadbackColor</c>,
-/// <c>RenderClearFrame</c>) — backend-specific by definition, or test/screenshot
-/// infrastructure.</description></item>
-/// <item><description><b>Raw pipeline and shader construction</b> (<c>CreateShader(in
-/// ShaderDesc)</c>, <c>CreatePipeline(in PipelineDesc)</c>) — the reflected-program overloads
-/// below are the contract; the raw descriptor path is a backend's own plumbing, and pinning it
-/// here would force every backend to expose separate shader-module handles.</description></item>
-/// </list>
-/// <para>Handle lifetime follows the backend's stale-handle contract: a <c>Destroy*</c> call
-/// invalidates the handle synchronously, and any later use of it throws rather than silently
-/// resolving to a recycled resource.</para>
-/// </remarks>
+/// <summary>Defines backend-independent GPU resource lifetime and command-stream
+/// submission.</summary>
+/// <remarks>Destroy calls invalidate handles synchronously. Native overlays, backend
+/// device/readback helpers and raw shader-module construction remain backend-specific; reflected
+/// programs provide the shared pipeline API.</remarks>
 public interface IRenderer : ITextureFactory, IBindGroupFactory
 {
     /// <summary>The backend's color-target format — the swapchain format when presenting to a
@@ -70,11 +49,8 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// <summary>Destroy a sampler.</summary>
     void DestroySampler(SamplerHandle handle);
 
-    /// <summary>Build a render pipeline from a Slang-reflected program plus a target color format.
-    /// Vertex layout comes verbatim from the program's reflection record — never hand-coded. The
-    /// <paramref name="topology"/> and <paramref name="stripIndexFormat"/> parameters default to
-    /// triangle-list / uint16; line / point / strip callers pass their own values rather than
-    /// getting silently wrong primitive assembly.</summary>
+    /// <summary>Creates a pipeline from reflected vertex layout, target format and primitive
+    /// topology.</summary>
     /// <param name="fragmentEntryPoint">Selects among multiple <c>[shader("fragment")]</c> entry
     /// points (e.g. linear vs sRGB-encoding); null takes the first.</param>
     /// <param name="vertexEntryPoint">The vertex-side twin, for programs authoring more than one

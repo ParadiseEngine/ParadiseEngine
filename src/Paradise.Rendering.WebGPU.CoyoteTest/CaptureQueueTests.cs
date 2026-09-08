@@ -5,19 +5,9 @@ using Paradise.Rendering.WebGPU.Internal;
 
 namespace Paradise.Rendering.WebGPU.CoyoteTest;
 
-/// <summary>
-/// <see cref="CaptureQueue"/> under systematic exploration.
-///
-/// This exists because a hand-written race test could not do the job. The defect these pin — a
-/// request enqueued after the drain had already passed it by, leaving a task nobody would ever
-/// complete — has a window a few instructions wide, and a stress loop written against the BROKEN
-/// code passed three runs out of three. Coyote schedules the interleavings rather than hoping for
-/// them, so the bad one is reached on purpose and comes back replayable.
-///
-/// THE INVARIANT, in one sentence: every request the queue ACCEPTS is either handed to a frame or
-/// faulted, and one it REFUSES was never accepted. What must never exist is a task that is neither
-/// served, faulted, nor refused — that is a caller hung for the life of the process.
-/// </summary>
+/// <summary>Systematically checks that every accepted capture is served or faulted.</summary>
+/// <remarks>Coyote explores the enqueue/close race that stress tests missed: no accepted task may
+/// remain pending after close.</remarks>
 public static class CaptureQueueTests
 {
     private static readonly Exception Closed = new ObjectDisposedException("renderer");

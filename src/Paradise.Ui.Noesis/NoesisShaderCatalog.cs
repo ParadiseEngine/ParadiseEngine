@@ -5,14 +5,9 @@ using System.Text;
 
 namespace Paradise.Ui.Noesis;
 
-/// <summary>Static description of Noesis's shader surface plus WGSL generation for every
-/// variant. The tables mirror <c>Noesis.Shader</c>'s own helper methods (asserted equal in
-/// tests) and the WGSL bodies are a faithful port of the reference GLSL templates embedded in
-/// libNoesis 3.2.12 (vertex: row-vector <c>pos * proj</c> plus a 4.0.0 OpenGL-to-WebGPU
-/// clip-Z remap; flat color/rect/tile; fragment:
-/// exact paint/effect formulas including the radial-gradient conic solve and the SDF
-/// constants). Colors and ramp texels arrive PREMULTIPLIED from Noesis — no premultiplication
-/// happens in shaders; SrcOver blending is One / OneMinusSrcAlpha.</summary>
+/// <summary>Describes Noesis shader variants and generates their WGSL.</summary>
+/// <remarks>Tables are tested against the SDK. Shaders port the 3.2.12 reference templates with the
+/// 4.0.0 clip-Z remap; colors arrive premultiplied and use One/OneMinusSrcAlpha blending.</remarks>
 public static class NoesisShaderCatalog
 {
     [Flags]

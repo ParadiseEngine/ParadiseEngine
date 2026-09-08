@@ -28,13 +28,9 @@ public enum WindowEventKind : byte
     /// <see cref="WindowEvent"/>.</summary>
     Axis = 4,
 
-    /// <summary>The window is now <see cref="WindowEvent.X"/> × <see cref="WindowEvent.Y"/> PIXELS.
-    ///
-    /// Not a device event, and carried in the input stream anyway, because ORDER is what makes
-    /// it useful: a consumer that lays out to a size must apply the resize at the same point in
-    /// the sequence the pointer events do, or it hit-tests one frame against the old geometry.
-    /// <see cref="IWindow.Resized"/> still exists for consumers that are not draining input —
-    /// a renderer rebuilding its swapchain on another thread.</summary>
+    /// <summary>Reports the new window size in pixels through the ordered input stream.</summary>
+    /// <remarks>Apply before subsequent pointer events; IWindow.Resized remains available for
+    /// consumers that do not drain input.</remarks>
     Resize = 5,
 }
 
@@ -74,31 +70,11 @@ public enum GamepadAxis : byte
     LeftX, LeftY, RightX, RightY, LeftTrigger, RightTrigger,
 }
 
-/// <summary>
-/// One raw input event, verbatim as the window backend reported it. One event type across
-/// devices and kinds (a tape is one stream) — <see cref="Kind"/> says which fields mean
-/// anything, <see cref="Source"/> discriminates <see cref="Code"/>. Construct through the
-/// factories and read through the typed accessors rather than touching <see cref="Code"/>
-/// directly.
-///
-/// <b>Why one widened struct rather than a stream per kind:</b> ORDER is load-bearing. A
-/// pointer move must precede the button-down that hit-tests against where it left the pointer,
-/// and a click must be ordered against a keystroke. Parallel queues cannot express that, and
-/// no consumer can reconstruct it from timestamps alone.
-///
-/// <b>Transitions, except where an axis makes that meaningless.</b> Buttons report edges only —
-/// backends must not forward auto-repeat, which would read as phantom presses. An axis has no
-/// edges, so <see cref="WindowEventKind.Axis"/> reports the value each time the backend observes
-/// it change: a consumer holds the last value and a step with no axis event means "still
-/// there", never "centred".
-///
-/// <b>Units are the backend's problem, meaning is the consumer's.</b> Pointer coordinates are
-/// in PIXELS, matching <see cref="IWindow.Width"/>/<see cref="IWindow.Height"/> and the surface
-/// a renderer draws into — a backend on a scaled display converts before it reports here.
-/// Axis values are normalized to -1..1 (0..1 for triggers) and carry NO DEADZONE: a deadzone is
-/// calibration policy that belongs with the bindings, the same reason this reports scancodes
-/// rather than actions.
-/// </summary>
+/// <summary>Carries one timestamp-orderable raw window event.</summary>
+/// <remarks>Use factories and typed accessors. A single stream preserves move/button/key order;
+/// timestamps cannot reconstruct order across separate queues. Buttons report transitions without
+/// repeat, axes report changed values without deadzones, and consumers retain the latest value.
+/// Pointer coordinates are pixels; axes are normalized to -1..1, or 0..1 for triggers.</remarks>
 /// <param name="Kind">Which fields of this event mean anything.</param>
 /// <param name="Source">Which device produced it — discriminates <paramref name="Code"/>.</param>
 /// <param name="Slot">Which device of its kind, for devices that come in multiples: the gamepad
@@ -106,7 +82,8 @@ public enum GamepadAxis : byte
 /// <param name="Code">The key, button or axis, per <paramref name="Source"/> and
 /// <paramref name="Kind"/>.</param>
 /// <param name="Pressed">For <see cref="WindowEventKind.Button"/>: down, or back up.</param>
-/// <param name="X">Pointer position or scroll delta or axis value, per <paramref name="Kind"/>.</param>
+/// <param name="X">Pointer position or scroll delta or axis value, per <paramref
+/// name="Kind"/>.</param>
 /// <param name="Y">Pointer position or scroll delta, per <paramref name="Kind"/>.</param>
 /// <param name="Character">For <see cref="WindowEventKind.Text"/>: the Unicode codepoint.</param>
 public readonly record struct WindowEvent(
@@ -187,9 +164,7 @@ public readonly record struct WindowEvent(
     public float AxisValue => X;
 }
 
-/// <summary>One raw device event and when it happened. The timestamp is stamped AT THE
-/// PUMP — the closest a host gets to when the input actually happened — on the PLATFORM's
-/// monotonic clock (elapsed since the platform came up), one epoch for every window it
-/// created, so a consumer draining the queue late still records real timings and two windows'
-/// streams are directly comparable.</summary>
+/// <summary>Pairs an input event with the platform's monotonic pump time.</summary>
+/// <remarks>All windows share the same epoch, so late drains preserve event timing and streams
+/// remain comparable.</remarks>
 public readonly record struct TimedWindowEvent(TimeSpan Timestamp, WindowEvent Event);

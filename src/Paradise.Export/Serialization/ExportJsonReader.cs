@@ -7,12 +7,7 @@ using Paradise.Export.Serialization.Converters;
 
 namespace Paradise.Export.Serialization
 {
-    /// <summary>
-    /// The read half of the contract: deserializes exported documents with the same
-    /// source-generated metadata + converters <see cref="ExportJsonWriter"/> writes with, so the
-    /// round trip is exact. Consumed by runtimes (Paradise.Sample.Runtime) that load <c>data/</c> —
-    /// reflection-free, AOT-clean.
-    /// </summary>
+    /// <summary>Reads exported JSON with the writer's source-generated metadata and converters.</summary>
     public static class ExportJsonReader
     {
         private static readonly JsonSerializerOptions Options = CreateOptions();

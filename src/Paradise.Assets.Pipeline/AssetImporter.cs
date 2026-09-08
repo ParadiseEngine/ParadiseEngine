@@ -7,18 +7,13 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>Everything an importer may draw on.</summary>
+/// <summary>Inputs, outputs and services available to an importer.</summary>
 /// <remarks>
-/// <paramref name="FileSystem"/> is the source tree as the build index sees it: every file read
-/// or asked about through it is recorded, and the asset is rebuilt when any of them changes. It
-/// is read-only, case-exact under <c>assets/</c>, and refuses directory listings. Anything the
-/// output depends on that is NOT read through it — a tool's version, the profile's settings — is
-/// the runner's to fold into the index environment; the built-ins have nothing else.
-/// <paramref name="Meta"/> is the asset's sidecar, which verify guarantees exists before a build
-/// runs. <paramref name="Sources"/> also resolves an <see cref="Paradise.Authoring.AssetReference"/>
-/// the asset makes: the guid decides, the path half is a hint a rename can leave stale.
-/// <paramref name="Importers"/> is the chain this build runs, so a document being baked can ask
-/// the importer of an asset it references where that asset is built (<see cref="BuiltPath"/>).
+/// <paramref name="FileSystem"/> records reads and existence checks; sources are read-only,
+/// case-exact and cannot be listed. The runner records other dependencies, such as tool versions
+/// and profile settings, in the index environment. Verify ensures <paramref name="Meta"/> exists.
+/// <paramref name="Sources"/> resolves reference GUIDs; <paramref name="Importers"/> determines
+/// referenced assets' output paths through <see cref="BuiltPath"/>.
 /// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
@@ -203,7 +198,7 @@ public interface IAssetImporter
     /// <summary>The sidecar settings domains this importer reads, so <c>verify</c> knows a table under one is meant and can check its shape. A domain exists exactly when a step reads it.</summary>
     IReadOnlyList<IImportSettingsDomain> SettingsDomains => [];
 
-    // ---- Extraction: what a SOURCE CONTAINER turns into --------------------------------------
+    // Extraction: what a SOURCE CONTAINER turns into
     //
     // A GLB is a container, and a game's own format is another. Extraction is the same importer's
     // other half rather than a second chain, so one Claims decides both and the sidecar's recorded

@@ -6,14 +6,10 @@ namespace Paradise.ECS;
 /// </summary>
 public interface IEntityManager
 {
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     int AliveCount { get; }
 
-    /// <summary>
-    /// Gets the current capacity of the entity storage.
-    /// </summary>
+    /// <summary>The current capacity of the entity storage.</summary>
     int Capacity { get; }
 
     /// <summary>
@@ -37,16 +33,12 @@ public interface IEntityManager
     /// <param name="entity">The entity to destroy.</param>
     void Destroy(Entity entity);
 
-    /// <summary>
-    /// Checks if the entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if the entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive, false if destroyed or invalid.</returns>
     bool IsAlive(Entity entity);
 
-    /// <summary>
-    /// Gets the location for the specified entity ID.
-    /// </summary>
+    /// <summary>The location for the specified entity ID.</summary>
     /// <param name="entityId">The entity ID.</param>
     /// <returns>The entity location containing version and archetype info.</returns>
     EntityLocation GetLocation(int entityId);

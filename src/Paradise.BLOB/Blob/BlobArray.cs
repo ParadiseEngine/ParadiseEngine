@@ -29,13 +29,7 @@ public unsafe struct BlobArray<T> where T : unmanaged
         }
     }
 
-    public T[] ToArray()
-    {
-        var array = new T[Length];
-        // TODO: benchmark
-        for (var i = 0; i < Length; i++) array[i] = this[i];
-        return array;
-    }
+    public T[] ToArray() => ToSpan().ToArray();
 
     public Span<T> ToSpan()
     {

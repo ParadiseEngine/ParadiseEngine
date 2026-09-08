@@ -9,15 +9,9 @@ using WgTextureView = WebGpuSharp.TextureView;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>
-/// A texture the renderer owns, for a run with no display: the same one is lent every frame, and
-/// there is nobody to present it to.
-///
-/// It is created <c>CopySrc</c> as well as <c>RenderAttachment</c> — the flag that makes
-/// <c>CopyTextureToBuffer</c> legal. Together with the fact that this texture is OURS and outlives
-/// any single frame, that is what lets a caller read the finished image at its leisure rather than
-/// having to catch it before a present.
-/// </summary>
+/// <summary>Owns a persistent offscreen target for rendering without a display.</summary>
+/// <remarks>CopySrc permits readback after a frame; the texture remains valid until resize or
+/// disposal.</remarks>
 internal sealed class OffscreenTarget : IPresentationTarget
 {
     private readonly WebGpuDevice _device;

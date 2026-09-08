@@ -60,10 +60,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         ).Where(static info => info.HasValue)
          .Select(static (info, _) => info!.Value);
 
-        // Registration is emitted from a SEPARATE pass over every INode struct, not from the
-        // [Builder] pass above. The two sets are not the same: DelayTimerNode is registerable and
-        // used to have no [Builder] at all, back when a factory built it. Keying registration
-        // on [Builder] would silently drop it, and with it every timer node in every tree.
+        // Register every eligible INode, including nodes without a Builder attribute.
         var registrable = context.SyntaxProvider.CreateSyntaxProvider(
             predicate: static (node, _) =>
                 IsStructDeclaration(node) && ((TypeDeclarationSyntax)node).BaseList?.Types.Count > 0,
@@ -118,9 +115,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
             var source = GenerateWrapper(info);
 
-            // Namespace-qualified: hint names must be unique per generator, and a duplicate
-            // (two same-named builders in different namespaces) throws inside Roslyn and drops
-            // EVERY file this generator would emit — registration included.
+            // Qualify hint names by namespace; a collision aborts all output from this generator.
             string hint = info.Namespace is null
                 ? $"{info.GeneratedClassName}.g.cs"
                 : $"{info.Namespace.Replace('.', '_')}_{info.GeneratedClassName}.g.cs";
@@ -173,15 +168,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         }
 
         // Check for [Guid]
-        bool hasGuid = false;
-        foreach (var attr in structSymbol.GetAttributes())
-        {
-            if (attr.AttributeClass?.ToDisplayString() == GuidAttributeFullName)
-            {
-                hasGuid = true;
-                break;
-            }
-        }
+        bool hasGuid = HasGuidAttribute(structSymbol);
 
         // Check if unmanaged
         bool isUnmanaged = structSymbol.IsUnmanagedType;
@@ -195,9 +182,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             ? null
             : structSymbol.ContainingNamespace?.ToDisplayString();
 
-        // The exposed surface: the declared constructor's parameters when there is one
-        // (everything else is runtime state the builder never shows), otherwise every public
-        // value field.
+        // Expose constructor parameters when declared, otherwise public value fields.
         var publicCtors = ImmutableArray.CreateBuilder<IMethodSymbol>();
         foreach (var ctorSymbol in structSymbol.InstanceConstructors)
         {
@@ -214,7 +199,6 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             if (member is IFieldSymbol field
                 && field.DeclaredAccessibility == Accessibility.Public
                 && !field.IsStatic
-                && !field.IsConst
                 && field.Type.IsValueType)
             {
                 publicFields.Add(field);
@@ -258,9 +242,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         }
         else
         {
-            // No constructor: exposed = every public value field. First required, rest optional
-            // for leaves and decorators; all required for composites, whose `params children`
-            // must come last.
+            // Without a constructor, expose all public fields; composites require them before params children.
             for (int i = 0; i < publicFields.Count; i++)
             {
                 IFieldSymbol field = publicFields[i];
@@ -344,16 +326,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
     private const string NodeDataFullName = "Paradise.BT.INode";
 
-    /// <summary>
-    /// The fully-qualified name of a node type that can be registered, or null.
-    ///
-    /// Three conditions, and each drops a real case: it must implement INode, it must be
-    /// unmanaged (a node holding a reference cannot be stored as bytes), and it must carry a
-    /// [Guid] (the identity a layout resolves through). Generic and inaccessible types are
-    /// skipped too — the emitted initializer is an ordinary internal class, so it can only name
-    /// what an internal class can name. That last rule is what keeps a private test node, declared
-    /// to prove a layout REFUSES unregistered types, from being registered behind its own back.
-    /// </summary>
+    /// <summary>Returns metadata for a registrable node, or null.</summary>
+    /// <remarks>Nodes must implement INode, be unmanaged and non-generic, carry a Guid,
+    /// and be accessible to the generated internal initializer.</remarks>
     private static RegistrableNode? GetRegistrableNode(
         GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
@@ -379,7 +354,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             }
         }
 
-        if (!implementsNodeData || !HasGuidAttribute(symbol) || !IsReachable(symbol))
+        if (!implementsNodeData || !HasGuidAttribute(symbol) || !IsReachableType(symbol))
         {
             return null;
         }
@@ -391,11 +366,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), reads, writes);
     }
 
-    /// <summary>
-    /// What this node touches, for the assembly-level metadata: its <c>Tick</c> body's
-    /// <c>GetData</c>/<c>SetData</c> calls unioned with any hand-written access attributes. This
-    /// is what a CONSUMING assembly's binding reads, since bodies do not survive into metadata.
-    /// </summary>
+    /// <summary>Unions body access and declared access into metadata for consuming assemblies.</summary>
+    /// <remarks>Referenced assemblies expose attributes, not method bodies.</remarks>
     private static void CollectNodeAccess(
         INamedTypeSymbol symbol,
         Compilation compilation,
@@ -486,8 +458,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         return false;
     }
 
-    /// <summary>Reachability for an accessed DATA type — same rule as <see cref="IsReachable"/>,
-    /// over any type symbol.</summary>
+    /// <summary>Whether an internal class in this assembly can name the type and its containers.</summary>
     private static bool IsReachableType(ITypeSymbol symbol)
     {
         for (ITypeSymbol? current = symbol; current is not null; current = current.ContainingType)
@@ -501,29 +472,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         return true;
     }
 
-    /// <summary>Can an internal class in the same assembly name this type? Private and protected
-    /// nested types cannot be, at any depth.</summary>
-    private static bool IsReachable(INamedTypeSymbol symbol)
-    {
-        for (ITypeSymbol? current = symbol; current is not null; current = current.ContainingType)
-        {
-            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// One module initializer per assembly that declares node types, registering every one.
-    ///
-    /// This is what removes the hand-written RegisterAll()/Register&lt;T&gt;() calls: a forgotten
-    /// registration used to surface as a refusal when a layout was built, a long way from the node
-    /// somebody added. A module initializer runs before any of the assembly's types are used, so
-    /// the table is populated by the time anything can ask.
-    /// </summary>
+    /// <summary>Emits one module initializer to register the assembly's nodes before first use.</summary>
     private static void EmitRegistration(SourceProductionContext spc, ImmutableArray<RegistrableNode> nodes)
     {
         if (nodes.IsDefaultOrEmpty)
@@ -544,8 +493,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         sb.AppendLine("#nullable enable");
         sb.AppendLine();
 
-        // Each node's access, published as metadata so a CONSUMING assembly's binding can read it
-        // where no body exists — the generated counterpart of hand-written [Reads<T>]/[Writes<T>].
+        // Publish node access for consumers that cannot inspect its body.
         foreach (var node in distinct)
         {
             sb.Append($"[assembly: global::Paradise.BT.NodeAccess(typeof({node.Name})");
@@ -608,7 +556,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         public override int GetHashCode() => Name.GetHashCode();
     }
 
-    private static string StripNodeSuffix(string name)
+    internal static string StripNodeSuffix(string name)
     {
         return name.EndsWith("Node", StringComparison.Ordinal)
             ? name.Substring(0, name.Length - 4)
@@ -659,15 +607,8 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
         sb.AppendLine("}");
 
-        // A static entry point beside the class, so a tree reads Seq(Delay(0.5f)) rather than
-        // new Sequence(new Delay(0.5f)). Contributed to one partial class per assembly, which a
-        // tree brings into scope with `using static`.
-        //
-        // This is a factory method, which is the shape that was just deleted from this library —
-        // and the difference is the RETURN TYPE. BuiltInBehaviorNodes.Sequence returned a
-        // BehaviorNodeDefinition, discarding every trace of what it built, so a binding could not
-        // see through it. This returns the BUILDER, which carries its node as a generic argument
-        // on its base, so the node type survives the call.
+        // Emit factories for use with using static. Returning concrete builders preserves node types
+        // for the binding scan.
         sb.AppendLine();
         sb.AppendLine("public static partial class Nodes");
         sb.AppendLine("{");
@@ -709,16 +650,9 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
     private static void GenerateLeafConstructor(StringBuilder sb, NodeInfo info)
     {
-        if (info.Fields.IsEmpty)
-        {
-            sb.AppendLine($"    public {info.GeneratedClassName}() : base({Construction(info)}) {{ }}");
-        }
-        else
-        {
-            var paramList = BuildParamList(info.Fields, includeChild: false);
-            sb.AppendLine(RequireNamedArguments);
-            sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}) {{ }}");
-        }
+        var paramList = BuildParamList(info.Fields, includeChild: false);
+        if (!info.Fields.IsEmpty) sb.AppendLine(RequireNamedArguments);
+        sb.AppendLine($"    public {info.GeneratedClassName}({paramList}) : base({Construction(info)}) {{ }}");
     }
 
     private static void GenerateDecoratorConstructor(StringBuilder sb, NodeInfo info)

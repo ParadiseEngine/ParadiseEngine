@@ -6,16 +6,11 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Screen-space reflection at <see cref="RenderPassEvent.AfterPrepass"/>: a compute pass
-/// marches each pixel's mirror ray through the depth + normal pre-pass and writes the color the
-/// PREVIOUS frame's HDR scene held at the hit, with a confidence the scene pass blends its indirect
-/// specular by. The history is this feature's own copy of the HDR target, blitted at
-/// <see cref="RenderPassEvent.AfterTransparent"/>; reading last frame's picture is what lets the
-/// reflection feed the very pass that produces it, at the cost of one frame of latency.
-///
-/// <para>Runs while <see cref="PbrScene.Ssr"/> is enabled and something opaque exists; it requires
-/// the pre-pass through <see cref="FrameRequirements.DepthNormalPrepass"/> and publishes
-/// <see cref="PbrResults.SsrReflection"/>. Off, it declares nothing.</para></summary>
+/// <summary>Traces screen-space reflection rays against the prepass and samples prior-frame
+/// HDR.</summary>
+/// <remarks>A history copy after transparent rendering permits reflections in the scene that
+/// produces it, with one-frame latency. Enabled opaque scenes require the prepass and publish
+/// SsrReflection.</remarks>
 public sealed class ScreenSpaceReflectionFeature : IRenderFeature
 {
     [StructLayout(LayoutKind.Sequential, Size = 240)]
@@ -105,11 +100,8 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
         var hasPrepass = frame.Blackboard.TryGet(PbrResults.PrepassNormal, out var normal)
             & frame.Blackboard.TryGet(PbrResults.PrepassDepth, out var depth);
 
-        // The history copy is declared whenever the feature is on, so the first frame with
-        // something opaque already has last frame's picture to read. Its consumer is NEXT frame's
-        // trace, which the graph cannot see: the pass is kept explicitly, and so is its STORE —
-        // inferred, the graph discards an attachment nothing reads this frame, which is exactly
-        // the first frame and the frame after a resize, the two that exist to fill it.
+        // Keep and store history explicitly: its reader runs next frame, beyond graph reachability.
+        // This also seeds history on the first frame and after resize.
         EnsureTargets(settings.ResolutionScale);
         var history = graph.Texture(PbrTargets.SsrHistory);
         graph.AddRasterPass("Ssr.History", RenderPassEvent.AfterTransparent)

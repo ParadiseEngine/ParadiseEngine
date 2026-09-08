@@ -23,24 +23,16 @@ public sealed class World<TMask, TConfig> : IDisposable
     private readonly OperationGuard _operationGuard = new();
     private int _disposed;
 
-    /// <summary>
-    /// Gets the shared archetype metadata used by this world.
-    /// </summary>
+    /// <summary>The shared archetype metadata used by this world.</summary>
     public SharedArchetypeMetadata<TMask, TConfig> SharedMetadata => _sharedMetadata;
 
-    /// <summary>
-    /// Gets the chunk manager for memory allocation.
-    /// </summary>
+    /// <summary>The chunk manager for memory allocation.</summary>
     public ChunkManager ChunkManager => _chunkManager;
 
-    /// <summary>
-    /// Gets the archetype registry.
-    /// </summary>
+    /// <summary>The archetype registry.</summary>
     public ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry => _archetypeRegistry;
 
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     public int EntityCount => _entityManager.AliveCount;
 
     /// <summary>
@@ -92,9 +84,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return _entityManager.Create();
     }
 
-    /// <summary>
-    /// Creates a new entity using the provided builder.
-    /// </summary>
+    /// <summary>Creates a new entity using the provided builder.</summary>
     /// <typeparam name="TBuilder">The builder type.</typeparam>
     /// <param name="builder">The component builder with initial components.</param>
     /// <returns>The created entity handle.</returns>
@@ -104,14 +94,12 @@ public sealed class World<TMask, TConfig> : IDisposable
         using var _ = _operationGuard.EnterScope();
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        // Collect component mask
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
 
         // Validate before creating to avoid inconsistent state if limit exceeded
         ThrowHelper.ThrowIfEntityIdExceedsLimit(_entityManager.PeekNextId(), Config<TConfig>.MaxEntityId, TConfig.EntityIdByteSize);
 
-        // Create entity
         var entity = _entityManager.Create();
 
         if (mask.IsEmpty)
@@ -144,7 +132,6 @@ public sealed class World<TMask, TConfig> : IDisposable
 
         var location = GetValidatedLocation(entity);
 
-        // Collect component mask
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
 
@@ -183,19 +170,16 @@ public sealed class World<TMask, TConfig> : IDisposable
 
         var location = GetValidatedLocation(entity);
 
-        // Collect new component mask from builder
         var newMask = TMask.Empty;
         builder.CollectTypes(ref newMask);
 
         if (newMask.IsEmpty)
             return entity;
 
-        // Get current mask (empty if entity has no archetype)
         var currentMask = location.IsValid
             ? _archetypeRegistry.GetById(location.ArchetypeId)!.Layout.ComponentMask
             : TMask.Empty;
 
-        // Check for duplicates
         var overlap = currentMask.And(newMask);
         if (!overlap.IsEmpty)
         {
@@ -203,11 +187,9 @@ public sealed class World<TMask, TConfig> : IDisposable
             throw new InvalidOperationException($"Entity {entity} already has component with ID {id}.");
         }
 
-        // Merge masks and get target archetype
         var targetMask = currentMask.Or(newMask);
         var targetArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)targetMask);
 
-        // Allocate in target archetype
         int newGlobalIndex = targetArchetype.AllocateEntity(entity);
 
         // Copy existing components and remove from source
@@ -224,10 +206,8 @@ public sealed class World<TMask, TConfig> : IDisposable
             RemoveFromCurrentArchetype(location);
         }
 
-        // Update location
         _entityManager.SetLocation(entity, new EntityLocation(entity.Version, targetArchetype.Id, newGlobalIndex));
 
-        // Write new component data
         var (newChunkIndex, newIndexInChunk) = targetArchetype.GetChunkLocation(newGlobalIndex);
         var newChunkHandle = targetArchetype.GetChunk(newChunkIndex);
         builder.WriteComponents(_chunkManager, targetArchetype.Layout, newChunkHandle, newIndexInChunk);
@@ -235,9 +215,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return entity;
     }
 
-    /// <summary>
-    /// Places an entity in the specified archetype and writes component data from the builder.
-    /// </summary>
+    /// <summary>Places an entity in the specified archetype and writes component data from the builder.</summary>
     private void PlaceEntityWithComponents<TBuilder>(
         Entity entity,
         Archetype<TMask, TConfig> archetype,
@@ -273,9 +251,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets the Entity handle for a given entity ID by reading its version from storage.
-    /// </summary>
+    /// <summary>The Entity handle for a given entity ID by reading its version from storage.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Entity GetEntityFromId(int entityId)
     {
@@ -283,9 +259,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return new Entity(entityId, location.Version);
     }
 
-    /// <summary>
-    /// Destroys an entity and removes it from its archetype.
-    /// </summary>
+    /// <summary>Destroys an entity and removes it from its archetype.</summary>
     /// <param name="entity">The entity to destroy.</param>
     /// <returns>True if the entity was destroyed, false if it was already dead or invalid.</returns>
     public bool Despawn(Entity entity)
@@ -311,9 +285,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return true;
     }
 
-    /// <summary>
-    /// Checks if an entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if an entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive.</returns>
     public bool IsAlive(Entity entity)
@@ -327,9 +299,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return _entityManager.IsAlive(entity);
     }
 
-    /// <summary>
-    /// Gets a reference to a component on an entity.
-    /// </summary>
+    /// <summary>A reference to a component on an entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <returns>A ref struct wrapping the component reference.</returns>
@@ -353,9 +323,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return _chunkManager.GetBytes(chunkHandle).GetRef<T>(offset);
     }
 
-    /// <summary>
-    /// Sets a component value on an entity.
-    /// </summary>
+    /// <summary>Sets a component value on an entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <param name="value">The component value.</param>
@@ -379,9 +347,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         System.Runtime.InteropServices.MemoryMarshal.Write(_chunkManager.GetBytes(chunkHandle).Slice(offset), in value);
     }
 
-    /// <summary>
-    /// Checks if an entity has a specific component.
-    /// </summary>
+    /// <summary>Checks if an entity has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <returns>True if the entity has the component.</returns>
@@ -403,9 +369,7 @@ public sealed class World<TMask, TConfig> : IDisposable
         return archetype?.Layout.HasComponent(T.TypeId) ?? false;
     }
 
-    /// <summary>
-    /// Adds a component to an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <param name="value">The component value.</param>
@@ -428,7 +392,6 @@ public sealed class World<TMask, TConfig> : IDisposable
             int globalIndex = archetype.AllocateEntity(entity);
             _entityManager.SetLocation(entity, new EntityLocation(entity.Version, archetype.Id, globalIndex));
 
-            // Write component value
             var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(globalIndex);
             var chunkHandle = archetype.GetChunk(chunkIndex);
             int offset = archetype.Layout.GetBaseOffset(T.TypeId) + indexInChunk * T.Size;
@@ -438,26 +401,21 @@ public sealed class World<TMask, TConfig> : IDisposable
 
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
-        // Check if already has component
         if (sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} already has component {typeof(T).Name}.");
 
         // Get target archetype using O(1) edge cache
         var targetArchetype = _archetypeRegistry.GetOrCreateWithAdd(sourceArchetype, T.TypeId);
 
-        // Move entity to target archetype
         int newGlobalIndex = MoveEntity(entity, location, sourceArchetype, targetArchetype);
 
-        // Write the new component value
         var (newChunkIndex, newIndexInChunk) = targetArchetype.GetChunkLocation(newGlobalIndex);
         var newChunkHandle = targetArchetype.GetChunk(newChunkIndex);
         int newOffset = targetArchetype.Layout.GetBaseOffset(T.TypeId) + newIndexInChunk * T.Size;
         System.Runtime.InteropServices.MemoryMarshal.Write(_chunkManager.GetBytes(newChunkHandle).Slice(newOffset), in value);
     }
 
-    /// <summary>
-    /// Removes a component from an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Removes a component from an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
@@ -475,7 +433,6 @@ public sealed class World<TMask, TConfig> : IDisposable
 
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
-        // Check if has component
         if (!sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
 
@@ -491,13 +448,10 @@ public sealed class World<TMask, TConfig> : IDisposable
             return;
         }
 
-        // Move entity to target archetype
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
     }
 
-    /// <summary>
-    /// Creates a query builder for this world.
-    /// </summary>
+    /// <summary>Creates a query builder for this world.</summary>
     /// <returns>A new query builder.</returns>
     public static QueryBuilder<TMask> Query()
     {
@@ -510,20 +464,16 @@ public sealed class World<TMask, TConfig> : IDisposable
         Archetype<TMask, TConfig> source,
         Archetype<TMask, TConfig> target)
     {
-        // Remember old location for swap-remove handling
         int oldGlobalIndex = location.GlobalIndex;
         var (oldChunkIndex, oldIndexInChunk) = source.GetChunkLocation(oldGlobalIndex);
         var oldChunkHandle = source.GetChunk(oldChunkIndex);
 
-        // Allocate in target archetype
         int newGlobalIndex = target.AllocateEntity(entity);
         var (newChunkIndex, newIndexInChunk) = target.GetChunkLocation(newGlobalIndex);
         var newChunkHandle = target.GetChunk(newChunkIndex);
 
-        // Copy shared component data
         CopySharedComponents(source, target, oldChunkHandle, oldIndexInChunk, newChunkHandle, newIndexInChunk);
 
-        // Remove from source archetype (swap-remove)
         int movedEntityId = source.RemoveEntity(oldGlobalIndex);
 
         // If an entity was moved during swap-remove, update its location
@@ -534,7 +484,6 @@ public sealed class World<TMask, TConfig> : IDisposable
             _entityManager.SetLocation(movedEntity, new EntityLocation(movedLocation.Version, movedLocation.ArchetypeId, oldGlobalIndex));
         }
 
-        // Update the entity's location to the new archetype
         _entityManager.SetLocation(entity, new EntityLocation(location.Version, target.Id, newGlobalIndex));
 
         return newGlobalIndex;
@@ -640,9 +589,7 @@ public static class ComponentsBuilderWorldExtensions
 {
     extension<TBuilder>(TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder
     {
-        /// <summary>
-        /// Builds the entity in the specified world.
-        /// </summary>
+        /// <summary>Builds the entity in the specified world.</summary>
         /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
         /// <typeparam name="TConfig">The world configuration type.</typeparam>
         /// <param name="world">The world to create the entity in.</param>

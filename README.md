@@ -16,11 +16,11 @@ All packages are published to NuGet from a single version tag — the libraries 
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.BLOB](src/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
-| [Paradise.Features](src/Paradise.Features) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.svg)](https://www.nuget.org/packages/Paradise.Features) | Engine-wide feature configuration: what a build can switch on or off, layered from a config file, the environment and the command line, and readable at runtime by any subsystem |
-| [Paradise.Features.Toml](src/Paradise.Features.Toml) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.Toml.svg)](https://www.nuget.org/packages/Paradise.Features.Toml) | Reads `engine.toml` into that configuration — a separate package so its TOML parser stays out of the dependency closure of everything that only reads switches |
+| [Paradise.Features](src/Paradise.Features) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.svg)](https://www.nuget.org/packages/Paradise.Features) | Feature switches layered from configuration, environment and CLI |
+| [Paradise.Features.Toml](src/Paradise.Features.Toml) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.Toml.svg)](https://www.nuget.org/packages/Paradise.Features.Toml) | TOML configuration reader, isolated from switch-only consumers |
 | [Paradise.Physics](src/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
 | [Paradise.Export](src/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
-| [Paradise.Authoring](src/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | Declare authoring data once with `[Authored]`; a source generator publishes an editor-neutral schema every editor builds its own UI from |
+| [Paradise.Authoring](src/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | `[Authored]` records and generated editor schemas |
 
 ### ECS
 
@@ -45,8 +45,8 @@ All packages are published to NuGet from a single version tag — the libraries 
 | --- | --- | --- |
 | [Paradise.Rendering](src/Paradise.Rendering) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.svg)](https://www.nuget.org/packages/Paradise.Rendering) | Backend-agnostic rendering data contract: handles, descriptors, reflection records |
 | [Paradise.Rendering.WebGPU](src/Paradise.Rendering.WebGPU) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.WebGPU.svg)](https://www.nuget.org/packages/Paradise.Rendering.WebGPU) | WebGPU (Dawn) backend via WebGPUSharp |
-| [Paradise.Rendering.Browser](src/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | Browser (WebAssembly) WebGPU backend driving the browser's own WebGPU through a bundled JS shim — consumers write no JavaScript |
-| [Paradise.Geometry](src/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide, quantized bounding volume hierarchies over triangles or instances, in the layout the compute ray tracer reads, with the CPU builder and reference traversal |
+| [Paradise.Rendering.Browser](src/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | WebAssembly WebGPU backend with a bundled JavaScript bridge |
+| [Paradise.Geometry](src/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide quantized BVHs with CPU construction and reference traversal |
 | [Paradise.Rendering.Pbr](src/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders, Forward+ lights, shadow maps, and runtime probe global illumination over a compute ray tracer |
 
 ### Assets
@@ -63,9 +63,9 @@ never references these:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Assets.Project](src/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Asset project model: the `assets/` layout, the `project.toml` manifest, the content-addressed artifact cache shared with the Blender addon, and Zio mount construction |
-| [Paradise.Assets.Documents](src/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Authored-document contracts: canonical TOML writing, `*.meta` sidecars, and the prefab/scene documents. C# reference implementation, mirrored in the Blender addon |
-| [Paradise.Assets.Pipeline](src/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | The build pipeline itself: source-tree verification, canonical-form checks, importers, and the build verbs' logic, on Zio |
+| [Paradise.Assets.Project](src/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Project layout, manifest, shared artifact cache and Zio mounts |
+| [Paradise.Assets.Documents](src/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Canonical TOML, sidecars and prefab documents, mirrored in the Blender addon |
+| [Paradise.Assets.Pipeline](src/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | Verification, importers and asset build operations on Zio |
 
 ### Windowing and audio
 
@@ -87,8 +87,8 @@ never references these:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Cli.Host](src/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | The `paradise` command as a library: `BuildHost.Run(args, importers)`. What the tool runs, and what a game's own asset tool runs with its importers appended |
-| [Paradise.Cli](src/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` command: scaffold a project, verify and build its assets, and report on the build toolchain. Ships as a dotnet tool, not a library reference |
+| [Paradise.Cli.Host](src/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | CLI library and custom-importer entry point: `BuildHost.Run(args, importers)` |
+| [Paradise.Cli](src/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` dotnet tool for project, asset and toolchain operations |
 
 Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`,
 `Paradise.Authoring.Generators`) are not published standalone — they ship inside
@@ -119,7 +119,7 @@ conversion anywhere in the pipeline.
 ## Build and test
 
 ```bash
-dotnet build --solution ParadiseEngine.slnx
+dotnet build ParadiseEngine.slnx
 dotnet test --solution ParadiseEngine.slnx --output normal
 
 # Single project
@@ -132,37 +132,35 @@ downloads the pinned Slang toolchain (cached under the NuGet package root).
 
 ## Asset projects
 
-An asset project is an `assets/` source tree plus a `project.toml`, compiled into `build/`
-by the `paradise` CLI. Install it globally, or pin it per repo in a tool manifest:
+The `paradise` CLI builds an `assets/` tree and its `project.toml` into `build/`.
+Install globally, or use a repository tool manifest:
 
 ```bash
 dotnet tool install --global Paradise.Cli
-# or, per repo:  dotnet new tool-manifest && dotnet tool install Paradise.Cli
+# Per repository: dotnet new tool-manifest && dotnet tool install Paradise.Cli
 ```
 
 ```bash
-paradise new MyGame            # assets tree, a sample level, .gitignore
-paradise assets verify         # sidecars, identities, validity
-paradise assets verify --fix   # ... and repoint reference paths a rename left stale
-paradise assets build          # assets/ -> build/  (--editor for .editor/play)
-paradise assets watch          # keep *.meta in step, rebuilding as you go
-paradise assets mv <from> <to> # move a file or directory; sidecars and every reference follow
-paradise assets rm <path>      # delete an asset; refused while anything references it (--force to leave them dangling)
-paradise assets refs <path>    # who references it, and what it references (--transitive)
-paradise assets extract <glb>  # materials, textures and a prefab beside it, plus the mesh/clip documents watch mints (--all on a dir)
-paradise host play --scene assets/levels/arena.prefab   # build assets, build the launcher if a source changed, run it, wait
-paradise host play --watch ... # the same under `dotnet watch run`: an edit hot-patches or restarts the game
-paradise host build            # build the launcher (and whatever its post-build targets dump)
-paradise tools doctor          # every build tool: found, version, how to fix
+paradise new MyGame                    # scaffold an asset project
+paradise assets verify                 # validate sidecars, identities and documents
+paradise assets verify --fix           # repair stale reference paths
+paradise assets build                  # assets/ -> build/; --editor uses .editor/play/
+paradise assets watch                  # maintain sidecars and rebuild
+paradise assets mv <from> <to>          # move assets, sidecars and reference hints
+paradise assets rm <path>              # refuse referenced assets unless --force
+paradise assets refs <path>            # references in both directions; --transitive recurses
+paradise assets extract <glb>          # extract parts; --all processes a directory
+paradise host play --scene assets/levels/arena.prefab
+paradise host play --watch             # run through dotnet watch
+paradise host build                    # build the launcher
+paradise tools doctor                  # tool versions and installation help
 ```
 
-Verbs are grouped (`paradise assets build`, not `paradise build`); `paradise --help` lists
-them all with the shared `--project` and `--profile` options.
+Use `paradise --help` for verbs and shared `--project` / `--profile` options.
 
-### `host play` is how an editor runs the game
+### Running a game
 
-`[host]` in `project.toml` names the game's launcher, relative to the project root (the directory
-holding `assets/`), plus the arguments every launch gets before the caller's own:
+`[host]` names the launcher relative to the project root and arguments placed before caller arguments:
 
 ```toml
 [host]
@@ -170,225 +168,124 @@ project = "Game.Launcher/Game.Launcher.csproj"
 arguments = ["--ui", "ui/Shell.xaml"]
 ```
 
-`paradise host play --scene <document>` then builds `assets/` into `.editor/play/`, brings the
-launcher up to date, runs it on the document's built twin and waits for it to exit — so a front-end
-(the Blender addon, a script) holds ONE process whose exit is the game's exit and whose SIGTERM or
-Ctrl+C takes the whole tree down. "Up to date" is decided from the filesystem, not by MSBuild: the
-reference closure comes from `obj/project.assets.json` (which includes ProjectReferences a
-`Directory.Build.targets` injected, i.e. a workspace building against engine source), and any
-source or project file newer than the stamp the CLI wrote after its last successful build means
-`dotnet build` runs — with `--no-restore` unless a project file changed. Nothing changed costs
-no MSBuild at all; a build made elsewhere (an IDE) costs one no-op pass. `--no-build` runs what
-is built regardless, `--no-assets` skips the asset build, `-c Release` picks the configuration, and
-everything after `--` goes to the game.
+`host play` builds assets into `.editor/play/`, updates the launcher, runs the scene's built path
+and waits for exit. Its exit code matches the game; SIGTERM or Ctrl+C stops the process tree.
+`--no-build` reuses binaries, `--no-assets` skips assets, `-c Release` selects configuration,
+and arguments after `--` go to the game.
 
-`--watch` hands the project to `dotnet watch run --non-interactive` instead: it builds, runs, and
-on every source change hot-patches the running game (method bodies) or rebuilds and restarts it
-(anything else). Hot Reload does not re-run static initialisers or constructors, so an edit to a
-constant or a world-build path shows only after a restart — save a signature to force one. A
-launcher with `PublishAot` on must also set `StartupHookSupport` to `true` (Debug only), or
-`dotnet watch` cannot inject its agent and every edit becomes a restart.
+Freshness checks use the reference closure in `obj/project.assets.json`, including injected
+ProjectReferences. Newer source/project files trigger MSBuild; restore runs only when project files
+changed. Unchanged inputs skip it; the first check after an external build requires a no-op pass.
 
-### A GLB is interchange; `extract` makes the assets
+`--watch` uses `dotnet watch run --non-interactive`. Method edits hot-patch; other changes may
+restart. Hot Reload does not rerun constructors or static initializers: force a restart, such as
+by changing a signature, for those edits. Launchers enabling `PublishAot` need
+`StartupHookSupport=true` in Debug for the watch agent.
 
-```bash
-paradise assets extract Models/crate.glb          # or a directory with --all
-```
+### GLB extraction
 
-What a GLB holds becomes authored assets beside it (or under `[extract] directory` in
-`project.toml`, or the sidecar's `[glb] extract`): a `.mesh` document (a `.skinnedmesh` naming its
-skeleton when the GLB has a skin), a `.skeleton` and one `.anim` per clip — each a small TOML naming
-the GLB and the part it stands for, which the build cooks at the same path (the meshes to Paradise
-blobs, the skeleton and clips to ozz-animation archives, played by the managed ozz port in
-`Paradise.Animation`) — a `.material` document per
-glTF material with its textures as references, the embedded images as files the GLB now points
-at, and a `.prefab` wiring them, generated once and the author's from then on. The runtime never
-sees glTF: it reads the cooked files and the built materials. A clip keeps every key unless the
-GLB's sidecar sets `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
+`paradise assets extract Models/crate.glb` creates mesh, skeleton and clip reference documents,
+material documents, external images and a prefab. The GLB remains source: build cooks `.mesh` /
+`.skinnedmesh` to Paradise blobs and `.skeleton` / `.anim` to ozz archives. A skinned mesh names
+its skeleton. Runtime consumers load cooked files and built materials. Clips retain keys unless
+the GLB sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
 
-`[extract]` decides where each kind lands, assets-relative:
+Routes are assets-relative:
 
 ```toml
 [extract]
-directory  = "models"          # the fallback for any kind that names none
+directory  = "models"          # common fallback
 meshes     = "models"          # .mesh / .skinnedmesh
-skeletons  = "animations"      # .skeleton (falls back to `meshes`, not `directory`)
+skeletons  = "animations"      # defaults to the meshes route
 animations = "animations"      # .anim
-materials  = "materials"       # .material
-textures   = "textures"        # images the GLB no longer embeds
-prefabs    = "prefabs/models"  # the generated .prefab
-tilesets   = "tilesets"        # a kind a GAME's importer declares — no engine change
+materials  = "materials"
+textures   = "textures"
+prefabs    = "prefabs/models"
+tilesets   = "tilesets"        # a kind declared by a game importer
 ```
 
-The keys are open: anything that is not one of the section's own settings is a KIND, and the kinds
-that exist are whatever the build's importer chain declares (see below). Set nothing and everything
-lands beside the container; set only `directory` and everything lands in one folder. A kind falls
-back to the one its declaration names before `directory` — a `.skeleton` follows the geometry that
-names it, which is where it has always landed, and a project files it with the rig's clips by
-saying so. A GLB's own `[glb] extract` outranks all of it — a per-GLB directive names one folder
-for everything that GLB extracts to. Changing a key never moves what is already extracted: the
-sidecar records each output by guid and a later run re-syncs it where it now lives, so a routing
-change applies to what the GLB has no record of yet, and moving the existing files (`paradise
-assets mv`) is the author's call.
+Without routes, outputs stay beside the container. Kind-specific fallbacks precede `directory`;
+a per-GLB `[glb] extract` folder overrides all routes. Routing affects new files only: recorded
+outputs retain identity and location. Move them explicitly with `assets mv`.
 
-The mesh, skeleton and clip documents carry no author work, so `watch` mints them for a new or
-re-exported GLB on its own; a re-export that changes geometry or adds a clip needs no verb at
-all. Materials, textures and the prefab are the author's from the moment they exist, so `watch`
-only offers `extract` for those. The GLB's sidecar records every extracted entry; a material or
-image also carries a fingerprint of both sides, so a later run tells a re-export from an edit: a
-re-exported material re-extracts (keeping the document's Paradise-only fields), an edited
-material document is written back into the GLB (its glTF-expressible half), an edited image is
-flagged, and both sides changed is a conflict `--take-glb` or `--take-document` resolves. KTX2 is
-build output and never an authored asset: `verify` refuses one under `assets/`.
+Watchers freely mint/update tool-owned mesh, skeleton and clip documents. Materials, images and
+the generated prefab become authored files. Extraction tracks container and document fingerprints:
+re-exports update materials while retaining Paradise-only fields, material edits can update the
+GLB's glTF fields, and image edits are reported. Changes on both sides require `--take-glb` or
+`--take-document`. The prefab is created once and never synchronized. KTX2 is build output;
+`verify` rejects authored KTX2 beneath `assets/`.
 
-### A reference's guid decides; its path is a hint
+### References and sidecars
 
-An authored reference is `{ guid = "…", path = "…" }`. The **guid is the identity** and the
-sidecars are the guid → path index the whole pipeline resolves through. The path is carried
-because a guid alone is unreadable in a diff, and it is only ever a hint:
+An authored reference is `{ guid = "…", path = "…" }`. **GUID identifies; path is a readable hint.**
+`AssetIndex` resolves identity through sidecars. Stale hints are warnings repaired by `verify --fix`;
+a missing identity is an error even if the hinted path exists. Renames preserve references when
+the sidecar travels or the watcher relinks it by content hash. The watcher holds deleted identities
+for 30 seconds, then reports remaining dangling references.
 
-- Renaming a file in Finder or with `git mv` **never breaks a reference**. The sidecar travels
-  with the file (or `watch` relinks the identity by content hash), so the guid still names it and
-  the build resolves it. `verify` says so as a **warning**, and `verify --fix` catches the path up.
-- A guid **no asset carries** is an error: the reference names nothing, and no path can stand in
-  for an identity that is gone. Restore the asset or its sidecar, or repoint the reference.
-- When the two halves disagree — the path names a different asset than the guid — **the guid
-  wins**. Resolving by path would silently repoint every reference at the wrong asset the first
-  time two filenames were swapped.
+Container texture URIs use `[mesh]` sidecar entries `{ slot, uri, guid, path }`. The DCC follows
+the URI; the pipeline follows the GUID. `verify --fix` and `watch` record missing entries and update stale URIs
+when the format supports rewriting. A changed source URI is treated as a re-export and resolved
+again. `ReferenceGraph` derives edges per run from documents and sidecars; it is never persisted.
+Moves follow dependents, removal protects referenced assets, and `refs` lists both directions.
 
-`paradise assets mv` still rewrites eagerly, because a tree whose paths are true is the one worth
-committing. It is the tidy path, not the load-bearing one. `watch` does the same after a rename it
-sees, so a Finder rename leaves the tree as tidy as `mv` would — and when a delete outlives the
-30 s the identity is held for, it names every reference left dangling.
+Sidecar creation records `importer = "mesh"` using `Claims`, with appended importers taking
+precedence. All later verbs honor that name. Change the line to choose another importer for an
+existing asset; changing chain order affects newly claimed assets. Unknown names are errors,
+missing names are repairable warnings, and a named importer declining an asset fails its build.
 
-**A mesh names its textures the same way, in its sidecar.** A container's external uris are
-resolved once and recorded under `[mesh]` in the mesh's `.meta` as `{ slot, uri, guid, path }`
-entries; the uri is what the DCC follows, the recorded guid is what the pipeline follows. The
-container is only ever READ, so an FBX gets the same story as a GLB — the resolution lives in
-tooling-owned import settings, the way an FBX importer records its texture remaps. `verify --fix`
-and `watch` record what is missing, a texture rename catches the entry (and, for a format that
-can be written, the uri) up instead of forcing a re-export, and a uri that changed since it was
-recorded is a re-export and is re-resolved from scratch.
+### Custom importers
 
-**Who references what** is answered by `ReferenceGraph`, built per run from the sidecars and the
-documents — never stored in a sidecar, which would be a second copy of the document kept in sync
-by a watcher that may not be running. `mv` rewrites only the dependents of what moved, `rm` refuses
-what is still referenced, and `refs` prints both directions.
-
-### Every asset names its importer
-
-A sidecar carries `importer = "mesh"` beside its guid. The watcher decides it when it mints the
-sidecar, by asking the chain (`Claims`, last appended first) — not at the first build, because a
-build that edits committed sidecars is a dirty tree. From then on the name is honoured as written:
-the build, `verify`, and every reference verb look the importer up by name and never search. Edit
-the line to pick a different importer for one asset; append to the chain to change the default for
-NEW assets (existing ones keep their name until edited). A name the chain does not have is a
-`verify` error naming the chain; a sidecar with no name is a warning that `verify --fix` and
-`watch` clear; a named importer that declines the asset fails the build, loudly.
-
-A game that needs its own asset kind writes an `IAssetImporter` — `Claims` says whether an asset
-is its own from the path and, at most, a header; `Import` does the work — and runs the same verbs
-through `Paradise.Cli.Host` from a console project of its own — the tool cannot be handed code,
-and NativeAOT rules out scanning for it:
+Implement `IAssetImporter`: `Claims` examines the path and at most a header; `Import` builds it.
+The global CLI can load public, parameterless importer classes from prebuilt assemblies:
 
 ```toml
-# assets/project.toml — the global `paradise` loads these and appends what it finds
 [extensions]
 assemblies = ["tools/assets/bin/Debug/net10.0/MyGame.Assets.dll"]
 ```
 
-Paths are relative to the PROJECT ROOT, like `[host] project`. The assembly is scanned for public
-`IAssetImporter` types with a parameterless constructor, and they are appended to the chain — so
-one `paradise`, and its `watch` and tray, run the game's own importers. The project that produces
-the assembly must be built first; a path that does not exist says so and names it.
-
-The other way, which needs no configuration and is what CI should prefer, is a console project of
-the game's own:
+Paths are project-root-relative. Importers append to the same chain used by every verb, including
+watch and host play. Dynamic loading requires compatible Paradise versions; the CLI therefore
+is not trimmed or NativeAOT-published. For CI, a game-owned console tool gives MSBuild control
+of the complete dependency graph:
 
 ```csharp
-// tools/assets/Program.cs — `dotnet run --project tools/assets -- assets build`
 return Paradise.Cli.BuildHost.Run(args, [.. AssetImporters.All, new MyBankImporter()]);
 ```
 
-MSBuild then guarantees the game's importers and the pipeline they compile against are one coherent
-closure, which dynamic loading cannot promise: an extension built against a different `Paradise`
-version fails at load, and the error says so rather than leaving you reading "could not load type".
+Implement `References` to expose sites and `Rewrite` to repair them; source bytes may change only
+when the context permits. This integrates the kind with build, verify, watch, move, remove and refs.
 
-Either way it is one chain, lowest precedence first, so an appended importer shadows the built-in it
-replaces, and every verb runs it: `build`, `verify`, `watch`, `mv`, `rm`, `refs`, `extract`,
-`host play`. Loading by reflection is also why `Paradise.Cli` is not NativeAOT-published or trimmed
-— a deliberate cost of the single command.
-
-An importer that wants its asset kind in the reference graph — and so followed by `mv`, guarded by
-`rm`, listed by `refs`, checked by `verify` and caught up by `watch` — implements two more methods:
-`References` (every site the asset holds, from its bytes and its sidecar; null to decline) and
-`Rewrite` (bring them in line with the tree: the sidecar's entries always, the asset's own bytes
-only when the context allows). The findings are derived from the sites by the one rule, so an
-importer cannot forget one; nothing in the pipeline lists formats.
-
-### An importer's other half: what a source container turns INTO
-
-`Import` says how a file is BUILT. Extraction says what a source CONTAINER turns into — a GLB is
-one, a game's own format is another — and it is the same importer's other half, not a second chain:
-one `Claims` decides both, and the sidecar's recorded `importer` name dispatches both, so editing
-that line moves extraction with it.
-
-It is **never called from `Import`**, and must not be. `ImportContext.FileSystem` is read-only under
-`assets/` because the build index records every read to decide what to rebuild, while extraction
-WRITES there and mints identities. A build that wrote its own inputs would dirty the tree on every
-CI run, invalidate its own index mid-run, and have nowhere to put `--take-glb` / `--take-document`,
-which are an author's per-invocation decisions. `extract` and `watch` call it; `build` never does.
-
-An importer declares the KINDS its extraction writes — which is also what says whether it extracts
-at all — and `[extract]` routes them by those ids, so a format that yields tilesets or LODs needs no
-engine change to be filed properly:
+Extraction uses the same importer and recorded name. Declare output kinds to enable it:
 
 ```csharp
 public string Name => "crate";
-
-public bool Claims(ImportCandidate candidate)
-    => candidate.Asset.GetExtensionWithDot() == ".crate";
-
+public bool Claims(ImportCandidate candidate) => candidate.Asset.GetExtensionWithDot() == ".crate";
 public IReadOnlyList<ExtractKindDeclaration> ExtractKinds { get; } =
 [
-    new("tilesets"),            // the game's own kind
-    new(ExtractKind.Materials), // and one it shares with the built-ins
+    new("tilesets"),
+    new(ExtractKind.Materials),
 ];
 ```
 
-Everything else — `HasParts`, `HasAuthoredParts`, `IsExtracted`, `Extract`, `MintReferences` — is
-default-implemented to "reads no container", so the many importers that only build a file someone
-else authored are unaffected.
+`HasParts`, `HasAuthoredParts`, `IsExtracted`, `Extract` and `MintReferences` have defaults for
+non-container importers. Verify rejects routes for undeclared kinds. Call extraction only from
+extract/watch: `ImportContext.FileSystem` is read-only, and writing build inputs would invalidate
+the incremental index.
 
-A key in `[extract]` that no importer in the build declares is a `verify` error naming the kinds
-that ARE declared — the manifest cannot check that itself, because which kinds exist depends on the
-chain the tool was built with.
+Shared extraction APIs handle these contracts:
 
-The engine owns the parts that are hard and are nobody's format, and an importer gets them by
-using them:
+- `ExtractionRecord` stores kind, ownership, index, name, identity and two fingerprints in the
+  `[extract]` sidecar domain.
+- `ToolOwned` parts follow the container; `TwoSided` documents can change on either side;
+  `Blob` parts are authored bytes with no write-back operation.
+- `ExtractionSync.Decide` classifies changes and conflicts. After `TakeDocument`, fingerprints
+  agree only if the importer can write the edit back.
+- Generated prefabs are unrecorded; validate their route immediately after writing.
+- `SidecarMaintainer.Ensure` mints identity; `AssetIndex.Resolve` finds moved outputs by GUID.
+  Update recorded path hints when resolving them.
 
-- **The record.** What a container extracted to is written to the `[extract]` sidecar domain
-  (`ExtractionRecord`), a flat list of parts carrying kind, ownership, index, name, identity and
-  two fingerprints. Every extractor writes the same record; none needs a codec.
-- **Ownership** is the sync policy: `ToolOwned` (the container is the only side, so the watcher
-  mints and rewrites it freely), `TwoSided` (an authored document the container can change under),
-  `Blob` (authored bytes with nothing to write back).
-- **The keep-in-step rule.** `ExtractionSync.Decide` takes each side's fingerprint now and the pair
-  recorded at the last sync, and says whether a file is unchanged, stale, edited, adoptable, or a
-  conflict `--take-glb` / `--take-document` resolves. It returns the decision and not the
-  fingerprints to record, because after `TakeDocument` a format that can write the edit back has
-  both sides reading as the document and one that cannot still has two.
-- **The generated prefab is the exception**: it is written once and never recorded, so nothing
-  downstream would notice it landed where the scan cannot see it. Its route is therefore checked
-  directly after it is written, and an unindexed one is the same error every recorded kind gets.
-- **Identity.** `SidecarMaintainer.Ensure` mints a sidecar for each written file, and a recorded
-  part is found again through `AssetIndex.Resolve` — by guid, so a file the author moved is
-  re-synced where it now lives instead of written again at the default path. Catch its path half up
-  when you record it: the guid decides, the path is a hint.
-
-`GameExtractorTests` in `Paradise.Assets.Pipeline.Test` is a complete worked example — a container
-format the engine cannot read, extracted with routing, identities, conflicts and moves all working,
-written out of the public surface only.
+See `GameExtractorTests` for a complete public-API example with routing, conflicts and moves.
 
 ## Third-party libraries
 

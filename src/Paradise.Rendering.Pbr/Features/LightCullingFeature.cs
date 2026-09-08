@@ -6,17 +6,10 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Forward+ light culling at <see cref="RenderPassEvent.BeforeOpaque"/>: a compute pass
-/// that bins every point and spot light into the froxel grid the scene's fragment shader tests
-/// before it shades a light. One thread per froxel, one bit per light.
-///
-/// <para>The grid is Godot's — 32×32 pixel tiles by 32 logarithmic depth slices — and the binning
-/// is conservative: a froxel that claims a light it does not quite touch costs a shading add whose
-/// attenuation is near zero, while one that misses a light it does touch changes pixels. Inclusion
-/// wins wherever the two trade off.</para>
-///
-/// <para>Off, nothing bins and <see cref="SceneFeature"/> retracts the grid, so every light shades
-/// every pixel — the picture is unchanged and only the cost moves.</para></summary>
+/// <summary>Bins point and spot lights into Forward+ froxels before opaque rendering.</summary>
+/// <remarks>One compute thread handles each 32x32-pixel tile and logarithmic depth slice.
+/// Conservative inclusion prevents missing lights; disabling culling shades all lights with the
+/// same output.</remarks>
 public sealed class LightCullingFeature : IRenderFeature
 {
     /// <summary>Mirror of <c>CullUniforms</c> in lightCull.slang.</summary>
@@ -123,7 +116,7 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         var scene = _ctx.Scene;
         EnsureClusterBuffer();
-        ExtractDepthRange(scene.Camera.Projection);
+        ExtractDepthRange(_ctx.Projection);
         UploadLights(scene);
 
         ClusterBinning.FillSliceDepths(_near, _far, _sliceDepths);
@@ -132,7 +125,7 @@ public sealed class LightCullingFeature : IRenderFeature
         var froxels = _tilesX * _tilesY * ClusterBinning.ZSlices;
         var uniforms = new CullUniformsGpu
         {
-            InvProjection = Matrix4x4.Invert(scene.Camera.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
+            InvProjection = Matrix4x4.Invert(_ctx.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
             Params = new Vector4(_near, _far, ClusterBinning.TileSize, _lightCount),
             Screen = new Vector4(_ctx.Width, _ctx.Height, _tilesX, _tilesY),
             Grid = new Vector4(ClusterBinning.ZSlices, froxels, 0f, 0f),
@@ -175,7 +168,7 @@ public sealed class LightCullingFeature : IRenderFeature
     /// only cost every thread a branch and every mask a bit that is always set.</summary>
     private void UploadLights(PbrScene scene)
     {
-        var view = scene.Camera.View;
+        var view = _ctx.View;
         _lightCount = 0;
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
@@ -195,7 +188,7 @@ public sealed class LightCullingFeature : IRenderFeature
     internal ReadOnlySpan<CullLightGpu> LightsForTest => _lights.AsSpan(0, _lightCount);
 
     internal ClusterGrid GridForTest =>
-        ClusterGrid.For(_ctx.Scene.Camera.Projection, _ctx.Width, _ctx.Height, _near, _far);
+        ClusterGrid.For(_ctx.Projection, _ctx.Width, _ctx.Height, _near, _far);
 
     private static void Record(LightCullingFeature self, ref PassRecording pass, int froxels)
     {

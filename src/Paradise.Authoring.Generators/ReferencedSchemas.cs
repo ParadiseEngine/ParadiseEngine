@@ -111,7 +111,7 @@ internal static class ReferencedSchemas
         }
     }
 
-    // ---- Just enough JSON to take a published document apart again. ----
+    // Just enough JSON to take a published document apart again.
     //
     // A hand-rolled scanner rather than a parser dependency: this project targets netstandard2.0
     // as every analyzer must, and an analyzer may not carry a package the compiler host would

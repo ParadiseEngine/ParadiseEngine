@@ -18,8 +18,4 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- For SurfaceDescriptor/SurfacePlatform: a window's one rendering-facing product. -->
-  </ItemGroup>
-
 </Project>

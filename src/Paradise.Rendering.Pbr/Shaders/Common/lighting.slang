@@ -1,11 +1,6 @@
-// lighting.slang — the frame's lights and shadows as every shader that shades a point sees them:
-// the light records, the frame uniforms, the shadow-map array with its comparison sampler, the
-// attenuation models, and the shadow lookup. Shared by pbrCore.slang (the raster path) and the
-// probe tracer (which shades ray hits), so the two agree on what a light does to a surface.
-//
-// slangc keeps EVERY global an included file declares, referenced or not, so what is here is
-// exactly what a compute pass shading a hit must also bind: the frame UBO, the shadow array and
-// its sampler, in group 1 at bindings 0..2. The raster-only bindings live in uniforms.slang.
+// Shared raster and probe-tracer lighting: frame uniforms, attenuation and shadow lookup. Only
+// group-1 bindings 0..2 belong here; Slang retains included globals, so raster-only bindings stay
+// in uniforms.slang.
 #ifndef PARADISE_LIGHTING_SLANG
 #define PARADISE_LIGHTING_SLANG
 
@@ -97,11 +92,8 @@ float getDistanceAttenuation(float distanceToLight, float range, float decay)
 
 float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
 {
-    // Godot's spot cone (light_process_spot): a smooth radial falloff from the cone axis (full) to the
-    // edge (zero) — NOT a hard-edged disc. spotRim is 0 on-axis, 1 at the cone boundary; Godot raises it
-    // to spot_angle_attenuation (default 1.0, assumed here → linear rim). The previous inner/outer blend
-    // drew a hard "circle" on the ground whenever no inner angle was authored (Godot has no inner angle),
-    // because it fell back to inner == outer. spotAngles.y (inner angle) is unused in this model.
+    // Match Godot's linear spot-angle attenuation: full on-axis, zero at the outer cone. The
+    // inner-angle field is unused; using equal inner/outer angles creates a hard disc.
     float3 lightToSurface = -surfaceToLight;
     float3 coneDirection = -normalize(light.directionAndRange.xyz);
     float cosTheta = dot(lightToSurface, coneDirection);
@@ -112,46 +104,19 @@ float getSpotAttenuation(SceneLight light, float3 surfaceToLight)
     return 1.0 - spotRim; // 1 - pow(spotRim, spot_angle_attenuation); default exponent 1
 }
 
-// Shadow bias — two mechanisms, each sized by the map's ACTUAL texel world size (per light in
-// sizeParams.y: directional = metres, point/spot = metres per metre of receiver distance, since
-// perspective texels grow with range). A fixed world-space bias is only ever correct for one texel
-// size — the old 0.05 m constant was tuned when the camera-fitted 4096 sun map made ~2.5 cm texels,
-// and any coarser map (a scene authoring a smaller ShadowMapSize, a wider legacy fit) outgrew it and
-// flat ground self-shadowed in diagonal bands.
-//
-// 1. NORMAL-OFFSET bias: lift the receiver sample along its surface normal, scaled up toward
-//    grazing incidence (capped — the tan() blow-up at N·L → 0 must not push the sample outside
-//    the light's footprint). With the plane bias below covering the PCF disk, this only has to
-//    cover the CENTRE texel's own depth quantization — half a texel times the slope — and it must
-//    stay that small: every texel of lift is a strip of CONTACT LIGHT-LEAK beside each caster
-//    (near a wall's base the occluder's stored depth is nearly the receiver's own, so any lift
-//    reads the base as non-occluding and the shadow fades toward the contact line — visibly, on
-//    a coarse map, where a texel is tens of centimetres). Perpendicular to the surface, so unlike
-//    a large depth bias it does not shift the sample along the light and does not detach object
-//    shadows from their contact point.
-// 2. RECEIVER-PLANE depth bias (Isidoro): each PCF tap compares against the receiver PLANE's depth
-//    at the tap's own location — the plane's depth gradient in light NDC is solved from two
-//    projected surface tangents — instead of the centre depth. Without it the disk's outer taps
-//    need the normal offset to cover the WHOLE disk radius (blur × texel × slope), which at coarse
-//    resolutions is metres of lift and visibly eats every short shadow; with it the offset stays
-//    at ~1 texel no matter the blur.
-//
-// ShadowDepthBias is a small constant NDC residual on top. Together these keep flat ground
-// acne-free at every map resolution while contact shadows stay attached (matching Godot).
+// Shadow bias scales with actual texel size: directional uses meters; point/spot use meters per
+// receiver-distance meter.
+// Normal offset covers center-texel quantization, with a grazing-angle cap to limit contact light
+// leaks. Receiver-plane bias adjusts each PCF tap to its own projected depth, keeping normal offset
+// small even for wide filters. ShadowDepthBias adds a small residual NDC offset.
 static const float ShadowDepthBias = 0.0004;
-// Lift in texels = ShadowNormalBiasTexels · (1 + tan(angle to light)), capped: the half-texel
-// centre quantization needs ~0.5·tan texels of lift (the geometry works out to 0.5·sinθ/cos²θ),
-// and every texel beyond that widens the contact light-leak strip. The cap bounds the grazing
-// blow-up; past it the surface is nearly edge-on to the light and receives little direct light
-// anyway, so residual acne there stays invisible.
+// Lift is ShadowNormalBiasTexels*(1+tan(angle)), capped at grazing angles. Larger offsets widen
+// contact light leaks; capped residual acne occurs where direct light is weak.
 static const float ShadowNormalBiasTexels = 0.5;      // soft path: plane bias covers the disk
 static const float ShadowNormalBiasTexelsHard = 1.0;  // hard path: no plane bias, hw 2x2 footprint
 static const float ShadowMaxSlopeTexels = 2.0;    // cap on the total lift, in texels
-// NDC cap on the per-tap plane adjustment. It bounds SILHOUETTE light-leak: at a shadow edge the
-// receiver plane extends past the caster, and an unbounded gradient there would tilt taps into
-// accepting the caster's own depth. Sized against the camera-fit sun's depth range (~0.5-1.5 m of
-// depth per 0.01 NDC); the legacy whole-scene fit's larger range makes the cap proportionally
-// looser, which errs toward more bias on the path whose texels are also proportionally coarser.
+// Cap receiver-plane NDC adjustment to limit leaks at caster silhouettes. A larger legacy-fit depth
+// range makes the same cap looser where texels are also coarser.
 static const float ShadowPlaneBiasClamp = 0.01;
 
 // Cube face index (point lights) from the dominant axis of the light→surface direction.

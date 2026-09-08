@@ -7,19 +7,9 @@ public readonly record struct WindowOptions(string Title, uint Width, uint Heigh
     public bool Resizable { get; init; } = true;
 }
 
-/// <summary>
-/// The windowing backend: owns the platform's global state (SDL's init/quit, an OS event
-/// hook), creates windows, and PUMPS them. Create it, create windows from it, dispose windows
-/// before it.
-///
-/// The pump lives here, not on the window, because the OS event queue is per-process (or
-/// per-thread), not per-window: one drain routes each event to the window it names. Two
-/// windows each draining a shared queue would eat each other's events — a structural
-/// impossibility, not a filtering bug.
-///
-/// THREAD CONTRACT: construct, create windows, and pump on the MAIN thread — macOS delivers
-/// window events nowhere else, and every backend inherits that as its portable rule.
-/// </summary>
+/// <summary>Owns platform state, window creation and event pumping.</summary>
+/// <remarks>Construct, create windows and pump on the main thread; dispose windows before the
+/// platform. A single drain routes the shared OS queue to each window.</remarks>
 public interface IWindowPlatform : IDisposable
 {
     /// <summary>Create a window. Any number may exist; events are routed per window.</summary>
@@ -32,16 +22,10 @@ public interface IWindowPlatform : IDisposable
     void Pump();
 }
 
-/// <summary>
-/// One OS window, as a game host consumes it: read the raw input stream from any thread, hand
-/// a renderer its surface. Events arrive through <see cref="IWindowPlatform.Pump"/> — the
-/// queue is the platform's, and it routes.
-///
-/// Input is TRANSPORT, not meaning: the window reports timestamped device transitions
-/// (<see cref="TimedWindowEvent"/>) and never learns what a key does — bindings, held state and
-/// chords belong to the consumer's input layer. <see cref="TryReadEvent"/> and
-/// <see cref="RequestClose"/> are thread-safe; everything else is main-thread.
-/// </summary>
+/// <summary>Exposes one window's surface and timestamped input transitions.</summary>
+/// <remarks>IWindowPlatform.Pump routes events here. TryReadEvent and RequestClose are thread-safe;
+/// all other operations require the main thread. Bindings and held input state belong to the
+/// consumer.</remarks>
 public interface IWindow : IDisposable
 {
     /// <summary>Current size in pixels. Tracks live resizes; see <see cref="Resized"/>.</summary>
