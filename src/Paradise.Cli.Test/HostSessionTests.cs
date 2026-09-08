@@ -318,6 +318,29 @@ public class HostSessionTests
     }
 
     [Test]
+    public async Task watch_creates_a_missing_play_tree_under_a_linked_workspace_ancestor()
+    {
+        using var tree = SymlinkedTree.Create();
+        if (tree is null) return;
+        var playTree = tree.WorkingDirectory / ".editor/play";
+        var physicalPlayTree = tree.FileSystem.ConvertPathFromInternal(Path.Combine(tree.PhysicalRoot, ".editor", "play"));
+        var runner = new RecordingRunner();
+
+        await Assert.That(tree.FileSystem.DirectoryExists(playTree.GetDirectory())).IsFalse();
+        await Assert.That(tree.FileSystem.DirectoryExists(physicalPlayTree)).IsFalse();
+
+        var exit = Session(tree.FileSystem, runner).Play(
+            tree.Project, "Debug", tree.WorkingDirectory, [], watch: true, noBuild: false,
+            CancellationToken.None, restartOnChangesUnder: playTree, restartEnabled: static () => false);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(runner.Specs).Count().IsEqualTo(1);
+        await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo(tree.PhysicalRoot);
+        await Assert.That(tree.FileSystem.DirectoryExists(physicalPlayTree)).IsTrue();
+        await Assert.That(tree.FileSystem.DirectoryExists(playTree)).IsTrue();
+    }
+
+    [Test]
     public async Task play_resolves_a_linked_workspace_ancestor_for_the_output_and_working_directory()
     {
         using var tree = SymlinkedTree.Create();
