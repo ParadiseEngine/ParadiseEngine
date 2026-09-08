@@ -21,6 +21,7 @@ public sealed partial class SceneFeature : IRenderFeature
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
     private readonly LightCullingFeature _lightCulling;
+    private readonly InstancingFeature _instancing;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
     private readonly HashSet<int> _materialsSeen = [];
@@ -28,13 +29,14 @@ public sealed partial class SceneFeature : IRenderFeature
     private float _specularAaClamp;
 
     internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
-        LightCullingFeature lightCulling, float specularAaVariance, float specularAaClamp)
+        LightCullingFeature lightCulling, InstancingFeature instancing, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
         _shadows = shadows;
         _prepass = prepass;
         _gi = gi;
         _lightCulling = lightCulling;
+        _instancing = instancing;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
@@ -58,6 +60,8 @@ public sealed partial class SceneFeature : IRenderFeature
 
     public void Resize(uint width, uint height) => EnsureTargets();
 
+    public void OnEnabledChanged(bool enabled) => _instancing.ResetStatistics();
+
     private void EnsureTargets()
     {
         // Depth is TextureBinding too, so a capture can pack the opaque depth into the scene
@@ -68,6 +72,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        _instancing.ResetStatistics();
         var scene = _ctx.Scene;
         UploadFrameUniforms(scene);
         if (scene.HasSkyBackground) UploadSky(scene);
@@ -188,49 +193,58 @@ public sealed partial class SceneFeature : IRenderFeature
         // Pipeline is chosen per draw (rigid vs skinned need different vertex layouts, and a
         // material may select a custom program) but only re-set on a change, so an all-rigid
         // stock-material bucket still issues exactly one SetPipeline. Bind groups persist across
-        // SetPipeline within a pass — every pipeline shares the built-in groups 0/1/3.
-        var skinnedActive = (bool?)null;
-        var programActive = -1;
+        // SetPipeline within a pass — every pipeline shares the built-in groups 1/3; group 0
+        // is rebound for each draw because the instanced layout also carries instance storage.
+        var activePipeline = default(PipelineHandle);
         ref var encoder = ref pass.Encoder;
         pass.SetBindGroup(1);
         pass.SetBindGroup(3);
 
         var ctx = _ctx;
         var materials = ctx.Materials;
-        foreach (var (instance, primitive, _) in bucket)
+        for (var first = 0; first < bucket.Count;)
         {
+            var (instance, primitive, _) = bucket[first];
+            var count = _instancing.RunLength(bucket, first);
             var skinned = primitive.Skinned && instance.JointOffset >= 0;
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
                 throw new InvalidOperationException(
                     $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
                     "Custom material programs do not support the skinned vertex path (v1).");
-            if (skinnedActive != skinned || programActive != programId)
+            var pipeline = count > 1 ? _instancing.Pipeline(skinned, blend)
+                : skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend);
+            if (activePipeline != pipeline)
             {
-                encoder.SetPipeline(skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend));
-                skinnedActive = skinned;
-                programActive = programId;
+                encoder.SetPipeline(pipeline);
+                activePipeline = pipeline;
             }
 
-            var uniforms = new DrawUniformsGpu
-            {
-                Mvp = instance.Model * ctx.ViewProjection,
-                Model = instance.Model,
-                NormalMatrix = PbrMath.NormalMatrix(instance.Model),
-                // y carries the joint palette base for skinned draws; the lanes beside the
-                // highlight weight were already spare, so this needs no uniform layout change.
-                Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f,
-                    instance.GiMode == PbrGiMode.Disabled ? 1f : 0f, 0f),
-            };
             var slot = ctx.DrawIndex;
-            MemoryMarshal.Write(ctx.DrawStaging.AsSpan(slot * (int)ctx.DrawStride), in uniforms);
+            for (var i = 0; i < count; i++)
+            {
+                var item = bucket[first + i].Instance;
+                var uniforms = new DrawUniformsGpu
+                {
+                    Mvp = item.Model * ctx.ViewProjection,
+                    Model = item.Model,
+                    NormalMatrix = PbrMath.NormalMatrix(item.Model),
+                    Highlight = new Vector4(item.Highlight, skinned ? item.JointOffset : 0f,
+                        item.GiMode == PbrGiMode.Disabled ? 1f : 0f, 0f),
+                };
+                MemoryMarshal.Write(ctx.DrawStaging.AsSpan(ctx.DrawIndex * (int)ctx.DrawStride), in uniforms);
+                ctx.DrawIndex++;
+            }
 
-            encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(slot * ctx.DrawStride));
+            if (count > 1) encoder.SetBindGroup(0, _instancing.Group);
+            else encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(slot * ctx.DrawStride));
             encoder.SetBindGroup(2, materials.GetBindGroup(primitive.MaterialId));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-            ctx.DrawIndex++;
+            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, (uint)count, 0, 0,
+                count > 1 ? (uint)slot : 0));
+            _instancing.CountDraw(count);
+            first += count;
         }
     }
 

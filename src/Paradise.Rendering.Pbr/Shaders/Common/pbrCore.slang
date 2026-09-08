@@ -490,16 +490,22 @@ ProcResult evalProcedural(int kind, float3 p, float t, float3 colorA, float3 col
 /// The rigid vertex transform from explicit object-space components. Extensions displace the
 /// position (and adjust the normal/tangent if they can) before calling; the skinned entry point
 /// feeds its blended components through the same path.
-VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent)
+VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent, DrawUniforms instance)
 {
     VertexOutput output;
-    output.position = mul(draw.mvp, float4(localPosition, 1.0));
-    output.worldPos = mul(draw.model, float4(localPosition, 1.0)).xyz;
+    output.position = mul(instance.mvp, float4(localPosition, 1.0));
+    output.worldPos = mul(instance.model, float4(localPosition, 1.0)).xyz;
     output.objectPos = localPosition;
-    output.worldNormal = mul((float3x3)draw.normalMatrix, localNormal);
+    output.worldNormal = mul((float3x3)instance.normalMatrix, localNormal);
     output.texcoord = texcoord;
-    output.worldTangent = float4(mul((float3x3)draw.normalMatrix, localTangent.xyz), localTangent.w);
+    output.worldTangent = float4(mul((float3x3)instance.normalMatrix, localTangent.xyz), localTangent.w);
+    output.instanceHighlight = instance.highlight;
     return output;
+}
+
+VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent)
+{
+    return pbrTransformVertex(localPosition, localNormal, texcoord, localTangent, draw);
 }
 
 /// The displacement seam: the standard vertex stream plus an object-space offset. float3(0,0,0)
@@ -584,7 +590,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     float3 hemisphereColor;
     float3 probeIrradiance;
     bool probeLit = false;
-    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+    if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, N, V, probeIrradiance))
     {
         hemisphereColor = probeIrradiance;
@@ -654,7 +660,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
         ssrColor = ssrSample.rgb;
     }
     float3 reflected;
-    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+    if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, R, V, reflected))
     {
         ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
@@ -706,7 +712,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     color += emissive;
 
     // Highlight flash (selection/hit feedback): additive push toward white.
-    color += draw.highlight.x * 0.35;
+    color += input.instanceHighlight.x * 0.35;
 
     // Return LINEAR HDR — tonemapping moved to the composite pass (composite.slang), which
     // tonemaps the whole HDR scene target once (enabling bloom + a single consistent curve).

@@ -26,6 +26,7 @@ internal static class PbrBuiltInFeatures
         var prepass = new PrepassFeature(ctx, ssr);
         var gi = new ProbeGiFeature(ctx, shadows);
         var lightCulling = new LightCullingFeature(ctx);
+        var instancing = new InstancingFeature(ctx);
         pipeline
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
@@ -33,7 +34,8 @@ internal static class PbrBuiltInFeatures
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
-            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
+            .Add(instancing, PbrFeatureOrder.Instancing)
+            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, instancing, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
             .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);
