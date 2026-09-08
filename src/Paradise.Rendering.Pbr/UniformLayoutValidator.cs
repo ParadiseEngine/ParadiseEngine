@@ -34,6 +34,11 @@ public static class UniformLayoutValidator
         ("time", 30992, 16),
         ("shadowFilter", 31008, 16),
         ("invViewProj", 31024, 64),
+        ("shadowViewRects", 31088, 6144),
+        ("shadowViewData", 37232, 6144),
+        ("shadowViewDepth", 43376, 6144),
+        ("viewProj", 49520, 64),
+        ("contactShadowSettings", 49584, 16),
     ];
 
     private static readonly (string Name, uint Offset, uint Size)[] s_materialFields =

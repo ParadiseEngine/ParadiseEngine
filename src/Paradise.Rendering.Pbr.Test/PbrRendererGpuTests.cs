@@ -282,8 +282,8 @@ public class PbrRendererGpuTests
             // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
             // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
             // detaching). Point light: perspective texels are metres PER METRE of distance,
-            // 2·tan(45°)/mapSize at the default 1024 map.
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1024f);
+            // 2·tan(45°)/(tileSize - 2), excluding the atlas guard.
+            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1022f);
         }
         finally
         {
@@ -291,10 +291,8 @@ public class PbrRendererGpuTests
         }
     }
 
-    /// <summary>Checks directional shadow texel size for scene-fit and camera-centered
-    /// projections.</summary>
-    /// <remarks>A unit cube under a vertical sun gives 3/mapSize; a camera-centered fit gives
-    /// 2*(radius+xyPad)/mapSize.</remarks>
+    /// <summary>The uploaded bias follows the first cascade's actual texel density; growing the
+    /// caster bounds extends depth coverage without reducing camera-frustum resolution.</summary>
     [Test]
     public async Task directional_shadow_texel_size_tracks_the_active_fit()
     {
@@ -327,16 +325,21 @@ public class PbrRendererGpuTests
             scene.Instances.Add(instance);
             pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
 
-            // Unit cube → sceneRadius clamps to 4 < DirectionalShadowRadius (50) → legacy fit.
             pbr.RenderFrame(scene);
+            var shadow = pbr.Pipeline.Find<ShadowFeature>()!;
+            var first = shadow.Views[0];
+            var projectedScale = new Vector3(first.Vp.M11, first.Vp.M21, first.Vp.M31).Length();
+            var expectedTexel = 2f / ((first.Tile.Size - 2) * projectedScale);
             await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
-                .IsEqualTo(3f / 1024f).Within(1e-7f);
+                .IsEqualTo(expectedTexel).Within(1e-6f);
 
-            // 300 m cube → sceneRadius ≈ 130 > 50 → camera-centred fit at radius + xyPad = 51.
             instance.Model = Matrix4x4.CreateScale(300f);
             pbr.RenderFrame(scene);
+            await Assert.That(shadow.Views[0].TexelWorld).IsEqualTo(first.TexelWorld).Within(1e-6f);
+            await Assert.That(shadow.Views[0].DepthRange.Y - shadow.Views[0].DepthRange.X)
+                .IsGreaterThan(first.DepthRange.Y - first.DepthRange.X);
             await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
-                .IsEqualTo(2f * 51f / 1024f).Within(1e-7f);
+                .IsEqualTo(expectedTexel).Within(1e-6f);
         }
         finally
         {

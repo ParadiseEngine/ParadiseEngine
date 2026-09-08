@@ -6,16 +6,14 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Renders shadow-casting light views into a depth texture array.</summary>
-/// <remarks>Directional and spot lights use one layer; point lights use six. SceneFeature reads the
-/// plan after shadow setup.</remarks>
+/// <summary>Stabilized directional cascades and a dynamic atlas shared with local lights.
+/// Each tile is rendered through its own viewport in one depth pass. A whole light's faces are
+/// admitted together; atlas pressure lowers their resolution before dropping the light.</summary>
 public sealed class ShadowFeature : IRenderFeature
 {
     private const uint DefaultMapSize = 1024;
-    // One array layer per shadow view, capped by the shadow budget rather than by the light
-    // budget: a light that casts nothing costs no layer, and the two must scale apart because
-    // WebGPU's default maxTextureArrayLayers is 256 while a light cap has no such ceiling.
-    private const int MaxLayers = FrameUniformsGpu.MaxShadowViews;
+    // Metadata and texture budgets are independent of the number of unshadowed lights.
+    private const int MaxViews = FrameUniformsGpu.MaxShadowViews;
 
     private readonly PbrContext _ctx;
     private readonly ShaderProgramDesc _program;
@@ -27,14 +25,15 @@ public sealed class ShadowFeature : IRenderFeature
     private readonly byte[] _staging;
     private uint _mapSize = DefaultMapSize;
     private float _blurTexels = 3f;
-    private uint _layerCapacity;
+    private uint _allocatedAtlasSize;
+    private uint _atlasSize = 4096;
+    private readonly ShadowAtlasAllocator _atlas = new();
     private int _stagedDraws;
 
-    private readonly List<(int LightIndex, int Face, uint Layer, Matrix4x4 Vp)> _views = [];
-    private readonly int[] _baseLayer = new int[FrameUniformsGpu.MaxSceneLights];
-    private readonly int[] _faceCount = new int[FrameUniformsGpu.MaxSceneLights];
-    // Shadow texel world size per light (see ComputeLightMatrix), uploaded as sizeParams.y so the
-    // shader's normal-offset bias scales with the map's actual texel density.
+    private readonly List<ShadowView> _views = [];
+    private readonly int[] _firstView = new int[FrameUniformsGpu.MaxSceneLights];
+    private readonly int[] _viewCount = new int[FrameUniformsGpu.MaxSceneLights];
+    // Retained in the light record for custom shaders; built-ins use per-view texel sizes.
     private readonly float[] _texelWorld = new float[FrameUniformsGpu.MaxSceneLights];
 
     internal ShadowFeature(PbrContext ctx)
@@ -42,8 +41,7 @@ public sealed class ShadowFeature : IRenderFeature
         _ctx = ctx;
         var renderer = ctx.Renderer;
 
-        // Comparison sampler; clamp so a PCF tap near a layer edge reads that layer's border,
-        // never wraps.
+        // Shader taps clamp to tile texel centers before hardware comparison filtering.
         Sampler = renderer.CreateSampler(new SamplerDesc(
             "PbrShadowSampler",
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
@@ -52,10 +50,10 @@ public sealed class ShadowFeature : IRenderFeature
 
         // A valid array must always exist even when nothing casts, because the scene's frame
         // group binds it unconditionally; hence the minimum of one layer.
-        EnsureArray(1);
+        EnsureAtlas();
         // Plan() is where "no light has a tile" is normally established, and a build with shadows
         // switched off never runs one — so the invariant is established here too, rather than
-        // resting on _baseLayer's zeroes, which mean "layer 0" and not "no layer".
+        // resting on _firstView's zeroes, which mean "view 0" and not "no view".
         ClearPlan();
 
         // Depth-only caster pipeline. Its group-0 draw UBO is a dynamic-offset ring like the main
@@ -81,40 +79,58 @@ public sealed class ShadowFeature : IRenderFeature
     public FeatureDefinition Definition => PbrFeatures.Shadows;
     public FrameRequirements Requires => FrameRequirements.None;
 
-    /// <summary>Per-layer shadow map resolution, clamped to [256, 8192]. The array is re-declared
-    /// at the new size on the next frame.</summary>
+    /// <summary>Number of parallel camera-depth slices for a directional light, 1..4.</summary>
+    public int CascadeCount { get; set; } = 4;
+    /// <summary>Practical split blend: 0 is uniform, 1 logarithmic.</summary>
+    public float CascadeSplitLambda { get; set; } = 0.65f;
+    /// <summary>Maximum camera depth receiving directional shadows, in metres.</summary>
+    public float MaxDistance { get; set; } = 100f;
+    /// <summary>Fraction of a cascade blended into the following cascade, 0..0.3.</summary>
+    public float CascadeBlend { get; set; } = 0.1f;
+    /// <summary>Shared atlas extent (power of two, 512..8192). Memory is bounded by this value,
+    /// irrespective of the number of lights. Local lights and directional cascades share it.</summary>
+    public uint AtlasSize
+    {
+        get => _atlasSize;
+        set => _atlasSize = Math.Clamp(ShadowAtlasAllocator.RoundResolution(value), 512u, 8192u);
+    }
+    /// <summary>The most recent frame's admitted views, for diagnostics and atlas inspection.</summary>
+    public IReadOnlyList<ShadowView> Views => _views;
+
+    /// <summary>Requested directional tile resolution and automatic local-light ceiling, rounded
+    /// up to a power of two within 256..8192; atlas pressure may reduce it.</summary>
     public uint MapSize
     {
         get => _mapSize;
         set
         {
-            var clamped = Math.Clamp(value, 256u, 8192u);
+            var clamped = Math.Clamp(ShadowAtlasAllocator.RoundResolution(value), 256u, 8192u);
             if (clamped == _mapSize) return;
             _mapSize = clamped;
-            _layerCapacity = 0;
         }
     }
 
-    /// <summary>Soft-shadow PCF disk radius in shadow texels, clamped to [0.5, 8] — below ~2 the
-    /// map's texel staircase shows through the 8-tap Vogel filter, far above it contact shadows
-    /// detach into mush.</summary>
+    /// <summary>Maximum PCSS search and filter radius in shadow texels, clamped to 0.5..32.</summary>
     public float BlurTexels
     {
         get => _blurTexels;
-        set => _blurTexels = Math.Clamp(value, 0.5f, 8f);
+        set => _blurTexels = Math.Clamp(value, 0.5f, 32f);
     }
 
-    /// <summary>Radius in world metres of the camera-centred area the directional shadow map
-    /// covers; 0 falls back to the whole-scene fit. See <see cref="ComputeDirectionalLightMatrix"/>.</summary>
-    public float DirectionalRadius { get; set; } = 50f;
+    /// <summary>Compatibility alias for half of <see cref="MaxDistance"/>.</summary>
+    public float DirectionalRadius
+    {
+        get => MaxDistance * 0.5f;
+        set => MaxDistance = value > 0 ? value * 2f : float.MaxValue;
+    }
 
     /// <summary>The comparison sampler the scene pass reads the array with.</summary>
     public SamplerHandle Sampler { get; }
 
     // The frame's shadow plan, valid after Setup until the next frame.
-    internal IReadOnlyList<(int LightIndex, int Face, uint Layer, Matrix4x4 Vp)> Views => _views;
-    internal int BaseLayer(int light) => _baseLayer[light];
-    internal int FaceCount(int light) => _faceCount[light];
+
+    internal int FirstView(int light) => _firstView[light];
+    internal int ViewCount(int light) => _viewCount[light];
     internal float TexelWorld(int light) => _texelWorld[light];
 
     public void Resize(uint width, uint height)
@@ -124,7 +140,7 @@ public sealed class ShadowFeature : IRenderFeature
 
     /// <summary>The plan outlives the frame that built it — the scene's frame uniforms are
     /// written from it — so a feature switched off mid-run has to retract it, or every light
-    /// keeps sampling the layer it last owned out of an array nobody is filling any more.</summary>
+    /// keeps sampling a tile nobody is filling any more.</summary>
     public void OnEnabledChanged(bool enabled)
     {
         if (!enabled) ClearPlan();
@@ -133,14 +149,14 @@ public sealed class ShadowFeature : IRenderFeature
     private void ClearPlan()
     {
         _views.Clear();
-        Array.Fill(_baseLayer, -1);
-        Array.Clear(_faceCount);
+        Array.Fill(_firstView, -1);
+        Array.Clear(_viewCount);
     }
 
     public void Setup(in FrameContext frame)
     {
         Plan(_ctx.Scene, _ctx.View);
-        EnsureArray((uint)_views.Count);
+        EnsureAtlas();
 
         // Ring budget: views × casters. Hard-fail up front — like the main-pass check — so a
         // partial fill (silently missing shadows) cannot ship.
@@ -151,12 +167,10 @@ public sealed class ShadowFeature : IRenderFeature
 
         _stagedDraws = 0;
         var array = frame.Graph.Texture(PbrTargets.ShadowArray);
-        for (var k = 0; k < _views.Count; k++)
-        {
-            frame.Graph.AddRasterPass("Shadow.Layer", RenderPassEvent.Shadows)
-                .DepthLayer(array, _views[k].Layer, LoadOp.Clear, clear: 1f)
-                .Record(this, RecordLayer, k);
-        }
+        if (_views.Count > 0)
+            frame.Graph.AddRasterPass("Shadow.Atlas", RenderPassEvent.Shadows)
+                .DepthLayer(array, 0, LoadOp.Clear, clear: 1f)
+                .Record(this, RecordAtlas);
     }
 
     /// <summary>Upload the caster uniforms the recorders staged. Here rather than at the end of
@@ -168,9 +182,7 @@ public sealed class ShadowFeature : IRenderFeature
             _ctx.Renderer.UpdateBuffer<byte>(_drawRing, 0, _staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));
     }
 
-    // Assign one array layer per shadow view to every shadow-casting light and compute each
-    // face's light-space matrix, fit to the opaque casters' world AABB. When nothing casts the
-    // plan is empty and no pass is declared (nothing samples an unwritten layer; base layer -1).
+    // Matrix indices remain compact regardless of where the allocator places the tiles.
     private void Plan(PbrScene scene, in Matrix4x4 view)
     {
         ClearPlan();
@@ -182,43 +194,82 @@ public sealed class ShadowFeature : IRenderFeature
         var cameraPosition = Matrix4x4.Invert(view, out var viewInverse)
             ? viewInverse.Translation
             : center;
-        var layerCount = 0;
+        var requests = new List<ShadowAtlasRequest>();
+        var cascadeCount = Math.Clamp(CascadeCount, 1, 4);
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
             var light = scene.Lights[i];
             if (!light.CastsShadows) continue;
-            var faceCount = light.Type == PbrLightType.Point ? 6 : 1;
-            if (layerCount + faceCount > MaxLayers) continue; // won't fit; a smaller later light still can
-            _baseLayer[i] = layerCount;
-            _faceCount[i] = faceCount;
-            for (var f = 0; f < faceCount; f++)
+            var count = light.Type == PbrLightType.Directional ? cascadeCount : light.Type == PbrLightType.Point ? 6 : 1;
+            var resolution = light.Type == PbrLightType.Directional ? _mapSize : light.ShadowResolution;
+            if (resolution == 0)
             {
-                _views.Add((i, f, (uint)(layerCount + f),
-                    ComputeLightMatrix(light, f, center, extent, cameraPosition, out var texelWorld)));
-                // Same for every cube face (the six 90° frusta share one texel density).
-                _texelWorld[i] = texelWorld;
+                // Projected angular extent chooses local-light resolution. Quantized powers of
+                // two and retained rectangles avoid needless movement on steady scenes.
+                var distance = MathF.Max(1f, Vector3.Distance(cameraPosition, light.Position));
+                resolution = (uint)Math.Clamp(_mapSize * light.Range / distance, 128f, _mapSize);
             }
-            layerCount += faceCount;
+            requests.Add(new ShadowAtlasRequest(i, count, resolution, light.ShadowPriority));
+        }
+        var tiles = _atlas.Allocate(_atlasSize, requests);
+        var (cameraNear, cameraFar) = CascadedShadowMath.CameraRange(scene.Camera.Projection);
+        var shadowFar = MathF.Max(cameraNear + 0.01f, MathF.Min(cameraFar, MathF.Max(MaxDistance, cameraNear + 0.01f)));
+        foreach (var request in requests)
+        {
+            if (!tiles.TryGetValue(request.Light, out var lightTiles) || _views.Count + lightTiles.Length > MaxViews) continue;
+            var light = scene.Lights[request.Light];
+            _firstView[request.Light] = _views.Count; // matrix/view index, distinct from physical layer
+            _viewCount[request.Light] = lightTiles.Length;
+            for (var f = 0; f < lightTiles.Length; f++)
+            {
+                var tile = lightTiles[f];
+                var resolution = tile.Size - 2; // a clear one-texel guard around every viewport
+                float texelWorld, splitNear = 0, splitFar = 0;
+                Vector2 depth;
+                Matrix4x4 vp;
+                if (light.Type == PbrLightType.Directional)
+                {
+                    splitNear = CascadedShadowMath.Split(cameraNear, shadowFar, f, cascadeCount, CascadeSplitLambda);
+                    splitFar = CascadedShadowMath.Split(cameraNear, shadowFar, f + 1, cascadeCount, CascadeSplitLambda);
+                    var overlapNear = f == 0 ? splitNear : splitNear -
+                        (splitNear - CascadedShadowMath.Split(cameraNear, shadowFar, f - 1, cascadeCount, CascadeSplitLambda)) * Math.Clamp(CascadeBlend, 0, 0.3f);
+                    vp = CascadedShadowMath.Fit(scene.Camera, light.Direction, overlapNear, splitFar,
+                        center, extent, resolution, out texelWorld, out depth);
+                }
+                else
+                {
+                    vp = ComputeLocalLightMatrix(light, f, resolution, out texelWorld);
+                    depth = new Vector2(0.05f, MathF.Max(light.Range, 1f));
+                }
+                _views.Add(new ShadowView(request.Light, f, tile, vp, texelWorld, splitNear, splitFar,
+                    depth, light.Type != PbrLightType.Directional));
+                if (f == 0) _texelWorld[request.Light] = texelWorld;
+            }
         }
     }
 
-    // Grow-only: a single shared texture across all shadow views keeps the frame group stable
-    // between frames of equal (or smaller) shadow-layer count.
-    private void EnsureArray(uint layerCount)
+    private void EnsureAtlas()
     {
-        layerCount = Math.Max(1, layerCount);
-        if (layerCount <= _layerCapacity) return;
-        _ctx.Targets.Ensure(PbrTargets.ShadowArray, PbrTargets.RenderTarget(_mapSize, _mapSize, TextureFormat.Depth32Float, layerCount));
-        _layerCapacity = layerCount;
+        if (_allocatedAtlasSize == _atlasSize) return;
+        // Keep the array binding contract used by raster, GI and game shaders, with one layer.
+        _ctx.Targets.Ensure(PbrTargets.ShadowArray,
+            PbrTargets.RenderTarget(_atlasSize, _atlasSize, TextureFormat.Depth32Float, 1));
+        _allocatedAtlasSize = _atlasSize;
     }
 
-    // Depth-only fill of ONE layer. Every opaque caster is drawn with
-    // lightMvp = model × faceViewProjection (mirrors the main Mvp = model × viewProjection so the
-    // shadow shader matches pbr.slang). No viewport math — each layer owns the whole [0,1].
-    private static void RecordLayer(ShadowFeature self, ref PassRecording pass, int view)
+    private static void RecordAtlas(ShadowFeature self, ref PassRecording pass, int _)
+    {
+        for (var view = 0; view < self._views.Count; view++) RecordView(self, ref pass, view);
+    }
+
+    private static void RecordView(ShadowFeature self, ref PassRecording pass, int view)
     {
         ref var encoder = ref pass.Encoder;
-        var vp = self._views[view].Vp;
+        var item = self._views[view];
+        var vp = item.Vp;
+        // Clip-space clipping confines geometry to this integer-aligned viewport; the empty
+        // border and shader tap clamping keep hardware PCF from reaching adjacent tiles.
+        encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
         encoder.SetBindGroup(1, self._jointGroup);
         var skinnedActive = (bool?)null;
         foreach (var (instance, primitive, _) in self._ctx.Opaque)
@@ -258,12 +309,9 @@ public sealed class ShadowFeature : IRenderFeature
         return _skinnedPipeline;
     }
 
-    // Shadow projection: directional uses a camera-centered orthographic fit, spot its cone, and
-    // point six 90-degree faces. texelWorld scales bias in meters for directional lights, or meters
-    // per meter of receiver distance for perspective lights.
-    private Matrix4x4 ComputeLightMatrix(
-        PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition,
-        out float texelWorld)
+    // Perspective texel sizes are metres per metre of receiver distance.
+    private static Matrix4x4 ComputeLocalLightMatrix(
+        PbrLight light, int face, uint resolution, out float texelWorld)
     {
         switch (light.Type)
         {
@@ -274,7 +322,7 @@ public sealed class ShadowFeature : IRenderFeature
                 var view = PbrMath.LookAt(light.Position, light.Position + aim, up);
                 var fov = Math.Clamp(light.SpotOuterDegrees * (MathF.PI / 180f) * 1.05f, 0.1f, 3.0f);
                 var proj = PbrMath.Perspective(fov, 1f, 0.05f, MathF.Max(light.Range, 1f));
-                texelWorld = 2f * MathF.Tan(fov * 0.5f) / _mapSize; // per metre of distance
+                texelWorld = 2f * MathF.Tan(fov * 0.5f) / resolution; // per metre of distance
                 return PbrMath.ViewProjection(view, proj);
             }
             case PbrLightType.Point:
@@ -282,13 +330,11 @@ public sealed class ShadowFeature : IRenderFeature
                 var (dir, up) = CubeFace(face);
                 var view = PbrMath.LookAt(light.Position, light.Position + dir, up);
                 var proj = PbrMath.Perspective(MathF.PI / 2f, 1f, 0.05f, MathF.Max(light.Range, 1f));
-                texelWorld = 2f / _mapSize; // tan(90°/2) = 1; per metre of distance
+                texelWorld = 2f / resolution; // tan(90°/2) = 1; per metre of distance
                 return PbrMath.ViewProjection(view, proj);
             }
-            default: // Directional
-                return ComputeDirectionalLightMatrix(
-                    light.Direction, center, extent, cameraPosition,
-                    DirectionalRadius, _mapSize, out texelWorld);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(light), "Expected a point or spot light.");
         }
     }
 
@@ -327,86 +373,6 @@ public sealed class ShadowFeature : IRenderFeature
         extent = (max - min) * 0.5f;
     }
 
-    // Directional projection is right-handed with clip Z in [0,1]. Fit a camera-centered square
-    // limited by shadowRadius and snap its center to light-space texels to avoid shimmer. Depth
-    // still spans the scene so distant tall casters contribute. Small scenes or a disabled radius
-    // retain the tighter whole-AABB fit.
-    private static Matrix4x4 ComputeDirectionalLightMatrix(
-        Vector3 surfaceToLight, Vector3 center, Vector3 extent, Vector3 cameraPosition,
-        float shadowRadius, uint shadowMapSize, out float texelWorld)
-    {
-        var lightDir = surfaceToLight.LengthSquared() > 1e-6f ? Vector3.Normalize(surfaceToLight) : Vector3.UnitY;
-        const float depthPad = 32f;
-        const float xyPad = 1f;
-        var sceneRadius = MathF.Max(4f, 0.5f * extent.Length());
-        var up = MathF.Abs(lightDir.Y) > 0.95f ? Vector3.UnitZ : Vector3.UnitY;
-
-        if (shadowRadius > 0f && shadowRadius < sceneRadius)
-        {
-            var radius = shadowRadius + xyPad;
-            var focus = Vector3.Clamp(cameraPosition, center - extent, center + extent);
-
-            // Snap the focus to the shadow-texel grid in the light's own plane basis.
-            var right = Vector3.Normalize(Vector3.Cross(up, lightDir));
-            var planeUp = Vector3.Cross(lightDir, right);
-            var texel = 2f * radius / shadowMapSize;
-            var focusRight = Vector3.Dot(focus, right);
-            var focusUp = Vector3.Dot(focus, planeUp);
-            focus += right * (MathF.Floor(focusRight / texel) * texel - focusRight)
-                   + planeUp * (MathF.Floor(focusUp / texel) * texel - focusUp);
-
-            var eye = focus + lightDir * (sceneRadius + depthPad);
-            var lightView = PbrMath.LookAt(eye, focus, up);
-
-            // Depth range from the scene AABB so out-of-circle casters still cast in.
-            float minZ = float.MaxValue, maxZ = float.MinValue;
-            for (var c = 0; c < 8; c++)
-            {
-                var corner = center + new Vector3(
-                    (c & 1) == 0 ? -extent.X : extent.X,
-                    (c & 2) == 0 ? -extent.Y : extent.Y,
-                    (c & 4) == 0 ? -extent.Z : extent.Z);
-                var lz = Vector3.Transform(corner, lightView).Z;
-                minZ = MathF.Min(minZ, lz); maxZ = MathF.Max(maxZ, lz);
-            }
-            // RH light space: the scene sits at negative Z. near/far are positive distances.
-            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
-            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
-            var proj = PbrMath.OrthographicOffCenter(-radius, radius, -radius, radius, nearPlane, farPlane);
-            texelWorld = texel; // the snap grid IS the texel size: 2·radius / mapSize
-            return PbrMath.ViewProjection(lightView, proj);
-        }
-
-        // Legacy whole-scene fit. Matches bank-heist (up-vector guard, XY/Z padding).
-        {
-            var eye = center + lightDir * (sceneRadius + depthPad);
-            var lightView = PbrMath.LookAt(eye, center, up);
-
-            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-            for (var c = 0; c < 8; c++)
-            {
-                var corner = center + new Vector3(
-                    (c & 1) == 0 ? -extent.X : extent.X,
-                    (c & 2) == 0 ? -extent.Y : extent.Y,
-                    (c & 4) == 0 ? -extent.Z : extent.Z);
-                var lp = Vector3.Transform(corner, lightView);
-                minX = MathF.Min(minX, lp.X); maxX = MathF.Max(maxX, lp.X);
-                minY = MathF.Min(minY, lp.Y); maxY = MathF.Max(maxY, lp.Y);
-                minZ = MathF.Min(minZ, lp.Z); maxZ = MathF.Max(maxZ, lp.Z);
-            }
-            // RH light space: the scene sits at negative Z. near/far are positive distances.
-            var nearPlane = MathF.Max(0.01f, -maxZ - depthPad);
-            var farPlane = MathF.Max(nearPlane + 1f, -minZ + depthPad);
-            var proj = PbrMath.OrthographicOffCenter(
-                minX - xyPad, maxX + xyPad, minY - xyPad, maxY + xyPad, nearPlane, farPlane);
-            // The map is square but the fit is not; the wider axis has the coarser texels, and the
-            // bias must cover the worst case.
-            texelWorld = MathF.Max(maxX - minX + 2f * xyPad, maxY - minY + 2f * xyPad) / shadowMapSize;
-            return PbrMath.ViewProjection(lightView, proj);
-        }
-    }
-
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
@@ -418,3 +384,8 @@ public sealed class ShadowFeature : IRenderFeature
         renderer.DestroySampler(Sampler);
     }
 }
+
+/// <summary>One admitted shadow view. Split depths are positive camera-space distances.
+/// The tile includes a one-texel clear guard; Vp maps into its inset viewport.</summary>
+public readonly record struct ShadowView(int LightIndex, int Face, ShadowAtlasTile Tile, Matrix4x4 Vp,
+    float TexelWorld, float SplitNear, float SplitFar, Vector2 DepthRange, bool Perspective);

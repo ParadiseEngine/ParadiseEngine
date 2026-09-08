@@ -1,5 +1,5 @@
 # shadows-directional_ssao-on_capture-off_bloom-off
-submit presenting passes=4 commands=60
+submit presenting passes=4 commands=94
 pass 00  colors=0
          depth tex#0 view#0 load=Clear store=Store clear=1
 pass 01  colors=1
@@ -13,6 +13,7 @@ pass 03  colors=1
          depth none
 
 BeginPass 00
+  SetViewport 1,1 1022x1022 depth=0..1
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
   SetBindGroup 0 bg#1 dyn=0
@@ -20,6 +21,39 @@ BeginPass 00
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
   SetBindGroup 0 bg#1 dyn=256
+  SetVertexBuffer 0 buf#2 offset=0 size=1152
+  SetIndexBuffer buf#3 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetViewport 1025,1 1022x1022 depth=0..1
+  SetBindGroup 1 bg#0
+  SetPipeline pipeline#0
+  SetBindGroup 0 bg#1 dyn=512
+  SetVertexBuffer 0 buf#0 offset=0 size=1152
+  SetIndexBuffer buf#1 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetBindGroup 0 bg#1 dyn=768
+  SetVertexBuffer 0 buf#2 offset=0 size=1152
+  SetIndexBuffer buf#3 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetViewport 2049,1 1022x1022 depth=0..1
+  SetBindGroup 1 bg#0
+  SetPipeline pipeline#0
+  SetBindGroup 0 bg#1 dyn=1024
+  SetVertexBuffer 0 buf#0 offset=0 size=1152
+  SetIndexBuffer buf#1 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetBindGroup 0 bg#1 dyn=1280
+  SetVertexBuffer 0 buf#2 offset=0 size=1152
+  SetIndexBuffer buf#3 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetViewport 3073,1 1022x1022 depth=0..1
+  SetBindGroup 1 bg#0
+  SetPipeline pipeline#0
+  SetBindGroup 0 bg#1 dyn=1536
+  SetVertexBuffer 0 buf#0 offset=0 size=1152
+  SetIndexBuffer buf#1 Uint32 offset=0 size=144
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  SetBindGroup 0 bg#1 dyn=1792
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0

@@ -12,18 +12,22 @@ public static class PbrFeatures
         "rendering.motionVectors", true,
         "Screen-space motion for temporal effects. Off, temporal consumers must reject history.");
 
-    /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
-    /// everything.</summary>
+    /// <summary>Directional cascades and local-light tiles in a shared depth atlas.</summary>
     public static FeatureDefinition Shadows { get; } = new(
         "rendering.shadows", true,
-        "Shadow maps for every shadow-casting light. Off, nothing casts a shadow.");
+        "Cascaded and local-light shadow maps in a shared atlas.");
+
+    /// <summary>Short direct-light shadow rays through the visible depth prepass.</summary>
+    public static FeatureDefinition ContactShadows { get; } = new(
+        "rendering.contactShadows", true,
+        "Short screen-space direct-light shadows from visible opaque geometry.");
 
     /// <summary>The depth + normal pre-pass every screen-space effect reads. Off, SSAO,
-    /// ray-traced AO and screen-space reflection have nothing to read and none of them
+    /// ray-traced AO, contact shadows and screen-space reflection have nothing to read and none of them
     /// run.</summary>
     public static FeatureDefinition Prepass { get; } = new(
         "rendering.depthNormalPrepass", true,
-        "The opaque depth + normal pre-pass. Off, SSAO, ray-traced AO and reflections all stop with it.");
+        "The opaque depth + normal pre-pass. Off, all effects that read it stop.");
 
     /// <summary>Ray-traced ambient occlusion in compute, against the scene's BVH.</summary>
     public static FeatureDefinition RayTracedAo { get; } = new(
@@ -129,7 +133,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Shadows, Prepass, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
@@ -158,6 +162,7 @@ public static class PbrFeatureOrder
     public const int Shadows = 100;
     public const int Prepass = 200;
     public const int MotionVectors = 250;
+    public const int ContactShadows = 275;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;

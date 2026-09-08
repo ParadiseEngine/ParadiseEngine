@@ -7,11 +7,12 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>Checks pass wiring, command signatures and pixels across rendering feature
-/// combinations.</summary>
-/// <remarks>Cases vary directional/point/no shadows, SSAO, scene capture and bloom. Signatures are
-/// adapter-independent; pixel goldens are keyed by runtime identifier. Refresh intentionally with
-/// PARADISE_UPDATE_GOLDEN=1.</remarks>
+/// <summary>The 24 combinations of shadow type, SSAO, scene-color capture and bloom are held
+/// against both the submitted command stream and the rendered image.</summary>
+/// <remarks>Directional lights contribute four cascade viewports and point lights six cube-face
+/// viewports inside one atlas pass. Signatures are adapter-independent; pixel baselines are
+/// keyed by runtime identifier. Refresh intentional renderer changes with
+/// <c>PARADISE_UPDATE_GOLDEN=1</c>, then inspect the source diff and captures.</remarks>
 public class PassMatrixBaselineTests
 {
     private const uint Size = 128; // → bloom chain of 4 levels (64,32,16,8), i.e. 7 bloom passes
@@ -73,7 +74,7 @@ public class PassMatrixBaselineTests
                 var recorder = new RecordingRenderer(backend);
 
                 // A renderer per case, not one reused across the matrix. Several of its resources
-                // are grow-only (the shadow-map array, the draw ring), so a shared instance would
+                // are persistent (the atlas allocations, the draw ring), so a shared instance would
                 // make each case's structure depend on which cases ran before it — and a golden
                 // that only holds in matrix order is worse than none.
                 var switches = new FeatureSwitches();
@@ -82,8 +83,7 @@ public class PassMatrixBaselineTests
 
                 var scene = BuildScene(pbr, testCase);
 
-                // Warm up: the first frames build pipeline variants lazily and grow the shadow
-                // array, so the steady state is what the baseline should hold.
+                // Warm up lazy pipeline variants so the baseline holds the steady frame.
                 for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
                 recorder.Clear();
                 pbr.RenderFrame(scene);

@@ -184,7 +184,8 @@
     `texture_2d_array<f32>` even though it is sampled with textureSampleCompareLevel, which WGSL
     permits only on `texture_depth_2d_array` (Slang issue #6942 — closed, but still regressed for the
     standard Texture2DArray<float> + SamplerComparisonState pattern). We patch the single
-    `shadowTexture` declaration here, at build time, so the runtime never performs WGSL surgery.
+    `shadowTexture` declaration and scalar blocker-search loads here, at build time, so the runtime
+    never performs WGSL surgery.
     No-op for shaders without a shadow map; the guardrail fails the build if comparison sampling is
     present but the depth-texture declaration is missing (e.g. a renamed shadow texture the regex
     didn't catch).
@@ -205,6 +206,25 @@
             var patched = Regex.Replace(code,
                 @"(var\s+shadowTexture(?:_\d+)?\s*:\s*)texture_2d_array<f32>",
                 "$1texture_depth_2d_array");
+            // A sampled texture load yields vec4, but a depth load yields f32. Slang emits
+            // .x for Texture2DArray<float>; remove it only from this patched texture's loads.
+            for (var start = patched.IndexOf("textureLoad(", StringComparison.Ordinal); start >= 0;
+                 start = patched.IndexOf("textureLoad(", start + 1, StringComparison.Ordinal))
+            {
+                var end = start + "textureLoad".Length;
+                var nesting = 0;
+                do
+                {
+                    if (patched[end] == '(') nesting++;
+                    if (patched[end] == ')') nesting--;
+                    end++;
+                } while (end < patched.Length && nesting > 0);
+                var comma = patched.IndexOf(',', start);
+                if (comma > start && comma < end &&
+                    Regex.IsMatch(patched.Substring(start, comma - start), @"\bshadowTexture(?:_\d+)?\b") &&
+                    end + 1 < patched.Length && patched[end] == '.' && patched[end + 1] == 'x')
+                    patched = patched.Remove(end, 2);
+            }
             if (patched.Contains("textureSampleCompareLevel(") && !patched.Contains("texture_depth_2d_array"))
                 throw new Exception("Shadow comparison sampling present but no texture_depth_2d_array shadow texture after patch: " + WgslFile);
             if (patched != code)

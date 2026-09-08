@@ -7,8 +7,8 @@
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 64;
 
-// Each shadow view uses one layer and matrix, with a budget independent of MaxSceneLights.
-// Match FrameUniformsGpu.MaxShadowViews; UniformLayoutValidator checks this at renderer init.
+// Shadow metadata budget is independent of the light count and physical atlas extent.
+// Mirrored by FrameUniformsGpu.MaxShadowViews and checked by UniformLayoutValidator.
 static const int MaxShadowViews = 384;
 
 struct SceneLight
@@ -16,9 +16,9 @@ struct SceneLight
     float4 positionAndType;       // xyz: position, w: 0 directional / 1 point / 2 spot
     float4 directionAndRange;     // xyz: direction from surface to light, w: range
     float4 colorAndIntensity;     // rgb: color, w: intensity
-    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-array layer (<0 = no shadow), w: shadow strength (0 = none)
-    float4 shadowAtlas;           // x: distance-attenuation decay, y: face count (1 = dir/spot, 6 = point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
-    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), y: shadow texel world size (directional: metres; point/spot: metres per metre of receiver distance), z: indirect energy (how much of the light the probes bounce), w unused
+    float4 spotAngles;            // x: outer angle degrees, y: inner angle degrees, z: base shadow-view index (<0 = no shadow), w: shadow strength (0 = none)
+    float4 shadowAtlas;           // x: distance-attenuation decay, y: view count (1..4 dir, 1 spot, 6 point), z: LIGHT_PARAM_SPECULAR, w: soft-shadow flag
+    float4 sizeParams;            // x: LIGHT_PARAM_SIZE (directional: precomputed 1−cos(angular); point/spot: world radius), y: shadow texel world size (directional: metres; point/spot: metres per metre of receiver distance), z: indirect energy (how much of the light the probes bounce), w: PCSS world radius or tan(angular radius)
 };
 
 struct FrameUniforms
@@ -40,21 +40,29 @@ struct FrameUniforms
     float4   cameraForward;  // xyz: world-space camera forward (unit), w: cluster near
     float4   clusterParams;  // x: tilesX, y: tilesY, z: zSlices, w: cluster far (x<1 disables)
     SceneLight sceneLights[MaxSceneLights];
-    float4   shadowSettings; // x: 1/shadowMapSize (per-layer texel size), y: tonemap mode, z: exposure, w: white
-    float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow-array layer; index = light.spotAngles.z + face
+    float4   shadowSettings; // x: 1/atlasSize, y: tonemap mode, z: exposure, w: white
+    float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow view; index = light.spotAngles.z + face
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
-    float4   shadowFilter;   // x: soft-shadow PCF disk radius in shadow texels, yzw unused
+    float4   shadowFilter;   // x: maximum PCSS radius in texels, y: cascade blend fraction
     // Inverse of the camera view-projection: how a screen-space effect turns a pre-pass depth
     // back into a world position, instead of storing positions at 32-bit float per pixel.
     float4x4 invViewProj;
+    float4 shadowViewRects[MaxShadowViews]; // xy offset, zw extent of the inset viewport
+    float4 shadowViewData[MaxShadowViews];  // x world texel, yz camera split near/far, w physical array layer
+    float4 shadowViewDepth[MaxShadowViews]; // xy light near/far, z perspective flag, w viewport resolution
+    float4x4 viewProj;
+    float4 contactShadowSettings; // x length, y thickness, z steps, w strength (zero disables)
 };
 
 [[vk::binding(0, 1)]]
 ConstantBuffer<FrameUniforms> frame;
 
-// Shadow depth array and comparison sampler. Slang.targets patches shadowTexture to
-// texture_depth_2d_array for SampleCmp (Slang #6942); the reflection loader recognizes these exact
-// names.
+// Shadow atlas (a single Depth32Float 2D array with one physical layer) + comparison
+// sampler, on the group-1 slots reserved when shadow mapping was removed. NOTE: the generated WGSL
+// declares shadowTexture as texture_2d_array<f32>; a build-time patch (Slang.targets) rewrites it
+// to texture_depth_2d_array, which WGSL requires for textureSampleCompareLevel (Slang issue #6942).
+// The loader forces the matching bind-group layout (DepthTextureArray + ComparisonSampler) by these
+// exact names.
 [[vk::binding(1, 1)]]
 Texture2DArray<float> shadowTexture;
 
@@ -120,9 +128,6 @@ int getPointShadowFace(float3 dir)
     return dir.z > 0.0 ? 4 : 5;
 }
 
-// Light visibility in [0,1]: 1 = fully lit, (1 - strength) = fully shadowed. Samples the shadow-map
-// array — one full-resolution layer per shadow view (dir/spot = 1, point = 6 cube faces) — via the
-// light's per-face view-projection. No tile UV math and no seam clamp: each layer owns all of [0,1].
 // Interleaved Gradient Noise (Godot's quick_hash) — decorrelates the per-pixel PCF disk rotation.
 float shadowDiskHash(float2 pos)
 {
@@ -130,123 +135,145 @@ float shadowDiskHash(float2 pos)
     return frac(magic.z * frac(dot(pos, magic.xy)));
 }
 
-// Use the geometric normal for receiver lift and plane bias. A normal-map perturbation does not
-// describe the rasterized surface and would corrupt shadow depth comparisons.
-// Keep the unused lightIndex parameter for existing game material shaders; the light record
-// supplies the shadow base layer through spotAngles.z.
-float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
+// geoN is the GEOMETRIC normal (front-face-corrected interpolated vertex normal), not the
+// normal-mapped shading normal: every quantity here — the lift direction, the slope factor, the
+// receiver-plane basis — describes the real surface the shadow map rasterized. A normal-mapped
+// floor's shading normal tilts the solved plane away from the actual geometry, turning the
+// per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
+// the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
+// out of the shadow lookup entirely.)
+// lightIndex is unread since the shadow matrices became view-keyed: the light record carries its
+// own base view in spotAngles.z. It stays in the signature because a GAME's material shader calls
+// this (Pingu's poolInterior.slang does), and dropping a parameter would break that source for no
+// gain while the light cap is unchanged. It goes with the cap lift, which breaks those shaders
+// anyway.
+// A rotated Poisson disk is shared by blocker search and the variable-radius PCF filter.
+static const float2 ShadowPoisson[16] = {
+    float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725),
+    float2(-0.09418410,-0.92938870), float2(0.34495938,0.29387760),
+    float2(-0.91588581,0.45771432), float2(-0.81544232,-0.87912464),
+    float2(-0.38277543,0.27676845), float2(0.97484398,0.75648379),
+    float2(0.44323325,-0.97511554), float2(0.53742981,-0.47373420),
+    float2(-0.26496911,-0.41893023), float2(0.79197514,0.19090188),
+    float2(-0.24188840,0.99706507), float2(-0.81409955,0.91437590),
+    float2(0.19984126,0.78641367), float2(0.14383161,-0.14100790)
+};
+
+float shadowLinearDepth(float depth, float4 projection)
 {
-    if (light.spotAngles.w <= 0.0 || light.shadowAtlas.y <= 0.0 || light.spotAngles.z < 0.0)
-        return 1.0; // no shadow for this light
-
-    // The face is chosen below, from the BIASED sample position: picking it from the surface's own
-    // direction and then projecting a position lifted off the surface can land the sample just
-    // outside that face's 90° frustum, where "outside the frustum" reads as lit — a thin bright
-    // seam along every cube-face boundary, visible wherever the light is the only illumination.
-    int face = 0;
-
-    // Cover center-texel quantization with capped normal offset. Hard shadows need a larger offset
-    // because their hardware 2x2 comparisons lack per-tap plane bias.
-    float texelWorld = light.sizeParams.y;
-    if (light.positionAndType.w > 0.5)
-    {
-        // Perspective (point/spot): texels grow with distance. RADIAL distance, not axial — an
-        // over-estimate of up to 1/cos(off-axis angle) at a cone's rim, deliberately erring
-        // toward more bias rather than under-covering the texel.
-        texelWorld *= length(light.positionAndType.xyz - worldPos);
-    }
-    float biasTexels = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
-    float ndotl = saturate(dot(geoN, surfaceToLight));
-    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05); // tan(angle to light)
-    float liftTexels = min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels);
-    float3 samplePos = worldPos + geoN * (texelWorld * liftTexels);
-
-    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5) // point light
-        face = getPointShadowFace(samplePos - light.positionAndType.xyz);
-    if ((float)face >= light.shadowAtlas.y)
-        return 1.0;
-
-    // Index the matrix by the same array layer sampled below.
-    int matrixIndex = (int)light.spotAngles.z + face;
-    float4 shadowPos = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos, 1.0));
-    if (shadowPos.w <= 0.0)
-        return 1.0;
-    float3 ndc = shadowPos.xyz / shadowPos.w;
-    float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5; // NDC → UV, Y flipped (WebGPU clip-Z [0,1])
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0)
-        return 1.0; // outside the light frustum → treat as lit
-
-    float layer = light.spotAngles.z + (float)face; // array slice for this view
-    float texel = frame.shadowSettings.x;
-    float compare = ndc.z - ShadowDepthBias;
-
-    float lit;
-    if (light.shadowAtlas.w > 0.5)
-    {
-        // Soft shadows use a 16-tap Vogel disk at the authored blur radius, rotated by interleaved
-        // gradient noise. Fewer taps produce visible stippling on coarse maps; linear comparison
-        // sampling covers narrow penumbrae.
-        static const float2 kVogel16[16] = {
-            float2(+0.176777, +0.000000),
-            float2(-0.225780, +0.206818),
-            float2(+0.034587, -0.393769),
-            float2(+0.284530, +0.371204),
-            float2(-0.522210, -0.092451),
-            float2(+0.494753, -0.314594),
-            float2(-0.165602, +0.615488),
-            float2(-0.315405, -0.607676),
-            float2(+0.684569, +0.250232),
-            float2(-0.712353, +0.293773),
-            float2(+0.343624, -0.733602),
-            float2(+0.253403, +0.809035),
-            float2(-0.764550, -0.443523),
-            float2(+0.897228, -0.196804),
-            float2(-0.547908, +0.778490),
-            float2(-0.125948, -0.976159),
-        };
-        float s = texel * frame.shadowFilter.x;
-        float r = shadowDiskHash(fragCoord) * 2.0 * PI;
-        float cr = cos(r);
-        float sr = sin(r);
-
-        // Solve receiver-plane depth gradients from projected tangents and adjust each tap at its
-        // offset. Exact for orthographic light, first-order for perspective; avoids bias sized to
-        // the whole PCF disk.
-        float3 tan1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0)));
-        float3 tan2 = cross(geoN, tan1);
-        float planeStep = max(texelWorld, 1e-4);
-        float4 q1 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan1 * planeStep, 1.0));
-        float4 q2 = mul(frame.sceneLightShadowMatrices[matrixIndex], float4(samplePos + tan2 * planeStep, 1.0));
-        float3 e1 = q1.xyz / max(q1.w, 1e-6) - ndc;
-        float3 e2 = q2.xyz / max(q2.w, 1e-6) - ndc;
-        float det = e1.x * e2.y - e1.y * e2.x;
-        // dz per NDC-xy offset d: dz = dot(zGrad, d) with the 2x2 solve below; degenerate when the
-        // plane is edge-on to the light (both tangents project to one line) — no adjustment then.
-        float2 zGrad = abs(det) > 1e-9
-            ? float2(e1.z * e2.y - e1.y * e2.z, e1.x * e2.z - e1.z * e2.x) / det
-            : float2(0.0, 0.0);
-
-        lit = 0.0;
-        [unroll] for (int k = 0; k < 16; k++)
-        {
-            // Godot's mat2(vec2(cr,-sr), vec2(sr,cr)) * offset (column-major GLSL).
-            float2 o = float2(cr * kVogel16[k].x + sr * kVogel16[k].y,
-                              -sr * kVogel16[k].x + cr * kVogel16[k].y);
-            float2 uvOff = o * s;
-            // UV → NDC offset is (2, -2) (the Y flip from the uv mapping above).
-            float dz = clamp(zGrad.x * (2.0 * uvOff.x) + zGrad.y * (-2.0 * uvOff.y),
-                             -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
-            lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv + uvOff, layer), compare + dz);
-        }
-        lit *= 0.0625;
-    }
-    else
-    {
-        lit = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), compare);
-    }
-
-    return lerp(1.0 - light.spotAngles.w, 1.0, lit);
+    return projection.z > 0.5
+        ? projection.x * projection.y / max(projection.y - depth * (projection.y - projection.x), 1e-6)
+        : lerp(projection.x, projection.y, depth);
 }
 
+float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN,
+                       float3 surfaceToLight, float2 fragCoord)
+{
+    float4 rect = frame.shadowViewRects[index];
+    float4 data = frame.shadowViewData[index];
+    float4 projection = frame.shadowViewDepth[index];
+    float texelWorld = data.x;
+    if (light.positionAndType.w > 0.5) texelWorld *= length(light.positionAndType.xyz - worldPos);
+    float ndotl = saturate(dot(geoN, surfaceToLight));
+    float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05);
+    float biasTexels = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
+    float3 samplePos = worldPos + geoN * (texelWorld * min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels));
+    float4 shadowPos = mul(frame.sceneLightShadowMatrices[index], float4(samplePos, 1));
+    if (shadowPos.w <= 0) return 1;
+    float3 ndc = shadowPos.xyz / shadowPos.w;
+    float2 localUv = ndc.xy * float2(0.5, -0.5) + 0.5;
+    if (any(localUv < 0) || any(localUv > 1) || ndc.z < 0 || ndc.z > 1) return 1;
+    float2 uv = rect.xy + localUv * rect.zw;
+    float texel = frame.shadowSettings.x;
+    // Clamp to TEXEL CENTERS in this viewport. Hardware 2x2 PCF cannot read another tile.
+    float2 uvMin = rect.xy + texel * 0.5;
+    float2 uvMax = rect.xy + rect.zw - texel * 0.5;
+    float compare = ndc.z - ShadowDepthBias;
+    if (light.shadowAtlas.w <= 0.5)
+        return shadowTexture.SampleCmpLevelZero(shadowSampler, float3(clamp(uv, uvMin, uvMax), data.w), compare);
+
+    float3 t1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0,1,0) : float3(1,0,0)));
+    float3 t2 = cross(geoN, t1);
+    float step = max(texelWorld, 1e-4);
+    float4 q1 = mul(frame.sceneLightShadowMatrices[index], float4(samplePos + t1 * step, 1));
+    float4 q2 = mul(frame.sceneLightShadowMatrices[index], float4(samplePos + t2 * step, 1));
+    float3 e1 = q1.xyz / max(q1.w, 1e-6) - ndc;
+    float3 e2 = q2.xyz / max(q2.w, 1e-6) - ndc;
+    float det = e1.x * e2.y - e1.y * e2.x;
+    float2 gradient = abs(det) > 1e-9
+        ? float2(e1.z * e2.y - e1.y * e2.z, e1.x * e2.z - e1.z * e2.x) / det
+        : float2(0,0);
+    // Convert from light NDC to ATLAS UV, preserving receiver-plane bias after packing.
+    gradient *= float2(2,-2) / rect.zw;
+    float angle = shadowDiskHash(fragCoord) * 2 * PI;
+    float cr = cos(angle), sr = sin(angle);
+    float2 offsets[16];
+    float blockers = 0, blockerSum = 0;
+    float maxRadius = frame.shadowFilter.x;
+    [unroll] for (int k = 0; k < 16; k++)
+    {
+        offsets[k] = float2(cr * ShadowPoisson[k].x + sr * ShadowPoisson[k].y,
+                           -sr * ShadowPoisson[k].x + cr * ShadowPoisson[k].y);
+        float2 tap = clamp(uv + offsets[k] * (texel * maxRadius), uvMin, uvMax);
+        float dz = clamp(dot(gradient, tap - uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
+        float depth = shadowTexture.Load(int4(int2(tap / texel), int(data.w), 0));
+        if (depth < compare + dz)
+        {
+            blockerSum += shadowLinearDepth(depth - dz, projection);
+            blockers += 1;
+        }
+    }
+    if (blockers == 0) return 1;
+    float receiver = shadowLinearDepth(compare, projection);
+    float blocker = blockerSum / blockers;
+    float separation = max(0, receiver - blocker);
+    float penumbraWorld = separation * light.sizeParams.w;
+    if (projection.z > 0.5) penumbraWorld /= max(blocker, 1e-4);
+    float radius = clamp(penumbraWorld / max(texelWorld, 1e-6), 0.5, maxRadius);
+    float lit = 0;
+    [unroll] for (int k = 0; k < 16; k++)
+    {
+        float2 tap = clamp(uv + offsets[k] * (texel * radius), uvMin, uvMax);
+        float dz = clamp(dot(gradient, tap - uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
+        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(tap, data.w), compare + dz);
+    }
+    return lit / 16;
+}
+
+float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
+{
+    if (light.spotAngles.w <= 0 || light.shadowAtlas.y <= 0 || light.spotAngles.z < 0) return 1;
+    int first = int(light.spotAngles.z), count = int(light.shadowAtlas.y), face = 0;
+    float cameraDepth = dot(worldPos - frame.cameraPos.xyz, frame.cameraForward.xyz);
+    if (light.positionAndType.w < 0.5)
+    {
+        if (cameraDepth > frame.shadowViewData[first + count - 1].z) return 1;
+        [unroll] for (int c = 0; c < 3; c++)
+            if (c < count - 1 && cameraDepth > frame.shadowViewData[first + c].z) face = c + 1;
+    }
+    else if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5)
+    {
+        // Choose the cube face from the biased receiver, keeping cube seams consistent with
+        // the projection performed by sampleShadowView.
+        float texelWorld = frame.shadowViewData[first].x * length(light.positionAndType.xyz - worldPos);
+        float ndotl = saturate(dot(geoN, surfaceToLight));
+        float slope = sqrt(saturate(1 - ndotl * ndotl)) / max(ndotl, 0.05);
+        float bias = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
+        face = getPointShadowFace(worldPos + geoN * (texelWorld * min(bias * (1 + slope), ShadowMaxSlopeTexels)) - light.positionAndType.xyz);
+    }
+    float lit = sampleShadowView(light, first + face, worldPos, geoN, surfaceToLight, fragCoord);
+    if (light.positionAndType.w < 0.5)
+    {
+        float4 split = frame.shadowViewData[first + face];
+        float blend = saturate((cameraDepth - (split.z - (split.z - split.y) * frame.shadowFilter.y)) /
+                              max((split.z - split.y) * frame.shadowFilter.y, 1e-5));
+        if (blend > 0)
+        {
+            float next = face + 1 < count ? sampleShadowView(light, first + face + 1, worldPos, geoN, surfaceToLight, fragCoord) : 1;
+            lit = lerp(lit, next, blend);
+        }
+    }
+    return lerp(1 - light.spotAngles.w, 1, lit);
+}
 
 #endif // PARADISE_LIGHTING_SLANG

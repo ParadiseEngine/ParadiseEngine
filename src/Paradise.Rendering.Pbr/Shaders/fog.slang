@@ -41,20 +41,41 @@ float phase(float cosine)
 // Participating media have no receiver surface: applying raster normal/plane bias moves
 // samples across thin blockers. Hardware PCF compares the actual volume point without
 // the raster depth offset either: there is no coplanar receiver to cause surface acne.
+float volumeShadowView(int index, float3 position)
+{
+    float4 projected = mul(frame.sceneLightShadowMatrices[index], float4(position, 1));
+    if (projected.w <= 0) return 1;
+    float3 ndc = projected.xyz / projected.w;
+    float2 localUv = ndc.xy * float2(0.5, -0.5) + 0.5;
+    if (any(localUv < 0) || any(localUv > 1) || ndc.z < 0 || ndc.z > 1) return 1;
+    float4 rect = frame.shadowViewRects[index];
+    float halfTexel = frame.shadowSettings.x * 0.5;
+    float2 uv = clamp(rect.xy + localUv * rect.zw, rect.xy + halfTexel, rect.xy + rect.zw - halfTexel);
+    return shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, frame.shadowViewData[index].w), ndc.z);
+}
 float volumeShadow(SceneLight light, float3 position)
 {
     if (light.spotAngles.w <= 0 || light.shadowAtlas.y <= 0 || light.spotAngles.z < 0) return 1;
-    int face = 0;
-    if (light.positionAndType.w > 0.5 && light.positionAndType.w < 1.5)
+    int first = (int)light.spotAngles.z, count = (int)light.shadowAtlas.y, face = 0;
+    float cameraDepth = dot(position - frame.cameraPos.xyz, frame.cameraForward.xyz);
+    if (light.positionAndType.w < 0.5)
+    {
+        if (cameraDepth > frame.shadowViewData[first + count - 1].z) return 1;
+        for (int c = 0; c < count - 1; c++)
+            if (cameraDepth > frame.shadowViewData[first + c].z) face = c + 1;
+    }
+    else if (light.positionAndType.w < 1.5)
         face = getPointShadowFace(position - light.positionAndType.xyz);
-    if (face >= (int)light.shadowAtlas.y) return 1;
-    int layer = (int)light.spotAngles.z + face;
-    float4 projected = mul(frame.sceneLightShadowMatrices[layer], float4(position, 1));
-    if (projected.w <= 0) return 1;
-    float3 ndc = projected.xyz / projected.w;
-    float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5;
-    if (any(uv < 0) || any(uv > 1) || ndc.z < 0 || ndc.z > 1) return 1;
-    float visibility = shadowTexture.SampleCmpLevelZero(shadowSampler, float3(uv, layer), ndc.z);
+    if (face >= count) return 1;
+    float visibility = volumeShadowView(first + face, position);
+    if (light.positionAndType.w < 0.5)
+    {
+        float4 split = frame.shadowViewData[first + face];
+        float width = (split.z - split.y) * frame.shadowFilter.y;
+        float blend = saturate((cameraDepth - (split.z - width)) / max(width, 1e-5));
+        if (blend > 0)
+            visibility = lerp(visibility, face + 1 < count ? volumeShadowView(first + face + 1, position) : 1, blend);
+    }
     return lerp(1, visibility, light.spotAngles.w);
 }
 float3 incidentLight(float3 position, float3 rayDirection)

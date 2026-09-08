@@ -33,6 +33,14 @@ public sealed record PbrLight
     public bool CastsShadows { get; init; }
     public float ShadowStrength { get; init; } = 1f;
     public bool SoftShadows { get; init; }
+    /// <summary>Local shadow tile resolution. Zero selects it from projected light extent.</summary>
+    public uint ShadowResolution { get; init; }
+    /// <summary>Atlas admission priority; larger values retain quality before smaller ones.</summary>
+    public int ShadowPriority { get; init; }
+    /// <summary>PCSS local emitter radius in metres.</summary>
+    public float ShadowSourceRadius { get; init; } = 0.1f;
+    /// <summary>PCSS directional emitter angular diameter in degrees (the sun is about 0.53°).</summary>
+    public float ShadowAngularDiameter { get; init; } = 0.53f;
     // Godot LIGHT_PARAM_SPECULAR: scales the specular lobe only (default 0.5 — Godot's own).
     public float Specular { get; init; } = 0.5f;
     // Godot LIGHT_PARAM_SIZE: directional = angular diameter in DEGREES; point/spot = world
@@ -337,6 +345,7 @@ public sealed class PbrScene
     // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
     // and the shader darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();
+    public PbrContactShadows ContactShadows = new();
     public PbrRayTracedAo RayTracedAo = new();
     public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
@@ -345,4 +354,15 @@ public sealed class PbrScene
     public ulong TemporalHistoryVersion;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
+}
+
+/// <summary>Fine direct-light shadows from the visible depth buffer, complementing shadow maps.
+/// Off-screen or hidden blockers cannot contribute. The engine switch must also permit them.</summary>
+public sealed record PbrContactShadows
+{
+    public bool Enabled { get; init; }
+    public float Length { get; init; } = 0.5f;
+    public float Thickness { get; init; } = 0.05f;
+    public int Steps { get; init; } = 16;
+    public float Strength { get; init; } = 1f;
 }

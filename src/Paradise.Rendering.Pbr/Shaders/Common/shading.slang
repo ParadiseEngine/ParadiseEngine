@@ -120,6 +120,7 @@ float3 evaluateDirectLight(
     float3 diffuse = kD * baseColor;
     float3 radiance = light.colorAndIntensity.rgb * light.colorAndIntensity.w * attenuation;
     float shadow = sampleSceneLightShadow(light, lightIndex, worldPos, geoN, L, fragCoord);
+    shadow = min(shadow, sampleContactShadow(light, worldPos, geoN, L, fragCoord));
     return (diffuse + specular) * radiance * NdotL * shadow;
 }
 
