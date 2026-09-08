@@ -62,6 +62,9 @@ jobs:
             --manifest tools/ktx/ktx.manifest.json --rid linux-x64 \
             --out ~/.nuget/packages/_ktx/$version/linux-x64
 
+      - name: Verify standalone Slang bootstrap under CI and publish settings
+        run: python3 tools/slang/test_ci_bootstrap.py
+
       - name: Prepare CI solution
         run: |
           cp ParadiseEngine.slnx ParadiseEngine.ci.slnx

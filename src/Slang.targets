@@ -78,7 +78,9 @@
       <_SlangBootstrapProps>Configuration=Release</_SlangBootstrapProps>
       <_SlangBootstrapProps Condition="'$(SlangBootstrapOutputRoot)' != ''">Configuration=Release;BaseIntermediateOutputPath=$(SlangBootstrapOutputRoot)obj/;BaseOutputPath=$(SlangBootstrapOutputRoot)bin/</_SlangBootstrapProps>
     </PropertyGroup>
-    <!-- RemoveProperties strips inherited globals (TreatWarningsAsErrors, EnableDefaultCompileItems
+    <!-- The bootstrap is a portable build helper, outside the consumer Git source roots.
+         CI source mapping and application publishing settings must not reach it.
+         RemoveProperties strips inherited globals (TreatWarningsAsErrors, EnableDefaultCompileItems
          from `dotnet restore` which sets it false in the SDK restore plumbing) so the bootstrap
          project sees a clean property bag and its own defaults apply. Without this, the parent
          project's TreatWarningsAsErrors=true turns the bootstrap's CA2007 warnings into errors,
@@ -86,11 +88,11 @@
          glob, making csc complain that there's no Main method to find. -->
     <MSBuild Projects="$(SlangBootstrapProject)"
              Properties="$(_SlangBootstrapProps)"
-             RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier"
+             RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier;ContinuousIntegrationBuild;DeterministicSourcePaths;PublishAot;PublishTrimmed;SelfContained"
              Targets="Restore" />
     <MSBuild Projects="$(SlangBootstrapProject)"
              Properties="$(_SlangBootstrapProps)"
-             RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier"
+             RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier;ContinuousIntegrationBuild;DeterministicSourcePaths;PublishAot;PublishTrimmed;SelfContained"
              Targets="Build">
       <Output TaskParameter="TargetOutputs" ItemName="_SlangBootstrapAssemblies" />
     </MSBuild>
