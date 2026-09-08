@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>SDL and offscreen application hosting with shared TOML feature configuration.</Description>
+    <PackageTags>game;hosting;sdl;nativeaot</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Hosting/Paradise.Hosting.csproj" />
+    <ProjectReference Include="../Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
+    <ProjectReference Include="../Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+</Project>

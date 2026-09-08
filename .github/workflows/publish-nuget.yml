@@ -92,6 +92,10 @@ jobs:
             Paradise.Animation
             Paradise.Assets.Mesh
             Paradise.Diagnostics
+            Paradise.Features
+            Paradise.Features.Toml
+            Paradise.Hosting
+            Paradise.Hosting.Desktop
             Paradise.BT
             Paradise.BT.Builder
             Paradise.BT.Nodes
