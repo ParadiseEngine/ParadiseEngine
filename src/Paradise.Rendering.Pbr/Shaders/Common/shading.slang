@@ -4,6 +4,7 @@
 #define PARADISE_PBR_SHADING_SLANG
 
 #include "uniforms.slang"
+#include "decals.slang"
 #include "probes.slang"
 #include "tonemapping.slang"
 
@@ -192,6 +193,8 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
 float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
                     float metallic, float roughness, float occlusion, float3 emissive)
 {
+    float3 decalGeoNormal = normalize(input.isFrontFace ? input.worldNormal : -input.worldNormal);
+    applyDecals(input, decalGeoNormal, N, baseColor, metallic, roughness, emissive);
     roughness = applySpecularAntiAliasing(max(roughness, 0.04), N);
     float3 V = normalize(frame.cameraPos.xyz - input.worldPos);
     // The GEOMETRIC normal, for the shadow-bias geometry only (see sampleSceneLightShadow):

@@ -209,7 +209,7 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
-    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1)
     {
         ThrowIfDisposed();
         var index = _textures.Resolve(handle.Index, handle.Generation, "Texture");
@@ -217,7 +217,7 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         // pitch, and padding the source would only mask a short payload.
         WriteTextureJs(
             (int)index, (int)mipLevel, Stage(data, pad: false),
-            (int)bytesPerRow, (int)rowsPerImage, (int)width, (int)height);
+            (int)bytesPerRow, (int)rowsPerImage, (int)width, (int)height, (int)depthOrArrayLayers);
     }
 
     /// <inheritdoc/>
@@ -236,7 +236,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         var slot = _textureViews.Allocate(out var generation);
         CreateTextureViewJs(
             (int)slot, (int)texture, ViewDimensionName(desc.Dimension),
-            (int)desc.BaseArrayLayer, (int)Math.Max(1, desc.ArrayLayerCount), desc.Name ?? string.Empty);
+            (int)desc.BaseArrayLayer, (int)Math.Max(1, desc.ArrayLayerCount),
+            (int)desc.BaseMipLevel, (int)Math.Max(1, desc.MipLevelCount), desc.Name ?? string.Empty);
         return new TextureViewHandle(slot, generation);
     }
 
@@ -391,6 +392,9 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
                     break;
                 case BindingResourceType.UnfilterableFloatTexture:
                     json.Append(",\"texture\":{\"sampleType\":\"unfilterable-float\",\"viewDimension\":\"2d\"}");
+                    break;
+                case BindingResourceType.SampledTextureArray:
+                    json.Append(",\"texture\":{\"sampleType\":\"float\",\"viewDimension\":\"2d-array\"}");
                     break;
                 case BindingResourceType.DepthTexture:
                     json.Append(",\"texture\":{\"sampleType\":\"depth\",\"viewDimension\":\"2d\"}");

@@ -47,7 +47,8 @@ internal sealed record SlangTypeNode(
     [property: JsonPropertyName("elementVarLayout")] SlangVarLayout? ElementVarLayout = null,
     // RW resource access: "write" (WTexture2D), "readWrite" (RWTexture2D / RWStructuredBuffer),
     // "read", or absent for ordinary read-only resources.
-    [property: JsonPropertyName("access")] string? Access = null);
+    [property: JsonPropertyName("access")] string? Access = null,
+    [property: JsonPropertyName("array")] bool Array = false);
 
 internal sealed record SlangVarLayout(
     [property: JsonPropertyName("type")] SlangTypeNode? Type,

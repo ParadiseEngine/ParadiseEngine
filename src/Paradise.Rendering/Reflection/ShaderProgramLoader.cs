@@ -164,7 +164,7 @@ public static class ShaderProgramLoader
                     StorageFormat: ParseStorageFormat(p),
                     Access: type.Access == "readWrite" ? StorageTextureAccess.ReadWrite : StorageTextureAccess.WriteOnly),
                 "resource" when type.BaseShape == "texture2D" => new BindGroupLayoutEntryDesc(
-                    binding.Index, defaultVisibility, BindingResourceType.SampledTexture),
+                    binding.Index, defaultVisibility, type.Array ? BindingResourceType.SampledTextureArray : BindingResourceType.SampledTexture),
                 // RWStructuredBuffer<T> → WGSL var<storage, read_write>.
                 "resource" when type.BaseShape == "structuredBuffer" && isRw => new BindGroupLayoutEntryDesc(
                     binding.Index, writeVisibility, BindingResourceType.StorageBuffer),

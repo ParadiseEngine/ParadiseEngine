@@ -15,8 +15,9 @@ public interface ITextureFactory
     /// <summary>Upload one mip level. <paramref name="bytesPerRow"/> is the source row pitch in
     /// bytes (for BC formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
     /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
-    /// the mip's texel dimensions. Block-size math stays in the asset layer.</summary>
-    void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height);
+    /// the mip's texel dimensions. Array layers are consecutive images in the payload, starting at layer zero.
+    /// Block-size math stays in the asset layer.</summary>
+    void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1);
 
     /// <summary>Destroy a texture. Views created from it must be destroyed separately.</summary>
     void DestroyTexture(TextureHandle handle);

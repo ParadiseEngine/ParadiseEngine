@@ -306,8 +306,8 @@ internal sealed partial class WebGpuDevice : IDisposable
             Dimension = FormatConversions.ToWgpu(desc.Dimension),
             BaseArrayLayer = desc.BaseArrayLayer,
             ArrayLayerCount = Math.Max(1, desc.ArrayLayerCount),
-            BaseMipLevel = 0,
-            MipLevelCount = 1,
+            BaseMipLevel = desc.BaseMipLevel,
+            MipLevelCount = Math.Max(1, desc.MipLevelCount),
         };
         var view = texture.CreateView(in vd)
             ?? throw new InvalidOperationException("Explicit texture view creation returned null.");
@@ -462,10 +462,11 @@ internal sealed partial class WebGpuDevice : IDisposable
                     };
                     break;
                 case BindingResourceType.SampledTexture:
+                case BindingResourceType.SampledTextureArray:
                     entry.Texture = new WgTextureBindingLayout
                     {
                         SampleType = WgTextureSampleType.Float,
-                        ViewDimension = WgTextureViewDimension.D2,
+                        ViewDimension = e.Type == BindingResourceType.SampledTextureArray ? WgTextureViewDimension.D2Array : WgTextureViewDimension.D2,
                         Multisampled = false,
                     };
                     break;

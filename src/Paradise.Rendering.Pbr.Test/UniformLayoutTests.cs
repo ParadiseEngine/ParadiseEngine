@@ -18,7 +18,7 @@ public class UniformLayoutTests
     {
         var program = LoadProgram();
         UniformLayoutValidator.Validate(program); // throws on any divergence
-        await Assert.That(program.UniformBlocks.Length).IsEqualTo(5); // draw, frame, material, ssao, probeVolume
+        await Assert.That(program.UniformBlocks.Length).IsEqualTo(6); // draw, frame, material, ssao, probeVolume, decalFrame
     }
 
     [Test]
@@ -63,7 +63,8 @@ public class UniformLayoutTests
         var program = LoadProgram();
         await Assert.That(program.Layout.Groups.Length).IsEqualTo(4);
         await Assert.That(program.Layout.Groups[0].Entries.Length).IsEqualTo(1); // draw UBO
-        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(5); // frame UBO + shadow depth texture + comparison sampler + cluster masks + joint palettes
+        await Assert.That(program.Layout.Groups[1].Entries.Length).IsEqualTo(9); // frame UBO + shadow depth texture + comparison sampler + cluster masks + joint palettes + four decal bindings
+        await Assert.That(program.Layout.Groups[1].Entries.Single(e => e.Binding == 7).Type).IsEqualTo(BindingResourceType.SampledTextureArray);
         await Assert.That(program.Layout.Groups[2].Entries.Length).IsEqualTo(7); // material UBO + 5 tex + sampler
         await Assert.That(program.Layout.Groups[3].Entries.Length).IsEqualTo(13); // SSAO UBO, pre-pass normal, sky-specular LUT + sampler, DFG LUT, pre-pass depth, ray-traced AO, probe atlases (2), probe volume, probe states, probe sampler, screen-space reflection
     }

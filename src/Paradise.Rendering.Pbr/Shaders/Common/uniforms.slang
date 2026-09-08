@@ -11,7 +11,7 @@ struct DrawUniforms
     float4x4 mvp;          // Model-View-Projection matrix
     float4x4 model;        // Model matrix (for world-space normals/positions)
     float4x4 normalMatrix; // Inverse-transpose model matrix (for world-space normals)
-    float4 highlight;      // x: highlight weight, y: joint palette base (skinned), z: probe GI disabled for this draw, w unused
+    float4 highlight;      // x: highlight weight, y: joint palette base (skinned), z: probe GI disabled for this draw, w: decals disabled for this draw
 };
 
 struct MaterialUniforms

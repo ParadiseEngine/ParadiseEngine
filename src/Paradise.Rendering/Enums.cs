@@ -208,6 +208,7 @@ public enum BindingResourceType : byte
     DepthTextureArray,
     MultisampledTexture,
     StorageTexture,
+    SampledTextureArray,
 }
 
 /// <summary>Access mode of a <see cref="BindingResourceType.StorageTexture"/> binding. WriteOnly

@@ -163,12 +163,12 @@ export function createTexture(slot, descJson) {
     put(G.textures, slot, { texture, view: texture.createView() });
 }
 
-export function writeTexture(index, mipLevel, data, bytesPerRow, rowsPerImage, width, height) {
+export function writeTexture(index, mipLevel, data, bytesPerRow, rowsPerImage, width, height, depthOrArrayLayers) {
     G.device.queue.writeTexture(
         { texture: G.textures[index].texture, mipLevel },
         toBytes(data),
         { bytesPerRow, rowsPerImage },
-        { width, height, depthOrArrayLayers: 1 });
+        { width, height, depthOrArrayLayers });
 }
 
 export function destroyTexture(index) {
@@ -177,14 +177,14 @@ export function destroyTexture(index) {
     G.textures[index] = null;
 }
 
-export function createTextureView(slot, textureIndex, dimension, baseArrayLayer, arrayLayerCount, label) {
+export function createTextureView(slot, textureIndex, dimension, baseArrayLayer, arrayLayerCount, baseMipLevel, mipLevelCount, label) {
     const view = G.textures[textureIndex].texture.createView({
         label,
         dimension,
         baseArrayLayer,
         arrayLayerCount,
-        baseMipLevel: 0,
-        mipLevelCount: 1,
+        baseMipLevel,
+        mipLevelCount,
     });
     put(G.textureViews, slot, view);
 }

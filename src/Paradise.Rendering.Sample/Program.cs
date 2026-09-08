@@ -96,6 +96,7 @@ internal static class Program
             GiDemoScene.ProbeGi = Array.IndexOf(args, "--no-gi") < 0;
             GiDemoScene.RayTracedAo = PbrViewerScene.RayTracedAo;
             GiDemoScene.Reflections = PbrViewerScene.Reflections;
+            GiDemoScene.Decals = Array.IndexOf(args, "--decals") >= 0;
             GiDemoScene.Fog = Array.IndexOf(args, "--fog") >= 0;
             GiDemoScene.AnimateLights = Array.IndexOf(args, "--static-lights") < 0;
             GiDemoScene.PanelOnly = Array.IndexOf(args, "--panel-only") >= 0;

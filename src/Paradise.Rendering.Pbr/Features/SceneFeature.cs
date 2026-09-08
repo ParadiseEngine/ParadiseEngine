@@ -18,6 +18,7 @@ public sealed partial class SceneFeature : IRenderFeature
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
     private readonly LightCullingFeature _lightCulling;
+    private readonly DecalFeature _decals;
     private readonly InstancingFeature _instancing;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
@@ -27,7 +28,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
         LightCullingFeature lightCulling, FrustumCullingFeature frustum, OcclusionCullingFeature occlusion,
-        InstancingFeature instancing, float specularAaVariance, float specularAaClamp)
+        InstancingFeature instancing, DecalFeature decals, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
         _frustum = frustum;
@@ -37,6 +38,7 @@ public sealed partial class SceneFeature : IRenderFeature
         _gi = gi;
         _lightCulling = lightCulling;
         _instancing = instancing;
+        _decals = decals;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
@@ -149,6 +151,10 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Sampler(2, _shadows.Sampler),
             GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
             GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
+            GraphBinding.Buffer(5, _decals.UniformBuffer, 0, 16),
+            GraphBinding.Buffer(6, _decals.DecalBuffer, 0, DecalFeature.DecalBufferBytes),
+            GraphBinding.View(7, _decals.TextureView),
+            GraphBinding.Sampler(8, _decals.Sampler),
         ]);
         pass.BindGroup(3, "PbrLightingGroup", _lightingGroupLayout,
         [
@@ -236,7 +242,7 @@ public sealed partial class SceneFeature : IRenderFeature
                     Model = item.Model,
                     NormalMatrix = PbrMath.NormalMatrix(item.Model),
                     Highlight = new Vector4(item.Highlight, skinned ? item.JointOffset : 0f,
-                        item.GiMode == PbrGiMode.Disabled ? 1f : 0f, 0f),
+                        item.GiMode == PbrGiMode.Disabled ? 1f : 0f, item.ReceivesDecals ? 0f : 1f),
                 };
                 MemoryMarshal.Write(ctx.DrawStaging.AsSpan(ctx.DrawIndex * (int)ctx.DrawStride), in uniforms);
                 ctx.DrawIndex++;

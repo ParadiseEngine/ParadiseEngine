@@ -57,6 +57,10 @@ public static class PbrFeatures
         "rendering.lightCulling", true,
         "Forward+ froxel light culling. Off, every light shades every pixel.");
 
+    /// <summary>Projected material decals applied before lighting.</summary>
+    public static FeatureDefinition Decals { get; } = new(
+        "rendering.decals", true, "Project ordered decal materials onto scene surfaces.");
+
     /// <summary>Automatic GPU instancing of compatible geometry.</summary>
     public static FeatureDefinition Instancing { get; } = new(
         "rendering.instancing", true,
@@ -143,7 +147,7 @@ public static class PbrFeatures
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
         FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Instancing, Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
+        Decals, Instancing, Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
 
@@ -178,6 +182,7 @@ public static class PbrFeatureOrder
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
     public const int LightCulling = 550;
+    public const int Decals = 560;
     public const int Instancing = 575;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;

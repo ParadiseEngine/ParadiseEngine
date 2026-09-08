@@ -31,6 +31,7 @@ internal sealed class GiDemoScene : IDisposable
     public static bool ProbeGi { get; set; } = true;
     public static bool RayTracedAo { get; set; }
     public static bool Reflections { get; set; }
+    public static bool Decals { get; set; }
     public static bool Fog { get; set; }
     public static bool AnimateLights { get; set; } = true;
 
@@ -48,6 +49,38 @@ internal sealed class GiDemoScene : IDisposable
     /// rebuilt at the same size whatever the light count, so only a scene with many lights
     /// separates the per-frame grid cost from the per-light one.</summary>
     public static int ExtraLights { get; set; }
+
+    private void AddDecals()
+    {
+        const int size = 64;
+        var pixels = new byte[size * size * 4];
+        for (var y = 0; y < size; y++)
+        for (var x = 0; x < size; x++)
+        {
+            var u = (x + 0.5f) / size - 0.5f;
+            var v = (y + 0.5f) / size - 0.5f;
+            var radius = MathF.Sqrt(u * u + v * v);
+            var arrow = (MathF.Abs(u) < 0.07f && v > -0.12f && v < 0.3f)
+                || (v < -0.05f && v > -0.3f && MathF.Abs(u) < (v + 0.3f));
+            var index = (y * size + x) * 4;
+            pixels[index] = pixels[index + 1] = pixels[index + 2] = 255;
+            pixels[index + 3] = (byte)(arrow || (radius > 0.39f && radius < 0.46f) ? 255 : 0);
+        }
+        var stencil = new PbrDecalTexture(size, size, pixels);
+        _scene.Decals.Volumes.Add(new PbrDecal
+        {
+            Material = new() { ColorTexture = stencil, Color = new Vector4(1, 0.55f, 0.04f, 1),
+                Roughness = 0.45f, MaterialWeight = 1 },
+            Model = Matrix4x4.CreateScale(2.2f, 2.2f, 0.3f) * Matrix4x4.CreateRotationX(-MathF.PI / 2)
+                * Matrix4x4.CreateTranslation(-0.5f, 0.02f, 1.2f),
+        });
+        _scene.Decals.Volumes.Add(new PbrDecal
+        {
+            Material = new() { ColorTexture = stencil, Color = new Vector4(0.1f, 0.8f, 1, 1),
+                Emission = new Vector3(0.05f, 0.4f, 0.8f), EmissionWeight = 1 },
+            Model = Matrix4x4.CreateScale(1.4f, 1.4f, 0.3f) * Matrix4x4.CreateTranslation(1.4f, 2.5f, -2.98f),
+        });
+    }
 
     public GiDemoScene(WebGpuRenderer renderer, uint width, uint height, string? modelPath, ILogger? logger = null)
     {
@@ -81,6 +114,8 @@ internal sealed class GiDemoScene : IDisposable
         // The classic pair: a tall box at the back left, a short box at the front right.
         Add(whiteBox, Matrix4x4.CreateScale(1.2f, 2.4f, 1.2f) * Matrix4x4.CreateRotationY(0.3f) * Matrix4x4.CreateTranslation(-1.1f, 1.2f, -1.2f));
         Add(whiteBox, Matrix4x4.CreateScale(1.2f, 1.2f, 1.2f) * Matrix4x4.CreateRotationY(-0.3f) * Matrix4x4.CreateTranslation(1.2f, 0.6f, 0.6f));
+
+        if (Decals) AddDecals();
 
         if (modelPath is not null) PlaceModel(modelPath, new Vector3(1.2f, 1.2f, 0.6f), 1.2f);
 
