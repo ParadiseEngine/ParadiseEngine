@@ -57,9 +57,12 @@ public static class PbrFeatures
         "rendering.lightCulling", true,
         "Forward+ froxel light culling. Off, every light shades every pixel.");
 
-    /// <summary>The scene itself: sky, opaque and blended geometry into the HDR target. Off,
-    /// there is no picture — which is what makes it a useful thing to switch while looking for
-    /// the cost of everything else.</summary>
+    /// <summary>Automatic GPU instancing of compatible geometry.</summary>
+    public static FeatureDefinition Instancing { get; } = new(
+        "rendering.instancing", true,
+        "Instance compatible consecutive draws. Off, every object issues its own draw.");
+
+    /// <summary>Sky, opaque and blended geometry into the HDR target.</summary>
     public static FeatureDefinition Scene { get; } = new(
         "rendering.scene", true,
         "The main HDR pass: sky, opaque and blended geometry. Off, nothing is drawn.");
@@ -140,7 +143,7 @@ public static class PbrFeatures
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
         FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
+        Instancing, Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
 
@@ -175,6 +178,7 @@ public static class PbrFeatureOrder
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
     public const int LightCulling = 550;
+    public const int Instancing = 575;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
     public const int Fog = 710;

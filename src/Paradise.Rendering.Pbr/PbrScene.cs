@@ -294,10 +294,16 @@ public sealed class PbrInstance
     public PbrGiMode GiMode = PbrGiMode.Static;
 }
 
-/// <summary>Everything <see cref="PbrRenderer.RenderFrame"/> consumes for one frame. Plain CPU
-/// state — mutate freely between frames.</summary>
+/// <summary>Automatic instancing of consecutive compatible draws in submission order.</summary>
+public sealed record PbrInstancing
+{
+    public bool Enabled { get; init; } = true;
+}
+
+/// <summary>The mutable CPU state consumed by one frame.</summary>
 public sealed class PbrScene
 {
+    public PbrInstancing Instancing = new();
     public PbrFog Fog = new();
     public List<PbrFogVolume> FogVolumes { get; } = [];
     public PbrCamera Camera;

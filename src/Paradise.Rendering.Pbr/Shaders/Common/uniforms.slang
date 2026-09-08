@@ -189,6 +189,7 @@ struct VertexOutput
     float3 worldNormal : NORMAL;
     float2 texcoord    : TEXCOORD0;
     float4 worldTangent : TANGENT;
+    float4 instanceHighlight : INSTANCEHIGHLIGHT;
     float3 objectPos   : OBJECTPOS; // object-space position (procedural materials ride the mesh)
 };
 
@@ -199,6 +200,7 @@ struct FragmentInput
     float3 worldNormal : NORMAL;
     float2 texcoord    : TEXCOORD0;
     float4 worldTangent : TANGENT;
+    float4 instanceHighlight : INSTANCEHIGHLIGHT;
     float3 objectPos   : OBJECTPOS;
     // Godot flips the geometric normal on back-facing fragments (double-sided materials render
     // their inside with the outward normal negated); without this the inside of a mesh reads the

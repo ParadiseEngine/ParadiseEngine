@@ -20,16 +20,22 @@
 /// The rigid vertex transform from explicit object-space components. Extensions displace the
 /// position (and adjust the normal/tangent if they can) before calling; the skinned entry point
 /// feeds its blended components through the same path.
-VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent)
+VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent, DrawUniforms instance)
 {
     VertexOutput output;
-    output.position = mul(draw.mvp, float4(localPosition, 1.0));
-    output.worldPos = mul(draw.model, float4(localPosition, 1.0)).xyz;
+    output.position = mul(instance.mvp, float4(localPosition, 1.0));
+    output.worldPos = mul(instance.model, float4(localPosition, 1.0)).xyz;
     output.objectPos = localPosition;
-    output.worldNormal = mul((float3x3)draw.normalMatrix, localNormal);
+    output.worldNormal = mul((float3x3)instance.normalMatrix, localNormal);
     output.texcoord = texcoord;
-    output.worldTangent = float4(mul((float3x3)draw.normalMatrix, localTangent.xyz), localTangent.w);
+    output.worldTangent = float4(mul((float3x3)instance.normalMatrix, localTangent.xyz), localTangent.w);
+    output.instanceHighlight = instance.highlight;
     return output;
+}
+
+VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2 texcoord, float4 localTangent)
+{
+    return pbrTransformVertex(localPosition, localNormal, texcoord, localTangent, draw);
 }
 
 /// The displacement seam: the standard vertex stream plus an object-space offset. float3(0,0,0)

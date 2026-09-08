@@ -256,7 +256,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     float3 hemisphereColor;
     float3 probeIrradiance;
     bool probeLit = false;
-    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+    if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, N, V, probeIrradiance))
     {
         hemisphereColor = probeIrradiance;
@@ -323,7 +323,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
         ssrColor = ssrSample.rgb;
     }
     float3 reflected;
-    if (probeVolume.origin.w > 0.5 && draw.highlight.z < 0.5
+    if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
         && sampleProbeIrradiance(input.worldPos, R, V, reflected))
     {
         ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
@@ -371,7 +371,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     color += emissive;
 
     // Highlight flash (selection/hit feedback): additive push toward white.
-    color += draw.highlight.x * 0.35;
+    color += input.instanceHighlight.x * 0.35;
 
     // Return LINEAR HDR — tonemapping moved to the composite pass (composite.slang), which
     // tonemaps the whole HDR scene target once (enabling bloom + a single consistent curve).
