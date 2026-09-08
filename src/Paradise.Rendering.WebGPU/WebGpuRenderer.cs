@@ -60,6 +60,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private WgBuffer? _timingReadback;
     private int _timedPasses;
 #endif
+    private readonly List<int> _hostTimingSlots = [];
     /// <summary>Provides an advisory disposed check visible across threads.</summary>
     /// <remarks>It cannot make check-then-act atomic. CaptureQueue serializes request acceptance;
     /// _disposeGate ensures teardown runs once.</remarks>
@@ -156,7 +157,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <summary>Submit a stream that renders only into explicit offscreen targets. No backbuffer
-    /// acquire, no <see cref="OverlayPass"/>, no present — and critically no frame advance: the
+    /// acquire or present, and no frame advance: the
     /// deferred-destruction window is measured in PRESENTED frames, and advancing it per
     /// offscreen submit would shrink the in-flight safety margin.</summary>
     public void SubmitOffscreen(in RenderCommandStream stream)
@@ -293,7 +294,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     /// <summary>GPU duration in milliseconds of each pass of the last presenting submit, in the
     /// order the passes were begun (render and compute alike). Blocks until that submit has
-    /// finished. Empty when timing is off, unsupported, or not compiled in.</summary>
+    /// finished. Native host passes report zero. Empty when timing is off, unsupported, or not compiled in.</summary>
     public double[] ReadPassTimings()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -311,6 +312,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             {
                 for (var i = 0; i < count; i++)
                 {
+                    if (_hostTimingSlots.Contains(i)) continue;
                     var begin = BitConverter.ToUInt64(mapped.Slice(i * 16, 8));
                     var end = BitConverter.ToUInt64(mapped.Slice(i * 16 + 8, 8));
                     result[i] = end >= begin ? (end - begin) / 1_000_000.0 : 0.0;
@@ -691,16 +693,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     // -------- Command stream submission --------
 
-    /// <summary>Optional overlay pass recorded into the frame encoder AFTER the scene passes and
-    /// before submit/present — the seam UI composition (e.g. the Noesis device) hooks into. The
-    /// callback receives the frame's command encoder and the backbuffer view; passes it records
-    /// should load (not clear) the color target so they composite over the scene. Invoked on the
-    /// render thread only. Single-subscriber: assigning replaces any previous handler rather than
-    /// composing with it.</summary>
-    public Action<WebGpuSharp.CommandEncoder, WgTextureView>? OverlayPass { get; set; }
-
     /// <summary>The raw WebGPUSharp device, for subsystems that record their own passes through
-    /// <see cref="OverlayPass"/> (they need it to create pipelines/buffers/textures). Treat as
+    /// <see cref="WebGpuHostPass"/> (they need it to create pipelines/buffers/textures). Treat as
     /// read-only infrastructure — resource lifetime stays with the creating subsystem.</summary>
     public WebGpuSharp.Device NativeDevice
     {
@@ -712,7 +706,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <summary><see cref="ColorFormat"/> in WebGPUSharp's vocabulary — the other half of what an
-    /// <see cref="OverlayPass"/> subsystem needs, since its pipeline's color target must match the
+    /// <see cref="WebGpuHostPass"/> subsystem needs, since its pipeline's color target must match the
     /// backbuffer or the backend rejects it at draw time. Without this a host has to maintain its
     /// own copy of the engine-to-WebGPU format table to wire up a subsystem it does not otherwise
     /// have to understand.</summary>
@@ -737,7 +731,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         var encoder = _device.Device.CreateCommandEncoder();
         var timedPasses = ExecuteStream(in stream, encoder, view, timed: true);
         ResolveTimings(encoder, timedPasses);
-        OverlayPass?.Invoke(encoder, view);
         // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
         // without its UI — and before Finish, so the copy rides the frame's own command buffer.
         var pending = RecordPendingCaptures(encoder);
@@ -976,6 +969,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     {
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
+        if (timed) _hostTimingSlots.Clear();
         var passOrdinal = 0;
         var timedPasses = 0;
 
@@ -991,6 +985,25 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 ref readonly var cmd = ref commands[i];
                 switch (cmd.Kind)
                 {
+                    case RenderCommandKind.HostPass:
+                    {
+                        if (activePass is not null || activeComputePass is not null)
+                            throw new InvalidOperationException("Host callback issued inside an open pass.");
+                        var index = cmd.HostPass.CallbackIndex;
+                        if ((uint)index >= (uint)stream.HostPasses.Length)
+                            throw new InvalidOperationException("Host callback index is outside the stream's callback table.");
+                        var host = stream.HostPasses.Span[index];
+                        if (host.Callback is not WebGpuHostPass callback)
+                            throw new NotSupportedException("Host callback does not support WebGPU.");
+                        var target = host.Target.IsValid ? _device.ResolveTextureView(host.Target)
+                            : backbuffer ?? throw new InvalidOperationException("SubmitOffscreen host callbacks require an explicit target.");
+                        // Native callbacks own their passes; preserve their ordinal but report no timing.
+                        if (timed) _hostTimingSlots.Add(passOrdinal);
+                        if (timed && TimestampsFor(passOrdinal) is not null) timedPasses = passOrdinal + 1;
+                        passOrdinal++;
+                        callback.Record(encoder, target);
+                        break;
+                    }
                     case RenderCommandKind.BeginPass:
                     {
                         if (activePass is not null)

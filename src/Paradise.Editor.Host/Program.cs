@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Paradise.Diagnostics;
 using Paradise.Editor.ImGui;
 using Paradise.Rendering;
+using Paradise.Rendering.Graph;
 using Paradise.Rendering.WebGPU;
 using Paradise.Ui.ImGui;
 using Paradise.Windowing;
@@ -73,6 +74,12 @@ internal static class Program
 
         var pending = new List<ImGuiTextureOp>();
         var scene = new ClearFrame(Background);
+        ImGuiDrawSnapshot? snapshot = null;
+        scene.Graph.AddHostPass("ImGui", RenderPassEvent.Overlay, new WebGpuHostPass((encoder, view) =>
+        {
+            overlay.ApplyTextureOps(pending);
+            if (snapshot is not null) overlay.Render(encoder, view, window.Width, window.Height, snapshot);
+        }), FrameGraph.Backbuffer);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         while (!window.CloseRequested)
         {
@@ -92,12 +99,7 @@ internal static class Program
             }
             core.Input.Tick(clock.Elapsed.TotalSeconds);
 
-            var snapshot = core.AcquireSnapshotForRender(pending, out _);
-            renderer.OverlayPass = (encoder, view) =>
-            {
-                overlay.ApplyTextureOps(pending);
-                if (snapshot is not null) overlay.Render(encoder, view, window.Width, window.Height, snapshot);
-            };
+            snapshot = core.AcquireSnapshotForRender(pending, out _);
             renderer.Submit(scene.Record());
         }
 
@@ -122,6 +124,12 @@ internal static class Program
 
         var pending = new List<ImGuiTextureOp>();
         var scene = new ClearFrame(Background);
+        ImGuiDrawSnapshot? snapshot = null;
+        scene.Graph.AddHostPass("ImGui", RenderPassEvent.Overlay, new WebGpuHostPass((encoder, view) =>
+        {
+            overlay.ApplyTextureOps(pending);
+            if (snapshot is not null) overlay.Render(encoder, view, Width, Height, snapshot);
+        }), FrameGraph.Backbuffer);
         var commands = 0;
         Task<ColorReadback>? capture = null;
         for (var frame = 0; frame < frames; frame++)
@@ -131,13 +139,8 @@ internal static class Program
             if (frame == frames - 1) capture = renderer.CaptureFrameAsync();
 
             core.Input.Tick(frame / 60.0);
-            var snapshot = core.AcquireSnapshotForRender(pending, out _);
+            snapshot = core.AcquireSnapshotForRender(pending, out _);
             commands = snapshot?.CommandCount ?? 0;
-            renderer.OverlayPass = (encoder, view) =>
-            {
-                overlay.ApplyTextureOps(pending);
-                if (snapshot is not null) overlay.Render(encoder, view, Width, Height, snapshot);
-            };
             renderer.Submit(scene.Record());
         }
 

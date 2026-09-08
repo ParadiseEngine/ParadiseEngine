@@ -77,8 +77,14 @@ public sealed partial class FrameGraph
     private readonly List<GraphBinding> _bindings = [];
     private readonly Stack<int> _liveStack = new();
     private readonly ILogger _log;
-    private RenderPassDesc[] _descs = [];
     private int[] _order = [];
+    private readonly ConditionalWeakTable<ArrayBufferWriter<RenderCommand>, CompiledTables> _compiledTables = new();
+
+    private sealed class CompiledTables
+    {
+        public RenderPassDesc[] Descriptions { get; set; } = [];
+        public HostPassInvocation[] HostPasses { get; set; } = [];
+    }
 
     /// <param name="textures">The targets this graph owns. Null for a graph that only routes
     /// imported resources.</param>
@@ -109,7 +115,7 @@ public sealed partial class FrameGraph
     public int CulledPassCount { get; private set; }
 
     /// <summary>The passes the last <see cref="Compile"/> recorded, in the order they were begun
-    /// — render and compute alike. The k-th name is the k-th pass a backend's per-pass timing
+    /// — raster, compute and host callbacks alike. The k-th name is the k-th pass a backend's per-pass timing
     /// reports, which is how a profiler puts a name to a number.</summary>
     public IReadOnlyList<string> LivePassNames => _livePassNames;
 
@@ -187,6 +193,25 @@ public sealed partial class FrameGraph
     public PassBuilder AddComputePass(string name, RenderPassEvent when, int offset = 0) =>
         AddPass(name, when, offset, PassKind.Compute);
 
+    /// <summary>Declare a native host callback that loads and stores one color target.</summary>
+    /// <remarks>The callback runs at submission, outside any stream render or compute pass.
+    /// Declare additional native resource dependencies with Reads and Writes. Browsers skip it.</remarks>
+    public PassBuilder AddHostPass(string name, RenderPassEvent when, HostRenderPass callback,
+        GraphTexture target, int offset = 0)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        if (!target.IsValid || target.Index >= _resources.Count)
+            throw new ArgumentException("Host target is not a graph resource.", nameof(target));
+        if (_resources[target.Index].Kind is ResourceKind.ImportedDepth or ResourceKind.ImportedBuffer)
+            throw new ArgumentException("Host target must be a color texture.", nameof(target));
+        var builder = AddPass(name, when, offset, PassKind.Host);
+        ref var pass = ref PassAt(_passes.Count - 1);
+        pass.HostCallback = callback;
+        pass.ColorCount = 1;
+        pass.Colors[0] = new Attachment { Target = target, Load = LoadOp.Load, Store = StoreOp.Store };
+        return builder;
+    }
+
     private PassBuilder AddPass(string name, RenderPassEvent when, int offset, PassKind kind)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -210,9 +235,19 @@ public sealed partial class FrameGraph
     {
         ArgumentNullException.ThrowIfNull(writer);
 
+        var tables = _compiledTables.GetValue(writer, static _ => new CompiledTables());
+        // Only a reset writer releases its previous stream's tables. Another writer gets its
+        // own storage, and appending without a reset leaves the earlier arrays untouched.
+        if (writer.WrittenCount != 0)
+        {
+            tables.Descriptions = [];
+            tables.HostPasses = [];
+        }
+        Array.Clear(tables.HostPasses);
         var declared = _passes.Count;
+        if (tables.HostPasses.Length < declared) tables.HostPasses = new HostPassInvocation[Math.Max(declared, 16)];
         if (_order.Length < declared) _order = new int[Math.Max(declared, 16)];
-        if (_descs.Length < declared) _descs = new RenderPassDesc[Math.Max(declared, 16)];
+        if (tables.Descriptions.Length < declared) tables.Descriptions = new RenderPassDesc[Math.Max(declared, 16)];
 
         var passes = CollectionsMarshal.AsSpan(_passes);
         Validate(passes, declared);
@@ -249,7 +284,7 @@ public sealed partial class FrameGraph
         {
             ref var pass = ref passes[_order[slot]];
             if (pass.Kind != PassKind.Raster) continue;
-            ref var desc = ref _descs[rasterCount++];
+            ref var desc = ref tables.Descriptions[rasterCount++];
             desc = new RenderPassDesc(pass.ColorCount, ResolveDepth(passes, slot, count));
             for (var c = 0; c < pass.ColorCount; c++)
                 desc[c] = ResolveColor(passes, slot, count, c);
@@ -262,13 +297,20 @@ public sealed partial class FrameGraph
 
         var encoder = new RenderCommandEncoder(writer);
         var rasterSlot = 0;
+        var hostSlot = 0;
         _livePassNames.Clear();
         for (var slot = 0; slot < count; slot++)
         {
             ref var pass = ref passes[_order[slot]];
             _livePassNames.Add(pass.Name);
             var recording = new PassRecording(encoder, pass.Groups, pass.Name);
-            if (pass.Kind == PassKind.Compute)
+            if (pass.Kind == PassKind.Host)
+            {
+                var target = ResolveColor(passes, slot, count, 0).ColorView;
+                tables.HostPasses[hostSlot] = new HostPassInvocation(pass.HostCallback!, target);
+                encoder.HostPass(hostSlot++);
+            }
+            else if (pass.Kind == PassKind.Compute)
             {
                 encoder.BeginComputePass();
                 pass.Invoke!(pass.Recorder!, pass.Context!, ref recording, pass.Argument);
@@ -282,7 +324,10 @@ public sealed partial class FrameGraph
             }
         }
 
-        return new RenderCommandStream(writer.WrittenMemory, _descs.AsMemory(0, rasterCount));
+        return new RenderCommandStream(writer.WrittenMemory, tables.Descriptions.AsMemory(0, rasterCount))
+        {
+            HostPasses = tables.HostPasses.AsMemory(0, hostSlot),
+        };
     }
 
     private void ResolveBindGroups(ref Pass pass)
@@ -331,7 +376,7 @@ public sealed partial class FrameGraph
             if (pass.Kind == PassKind.Raster && pass.ColorCount == 0 && !pass.HasDepth)
                 throw new InvalidOperationException(
                     $"Raster pass '{pass.Name}' declares no attachments; it would render nowhere.");
-            if (pass.Recorder is null)
+            if (pass.Kind != PassKind.Host && pass.Recorder is null)
                 throw new InvalidOperationException(
                     $"Pass '{pass.Name}' was declared but never given a recorder.");
         }
@@ -559,7 +604,7 @@ public sealed partial class FrameGraph
 
     private enum ResourceKind : byte { Backbuffer, ImportedColor, ImportedDepth, Owned, ImportedBuffer }
 
-    private enum PassKind : byte { Raster, Compute }
+    private enum PassKind : byte { Raster, Compute, Host }
 
     private readonly record struct Resource(
         ResourceKind Kind, GraphResourceScope Scope, TextureViewHandle View, TextureHandle Texture, string? Name, BufferHandle Buffer);
@@ -627,6 +672,7 @@ public sealed partial class FrameGraph
         public int SortKey;
         public object? Context;
         public Delegate? Recorder;
+        public HostRenderPass? HostCallback;
         public PassInvoker? Invoke;
         public int Argument;
         public int ColorCount;
@@ -703,6 +749,8 @@ public sealed partial class FrameGraph
         /// recorder binds it by index with <see cref="PassRecording.SetBindGroup"/>.</summary>
         public PassBuilder BindGroup(uint groupIndex, string name, BindGroupLayoutDesc layout, ReadOnlySpan<GraphBinding> bindings)
         {
+            if (_graph.PassAt(_index).Kind == PassKind.Host)
+                throw new InvalidOperationException("Host callbacks own their native bind groups.");
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(groupIndex, (uint)MaxBindGroups);
             ArgumentNullException.ThrowIfNull(name);
             ArgumentNullException.ThrowIfNull(layout);
@@ -833,6 +881,8 @@ public sealed partial class FrameGraph
         private PassBuilder Record(object context, Delegate recorder, PassInvoker invoke, int argument)
         {
             ref var pass = ref _graph.PassAt(_index);
+            if (pass.Kind == PassKind.Host)
+                throw new InvalidOperationException("Host passes already have a submission callback.");
             pass.Context = context;
             pass.Recorder = recorder;
             pass.Invoke = invoke;

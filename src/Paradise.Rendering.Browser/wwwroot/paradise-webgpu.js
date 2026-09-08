@@ -433,6 +433,8 @@ export function submitFrame(frame, passCount, opCount) {
             case 13: // DrawIndexedIndirect
                 pass.drawIndexedIndirect(G.buffers[dv.getUint32(o + 4, true)], dv.getFloat64(o + 32, true));
                 break;
+            case 14: // HostPass: native callbacks have no browser implementation.
+                break;
             default:
                 throw new Error(`Unknown render command opcode ${dv.getUint8(o)}.`);
         }

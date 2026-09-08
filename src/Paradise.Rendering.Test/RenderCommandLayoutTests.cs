@@ -34,6 +34,7 @@ public class RenderCommandLayoutTests
             [RenderCommandKind.SetComputePipeline] = 11,
             [RenderCommandKind.Dispatch] = 12,
             [RenderCommandKind.DrawIndexedIndirect] = 13,
+            [RenderCommandKind.HostPass] = 14,
         };
         foreach (var (kind, opcode) in expected)
         {
