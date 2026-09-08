@@ -9,13 +9,6 @@
     <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
     <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
   </Folder>
-  <Folder Name="/samples/">
-    <Project Path="src/Paradise.BT.Sample/Paradise.BT.Sample.csproj" />
-    <Project Path="src/Paradise.ECS.Sample/Paradise.ECS.Sample.csproj" />
-    <Project Path="src/Paradise.Rendering.Sample/Paradise.Rendering.Sample.csproj" />
-    <Project Path="src/Paradise.Rendering.Browser.Sample/Paradise.Rendering.Browser.Sample.csproj" />
-    <Project Path="src/Paradise.Ui.ImGui.Sample/Paradise.Ui.ImGui.Sample.csproj" />
-  </Folder>
   <Folder Name="/sources/">
     <Project Path="src/Paradise.BLOB/Paradise.BLOB.csproj" />
     <Project Path="src/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />

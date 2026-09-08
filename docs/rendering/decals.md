@@ -1,5 +1,7 @@
 # Projected material decals
 
+> Sample commands in this document run from [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples), which now owns the sample applications.
+
 Decals paint surface color, normals, metallic/roughness and emission before forward PBR
 lighting. They work with stock rigid/skinned materials, instancing, and custom shaders using
 `shadePbrCore` or `shadeSurface`. They leave the receiver's alpha and geometry unchanged.

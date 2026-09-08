@@ -1,5 +1,7 @@
 # Antialiasing
 
+> Sample commands in this document run from [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples), which now owns the sample applications.
+
 FXAA and TAA are independently optional scene effects:
 
 ```csharp

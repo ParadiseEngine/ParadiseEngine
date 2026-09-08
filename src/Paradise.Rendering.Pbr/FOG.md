@@ -1,5 +1,7 @@
 # Fog and volumetric lighting
 
+> Sample commands in this document run from [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples), which now owns the sample applications.
+
 Enable fog per scene; the process-wide `rendering.fog` switch can disable it independently:
 
 ```csharp

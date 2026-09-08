@@ -1,5 +1,7 @@
 # Renderer showcase profiling fixes
 
+> Sample commands in this document run from [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples), which now owns the sample applications.
+
 Follow-up to [issue #287](https://github.com/ParadiseEngine/ParadiseEngine/issues/287),
 measured on 2026-09-08 against showcase commit `9c29bc7c886ef5f436010bdbf5632e37fd55d2e2`.
 

@@ -97,7 +97,8 @@ referencing those packages activates the codegen automatically.
 
 ## Monorepo layout
 
-- `src/` — all library, test (`*.Test`), sample (`*.Sample`), generator, and benchmark projects.
+- `src/` — library, test (`*.Test`), generator, and benchmark projects.
+- [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples) — native and browser sample applications, their NativeAOT smoke test, and website deployment. [Run the browser demos](https://paradiseengine.dev/samples/).
 - `src/Directory.Build.props` / `src/Directory.Packages.props` — shared build settings, shared
   NuGet package metadata, and centrally managed package versions.
 - `src/Slang.targets` — Slang → WGSL shader toolchain (downloads a pinned `slangc` per

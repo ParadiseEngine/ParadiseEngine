@@ -10,14 +10,15 @@ dotnet build ParadiseEngine.slnx
 dotnet test --solution ParadiseEngine.slnx --output normal
 dotnet build src/Paradise.BT/Paradise.BT.csproj
 dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
-dotnet run --project src/Paradise.BT.Sample/Paradise.BT.Sample.csproj
 ```
 
 Use .NET SDK 10.0.400+ (`global.json`, `rollForward: latestMinor`). Older compilers cannot load
 the Roslyn 5.9 analyzers (CS9057). Shared properties and package versions live in
 `src/Directory.Build.props` and `src/Directory.Packages.props`.
 
-`Paradise.BT.Sample` enables `PublishAot` to check tree construction and ticking. Tests allow
+Sample applications and their build/deployment CI live in
+[ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples). Run sample commands below
+from that repository. Its `Paradise.BT.Sample` enables `PublishAot` to check tree construction and ticking. Tests allow
 `Reflection.Emit` for the analyzer harness. BT serialization and BLOB's
 `ManagedBlobAssetReference` still need dedicated AOT publish-and-run coverage.
 
@@ -49,7 +50,7 @@ coordinate-agnostic; conversions belong where transforms, projections or navmesh
 ## Behavior trees and blobs
 
 `Paradise.BLOB` provides unmanaged blob builders with no external dependencies. `Paradise.BT`
-builds the runtime on it; `Paradise.BT.Sample` demonstrates usage and `*.Test` holds TUnit tests.
+builds the runtime on it; `Paradise.BT.Sample` in ParadiseSamples demonstrates usage and `*.Test` holds TUnit tests.
 
 1. `[Builder]` generates builders; `LeafNode<T>`, `DecoratorNode<T>` and `CompositeNode<T>` also
    compose a `BTreeNode` graph directly.
