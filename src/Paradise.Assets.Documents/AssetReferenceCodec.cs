@@ -2,11 +2,8 @@ using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// The wire form of an <see cref="AssetReference"/>: <c>{ guid = "…", path = "…" }</c> in that
-/// order, the Python mirror producing the same bytes. An absent reference is <c>{}</c>, not an
-/// omitted element, because references sit in arrays where position is meaning.
-/// </summary>
+/// <summary>Encodes <see cref="AssetReference"/> as <c>{ guid = "…", path = "…" }</c>, in that order.</summary>
+/// <remarks>Matches the Python writer byte-for-byte; absent references use <c>{}</c> to preserve array positions.</remarks>
 public static class AssetReferenceCodec
 {
     public const string GuidKey = "guid";

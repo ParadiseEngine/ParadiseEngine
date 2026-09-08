@@ -98,12 +98,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task destroy_shader_then_recreate_with_same_content_returns_distinct_handle()
     {
-        // (2) Use-after-free guard — DestroyShader synchronously bumps the slot's generation so
-        // the old handle stops resolving immediately. A re-create with the same content re-uses
-        // the cached native module below the handle layer but mints a fresh slot entry, so h2
-        // always differs from h1 and h1 can never silently start resolving again. Iteration 5
-        // restructured the cache from "interned-handle" to "native-below-handle"; the contract
-        // surfaced by this test is unchanged.
+        // Destroy invalidates the public slot immediately; recreating identical shader content must
+        // produce a new handle while reusing the native module.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -210,19 +206,9 @@ public class HandleDistinctnessTests
     [Test]
     public async Task two_create_pipeline_calls_return_distinct_handles_with_shared_native_cache()
     {
-        // (3) Pipeline cache below public handle layer — two CreatePipeline(in PipelineDesc)
-        // calls with structurally-equal descs (same reused ShaderHandles) share the underlying
-        // native pipeline (cache hit) but receive DISTINCT PipelineHandle values. This is the
-        // contract that lets one consumer destroy its handle without invalidating another
-        // consumer's handle to the same native resource.
-        //
-        // Note: this test uses the high-level CreatePipeline(ShaderProgramDesc, TextureFormat)
-        // helper, which mints a fresh ShaderHandle per call under iter-5 (shader-module cache
-        // lives below the public handle layer, same as pipelines). As a result p1 and p2 are
-        // backed by DIFFERENT native pipelines here — the shared-native property is covered by
-        // PipelineCache unit tests and by any caller that reuses ShaderHandles across multiple
-        // CreatePipeline(in PipelineDesc) invocations. The crucial iter-5 invariant this test
-        // pins is the one the name asserts: destroying p1 must NOT invalidate p2's live handle.
+        // Public pipeline handles remain independent even when native resources are shared:
+        // destroying p1 must preserve p2. This high-level helper creates fresh shader handles;
+        // native cache reuse is tested separately.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -267,12 +253,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task two_create_shader_module_calls_return_distinct_handles_with_shared_native_cache()
     {
-        // Iteration-5 fix (codex iteration-4 verdict): CreateShader(ShaderModuleDesc) used to
-        // intern the public ShaderHandle by (Wgsl, EntryPoint, Stage). Two callers with the same
-        // desc got the same handle, so Destroy* by either caller invalidated the other's live
-        // handle. The shader-module cache now lives BELOW the public handle layer — same pattern
-        // as PipelineCache: each call mints a fresh ShaderHandle, the native WgShaderModule is
-        // shared across slots via content-keyed dedupe.
+        // Identical shader content shares native modules, never public handles; destroying one
+        // caller's handle must preserve another's.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -376,18 +358,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_from_program_does_not_grow_shader_slot_table()
     {
-        // Iter-6 fix for OpenCara's iter-5 minor finding: the high-level
-        // CreatePipeline(ShaderProgramDesc, TextureFormat) helper minted two ShaderHandles that
-        // were consumed locally by the PipelineDesc and never returned to the caller, so every
-        // call leaked two entries into _device.Shaders. Iter-6 destroys the locally-minted
-        // handles after the native pipeline is built — the content-keyed _shaderModuleCache and
-        // the native WgRenderPipeline both retain the WgShaderModule, so post-creation destroy
-        // only releases slot-table metadata.
-        //
-        // Assertion: N repeated CreatePipeline(program, fmt) calls leave
-        // renderer.ShaderSlotCountForTest at the same value as after the warm-up call. Any
-        // reappearance of the leak (e.g. a forgotten Destroy pair or an inline refactor that
-        // drops it) surfaces here as a hard failure regardless of GPU presence in CI.
+        // The high-level helper must release its temporary shader slots after pipeline creation.
+        // Repeated calls must preserve the warmed-up slot count; native modules remain cache-owned.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -416,18 +388,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_from_program_releases_vs_handle_when_fs_create_throws()
     {
-        // Iter-9 fix for OpenCara's iter-8 finding: the iter-8 try/finally covered only the
-        // inner CreatePipeline(in PipelineDesc) call; both CreateShaderModule allocations sat
-        // OUTSIDE the try. If the second one (fs) threw — e.g. Dawn rejects invalid WGSL and
-        // WebGpuDevice.CreateShaderModule returns "ShaderModule creation returned null." — the
-        // already-allocated vs slot entry leaked. Iter-9 widens the try to cover both module
-        // allocations and guards each DestroyShader with `IsValid` so default(ShaderHandle)
-        // entries are safely skipped.
-        //
-        // Reproduce by constructing a ShaderProgramDesc whose FS module has deliberately invalid
-        // WGSL. Dawn rejects it, CreateShaderModule throws, the finally hits with vsHandle
-        // allocated and fsHandle still default — the IsValid guard destroys vs (closing the
-        // leak window) and skips fs.
+        // Force fragment-module creation to fail after the vertex slot exists. Cleanup must free
+        // the vertex slot and safely skip the unallocated fragment handle.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -485,15 +447,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_from_program_releases_shader_handles_on_exception()
     {
-        // Iter-8 fix for OpenCara's iter-7 minor finding: the helper's inner CreatePipeline(in
-        // PipelineDesc) could throw from BuildNativePipeline guards, and pre-iter-8 the
-        // DestroyShader pair ran only on the happy path, so exception paths leaked two slot
-        // entries per call. Iter-8 wraps the inner call in try/finally.
-        //
-        // M2 note: the non-empty-Layout guard this test originally used to force the exception
-        // path is gone (explicit layouts now build). The tampered program below therefore
-        // builds successfully, and the assertion pins the same invariant on the happy path:
-        // repeated helper calls never grow the shader slot table, exception or not.
+        // Repeated helper calls must not leak temporary shader slots. The explicit layout is now
+        // supported, so this case exercises successful creation.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -538,12 +493,8 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_from_program_respects_custom_topology()
     {
-        // Iter-7 fix for OpenCara's iter-6 Major B (codex): the helper used to hardcode
-        // PrimitiveTopology.TriangleList / IndexFormat.Uint16, so a point/line/strip caller got
-        // the wrong primitive assembly with no override. Iter-7 added topology + stripIndexFormat
-        // parameters with current-behavior defaults. This test exercises a non-default topology
-        // (PointList — the simplest non-triangle primitive) end-to-end through the helper: the
-        // pipeline must build and the returned handle must be valid.
+        // Exercise a nondefault topology through the high-level pipeline helper; hardcoded
+        // triangles would silently assemble the wrong primitives.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 

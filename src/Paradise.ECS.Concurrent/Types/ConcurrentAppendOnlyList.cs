@@ -36,16 +36,12 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     private volatile int _count;
     private volatile int _committedCount;
 
-    /// <summary>
-    /// Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with chunk size optimized for L1 cache (~16KB per chunk).
-    /// </summary>
+    /// <summary>Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with chunk size optimized for L1 cache (~16KB per chunk).</summary>
     public ConcurrentAppendOnlyList() : this(CalculateDefaultChunkShift())
     {
     }
 
-    /// <summary>
-    /// Calculates the optimal chunk shift to make each chunk approximately 16KB.
-    /// </summary>
+    /// <summary>Calculates the optimal chunk shift to make each chunk approximately 16KB.</summary>
     private static int CalculateDefaultChunkShift()
     {
         int elementSize = Unsafe.SizeOf<T>();
@@ -54,9 +50,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         return Math.Clamp(shift, MinChunkShift, MaxChunkShift);
     }
 
-    /// <summary>
-    /// Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with specified chunk size.
-    /// </summary>
+    /// <summary>Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with specified chunk size.</summary>
     /// <param name="chunkShift">
     /// The power of 2 for chunk size. Default is 10 (1024 elements per chunk).
     /// Valid range is 2-20 (4 to ~1M elements per chunk).
@@ -86,18 +80,14 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         get => _committedCount;
     }
 
-    /// <summary>
-    /// Gets the current capacity of the list (total slots across all allocated chunks).
-    /// </summary>
+    /// <summary>The current capacity of the list (total slots across all allocated chunks).</summary>
     public int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _chunkCount * _chunkSize;
     }
 
-    /// <summary>
-    /// Gets the number of allocated chunks.
-    /// </summary>
+    /// <summary>The number of allocated chunks.</summary>
     public int ChunkCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -112,12 +102,10 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     /// <returns>The index at which the value was stored.</returns>
     public int Add(T value)
     {
-        // Reserve a slot atomically
         int index = Interlocked.Increment(ref _count) - 1;
         int chunkIndex = index >> _chunkShift;
         int indexInChunk = index & _chunkMask;
 
-        // Ensure the chunk and bitmap exist
         EnsureChunk(chunkIndex);
 
         // Write to the slot (chunk is guaranteed to exist now)
@@ -125,17 +113,14 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         var chunk = _chunks[chunkIndex];
         chunk[indexInChunk] = value;
 
-        // Mark slot as ready in bitmap (atomic)
         MarkSlotReady(index);
 
-        // Try to advance committed count
         TryAdvanceCommittedCount();
 
         // Wait until our slot is committed (fast path: usually already committed)
         SpinWait spinWait = default;
         while (_committedCount <= index)
         {
-            // Try to help advance if possible
             TryAdvanceCommittedCount();
             spinWait.SpinOnce(-1); // -1 disables Sleep(1), only yields
         }
@@ -157,14 +142,11 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
 
         int length = values.Length;
 
-        // Reserve slots atomically
         int startIndex = Interlocked.Add(ref _count, length) - length;
         int endChunkIndex = (startIndex + length - 1) >> _chunkShift;
 
-        // Ensure all needed chunks exist
         EnsureChunk(endChunkIndex);
 
-        // Write all values to their slots
         var chunks = _chunks;
         for (int i = 0; i < length; i++)
         {
@@ -177,7 +159,6 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         // Mark all slots as ready in bitmap (processes 64 bits at a time)
         MarkSlotsReady(startIndex, length);
 
-        // Try to advance committed count
         TryAdvanceCommittedCount();
 
         // Wait until all our slots are committed
@@ -271,9 +252,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         }
     }
 
-    /// <summary>
-    /// Checks if a slot is marked as ready in the bitmap.
-    /// </summary>
+    /// <summary>Checks if a slot is marked as ready in the bitmap.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool IsSlotReady(int index)
     {
@@ -346,9 +325,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         }
     }
 
-    /// <summary>
-    /// Gets a reference to the element at the specified index.
-    /// </summary>
+    /// <summary>A reference to the element at the specified index.</summary>
     /// <param name="index">The zero-based index of the element to get.</param>
     /// <returns>A reference to the value at the specified index.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if index is out of range.</exception>
@@ -377,9 +354,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         EnsureChunkSlow(chunkIndex);
     }
 
-    /// <summary>
-    /// Slow path for chunk allocation. Acquires lock and allocates if needed.
-    /// </summary>
+    /// <summary>Slow path for chunk allocation. Acquires lock and allocates if needed.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void EnsureChunkSlow(int chunkIndex)
     {
@@ -401,7 +376,6 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         int maxIndex = (chunkIndex + 1) * _chunkSize - 1;
         int requiredBitmapWords = (maxIndex >> BitsPerWordShift) + 1;
 
-        // Grow bitmap if needed
         if (requiredBitmapWords > _readyBitmap.Length)
         {
             var newBitmap = new ulong[requiredBitmapWords];
@@ -409,7 +383,6 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
             _readyBitmap = newBitmap;
         }
 
-        // Allocate all chunks up to and including chunkIndex
         for (int i = _chunkCount; i <= chunkIndex; i++)
         {
             Volatile.Write(ref _chunks[i], new T[_chunkSize]);
@@ -418,9 +391,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         _chunkCount = chunkIndex + 1;
     }
 
-    /// <summary>
-    /// Returns an enumerator that iterates through the list.
-    /// </summary>
+    /// <summary>Returns an enumerator that iterates through the list.</summary>
     /// <returns>An enumerator for the list.</returns>
     public Enumerator GetEnumerator() => new(this);
 
@@ -435,9 +406,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
         => throw new ArgumentOutOfRangeException(nameof(index),
             $"Index {index} is out of range. Count: {count}");
 
-    /// <summary>
-    /// Enumerator for <see cref="ConcurrentAppendOnlyList{T}"/>.
-    /// </summary>
+    /// <summary>Enumerator for <see cref="ConcurrentAppendOnlyList{T}"/>.</summary>
     public struct Enumerator : IEnumerator<T>
     {
         private readonly ConcurrentAppendOnlyList<T> _list;

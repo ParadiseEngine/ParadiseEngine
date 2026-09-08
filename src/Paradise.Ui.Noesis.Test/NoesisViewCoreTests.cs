@@ -5,13 +5,9 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis.Test;
 
-/// <summary>NoesisViewCore + NoesisOverlayRenderer against real Noesis and a real (headless)
-/// WebGPU adapter: the sim-thread tick must lazily create the view (applying the MVVM
-/// DataContext and firing the simTick hook), input events must route into it, and the overlay
-/// renderer must record a full UI frame through the render device. Tests skip when the Noesis
-/// native library or a WebGPU adapter is unavailable. All view interactions happen
-/// synchronously before the first await — Noesis pins each view to its creation thread, and
-/// awaits may resume elsewhere.</summary>
+/// <summary>Checks Noesis input, lazy view creation and WebGPU overlay rendering.</summary>
+/// <remarks>Skip when Noesis or an adapter is unavailable. View interactions precede the first
+/// await because Noesis binds a view to its creation thread.</remarks>
 [NotInParallel]
 public class NoesisViewCoreTests
 {
@@ -111,14 +107,9 @@ public class NoesisViewCoreTests
         await Assert.That(core.Height).IsEqualTo(480u);
     }
 
-    /// <summary>Key and text UiEvents must reach the view — the events that make a Noesis menu
-    /// FOCUSABLE rather than merely clickable, and which the core silently dropped until they
-    /// were mapped. Asserted on the routed Noesis events (the root Grid is made focusable and
-    /// focused first, because keyboard input goes to the focused element and a bare view has no
-    /// theme to give anything else a template).
-    ///
-    /// The negative half matters as much: an unmapped UiKey must return false WITHOUT touching
-    /// the view, because a host reads that false as "the game may have this key".</summary>
+    /// <summary>Checks routed keyboard and text events, including unhandled unknown keys.</summary>
+    /// <remarks>The root is explicitly focused because a bare view has no theme; unmapped keys must
+    /// return false without calling the view.</remarks>
     [Test]
     public async Task key_and_text_events_reach_the_view_and_unmapped_keys_do_not()
     {
@@ -165,11 +156,9 @@ public class NoesisViewCoreTests
         await Assert.That(surrogateHandled).IsFalse();
     }
 
-    /// <summary>A Scroll WindowEvent must arrive in the view as a Noesis wheel event — one notch is
-    /// 120 units — and the sub-notch deltas a MacBook trackpad reports must accumulate instead of
-    /// truncating to nothing. Asserted on the routed MouseWheel event rather than a ScrollViewer's
-    /// offset because a bare view has no theme, so ScrollViewer gets no template (and therefore no
-    /// scroll info) here.</summary>
+    /// <summary>Checks wheel routing and accumulation of fractional trackpad deltas.</summary>
+    /// <remarks>One notch is 120 Noesis units. Assert routed events because an unthemed
+    /// ScrollViewer has no scroll-info template.</remarks>
     [Test]
     public async Task scroll_events_reach_the_view_including_sub_notch_trackpad_deltas()
     {
@@ -322,11 +311,8 @@ public class NoesisViewCoreTests
             return (corner, cornerA, center);
         }
 
-        // Frame 1: red clear + the Noesis overlay (corner pixel stays red — the XAML content is
-        // centered and does not cover it; the CENTER pixel must show Noesis content, not the
-        // red clear). Frame 2: green clear only. If the overlay frame poisons subsequent
-        // submissions, frame 2's clear never lands and the corner still reads red — the
-        // launcher freeze reproduced in isolation.
+        // Frame one draws an overlay on red; frame two clears green. Check center content and
+        // corner colors to detect overlay state poisoning the next submission.
         SubmitFrame(1.0, 0.0, 0.0, withOverlay: true);
         var afterOverlayFrame = ReadPixels();
         SubmitFrame(0.0, 1.0, 0.0, withOverlay: false);

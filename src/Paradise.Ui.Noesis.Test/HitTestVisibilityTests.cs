@@ -4,19 +4,10 @@ using Zio.FileSystems;
 
 namespace Paradise.Ui.Noesis.Test;
 
-/// <summary>
-/// How a game overlay must be authored, and the trap that reads as "the menu is dead".
-///
-/// The tempting shape for a HUD-plus-menu is a root with <c>IsHitTestVisible="False"</c> so
-/// clicks fall through to the game, and the menu setting it back to <c>True</c> so it catches
-/// them. That does not work: a False parent excludes its ENTIRE SUBTREE, and a child cannot
-/// re-enable itself. Nothing warns — the overlay still draws, the click just reaches nothing —
-/// so the failure looks like broken pointer input several layers down.
-///
-/// Hit-testing is therefore OPT-OUT: keep the root hit-testable with a null Background (so
-/// empty regions are not targets and clicks there fall through), and set
-/// <c>IsHitTestVisible="False"</c> on each piece of PAINT that has a background of its own.
-/// </summary>
+/// <summary>Checks overlay hit-test authoring rules.</summary>
+/// <remarks>A false IsHitTestVisible excludes the entire subtree, including children set true. Keep
+/// the root hit-testable with a null background and disable hit-testing only on decorative
+/// elements.</remarks>
 [NotInParallel]
 public class HitTestVisibilityTests
 {
@@ -83,17 +74,9 @@ public class HitTestVisibilityTests
         await Assert.That(r.Handled).IsTrue();
     }
 
-    /// <summary>
-    /// An overlay with nothing in it swallows nothing — the whole point of the verdict.
-    /// </summary>
-    /// <remarks>
-    /// The narrowest possible statement of what the host relies on, and the case that was
-    /// silently broken: Noesis 4.0.0's <c>View.MouseButtonDown</c> returns true even here, where
-    /// the view is one empty Grid with a null background and there is nothing under the pointer
-    /// at all. Forwarded to the host as-is, that is a total mouse blackout — a HUD that draws
-    /// nothing eats every click in the game. Left-and-right, because the press is the only event
-    /// kind affected and both buttons showed it.
-    /// </remarks>
+    /// <summary>An empty overlay must let pointer presses reach the game.</summary>
+    /// <remarks>Noesis 4.0.0 MouseButtonDown returns true even over an empty view, so the input
+    /// wrapper must hit-test both pointer buttons.</remarks>
     [Test]
     public async Task an_empty_overlay_does_not_swallow_the_click()
     {

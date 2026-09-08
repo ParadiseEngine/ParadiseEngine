@@ -7,12 +7,8 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Authoring.SchemaDump;
 
-/// <summary>
-/// Reads the <c>AuthoringSchema.Json</c> constant out of a compiled assembly's metadata and
-/// writes it to a file — without loading the assembly. A <c>const string</c> is a literal in the
-/// blob heap, so no dependency has to be resolvable and nothing runs; this works identically on a
-/// desktop, wasm or test build of the game core.
-/// </summary>
+/// <summary>Writes an assembly's <c>AuthoringSchema.Json</c> constant without loading the assembly.</summary>
+/// <remarks>Reading metadata requires no executable code or resolvable dependencies, including for wasm assemblies.</remarks>
 public static class SchemaDumper
 {
     /// <summary>The generated holder's name. Its namespace is the game's root namespace, which

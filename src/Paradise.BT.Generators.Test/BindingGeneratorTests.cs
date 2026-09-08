@@ -5,23 +5,10 @@ using Paradise.BT.Generators;
 
 namespace Paradise.BT.Generators.Test;
 
-/// <summary>
-/// Driven through <see cref="CSharpGeneratorDriver"/> rather than the analyzer-testing harness,
-/// for one reason worth the extra setup: it can COMPILE what the generator emitted. A generator
-/// test that only inspects diagnostics proves the refusals work and says nothing about whether the
-/// emitted blackboard — ref fields into chunk memory, handed out through an interface — is even
-/// legal C#. <see cref="Binds_Components_And_Extras_And_The_Result_Compiles"/> is the test that
-/// keeps the design honest.
-/// </summary>
+/// <summary>Compiles generated blackboards with CSharpGeneratorDriver to verify emitted code and ref safety.</summary>
 public sealed class BindingGeneratorTests
 {
-    /// <summary>
-    /// Stand-ins for Paradise.BT and Paradise.ECS. The generator resolves both symbolically — it
-    /// takes no reference on Paradise.ECS and could not, so a faithful stub is a complete
-    /// substitute. <c>Segments</c> mirrors the real emitted shape exactly where it matters: a
-    /// PROPERTY returning a ref struct by value, whose indexer returns a ref into chunk memory.
-    /// That is the shape whose ref-safety was in question.
-    /// </summary>
+    /// <summary>Stubs BT/ECS symbols, including a Segments property whose indexer returns a chunk reference.</summary>
     private const string Prelude = """
         using System;
 
@@ -189,15 +176,11 @@ public sealed class BindingGeneratorTests
 
         string generated = string.Join("\n", sources);
 
-        // The component split. Components resolve off the row on demand — segments plus an index,
-        // never a ref field, because a ref struct holding ref fields cannot be passed as `ref` to
-        // the VM. The non-component lands in the extras struct rather than being sought on the row.
+        // Components bind read-only; writable non-components bind directly to caller storage.
         await Assert.That(generated).Contains("ref readonly global::Game.WorldTransform _worldTransform;");
         await Assert.That(generated).Contains("ref global::Game.Decision decision");
 
-        // Read-only reads the row by value; writable hands out a ref straight into the chunk.
-        // A ref struct, holding a reference to everything it touches. Passable because the VM
-        // takes a blackboard BY VALUE; by `ref` this shape is rejected outright.
+        // The VM accepts the ref-struct blackboard by value to satisfy ref-safety rules.
         await Assert.That(generated).Contains("public readonly ref struct EnemyTreeBlackboard");
 
         // Read-only access is held by `ref readonly`, so SetData on it has nowhere to go.
@@ -296,11 +279,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("This tree touches nothing");
     }
 
-    /// <summary>
-    /// A node a factory builds, so the tree never names it. The escape hatch of last resort, for a
-    /// factory carrying no [Builds&lt;T&gt;]; prefer annotating the factory. The attribute is now
-    /// ONLY this: the interface marks the tree, [BehaviorTreeBinding] just carries Also.
-    /// </summary>
+    /// <summary>Uses BehaviorTreeBinding.Also to include a node hidden behind a factory return type.</summary>
     [Test]
     public async Task Also_Binds_A_Node_The_Tree_Never_Names()
     {
@@ -333,14 +312,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("in global::Game.Decision decision");
     }
 
-    /// <summary>
-    /// A node that declares NOTHING still contributes, because its body is read directly. This is
-    /// only decidable since GetData/SetData replaced the ref-returning accessor: taking a ref to
-    /// avoid a copy and taking one to mutate were the same call.
-    ///
-    /// The declarations remain the cross-assembly contract — a node from a referenced assembly has
-    /// no body to read — so the two are unioned rather than one replacing the other.
-    /// </summary>
+    /// <summary>Collects undeclared access from local node bodies and unions it with metadata declarations.</summary>
     [Test]
     public async Task A_Node_That_Declares_Nothing_Is_Read_From_Its_Body()
     {
@@ -408,14 +380,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(diagnostics.Select(d => d.Id)).Contains("PBT0008");
     }
 
-    /// <summary>
-    /// A tree written with the builder DSL binds too. A builder derives from
-    /// <c>CompositeNode&lt;T&gt;</c> and friends, so the node type survives as a generic argument
-    /// on the base — the tree's source never says <c>HiddenNode</c>, and the scan finds it anyway.
-    ///
-    /// This is what separates the DSL from a factory method: a method returning
-    /// <c>BehaviorNodeDefinition</c> discards the type and has to be told.
-    /// </summary>
+    /// <summary>Finds a DSL node through its builder's generic base type.</summary>
     [Test]
     public async Task A_Tree_Built_With_The_Builder_Dsl_Binds()
     {
@@ -449,15 +414,8 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
-    /// <summary>
-    /// A builder generated BESIDE the tree, in the same compilation. BTreeNodeGenerator would emit
-    /// <c>Hidden</c> for <c>HiddenNode</c>, but this generator cannot see another generator's
-    /// output, so the reference is an error type at the moment the scan runs.
-    ///
-    /// Recovered by NAME against a table of the builders that will be emitted, derived from the
-    /// same <c>[Builder]</c> declarations. Without it, a tree composed of its own assembly's
-    /// builders binds an empty blackboard — compiling cleanly and failing on the first tick.
-    /// </summary>
+    /// <summary>Resolves builders awaiting generation by name from their Builder declarations.</summary>
+    /// <remarks>Generators cannot see each other's output in the same compilation.</remarks>
     [Test]
     public async Task A_Builder_Generated_Beside_The_Tree_Is_Recovered_By_Name()
     {
@@ -489,14 +447,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
-    /// <summary>
-    /// A factory RETURNING a builder is transparent, which is what lets the DSL drop <c>new</c>.
-    ///
-    /// The distinction is the return type and nothing else. The factories deleted from this library
-    /// returned a bare <c>BehaviorNodeDefinition</c> and discarded every trace of what they built;
-    /// a method typed <c>Hidden</c> still carries <c>HiddenNode</c> on that type's base, so the
-    /// scan follows it with no annotation at all.
-    /// </summary>
+    /// <summary>Finds factory-created nodes through concrete builder return types without annotations.</summary>
     [Test]
     public async Task A_Factory_Returning_A_Builder_Needs_No_Annotation()
     {
@@ -535,9 +486,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(string.Join("\n", sources)).Contains("ref global::Game.Decision decision");
     }
 
-    /// <summary>Two same-named data types both survive the FQN-keyed merge, so their generated
-    /// identifiers must be disambiguated — two `_target` fields would be CS0102 in a file the
-    /// user cannot edit. A type named after a keyword must be escaped for the same reason.</summary>
+    /// <summary>Disambiguates same-named data types and escapes keyword identifiers in generated code.</summary>
     [Test]
     public async Task Colliding_And_Keyword_Type_Names_Still_Compile()
     {
@@ -606,12 +555,7 @@ public sealed class BindingGeneratorTests
         await Assert.That(sources.Length).IsEqualTo(2);
     }
 
-    /// <summary>
-    /// The cross-assembly path with NO hand-written declarations: the node's declaring assembly is
-    /// compiled separately (its BODY does not survive into metadata), BTreeNodeGenerator publishes
-    /// the body-scanned access as <c>[assembly: NodeAccess]</c>, and this binding reads it off the
-    /// metadata reference — which is what made attributes like DelayTimerNode's optional.
-    /// </summary>
+    /// <summary>Reads body-scanned NodeAccess metadata from a separately compiled node assembly.</summary>
     [Test]
     public async Task A_Referenced_Nodes_Access_Arrives_Through_Generated_Metadata()
     {
@@ -723,7 +667,7 @@ public sealed class BindingGeneratorTests
             .Contains("global::Game.Pulse");
     }
 
-    // ===================== harness =====================
+    // harness
 
     private static (ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<string> Sources,
         ImmutableArray<Diagnostic> CompileErrors) Run(string source, bool expectUnresolvedNames = false)
@@ -737,10 +681,7 @@ public sealed class BindingGeneratorTests
                 .Select(a => (MetadataReference)MetadataReference.CreateFromFile(a.Location)),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
-        // A stub that does not compile would make the generator find nothing and every assertion
-        // fail for the wrong reason, so refuse it here with the compiler's own message.
-        // CS0246 is EXPECTED where a test composes a tree from builders another generator would
-        // emit: they do not exist at this point, which is exactly the case being exercised.
+        // Reject invalid stubs, except CS0246 for builders awaiting another generator's output.
         var inputErrors = compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error
                 && !(expectUnresolvedNames && d.Id == "CS0246"))
@@ -778,9 +719,7 @@ public sealed class BindingGeneratorTests
             compileErrors);
     }
 
-    /// <summary>The IBlackboardFor argument must come from the symbol's display string — a
-    /// namespace + name concatenation mangles a NESTED tree into a type that does not exist,
-    /// and the failure would be CS0246 in a generated file the user cannot edit.</summary>
+    /// <summary>Uses the tree symbol's full name so nested trees remain valid IBlackboardFor arguments.</summary>
     [Test]
     public async Task A_Nested_Tree_Gets_A_Correctly_Qualified_Blackboard_Marker()
     {

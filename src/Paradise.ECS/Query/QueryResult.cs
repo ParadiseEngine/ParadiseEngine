@@ -20,9 +20,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
     private readonly IEntityManager _entityManager;
     private readonly Query<TMask, TConfig, TArchetype> _query;
 
-    /// <summary>
-    /// Creates a new query result.
-    /// </summary>
+    /// <summary>Creates a new query result.</summary>
     /// <param name="chunkManager">The chunk manager for memory access.</param>
     /// <param name="entityManager">The entity manager for looking up entity versions.</param>
     /// <param name="query">The underlying query.</param>
@@ -34,9 +32,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         _query = query;
     }
 
-    /// <summary>
-    /// Gets the total number of entities matching this query.
-    /// </summary>
+    /// <summary>The total number of entities matching this query.</summary>
     /// <remarks>
     /// <para>
     /// How many entities live in the archetypes this query matches — an UPPER BOUND on what
@@ -58,9 +54,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         get => _query.EntityCount;
     }
 
-    /// <summary>
-    /// Counts what this query will actually yield, filters included.
-    /// </summary>
+    /// <summary>Counts what this query will actually yield, filters included.</summary>
     /// <remarks>
     /// A method, not a property, because it iterates: O(1) archetype bookkeeping cannot answer it
     /// for a filtered queryable. Prefer <see cref="EntityCapacity"/> when a bound will do, and
@@ -76,9 +70,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         return count;
     }
 
-    /// <summary>
-    /// Gets whether this query has any matching entities.
-    /// </summary>
+    /// <summary>Whether this query has any matching entities.</summary>
     /// <remarks>
     /// Cheap in both directions, which is why it stays a property while <see cref="Count"/> did
     /// not. Unfiltered it is archetype bookkeeping. Filtered it stops at the FIRST match, and the
@@ -96,15 +88,11 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Returns an enumerator that iterates through all entities in the matching archetypes.
-    /// </summary>
+    /// <summary>Returns an enumerator that iterates through all entities in the matching archetypes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Enumerator GetEnumerator() => new(_chunkManager, _entityManager, _query);
 
-    /// <summary>
-    /// Enumerator for iterating over TData instances.
-    /// </summary>
+    /// <summary>Enumerator for iterating over TData instances.</summary>
     public ref struct Enumerator
     {
         private readonly ChunkManager _chunkManager;
@@ -127,18 +115,14 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
             _entitiesInChunk = 0;
         }
 
-        /// <summary>
-        /// Gets the current data instance.
-        /// </summary>
+        /// <summary>The current data instance.</summary>
         public TData Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => TData.Create(_chunkManager, _entityManager, _currentLayout, _currentChunk, _indexInChunk);
         }
 
-        /// <summary>
-        /// Advances to the next entity.
-        /// </summary>
+        /// <summary>Advances to the next entity.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
@@ -174,17 +158,11 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
     }
 }
 
-/// <summary>
-/// A generic chunk query result that iterates over chunks and returns typed chunk data instances.
-/// This struct is reused across all queryable types, reducing generated code.
-///
-/// <para><b>Row filters do not apply here.</b> This yields CHUNKS, and a chunk-level filter is a
-/// different question from a row-level one — a chunk holds matching and non-matching entities
-/// alike. A queryable declaring <c>[WithTag&lt;T&gt;]</c> or <c>[WithoutTag&lt;T&gt;]</c> therefore
-/// still hands out whole chunks
-/// through this path, and a caller batching over the spans must test the rows itself. See
-/// ParadiseEngine#166.</para>
-/// </summary>
+/// <summary>Iterates chunks as typed data shared by generated queryables.</summary>
+/// <remarks>
+/// Row filters, including tags, do not apply to chunk spans: callers must filter individual rows.
+/// See ParadiseEngine#166.
+/// </remarks>
 /// <typeparam name="TChunkData">The chunk data type providing span access, must implement IQueryChunkData.</typeparam>
 /// <typeparam name="TArchetype">The archetype type implementing IArchetype.</typeparam>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
@@ -199,9 +177,7 @@ public readonly ref struct ChunkQueryResult<TChunkData, TArchetype, TMask, TConf
     private readonly IEntityManager _entityManager;
     private readonly Query<TMask, TConfig, TArchetype> _query;
 
-    /// <summary>
-    /// Creates a new chunk query result.
-    /// </summary>
+    /// <summary>Creates a new chunk query result.</summary>
     /// <param name="chunkManager">The chunk manager for memory access.</param>
     /// <param name="entityManager">The entity manager for looking up entity versions.</param>
     /// <param name="query">The underlying query.</param>
@@ -213,33 +189,25 @@ public readonly ref struct ChunkQueryResult<TChunkData, TArchetype, TMask, TConf
         _query = query;
     }
 
-    /// <summary>
-    /// Gets the total number of entities matching this query.
-    /// </summary>
+    /// <summary>The total number of entities matching this query.</summary>
     public int EntityCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _query.EntityCount;
     }
 
-    /// <summary>
-    /// Gets whether this query has any matching entities.
-    /// </summary>
+    /// <summary>Whether this query has any matching entities.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _query.IsEmpty;
     }
 
-    /// <summary>
-    /// Returns an enumerator that iterates through all chunks in the matching archetypes.
-    /// </summary>
+    /// <summary>Returns an enumerator that iterates through all chunks in the matching archetypes.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Enumerator GetEnumerator() => new(_chunkManager, _entityManager, _query);
 
-    /// <summary>
-    /// Enumerator for iterating over TChunkData instances.
-    /// </summary>
+    /// <summary>Enumerator for iterating over TChunkData instances.</summary>
     public ref struct Enumerator
     {
         private readonly ChunkManager _chunkManager;
@@ -254,9 +222,7 @@ public readonly ref struct ChunkQueryResult<TChunkData, TArchetype, TMask, TConf
             _chunkEnumerator = query.Chunks.GetEnumerator();
         }
 
-        /// <summary>
-        /// Gets the current chunk data instance.
-        /// </summary>
+        /// <summary>The current chunk data instance.</summary>
         public TChunkData Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -267,9 +233,7 @@ public readonly ref struct ChunkQueryResult<TChunkData, TArchetype, TMask, TConf
             }
         }
 
-        /// <summary>
-        /// Advances to the next chunk.
-        /// </summary>
+        /// <summary>Advances to the next chunk.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext() => _chunkEnumerator.MoveNext();
     }

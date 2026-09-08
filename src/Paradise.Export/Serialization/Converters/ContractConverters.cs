@@ -28,34 +28,10 @@ namespace Paradise.Export.Serialization.Converters
         }
     }
 
-    /// <summary>
-    /// <see cref="Color32"/> as <c>"#RRGGBBAA"</c> — the spelling of the 32 bits it actually is.
-    /// </summary>
+    /// <summary>Writes <see cref="Color32"/> as <c>"#RRGGBBAA"</c>.</summary>
     /// <remarks>
-    /// <para>
-    /// A colour is a PACKED INT here, one byte per channel, so the four-float object this used to
-    /// write was four lossy-looking numbers standing in for an exact value:
-    /// <c>0.078431375, 0.12156863, 0.3137255, 1.0</c> is <c>#141F50FF</c> and nothing else. The hex
-    /// form is shorter, exact, and reads as a colour.
-    /// </para>
-    /// <para>
-    /// <b>It also removes a problem rather than adding one.</b> TOML parses <c>x = { … }</c> and
-    /// <c>[x]</c> identically, so a table's inline-ness cannot be recovered from the document —
-    /// which is why the canonical writer RESERVES the exact <c>{guid, path}</c> shape and
-    /// reconstructs the form from it, a predicate the C# and Python writers must spell identically
-    /// forever. A colour written as an object needed a second such reservation. A STRING needs
-    /// none: it is a scalar both writers already agree on, and nothing has to detect it.
-    /// </para>
-    /// <para>
-    /// Alpha is ALWAYS written, so the literal is a fixed nine characters and a reader never has to
-    /// guess whether a short form meant opaque or malformed.
-    /// </para>
-    /// <para>
-    /// Reading accepts the legacy <c>{ r, g, b, a }</c> object as well, and that tolerance is what
-    /// makes the migration safe rather than a flag day: every committed document, every host that
-    /// has not been updated, and every fixture keeps loading while they are converted. The WRITE
-    /// half is the format change; the read half is deliberately generous.
-    /// </para>
+    /// The fixed nine-character scalar preserves every channel exactly and needs no TOML table-shape rule.
+    /// Reading also accepts legacy <c>{ r, g, b, a }</c> objects.
     /// </remarks>
     public sealed class Color32Converter : JsonConverter<Color32>
     {

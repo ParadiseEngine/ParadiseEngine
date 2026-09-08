@@ -32,36 +32,26 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
     private const int ArchetypeShift = VersionBits;
     private const int IndexShift = VersionBits + ArchetypeBits;
 
-    /// <summary>
-    /// Maximum supported version value (16,777,215).
-    /// </summary>
+    /// <summary>Maximum supported version value (16,777,215).</summary>
     public const uint MaxVersion = (1U << VersionBits) - 1;
 
-    /// <summary>
-    /// Maximum supported archetype ID (1,048,574).
-    /// </summary>
+    /// <summary>Maximum supported archetype ID (1,048,574).</summary>
     public const int MaxArchetypeId = (1 << ArchetypeBits) - 2; // -1 reserved for invalid
 
-    /// <summary>
-    /// Maximum supported global index (1,048,574).
-    /// </summary>
+    /// <summary>Maximum supported global index (1,048,574).</summary>
     public const int MaxGlobalIndex = (1 << IndexBits) - 2; // -1 reserved for invalid
 
     [FieldOffset(0)]
     private readonly ulong _packed;
 
-    /// <summary>
-    /// Creates a new entity location from raw packed value.
-    /// </summary>
+    /// <summary>Creates a new entity location from raw packed value.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private EntityLocation(ulong packed)
     {
         _packed = packed;
     }
 
-    /// <summary>
-    /// Creates a new entity location.
-    /// </summary>
+    /// <summary>Creates a new entity location.</summary>
     /// <param name="version">The entity version.</param>
     /// <param name="archetypeId">The archetype ID (-1 for invalid).</param>
     /// <param name="globalIndex">The global index within the archetype (-1 for invalid).</param>
@@ -80,54 +70,42 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
             | (packedIndex << IndexShift);
     }
 
-    /// <summary>
-    /// Gets the raw packed value for atomic operations.
-    /// </summary>
+    /// <summary>The raw packed value for atomic operations.</summary>
     public ulong Packed
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _packed;
     }
 
-    /// <summary>
-    /// Gets the entity version.
-    /// </summary>
+    /// <summary>The entity version.</summary>
     public uint Version
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (uint)(_packed & VersionMask);
     }
 
-    /// <summary>
-    /// Gets the archetype ID (-1 if invalid).
-    /// </summary>
+    /// <summary>The archetype ID (-1 if invalid).</summary>
     public int ArchetypeId
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (int)((_packed >> ArchetypeShift) & ArchetypeMask) - 1;
     }
 
-    /// <summary>
-    /// Gets the global index within the archetype (-1 if invalid).
-    /// </summary>
+    /// <summary>The global index within the archetype (-1 if invalid).</summary>
     public int GlobalIndex
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (int)((_packed >> IndexShift) & IndexMask) - 1;
     }
 
-    /// <summary>
-    /// Gets whether this location is valid (has a valid archetype).
-    /// </summary>
+    /// <summary>Whether this location is valid (has a valid archetype).</summary>
     public bool IsValid
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => ArchetypeId >= 0;
     }
 
-    /// <summary>
-    /// Creates an entity location from a raw packed value.
-    /// </summary>
+    /// <summary>Creates an entity location from a raw packed value.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static EntityLocation FromPacked(ulong packed) => new(packed);
 
@@ -143,14 +121,10 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
         return currentVersion < MaxVersion ? currentVersion + 1 : 1;
     }
 
-    /// <summary>
-    /// An invalid/empty entity location.
-    /// </summary>
+    /// <summary>An invalid/empty entity location.</summary>
     public static readonly EntityLocation Invalid = new(0, -1, -1);
 
-    /// <summary>
-    /// Checks if this location matches the given entity's version.
-    /// </summary>
+    /// <summary>Checks if this location matches the given entity's version.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the versions match and the entity is valid at this location.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -169,15 +143,11 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
     /// <inheritdoc />
     public override int GetHashCode() => _packed.GetHashCode();
 
-    /// <summary>
-    /// Equality operator.
-    /// </summary>
+    /// <summary>Equality operator.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(EntityLocation left, EntityLocation right) => left.Equals(right);
 
-    /// <summary>
-    /// Inequality operator.
-    /// </summary>
+    /// <summary>Inequality operator.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(EntityLocation left, EntityLocation right) => !left.Equals(right);
 

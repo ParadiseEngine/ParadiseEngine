@@ -5,9 +5,7 @@ using Zio;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>
-/// A directory of derived artifacts addressed by the digest of their inputs.
-/// </summary>
+/// <summary>A directory of derived artifacts addressed by the digest of their inputs.</summary>
 /// <remarks>
 /// One directory shared with the Blender addon (<c>.editor/cache</c>, <see cref="ArtifactDigest"/>
 /// keys, <c>&lt;kind&gt;/&lt;key&gt;&lt;ext&gt;</c> entries), so an artifact either tool made

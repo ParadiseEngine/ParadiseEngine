@@ -5,14 +5,9 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>What the PBR features share: the backend, the graph's collaborators, the draw ring
-/// every geometry pass fills, the joint palettes, and the frame's scene once
-/// <see cref="PbrRenderer.RenderFrame"/> has partitioned it.
-///
-/// <para>A feature reaches nothing of another feature through here. What one feature produces
-/// for another travels by name on the blackboard or, for the two engine features that are
-/// genuinely one thing split in two (scene lighting reads the shadow plan), as a constructor
-/// argument the renderer supplies.</para></summary>
+/// <summary>Holds renderer resources and frame data shared by PBR features.</summary>
+/// <remarks>Feature outputs travel through the blackboard or explicit constructor dependencies,
+/// keeping the context free of feature-to-feature access.</remarks>
 internal sealed class PbrContext : IDisposable
 {
     public const int MaxDrawsPerFrame = 4096;

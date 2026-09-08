@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for the Tag system including TagId, ITag interface, and tag generation.
-/// </summary>
+/// <summary>Tests for the Tag system including TagId, ITag interface, and tag generation.</summary>
 public class TagTests
 {
     [Test]
@@ -94,9 +92,7 @@ public partial struct TestManualIdTag;
 [Component]
 public partial struct EntityTags;
 
-/// <summary>
-/// Integration tests for generated tag code.
-/// </summary>
+/// <summary>Integration tests for generated tag code.</summary>
 public class TagGeneratorIntegrationTests
 {
     [Test]
@@ -194,9 +190,7 @@ public class TagGeneratorIntegrationTests
     }
 }
 
-/// <summary>
-/// Tests for TagMask operations using ImmutableBitSet.
-/// </summary>
+/// <summary>Tests for TagMask operations using ImmutableBitSet.</summary>
 public class TagMaskTests
 {
     [Test]

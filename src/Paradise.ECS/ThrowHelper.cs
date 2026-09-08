@@ -2,35 +2,25 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Static helper methods for common argument validation and exception throwing.
-/// </summary>
+/// <summary>Static helper methods for common argument validation and exception throwing.</summary>
 internal static class ThrowHelper
 {
-    /// <summary>
-    /// Throws if <paramref name="byteOffset"/> is negative.
-    /// </summary>
+    /// <summary>Throws if <paramref name="byteOffset"/> is negative.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfNegativeOffset(int byteOffset)
         => ThrowIfNegative(byteOffset);
 
-    /// <summary>
-    /// Throws if <paramref name="count"/> is negative.
-    /// </summary>
+    /// <summary>Throws if <paramref name="count"/> is negative.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfNegativeCount(int count)
         => ThrowIfNegative(count);
 
-    /// <summary>
-    /// Throws if <paramref name="size"/> is negative.
-    /// </summary>
+    /// <summary>Throws if <paramref name="size"/> is negative.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfNegativeSize(int size)
         => ThrowIfNegative(size);
 
-    /// <summary>
-    /// Throws if <paramref name="totalBytes"/> exceeds chunk size.
-    /// </summary>
+    /// <summary>Throws if <paramref name="totalBytes"/> exceeds chunk size.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfExceedsChunkSize(int chunkSize, int totalBytes)
         => ThrowIfGreaterThan(totalBytes, chunkSize);
@@ -72,16 +62,12 @@ internal static class ThrowHelper
         ThrowIfGreaterThan(size, chunkSize);
     }
 
-    /// <summary>
-    /// Throws <see cref="ObjectDisposedException"/> if the condition is true.
-    /// </summary>
+    /// <summary>Throws <see cref="ObjectDisposedException"/> if the condition is true.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfDisposed(bool condition, object instance)
         => ObjectDisposedException.ThrowIf(condition, instance);
 
-    /// <summary>
-    /// Throws if the pointer is null.
-    /// </summary>
+    /// <summary>Throws if the pointer is null.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static unsafe void ThrowIfNull(void* ptr)
         => ArgumentNullException.ThrowIfNull(ptr);
@@ -94,9 +80,7 @@ internal static class ThrowHelper
     private static void ThrowIfGreaterThan(int value, int other, [CallerArgumentExpression(nameof(value))] string? paramName = null)
         => ArgumentOutOfRangeException.ThrowIfGreaterThan(value, other, paramName);
 
-    /// <summary>
-    /// Throws if the component ID exceeds the capacity of the bit storage.
-    /// </summary>
+    /// <summary>Throws if the component ID exceeds the capacity of the bit storage.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfComponentIdExceedsCapacity(int componentId, int capacity)
     {
@@ -104,9 +88,7 @@ internal static class ThrowHelper
             ThrowComponentIdExceedsCapacity(componentId, capacity);
     }
 
-    /// <summary>
-    /// Throws if the component ID is invalid (negative).
-    /// </summary>
+    /// <summary>Throws if the component ID is invalid (negative).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfInvalidComponentId(ComponentId id)
     {
@@ -124,16 +106,12 @@ internal static class ThrowHelper
         => throw new InvalidOperationException(
             "Component type has not been registered. Ensure the type is marked with [Component] attribute.");
 
-    /// <summary>
-    /// Throws an <see cref="ArgumentException"/> with the specified message.
-    /// </summary>
+    /// <summary>Throws an <see cref="ArgumentException"/> with the specified message.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void ThrowArgumentException(string message, string? paramName = null)
         => throw new ArgumentException(message, paramName);
 
-    /// <summary>
-    /// Throws if the archetype ID exceeds the maximum allowed.
-    /// </summary>
+    /// <summary>Throws if the archetype ID exceeds the maximum allowed.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void ThrowIfArchetypeIdExceedsLimit(int archetypeId)
     {
@@ -146,9 +124,7 @@ internal static class ThrowHelper
         => throw new InvalidOperationException(
             $"Archetype count exceeded maximum of {IConfig.MaxArchetypeId}.");
 
-    /// <summary>
-    /// Throws if the entity ID exceeds what can be stored in EntityIdByteSize bytes.
-    /// </summary>
+    /// <summary>Throws if the entity ID exceeds what can be stored in EntityIdByteSize bytes.</summary>
     /// <param name="entityId">The entity ID to validate.</param>
     /// <param name="maxEntityId">The maximum allowed entity ID.</param>
     /// <param name="byteSize">The entity ID byte size for error message.</param>
@@ -173,16 +149,12 @@ internal static class ThrowHelper
         => throw new InvalidOperationException(
             $"Invalid EntityIdByteSize: {entityIdByteSize}. Supported values are 1, 2, and 4.");
 
-    /// <summary>
-    /// Throws when attempting to free a chunk that is currently borrowed.
-    /// </summary>
+    /// <summary>Throws when attempting to free a chunk that is currently borrowed.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void ThrowChunkInUse(ChunkHandle handle)
         => throw new InvalidOperationException($"Cannot free chunk while borrowed: {handle}");
 
-    /// <summary>
-    /// Throws when ChunkManager capacity is exceeded.
-    /// </summary>
+    /// <summary>Throws when ChunkManager capacity is exceeded.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void ThrowChunkManagerCapacityExceeded(int maxMetaBlocks, int entriesPerMetaBlock)
         => throw new InvalidOperationException($"ChunkManager capacity exceeded (max {maxMetaBlocks * entriesPerMetaBlock} chunks)");

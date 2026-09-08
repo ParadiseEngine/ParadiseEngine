@@ -2,20 +2,8 @@ using TUnit.Assertions.Enums;
 
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// The invariant chunk-level tag skipping would rest on:
-///
-/// <b>a chunk's tag mask covers every tag carried by the entities in that chunk.</b>
-///
-/// It only has to be a SUPERSET — the mask is sticky, so bits linger after a tag is removed, and an
-/// extra bit merely costs a scan. A MISSING bit is the dangerous direction: a consumer that skips a
-/// chunk on a clear bit would step over entities that really do carry the tag, and they would
-/// simply stop appearing in queries.
-///
-/// Nothing reads the mask for filtering yet, so a violation is currently invisible — the row filter
-/// still inspects every entity and gets the right answer. These tests pin the invariant NOW,
-/// before anything depends on it, and each one names the operation that breaks it.
-/// </summary>
+/// <summary>Every chunk mask covers all tags carried by its entities after each structural operation.</summary>
+/// <remarks>Extra sticky bits only cost scans; missing bits would hide matching entities.</remarks>
 public sealed class ChunkMaskInvariantTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

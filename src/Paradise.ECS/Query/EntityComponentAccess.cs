@@ -1,8 +1,6 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// Non-generic component access operations shared by world implementations.
-/// </summary>
+/// <summary>Non-generic component access operations shared by world implementations.</summary>
 public interface IEntityComponentAccess
 {
     /// <summary>Gets a reference to a component on an entity.</summary>
@@ -18,9 +16,7 @@ public interface IEntityComponentAccess
     bool TrySetComponent<T>(Entity entity, T value) where T : unmanaged, IComponent;
 }
 
-/// <summary>
-/// Read-only component access for an arbitrary entity handle.
-/// </summary>
+/// <summary>Read-only component access for an arbitrary entity handle.</summary>
 /// <typeparam name="T">The component type.</typeparam>
 public readonly struct EntityComponentReader<T>
     where T : unmanaged, IComponent
@@ -40,9 +36,7 @@ public readonly struct EntityComponentReader<T>
     public bool TryGet(Entity entity, out T value) => _world.TryGetComponent(entity, out value);
 }
 
-/// <summary>
-/// Writable component access for an arbitrary entity handle.
-/// </summary>
+/// <summary>Writable component access for an arbitrary entity handle.</summary>
 /// <typeparam name="T">The component type.</typeparam>
 public readonly struct EntityComponentWriter<T>
     where T : unmanaged, IComponent

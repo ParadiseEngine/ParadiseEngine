@@ -1,6 +1,7 @@
 namespace Paradise.Assets.Documents;
 
-/// <summary>Schema-free handling of the game's own TOML: parse-check and canonical rewrite. Comments do not survive; the committed source keeps them because build output is a separate tree.</summary>
+/// <summary>Validates and canonically rewrites schema-free TOML into a separate build tree.</summary>
+/// <remarks>Build output omits comments; authored source retains them.</remarks>
 public static class ConfigDocument
 {
     public static bool TryCanonicalize(string toml, out string canonical, out string error)

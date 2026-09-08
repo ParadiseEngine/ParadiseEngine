@@ -18,8 +18,7 @@
     <!-- XAML, textures and fonts come out of a mount the host chooses, not off a host path. -->
     <PackageReference Include="Zio" />
     <PackageReference Include="WebGPUSharp" />
-    <!-- The view half (NoesisViewCore) implements IUiInput, so the package that was
-         Paradise.Ui.Noesis.Host folded in here brings its one dependency with it. -->
+    <!-- NoesisViewCore implements the shared UI input contract. -->
     <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
   </ItemGroup>
 </Project>

@@ -15,8 +15,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>rendering;webgpu;webassembly;wasm;browser;graphics;game-dev</PackageTags>
     <IsTrimmable>true</IsTrimmable>
-    <!-- Razor SDK so wwwroot/paradise-webgpu.js ships as a static web asset: consuming apps serve
-         it from _content/Paradise.Rendering.Browser/ and JSHost.ImportAsync loads it from there. -->
+    <!-- Razor packages the shim at _content/Paradise.Rendering.Browser/. -->
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 

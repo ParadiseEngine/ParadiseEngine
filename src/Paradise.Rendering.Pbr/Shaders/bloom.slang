@@ -1,11 +1,6 @@
-// bloom.slang — physically-plausible bloom on the linear-HDR scene target (the "Next-gen post
-// processing in Call of Duty: Advanced Warfare" progressive dual-filter). Three fullscreen passes
-// share one bind-group layout (source texture + sampler + params):
-//   brightPass  — soft-knee threshold of the HDR scene → bloom mip 0 (half res)
-//   downsample  — 13-tap filtered box downsample, mip i → mip i+1
-//   upsample    — 9-tap tent upsample, mip i+1 → mip i, ADDITIVE blend (accumulates the chain)
-// The filter kernels read the SOURCE texel size from textureDimensions, so no per-level uniform is
-// needed. Output is linear HDR; composite.slang adds it back scaled by intensity.
+// Progressive dual-filter bloom on linear HDR (Call of Duty: Advanced Warfare). Shared bindings
+// drive a soft-knee bright pass, 13-tap downsample and additive 9-tap upsample. Source dimensions
+// supply texel size; composite scales the result by intensity.
 
 struct BloomParams
 {

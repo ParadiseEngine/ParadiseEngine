@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for Query and QueryBuilder.
-/// </summary>
+/// <summary>Tests for Query and QueryBuilder.</summary>
 public sealed class QueryTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

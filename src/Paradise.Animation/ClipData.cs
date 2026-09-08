@@ -12,13 +12,16 @@ public enum ChannelPath : byte
     Scale = 2,
 }
 
-/// <summary>One keyframe track as a GLB carries it: a joint, a path, interpolation, and packed keys — 3 floats per key for translation and scale, 4 (XYZW) for rotation. <c>Step</c> is STEP interpolation, else LINEAR; CUBICSPLINE is rejected at extraction.</summary>
+/// <summary>Stores one GLB channel's joint, path, interpolation and packed keys.</summary>
+/// <remarks>Translation and scale use three floats per key; rotation uses four (XYZW).
+/// Step selects STEP interpolation; otherwise LINEAR applies. Extraction rejects CUBICSPLINE.</remarks>
 public readonly record struct ClipChannelData(int Joint, ChannelPath Path, bool Step, float[] Times, float[] Values)
 {
     public int FloatsPerKey => Path == ChannelPath.Rotation ? 4 : 3;
 }
 
-/// <summary>A clip as cooked from a GLB, channels addressing the joints of the skeleton it was cooked with: the managed shape <see cref="ClipFormat"/> builds a <see cref="ClipBlob"/> from, and what <see cref="Offline.ClipConverter"/> turns into a raw animation.</summary>
+/// <summary>Stores cooked GLB channels indexed by skeleton joint.</summary>
+/// <remarks>ClipFormat packs these into a ClipBlob; ClipConverter produces a raw animation.</remarks>
 public sealed record ClipData(string Name, IReadOnlyList<ClipChannelData> Channels)
 {
     public float Duration
@@ -50,11 +53,8 @@ public struct ClipChannelBlob
     public readonly int FloatsPerKey => Path == ChannelPath.Rotation ? 4 : 3;
 }
 
-/// <summary>
-/// A <see cref="ClipData"/> as one blob: the source-fidelity keys of a clip before ozz
-/// compression, deterministic for a given source so its bytes are what the pipeline fingerprints
-/// a clip by (name excluded) and finds it again by after the DCC renamed it.
-/// </summary>
+/// <summary>Stores source clip keys before ozz compression.</summary>
+/// <remarks>Deterministic bytes, excluding the name, let the pipeline fingerprint and find renamed clips.</remarks>
 public struct ClipBlob
 {
     public const uint ExpectedMagic = 0x4D4E4150;   // "PANM"

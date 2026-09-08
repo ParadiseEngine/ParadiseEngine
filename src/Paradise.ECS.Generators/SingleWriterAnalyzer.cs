@@ -7,19 +7,12 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Paradise.ECS.Generators;
 
-/// <summary>
-/// Enforces the <c>[SingleWriter]</c> contract (PECS3008): a single-writer component may have
-/// WRITE access from at most one system per compilation. A component is single-writer when it
-/// carries <c>[SingleWriter]</c> itself, or when its declaring ASSEMBLY carries
-/// <c>[assembly: SingleWriter]</c> (which covers every <c>[Component]</c> in that assembly).
-/// Write access = a non-readonly <c>ref T</c> field (IEntitySystem inline mode), a
-/// <c>Span&lt;T&gt;</c> field (IChunkSystem inline mode), or a queryable composition field
-/// (Data/ChunkData/Segments - every non-read-only <c>With&lt;T&gt;</c> of the queryable counts
-/// as a write), or an <c>EntityComponentWriter&lt;T&gt;</c> field. Read access
-/// (<c>ref readonly T</c>, <c>ReadOnlySpan&lt;T&gt;</c>, <c>EntityComponentReader&lt;T&gt;</c>,
-/// <c>IsReadOnly = true</c>) is unrestricted. Writes from plain managed code are outside the
-/// system-injection model and are not tracked.
-/// </summary>
+/// <summary>Enforces one system writer per single-writer component in a compilation (PECS3008).</summary>
+/// <remarks>
+/// A component or assembly may declare <c>[SingleWriter]</c>. Writes include mutable refs, spans,
+/// queryable compositions, and <c>EntityComponentWriter&lt;T&gt;</c>; read-only access is unrestricted.
+/// Managed writes outside system injection are not tracked.
+/// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
 {

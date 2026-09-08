@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ChunkArray{T}"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ChunkArray{T}"/>.</summary>
 public sealed class ChunkArrayTests
 {
     private const int BlockByteSize = 16384; // 16KB blocks

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="HashedKey{T}"/>.
-/// </summary>
+/// <summary>Tests for <see cref="HashedKey{T}"/>.</summary>
 public sealed class HashedKeyTests
 {
     [Test]

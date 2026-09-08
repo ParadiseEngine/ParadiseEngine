@@ -1,13 +1,6 @@
-// pbr.slang — the built-in PBR program's ENTRY POINTS, and nothing else. Every helper, the
-// vertex transform, and the whole lighting path live in Common/pbrCore.slang so that game
-// shaders can `#include` and extend them (custom displacement, custom surface resolution)
-// without touching engine files — see PbrRenderer.RegisterMaterialProgram.
-//
-// Two properly-authored fragment entry points instead of runtime WGSL surgery:
-//   fragmentMain     — linear output, for *UnormSrgb swapchain formats (hardware encodes)
-//   fragmentMainSrgb — applies the sRGB OETF in-shader, for non-sRGB-only surfaces
-// Exactly one of the two is picked per pipeline based on the surface format — never both, so
-// the image is never double-encoded.
+// Built-in PBR entry points over Common/pbrCore.slang. fragmentMain returns linear color for sRGB
+// targets; fragmentMainSrgb applies the OETF for non-sRGB targets. Pick one encoding path per
+// pipeline.
 
 #include "Common/pbrCore.slang"
 

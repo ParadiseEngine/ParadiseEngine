@@ -10,9 +10,8 @@ public interface IBvhLeafIntersector
     bool Intersect(int slot, Vector3 origin, Vector3 direction, ref float tMax);
 }
 
-/// <summary>The CPU reference walk over a <see cref="WideBvh"/>: the same node decode, the same
-/// slab test and the same closest-hit discipline as the shader. It exists to prove the builder
-/// and to give tests an oracle; the renderer never runs it per frame.</summary>
+/// <summary>Provides the CPU oracle for the shader's BVH decode, slab test and closest-hit traversal.</summary>
+/// <remarks>Used to verify the builder, outside the renderer's frame loop.</remarks>
 public static class BvhTraversal
 {
     /// <summary>Entries the walk's stack holds — the same as the shader's. A hierarchy needs

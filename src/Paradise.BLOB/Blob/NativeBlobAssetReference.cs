@@ -3,12 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BLOB;
 
-/// <summary>
-/// Blob storage in unmanaged memory (<see cref="NativeMemory.AlignedAlloc"/>): unlike
-/// <see cref="ManagedBlobAssetReference"/> there is no pinned GC-heap array — no GC pressure for
-/// large blobs and no pinning fragmentation. Dispose frees the allocation; the finalizer is the
-/// backstop if the owner never does.
-/// </summary>
+/// <summary>Owns blob storage allocated by NativeMemory.AlignedAlloc.</summary>
+/// <remarks>Dispose frees the allocation; a finalizer handles abandoned owners without GC-heap pinning.</remarks>
 public unsafe class NativeBlobAssetReference : IDisposable
 {
     private void* _ptr;

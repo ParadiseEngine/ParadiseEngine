@@ -35,9 +35,7 @@ namespace Paradise.ECS;
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class TagAttribute : Attribute
 {
-    /// <summary>
-    /// Gets or sets the manual tag ID. When set, this ID is used instead of auto-assignment.
-    /// </summary>
+    /// <summary>Gets or sets the manual tag ID. When set, this ID is used instead of auto-assignment.</summary>
     /// <remarks>
     /// Use this to ensure a tag always has the same ID regardless of other tags
     /// in the project. Auto-assigned IDs will skip over manually assigned values.

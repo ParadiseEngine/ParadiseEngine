@@ -2,20 +2,10 @@ using System.Runtime.Versioning;
 
 namespace Paradise.Cli;
 
-/// <summary>
-/// Constructs a tray if a desktop session can show one, and a no-op otherwise.
-/// </summary>
+/// <summary>Creates a native watch tray when available, otherwise a no-op.</summary>
 /// <remarks>
-/// <para>
-/// Two native renderings, one factory: Win32 <c>Shell_NotifyIcon</c> on Windows (its own STA
-/// pump, because a console thread has no message loop) and AppKit <c>NSStatusItem</c> on
-/// macOS (AppKit owns the main thread; see <see cref="IWatchTray.Run"/>). Neither is a GUI
-/// framework. Linux has no native implementation yet, and CI must keep today's console loop.
-/// </para>
-/// <para>
-/// The tray is strictly additive. Headless, CI, <c>--no-tray</c>, Linux, and a native startup
-/// failure take the no-op path, and <c>watch</c> then behaves as it did before the icon existed.
-/// </para>
+/// Windows uses a dedicated STA message pump; macOS AppKit owns the main thread.
+/// Linux, headless sessions, <c>--no-tray</c> and native startup failures use the console loop.
 /// </remarks>
 internal static class WatchTray
 {

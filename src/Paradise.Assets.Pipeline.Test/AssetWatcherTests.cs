@@ -37,9 +37,7 @@ public class AssetWatcherTests
         fileSystem.WriteAllBytes(path, bytes);
     }
 
-    /// <summary>
-    /// The loop guard: the maintainer's own sidecar writes must not come back as work.
-    /// </summary>
+    /// <summary>The loop guard: the maintainer's own sidecar writes must not come back as work.</summary>
     /// <remarks>
     /// A mint fires a Created and a hash refresh fires a Changed. If either were queued, draining
     /// it would write again and the watcher would run forever on one edit. Sidecar deletes are

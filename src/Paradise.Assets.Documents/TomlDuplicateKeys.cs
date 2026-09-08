@@ -2,20 +2,11 @@ using Tomlyn.Syntax;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// Refuses a key defined twice, as TOML 1.0 and the Python mirror's <c>tomllib</c> do (issue #198).
-/// </summary>
+/// <summary>Rejects duplicate keys as required by TOML 1.0 and Python's <c>tomllib</c>.</summary>
 /// <remarks>
-/// Not Tomlyn's own <c>validate: true</c> pass: that one stops advancing the array-of-tables index
-/// after a <c>[a.b.sub]</c> header, so the NEXT <c>[[a.b]]</c> element's plain key <c>sub</c> is
-/// reported as a redefinition of the earlier element's subtable and a valid document is refused
-/// (a light's <c>[objects.components.Value]</c> colour followed by a direction's
-/// <c>Value = [...]</c> was the shape that hit; Tomlyn 2.10.1, issue #219). This walk resolves
-/// every path through the current element of each array of tables it crosses.
-/// <para>
-/// The tree is keyed by exact segment, never by a joined string: a quoted <c>"a.b"</c> is one key
-/// and <c>a.b</c> is two, and neither may alias the other or an array element.
-/// </para>
+/// Tomlyn 2.10.1 validation misidentifies keys after nested array-table headers (issue #219).
+/// This walk tracks each array's current element and exact path segments, keeping a quoted
+/// <c>"a.b"</c> distinct from the dotted path <c>a.b</c>.
 /// </remarks>
 internal static class TomlDuplicateKeys
 {
@@ -127,9 +118,8 @@ internal static class TomlDuplicateKeys
         }
 
         var name = segments[^1];
-        if (node.Children.ContainsKey(name)) return Redefined([.. tablePath, .. segments], keyValue);
         var value = new Node(Kind.Value);
-        node.Children[name] = value;
+        if (!node.Children.TryAdd(name, value)) return Redefined([.. tablePath, .. segments], keyValue);
         return DefineValue(value, [.. tablePath, .. segments], keyValue.Value);
     }
 

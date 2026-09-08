@@ -192,7 +192,7 @@ public class PrefabResolverTests
         await Assert.That(result.Document.Objects[1].Parent).IsEqualTo(Guid.Parse(ChildLocal));
     }
 
-    // ---- multi-object prefabs ------------------------------------------------------------
+    // multi-object prefabs
 
     [Test]
     public async Task children_follow_their_instance_in_prefab_document_order()
@@ -313,7 +313,7 @@ public class PrefabResolverTests
         await Assert.That(result.Errors[0].Message).Contains("does not contain");
     }
 
-    // ---- prefab validation ---------------------------------------------------------------
+    // prefab validation
 
     [Test]
     public async Task a_prefab_with_two_roots_is_refused()

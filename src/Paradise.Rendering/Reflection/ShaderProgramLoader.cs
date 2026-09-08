@@ -6,14 +6,10 @@ using System.Text.Json;
 
 namespace Paradise.Rendering;
 
-/// <summary>Loads a build-time Slang-compiled shader pair from an assembly's embedded resources
-/// (<c>{prefix}.wgsl</c> + <c>{prefix}.reflection.json</c>) and returns a
-/// <see cref="ShaderProgramDesc"/> with vertex layout populated from reflection — never
-/// hand-coded. The transformation keeps the engine-canonical record shape stable while the loader
-/// absorbs any Slang reflection-JSON schema drift.</summary>
-/// <remarks>Backend-agnostic on purpose: the WGSL blob and its reflection record are produced by
-/// <c>Slang.targets</c> at build time and mean the same thing to every rendering backend, so the
-/// loader lives in this contract package rather than inside one of them.</remarks>
+/// <summary>Loads embedded WGSL and Slang reflection into a backend-independent shader
+/// program.</summary>
+/// <remarks>The loader derives vertex layouts and normalizes reflection schema details;
+/// Slang.targets produces the resources at build time.</remarks>
 public static class ShaderProgramLoader
 {
     // Well-known shader parameter names whose bind-group layout must be forced to the shadow-map
@@ -76,11 +72,8 @@ public static class ShaderProgramLoader
             if (!string.Equals(ep.Stage, "vertex", StringComparison.Ordinal)) continue;
             byEntryPoint[ep.Name] = ExtractVertexBuffers([ep]);
         }
-        // Visibility follows the file's stage mix (slangc lists ALL globals per entry point, so
-        // per-binding stage attribution is unavailable): compute-only files get Compute, raster
-        // files keep the historical Vertex|Fragment (byte-identical layouts to before compute
-        // existed), and mixed files get the union. RW entries are special-cased inside
-        // BuildLayout — write-access storage is never legal with Vertex visibility.
+        // Slang lists globals for every entry point, so visibility uses the file's stage union.
+        // Writable storage excludes Vertex in BuildLayout.
         var hasCompute = false;
         var hasRaster = false;
         foreach (var ep in entryPoints)
@@ -140,19 +133,11 @@ public static class ShaderProgramLoader
             var type = p.Type ?? throw new InvalidOperationException(
                 $"Global shader parameter '{p.Name ?? "<unnamed>"}' has no type node.");
 
-            // slangc reflection cannot distinguish a shadow-map depth texture / comparison sampler
-            // from ordinary ones (SamplerComparisonState reflects as plain "samplerState", and the
-            // depth Texture2DArray<float> as a plain "texture2DArray float"). The generated WGSL,
-            // however, declares them as texture_depth_2d_array / sampler_comparison (the shadowTexture
-            // type is patched at build time — see Slang.targets). The bind-group LAYOUT must match the
-            // shader, so override by the well-known names.
-            // Write-access storage may never carry Vertex visibility (WebGPU validation error);
-            // give it Compute when the file has a compute entry, Fragment otherwise (fragment
-            // storage writes are legal for write-only access). DELIBERATE CARVE-OUT from the
-            // defaultVisibility union: in a mixed compute+raster file an RW resource gets
-            // Compute-ONLY visibility, so a fragment stage writing the same storage resource a
-            // compute kernel uses would be rejected at pipeline creation — keep such a shader in
-            // its own file (or widen this to Compute|Fragment when the first real case lands).
+            // Override known depth-texture/comparison-sampler names because Slang reflection omits
+            // that distinction. Layouts must match the WGSL types patched by Slang.targets.
+            // Writable storage cannot use Vertex visibility; mixed files choose Compute only. Put
+            // fragment-write storage in a separate file until a shared Compute|Fragment case is
+            // supported.
             var writeVisibility = hasCompute ? ShaderStage.Compute : ShaderStage.Fragment;
             var isRw = type.Access is "write" or "readWrite";
             var entry = type.Kind switch
@@ -181,13 +166,8 @@ public static class ShaderProgramLoader
                 // RWStructuredBuffer<T> → WGSL var<storage, read_write>.
                 "resource" when type.BaseShape == "structuredBuffer" && isRw => new BindGroupLayoutEntryDesc(
                     binding.Index, writeVisibility, BindingResourceType.StorageBuffer),
-                // StructuredBuffer<T> → WGSL var<storage, read>. Default visibility like every
-                // other over-visible entry: read-only storage is legal in the vertex stage (only
-                // read_write is prohibited there), and the joint-palette buffer is READ from it.
-                // This was Fragment-only once, sized to the Forward+ cluster masks — and a
-                // vertex-stage reader then failed createRenderPipeline, which Dawn reports only
-                // through the async error callback: the pipeline just silently dropped every
-                // frame that used it.
+                // Read-only storage uses the file's visibility union, including Vertex for joint
+                // palettes. Fragment-only visibility would reject skinned pipelines asynchronously.
                 "resource" when type.BaseShape == "structuredBuffer" => new BindGroupLayoutEntryDesc(
                     binding.Index, defaultVisibility, BindingResourceType.ReadonlyStorageBuffer),
                 "samplerState" when p.Name == ShadowSamplerName => new BindGroupLayoutEntryDesc(

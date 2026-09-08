@@ -321,7 +321,7 @@ internal sealed class GlbTestBuilder
         stream.Write(bytes);
     }
 
-    // -------- canned shapes --------
+    // canned shapes
 
     /// <summary>A unit quad (4 verts, 2 triangles) with all four attributes, tightly packed in
     /// separate buffer views. The baseline happy-path asset.</summary>

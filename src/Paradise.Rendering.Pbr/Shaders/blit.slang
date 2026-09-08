@@ -1,11 +1,5 @@
-// blit.slang — the scene-color capture copy: after the opaque bucket (and sky) land in the HDR
-// target, this blits them into the sceneColor texture that blend materials sample for
-// screen-space refraction (the engine's screen_texture / _CameraOpaqueTexture / SceneColor
-// analog) — and packs the OPAQUE SCENE DEPTH into the otherwise-unused alpha channel, the
-// rejection signal depth-aware refraction needs: a refracted sample whose captured depth is
-// CLOSER than the water fragment belongs to geometry in front of / above the surface and must
-// not be smeared into the water. Deliberately not the composite shader: composite tonemaps;
-// capture must stay LINEAR HDR.
+// Copies opaque/sky linear HDR color for refraction, packing opaque device depth into alpha. Reject
+// refracted samples nearer than the surface. Tone mapping belongs to composite.slang.
 
 [[vk::binding(0, 0)]]
 Texture2D<float4> sourceTexture;

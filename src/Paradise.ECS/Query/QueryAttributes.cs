@@ -27,9 +27,7 @@ namespace Paradise.ECS;
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class QueryableAttribute : Attribute
 {
-    /// <summary>
-    /// Gets or sets the manual queryable ID. When set, this ID is used instead of auto-assignment.
-    /// </summary>
+    /// <summary>Gets or sets the manual queryable ID. When set, this ID is used instead of auto-assignment.</summary>
     /// <remarks>
     /// Use this to ensure a queryable always has the same ID regardless of other queryables
     /// in the project. Auto-assigned IDs will skip over manually assigned values.
@@ -80,9 +78,7 @@ public sealed class QueryableAttribute : Attribute
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true, Inherited = false)]
 public sealed class WithAttribute<T> : Attribute where T : unmanaged, IComponent
 {
-    /// <summary>
-    /// Gets or sets a custom property name. Defaults to the component type name.
-    /// </summary>
+    /// <summary>Gets or sets a custom property name. Defaults to the component type name.</summary>
     public string? Name { get; set; }
 
     /// <summary>
@@ -164,9 +160,7 @@ public sealed class WithAnyAttribute<T> : Attribute where T : unmanaged, ICompon
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true, Inherited = false)]
 public sealed class OptionalAttribute<T> : Attribute where T : unmanaged, IComponent
 {
-    /// <summary>
-    /// Gets or sets a custom property name. Defaults to the component type name.
-    /// </summary>
+    /// <summary>Gets or sets a custom property name. Defaults to the component type name.</summary>
     public string? Name { get; set; }
 
     /// <summary>

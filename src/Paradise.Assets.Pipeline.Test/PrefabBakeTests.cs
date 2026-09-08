@@ -239,9 +239,7 @@ public class PrefabBakeTests
         await Assert.That(payload.GetProperty("Mesh").GetString()).IsEqualTo("models/crate.glb");
     }
 
-    /// <summary>
-    /// A payload table inside an array is data, not a reference, and reaches the contract whole.
-    /// </summary>
+    /// <summary>A payload table inside an array is data, not a reference, and reaches the contract whole.</summary>
     /// <remarks>
     /// The other half of the rule <c>ProjectVerifier.Walk</c> applies, and the two must be pinned
     /// together: the reader wraps every table inside an array as inline, so a bake matching on the

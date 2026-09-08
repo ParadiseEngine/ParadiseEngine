@@ -8,9 +8,7 @@ public class PrefabCheckTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");
 
-    /// <summary>
-    /// Valid but not canonical: spacing a machine write never produces.
-    /// </summary>
+    /// <summary>Valid but not canonical: spacing a machine write never produces.</summary>
     /// <remarks>
     /// Note what is NOT usable here any more — reordering the payload keys. A component's fields
     /// sit flat and their order comes from the document, because payload order is data the writer

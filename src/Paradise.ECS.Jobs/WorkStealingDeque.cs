@@ -11,18 +11,14 @@ internal sealed class WorkStealingDeque
     private int _top;
     private int _bottom;
 
-    /// <summary>
-    /// Initializes a new deque with the specified initial capacity.
-    /// </summary>
+    /// <summary>Initializes a new deque with the specified initial capacity.</summary>
     /// <param name="capacity">Initial capacity (must be power of 2).</param>
     public WorkStealingDeque(int capacity = 64)
     {
         _buffer = new int[RoundUpPowerOf2(capacity)];
     }
 
-    /// <summary>
-    /// Gets the current number of items in the deque (approximate, for diagnostics).
-    /// </summary>
+    /// <summary>The current number of items in the deque (approximate, for diagnostics).</summary>
     public int Count => Math.Max(0, _bottom - _top);
 
     /// <summary>

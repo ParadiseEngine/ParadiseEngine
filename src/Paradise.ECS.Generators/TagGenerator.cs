@@ -18,7 +18,6 @@ public class TagGenerator : IIncrementalGenerator
 {
     private const string TagAttributeFullName = "Paradise.ECS.TagAttribute";
     private const string ComponentAttributeFullName = "Paradise.ECS.ComponentAttribute";
-    private const string RegistryNamespaceAttributeFullName = "Paradise.ECS.ComponentRegistryNamespaceAttribute";
     private const int DefaultMaxTagId = (1 << 11) - 1;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -54,15 +53,7 @@ public class TagGenerator : IIncrementalGenerator
 
     private static TagGeneratorConfig ExtractConfig(Compilation compilation, AnalyzerConfigOptionsProvider options)
     {
-        // Root namespace: attribute > build property > default
-        var nsAttr = compilation.Assembly.GetAttributes()
-            .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == RegistryNamespaceAttributeFullName);
-        var rootNamespace = nsAttr?.ConstructorArguments.FirstOrDefault().Value as string;
-        if (rootNamespace == null)
-        {
-            options.GlobalOptions.TryGetValue("build_property.RootNamespace", out rootNamespace);
-            rootNamespace ??= "Paradise.ECS";
-        }
+        var rootNamespace = GeneratorUtilities.GetRootNamespace(compilation, options);
 
         return new TagGeneratorConfig(rootNamespace);
     }
@@ -73,7 +64,6 @@ public class TagGenerator : IIncrementalGenerator
         ImmutableArray<TypeInfo> components,
         TagGeneratorConfig config)
     {
-        // Process and validate tags
         var (validTags, tagMaskType) = GeneratorUtilities.ProcessTypes(
             context, tags, DefaultMaxTagId,
             DiagnosticDescriptors.TagNotUnmanaged,
@@ -85,24 +75,18 @@ public class TagGenerator : IIncrementalGenerator
         if (validTags.Count == 0)
             return;
 
-        // Generate tag partial structs
         foreach (var tag in validTags)
             GenerateTagPartialStruct(context, tag);
 
-        // Generate TagRegistry
         GenerateTagRegistry(context, validTags, config.RootNamespace);
 
-        // Generate TagAliases
         GenerateTagAliases(context, validTags.Count, tagMaskType);
 
-        // Check for user-defined EntityTags in the root namespace
         var expectedEntityTagsFqn = $"{config.RootNamespace}.EntityTags";
         var userDefinedEntityTags = components.Any(c => c.FullyQualifiedName == expectedEntityTagsFqn);
 
-        // Generate EntityTags component (partial if user-defined, complete otherwise)
         GenerateEntityTagsComponent(context, config.RootNamespace, tagMaskType, userDefinedEntityTags);
 
-        // Generate AddTag extension using project-specific EntityTags and TagMask
         GenerateAddTagExtension(context, config.RootNamespace, tagMaskType);
     }
 

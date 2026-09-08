@@ -2,13 +2,9 @@ using Microsoft.Coyote.SystematicTesting;
 
 namespace Paradise.Ui.ImGui.CoyoteTest;
 
-/// <summary>
-/// Entry point for the ImGui texture-op queue's Coyote tests. Run with: <c>dotnet run [iterations]</c>.
-///
-/// Not a <c>dotnet test</c> project on purpose — see the csproj. For real systematic exploration
-/// build Release first so the <c>coyote rewrite</c> target runs; without rewriting these still
-/// execute, but as ordinary concurrent code rather than scheduled interleavings.
-/// </summary>
+/// <summary>Runs the ImGui Coyote tests with an optional iteration count.</summary>
+/// <remarks>Build and run Release to enable Coyote rewriting; dotnet test does not run this
+/// project.</remarks>
 public static class Program
 {
     public static int Main(string[] args)

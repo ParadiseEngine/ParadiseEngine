@@ -6,14 +6,11 @@ using Tomlyn;
 using Tomlyn.Serialization;
 using Tomlyn.Model;
 
-// The namespace is Paradise.Features, NOT Paradise.Features.Toml, even though the assembly is:
-// a namespace ending in `Toml` is in scope here and then beats the imported `Tomlyn.Toml` type,
-// which is the same trap that renamed Paradise.Configuration. It also reads better — a host with
-// `using Paradise.Features;` gets the reader with the model.
+// A Paradise.Features.Toml namespace would shadow the imported Tomlyn.Toml type.
 namespace Paradise.Features;
 
-/// <summary>Reads <c>engine.toml</c> into an <see cref="EngineConfiguration"/>.
-///
+/// <summary>Reads engine.toml into a format-neutral EngineConfiguration.</summary>
+/// <remarks>
 /// <code>
 /// # engine.toml
 /// [[features]]
@@ -27,23 +24,10 @@ namespace Paradise.Features;
 /// windMetresPerSecond = 3.5
 /// </code>
 ///
-/// <para><b>One entry per feature, holding everything about it.</b> This is the shape an authored
-/// component already has in a <c>*.prefab</c> — reserved keys and a payload
-/// (<c>PrefabComponent.ReservedKeys</c>) — and it is that shape for the same reasons. The name is
-/// a VALUE, not a key, so a dotted name needs no quoting rule and cannot be confused with table
-/// nesting; and the switch sits with the settings, which is where a person looks when they want to
-/// know what a feature is doing.</para>
-///
-/// <para><b><see cref="ReservedKeys"/> are the reader's; every other key is a setting.</b> That is
-/// the cost of the shape, and the same cost a prefab component pays: a game whose settings want a
-/// key called <c>name</c> cannot have one, and a boolean called <c>enabled</c> is read as the
-/// switch. <c>enabled</c> is optional — an entry may configure a feature without saying anything
-/// about whether it runs, and a feature that ships on then needs only its settings.</para>
-///
-/// <para><b>It reads text, not a path.</b> Every other reader in the engine takes a Zio
-/// <c>IFileSystem</c>; this one takes the stream, because a host that reads its configuration
-/// before it has mounted anything is the normal case — the mount is a decision made one layer up,
-/// and it already has the file open.</para></summary>
+/// <para>Each feature has one table: name identifies it, optional enabled controls its switch,
+/// and all other keys are settings. Names are values so dotted names cannot become nested tables.</para>
+/// <para>Hosts open the configuration before calling this reader; no filesystem mount is required.</para>
+/// </remarks>
 public static class TomlEngineConfiguration
 {
     /// <summary>The name a host looks for by convention, next to the game's other data.</summary>
@@ -71,9 +55,7 @@ public static class TomlEngineConfiguration
     public static EngineConfiguration Read(string toml)
     {
         ArgumentNullException.ThrowIfNull(toml);
-        // Parsed to syntax first, then bound through a SOURCE-GENERATED context, the way every
-        // other TOML reader here does it: TomlSerializer's reflection path would take NativeAOT
-        // and trimming with it.
+        // Source-generated binding keeps the reader compatible with AOT and trimming.
         var syntax = Tomlyn.Parsing.SyntaxParser.Parse(toml, sourceName: null, validate: false);
         if (syntax.HasErrors)
         {
@@ -121,8 +103,6 @@ public static class TomlEngineConfiguration
             var name = ReadName(entry);
             if (!seen.Add(name))
             {
-                // Last-wins would drop the first entry in silence, and two blocks for one feature
-                // is a copy-paste rather than an intention worth guessing at.
                 throw new FormatException($"'{name}' has more than one [[{FeaturesKey}]] entry.");
             }
 
@@ -164,11 +144,7 @@ public static class TomlEngineConfiguration
                 $"A [[{FeaturesKey}]] entry has a {NameKey} that is {Describe(name)}; it is a string.");
     }
 
-    /// <summary>The entry's own keys, minus the reserved ones, back as the TOML they were written
-    /// in — so the game's context binds what the file says and nothing is converted on the way
-    /// through. Null when the entry configures nothing, so a feature carrying only a switch keeps
-    /// the shared <see cref="FeatureSettings.None"/> rather than an entry holding an empty
-    /// table.</summary>
+    /// <summary>Serializes non-reserved keys, or returns null when no settings are present.</summary>
     private static FeatureSettings? SettingsOf(string name, TomlTable entry)
     {
         var configured = new TomlTable();
@@ -194,8 +170,7 @@ public static class TomlEngineConfiguration
     };
 }
 
-/// <summary>Untyped binding, source-generated: the document is a tree of tables and scalars, and
-/// what a feature's settings mean is the game's business, not this reader's. Top-level because the
-/// generator only emits for a type it can see at namespace scope.</summary>
+/// <summary>Source-generated binding for tables and scalars.</summary>
+/// <remarks>The generator requires namespace scope.</remarks>
 [TomlSerializable(typeof(TomlTable))]
 internal sealed partial class UntypedToml : TomlSerializerContext;

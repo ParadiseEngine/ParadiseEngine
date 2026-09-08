@@ -1,11 +1,7 @@
 namespace Paradise.Cli;
 
-/// <summary>Where the <c>dotnet</c> muxer is: PATH, then <c>DOTNET_ROOT</c>, then the installer's directories.</summary>
-/// <remarks>
-/// Not <see cref="Environment.ProcessPath"/>: under <c>dotnet paradise.dll</c> that IS the muxer,
-/// but under the tool's apphost it is <c>paradise</c> itself, and a locator that is right in one
-/// spelling and wrong in the other is worse than one that looks.
-/// </remarks>
+/// <summary>Finds <c>dotnet</c> through PATH, <c>DOTNET_ROOT</c> and installer directories.</summary>
+/// <remarks><see cref="Environment.ProcessPath"/> may name the CLI apphost rather than the dotnet muxer.</remarks>
 internal static class DotnetLocator
 {
     private static readonly string s_executable = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";

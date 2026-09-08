@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-// ============================================================================
 // Test System Definitions
-// ============================================================================
 
 /// <summary>
 /// Test system: adds velocity to position per entity, using underscore-prefixed fields.
@@ -21,9 +19,7 @@ public ref partial struct TestUnderscoreFieldSystem : IEntitySystem
 }
 #pragma warning restore IDE1006
 
-/// <summary>
-/// Test system: adds velocity to position per entity.
-/// </summary>
+/// <summary>Test system: adds velocity to position per entity.</summary>
 public ref partial struct TestMovementSystem : IEntitySystem
 {
     public ref TestPosition Position;
@@ -35,9 +31,7 @@ public ref partial struct TestMovementSystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Test system: multiplies velocity Y by 2.
-/// </summary>
+/// <summary>Test system: multiplies velocity Y by 2.</summary>
 public ref partial struct TestGravitySystem : IEntitySystem
 {
     public ref TestVelocity Velocity;
@@ -48,9 +42,7 @@ public ref partial struct TestGravitySystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Test system: runs after TestMovementSystem.
-/// </summary>
+/// <summary>Test system: runs after TestMovementSystem.</summary>
 [After<TestMovementSystem>]
 public ref partial struct TestBoundsSystem : IEntitySystem
 {
@@ -67,9 +59,7 @@ public ref partial struct TestBoundsSystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Test chunk system: batch multiplies velocity Y by 2.
-/// </summary>
+/// <summary>Test chunk system: batch multiplies velocity Y by 2.</summary>
 public ref partial struct TestGravityBatchSystem : IChunkSystem
 {
     public Span<TestVelocity> Velocities;
@@ -81,9 +71,7 @@ public ref partial struct TestGravityBatchSystem : IChunkSystem
     }
 }
 
-/// <summary>
-/// Test system: only reads health (no writes).
-/// </summary>
+/// <summary>Test system: only reads health (no writes).</summary>
 public ref partial struct TestReadOnlyHealthSystem : IEntitySystem
 {
     public ref readonly TestHealth Health;
@@ -95,13 +83,9 @@ public ref partial struct TestReadOnlyHealthSystem : IEntitySystem
     }
 }
 
-// ============================================================================
 // ECB-Enabled System Definitions
-// ============================================================================
 
-/// <summary>
-/// Test entity system that spawns a new entity per processed entity using an ECB.
-/// </summary>
+/// <summary>Test entity system that spawns a new entity per processed entity using an ECB.</summary>
 public ref partial struct TestSpawnOnUpdateSystem : IEntitySystem
 {
     public ref readonly TestPosition Position;
@@ -182,9 +166,7 @@ public ref partial struct TestDoubleVelocityAfterSpawnSystem : IEntitySystem
     }
 }
 
-/// <summary>
-/// Test chunk system with an ECB field to verify chunk-mode ECB support.
-/// </summary>
+/// <summary>Test chunk system with an ECB field to verify chunk-mode ECB support.</summary>
 public ref partial struct TestChunkSpawnSystem : IChunkSystem
 {
     public ReadOnlySpan<TestVelocity> Velocities;
@@ -200,13 +182,9 @@ public ref partial struct TestChunkSpawnSystem : IChunkSystem
     }
 }
 
-// ============================================================================
 // Tests
-// ============================================================================
 
-/// <summary>
-/// Tests for the System API: scheduling, execution, and DAG ordering.
-/// </summary>
+/// <summary>Tests for the System API: scheduling, execution, and DAG ordering.</summary>
 public sealed class SystemTests : IDisposable
 {
     private readonly SharedWorld _sharedWorld;
@@ -574,7 +552,6 @@ public sealed class SystemTests : IDisposable
 
         int countBefore = _world.EntityCount;
 
-        // Act
         schedule.Run(_world);
 
         // Assert: two new entities spawned (one per original entity)

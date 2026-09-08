@@ -1,10 +1,6 @@
-// procedural.slang — the per-kind procedural material recipes (lava, swirl, …) evaluated from
-// the noise primitives.
-//
-// Mirrors data/ui-adjacent Godot GDShader (kept in lockstep by a recipe-parity test). Object-space
-// p (scaled by procParams.y), time t (elapsed·flowSpeed). Returns albedo/emissive/roughness/metallic
-// that override the sampled PBR surface, then flow through the normal lighting (so a lava ball still
-// reflects the sky). Emissive is HDR (× emissiveStrength) so bright recipes bloom.
+// Procedural material recipes, kept in parity with Godot GDShader. Input is scaled object position
+// and flow-adjusted time; output overrides PBR factors. HDR emissive passes through lighting and
+// bloom.
 #ifndef PARADISE_PBR_PROCEDURAL_SLANG
 #define PARADISE_PBR_PROCEDURAL_SLANG
 

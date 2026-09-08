@@ -245,20 +245,11 @@ public sealed class WorkStealingDequeTests
             await Assert.That(seen.Contains(i)).IsTrue();
     }
 
-    /// <summary>
-    /// Stress test that forces many <c>Grow()</c> operations to run concurrently with
-    /// <c>Steal()</c> calls. Starts with a deliberately tiny initial capacity (2) and
-    /// pushes a large number of items so the deque grows repeatedly while several
-    /// stealer threads are actively racing the owner. With the canonical Chase-Lev
-    /// pre-CAS buffer read used by <see cref="WorkStealingDeque.Steal"/>, every pushed
-    /// item must be consumed exactly once — no duplicates and no losses, even though
-    /// the buffer reference can be swapped underneath the stealer arbitrarily often.
-    ///
-    /// This regression-tests the slot-stability guarantee documented in
-    /// <see cref="WorkStealingDeque.Steal"/>: the old buffer is never mutated after a
-    /// swap, and slot t is preserved across any Grow that happens before the stealer's
-    /// CAS. Repeats the workload many times to widen the race window across CI runs.
-    /// </summary>
+    /// <summary>Concurrent deque growth and steals consume every item exactly once.</summary>
+    /// <remarks>
+    /// A tiny initial capacity forces repeated growth. The pre-CAS slot read must remain valid across
+    /// buffer replacement: old buffers stay immutable and growth preserves slot t.
+    /// </remarks>
     [Test]
     public async Task ConcurrentStealAcrossManyGrows_AllItemsAccountedForExactlyOnce()
     {

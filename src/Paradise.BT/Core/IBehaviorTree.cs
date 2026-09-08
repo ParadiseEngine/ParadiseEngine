@@ -3,11 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.BT;
 
-/// <summary>
-/// The per-instance state of a running tree — what each node returned last tick, and each node's
-/// live data. <b>Data is reached by <c>ref byte</c>, not by pointer</b>: a managed ref survives
-/// GC compaction, so a blob may sit over plain arrays with no pinning.
-/// </summary>
+/// <summary>Exposes per-instance node states and runtime data.</summary>
+/// <remarks>Managed ref-byte access survives GC compaction, allowing unpinned array storage.</remarks>
 public interface IBehaviorTree
 {
     /// <summary>The node's durable type identity — what <see cref="VirtualMachine"/> hands to

@@ -1,9 +1,5 @@
-// noise.slang — the value-noise primitives the procedural material recipes are built from, and
-// the smallest useful piece of the PBR core for a game shader to reuse on its own: a dissolve,
-// a wind gust or a scatter mask needs `fbm` and nothing else in this directory.
-//
-// Split out of pbrCore.slang so including it costs neither the lighting path nor the group-1/3
-// bindings that path declares. Object-space in, [0,1] out.
+// Binding-free object-space hash, value-noise, fbm and Worley helpers with [0,1] output. Include
+// directly for effects that need noise without lighting resources.
 #ifndef PARADISE_PBR_NOISE_SLANG
 #define PARADISE_PBR_NOISE_SLANG
 

@@ -178,7 +178,7 @@ public class AuthoredComponentRouterTests
         await Assert.That(reported.Type).IsEqualTo("Someone.Else");
     }
 
-    // ---- materializing a LIST, with no entity in sight ------------------------------------
+    // materializing a LIST, with no entity in sight
     //
     // The same {"Id", "Data"} payloads are how a game's CONFIG DOCUMENT stores its tuning groups
     // — a file with no entities in it at all. These pin that the list overload is the same

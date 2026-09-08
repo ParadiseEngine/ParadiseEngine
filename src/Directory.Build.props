@@ -7,25 +7,11 @@
     <LangVersion>14.0</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
-    <!-- ON so the compiler VALIDATES doc comments: a <see cref="..."/> naming something that no
-         longer exists is CS1574, and with warnings-as-errors that breaks the build instead of
-         rotting silently. Three dangling crefs were found by hand before this was turned on.
-         CS1591/CS1573 (missing comment, missing param tag) are suppressed deliberately: the goal
-         is references that RESOLVE, not blanket doc coverage, and requiring the latter across the
-         engine would be a different decision made by accident. -->
+    <!-- Validate XML references while allowing undocumented members and parameters. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- The version every Paradise.* package ships as. They are versioned TOGETHER: a consumer
-         pins one number (ShiningPie's ParadiseVersion) and gets a set that was built and tested
-         against itself, so a partial bump is not a thing anyone can express by accident.
-
-         WHAT ACTUALLY SHIPS IS THE TAG. publish-nuget.yml resolves the version from GITHUB_REF_NAME
-         and packs with -p:Version=, which overrides this. So this value is the LOCAL default — what
-         a source build and a workspace override stamp — and it drifted two releases behind (0.41.0
-         while v0.42.0 was on nuget.org) without anything failing, because nothing compares them.
-         Kept in step deliberately: a reader pinning a consumer looks here first, and a number two
-         releases stale is a worse answer than no number at all. -->
+    <!-- Local default for all Paradise packages; keep it current. Release tags override it with -p:Version. -->
     <Version>0.43.0</Version>
   </PropertyGroup>
 
@@ -44,11 +30,8 @@
     <Link Include="../.editorconfig" />
   </ItemGroup>
 
-  <!-- dotnet build -p:ParadiseProfiling=true compiles the profiling paths in: per-pass GPU
-       timestamps in the WebGPU backend, CPU phase timings in the PBR renderer, the sample's
-       bench. A global property reaches every project in the build, so the renderer and the host
-       that reads its timings always agree; a define set in one csproj would not. Off, the public
-       members stay (a host compiles either way) and report that timing is unavailable. -->
+  <!-- Enable GPU timestamps, CPU timings and sample benchmarks across the project graph.
+       Public timing APIs remain present but report unavailable when disabled. -->
   <PropertyGroup Condition="'$(ParadiseProfiling)' == 'true'">
     <DefineConstants>$(DefineConstants);PARADISE_PROFILING</DefineConstants>
   </PropertyGroup>

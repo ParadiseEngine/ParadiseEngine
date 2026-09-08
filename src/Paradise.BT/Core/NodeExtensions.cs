@@ -19,7 +19,7 @@ public static class NodeExtensions
         Predicate<NodeState> breakCheck)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, breakCheck, static state => !state.IsCompleted());
+        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, breakCheck);
 
     public static NodeState TickChildrenReturnFirstOrDefault<TBehaviorTree, TBlackboard>(
         this int parentIndex,
@@ -27,7 +27,7 @@ public static class NodeExtensions
         TBlackboard bb)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
-        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, static _ => true, static state => !state.IsCompleted());
+        => TickChildrenReturnBreakOrDefault(parentIndex, blob, bb, static _ => true);
 
     public static NodeState TickChild<TBehaviorTree, TBlackboard>(
         this int parentIndex,
@@ -45,8 +45,7 @@ public static class NodeExtensions
         int parentIndex,
         TBehaviorTree blob,
         TBlackboard bb,
-        Predicate<NodeState> breakCheck,
-        Predicate<NodeState> tickCheck)
+        Predicate<NodeState> breakCheck)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
@@ -56,7 +55,7 @@ public static class NodeExtensions
         while (childIndex < endIndex)
         {
             NodeState previousState = blob.GetState(childIndex);
-            NodeState currentState = tickCheck(previousState)
+            NodeState currentState = !previousState.IsCompleted()
                 ? VirtualMachine.Tick(childIndex, blob, bb)
                 : NodeState.None;
             lastState = currentState == NodeState.None ? previousState : currentState;
