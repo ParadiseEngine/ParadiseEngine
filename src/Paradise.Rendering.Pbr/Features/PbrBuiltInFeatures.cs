@@ -14,7 +14,7 @@ internal static class PbrBuiltInFeatures
         var occlusion = new OcclusionCullingFeature(ctx, frustum);
         var shadows = new ShadowFeature(ctx);
         var ssr = new ScreenSpaceReflectionFeature(ctx);
-        var prepass = new PrepassFeature(ctx, ssr, frustum);
+        var prepass = new PrepassFeature(ctx, frustum);
         var gi = new ProbeGiFeature(ctx, shadows);
         var lightCulling = new LightCullingFeature(ctx);
         var decals = new DecalFeature(ctx);

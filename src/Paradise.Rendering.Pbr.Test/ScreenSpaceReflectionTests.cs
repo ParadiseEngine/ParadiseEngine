@@ -100,6 +100,33 @@ public class ScreenSpaceReflectionTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Reflection_survives_ray_traced_ao_switch_off(bool initiallyEnabled)
+    {
+        using var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        switches.Set(PbrFeatures.RayTracedAo.Id, initiallyEnabled);
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var scene = BuildScene(pbr, ssr: true);
+        scene.RayTracedAo = new PbrRayTracedAo { Enabled = true, RaysPerPixel = 4 };
+        if (initiallyEnabled) Render(backend, pbr, scene);
+        switches.Set(PbrFeatures.RayTracedAo.Id, false);
+        var reflected = FloorRedness(Render(backend, pbr, scene), backend.ColorFormat);
+        await Assert.That(pbr.LastPassNames).DoesNotContain("Rtao.Trace");
+        await Assert.That(pbr.LastPassNames).Contains("Ssr.Trace");
+        await Assert.That(reflected).IsGreaterThan(30);
+
+        switches.Set(PbrFeatures.ScreenSpaceReflection.Id, false);
+        var without = FloorRedness(Render(backend, pbr, scene), backend.ColorFormat);
+        await Assert.That(without).IsLessThan(8);
+        switches.Set(PbrFeatures.ScreenSpaceReflection.Id, true);
+        var restored = FloorRedness(Render(backend, pbr, scene), backend.ColorFormat);
+        await Assert.That(restored).IsGreaterThan(30);
+    }
+
+    [Test]
     public async Task Reflection_makes_the_mirror_floor_red_below_the_red_block()
     {
         using var backend = TryCreateHeadlessOrSkip();

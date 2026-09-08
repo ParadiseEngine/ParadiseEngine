@@ -56,6 +56,15 @@ internal static class Program
             return 0;
         }
 
+        if (Array.IndexOf(args, "--showcase") >= 0)
+        {
+            try { return RendererShowcase.Run(args, s_log); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Showcase failed: {ex}");
+                return 1;
+            }
+        }
         var headlessFrames = ParseHeadless(args);
         var screenshotPath = ParseValue(args, "--screenshot");
         s_bench = Array.IndexOf(args, "--bench") >= 0;
