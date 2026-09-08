@@ -71,7 +71,7 @@ public sealed class BloomFeature : IRenderFeature
     {
         var scene = _ctx.Scene;
         var graph = frame.Graph;
-        var hdr = graph.Texture(PbrTargets.Hdr);
+        var hdr = frame.Blackboard.GetOrDefault(PbrResults.SceneColor, graph.Texture(PbrTargets.Hdr));
         _mips.Clear();
         for (var i = 0; i < _levels; i++)
             _mips.Add(graph.Texture(PbrTargets.Bloom[i]));

@@ -373,7 +373,7 @@ public class FeatureSwitchTests
 
         await Assert.That(probe.Setups).IsEqualTo(1);
         await Assert.That(ranBeforeTheScene).IsTrue();
-        await Assert.That(order[^1]).IsEqualTo(PbrFeatures.Composite.Name);
+        await Assert.That(order[^1]).IsEqualTo(PbrFeatures.Presentation.Name);
         await Assert.That(Array.IndexOf(order, probe.Definition.Name))
             .IsLessThan(Array.IndexOf(order, PbrFeatures.Scene.Name));
     }

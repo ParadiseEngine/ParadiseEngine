@@ -116,7 +116,7 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         var scene = _ctx.Scene;
         EnsureClusterBuffer();
-        ExtractDepthRange(scene.Camera.Projection);
+        ExtractDepthRange(_ctx.Projection);
         UploadLights(scene);
 
         ClusterBinning.FillSliceDepths(_near, _far, _sliceDepths);
@@ -125,7 +125,7 @@ public sealed class LightCullingFeature : IRenderFeature
         var froxels = _tilesX * _tilesY * ClusterBinning.ZSlices;
         var uniforms = new CullUniformsGpu
         {
-            InvProjection = Matrix4x4.Invert(scene.Camera.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
+            InvProjection = Matrix4x4.Invert(_ctx.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
             Params = new Vector4(_near, _far, ClusterBinning.TileSize, _lightCount),
             Screen = new Vector4(_ctx.Width, _ctx.Height, _tilesX, _tilesY),
             Grid = new Vector4(ClusterBinning.ZSlices, froxels, 0f, 0f),
@@ -168,7 +168,7 @@ public sealed class LightCullingFeature : IRenderFeature
     /// only cost every thread a branch and every mask a bit that is always set.</summary>
     private void UploadLights(PbrScene scene)
     {
-        var view = scene.Camera.View;
+        var view = _ctx.View;
         _lightCount = 0;
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
@@ -188,7 +188,7 @@ public sealed class LightCullingFeature : IRenderFeature
     internal ReadOnlySpan<CullLightGpu> LightsForTest => _lights.AsSpan(0, _lightCount);
 
     internal ClusterGrid GridForTest =>
-        ClusterGrid.For(_ctx.Scene.Camera.Projection, _ctx.Width, _ctx.Height, _near, _far);
+        ClusterGrid.For(_ctx.Projection, _ctx.Width, _ctx.Height, _near, _far);
 
     private static void Record(LightCullingFeature self, ref PassRecording pass, int froxels)
     {

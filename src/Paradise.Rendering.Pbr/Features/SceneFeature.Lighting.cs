@@ -45,7 +45,7 @@ public sealed partial class SceneFeature
         // while light culling is switched off: clusterParams.x < 1 is the shader's "test every
         // light" fallback, and without it a stale mask buffer would keep culling lights that
         // nothing is binning any more.
-        frame.CameraForward = new Vector4(CameraForward(scene.Camera.View), _lightCulling.Near);
+        frame.CameraForward = new Vector4(CameraForward(_ctx.View), _lightCulling.Near);
         frame.ClusterParams = _lightCulling.Active
             ? new Vector4(_lightCulling.TilesX, _lightCulling.TilesY, LightCullingFeature.ZSlices, _lightCulling.Far)
             : default;

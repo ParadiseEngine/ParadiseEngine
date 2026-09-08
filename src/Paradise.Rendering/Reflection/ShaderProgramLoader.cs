@@ -22,6 +22,8 @@ public static class ShaderProgramLoader
     // The opaque scene depth read by the capture blit (Depth32Float viewed as unfilterable float,
     // textureLoad only — WebGPU allows depth formats under the unfilterable-float sample type).
     private const string CaptureDepthTextureName = "captureDepthTexture";
+    // Full-precision temporal depth history uses R32Float, which is not filterable by default.
+    private const string HistoryDepthTextureName = "historyDepthTexture";
 
     /// <summary>Load <paramref name="logicalNamePrefix"/>.wgsl + .reflection.json from
     /// <paramref name="assembly"/>. Returns a <see cref="ShaderProgramDesc"/> with one
@@ -151,7 +153,7 @@ public static class ShaderProgramLoader
                     binding.Index, defaultVisibility, BindingResourceType.DepthTextureArray),
                 "resource" when p.Name == PrepassDepthTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, defaultVisibility, BindingResourceType.UnfilterableFloatTexture),
-                "resource" when p.Name == CaptureDepthTextureName => new BindGroupLayoutEntryDesc(
+                "resource" when p.Name is CaptureDepthTextureName or HistoryDepthTextureName => new BindGroupLayoutEntryDesc(
                     binding.Index, defaultVisibility, BindingResourceType.UnfilterableFloatTexture),
                 // WTexture2D / RWTexture2D → WGSL texture_storage_2d<format, access>. The
                 // [format("...")] attribute is REQUIRED: without it slangc silently defaults the

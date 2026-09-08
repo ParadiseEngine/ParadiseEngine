@@ -100,14 +100,27 @@ internal sealed class PbrContext : IDisposable
     // Frame-local: set by RenderFrame before any feature runs, read by every recorder.
     public PbrScene Scene { get; private set; } = null!;
     public Matrix4x4 View { get; private set; }
+    public Matrix4x4 Projection { get; private set; }
+    private Vector2 _previousProjectionJitterUv;
+    public Vector2 ProjectionJitterUv { get; private set; }
+    public Vector2 MotionJitterDelta => ProjectionJitterUv - _previousProjectionJitterUv;
     public Matrix4x4 ViewProjection { get; private set; }
 
-    public void BeginFrame(PbrScene scene, in Matrix4x4 view, in Matrix4x4 viewProjection)
+    public void BeginFrame(PbrScene scene)
     {
         Scene = scene;
-        View = view;
-        ViewProjection = viewProjection;
+        View = scene.Camera.View;
+        _previousProjectionJitterUv = ProjectionJitterUv;
+        SetProjection(scene.Camera.Projection);
         DrawIndex = 0;
+    }
+
+    /// <summary>Sets the frame's projection without changing the authored camera.</summary>
+    public void SetProjection(in Matrix4x4 projection, Vector2 jitterUv = default)
+    {
+        Projection = projection;
+        ProjectionJitterUv = jitterUv;
+        ViewProjection = PbrMath.ViewProjection(View, Projection);
     }
 
     public void Resize(uint width, uint height)
