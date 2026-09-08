@@ -89,7 +89,17 @@ public class AntiAliasingTests
         return scene;
     }
 
-    private static byte[] Capture(WebGpuRenderer backend) => (byte[])backend.ReadbackColor(out _, out _).Clone();
+    private static byte[] Capture(WebGpuRenderer backend, string? artifact = null)
+    {
+        var pixels = (byte[])backend.ReadbackColor(out var width, out var height).Clone();
+        if (artifact is not null && Environment.GetEnvironmentVariable("PARADISE_AA_ARTIFACTS") is { Length: > 0 } directory)
+        {
+            Directory.CreateDirectory(directory);
+            using var output = File.Create(Path.Combine(directory, artifact + ".png"));
+            PngWriter.Write(output, new ColorReadback(pixels, width, height), backend.ColorFormat);
+        }
+        return pixels;
+    }
     private static int Center(byte[] pixels) => pixels[(int)((Size / 2 * Size + Size / 2) * 4)];
     private static float Encode(float linear) => (linear <= 0.0031308f ? 12.92f * linear : 1.055f * MathF.Pow(linear, 1f / 2.4f) - 0.055f) * 255f;
     private static float Decode(int encoded)
@@ -116,10 +126,10 @@ public class AntiAliasingTests
         var signal = AddSignal(pbr, backend);
         signal.Signal = new Vector4(0, 0, 1, 0);
         pbr.RenderFrame(scene);
-        var off = Capture(backend);
+        var off = Capture(backend, "fxaa-off");
         scene.Fxaa = new PbrFxaa { Enabled = true };
         pbr.RenderFrame(scene);
-        var on = Capture(backend);
+        var on = Capture(backend, "fxaa-on");
         await Assert.That(FractionalPixels(off)).IsEqualTo(0);
         await Assert.That(FractionalPixels(on)).IsGreaterThan(30);
         await Assert.That(pbr.LastPassNames).Contains("Fxaa.Resolve");
@@ -146,12 +156,12 @@ public class AntiAliasingTests
         var scene = Scene(pbr, triangle: true);
         var projection = scene.Camera.Projection;
         pbr.RenderFrame(scene);
-        var off = Capture(backend);
+        var off = Capture(backend, "taa-off");
         var maximum = off.Where((_, i) => i % 4 == 0).Max();
         scene.Taa = new PbrTaa { Enabled = true };
         var temporal = pbr.Pipeline.Find<TemporalAntiAliasingFeature>()!;
         for (var i = 0; i < 8; i++) pbr.RenderFrame(scene);
-        var on = Capture(backend);
+        var on = Capture(backend, "taa-on");
         await Assert.That(FractionalPixels(on, maximum)).IsGreaterThan(FractionalPixels(off, maximum) + 20);
         await Assert.That(temporal.HistoryReady).IsTrue();
         await Assert.That(scene.Camera.Projection).IsEqualTo(projection);
@@ -331,9 +341,58 @@ public class AntiAliasingTests
             pbr.Switches.Set(PbrFeatures.LightCulling.Id, false);
             for (var i = 0; i <= phase; i++) pbr.RenderFrame(scene);
             var unbinned = Capture(backend);
-            await Assert.That(binned.SequenceEqual(unbinned)).IsTrue();
+            for (var index = 0; index < binned.Length; index++)
+                if (binned[index] != unbinned[index])
+                    throw new InvalidOperationException(
+                        $"Jitter phase {phase}, pixel {index / 4}, channel {index % 4}: " +
+                        $"binned {binned[index]}, unbinned {unbinned[index]}.");
             await Assert.That(binned.Where((_, i) => i % 4 == 0).Max()).IsGreaterThan((byte)20);
         }
+    }
+
+    [Test]
+    public async Task Combined_AA_preserves_pass_order_and_engine_switches_restore_the_unfiltered_frame()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, triangle: true);
+        scene.Bloom = new PbrBloom { Enabled = true, Threshold = 0.1f, Intensity = 0.2f };
+        pbr.RenderFrame(scene);
+        var unfiltered = Capture(backend);
+        scene.Taa = new PbrTaa { Enabled = true };
+        for (var i = 0; i < 8; i++) pbr.RenderFrame(scene);
+        scene.Fxaa = new PbrFxaa { Enabled = true };
+        pbr.RenderFrame(scene);
+        var passes = pbr.LastPassNames.ToList();
+        var bloom = passes.FindIndex(name => name.StartsWith("Bloom.", StringComparison.Ordinal));
+        await Assert.That(bloom).IsGreaterThan(passes.IndexOf("Taa.Resolve"));
+        await Assert.That(passes.IndexOf("Taa.Resolve")).IsGreaterThan(passes.IndexOf("MotionVectors.Geometry"));
+        await Assert.That(passes.IndexOf("Composite")).IsGreaterThan(bloom);
+        await Assert.That(passes.IndexOf("Fxaa.Resolve")).IsGreaterThan(passes.IndexOf("Composite"));
+        await Assert.That(passes.IndexOf("Presentation")).IsGreaterThan(passes.IndexOf("Fxaa.Resolve"));
+
+        pbr.Switches.Set(PbrFeatures.TemporalAntiAliasing.Id, false);
+        pbr.RenderFrame(scene);
+        var spatial = Capture(backend);
+        await Assert.That(pbr.LastPassNames).DoesNotContain("Taa.Resolve");
+        await Assert.That(pbr.LastPassNames).DoesNotContain("MotionVectors.Geometry");
+        await Assert.That(pbr.LastPassNames).Contains("Fxaa.Resolve");
+        await Assert.That(pbr.Pipeline.Find<TemporalAntiAliasingFeature>()!.JitterPixels).IsEqualTo(Vector2.Zero);
+
+        pbr.Switches.Set(PbrFeatures.Fxaa.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(Capture(backend).SequenceEqual(unfiltered)).IsTrue();
+        await Assert.That(pbr.LastPassNames).DoesNotContain("Fxaa.Resolve");
+        await Assert.That(pbr.LastPassNames).DoesNotContain("Presentation");
+
+        pbr.Switches.Set(PbrFeatures.Fxaa.Id, true);
+        pbr.RenderFrame(scene);
+        await Assert.That(Capture(backend).SequenceEqual(spatial)).IsTrue();
+        pbr.Switches.Set(PbrFeatures.TemporalAntiAliasing.Id, true);
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.Pipeline.Find<TemporalAntiAliasingFeature>()!.HistoryReady).IsFalse();
+        await Assert.That(pbr.LastPassNames).Contains("Taa.Resolve");
     }
 
     [Test]
