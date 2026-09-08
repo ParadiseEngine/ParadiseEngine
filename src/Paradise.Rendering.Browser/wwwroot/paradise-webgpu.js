@@ -177,14 +177,14 @@ export function destroyTexture(index) {
     G.textures[index] = null;
 }
 
-export function createTextureView(slot, textureIndex, dimension, baseArrayLayer, arrayLayerCount, label) {
+export function createTextureView(slot, textureIndex, dimension, baseArrayLayer, arrayLayerCount, baseMipLevel, mipLevelCount, label) {
     const view = G.textures[textureIndex].texture.createView({
         label,
         dimension,
         baseArrayLayer,
         arrayLayerCount,
-        baseMipLevel: 0,
-        mipLevelCount: 1,
+        baseMipLevel,
+        mipLevelCount,
     });
     put(G.textureViews, slot, view);
 }

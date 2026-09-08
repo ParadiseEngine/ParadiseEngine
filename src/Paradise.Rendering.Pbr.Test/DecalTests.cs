@@ -1,4 +1,5 @@
 using System.Numerics;
+using Paradise.Assets.Gltf;
 using System.Runtime.InteropServices;
 using Paradise.Rendering.WebGPU;
 
@@ -172,6 +173,29 @@ public class DecalTests
         scene.Decals.Volumes.Clear();
         Same(baseline, Render(pbr, backend, scene));
         await Assert.That(pbr.Pipeline.Find<DecalFeature>()!.ActiveDecalCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task bound_atlas_view_exposes_generated_lower_mips()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr);
+        var program = pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(typeof(DecalTests).Assembly, "Shaders.decalMipFixture"));
+        var material = new GltfMaterialData("mip probe", Vector4.One, 0, 1, Vector3.Zero, 1, 1,
+            0, GltfAlphaMode.Opaque, 0.5f, false, -1, -1, -1, -1, -1, GltfUvTransform.Identity);
+        var receiver = scene.Instances[0];
+        receiver.Mesh.Primitives[0] = receiver.Mesh.Primitives[0] with { MaterialId = pbr.Materials.AddMaterial(material, [], program) };
+        scene.Decals.Volumes.Add(new PbrDecal
+        {
+            Material = new() { ColorTexture = new(2, 2,
+                [255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255]) },
+        });
+        var pixel = Pixel(Render(pbr, backend, scene), backend, 48, 48);
+        await Assert.That(pixel.X).IsBetween(186f, 190f);
+        await Assert.That(pixel.Z).IsBetween(186f, 190f);
+        await Assert.That(pixel.Y).IsEqualTo(0f);
     }
 
     [Test]

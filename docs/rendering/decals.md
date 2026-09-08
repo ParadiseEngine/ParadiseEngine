@@ -35,7 +35,8 @@ which properties are painted; normal weight has no effect without a normal textu
 Greater `Order` paints later. Equal orders preserve list order. Set `instance.ReceivesDecals =
 false` to opt out, including for one member of an instanced batch. Both the process switch
 `rendering.decals` and `scene.Decals.Enabled` must allow decals. Switching either off retracts
-previous decal data at the next frame. Singular, non-affine and non-finite projector transforms
+the active count at the next frame. The resident atlas is retained across disable/enable
+transitions to avoid repeated uploads. Singular, non-affine and non-finite projector transforms
 are skipped; non-finite material factors are rejected.
 
 A frame supports 32 valid enabled projectors. Exceeding that limit throws rather than silently
@@ -58,5 +59,5 @@ dotnet run --project src/Paradise.Rendering.Sample -- --gi-demo --decals --fog -
 `DecalTests` checks affine projection, fading, immutable image ownership, premultiplied mips,
 array-layer isolation, real GPU material channels, ordered materials, atlas replacement,
 feature transitions, capacity limits and per-instance opt-out. Shader reflection tests require
-a sampled 2D-array binding. Native GPU rendering is tested; browser array upload and binding
+a sampled 2D-array binding; a GPU fixture samples mip 1 through the actual bound atlas view. Native GPU rendering is tested; browser array upload and binding
 support is implemented and builds, but browser runtime rendering has not been exercised.

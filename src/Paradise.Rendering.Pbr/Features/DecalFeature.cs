@@ -117,7 +117,7 @@ public sealed class DecalFeature : IRenderFeature
                 width = Math.Max(1, width / 2);
                 height = Math.Max(1, height / 2);
             }
-            view = renderer.CreateTextureView(new TextureViewDesc("PbrDecalAtlasView", texture, TextureViewDimension.D2Array, 0, (uint)atlas.Layers));
+            view = renderer.CreateTextureView(new TextureViewDesc("PbrDecalAtlasView", texture, TextureViewDimension.D2Array, 0, (uint)atlas.Layers, MipLevelCount: (uint)atlas.Mips.Count));
         }
         catch
         {

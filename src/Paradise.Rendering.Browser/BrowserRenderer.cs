@@ -236,7 +236,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         var slot = _textureViews.Allocate(out var generation);
         CreateTextureViewJs(
             (int)slot, (int)texture, ViewDimensionName(desc.Dimension),
-            (int)desc.BaseArrayLayer, (int)Math.Max(1, desc.ArrayLayerCount), desc.Name ?? string.Empty);
+            (int)desc.BaseArrayLayer, (int)Math.Max(1, desc.ArrayLayerCount),
+            (int)desc.BaseMipLevel, (int)Math.Max(1, desc.MipLevelCount), desc.Name ?? string.Empty);
         return new TextureViewHandle(slot, generation);
     }
 
