@@ -36,6 +36,67 @@ public class HostSessionTests
         protected override UPath ConvertPathFromInternalImpl(string innerPath) => innerPath;
     }
 
+    /// <summary>Uses the OS because a memory filesystem cannot reproduce linked workspace ancestors.</summary>
+    private sealed class SymlinkedTree : IDisposable
+    {
+        private readonly DirectoryInfo _temporary = Directory.CreateTempSubdirectory("paradise-host-");
+
+        public PhysicalFileSystem FileSystem { get; } = new();
+        public string PhysicalRoot { get; }
+        public string PhysicalProject { get; }
+        public string PhysicalOutput { get; }
+        public string LinkedRoot { get; }
+        public UPath Project { get; }
+        public UPath WorkingDirectory { get; }
+
+        public SymlinkedTree()
+        {
+            // macOS's temporary directory can itself have a /var -> /private/var ancestor.
+            var temporary = PhysicalDirectory(_temporary);
+            PhysicalRoot = Path.Combine(temporary, "physical");
+            PhysicalProject = Path.Combine(PhysicalRoot, "Game.Launcher", "Game.Launcher.csproj");
+            PhysicalOutput = Path.Combine(PhysicalRoot, "Game.Launcher", "bin", "Debug", "net10.0", "Game.Launcher.dll");
+            LinkedRoot = Path.Combine(temporary, "workspace");
+            Project = FileSystem.ConvertPathFromInternal(Path.Combine(LinkedRoot, "Game.Launcher", "Game.Launcher.csproj"));
+            WorkingDirectory = FileSystem.ConvertPathFromInternal(LinkedRoot);
+
+            Directory.CreateDirectory(Path.GetDirectoryName(PhysicalProject)!);
+            File.WriteAllText(PhysicalProject, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            Directory.CreateDirectory(Path.Combine(PhysicalRoot, "Game.Launcher", "obj"));
+            File.WriteAllText(Path.Combine(PhysicalRoot, "Game.Launcher", "obj", "project.assets.json"), """{ "libraries": {}, "project": { "frameworks": { "net10.0": {} } } }""");
+            Directory.CreateDirectory(Path.GetDirectoryName(PhysicalOutput)!);
+            File.WriteAllText(PhysicalOutput, "MZ");
+        }
+
+        public static SymlinkedTree? Create()
+        {
+            var tree = new SymlinkedTree();
+            try
+            {
+                Directory.CreateSymbolicLink(tree.LinkedRoot, "physical");
+                return tree;
+            }
+            catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+            {
+                tree.Dispose();
+                Skip.Test("creating directory symlinks requires Windows Developer Mode or elevation");
+                return null;
+            }
+        }
+
+        public void Dispose()
+        {
+            FileSystem.Dispose();
+            _temporary.Delete(recursive: true);
+        }
+
+        private static string PhysicalDirectory(DirectoryInfo directory)
+        {
+            if (directory.ResolveLinkTarget(returnFinalTarget: true) is DirectoryInfo target) return PhysicalDirectory(target);
+            return directory.Parent is { } parent ? Path.Combine(PhysicalDirectory(parent), directory.Name) : directory.FullName;
+        }
+    }
+
     private static TransparentFileSystem Tree(bool built = true, bool restored = true)
     {
         var fileSystem = new TransparentFileSystem();
@@ -219,5 +280,55 @@ public class HostSessionTests
         await Assert.That(exit).IsEqualTo(0);
         await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", s_csproj.FullName, "-c", "Release", "-v", "q", "--nologo" }, CollectionOrdering.Matching);
         await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo("/repo/Game.Launcher");
+    }
+
+    [Test]
+    public async Task build_resolves_a_linked_workspace_ancestor_for_the_project_and_working_directory()
+    {
+        using var tree = SymlinkedTree.Create();
+        if (tree is null) return;
+        var runner = new RecordingRunner();
+
+        var exit = Session(tree.FileSystem, runner).Build(tree.Project, "Release", restore: true, CancellationToken.None);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(runner.Specs).Count().IsEqualTo(1);
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { "build", tree.PhysicalProject, "-c", "Release", "-v", "q", "--nologo" }, CollectionOrdering.Matching);
+        await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo(Path.GetDirectoryName(tree.PhysicalProject));
+        await Assert.That(tree.FileSystem.FileExists(HostFreshness.StampPath(tree.Project))).IsTrue();
+    }
+
+    [Test]
+    public async Task watch_resolves_a_linked_workspace_ancestor_for_the_project_and_working_directory()
+    {
+        using var tree = SymlinkedTree.Create();
+        if (tree is null) return;
+        File.Delete(Path.Combine(tree.PhysicalRoot, "Game.Launcher", "obj", "project.assets.json"));
+        var runner = new RecordingRunner();
+
+        var exit = Session(tree.FileSystem, runner).Play(tree.Project, "Debug", tree.WorkingDirectory, ["--scene", "levels/a.prefab"], watch: true, noBuild: false, CancellationToken.None);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(runner.Specs).Count().IsEqualTo(1);
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[]
+        {
+            "watch", "run", "--non-interactive", "--project", tree.PhysicalProject, "-c", "Debug", "--", "--scene", "levels/a.prefab",
+        }, CollectionOrdering.Matching);
+        await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo(tree.PhysicalRoot);
+    }
+
+    [Test]
+    public async Task play_resolves_a_linked_workspace_ancestor_for_the_output_and_working_directory()
+    {
+        using var tree = SymlinkedTree.Create();
+        if (tree is null) return;
+        var runner = new RecordingRunner();
+
+        var exit = Session(tree.FileSystem, runner).Play(tree.Project, "Debug", tree.WorkingDirectory, ["--scene", "levels/a.prefab"], watch: false, noBuild: true, CancellationToken.None);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(runner.Specs).Count().IsEqualTo(1);
+        await Assert.That(runner.Specs[0].Arguments).IsEquivalentTo(new[] { tree.PhysicalOutput, "--scene", "levels/a.prefab" }, CollectionOrdering.Matching);
+        await Assert.That(runner.Specs[0].WorkingDirectory).IsEqualTo(tree.PhysicalRoot);
     }
 }
