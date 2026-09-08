@@ -58,6 +58,8 @@ internal sealed class GiDemoScene : IDisposable
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         _pbr = new PbrRenderer(renderer, Program.Features, _width, _height, logger: logger);
+        _scene.Taa = new PbrTaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--taa") >= 0 };
+        _scene.Fxaa = new PbrFxaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--fxaa") >= 0 };
 
         var (cube, cubeIndices) = Procedural.UnitCube();
         var white = _pbr.Materials.AddDefaultMaterial(new Vector4(0.73f, 0.73f, 0.73f, 1f), metallic: 0f, roughness: 0.9f);

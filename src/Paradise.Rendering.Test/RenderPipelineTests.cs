@@ -27,6 +27,8 @@ public class RenderPipelineTests
 
         public void Resize(uint width, uint height) => Resized++;
 
+        public void PrepareFrame() => Log.Add("prepare " + Definition.Name);
+
         public void BeforeSubmit() => Log.Add("submit " + Definition.Name);
 
         public void OnEnabledChanged(bool enabled)
@@ -62,6 +64,31 @@ public class RenderPipelineTests
     }
 
     private static FrameGraph GraphWithTextures() => new(new GraphTextureRegistry(new FakeTextureFactory()));
+
+    [Test]
+    public async Task preparation_runs_in_feature_order_and_keeps_the_setup_switch_snapshot()
+    {
+        var log = new List<string>();
+        var a = new Probe("a") { Log = log };
+        var b = new Probe("b") { Log = log };
+        var c = new Probe("c", enabledByDefault: false) { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches())
+            .Add(b, 200).Add(a, 100).Add(c, 300);
+        log.Clear();
+        pipeline.BeginFrame();
+        pipeline.Switches.Set(a.Definition.Id, false);
+        pipeline.Switches.Set(c.Definition.Id, true);
+        pipeline.PrepareFrame();
+        pipeline.Setup(GraphWithTextures());
+        await Assert.That(log).IsEquivalentTo(
+            ["prepare test.a", "prepare test.b", "test.a", "test.b"], CollectionOrdering.Matching);
+        log.Clear();
+        pipeline.PrepareFrame();
+        pipeline.Setup(GraphWithTextures());
+        await Assert.That(log).IsEquivalentTo(
+            ["off test.a", "on test.c", "prepare test.b", "prepare test.c", "test.b", "test.c"],
+            CollectionOrdering.Matching);
+    }
 
     [Test]
     public async Task features_set_up_in_list_order_and_skip_the_disabled()

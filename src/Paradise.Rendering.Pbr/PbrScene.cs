@@ -239,6 +239,12 @@ public struct PbrCamera
     public Vector3 Position;
 }
 
+/// <summary>Explicitly produces motion even when no temporal effect requests it.</summary>
+public sealed record PbrMotionVectors
+{
+    public bool Enabled { get; init; }
+}
+
 /// <summary>One uploaded draw batch: geometry handles plus the material it binds.</summary>
 public sealed record PbrPrimitive(
     BufferHandle VertexBuffer,
@@ -286,6 +292,10 @@ public sealed class PbrScene
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
     public PbrBloom Bloom = new();
+    public PbrTaa Taa = new();
+    public PbrFxaa Fxaa = new();
+    /// <summary>Simulation seconds since the previous frame, clamped by temporal post effects.</summary>
+    public float DeltaSeconds = 1f / 60f;
     /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned
     /// via <c>--anim-time</c> for deterministic screenshots/parity).</summary>
     public float ElapsedSeconds;
@@ -319,6 +329,9 @@ public sealed class PbrScene
     public PbrRayTracedAo RayTracedAo = new();
     public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
+    public PbrMotionVectors MotionVectors = new();
+    /// <summary>Increment on camera cuts, teleports or discontinuous scene edits to reject temporal history.</summary>
+    public ulong TemporalHistoryVersion;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
 }

@@ -44,6 +44,8 @@ internal sealed class PbrViewerScene : IDisposable
         _width = Math.Max(1, width);
         _height = Math.Max(1, height);
         _pbr = new PbrRenderer(renderer, Program.Features, _width, _height, logger: logger);
+        _scene.Taa = new PbrTaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--taa") >= 0 };
+        _scene.Fxaa = new PbrFxaa { Enabled = Array.IndexOf(Environment.GetCommandLineArgs(), "--fxaa") >= 0 };
 
         if (glbPath is not null)
         {

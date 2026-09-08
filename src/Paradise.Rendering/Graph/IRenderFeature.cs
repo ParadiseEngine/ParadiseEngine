@@ -20,6 +20,12 @@ public enum FrameRequirements
     /// depth + normal pre-pass runs and publishes its targets, whatever the scene's own
     /// screen-space settings say.</summary>
     DepthNormalPrepass = 1 << 1,
+
+    /// <summary>Current-to-previous screen-space motion must be available for temporal effects.</summary>
+    MotionVectors = 1 << 2,
+
+    /// <summary>Tonemapping must publish display-linear color for effects before presentation.</summary>
+    DisplayColor = 1 << 3,
 }
 
 /// <summary>One unit of the frame: a thing that owns its own GPU resources and declares its own
@@ -49,6 +55,13 @@ public interface IRenderFeature : IDisposable
     /// is added to a <see cref="RenderPipeline"/> and again whenever the frame changes size, so
     /// a feature need not create its targets in its constructor.</summary>
     void Resize(uint width, uint height);
+
+    /// <summary>Prepare frame-local camera or scene state before partitioning and GPU uploads.</summary>
+    /// <remarks>Runs after the pipeline snapshots switches and before requirements and setup;
+    /// changes must stay in frame-local state rather than modifying authored scene data.</remarks>
+    void PrepareFrame()
+    {
+    }
 
     /// <summary>Declare this frame's passes and publish what other features may consume.</summary>
     void Setup(in FrameContext frame);

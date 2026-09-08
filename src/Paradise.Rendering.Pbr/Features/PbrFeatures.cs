@@ -17,6 +17,11 @@ namespace Paradise.Rendering.Pbr;
 /// platform decision have to be re-made in every level.</para></summary>
 public static class PbrFeatures
 {
+    /// <summary>Camera, object and skinned-vertex motion for temporal effects.</summary>
+    public static FeatureDefinition MotionVectors { get; } = new(
+        "rendering.motionVectors", true,
+        "Screen-space motion for temporal effects. Off, temporal consumers must reject history.");
+
     /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
     /// everything.</summary>
     public static FeatureDefinition Shadows { get; } = new(
@@ -64,6 +69,16 @@ public static class PbrFeatures
         "rendering.sceneColorCapture", false,
         "Copy the opaque scene so blend materials can refract it. Costs a blit and a reload per frame.");
 
+    /// <summary>Jittered HDR temporal accumulation with motion and depth rejection.</summary>
+    public static FeatureDefinition TemporalAntiAliasing { get; } = new(
+        "rendering.temporalAntiAliasing", true,
+        "Temporal antialiasing. Off, the camera is unjittered and no color history accumulates.");
+
+    /// <summary>Spatial edge filtering after tonemapping and display effects.</summary>
+    public static FeatureDefinition Fxaa { get; } = new(
+        "rendering.fxaa", true,
+        "FXAA spatial antialiasing. Off, presentation preserves unfiltered display color.");
+
     /// <summary>The bloom mip chain.</summary>
     public static FeatureDefinition Bloom { get; } = new(
         "rendering.bloom", true,
@@ -74,6 +89,10 @@ public static class PbrFeatures
         "rendering.composite", true,
         "Tonemap the HDR scene onto the backbuffer. Off, the frame is never presented.");
 
+    /// <summary>Output transfer and presentation after optional display effects.</summary>
+    public static FeatureDefinition Presentation { get; } = new(
+        "rendering.presentation", true, "Present the processed display color with one sRGB transfer.");
+
     /// <summary>All of them, in frame order — what a <c>--list-features</c> flag or a config-file
     /// template prints WITHOUT constructing a renderer, which on a machine with no GPU adapter is
     /// the difference between a listing and a crash. A test pins this against what
@@ -81,8 +100,8 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, Bloom, Composite,
+        Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Scene, SceneColorCapture, TemporalAntiAliasing, Bloom, Composite, Fxaa, Presentation,
     ];
 
     /// <summary>Declares every built-in into <paramref name="switches"/>. A renderer does this
@@ -108,12 +127,25 @@ public static class PbrFeatureOrder
 
     public const int Shadows = 100;
     public const int Prepass = 200;
+    public const int MotionVectors = 250;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
     public const int LightCulling = 550;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
+    public const int TemporalAntiAliasing = 720;
+    public const int Exposure = 730;
+    public const int DepthOfField = 740;
+    public const int MotionBlur = 750;
     public const int Bloom = 800;
     public const int Composite = 900;
+    public const int ColorGrading = 910;
+    public const int LensDistortion = 920;
+    public const int ChromaticAberration = 925;
+    public const int Vignette = 930;
+    public const int FilmGrain = 940;
+    public const int Sharpening = 950;
+    public const int AntiAliasing = 960;
+    public const int Presentation = 1000;
 }

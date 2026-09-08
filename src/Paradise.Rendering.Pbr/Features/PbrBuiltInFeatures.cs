@@ -29,13 +29,17 @@ internal static class PbrBuiltInFeatures
         pipeline
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
+            .Add(new MotionVectorsFeature(ctx), PbrFeatureOrder.MotionVectors)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
             .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
+            .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
-            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);
+            .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite)
+            .Add(new FxaaFeature(ctx), PbrFeatureOrder.AntiAliasing)
+            .Add(new PresentationFeature(ctx), PbrFeatureOrder.Presentation);
     }
 }
