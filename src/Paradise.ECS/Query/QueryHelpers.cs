@@ -8,9 +8,7 @@ namespace Paradise.ECS;
 /// </summary>
 public static class QueryHelpers
 {
-    /// <summary>
-    /// Creates a query result for entity-level iteration.
-    /// </summary>
+    /// <summary>Creates a query result for entity-level iteration.</summary>
     /// <typeparam name="TData">The data type providing component access.</typeparam>
     /// <typeparam name="TMask">The component mask type.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -31,9 +29,7 @@ public static class QueryHelpers
             world.ChunkManager, world.EntityManager, query);
     }
 
-    /// <summary>
-    /// Creates a chunk query result for batch processing.
-    /// </summary>
+    /// <summary>Creates a chunk query result for batch processing.</summary>
     /// <typeparam name="TChunkData">The chunk data type providing span access.</typeparam>
     /// <typeparam name="TMask">The component mask type.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>

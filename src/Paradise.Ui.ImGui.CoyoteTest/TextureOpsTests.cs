@@ -3,25 +3,18 @@ using Paradise.Ui.ImGui;
 
 namespace Paradise.Ui.ImGui.CoyoteTest;
 
-/// <summary>Systematic interleavings of <see cref="ImGuiTextureOps"/>, the one place in the ImGui
-/// stack where two threads share mutable state.
-///
-/// The property under test is not "no crash" but NO LOSS AND NO REORDER: the ops queue carries a
-/// state machine (create → update → destroy per texture), so a single dropped entry leaves the
-/// renderer either drawing an id it never allocated or patching a texture that does not exist.
-/// Both are silent in the geometry path, which is exactly why they are worth scheduling for.
-///
-/// These are async and await their joins so Coyote's hang detection stays a signal rather than
-/// noise, per the repo's Coyote notes.</summary>
+/// <summary>Checks that concurrent texture queue operations preserve every entry in
+/// order.</summary>
+/// <remarks>Create, update and destroy form a state machine; losing or reordering an entry
+/// invalidates later draws. Awaited joins preserve Coyote hang detection.</remarks>
 public static class TextureOpsTests
 {
     private const int OpsPerProducer = 6;
 
-    /// <summary>One producer enqueuing while the render thread drains: every op must come out,
-    /// exactly once, in the order it went in.
-    ///
-    /// This is the test a check-then-enqueue "fast path" fails. A lost op leaves the consumer
-    /// waiting for a count that never arrives, which Coyote reports as a hang.</summary>
+    /// <summary>Concurrent enqueue and drain must deliver every operation exactly once in
+    /// order.</summary>
+    /// <remarks>A lost operation leaves the consumer waiting, which Coyote reports as a
+    /// hang.</remarks>
     public static async Task DrainRacingEnqueue_LosesNothingAndKeepsOrder()
     {
         var ops = new ImGuiTextureOps();

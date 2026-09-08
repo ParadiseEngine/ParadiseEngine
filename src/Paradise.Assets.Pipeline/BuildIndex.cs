@@ -7,15 +7,12 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What the last build into a tree produced, so the next can skip it; derived, never truth.</summary>
+/// <summary>Records inputs and outputs for incremental build reuse.</summary>
 /// <remarks>
-/// An entry records every file the importer touched (<see cref="ObservedSources"/>), each with
-/// the stamp it had, and reuse means every one of them is unchanged today and every output is
-/// still there at its recorded size. Two tiers per input because hashing every source is most of
-/// the cost being removed: SHA-256 runs only when (mtime, size) fails, so a checkout or a re-save
-/// still skips. Anything the importer does not read through its filesystem — the encoder's
-/// version, the manifest's profile table — is folded into the document-wide
-/// <see cref="BuildIndexDocument.Environment"/>, and a change there drops the whole index.
+/// Reuse requires unchanged observed inputs and outputs at their recorded sizes.
+/// Compare (mtime, size) first, then SHA-256 after a stamp change.
+/// Non-file inputs, including tool versions and profile settings, belong in
+/// <see cref="BuildIndexDocument.Environment"/>; changing it invalidates the whole index.
 /// </remarks>
 public sealed class BuildIndex
 {

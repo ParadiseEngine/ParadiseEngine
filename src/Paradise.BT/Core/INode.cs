@@ -9,11 +9,8 @@ public interface INode
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct;
 
-    /// <summary>
-    /// Reset hook for side effects beyond data restoration (the VM restores the data itself).
-    /// STATIC because an instance default interface method invoked through a constrained type
-    /// parameter boxes the receiver — the cost is that Reset cannot read the node's own fields.
-    /// </summary>
+    /// <summary>Resets side effects after the VM restores node data.</summary>
+    /// <remarks>The static hook avoids boxing and cannot read instance fields.</remarks>
     static virtual void Reset<TBehaviorTree, TBlackboard>(int index, TBehaviorTree tree, TBlackboard bb)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct

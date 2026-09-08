@@ -15,7 +15,6 @@ Console.WriteLine();
 using var sharedWorld = SharedWorldFactory.Create();
 var world = sharedWorld.CreateWorld();
 
-// Run all samples in sequence
 var (emptyEntity, playerEntity, enemies) = EntityCreationSample.Run(world);
 ComponentAccessSample.Run(world, playerEntity);
 TagSystemSample.Run(world, playerEntity);

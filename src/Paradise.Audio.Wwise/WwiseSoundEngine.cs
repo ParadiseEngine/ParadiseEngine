@@ -3,22 +3,12 @@ using Paradise.Audio.Wwise.Interop;
 
 namespace Paradise.Audio.Wwise;
 
-/// <summary>
-/// The Wwise sound engine's lifetime and its whole API surface, as one object.
-///
-/// AUDIO IS NEVER LOAD-BEARING. Every method here degrades instead of throwing: on a machine with
-/// no Wwise SDK the native library does not exist, <see cref="TryInitialize"/> returns false, and
-/// every subsequent call is a cheap no-op. A game must be playable in silence — a contributor
-/// without a Wwise licence, and CI, both have to be able to run it. That is why this type reports
-/// failure through return values and <see cref="LastError"/> rather than exceptions.
-///
-/// THREAD AFFINITY. Wwise's own API is thread-safe, but this type assumes ONE caller thread for
-/// its whole lifetime, which is also what the native shim assumes. Paradise hosts drive it from
-/// the sim thread, where the published world state it reads already lives. Calling
-/// <see cref="RenderAudio"/> from the render thread while the sim thread posts events would work
-/// in Wwise's terms and still be a mistake here — the ordering between a position update and the
-/// event that depends on it would stop being deterministic.
-/// </summary>
+/// <summary>Owns the Wwise engine lifetime and managed audio operations.</summary>
+/// <remarks>
+/// Audio is optional: failed initialization returns false, records <see cref="LastError"/>, and
+/// subsequent calls become no-ops so unlicensed hosts can run silently.
+/// Use one caller thread, normally simulation, for the entire lifetime to preserve event/position ordering.
+/// </remarks>
 public sealed class WwiseSoundEngine : IDisposable
 {
     private bool _initialized;
@@ -158,7 +148,7 @@ public sealed class WwiseSoundEngine : IDisposable
         }
     }
 
-    // ---- game objects -------------------------------------------------------------------------
+    // game objects
 
     /// <summary>Register an emitter or listener. <paramref name="name"/> is shown in the profiler
     /// and nowhere else, so it should say which entity this is rather than which sound it makes.</summary>
@@ -239,7 +229,7 @@ public sealed class WwiseSoundEngine : IDisposable
         return true;
     }
 
-    // ---- playback -----------------------------------------------------------------------------
+    // playback
 
     /// <summary>Post an event on an object.</summary>
     /// <returns>A playing id for stopping this instance later, or
@@ -275,7 +265,7 @@ public sealed class WwiseSoundEngine : IDisposable
         }
     }
 
-    // ---- offline capture ------------------------------------------------------------------------
+    // offline capture
 
     /// <summary>
     /// Also write the master output to a .wav, until <see cref="StopOutputCapture"/>.
@@ -313,7 +303,7 @@ public sealed class WwiseSoundEngine : IDisposable
         }
     }
 
-    // ---- parameters ---------------------------------------------------------------------------
+    // parameters
 
     /// <summary>Set a game parameter. Defaults to the global scope; pass an object to give that
     /// emitter its own value.</summary>

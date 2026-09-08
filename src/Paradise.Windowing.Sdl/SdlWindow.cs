@@ -9,25 +9,11 @@ using static SDL.SDL3;
 
 namespace Paradise.Windowing.Sdl;
 
-/// <summary>
-/// One SDL3 window: the state and the surface. Events arrive from
-/// <see cref="SdlWindowPlatform.Pump"/>, which owns the process-wide queue and routes each
-/// event here by window id; this class turns what it is handed into the contract's vocabulary
-/// — timestamped <see cref="WindowEvent"/> transitions (scancodes rather than keycodes, so
-/// physical position survives keyboard layouts), resizes, the close latch — and
-/// <see cref="CreateSurface"/> maps the native window to a WebGPU-ready
-/// <see cref="SurfaceDescriptor"/> per platform.
-///
-/// Keyboard, pointer, typed text and gamepad (buttons and analog axes). Two conversions happen
-/// here and nowhere else, because only this class knows the platform well enough: pointer
-/// positions are scaled from SDL's window POINTS into the contract's PIXELS (see
-/// <see cref="_pixelDensity"/>), and an analog trigger is reported BOTH as its axis and, across
-/// a threshold, as the <see cref="GamepadButton"/> the contract promises.
-///
-/// <see cref="Handle"/> exposes the native window for consumers that reference this backend
-/// DIRECTLY and want more than the contract — a debug overlay renderer, an OS-specific
-/// tweak. Code that stays on <see cref="IWindow"/> stays backend-portable.
-/// </summary>
+/// <summary>Translates one SDL3 window's state and routed events into the windowing
+/// contract.</summary>
+/// <remarks>SdlWindowPlatform owns the process event queue. This window converts pointer points to
+/// pixels and gamepad triggers to axes plus button transitions. CreateSurface provides native
+/// handles; Handle supports backend-specific consumers.</remarks>
 public sealed unsafe partial class SdlWindow : IWindow
 {
     private readonly SDL_Window* _window;
@@ -39,11 +25,9 @@ public sealed unsafe partial class SdlWindow : IWindow
     private volatile bool _closeRequested;
     private bool _disposed;
 
-    /// <summary>Pixels per point, tracked alongside the pixel size. SDL reports pointer
-    /// positions in window POINTS while <see cref="Width"/>/<see cref="Height"/> and the
-    /// surface are in pixels; on a Retina display those differ by 2, and forwarding SDL's
-    /// numbers unscaled puts every click at half its true position — which looks like a
-    /// hit-testing bug in whatever consumes it, several layers away from the cause.</summary>
+    /// <summary>Tracks pixels per SDL window point.</summary>
+    /// <remarks>Scale pointer coordinates by this density to match the pixel dimensions used for
+    /// rendering and hit tests.</remarks>
     private float _pixelDensity = 1f;
 
     /// <summary>Which triggers are currently past <see cref="TriggerPressThreshold"/>, one bit
@@ -197,11 +181,9 @@ public sealed unsafe partial class SdlWindow : IWindow
         }
     }
 
-    /// <summary>An axis settled at a new value. SDL reports a signed 16-bit reading, and the
-    /// negative end reaches one further than the positive (-32768 vs 32767) — dividing by
-    /// 32767 and clamping is what makes a stick pushed fully left report exactly -1 rather
-    /// than -1.00003. Triggers rest at 0 and only ever go positive, so the same scale gives
-    /// them 0..1 for free.</summary>
+    /// <summary>Normalizes SDL signed 16-bit gamepad axes.</summary>
+    /// <remarks>Divide by 32767 and clamp the asymmetric -32768 endpoint; triggers naturally use
+    /// the range 0..1.</remarks>
     internal void OnGamepadAxis(SDL_GamepadAxis axis, short value, byte slot, TimeSpan now)
     {
         if (ToGamepadAxis(axis) is not { } mapped) return;
@@ -209,11 +191,8 @@ public sealed unsafe partial class SdlWindow : IWindow
         var normalized = Math.Clamp(value / 32767f, -1f, 1f);
         _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Axis(mapped, normalized, slot)));
 
-        // A trigger is the one control the contract names TWICE: GamepadButton declares
-        // Left/RightTrigger and says "the digital threshold is the backend's", while SDL only
-        // ever reports triggers as axes. So the analog reading above is the truth, and this is
-        // the promised digital view of it — emitted alongside, not instead, so a binder can use
-        // either without knowing which device produced it.
+        // Expose triggers as both normalized axes and thresholded buttons so bindings can use
+        // either contract.
         if (ToTriggerButton(mapped) is not { } triggerButton) return;
         var key = (slot, mapped);
         var wasHeld = _triggerHeld.GetValueOrDefault(key);
@@ -227,12 +206,9 @@ public sealed unsafe partial class SdlWindow : IWindow
         }
     }
 
-    /// <summary>A gamepad went away mid-input. Everything it was holding has to be let go
-    /// explicitly: the contract is transitions, so a consumer that saw the press and never sees
-    /// the release holds the action forever — a controller unplugged mid-push would leave the
-    /// player walking for the rest of the run. Releasing every button and centring every axis
-    /// is cheap and unconditional; a button that was not held reads as a redundant release,
-    /// which every refcounting binder already tolerates.</summary>
+    /// <summary>Releases buttons and centers axes when a gamepad disconnects.</summary>
+    /// <remarks>Input consumers retain transitions, so omitted releases would leave actions held;
+    /// redundant releases are tolerated.</remarks>
     internal void OnGamepadRemoved(byte slot, TimeSpan now)
     {
         for (var button = GamepadButton.South; button <= GamepadButton.Guide; button++)
@@ -260,11 +236,8 @@ public sealed unsafe partial class SdlWindow : IWindow
 
         if (OperatingSystem.IsMacOS())
         {
-            // SDL owns the CAMetalLayer: SDL_Metal_CreateView attaches a Metal-backed view to
-            // the window's content view (main thread — SDL3 requires main-thread video on
-            // macOS), and SDL_Metal_GetLayer hands back the CAMetalLayer* Dawn's Cocoa surface
-            // needs. The view is destroyed with the window, which is why the renderer must be
-            // disposed first.
+            // SDL owns and creates the CAMetalLayer on the main thread. Dispose the renderer before
+            // the window releases that view.
             _metalView = SDL_Metal_CreateView(_window);
             if (_metalView == IntPtr.Zero)
             {

@@ -4,14 +4,10 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
-/// <summary>
-/// An ozz-animation clip as one native blob: three keyframe streams (translation, rotation,
-/// scale), each sorted by time across all tracks with a back-link from every key to the previous
-/// key of its track, so a sampler advancing in time touches only the keys that change. Values
-/// are quantized: half floats for translation and scale, three 15-bit components for rotation.
-/// Track count is padded to a multiple of four in every stream, as ozz's SIMD sampler requires.
-/// Opened from an <c>ozz-animation</c> archive by <see cref="OzzArchive.ReadAnimation(System.ReadOnlySpan{byte})"/>.
-/// </summary>
+/// <summary>Stores an ozz-animation clip in one native blob.</summary>
+/// <remarks>Translation, rotation and scale streams merge tracks by time with per-track back-links.
+/// Translation and scale use half floats; rotations use three 15-bit components.
+/// Streams pad tracks to multiples of four for SIMD sampling; OzzArchive.ReadAnimation loads archives.</remarks>
 public struct AnimationBlob
 {
     public float Duration;
@@ -53,13 +49,10 @@ public struct AnimationBlob
     }
 }
 
-/// <summary>
-/// One component's keys across every track, in time order. <see cref="Ratios"/> indexes the clip's
-/// timepoints (one byte per key when there are at most 256 timepoints, else two);
-/// <see cref="Previouses"/> is each key's distance back to the previous key of the same track;
-/// <see cref="Values"/> holds three 16-bit words per key. I-frames are group-varint snapshots of
-/// the sampler's per-track cursor at regular intervals, so a seek need not walk from the start.
-/// </summary>
+/// <summary>Stores one component's time-ordered keys across all tracks.</summary>
+/// <remarks>Ratios index timepoints using one byte for at most 256 times, otherwise two.
+/// Previouses stores per-track back-links; Values holds three 16-bit words per key.
+/// Group-varint i-frames snapshot per-track cursors for seeking.</remarks>
 public struct KeyframeStreamBlob
 {
     public BlobArray<byte> Ratios;

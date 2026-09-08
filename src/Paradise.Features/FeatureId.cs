@@ -3,20 +3,14 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Paradise.Features;
 
-/// <summary>The name of one switchable engine feature: dotted segments, subsystem first —
-/// <c>rendering.bloom</c>, <c>rendering.globalIllumination</c>, <c>ui.debugPanels</c>,
-/// <c>gameplay.weather</c>.
-///
-/// <para>A type rather than a bare string because the name travels between three places that
-/// never see each other — the feature that declares it, the config file that overrides it, and
-/// the subsystem that asks whether it is on — and a typo in any of them is otherwise a silent
-/// "off". Validating once, here, turns it into an exception naming the bad name.</para>
-///
-/// <para><b>Comparison ignores case</b> (ordinal), because the other half of this contract is a
-/// file a person edits by hand and <c>Rendering.Bloom</c> meaning something different from
-/// <c>rendering.bloom</c> is a trap with no upside. The declared spelling is what
-/// <see cref="Value"/> and <see cref="ToString"/> give back, so a listing still reads the way the
-/// feature's author wrote it.</para></summary>
+/// <summary>Identifies a feature by a validated dotted name, with the subsystem first.</summary>
+/// <remarks>
+/// <para>Examples: <c>rendering.bloom</c>, <c>rendering.globalIllumination</c>,
+/// <c>ui.debugPanels</c>, <c>gameplay.weather</c>. Validation rejects malformed names shared
+/// between declarations, configuration and consumers.</para>
+/// <para>Comparison is ordinal and case-insensitive, so hand-edited casing does not change
+/// identity. <see cref="Value"/> and <see cref="ToString"/> preserve the declared spelling.</para>
+/// </remarks>
 public readonly record struct FeatureId
 {
     private readonly string? _value;
@@ -82,16 +76,14 @@ public readonly record struct FeatureId
         return segmentLength == 0 ? $"'{value}' ends with a '.'; feature ids read like 'rendering.bloom'." : null;
     }
 
-    /// <summary>Written out rather than left to the record, which would compare the wrapped
-    /// string ordinally and make <c>Rendering.Bloom</c> a different feature from
-    /// <c>rendering.bloom</c> — see the type's own remarks. The synthesized <c>==</c> and
-    /// <c>Equals(object)</c> route through this one, so the whole type stays consistent.</summary>
+    /// <summary>Compares names with ordinal, case-insensitive equality.</summary>
+    /// <remarks>Overrides the record's case-sensitive string comparison; synthesized <c>==</c> and
+    /// <c>Equals(object)</c> also use this method.</remarks>
     public bool Equals(FeatureId other) => StringComparer.OrdinalIgnoreCase.Equals(Value, other.Value);
 
     /// <inheritdoc cref="Equals(FeatureId)"/>
     public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
-    /// <summary>The name, not the record's <c>FeatureId { Value = … }</c>: this goes into error
-    /// messages and listings, where the name alone is the useful part.</summary>
+    /// <summary>Returns the feature name for messages and listings.</summary>
     public override string ToString() => Value;
 }

@@ -10,51 +10,37 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {
-    /// <summary>
-    /// Creates a new entity with no components (or with EntityTags for TaggedWorld).
-    /// </summary>
+    /// <summary>Creates a new entity with no components (or with EntityTags for TaggedWorld).</summary>
     /// <returns>The created entity handle.</returns>
     Entity Spawn();
 
-    /// <summary>
-    /// Destroys an entity and removes it from its archetype.
-    /// </summary>
+    /// <summary>Destroys an entity and removes it from its archetype.</summary>
     /// <param name="entity">The entity to destroy.</param>
     /// <returns>True if the entity was destroyed, false if it was already dead or invalid.</returns>
     bool Despawn(Entity entity);
 
-    /// <summary>
-    /// Checks if an entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if an entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive.</returns>
     bool IsAlive(Entity entity);
 
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     int EntityCount { get; }
 
-    /// <summary>
-    /// Adds a component to an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <param name="value">The component value.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or already has the component.</exception>
     void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent;
 
-    /// <summary>
-    /// Removes a component from an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Removes a component from an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
     void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent;
 
-    /// <summary>
-    /// Gets the chunk manager for memory allocation and chunk access.
-    /// </summary>
+    /// <summary>The chunk manager for memory allocation and chunk access.</summary>
     ChunkManager ChunkManager { get; }
 
     /// <summary>
@@ -63,44 +49,23 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// </summary>
     WorldEventStore Events { get; }
 
-    /// <summary>
-    /// Gets the entity manager for entity lifecycle and location tracking.
-    /// </summary>
+    /// <summary>The entity manager for entity lifecycle and location tracking.</summary>
     IEntityManager EntityManager { get; }
 
-    /// <summary>
-    /// Gets the archetype registry for queries and archetype management.
-    /// </summary>
+    /// <summary>The archetype registry for queries and archetype management.</summary>
     ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry { get; }
 
-    /// <summary>
-    /// Gets the thread-safe entity ID allocator backing this world's entity manager.
-    /// </summary>
+    /// <summary>The thread-safe entity ID allocator backing this world's entity manager.</summary>
     EntityIdAllocator EntityIdAllocator { get; }
 
-    /// <summary>
-    /// Creates a new entity using the provided builder.
-    /// </summary>
+    /// <summary>Creates a new entity using the provided builder.</summary>
     /// <typeparam name="TBuilder">The builder type.</typeparam>
     /// <param name="builder">The component builder with initial components.</param>
     /// <returns>The created entity handle.</returns>
     Entity CreateEntity<TBuilder>(TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
 
-    /// <summary>
-    /// Creates a new entity whose archetype is a mask assembled at RUNTIME, with every component
-    /// at its zero default.
-    ///
-    /// The counterpart to <see cref="CreateEntity{TBuilder}"/> for a caller that cannot name its
-    /// component set at compile time — a scene loader composing an entity out of whatever
-    /// components the authored document happens to carry. <see cref="IComponentsBuilder"/> builds
-    /// its mask by nesting generic structs, so the set has to be a literal chain of type
-    /// arguments; a mask is the same information as a value.
-    ///
-    /// Zero-initialized for the same reason <c>EnsureComponent</c> is: chunk memory is cleared on
-    /// allocation, so an unwritten component reads as <c>default</c> rather than as whatever the
-    /// last occupant of that slot left behind. Seed values afterwards through
-    /// <c>GetComponent&lt;T&gt;</c>.
-    /// </summary>
+    /// <summary>Creates an entity from a runtime component mask with default component values.</summary>
+    /// <remarks>Use when the component set is not known at compile time; seed values through <c>GetComponent&lt;T&gt;</c>.</remarks>
     /// <param name="mask">The component set the entity is created with. An empty mask places the
     /// entity in the empty archetype, exactly as <see cref="Spawn"/> does.</param>
     /// <returns>The created entity handle.</returns>
@@ -126,32 +91,24 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// <returns>The entity handle.</returns>
     Entity AddComponents<TBuilder>(Entity entity, TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
 
-    /// <summary>
-    /// Adds a component to an entity using raw bytes. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity using raw bytes. This is a structural change that may move the entity.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     /// <param name="data">The raw component data bytes.</param>
     void AddComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data);
 
-    /// <summary>
-    /// Removes a component from an entity using a raw component ID.
-    /// </summary>
+    /// <summary>Removes a component from an entity using a raw component ID.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     void RemoveComponentRaw(Entity entity, ComponentId componentId);
 
-    /// <summary>
-    /// Sets a component value on an entity using raw bytes. This is NOT a structural change.
-    /// </summary>
+    /// <summary>Sets a component value on an entity using raw bytes. This is NOT a structural change.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     /// <param name="data">The raw component data bytes.</param>
     void SetComponentRaw(Entity entity, ComponentId componentId, ReadOnlySpan<byte> data);
 
-    /// <summary>
-    /// Removes all entities from this world.
-    /// </summary>
+    /// <summary>Removes all entities from this world.</summary>
     void Clear();
 
     /// <summary>

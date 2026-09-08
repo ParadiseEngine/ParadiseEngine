@@ -4,20 +4,11 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
-/// <summary>
-/// One character's playback: the clip it is playing, where in it, at what rate, whether it loops,
-/// and the clip it is fading out of. <see cref="Advance"/> moves time, <see cref="Evaluate"/>
-/// samples (blending the two clips while a fade runs) into local poses and model-space matrices
-/// the caller reads from <see cref="LocalPose"/> and <see cref="ModelMatrices"/>. Allocates only in
-/// the constructor: one <see cref="AnimationPlayerState"/> blob holding both sampling contexts,
-/// both pose sets and the matrices.
-/// </summary>
-/// <remarks>
-/// Holds the <see cref="NativeBlobAssetReference{T}"/>s it plays rather than raw refs so a clip
-/// stays alive while queued; the asset cache that loaded them still owns disposal. The skeleton
-/// is fixed at construction because the buffers are sized to it, and because a clip's tracks
-/// index that skeleton's joints — playing a clip cooked for another skeleton is refused.
-/// </remarks>
+/// <summary>Plays and cross-fades clips into one character's local poses and model matrices.</summary>
+/// <remarks>Advance moves time; Evaluate samples into LocalPose and ModelMatrices without allocation.
+/// The constructor allocates one AnimationPlayerState blob for cursors, poses and matrices.
+/// Clip and skeleton references keep assets reachable, but their cache owns disposal.
+/// The fixed skeleton sizes the buffers; clips must have the same track count.</remarks>
 public sealed class AnimationPlayer : IDisposable
 {
     private readonly NativeBlobAssetReference<SkeletonBlob> _skeleton;
@@ -69,8 +60,8 @@ public sealed class AnimationPlayer : IDisposable
     /// <summary>The whole per-character state as one blob — cursors, poses and matrices in one allocation the player owns — for a host that inspects or copies it.</summary>
     public ref AnimationPlayerState State => ref _state.Value;
 
-    /// <summary>Starts <paramref name="clip"/>; with a positive <paramref name="fadeSeconds"/> the clip playing until now keeps advancing and blends out over that time.</summary>
-    /// <exception cref="ArgumentException">The clip has a different track count than the skeleton has joints.</exception>
+    /// <summary>Starts a clip, optionally fading out the previous clip while it continues advancing.</summary>
+    /// <exception cref="ArgumentException">The clip's track count differs from the skeleton's joint count.</exception>
     public void Play(NativeBlobAssetReference<AnimationBlob> clip, float fadeSeconds = 0f, bool loop = true, float rate = 1f, float startTime = 0f)
     {
         ArgumentNullException.ThrowIfNull(clip);
@@ -80,17 +71,7 @@ public sealed class AnimationPlayer : IDisposable
             throw new ArgumentException($"The clip '{clip.Value.Name.ToString()}' has {clip.Value.TrackCount} tracks; the skeleton has {JointCount} joints.", nameof(clip));
         }
 
-        if (fadeSeconds > 0f && _current.Clip is not null)
-        {
-            _outgoing = _current;
-            _fadeDuration = fadeSeconds;
-            _fadeRemaining = fadeSeconds;
-        }
-        else
-        {
-            _outgoing = Slot.Rest;
-            _fadeRemaining = 0f;
-        }
+        BeginFade(fadeSeconds);
 
         _current = new Slot(clip, loop, rate, Math.Clamp(startTime, 0f, clip.Value.Duration));
         _state.Value.Current.Invalidate();
@@ -100,17 +81,7 @@ public sealed class AnimationPlayer : IDisposable
     public void Stop(float fadeSeconds = 0f)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (fadeSeconds > 0f && _current.Clip is not null)
-        {
-            _outgoing = _current;
-            _fadeDuration = fadeSeconds;
-            _fadeRemaining = fadeSeconds;
-        }
-        else
-        {
-            _outgoing = Slot.Rest;
-            _fadeRemaining = 0f;
-        }
+        BeginFade(fadeSeconds);
 
         _current = Slot.Rest;
     }
@@ -144,6 +115,21 @@ public sealed class AnimationPlayer : IDisposable
         }
 
         LocalToModel.Compute(ref _skeleton.Value, ref state.Pose, state.Models.ToSpan());
+    }
+
+    private void BeginFade(float fadeSeconds)
+    {
+        if (fadeSeconds > 0f && _current.Clip is not null)
+        {
+            _outgoing = _current;
+            _fadeDuration = fadeSeconds;
+            _fadeRemaining = fadeSeconds;
+        }
+        else
+        {
+            _outgoing = Slot.Rest;
+            _fadeRemaining = 0f;
+        }
     }
 
     private void Sample(in Slot slot, ref SamplingContext context, ref JointPoses pose)
@@ -194,12 +180,8 @@ public sealed class AnimationPlayer : IDisposable
     }
 }
 
-/// <summary>
-/// Everything an <see cref="AnimationPlayer"/> owns per character, as one native blob: the two
-/// sampling cursors, the two pose sets and the model matrices, sized to one skeleton. One
-/// allocation per character, one region a frame touches; the clip and skeleton it plays are the
-/// player's references, not the blob's, so this stays free of anything the GC must root.
-/// </summary>
+/// <summary>Stores one character's sampling cursors, poses and model matrices in one native blob.</summary>
+/// <remarks>The player retains clip and skeleton references outside this unmanaged state.</remarks>
 public struct AnimationPlayerState
 {
     public SamplingContext Current;

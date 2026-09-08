@@ -32,9 +32,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
     private readonly OperationGuard _operationGuard = new();
     private int _disposed;
 
-    /// <summary>
-    /// Creates a new archetype registry using the specified shared metadata.
-    /// </summary>
+    /// <summary>Creates a new archetype registry using the specified shared metadata.</summary>
     /// <param name="sharedMetadata">The shared metadata to use.</param>
     /// <param name="typeInfos">The component type information array.</param>
     /// <param name="chunkManager">The chunk manager for memory allocation.</param>
@@ -60,10 +58,8 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
         using var _ = _operationGuard.EnterScope();
 
-        // Get or create global query ID
         int queryId = _sharedMetadata.GetOrCreateQueryId(description);
 
-        // Fast path: query already exists in this world
         if ((uint)queryId < (uint)_queryCache.Count && _queryCache[queryId] is { } existingList)
         {
             return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(existingList);
@@ -71,7 +67,6 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
 
         using var lockScope = _lock.EnterScope();
 
-        // Grow list if needed by adding nulls
         int requiredCount = queryId + 1;
         for (int i = _queryCache.Count; i < requiredCount; i++)
         {
@@ -85,7 +80,6 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
             return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(slot);
         }
 
-        // Get matched archetype IDs from shared metadata and add only locally existing archetypes
         var matchedIds = _sharedMetadata.GetMatchedArchetypeIds(queryId);
         int matchedCount = matchedIds.Count;
         var archetypes = new List<Archetype<TMask, TConfig>>(matchedCount);
@@ -107,9 +101,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(archetypes);
     }
 
-    /// <summary>
-    /// Gets or creates an archetype for the given component mask.
-    /// </summary>
+    /// <summary>Gets or creates an archetype for the given component mask.</summary>
     /// <param name="mask">The component mask defining the archetype.</param>
     /// <returns>The archetype store for this mask.</returns>
     public Archetype<TMask, TConfig> GetOrCreate(HashedKey<TMask> mask)
@@ -120,10 +112,8 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         var matchedQueries = s_tempMatchedQueries ??= new List<int>();
         matchedQueries.Clear();
 
-        // Get or create global archetype ID and layout
         int archetypeId = _sharedMetadata.GetOrCreateArchetypeId(mask, matchedQueries);
 
-        // Get or create archetype instance in this world
         return GetOrCreateById(archetypeId, matchedQueries);
     }
 
@@ -141,7 +131,6 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         for (int i = 0; i < matchedCount; i++)
         {
             int queryId = matchedQueries[i];
-            // Only notify queries that exist locally in this world
             if ((uint)queryId < (uint)localQueryCount &&
                 _queryCache[queryId] is { } archetypes)
             {
@@ -150,9 +139,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Gets an archetype by its ID.
-    /// </summary>
+    /// <summary>An archetype by its ID.</summary>
     /// <param name="archetypeId">The archetype ID.</param>
     /// <returns>The archetype store, or null if not found in this world.</returns>
     public Archetype<TMask, TConfig>? GetById(int archetypeId)
@@ -163,9 +150,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         return (uint)archetypeId < (uint)_archetypes.Count ? _archetypes[archetypeId] : null;
     }
 
-    /// <summary>
-    /// Tries to get an archetype by its component mask.
-    /// </summary>
+    /// <summary>Tries to get an archetype by its component mask.</summary>
     /// <param name="mask">The component mask.</param>
     /// <param name="store">The archetype store if found.</param>
     /// <returns>True if found in this world.</returns>
@@ -204,10 +189,8 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         var matchedQueries = s_tempMatchedQueries ??= new List<int>();
         matchedQueries.Clear();
 
-        // Get target archetype ID from shared metadata (O(1) if cached)
         int targetId = _sharedMetadata.GetOrCreateWithAdd(source.Id, componentId, matchedQueries);
 
-        // Get or create archetype instance in this world
         return GetOrCreateById(targetId, matchedQueries);
     }
 
@@ -229,16 +212,12 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         var matchedQueries = s_tempMatchedQueries ??= new List<int>();
         matchedQueries.Clear();
 
-        // Get target archetype ID from shared metadata (O(1) if cached)
         int targetId = _sharedMetadata.GetOrCreateWithRemove(source.Id, componentId, matchedQueries);
 
-        // Get or create archetype instance in this world
         return GetOrCreateById(targetId, matchedQueries);
     }
 
-    /// <summary>
-    /// Gets or creates an archetype instance by its global ID.
-    /// </summary>
+    /// <summary>Gets or creates an archetype instance by its global ID.</summary>
     /// <param name="archetypeId">The global archetype ID.</param>
     /// <param name="matchedQueries">The list of matching query IDs from shared metadata.</param>
     /// <returns>The archetype instance for this world.</returns>
@@ -251,10 +230,8 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
             return existing;
         }
 
-        // Slow path: need to create
         using var lockScope = _lock.EnterScope();
 
-        // Grow list if needed by adding nulls
         int requiredCount = archetypeId + 1;
         for (int i = _archetypes.Count; i < requiredCount; i++)
         {
@@ -266,13 +243,11 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
         if (slot is not null)
             return slot;
 
-        // Create new archetype instance for this world
         var layoutData = _sharedMetadata.GetLayoutData(archetypeId);
         var archetype = new Archetype<TMask, TConfig>(archetypeId, layoutData, _typeInfos, _chunkManager);
 
         slot = archetype;
 
-        // Notify matching queries about the new archetype using pre-computed matched query IDs
         NotifyQueries(archetype, matchedQueries);
 
         return archetype;

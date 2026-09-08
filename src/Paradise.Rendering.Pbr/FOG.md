@@ -38,19 +38,27 @@ scene.FogVolumes.Add(new PbrFogVolume
 
 The box occupies [-0.5,+0.5] on each local axis before transformation. Overlapping boxes add
 extinction and combine their scattering albedos by density. Global density can be zero to draw
-local media alone. Up to 16 volumes are supported; singular transforms and excess volumes are
-rejected.
+local media alone. Up to 16 volumes are supported; non-finite, singular or projective transforms and excess volumes are
+rejected. Non-finite color and albedo components become zero; albedo is clamped to [0,1].
 
 The pass integrates front to back into HDR before temporal AA, bloom, and tone mapping. The
 near-plane ray origin is used for orthographic cameras; perspective rays originate at the
 camera. Geometry depth stops integration at opaque surfaces; sky rays stop at `MaxDistance`.
 `StartDistance` provides a clear region near the viewer. Step count is clamped to 1–128.
 
-This is full-resolution single scattering, with no temporal accumulation or multiple scattering.
-Its cost scales with pixels, steps, lights, and local volumes. Thin local media can need more
-steps. Blended surfaces use the opaque scene depth; their per-layer fog distances are not
+This is full-resolution single scattering, with no dedicated temporal accumulation or multiple scattering.
+When enabled, TAA accumulates the resulting fogged HDR scene.
+Its cost scales with pixels, steps, lights, and local volumes. Ray–box intersections preserve thin-volume extinction even between samples. Height density
+and lighting still use midpoint samples, so more steps improve rapidly varying density and
+shadow detail; local lighting is approximated at the segment midpoint. Blended surfaces use the opaque scene depth; their per-layer fog distances are not
 resolved independently. The default is disabled and incurs no fog pass or fog GPU resources.
 
-The initial five `FogTests` verify phase normalization, composition of extinction, real GPU
-Beer–Lambert attenuation, local volume bounds, direct scattering, and exact restoration when
-fog is switched off or density is zero.
+The twelve `FogTests` cover phase normalization, Beer–Lambert attenuation, height falloff,
+opaque depth for both camera types, thin and transformed volumes, input validation, directional
+shadows, point/spot scattering, AA/bloom ordering, resizing, and feature switches. Run them with:
+
+```sh
+dotnet run --project src/Paradise.Rendering.Pbr.Test -- --treenode-filter '/*/*/FogTests/*' --maximum-parallel-tests 1
+```
+
+Set `PARADISE_FOG_ARTIFACTS` to a directory to save thin-volume and shadowed/unshadowed GPU captures.

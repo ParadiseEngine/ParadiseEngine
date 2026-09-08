@@ -2,12 +2,8 @@ using Paradise.BLOB;
 
 namespace Paradise.BT;
 
-/// <summary>
-/// The shared, immutable half of a compiled tree: topology, GUID table, offsets and authored
-/// defaults, in one native blob every <see cref="BehaviorTreeRef"/> points into. A thousand agents share
-/// one layout and each owns only its mutable half. Dispose it only once nothing still ticks
-/// against it.
-/// </summary>
+/// <summary>Owns the shared tree topology, GUID table, offsets and defaults in one native blob.</summary>
+/// <remarks>Dispose only after every instance using this layout has finished.</remarks>
 public sealed class BehaviorTreeLayout : IDisposable
 {
     private NativeBlobAssetReference<LayoutBlob>? _blob;

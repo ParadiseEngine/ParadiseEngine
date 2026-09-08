@@ -4,9 +4,7 @@ namespace Paradise.BT.Test;
 
 public sealed class CoreTests
 {
-    // ============================
     // BTreeNode compilation
-    // ============================
 
     [Test]
     public async Task Builder_Accepts_Node_With_Zero_Children()
@@ -60,9 +58,7 @@ public sealed class CoreTests
         await Assert.That(ex).IsNotNull();
     }
 
-    // ============================
     // Layout topology
-    // ============================
 
     [Test]
     public async Task BehaviorTree_Count_Matches_Total_Node_Count()
@@ -103,9 +99,7 @@ public sealed class CoreTests
         await Assert.That(tree.GetEndIndex(2)).IsEqualTo(3);
     }
 
-    // ============================
     // BehaviorTreeInstance lifecycle
-    // ============================
 
     [Test]
     public async Task Instance_Status_Reflects_Last_Tick_Result()
@@ -186,9 +180,7 @@ public sealed class CoreTests
         await Assert.That(instance.Blackboard.GetData<int>()).IsEqualTo(42);
     }
 
-    // ============================
     // Complex tree scenarios
-    // ============================
 
     [Test]
     public async Task Deep_Nested_Tree_Executes_Correctly()

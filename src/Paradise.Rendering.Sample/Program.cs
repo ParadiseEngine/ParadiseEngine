@@ -20,18 +20,8 @@ internal static class Program
     private static uint InitialWidth = 640;
     private static uint InitialHeight = 480;
 
-    /// <summary>The sink every engine diagnostic in this sample goes through.</summary>
-    /// <remarks>
-    /// One factory, built once from <c>--log-level</c>, handing out a logger per category — which
-    /// is what <see cref="ParadiseConsole.CreateFactory"/> is for, and the first place in the repo
-    /// that needs more than one category behind the same options.
-    ///
-    /// A flag rather than an environment variable, because this host already parses flags and a
-    /// command you can read back is better than ambient state. It replaces
-    /// <c>PARADISE_CLUSTER_DEBUG=1</c>, which used to switch the cluster dump on at runtime and
-    /// was read once per frame to do it; the level costs one parse at startup and covers every
-    /// diagnostic rather than that one.
-    /// </remarks>
+    /// <summary>Provides the sample's shared diagnostic sink.</summary>
+    /// <remarks>Configure once from --log-level and create loggers by category.</remarks>
     private static ILoggerFactory s_log = ParadiseConsole.CreateFactory(new ParadiseConsoleOptions());
 
     private enum SceneKind
@@ -139,14 +129,10 @@ internal static class Program
         }
     }
 
-    /// <summary>Builds this run's feature configuration from the three layers a person configures
-    /// a build through, nearest last: <c>--config engine.toml</c>, then
-    /// <c>PARADISE_FEATURES</c>, then <c>--features +a,-b</c>. Null means an argument was bad and
-    /// was reported.
-    ///
-    /// <para>The built-ins are declared up front so <c>--list-features</c> and the stale-name
-    /// report work on a machine with no GPU adapter — the renderer declares the same definitions
-    /// again when it is built, which is a no-op.</para></summary>
+    /// <summary>Builds feature configuration from file, environment and command line in that
+    /// precedence order.</summary>
+    /// <remarks>Returns null after reporting invalid arguments. Declare built-ins before acquiring
+    /// a GPU so --list-features and unknown-name checks work without an adapter.</remarks>
     private static FeatureSwitches? ParseFeatures(string[] args)
     {
         var configuration = EngineConfiguration.Empty;
@@ -231,11 +217,8 @@ internal static class Program
     {
         if (frameCount < 0) return 1;
 
-        // SDL still needs to initialize cleanly even though no window is opened — the dummy
-        // video driver lets it succeed in headless CI containers without a display server.
-        // Using SDL_SetHint instead of Environment.SetEnvironmentVariable: native libc getenv()
-        // can cache values from process start, so the managed env var doesn't reliably reach
-        // SDL's video subsystem; SDL_SetHint writes through the SDL hint API directly.
+        // Set SDL's dummy video hint directly for headless CI; managed environment changes may not
+        // reach native getenv caches.
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"u8);
 
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO))
@@ -465,11 +448,8 @@ internal static class Program
 
         if (OperatingSystem.IsMacOS())
         {
-            // SDL owns the CAMetalLayer: SDL_Metal_CreateView attaches a Metal-backed view to
-            // the window's content view (must run on the main thread — we are on it; SDL3
-            // requires main-thread video on macOS), and SDL_Metal_GetLayer hands back the
-            // CAMetalLayer* that Dawn's Cocoa surface source needs. The caller destroys the
-            // view only after the renderer (and thus the wgpu surface) is disposed.
+            // SDL creates the CAMetalLayer on the main thread. Keep the view alive until after
+            // renderer/surface disposal.
             metalView = SDL_Metal_CreateView(window);
             if (metalView == IntPtr.Zero)
                 throw new InvalidOperationException($"SDL_Metal_CreateView failed: {SDL_GetError()}");

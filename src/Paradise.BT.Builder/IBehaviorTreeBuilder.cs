@@ -1,11 +1,7 @@
 namespace Paradise.BT.Builder;
 
-/// <summary>
-/// The type that builds one tree — what the binding generator keys on: it sweeps the implementing
-/// type for the nodes it composes, unions their access, and emits <c>{Type}Blackboard</c> plus
-/// its <c>Bind</c>. An interface rather than an attribute so the shape is compile-checked and a
-/// tree can be a type parameter.
-/// </summary>
+/// <summary>Builds a tree whose node access determines its generated blackboard and Bind method.</summary>
+/// <remarks>The static interface supports tree type parameters and compile-time shape checks.</remarks>
 public interface IBehaviorTreeBuilder
 {
     static abstract BTreeNode Build();

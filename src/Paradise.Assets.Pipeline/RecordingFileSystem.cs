@@ -3,18 +3,11 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// The importer's output mount: rooted at the build tree so an importer cannot write outside it,
-/// recording writes so the manifest cannot drift from what actually happened, and landing each
-/// file whole.
-/// </summary>
+/// <summary>Confines importer output to the build tree and records completed writes.</summary>
 /// <remarks>
-/// A file is written to a temporary sibling and renamed into place when its stream closes, so a
-/// build killed mid-write leaves a <c>.partial</c> the next sweep removes rather than a truncated
-/// output the index would trust (issue #202). A stream whose write threw is discarded on close,
-/// not renamed: the failure the importer reports must not be a file the tree keeps. Only the
-/// modes that replace the whole file get this; append and open-existing are handed straight
-/// through, because their result is not a function of one stream.
+/// Whole-file writes use a temporary sibling renamed on close. Failed writes are discarded;
+/// interrupted builds leave <c>.partial</c> files for cleanup instead of truncated output.
+/// Append and open-existing modes pass through because they depend on existing contents.
 /// </remarks>
 internal sealed class RecordingFileSystem : SubFileSystem
 {

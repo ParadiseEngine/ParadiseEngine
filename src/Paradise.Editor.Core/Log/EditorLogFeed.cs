@@ -6,9 +6,7 @@ namespace Paradise.Editor.Core.Log;
 public readonly record struct EditorLogEntry(
     DateTimeOffset At, LogLevel Level, string Category, string Message, Exception? Exception);
 
-/// <summary>
-/// The READ half of the editor's console. The write half is plain <see cref="ILogger"/>.
-/// </summary>
+/// <summary>The READ half of the editor's console. The write half is plain <see cref="ILogger"/>.</summary>
 /// <remarks>
 /// <para>
 /// The editor reports through the engine's seam (AGENTS.md): it takes an

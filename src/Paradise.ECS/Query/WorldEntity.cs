@@ -44,31 +44,20 @@ public readonly ref struct WorldEntity<TMask, TConfig>
         _indexInChunk = indexInChunk;
     }
 
-    /// <summary>
-    /// Gets the entity.
-    /// </summary>
+    /// <summary>The entity.</summary>
     public Entity Entity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
             var bytes = _chunkManager.GetBytes(_chunk);
-            int offset = ImmutableArchetypeLayout<TMask, TConfig>.GetEntityIdOffset(_indexInChunk);
-            int entityId = TConfig.EntityIdByteSize switch
-            {
-                1 => bytes.GetRef<byte>(offset),
-                2 => bytes.GetRef<ushort>(offset),
-                4 => bytes.GetRef<int>(offset),
-                _ => ThrowHelper.ThrowInvalidEntityIdByteSize<int>(TConfig.EntityIdByteSize)
-            };
+            int entityId = ImmutableArchetypeLayout<TMask, TConfig>.ReadEntityId(bytes, _indexInChunk);
             var location = _entityManager.GetLocation(entityId);
             return new Entity(entityId, location.Version);
         }
     }
 
-    /// <summary>
-    /// Gets a reference to a component on this entity.
-    /// </summary>
+    /// <summary>A reference to a component on this entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>A reference to the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -78,18 +67,14 @@ public readonly ref struct WorldEntity<TMask, TConfig>
         return ref _chunkManager.GetBytes(_chunk).GetRef<T>(offset);
     }
 
-    /// <summary>
-    /// Checks if this entity has a specific component.
-    /// </summary>
+    /// <summary>Checks if this entity has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>True if the entity has the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has<T>() where T : unmanaged, IComponent
         => _layout.HasComponent(T.TypeId);
 
-    /// <summary>
-    /// Implicitly converts a WorldEntity to its underlying Entity.
-    /// </summary>
+    /// <summary>Implicitly converts a WorldEntity to its underlying Entity.</summary>
     /// <param name="worldEntity">The WorldEntity to convert.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator Entity(WorldEntity<TMask, TConfig> worldEntity) => worldEntity.Entity;
@@ -151,18 +136,14 @@ public readonly ref struct WorldEntityChunk<TMask, TConfig>
         get => _chunk;
     }
 
-    /// <summary>
-    /// Gets a WorldEntity at the specified index within this chunk.
-    /// </summary>
+    /// <summary>A WorldEntity at the specified index within this chunk.</summary>
     /// <param name="index">The index within this chunk.</param>
     /// <returns>A WorldEntity providing access to the entity at the specified index.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public WorldEntity<TMask, TConfig> GetEntityAt(int index)
         => WorldEntity<TMask, TConfig>.Create(_chunkManager, _entityManager, _layout, _chunk, index);
 
-    /// <summary>
-    /// Gets a span over all components of type T in this chunk.
-    /// </summary>
+    /// <summary>A span over all components of type T in this chunk.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>A span over the components.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -172,9 +153,7 @@ public readonly ref struct WorldEntityChunk<TMask, TConfig>
         return _chunkManager.GetBytes(_chunk).GetSpan<T>(baseOffset, _entityCount);
     }
 
-    /// <summary>
-    /// Checks if this chunk's archetype has a specific component.
-    /// </summary>
+    /// <summary>Checks if this chunk's archetype has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <returns>True if the archetype has the component.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -189,9 +168,7 @@ public readonly ref struct WorldEntityChunk<TMask, TConfig>
 /// </summary>
 public static class WorldEntityQueryBuilderExtensions
 {
-    /// <summary>
-    /// Builds a query result for entity-level iteration using <see cref="WorldEntity{TMask, TConfig}"/>.
-    /// </summary>
+    /// <summary>Builds a query result for entity-level iteration using <see cref="WorldEntity{TMask, TConfig}"/>.</summary>
     /// <typeparam name="TMask">The component mask type.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <param name="builder">The query builder.</param>
@@ -202,15 +179,10 @@ public static class WorldEntityQueryBuilderExtensions
         Build<TMask, TConfig>(this QueryBuilder<TMask> builder, World<TMask, TConfig> world)
         where TMask : unmanaged, IBitSet<TMask>
         where TConfig : IConfig, new()
-    {
-        var query = world.ArchetypeRegistry.GetOrCreateQuery((HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
-        return new QueryResult<WorldEntity<TMask, TConfig>, Archetype<TMask, TConfig>, TMask, TConfig>(
-            world.ChunkManager, world.EntityManager, query);
-    }
+        => QueryHelpers.CreateQueryResult<WorldEntity<TMask, TConfig>, TMask, TConfig>(
+            world, (HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
 
-    /// <summary>
-    /// Builds a chunk query result for batch processing using <see cref="WorldEntityChunk{TMask, TConfig}"/>.
-    /// </summary>
+    /// <summary>Builds a chunk query result for batch processing using <see cref="WorldEntityChunk{TMask, TConfig}"/>.</summary>
     /// <typeparam name="TMask">The component mask type.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <param name="builder">The query builder.</param>
@@ -221,9 +193,6 @@ public static class WorldEntityQueryBuilderExtensions
         BuildChunk<TMask, TConfig>(this QueryBuilder<TMask> builder, World<TMask, TConfig> world)
         where TMask : unmanaged, IBitSet<TMask>
         where TConfig : IConfig, new()
-    {
-        var query = world.ArchetypeRegistry.GetOrCreateQuery((HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
-        return new ChunkQueryResult<WorldEntityChunk<TMask, TConfig>, Archetype<TMask, TConfig>, TMask, TConfig>(
-            world.ChunkManager, world.EntityManager, query);
-    }
+        => QueryHelpers.CreateChunkQueryResult<WorldEntityChunk<TMask, TConfig>, TMask, TConfig>(
+            world, (HashedKey<ImmutableQueryDescription<TMask>>)builder.Description);
 }

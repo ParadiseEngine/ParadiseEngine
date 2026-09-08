@@ -5,12 +5,11 @@ using Tomlyn.Serialization;
 
 namespace Paradise.Assets.Project;
 
-/// <summary>
-/// The wire shape of <c>project.toml</c>. Every member is nullable and nothing is validated here,
-/// so "absent" stays distinguishable from "held the default"; <see cref="ProjectManifest.Parse"/>
-/// decides. Keys are pinned with <c>[JsonPropertyName]</c> (Tomlyn honours it) rather than a
-/// naming policy that would also touch the user-chosen profile names.
-/// </summary>
+/// <summary>The unvalidated wire model of <c>project.toml</c>.</summary>
+/// <remarks>
+/// Nullable members distinguish omitted settings from explicit defaults for <see cref="ProjectManifest.Parse"/>.
+/// Explicit JSON names also apply to Tomlyn without transforming user-chosen profile names.
+/// </remarks>
 internal sealed class ProjectManifestDocument
 {
     [JsonPropertyName("name")]

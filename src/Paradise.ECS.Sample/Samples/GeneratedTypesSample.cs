@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates and verifies the generated types from source generators.
-/// </summary>
+/// <summary>Demonstrates and verifies the generated types from source generators.</summary>
 public static class GeneratedTypesSample
 {
     public static void Run()

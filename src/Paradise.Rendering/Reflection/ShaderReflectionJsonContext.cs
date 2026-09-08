@@ -3,17 +3,9 @@ using System.Text.Json.Serialization;
 
 namespace Paradise.Rendering;
 
-/// <summary>
-/// AOT/trim-safe <see cref="JsonSerializerContext"/> for the Slang-reflection-shaped records in
-/// <see cref="ShaderProgramDesc"/> and friends. Snake-case-lower property naming targets the
-/// Slang <c>-reflection-json</c> schema as of Slang v2026.7 (the version pinned by
-/// <c>tools/slang/slang.manifest.json</c>, landing in #42). Enum values are PascalCase via
-/// <see cref="JsonStringEnumConverter"/>; if a future Slang release switches to snake_case enum
-/// members or changes the flag separator, the regression suite in #45 catches the drift before
-/// the slangc bump merges.
-/// </summary>
-/// <remarks>The round-trip behavior of this context is exercised by the test suite on
-/// <c>net10.0</c>, the library's single target framework.</remarks>
+/// <summary>Provides AOT-safe JSON serialization for Slang reflection records.</summary>
+/// <remarks>Uses snake-case property names and PascalCase enum values. Reflection and round-trip
+/// tests detect drift from the pinned compiler schema.</remarks>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,

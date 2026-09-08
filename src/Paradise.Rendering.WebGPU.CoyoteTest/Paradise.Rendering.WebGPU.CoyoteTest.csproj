@@ -6,11 +6,7 @@
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!--
-      Intentionally NOT an IsTestProject — a standalone Coyote runner with its own Main, not a
-      TUnit suite. Marking it IsTestProject makes `dotnet test` try to host it under
-      Microsoft.Testing.Platform, which it does not support. Run it with `dotnet run`.
-    -->
+    <!-- Standalone Coyote runner: use dotnet run, not IsTestProject/Microsoft.Testing.Platform. -->
     <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
   </PropertyGroup>
 

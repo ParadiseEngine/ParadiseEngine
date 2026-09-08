@@ -77,9 +77,8 @@ public class OfflineTests
     [Test]
     public async Task a_track_with_keys_far_apart_in_the_stream_is_split_so_the_back_link_fits()
     {
-        // Keys sort by the time of the key before them, so between track 0's keys at 0.5 and 1
-        // sit every other track's keys whose predecessor lies in that half: 1023 × 70 of them,
-        // past the 16-bit back-link — the builder must insert a midpoint key on track 0.
+        // Other tracks place 1023 × 70 keys between track 0's keys, exceeding its 16-bit back-link.
+        // The builder must insert a midpoint key.
         var raw = new RawAnimation { Name = "wide", Duration = 1f };
         for (var i = 0; i < SkeletonBlob.MaxJoints; i++)
         {

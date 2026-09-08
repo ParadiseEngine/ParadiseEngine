@@ -42,13 +42,9 @@ ConstantBuffer<DrawUniforms> draw;
 [[vk::binding(3, 1)]]
 StructuredBuffer<uint> clusterMasks;
 
-// Joint palettes for skinned draws, packed end to end: one contiguous run of matrices per skinned
-// instance, and DrawUniforms.highlight.y carries that instance's first index. One buffer for every
-// skinned draw in the frame keeps this to a single binding and a single upload — 24 KB for a scene
-// of six 65-joint characters, versus re-uploading their vertex streams.
-//
-// Same convention as DrawUniforms.mvp: built as a row-vector product on the CPU and applied here
-// as mul(matrix, vector), which is what the rigid path already does with mvp/model.
+// One joint-matrix buffer contains consecutive palettes; draw.highlight.y is the instance's first
+// index. Upload once per frame. CPU row-vector products are read column-major and applied with
+// mul(matrix,vector), like rigid transforms.
 [[vk::binding(4, 1)]]
 StructuredBuffer<float4x4> jointMatrices;
 
@@ -73,12 +69,9 @@ Texture2D<float4> occlusionTexture;
 [[vk::binding(6, 2)]]
 Texture2D<float4> emissiveTexture;
 
-// Group 3: screen-space effects and environment tables. The depth + normal pre-pass is read here
-// with textureLoad: prepassNormalTexture is Rgba16Float (xyz = unit world normal, w = coverage,
-// cleared to 0 so the background reads w = 0) and prepassDepthTexture is the pre-pass's
-// Depth32Float viewed as an unfilterable float (a world position is frame.invViewProj of it).
-// SSAO is computed inline in the fragment and multiplies only the ambient term; intensity 0
-// disables it (the pre-pass is culled and the shader early-outs, so the stale texture is never read).
+// Prepass normals are Rgba16Float (xyz unit world normal, w coverage); depth is Depth32Float. Use
+// textureLoad and frame.invViewProj to reconstruct position. SSAO affects ambient only; zero
+// intensity skips stale targets when the prepass is culled.
 struct SsaoUniforms
 {
     float4 params; // x: intensity (0 = off), y: radius (world units), z: bias, w: power
@@ -92,23 +85,17 @@ ConstantBuffer<SsaoUniforms> ssao;
 [[vk::binding(1, 3)]]
 Texture2D<float4> prepassNormalTexture;
 
-// Sky-reflection specular (Godot Environment.reflected_light_source = Sky/Background): the
-// ProceduralSky radiance GGX-prefiltered on the CPU into a small LUT. The gradient sky is
-// azimuth-symmetric, so the prefiltered radiance depends only on reflection.y (u) and
-// roughness (v). Enabled via frame.aaSettings.x (sun disk/halo excluded — a 1D-symmetric LUT
-// cannot carry a directional glint; its diffuse-scale contribution is negligible).
+// GGX-prefiltered procedural sky LUT: gradient rows use reflection.y and sun rows use the
+// reflection/sun cosine; roughness selects rows within each half. Enabled by frame.aaSettings.x.
 [[vk::binding(2, 3)]]
 Texture2D<float4> skySpecularLut;
 
 [[vk::binding(3, 3)]]
 SamplerState skySpecularSampler;
 
-// The environment BRDF (DFG) table — the real GGX pre-integral (Godot's integrate_dfg.glsl
-// integrand: Schlick-GGX with the IBL k = α²/2, 1024 Hammersley samples), CPU-baked at startup
-// into a 128×128 Rgba16Float. r = scale (∫(1−Fc)·G_Vis), g = bias (∫Fc·G_Vis); specular =
-// F0·scale + f90·bias, and dfg_y (the F0=1 response used by the multiscatter energy
-// compensation) = scale + bias. u = NdotV, v = roughness. Replaces the Karis analytic fit,
-// whose few-percent corner error showed up on metals (× energy compensation × many lights).
+// CPU-integrated GGX DFG table: 128x128 Rgba16Float, 1024 Hammersley samples, IBL k=alpha^2/2. UV
+// is (NdotV,roughness); rg store scale/bias, giving F0*scale+f90*bias. Their sum supplies the F0=1
+// multiscatter response.
 [[vk::binding(4, 3)]]
 Texture2D<float4> dfgLut;
 
@@ -145,12 +132,8 @@ struct VertexInput
     [[vk::location(3)]] float4 tangent  : TANGENT;
 };
 
-// Skinned meshes extend the same stream rather than binding a second vertex buffer: the loader
-// reflects ONE interleaved layout per vertex entry point, so joints/weights ride along at the end
-// (20 floats/vertex instead of 12). They are uploaded once with the mesh, not per frame.
-//
-// Joint indices arrive as floats because that is how GltfPrimitive.JointsWeights stores them —
-// exact for any index a glTF skin can hold, and it keeps the stream a single float array.
+// Skinned vertices extend the reflected interleaved stream with joints/weights (20 floats rather
+// than 12), uploaded once. Joint indices are exact float representations of glTF palette indices.
 struct VertexInputSkinned
 {
     [[vk::location(0)]] float3 position : POSITION;

@@ -3,18 +3,8 @@ using Paradise.Audio.Wwise.Interop;
 
 namespace Paradise.Audio.Wwise;
 
-/// <summary>
-/// A registered Wwise game object: anything that emits or hears sound.
-///
-/// This is a strongly-typed id rather than a handle with behaviour. Wwise object ids and event
-/// ids are both plain integers, and every posting call takes one of each — so the single most
-/// likely mistake in an audio integration is passing them in the wrong order, which produces no
-/// error and no sound. Separate types make that a compile error.
-///
-/// Ids are the caller's to allocate. <see cref="FromIndex"/> exists so a host can derive stable
-/// ids from something it already has (an actor's index, an emitter's slot) instead of keeping a
-/// parallel counter, which would drift the moment the scene reloads.
-/// </summary>
+/// <summary>A typed ID for a registered Wwise emitter or listener.</summary>
+/// <remarks>Distinct from event IDs to prevent argument swaps; callers allocate IDs or derive them with <see cref="FromIndex"/>.</remarks>
 public readonly record struct WwiseGameObject(ulong Id)
 {
     /// <summary>The global scope: an RTPC set here applies to every object that has no value of

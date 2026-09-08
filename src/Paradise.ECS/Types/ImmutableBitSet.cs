@@ -31,23 +31,17 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         get;
     } = ValidateAndGetULongCount();
 
-    /// <summary>
-    /// Gets the maximum number of bits this bitset can store.
-    /// </summary>
+    /// <summary>The maximum number of bits this bitset can store.</summary>
     public static int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => ULongCount * 64;
     }
 
-    /// <summary>
-    /// Gets an empty bitset with all bits cleared.
-    /// </summary>
+    /// <summary>An empty bitset with all bits cleared.</summary>
     public static ImmutableBitSet<TBits> Empty => default;
 
-    /// <summary>
-    /// Gets a value indicating whether all bits in this bitset are cleared.
-    /// </summary>
+    /// <summary>Whether all bits in this bitset are cleared.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -64,9 +58,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
 
     private ImmutableBitSet(TBits bits) => _bits = bits;
 
-    /// <summary>
-    /// Determines whether the specified bitset is equal to this bitset.
-    /// </summary>
+    /// <summary>Determines whether the specified bitset is equal to this bitset.</summary>
     /// <param name="other">The bitset to compare with this bitset.</param>
     /// <returns><c>true</c> if all bits match; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -106,9 +98,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
             ULongCount);
     }
 
-    /// <summary>
-    /// Gets the value of the bit at the specified index.
-    /// </summary>
+    /// <summary>The value of the bit at the specified index.</summary>
     /// <param name="index">The zero-based index of the bit to get.</param>
     /// <returns><c>true</c> if the bit is set; otherwise, <c>false</c>.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
@@ -121,9 +111,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return (span[index >> 6] & (1UL << (index & 63))) != 0;
     }
 
-    /// <summary>
-    /// Returns a new bitset with the bit at the specified index set to 1.
-    /// </summary>
+    /// <summary>Returns a new bitset with the bit at the specified index set to 1.</summary>
     /// <param name="index">The zero-based index of the bit to set.</param>
     /// <returns>A new bitset with the specified bit set.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
@@ -138,9 +126,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(newBits);
     }
 
-    /// <summary>
-    /// Returns a new bitset with the bit at the specified index cleared to 0.
-    /// </summary>
+    /// <summary>Returns a new bitset with the bit at the specified index cleared to 0.</summary>
     /// <param name="index">The zero-based index of the bit to clear.</param>
     /// <returns>A new bitset with the specified bit cleared.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="index"/> is negative or greater than or equal to <see cref="Capacity"/>.</exception>
@@ -155,9 +141,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(newBits);
     }
 
-    /// <summary>
-    /// Performs a bitwise AND operation with another bitset.
-    /// </summary>
+    /// <summary>Performs a bitwise AND operation with another bitset.</summary>
     /// <param name="other">The bitset to AND with.</param>
     /// <returns>A new bitset containing the result of the AND operation.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -174,9 +158,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(result);
     }
 
-    /// <summary>
-    /// Performs a bitwise OR operation with another bitset.
-    /// </summary>
+    /// <summary>Performs a bitwise OR operation with another bitset.</summary>
     /// <param name="other">The bitset to OR with.</param>
     /// <returns>A new bitset containing the result of the OR operation.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -193,9 +175,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(result);
     }
 
-    /// <summary>
-    /// Performs a bitwise AND-NOT operation (this AND NOT other).
-    /// </summary>
+    /// <summary>Performs a bitwise AND-NOT operation (this AND NOT other).</summary>
     /// <param name="other">The bitset to AND-NOT with.</param>
     /// <returns>A new bitset containing bits that are set in this bitset but not in the other.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -212,9 +192,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(result);
     }
 
-    /// <summary>
-    /// Performs a bitwise XOR operation with another bitset.
-    /// </summary>
+    /// <summary>Performs a bitwise XOR operation with another bitset.</summary>
     /// <param name="other">The bitset to XOR with.</param>
     /// <returns>A new bitset containing the result of the XOR operation.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -231,9 +209,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return new ImmutableBitSet<TBits>(result);
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains all bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains all bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if this bitset is a superset of the other; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -249,9 +225,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return true;
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains any bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains any bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if the bitsets have any overlapping bits; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -267,17 +241,13 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return false;
     }
 
-    /// <summary>
-    /// Determines whether this bitset contains none of the bits that are set in the other bitset.
-    /// </summary>
+    /// <summary>Determines whether this bitset contains none of the bits that are set in the other bitset.</summary>
     /// <param name="other">The bitset to check against.</param>
     /// <returns><c>true</c> if the bitsets have no overlapping bits; otherwise, <c>false</c>.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool ContainsNone(in ImmutableBitSet<TBits> other) => !ContainsAny(other);
 
-    /// <summary>
-    /// Returns the number of bits that are set in this bitset.
-    /// </summary>
+    /// <summary>Returns the number of bits that are set in this bitset.</summary>
     /// <returns>The population count (number of 1 bits).</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int PopCount()
@@ -289,9 +259,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return count;
     }
 
-    /// <summary>
-    /// Returns the index of the first (lowest) bit that is set.
-    /// </summary>
+    /// <summary>Returns the index of the first (lowest) bit that is set.</summary>
     /// <returns>The zero-based index of the first set bit, or -1 if no bits are set.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int FirstSetBit()
@@ -308,9 +276,7 @@ public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<T
         return -1;
     }
 
-    /// <summary>
-    /// Returns the index of the last (highest) bit that is set.
-    /// </summary>
+    /// <summary>Returns the index of the last (highest) bit that is set.</summary>
     /// <returns>The zero-based index of the last set bit, or -1 if no bits are set.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int LastSetBit()

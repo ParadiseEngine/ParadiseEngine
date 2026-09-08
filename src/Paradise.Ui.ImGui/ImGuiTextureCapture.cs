@@ -3,26 +3,14 @@ using Hexa.NET.ImGui;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>The ImGui-thread half of Dear ImGui 1.92's texture protocol: read
-/// <c>ImDrawData.Textures</c>, copy out whatever the renderer has to upload, and answer ImGui
-/// with a status so it stops asking.
-///
-/// <b>The protocol, and why the answer goes back here rather than on the render thread.</b>
-/// ImGui asks for work by putting a status on an <c>ImTextureData</c> it owns:
-/// <c>WantCreate</c> → allocate and upload everything, then tell it the id you allocated;
-/// <c>WantUpdates</c> → re-upload <c>UpdateRect</c>; <c>WantDestroy</c> → free it. The obvious
-/// backend writes those replies from wherever it did the GPU work — which for us is the render
-/// thread, mid-flight, against a struct the ImGui thread is simultaneously rebuilding in
-/// <c>NewFrame</c>. So the replies are written HERE, immediately, on the ImGui thread, and the
-/// renderer never sees an <c>ImTextureData</c> at all: it sees a queue of
-/// <see cref="ImGuiTextureOp"/>s with the pixels already copied. Answering optimistically is
-/// safe because <see cref="ImGuiTextureOps"/> does not drop ops — the upload is guaranteed to
-/// happen, just not yet.</summary>
+/// <summary>Copies and acknowledges ImGui 1.92 texture requests on the ImGui thread.</summary>
+/// <remarks>Acknowledgements happen immediately to avoid touching ImTextureData from the render
+/// thread. ImGuiTextureOps preserves every copied create, update and destroy operation until
+/// applied.</remarks>
 public static class ImGuiTextureCapture
 {
-    /// <summary>Capture this frame's texture work into <paramref name="ops"/> and mark every
-    /// request answered. ImGui thread only, after <c>ImGui.Render()</c> and before the next
-    /// <c>NewFrame()</c> — the same window <see cref="ImGuiDrawSnapshot.Capture"/> requires.</summary>
+    /// <summary>Captures and acknowledges texture requests after Render and before NewFrame on the
+    /// ImGui thread.</summary>
     /// <exception cref="NotSupportedException">A texture arrived in a format other than RGBA32.
     /// Setting <c>io.Fonts.TexDesiredFormat = Alpha8</c> without teaching the renderer that
     /// format would otherwise upload garbage.</exception>
@@ -43,11 +31,8 @@ public static class ImGuiTextureCapture
             {
                 case ImTextureStatus.WantCreate:
                     ops.Enqueue(CreateOp(texture));
-                    // The id ImGui will stamp into every ImDrawCmd that samples this texture.
-                    // Offset by one because 0 is ImGui's null id and a command carrying it
-                    // asserts at draw time. UniqueID is ImGui's own counter and stays far below
-                    // ImGuiWebGpuRenderer.FirstHostTextureId, so it cannot collide with a
-                    // host-registered texture.
+                    // Zero is ImGui's null ID; offset UniqueID by one, below the reserved
+                    // host-texture range.
                     texture.SetTexID(new ImTextureID(TextureIdOf(texture)));
                     texture.SetStatus(ImTextureStatus.Ok);
                     break;
@@ -64,24 +49,14 @@ public static class ImGuiTextureCapture
                     {
                         ops.Enqueue(ImGuiTextureOp.Destroy(texture.GetTexID().Handle));
                     }
-                    // Clear the id BEFORE reporting Destroyed. ImGui's atlas asserts that a
-                    // destroyed texture carries no id before it removes the ImTextureData, and
-                    // every official backend clears it here. Hexa ships release natives, so the
-                    // assert is compiled out today and this reads as cosmetic — it is not: it is
-                    // a hard abort against any debug native.
+                    // Clear the ID before reporting Destroyed; debug ImGui asserts this atlas
+                    // contract.
                     texture.SetTexID(ImTextureID.Null);
                     texture.SetStatus(ImTextureStatus.Destroyed);
-                    // Deliberately NOT gated on UnusedFrames > 0, which is how the official
-                    // backends decline to free a texture ImGui drew with this frame. We answer
-                    // immediately and defer on our own side instead: the ops queue is ordered and
-                    // ImGuiWebGpuRenderer holds both the texture and its lookup for
-                    // DestroyDelayFrames, which covers the same window without making ImGui wait.
+                    // Acknowledge immediately; the ordered renderer queue delays both resource
+                    // destruction and lookup removal for in-flight snapshots.
                     break;
 
-                case ImTextureStatus.Ok:
-                case ImTextureStatus.Destroyed:
-                default:
-                    break;
             }
         }
     }

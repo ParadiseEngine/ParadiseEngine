@@ -4,26 +4,11 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Editor.ImGui;
 
-/// <summary>The dockspace every editor panel docks into, and the seeding of its default layout.
-/// </summary>
+/// <summary>Draws the dockspace and seeds its default layout when no node exists.</summary>
 /// <remarks>
-/// <para>
-/// <c>PassthruCentralNode</c> because the central node is where the Scene viewport goes: the
-/// dockspace host window must not paint over the frame the renderer already drew there.
-/// </para>
-/// <para>
-/// The layout is seeded only when there is NO node — a fresh profile, or after a reset. An ini
-/// restored through <c>ImGuiUiCore.TryLoadLayout</c> brings its own node graph, and rebuilding
-/// over it would silently discard the arrangement the user made. That is also why the rebuild
-/// tests the node rather than a "first frame" flag: whether a layout was restored is a fact about
-/// ImGui's state, not about how many frames have passed.
-/// </para>
-/// <para>
-/// <paramref name="seedLayout"/> runs INSIDE the builder transaction, between the root node being
-/// sized and <c>DockBuilderFinish</c>. Splitting or docking outside that window silently does
-/// nothing, which is the failure this seam exists to make unrepeatable. E1 passes the editor's
-/// real recipe; E0 docks one window so the dockspace is demonstrably load-bearing.
-/// </para>
+/// <c>PassthruCentralNode</c> leaves the rendered scene visible beneath the host window.
+/// Retain restored node graphs; rebuilding them would discard the user's layout.
+/// Run <paramref name="seedLayout"/> after sizing the root and before <c>DockBuilderFinish</c>.
 /// </remarks>
 public sealed class EditorDockspace(string id = "EditorDockspace", Action<uint>? seedLayout = null)
 {

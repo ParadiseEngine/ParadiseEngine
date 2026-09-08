@@ -1,19 +1,8 @@
 namespace Paradise.Rendering.Graph;
 
-/// <summary>Where in the frame a pass runs. Passes sort by <c>(int)Event + offset</c>, ties broken
-/// by declaration order.
-///
-/// <para><b>The values are spaced on purpose.</b> An insertion point that is an ordinal — an enum
-/// whose numeric value is its position — is the ceiling every extensible renderer eventually hits:
-/// a game cannot land between two of them, and the engine cannot add one without renumbering
-/// something already serialized. A sortable integer with gaps has neither problem. New engine
-/// stages go in the gaps; a game that needs to run immediately after the built-in opaque pass but
-/// before anything at <see cref="AfterOpaque"/> writes <c>Opaque + 1</c>.</para>
-///
-/// <para>The <c>Before</c>/<c>After</c> values are injection points and hold nothing by default.
-/// The bare stage names (<see cref="Shadows"/>, <see cref="Opaque"/>, …) are where the built-in
-/// passes sit, so "before the built-in opaque pass" and "after it" are both expressible without
-/// knowing how many passes the stage happens to expand into this frame.</para></summary>
+/// <summary>Orders passes by event value plus offset, breaking ties by declaration order.</summary>
+/// <remarks>Spaced values let engine and game passes occupy gaps without renumbering stages.
+/// Before/After stages are empty injection points; built-ins use the named stages.</remarks>
 public enum RenderPassEvent
 {
     /// <summary>Before anything else in the frame — nothing is set up yet. For work that produces

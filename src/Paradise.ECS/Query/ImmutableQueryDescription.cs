@@ -13,40 +13,22 @@ namespace Paradise.ECS;
 public readonly record struct ImmutableQueryDescription<TMask>(TMask All, TMask None, TMask Any)
     where TMask : unmanaged, IBitSet<TMask>
 {
-    /// <summary>
-    /// Creates a query description that matches all archetypes containing all specified components.
-    /// </summary>
+    /// <summary>Creates a query description that matches all archetypes containing all specified components.</summary>
     /// <param name="all">Components that must all be present.</param>
     public ImmutableQueryDescription(TMask all)
         : this(all, TMask.Empty, TMask.Empty)
     {
     }
 
-    /// <summary>
-    /// Gets an empty query description that matches all archetypes.
-    /// </summary>
+    /// <summary>An empty query description that matches all archetypes.</summary>
     public static ImmutableQueryDescription<TMask> Empty => default;
 
-    /// <summary>
-    /// Checks if an archetype matches this query's constraints.
-    /// </summary>
+    /// <summary>Checks if an archetype matches this query's constraints.</summary>
     /// <param name="archetypeMask">The archetype's component mask.</param>
     /// <returns>True if the archetype matches all constraints.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Matches(in TMask archetypeMask)
-    {
-        // Must contain all required components
-        if (!archetypeMask.ContainsAll(All))
-            return false;
-
-        // Must not contain any excluded components
-        if (!archetypeMask.ContainsNone(None))
-            return false;
-
-        // If Any constraint exists, must contain at least one
-        if (!Any.IsEmpty && !archetypeMask.ContainsAny(Any))
-            return false;
-
-        return true;
-    }
+        => archetypeMask.ContainsAll(All)
+            && archetypeMask.ContainsNone(None)
+            && (Any.IsEmpty || archetypeMask.ContainsAny(Any));
 }

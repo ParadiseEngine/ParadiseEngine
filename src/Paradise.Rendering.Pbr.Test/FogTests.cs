@@ -130,4 +130,221 @@ public class FogTests
     }
 
     private static float ToSrgb(float value) => value <= 0.0031308f ? value * 12.92f : 1.055f * MathF.Pow(value, 1f / 2.4f) - 0.055f;
+
+    [Test]
+    public async Task thin_local_volume_extinction_is_preserved_between_ray_samples()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Fog = scene.Fog with { Density = 0, MaxDistance = 6, Steps = 1 };
+        scene.FogVolumes.Add(new PbrFogVolume
+        {
+            Density = 100,
+            Transform = Matrix4x4.CreateScale(1, 4, 0.01f) * Matrix4x4.CreateTranslation(-1, 0, -1),
+        });
+        pbr.RenderFrame(scene);
+        var coarse = Pixels(backend, "thin-volume");
+        await Assert.That((float)Pixel(coarse, Size / 4, Size / 2)).IsEqualTo(ToSrgb(MathF.Exp(-1)) * 255).Within(2);
+        await Assert.That(Pixel(coarse, Size * 3 / 4, Size / 2)).IsEqualTo((byte)255);
+        scene.Fog = scene.Fog with { Steps = 96 };
+        pbr.RenderFrame(scene);
+        await Assert.That((int)Pixel(Pixels(backend), Size / 4, Size / 2))
+            .IsEqualTo(Pixel(coarse, Size / 4, Size / 2)).Within(2);
+    }
+
+    [Test]
+    public async Task nonfinite_colors_are_sanitized_and_invalid_volume_transforms_are_rejected()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Fog = scene.Fog with { Color = new Vector3(float.NaN, 0.2f, float.PositiveInfinity) };
+        pbr.RenderFrame(scene);
+        var sanitized = Pixels(backend);
+        scene.Fog = scene.Fog with { Color = new Vector3(0, 0.2f, 0) };
+        pbr.RenderFrame(scene);
+        await Assert.That(Pixels(backend).SequenceEqual(sanitized)).IsTrue();
+        var nonfinite = Matrix4x4.Identity;
+        nonfinite.M11 = float.NaN;
+        var projective = Matrix4x4.Identity;
+        projective.M14 = 0.1f;
+        foreach (var transform in new[] { Matrix4x4.CreateScale(0f), nonfinite, projective })
+        {
+            scene.FogVolumes.Clear();
+            scene.FogVolumes.Add(new PbrFogVolume { Transform = transform });
+            await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>();
+        }
+        scene.FogVolumes.Clear();
+        for (var i = 0; i <= FogFeature.MaxVolumes; i++) scene.FogVolumes.Add(new PbrFogVolume());
+        await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>();
+        scene.FogVolumes.Clear();
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.Pipeline.Find<FogFeature>()!.VolumeCount).IsEqualTo(0);
+    }
+
+    private static void AddWall(PbrRenderer pbr, PbrScene scene, Matrix4x4? transform = null)
+    {
+        float[] vertices = [-4, -4, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+            4, -4, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+            4, 4, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1,
+            -4, 4, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1];
+        var material = pbr.Materials.AddDefaultMaterial(new Vector4(0.5f, 0.5f, 0.5f, 1), metallic: 0, roughness: 1);
+        var primitive = pbr.UploadPrimitive(vertices, [0, 1, 2, 0, 2, 3], material);
+        scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([primitive]), Model = transform ?? Matrix4x4.Identity });
+    }
+
+    [Test]
+    public async Task opaque_depth_limits_fog_for_both_camera_projections()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Ambient = new PbrAmbient { Flat = true, Sky = Vector3.One };
+        AddWall(pbr, scene);
+        foreach (var perspective in new[] { false, true })
+        {
+            scene.Camera = scene.Camera with { Projection = perspective
+                ? PbrMath.Perspective(MathF.PI / 3, 1, 0.1f, 20) : PbrMath.Orthographic(4, 1, 0.1f, 20) };
+            scene.Fog = scene.Fog with { Enabled = false };
+            pbr.RenderFrame(scene);
+            var baseline = ToLinear(Pixel(Pixels(backend), Size / 2, Size / 2));
+            await Assert.That(baseline).IsGreaterThan(0.1f);
+            foreach (var maximum in new[] { 1f, 10f })
+            {
+                scene.Fog = scene.Fog with { Enabled = true, Density = 0.4f, StartDistance = 0.5f, MaxDistance = maximum };
+                pbr.RenderFrame(scene);
+                var length = MathF.Min(maximum, perspective ? 2f : 1.9f) - 0.5f;
+                await Assert.That(ToLinear(Pixel(Pixels(backend), Size / 2, Size / 2)))
+                    .IsEqualTo(baseline * MathF.Exp(-0.4f * length)).Within(0.01f);
+            }
+        }
+    }
+
+    [Test]
+    public async Task height_falloff_matches_density_at_each_orthographic_ray()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Fog = scene.Fog with { HeightFalloff = 1 };
+        pbr.RenderFrame(scene);
+        var pixels = Pixels(backend);
+        foreach (var y in new[] { Size / 4, Size * 3 / 4 })
+        {
+            var worldY = (1 - 2 * (y + 0.5f) / Size) * 2;
+            var expected = ToSrgb(MathF.Exp(-0.2f * MathF.Exp(-worldY) * 4)) * 255;
+            await Assert.That((float)Pixel(pixels, Size / 2, y)).IsEqualTo(expected).Within(2);
+        }
+    }
+
+    [Test]
+    public async Task fog_chains_with_aa_and_bloom_and_survives_resize_and_switches()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.Taa = new PbrTaa { Enabled = true };
+        scene.Fxaa = new PbrFxaa { Enabled = true };
+        scene.Bloom = new PbrBloom { Enabled = true, Threshold = 2 };
+        foreach (var size in new[] { Size, 97u, Size })
+        {
+            backend.Resize(size, size);
+            pbr.Resize(size, size);
+            for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
+            var pixels = backend.ReadbackColor(out var width, out var height);
+            await Assert.That(width).IsEqualTo(size);
+            await Assert.That(height).IsEqualTo(size);
+            await Assert.That((float)Pixel(pixels, size / 2, size / 2, size))
+                .IsEqualTo(ToSrgb(MathF.Exp(-0.8f)) * 255).Within(2);
+            var passes = pbr.LastPassNames.ToList();
+            await Assert.That(passes.IndexOf("Fog.Integrate")).IsGreaterThan(-1);
+            await Assert.That(passes.IndexOf("Taa.Resolve")).IsGreaterThan(passes.IndexOf("Fog.Integrate"));
+            await Assert.That(passes.FindIndex(name => name.StartsWith("Bloom.", StringComparison.Ordinal)))
+                .IsGreaterThan(passes.IndexOf("Taa.Resolve"));
+        }
+        pbr.Switches.Set(PbrFeatures.Fog.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.LastPassNames.Contains("Fog.Integrate")).IsFalse();
+        await Assert.That(Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo((byte)255);
+        pbr.Switches.Set(PbrFeatures.Fog.Id, true);
+        pbr.RenderFrame(scene);
+        await Assert.That((float)Pixel(Pixels(backend), Size / 2, Size / 2))
+            .IsEqualTo(ToSrgb(MathF.Exp(-0.8f)) * 255).Within(2);
+    }
+
+    [Test]
+    public async Task shadow_maps_occlude_scattering_and_switching_restores_light()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.ClearColor = new ColorRgba(0, 0, 0, 1);
+        scene.Fog = scene.Fog with { Density = 0.5f, LightScattering = true, Albedo = Vector3.One, Anisotropy = 0 };
+        scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.UnitX,
+            Intensity = 4, CastsShadows = true });
+        AddWall(pbr, scene, Matrix4x4.CreateRotationY(MathF.PI / 2) * Matrix4x4.CreateTranslation(0.5f, 0, 0));
+        var shadows = pbr.Pipeline.Find<ShadowFeature>()!;
+        shadows.DirectionalRadius = 4;
+        shadows.MapSize = 512;
+        pbr.RenderFrame(scene);
+        var shadowed = Pixel(Pixels(backend, "shadowed"), Size / 2, Size / 2);
+        pbr.Switches.Set(PbrFeatures.Shadows.Id, false);
+        pbr.RenderFrame(scene);
+        var lit = Pixel(Pixels(backend, "unshadowed"), Size / 2, Size / 2);
+        await Assert.That((int)lit - shadowed).IsGreaterThan(50);
+        pbr.Switches.Set(PbrFeatures.Shadows.Id, true);
+        pbr.RenderFrame(scene);
+        await Assert.That((int)Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo(shadowed).Within(2);
+    }
+
+    [Test]
+    public async Task point_range_and_spot_direction_bound_local_scattering()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene();
+        scene.ClearColor = new ColorRgba(0, 0, 0, 1);
+        scene.Fog = scene.Fog with { LightScattering = true, Albedo = Vector3.One, Anisotropy = 0 };
+        var light = new PbrLight { Type = PbrLightType.Point, Position = Vector3.UnitY, Range = 4, Intensity = 4 };
+        foreach (var type in new[] { PbrLightType.Point, PbrLightType.Spot })
+        {
+            scene.Lights.Clear();
+            scene.Lights.Add(light with { Type = type, Direction = Vector3.UnitY });
+            pbr.RenderFrame(scene);
+            await Assert.That(Pixel(Pixels(backend), Size / 2, Size / 2)).IsGreaterThan((byte)30);
+            scene.Lights[0] = type == PbrLightType.Point
+                ? scene.Lights[0] with { Range = 0.01f }
+                : scene.Lights[0] with { Direction = -Vector3.UnitY };
+            pbr.RenderFrame(scene);
+            await Assert.That(Pixel(Pixels(backend), Size / 2, Size / 2)).IsEqualTo((byte)0);
+        }
+    }
+
+    private static float ToLinear(byte value)
+    {
+        var x = value / 255f;
+        return x <= 0.04045f ? x / 12.92f : MathF.Pow((x + 0.055f) / 1.055f, 2.4f);
+    }
+
+    private static byte[] Pixels(WebGpuRenderer backend, string? artifact = null)
+    {
+        var pixels = backend.ReadbackColor(out var width, out var height).ToArray();
+        if (artifact is not null && Environment.GetEnvironmentVariable("PARADISE_FOG_ARTIFACTS") is { Length: > 0 } directory)
+        {
+            Directory.CreateDirectory(directory);
+            using var output = File.Create(Path.Combine(directory, artifact + ".png"));
+            PngWriter.Write(output, new ColorReadback(pixels, width, height), backend.ColorFormat);
+        }
+        return pixels;
+    }
+    private static byte Pixel(byte[] pixels, uint x, uint y, uint width = Size, int channel = 0) =>
+        pixels[(int)((y * width + x) * 4) + channel];
 }

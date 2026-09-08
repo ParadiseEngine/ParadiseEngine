@@ -1,25 +1,8 @@
-// Console app built by tools/ktx/KtxBootstrap.csproj — the KTX-Software twin of
-// tools/slang/SlangBootstrap.cs (same download → SHA256-verify → extract → marker shape, same
-// cross-process lock; see that file for the history behind each of those decisions). Resolves a
-// `ktx` CLI archive from tools/ktx/ktx.manifest.json for a given RID and installs it under the
-// cache directory the caller names — typically third_party/tools/KTX-Software, which
-// KtxTool.Find already probes.
-//
-// The manifest carries every RID Khronos publishes a usable asset for. Linux is a tarball and
-// extracts unattended, which is what CI runs. WINDOWS is an NSIS installer that REQUIRES
-// ELEVATION: it is gated behind --elevate and refused otherwise, because a build must never raise
-// a UAC prompt — that would hang an unattended run and ambush anyone who only typed `dotnet
-// build`. macOS ships a .pkg with no directory-targeted silent install, so darwin RIDs are absent
-// and this exits with guidance instead: install KTX-Software and set PARADISE_KTX_PATH.
-//
-// Args:
-//   --manifest <path>   tools/ktx/ktx.manifest.json
-//   --rid <rid>         e.g. linux-x64
-//   --out <dir>         destination cache directory (parent of bin/ktx)
-//   --elevate           permit a format that needs admin (only `paradise tools install` passes it)
-//
-// Exit codes: 0 = success / already-installed, 1 = failure (SHA mismatch, missing RID, network,
-// or an elevation-needing format without --elevate).
+// Installs a manifest-selected KTX archive after SHA256 verification, using a shared cache lock.
+// Usage: --manifest <path> --rid <rid> --out <cache directory> [--elevate].
+// Exits 0 on success/already installed, 1 on failure.
+// Windows NSIS installers require explicit --elevate; builds must never trigger UAC.
+// macOS packages need manual installation with PARADISE_KTX_PATH pointing to bin/ktx.
 
 using System.Diagnostics;
 using System.IO.Compression;
@@ -74,7 +57,7 @@ var ktxPath = Path.Combine(outDir, "bin", ktxName);
 var lockDir = Path.GetDirectoryName(outDir) ?? outDir;
 Directory.CreateDirectory(lockDir);
 var lockPath = Path.Combine(lockDir, ".ktx-bootstrap.lock");
-FileStream? lockHandle = null;
+FileStream lockHandle;
 var lockAcquireDeadline = DateTime.UtcNow.AddMinutes(15);
 while (true)
 {
@@ -116,11 +99,9 @@ using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
 }
 
 string actualSha;
-using (var sha = SHA256.Create())
 await using (var fs = File.OpenRead(archivePath))
 {
-    var bytes = await sha.ComputeHashAsync(fs);
-    actualSha = Convert.ToHexString(bytes).ToLowerInvariant();
+    actualSha = Convert.ToHexStringLower(await SHA256.HashDataAsync(fs));
 }
 if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase))
 {
@@ -162,14 +143,8 @@ else if (format is "tar.gz" or "tar.bz2")
 }
 else if (string.Equals(format, "nsis", StringComparison.OrdinalIgnoreCase))
 {
-    // Khronos publishes no Windows ARCHIVE — only an NSIS installer — and no unpacker handles
-    // modern NSIS payloads. The installer's own silent mode writes exactly the files an archive
-    // would have contained into a directory we choose, so that is what this uses.
-    //
-    // IT REQUIRES ELEVATION, which is why it is behind a flag. A build must never raise a UAC
-    // prompt: it would block an unattended CI run forever and ambush a developer who only typed
-    // `dotnet build`. So an unflagged run refuses and says who to ask instead. `paradise tools
-    // install ktx` passes --elevate, because there a person has just asked for this by name.
+    // Windows distributions use NSIS installers. Require --elevate so an unattended build
+    // cannot block on UAC; the explicit tools-install command supplies it.
     if (!elevate)
     {
         Console.Error.WriteLine(
@@ -180,14 +155,8 @@ else if (string.Equals(format, "nsis", StringComparison.OrdinalIgnoreCase))
         return 1;
     }
 
-    // /D is NSIS's target directory and has two rules that are not negotiable: it must be the
-    // LAST argument, and it must be UNQUOTED, because NSIS takes the rest of the command line
-    // verbatim. That is also why a path with spaces works here and why this uses the raw
-    // Arguments string -- ArgumentList would quote it and NSIS would install to the default
-    // location instead, silently, leaving the cache empty.
-    //
-    // UseShellExecute is what makes elevation possible at all: without it, CreateProcess fails
-    // with error 740 on a manifest that demands admin rather than showing the prompt.
+    // NSIS requires /D last and unquoted, including paths with spaces: use Arguments,
+    // not ArgumentList. UseShellExecute with runas permits required elevation.
     using var installer = Process.Start(new ProcessStartInfo(archivePath)
     {
         Arguments = $"/S /D={Path.GetFullPath(stagingDir)}",
@@ -224,14 +193,9 @@ else
 
 try { File.Delete(archivePath); } catch { }
 
-// KTX tarballs unpack into a single top-level directory (KTX-Software-5.0.0-rc2-Linux-x86_64/);
-// promote its contents so <out>/bin/ktx resolves uniformly.
-//
-// NOT for an installer, which already writes bin/ + lib/ + share/ at the top level. The collapse
-// is keyed on "exactly one directory", and an installer that happened to lay down only bin/ would
-// be flattened into <out>/ktx.exe — leaving <out>/bin/ktx.exe missing, which is the one path
-// every caller resolves. Excluding the format is cheaper than depending on how many directories
-// a future release ships.
+// Flatten a tarball's single root directory so bin/ktx has a stable path.
+// NSIS already installs that layout; flattening an installer containing only bin/
+// would incorrectly promote ktx.exe to the cache root.
 var stagedEntries = Directory.GetFileSystemEntries(stagingDir);
 string promoteRoot = stagingDir;
 if (!string.Equals(format, "nsis", StringComparison.OrdinalIgnoreCase)

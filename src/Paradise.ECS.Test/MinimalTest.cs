@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Minimal test to verify the test framework is working.
-/// </summary>
+/// <summary>Minimal test to verify the test framework is working.</summary>
 public sealed class MinimalTest
 {
     [Test]

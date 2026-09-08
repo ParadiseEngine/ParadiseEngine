@@ -2,21 +2,16 @@ using Paradise.Features;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The engine's render features as the engine configuration sees them: one declaration
-/// each, naming the switch, the state it ships in, and what turning it off costs.
-///
-/// <para>These are the names a config file writes and a <c>--features</c> flag types. They are
-/// part of the contract — renaming one silently ignores everybody's config — so they change the
-/// way a serialized name changes, not the way a class does.</para>
-///
-/// <para><b>A switch and a scene setting are different questions.</b> The switch is the platform's
-/// answer ("this build does not do probe GI"), applied once from configuration; the scene's own
-/// <c>Enabled</c> (<see cref="PbrGi"/>, <see cref="PbrBloom"/>, …) is the CONTENT's answer ("this
-/// level uses it"), authored per scene and changed per frame. A feature runs when both say yes.
-/// Collapsing them would either make a level able to override a platform decision or make a
-/// platform decision have to be re-made in every level.</para></summary>
+/// <summary>Declares the stable feature names and defaults used by engine configuration.</summary>
+/// <remarks>Names are serialized contracts. Both the process switch and the scene's Enabled setting
+/// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
+    /// <summary>Camera, object and skinned-vertex motion for temporal effects.</summary>
+    public static FeatureDefinition MotionVectors { get; } = new(
+        "rendering.motionVectors", true,
+        "Screen-space motion for temporal effects. Off, temporal consumers must reject history.");
+
     /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
     /// everything.</summary>
     public static FeatureDefinition Shadows { get; } = new(
@@ -68,6 +63,16 @@ public static class PbrFeatures
     public static FeatureDefinition Fog { get; } = new(
         "rendering.fog", true, "Height fog and shadowed participating-medium scattering.");
 
+    /// <summary>Jittered HDR temporal accumulation with motion and depth rejection.</summary>
+    public static FeatureDefinition TemporalAntiAliasing { get; } = new(
+        "rendering.temporalAntiAliasing", true,
+        "Temporal antialiasing. Off, the camera is unjittered and no color history accumulates.");
+
+    /// <summary>Spatial edge filtering after tonemapping and display effects.</summary>
+    public static FeatureDefinition Fxaa { get; } = new(
+        "rendering.fxaa", true,
+        "FXAA spatial antialiasing. Off, presentation preserves unfiltered display color.");
+
     /// <summary>The bloom mip chain.</summary>
     public static FeatureDefinition Bloom { get; } = new(
         "rendering.bloom", true,
@@ -78,6 +83,10 @@ public static class PbrFeatures
         "rendering.composite", true,
         "Tonemap the HDR scene onto the backbuffer. Off, the frame is never presented.");
 
+    /// <summary>Output transfer and presentation after optional display effects.</summary>
+    public static FeatureDefinition Presentation { get; } = new(
+        "rendering.presentation", true, "Present the processed display color with one sRGB transfer.");
+
     /// <summary>All of them, in frame order — what a <c>--list-features</c> flag or a config-file
     /// template prints WITHOUT constructing a renderer, which on a machine with no GPU adapter is
     /// the difference between a listing and a crash. A test pins this against what
@@ -85,8 +94,8 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, Fog, Bloom, Composite,
+        Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Bloom, Composite, Fxaa, Presentation,
     ];
 
     /// <summary>Declares every built-in into <paramref name="switches"/>. A renderer does this
@@ -112,6 +121,7 @@ public static class PbrFeatureOrder
 
     public const int Shadows = 100;
     public const int Prepass = 200;
+    public const int MotionVectors = 250;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
@@ -119,6 +129,18 @@ public static class PbrFeatureOrder
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
     public const int Fog = 710;
+    public const int TemporalAntiAliasing = 720;
+    public const int Exposure = 730;
+    public const int DepthOfField = 740;
+    public const int MotionBlur = 750;
     public const int Bloom = 800;
     public const int Composite = 900;
+    public const int ColorGrading = 910;
+    public const int LensDistortion = 920;
+    public const int ChromaticAberration = 925;
+    public const int Vignette = 930;
+    public const int FilmGrain = 940;
+    public const int Sharpening = 950;
+    public const int AntiAliasing = 960;
+    public const int Presentation = 1000;
 }

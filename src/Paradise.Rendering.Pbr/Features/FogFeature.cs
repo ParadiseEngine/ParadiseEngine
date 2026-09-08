@@ -79,12 +79,14 @@ public sealed class FogFeature : IRenderFeature
             throw new ArgumentException($"Fog supports at most {MaxVolumes} local volumes.");
         foreach (var volume in _ctx.Scene.FogVolumes)
         {
-            if (!Matrix4x4.Invert(volume.Transform, out var inverse))
-                throw new ArgumentException("A fog volume transform must be invertible.");
+            if (!IsFinite(volume.Transform) || volume.Transform.M14 != 0 || volume.Transform.M24 != 0
+                || volume.Transform.M34 != 0 || volume.Transform.M44 != 1
+                || !Matrix4x4.Invert(volume.Transform, out var inverse) || !IsFinite(inverse))
+                throw new ArgumentException("A fog volume transform must be finite, affine and invertible.");
             _volumes[VolumeCount++] = new FogVolumeGpu
             {
                 InverseTransform = inverse,
-                AlbedoDensity = new Vector4(Vector3.Clamp(volume.Albedo, Vector3.Zero, Vector3.One), FinitePositive(volume.Density)),
+                AlbedoDensity = new Vector4(Vector3.Min(FinitePositive(volume.Albedo), Vector3.One), FinitePositive(volume.Density)),
             };
         }
         EnsureResources();
@@ -92,14 +94,14 @@ public sealed class FogFeature : IRenderFeature
         var maxDistance = MathF.Max(FinitePositive(settings.MaxDistance), 0.001f);
         var uniforms = new FogUniforms
         {
-            ColorDensity = new Vector4(Vector3.Max(settings.Color, Vector3.Zero), FinitePositive(settings.Density)),
+            ColorDensity = new Vector4(FinitePositive(settings.Color), FinitePositive(settings.Density)),
             HeightDistance = new Vector4(float.IsFinite(settings.BaseHeight) ? settings.BaseHeight : 0f,
                 FinitePositive(settings.HeightFalloff), MathF.Min(FinitePositive(settings.StartDistance), maxDistance), maxDistance),
             Scattering = new Vector4(Math.Clamp(settings.Steps, 1, 128),
                 float.IsFinite(settings.Anisotropy) ? Math.Clamp(settings.Anisotropy, -0.95f, 0.95f) : 0f,
                 settings.LightScattering ? 1f : 0f, VolumeCount),
-            Albedo = new Vector4(Vector3.Clamp(settings.Albedo, Vector3.Zero, Vector3.One),
-                MathF.Abs(_ctx.Scene.Camera.Projection.M44) < 1e-6f ? 1f : 0f),
+            Albedo = new Vector4(Vector3.Min(FinitePositive(settings.Albedo), Vector3.One),
+                MathF.Abs(_ctx.Projection.M44) < 1e-6f ? 1f : 0f),
         };
         _ctx.Renderer.UpdateBuffer<FogUniforms>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
         if (VolumeCount > 0) _ctx.Renderer.UpdateBuffer<FogVolumeGpu>(_volumeBuffer, 0, _volumes.AsSpan(0, VolumeCount));
@@ -125,6 +127,15 @@ public sealed class FogFeature : IRenderFeature
     }
 
     private static float FinitePositive(float value) => float.IsFinite(value) ? MathF.Max(value, 0f) : 0f;
+
+    private static Vector3 FinitePositive(Vector3 value) =>
+        new(FinitePositive(value.X), FinitePositive(value.Y), FinitePositive(value.Z));
+
+    private static bool IsFinite(Matrix4x4 m) =>
+        float.IsFinite(m.M11) && float.IsFinite(m.M12) && float.IsFinite(m.M13) && float.IsFinite(m.M14)
+        && float.IsFinite(m.M21) && float.IsFinite(m.M22) && float.IsFinite(m.M23) && float.IsFinite(m.M24)
+        && float.IsFinite(m.M31) && float.IsFinite(m.M32) && float.IsFinite(m.M33) && float.IsFinite(m.M34)
+        && float.IsFinite(m.M41) && float.IsFinite(m.M42) && float.IsFinite(m.M43) && float.IsFinite(m.M44);
 
     private static void Record(FogFeature self, ref PassRecording pass, int _)
     {

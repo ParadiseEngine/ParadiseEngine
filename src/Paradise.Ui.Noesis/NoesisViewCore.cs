@@ -11,30 +11,11 @@ using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace Paradise.Ui.Noesis;
 
-/// <summary>The renderer-independent half of NoesisGUI in the two-half UI architecture,
-/// shared by every host (an SDL/WebGPU runtime, a Godot play-mode bridge):
-///
-/// - <see cref="Input"/> (<see cref="IUiInput"/>) runs on the SIM thread — the simulation
-///   drains pointer, key and text events into the view and advances view time each fixed tick,
-///   so hover, focus, animations and bindings step in lockstep with game state. Handle's return
-///   value is the view's own verdict — true only when the UI actually consumed the event — which
-///   is what lets a host route unconsumed input onward to gameplay without guessing.
-/// - The host's render half (a WebGPU overlay pass, or an offscreen render + readback) reads
-///   <see cref="View"/> once published, initializes its own <c>RenderDevice</c> against it,
-///   and calls <c>TryUpdateRenderTree</c> once per frame before recording the passes
-///   (<see cref="NoesisOverlayRenderer"/> packages that half for OverlayPass hosts).
-///
-/// The two halves meet at exactly one point, per Noesis's threading model: view updates
-/// (sim) and <c>UpdateRenderTree</c> (render) are mutually excluded by the internal sync
-/// lock — which is why the render half goes through <c>TryUpdateRenderTree</c> instead
-/// of touching the renderer directly; <c>Renderer.Init/RenderOffscreen/Render</c> touch only
-/// render-side state and deliberately stay outside the lock.
-///
-/// Noesis pins each View to the Dispatcher of its CREATION thread, so all GUI construction
-/// (native init, providers rooted at the XAML's directory, optional
-/// <c>Theme/NoesisTheme.DarkBlue.xaml</c>, view creation) happens LAZILY on the sim thread at
-/// the first tick; render halves wait (skipping frames) until <see cref="View"/> is
-/// published.</summary>
+/// <summary>Coordinates Noesis input, view updates and render-tree transfer.</summary>
+/// <remarks>Input and Tick run on the simulation thread; TryUpdateRenderTree serializes the
+/// renderer handoff with them. Renderer.Init and Render calls use render-side state outside that
+/// lock. GUI construction is deferred to the first simulation tick because Noesis binds the view to
+/// its creation thread; rendering waits for publication.</remarks>
 // Lifetime: process-scoped by design — no Dispose/GUI.Shutdown. Hosts create at most one
 // NoesisViewCore per process and native/GPU teardown happens at exit; add disposal if this
 // ever hosts multiple sessions (tests, editor).
@@ -68,6 +49,10 @@ public sealed partial class NoesisViewCore
     public uint Width => _width;
     public uint Height => _height;
 
+    /// <summary>Creates a Noesis view using resources rooted at the XAML directory.</summary>
+    /// <remarks>Providers borrow a submount of the host filesystem, enforcing resource containment.
+    /// Place shared Theme/Fonts beneath the XAML directory; the view does not own the host
+    /// mount.</remarks>
     /// <param name="dataContext">Optional root DataContext for the loaded XAML (an MVVM
     /// ViewModel) — applied on the sim thread before the view is created.</param>
     /// <param name="simTick">Optional per-tick refresh hook, run on the SIM thread under the
@@ -81,18 +66,6 @@ public sealed partial class NoesisViewCore
     /// mounts memory and needs no fixture files on disk at all.</param>
     /// <param name="xamlPath">The root XAML, as a path in <paramref name="content"/>. Its
     /// DIRECTORY becomes this view's whole world — see the remarks.</param>
-    /// <remarks>
-    /// The XAML's directory is re-mounted as the providers' root, so a resource URI cannot name
-    /// anything above it. That bound is not new policy; it is what the UI tree already assumes —
-    /// Noesis resolves every resource against the XAML's own directory, which is why a shell must
-    /// sit AT <c>ui/</c> rather than in a subfolder or its <c>Theme/Fonts</c> stop resolving. What
-    /// is new is that the bound is now ENFORCED rather than merely conventional, and it makes this
-    /// path symmetric with the GLB sidecar reader, which mounts the file's own directory for the
-    /// same reason.
-    ///
-    /// <c>owned: false</c> because the mount belongs to the host: this view borrows it for the
-    /// process and disposes nothing (see the lifetime note above the class).
-    /// </remarks>
     public NoesisViewCore(IFileSystem content, UPath xamlPath, uint pixelWidth, uint pixelHeight,
         object? dataContext = null, Action? simTick = null,
         string? licenseName = null, string? licenseKey = null, ILogger? logger = null)
@@ -126,14 +99,9 @@ public sealed partial class NoesisViewCore
     /// per frame, before recording the UI passes.</summary>
     public bool TryUpdateRenderTree() => TryUpdateRenderTree(out _);
 
-    /// <summary>As <see cref="TryUpdateRenderTree()"/>, and reports whether the render tree
-    /// actually CHANGED since the last frame.
-    ///
-    /// Use it to skip work only if you are drawing into a target that PERSISTS between frames.
-    /// A host compositing through an OverlayPass must not: its backbuffer is a fresh swapchain
-    /// texture every frame, so skipping the UI passes on an unchanged frame does not reuse the
-    /// last image, it presents one with no UI at all — a flicker whose rate depends on how
-    /// still the UI is, which is a memorable way to spend an afternoon.</summary>
+    /// <summary>Attempts a render-tree update and reports whether it changed.</summary>
+    /// <remarks>Skip drawing unchanged content only when the target persists between frames; a
+    /// fresh swapchain still needs every overlay pass.</remarks>
     public bool TryUpdateRenderTree(out bool changed)
     {
         changed = false;
@@ -259,19 +227,9 @@ public sealed partial class NoesisViewCore
                         var y = TrackY(raw.Y);
                         if (!raw.Pressed) return view.MouseButtonUp(x, y, ToNoesis(raw.PointerButton));
 
-                        // A PRESS is the one event whose verdict Noesis cannot give us. Its
-                        // View.MouseButtonDown returns true whatever is under the pointer —
-                        // measured against an empty view with nothing hit-testable in it at all,
-                        // and true for left and right alike — because a press always does focus
-                        // and capture work that the view counts as consumption. Taken at face
-                        // value that is an input blackout: IUiInput's verdict gates game logic,
-                        // so every click in the game would be swallowed by any overlay, however
-                        // transparent. Move, release and wheel all answer honestly and are still
-                        // asked. Only the press is decided here.
-                        //
-                        // Hit-tested BEFORE forwarding, because the question is what the user
-                        // pressed ON — the press itself may open a popup or move focus, and the
-                        // tree it leaves behind is not what they aimed at.
+                        // Noesis reports every press consumed, even over empty views. Hit-test
+                        // before forwarding: the press may change focus or open a popup. Other
+                        // event kinds retain the toolkit verdict.
                         var consumed = OverSomething(view, x, y);
                         view.MouseButtonDown(x, y, ToNoesis(raw.PointerButton));
                         return consumed;
@@ -316,17 +274,10 @@ public sealed partial class NoesisViewCore
             }
         }
 
-        /// <summary>Advance UI time, unless the render side has not taken the last frame yet.
-        ///
-        /// That guard is the documented contract, not caution: Noesis says <c>Update</c> "never
-        /// blocks and allocates memory when not synchronized with UpdateRenderTree", so every
-        /// Update that returns true and is not matched by an UpdateRenderTree queues a snapshot
-        /// that is never collected. A host can drop frames for ordinary reasons — a minimized
-        /// window, a lost swapchain, any frame that returns before its overlay pass — and with
-        /// a UI that changes every tick (a clock, a counter) those unmatched Updates accumulate
-        /// for as long as it stays minimized. Skipping instead is free and correct: there is no
-        /// one to show the frame to, and time is passed absolutely, so the next Update that does
-        /// run lands on the right moment rather than replaying the backlog.</summary>
+        /// <summary>Advances UI time when the previous view snapshot has been consumed.</summary>
+        /// <remarks>Unmatched successful Update calls allocate queued snapshots. Skipping prevents
+        /// buildup while rendering is paused; absolute time lets the next update catch
+        /// up.</remarks>
         public void Tick(double simTimeSeconds)
         {
             lock (owner._sync)
@@ -341,31 +292,11 @@ public sealed partial class NoesisViewCore
             }
         }
 
-        /// <summary>Whether anything the UI would route input to sits under the point.</summary>
-        /// <remarks>
-        /// <para>
-        /// <b>Filtered, because <see cref="VisualTreeHelper.HitTest(Visual, Point)"/> is a VISUAL
-        /// hit test and input hit-testing is not the same question.</b> The plain overload
-        /// happily returns an element inside an <c>IsHitTestVisible="False"</c> subtree — it is
-        /// still painted, so it is still visually there — and Noesis 4.0.0 exposes no
-        /// <c>InputHitTest</c> to ask the other question directly. The filter is how the
-        /// difference is expressed: a subtree the UI would not route input into is skipped whole,
-        /// which is exactly what <c>IsHitTestVisible="False"</c> means and why a False parent
-        /// cannot be overridden by a True child.
-        /// </para>
-        /// <para>
-        /// Disabled elements are deliberately NOT skipped: a greyed-out button still swallows the
-        /// click that lands on it, and letting that reach the game would fire a weapon through a
-        /// modal dialog.
-        /// </para>
-        /// <para>
-        /// This is a HIT, which is a coarser question than "did an element take it" — a bare
-        /// panel with a background reports consumed here though nothing would have run. The
-        /// authoring discipline closes that gap from the other side: paint carries
-        /// <c>IsHitTestVisible="False"</c> and roots carry a null background, so what stays
-        /// hit-testable is what is meant to be interactive.
-        /// </para>
-        /// </remarks>
+        /// <summary>Tests whether an input-eligible visual lies under the pointer.</summary>
+        /// <remarks>Noesis's visual hit test includes noninteractive subtrees, so filter
+        /// IsHitTestVisible=false explicitly. Keep disabled controls hit-testable to block clicks
+        /// through dialogs. Decorative elements should opt out; roots should use a null
+        /// background.</remarks>
         private static bool OverSomething(View view, int x, int y)
         {
             if (view.Content is not Visual root) return false;
@@ -408,16 +339,10 @@ public sealed partial class NoesisViewCore
             _ => MouseButton.Left,
         };
 
-        /// <summary>The windowing contract's keys → Noesis's. Total over the vocabulary a UI
-        /// can act on, so a host forwards whatever it already has and nothing has to be
-        /// re-mapped downstream. Anything outside it — and <see cref="KeyboardKey.None"/> —
-        /// returns null so the caller reports "not handled" WITHOUT touching the view; an
-        /// unmapped key must never consume input. Noesis follows WPF's naming, so Enter is
-        /// <c>Return</c>, Backspace is <c>Back</c> and the digits are <c>D0</c>-<c>D9</c>.
-        ///
-        /// WHICH keys a UI is allowed to see is deliberately NOT decided here — that is the
-        /// host's policy, and a game that forwards [W] has handed movement to whatever holds
-        /// focus.</summary>
+        /// <summary>Maps supported window keys to Noesis keys, returning null for unmapped
+        /// input.</summary>
+        /// <remarks>The host decides which keys reach the UI; an unmapped key must remain
+        /// unconsumed.</remarks>
         private static Key? ToNoesis(KeyboardKey key) => key switch
         {
             KeyboardKey.Enter => Key.Return,
@@ -499,25 +424,10 @@ public sealed partial class NoesisViewCore
 
     // ---- content-mount resource providers rooted at the XAML's directory ----
 
-    /// <summary>
-    /// A Noesis resource URI as a path under <paramref name="root"/>, or null for one that names
-    /// nothing this view may load.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Noesis hands out '/'-separated URI paths, which is what a <see cref="UPath"/> already is —
-    /// the separator translation this used to do disappears with the mount. Both separators are
-    /// still trimmed off the front of a segment: a URI may spell a root-relative resource
-    /// ("/Theme/Fonts"), and combining that onto the root would otherwise escape it.
-    /// </para>
-    /// <para>
-    /// NULL RATHER THAN A THROW, because of who the caller is. A URI that climbs past the root
-    /// ("../secrets.xaml") makes <see cref="UPath"/>'s combine throw, and these run inside
-    /// callbacks Noesis invokes from NATIVE code — so an authoring typo would leave a managed
-    /// exception crossing a native frame instead of the "no such resource" every provider here
-    /// is contracted to answer with.
-    /// </para>
-    /// </remarks>
+    /// <summary>Resolves a resource URI beneath the view root, returning null when
+    /// invalid.</summary>
+    /// <remarks>Trim leading separators for root-relative URIs. Path errors must return
+    /// missing-resource results because providers are called from native Noesis code.</remarks>
     private static UPath? Combine(UPath root, params string[] segments)
     {
         var path = root;

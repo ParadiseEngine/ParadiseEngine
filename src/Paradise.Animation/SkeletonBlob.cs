@@ -6,12 +6,9 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
-/// <summary>One joint's local transform: what a clip samples to and a rest pose holds.</summary>
-/// <remarks>
-/// 48 bytes, not the 40 the fields need: translation, rotation and scale each start on a 16-byte
-/// boundary so a blend or a matrix build loads each as one <see cref="System.Runtime.Intrinsics.Vector128{T}"/>.
-/// The padding lanes are zero and stay zero; nothing reads them.
-/// </remarks>
+/// <summary>Stores one joint's local translation, rotation and scale.</summary>
+/// <remarks>The 48-byte layout aligns each component to 16 bytes for Vector128 loads;
+/// padding lanes remain zero.</remarks>
 [StructLayout(LayoutKind.Explicit, Size = 48)]
 public readonly struct JointPose : IEquatable<JointPose>
 {
@@ -32,7 +29,8 @@ public readonly struct JointPose : IEquatable<JointPose>
     public Matrix4x4 ToMatrix() =>
         Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Translation);
 
-    /// <summary>The same pose with a unit rotation, a zero one becoming identity — ozz's <c>NormalizeSafe</c> in its operation order, so a built skeleton's bytes still match ozz's. Every authoring path applies it; a non-unit rest rotation would otherwise scale every unanimated joint below it.</summary>
+    /// <summary>Normalizes rotation using ozz's operation order, mapping a zero quaternion to identity.</summary>
+    /// <remarks>Authoring normalizes poses to prevent rest rotations from scaling child joints.</remarks>
     public JointPose WithNormalizedRotation()
     {
         var q = Rotation;
@@ -55,13 +53,9 @@ public readonly struct JointPose : IEquatable<JointPose>
     public static bool operator !=(JointPose left, JointPose right) => !left.Equals(right);
 }
 
-/// <summary>
-/// An ozz-animation skeleton as one native blob: joints in depth-first order, each with its
-/// parent index, its name and its rest-pose local transform. A parent always precedes its
-/// children, so a single forward pass computes model-space poses. Opened from an
-/// <c>ozz-skeleton</c> archive by <see cref="OzzArchive.ReadSkeleton(System.ReadOnlySpan{byte})"/>, or built by the offline
-/// side; read only through a <c>ref</c>, never through a copy.
-/// </summary>
+/// <summary>Stores depth-first skeleton joints, parents, names and rest poses in one native blob.</summary>
+/// <remarks>Parents precede children for a forward hierarchy walk. OzzArchive.ReadSkeleton and
+/// offline builders create this layout; access it by ref to preserve relative offsets.</remarks>
 public struct SkeletonBlob
 {
     /// <summary>ozz's limit; a clip's track index and the sampler's cache are 16-bit.</summary>
@@ -105,8 +99,9 @@ public struct SkeletonBlob
         return true;
     }
 
-    /// <summary>Builds the blob from flat depth-first arrays; what the archive reader, the offline builder and the GLB cook all go through. Rest rotations are taken as given: the reader must reproduce an archive's bytes, so the authoring paths normalize (<see cref="JointPose.WithNormalizedRotation"/>) before they get here.</summary>
-    /// <exception cref="ArgumentException">Mismatched lengths, too many joints, or a parent that does not precede its child.</exception>
+    /// <summary>Builds a skeleton blob from flat depth-first arrays.</summary>
+    /// <remarks>Rest rotations are preserved for archive parity; authoring must normalize them first.</remarks>
+    /// <exception cref="ArgumentException">Lengths mismatch, joint limits are exceeded, or a parent follows its child.</exception>
     public static NativeBlobAssetReference<SkeletonBlob> Create(string[] names, short[] parents, JointPose[] restPoses)
     {
         ArgumentNullException.ThrowIfNull(names);

@@ -4,19 +4,9 @@ using PdTextureFormat = Paradise.Rendering.TextureFormat;
 
 namespace Paradise.Rendering.WebGPU;
 
-/// <summary>The smallest correct PNG encoder that will do: 8-bit RGBA, no interlacing, one IDAT.
-///
-/// Beside <see cref="ColorReadback"/> because that is what it is for. <c>CaptureFrameAsync</c>
-/// exists so a host can look at a frame it rendered — from a screenshot key, from a headless
-/// smoke run in CI — and a readback nobody can open is only half of that. The engine has no other
-/// image writer: the asset pipeline reads images, it does not produce them.
-///
-/// Deliberately not a general image library. No format choice, no metadata, no streaming, no
-/// palette. A host that needs any of those has outgrown this and should take a dependency.
-///
-/// Writes to a <see cref="Stream"/> rather than a path, so the destination stays the caller's
-/// decision — a file, a mount, or memory in a test — without this package taking a view on
-/// filesystems.</summary>
+/// <summary>Writes noninterlaced RGBA8 PNG images with one IDAT chunk.</summary>
+/// <remarks>Accepts a caller-owned stream and BGRA readback data; metadata, palettes and other
+/// formats are outside this writer's scope.</remarks>
 public static class PngWriter
 {
     /// <summary>Encode tightly-packed, top-down RGBA8.</summary>

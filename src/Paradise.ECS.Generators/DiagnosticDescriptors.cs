@@ -2,14 +2,10 @@ using Microsoft.CodeAnalysis;
 
 namespace Paradise.ECS.Generators;
 
-/// <summary>
-/// Diagnostic descriptors for component-related compile-time errors.
-/// </summary>
+/// <summary>Diagnostic descriptors for component-related compile-time errors.</summary>
 internal static class DiagnosticDescriptors
 {
-    /// <summary>
-    /// PECS001: Component must be an unmanaged struct.
-    /// </summary>
+    /// <summary>PECS001: Component must be an unmanaged struct.</summary>
     public static readonly DiagnosticDescriptor ComponentNotUnmanaged = new(
         id: "PECS001",
         title: "Component must be unmanaged",
@@ -19,9 +15,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Component types must be unmanaged structs to be stored efficiently in ECS chunks.");
 
-    /// <summary>
-    /// PECS002: Component count exceeds built-in capacity.
-    /// </summary>
+    /// <summary>PECS002: Component count exceeds built-in capacity.</summary>
     public static readonly DiagnosticDescriptor ComponentCountExceedsBuiltIn = new(
         id: "PECS002",
         title: "Component count exceeds built-in capacity",
@@ -31,9 +25,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "The number of component types exceeds the largest built-in bit storage type (Bit1024). A custom storage type will be generated.");
 
-    /// <summary>
-    /// PECS003: Component must be a struct.
-    /// </summary>
+    /// <summary>PECS003: Component must be a struct.</summary>
     public static readonly DiagnosticDescriptor ComponentMustBeStruct = new(
         id: "PECS003",
         title: "Component must be a struct",
@@ -46,9 +38,7 @@ internal static class DiagnosticDescriptors
     // PECS004 (invalid component GUID format) was retired: identity now comes from
     // [System.Runtime.InteropServices.Guid], whose argument the compiler already validates with CS0591.
 
-    /// <summary>
-    /// PECS005: Component nested in generic type.
-    /// </summary>
+    /// <summary>PECS005: Component nested in generic type.</summary>
     public static readonly DiagnosticDescriptor UnsupportedContainingType = new(
         id: "PECS005",
         title: "Component nested in generic type",
@@ -58,9 +48,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Component types cannot be nested inside generic types because the source generator cannot infer type parameters.");
 
-    /// <summary>
-    /// PECS006: Component type ID exceeds maximum limit.
-    /// </summary>
+    /// <summary>PECS006: Component type ID exceeds maximum limit.</summary>
     public static readonly DiagnosticDescriptor ComponentIdExceedsLimit = new(
         id: "PECS006",
         title: "Component type ID exceeds maximum",
@@ -70,9 +58,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Component type IDs must not exceed the maximum limit imposed by the archetype graph edge key packing (11 bits = 2047).");
 
-    /// <summary>
-    /// PECS007: Too many components - exceeds maximum component type ID.
-    /// </summary>
+    /// <summary>PECS007: Too many components - exceeds maximum component type ID.</summary>
     public static readonly DiagnosticDescriptor TooManyComponents = new(
         id: "PECS007",
         title: "Too many components",
@@ -82,9 +68,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "The total number of components (including manual ID assignments) must not exceed the maximum component type ID limit imposed by the archetype graph edge key packing.");
 
-    /// <summary>
-    /// PECS008: Disposable ref struct must be disposed.
-    /// </summary>
+    /// <summary>PECS008: Disposable ref struct must be disposed.</summary>
     public static readonly DiagnosticDescriptor DisposableRefStructNotDisposed = new(
         id: "PECS008",
         title: "Disposable ref struct must be disposed",
@@ -94,9 +78,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Ref structs with a Dispose method manage resources that must be released. Failing to dispose them can lead to resource leaks such as unreleased chunk borrows.");
 
-    /// <summary>
-    /// PECS009: Multiple types marked as DefaultConfig.
-    /// </summary>
+    /// <summary>PECS009: Multiple types marked as DefaultConfig.</summary>
     public static readonly DiagnosticDescriptor MultipleDefaultConfigs = new(
         id: "PECS009",
         title: "Multiple DefaultConfig attributes",
@@ -106,9 +88,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Only one type can be marked with [DefaultConfig] per assembly.");
 
-    /// <summary>
-    /// PECS010: Type marked with DefaultConfig doesn't implement IConfig.
-    /// </summary>
+    /// <summary>PECS010: Type marked with DefaultConfig doesn't implement IConfig.</summary>
     public static readonly DiagnosticDescriptor DefaultConfigInvalidType = new(
         id: "PECS010",
         title: "DefaultConfig type must implement IConfig",
@@ -118,9 +98,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Types marked with [DefaultConfig] must implement the IConfig interface.");
 
-    /// <summary>
-    /// PECS011: Queryable must be a ref struct.
-    /// </summary>
+    /// <summary>PECS011: Queryable must be a ref struct.</summary>
     public static readonly DiagnosticDescriptor QueryableMustBeRefStruct = new(
         id: "PECS011",
         title: "Queryable must be ref struct",
@@ -130,9 +108,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Queryable types must be ref structs for safe iteration over entity data.");
 
-    /// <summary>
-    /// PECS012: Queryable must be partial.
-    /// </summary>
+    /// <summary>PECS012: Queryable must be partial.</summary>
     public static readonly DiagnosticDescriptor QueryableMustBePartial = new(
         id: "PECS012",
         title: "Queryable must be partial",
@@ -142,9 +118,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Queryable types must be partial so the generator can implement IQueryable interface members.");
 
-    /// <summary>
-    /// PECS013: Duplicate component type in queryable attributes.
-    /// </summary>
+    /// <summary>PECS013: Duplicate component type in queryable attributes.</summary>
     public static readonly DiagnosticDescriptor DuplicateComponentInQueryable = new(
         id: "PECS013",
         title: "Duplicate component in queryable",
@@ -154,9 +128,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each component type should only appear once across With, Without, and Any attributes in a queryable.");
 
-    /// <summary>
-    /// PECS014: Duplicate manual Queryable ID.
-    /// </summary>
+    /// <summary>PECS014: Duplicate manual Queryable ID.</summary>
     public static readonly DiagnosticDescriptor DuplicateQueryableId = new(
         id: "PECS014",
         title: "Duplicate queryable ID",
@@ -166,9 +138,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each manual Queryable ID must be unique. Multiple queryables with the same ID will cause incorrect query behavior.");
 
-    /// <summary>
-    /// PECS015: Duplicate manual Component ID.
-    /// </summary>
+    /// <summary>PECS015: Duplicate manual Component ID.</summary>
     public static readonly DiagnosticDescriptor DuplicateComponentId = new(
         id: "PECS015",
         title: "Duplicate component ID",
@@ -178,9 +148,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each manual Component ID must be unique. Multiple components with the same ID will cause data corruption.");
 
-    /// <summary>
-    /// PECS016: Component is empty (zero size).
-    /// </summary>
+    /// <summary>PECS016: Component is empty (zero size).</summary>
     public static readonly DiagnosticDescriptor ComponentIsEmpty = new(
         id: "PECS016",
         title: "Component is empty",
@@ -190,9 +158,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Empty components (zero size) should typically be tags. Use [Tag] for marker types that don't store data.");
 
-    /// <summary>
-    /// PECS017: [WithTag&lt;T&gt;] and [WithoutTag&lt;T&gt;] on the same queryable for the same T.
-    /// </summary>
+    /// <summary>PECS017: [WithTag&lt;T&gt;] and [WithoutTag&lt;T&gt;] on the same queryable for the same T.</summary>
     public static readonly DiagnosticDescriptor ConflictingTagFilters = new(
         id: "PECS017",
         title: "Conflicting tag filters",
@@ -204,9 +170,7 @@ internal static class DiagnosticDescriptors
 
     // ===== Tag-related diagnostics =====
 
-    /// <summary>
-    /// PECS020: Tag must be an unmanaged struct.
-    /// </summary>
+    /// <summary>PECS020: Tag must be an unmanaged struct.</summary>
     public static readonly DiagnosticDescriptor TagNotUnmanaged = new(
         id: "PECS020",
         title: "Tag must be unmanaged",
@@ -216,9 +180,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Tag types must be unmanaged structs.");
 
-    /// <summary>
-    /// PECS021: Tag must be empty (no instance fields).
-    /// </summary>
+    /// <summary>PECS021: Tag must be empty (no instance fields).</summary>
     public static readonly DiagnosticDescriptor TagHasFields = new(
         id: "PECS021",
         title: "Tag must be empty",
@@ -230,9 +192,7 @@ internal static class DiagnosticDescriptors
 
     // PECS022 (invalid tag GUID format) was retired alongside PECS004, for the same reason.
 
-    /// <summary>
-    /// PECS023: Tag nested in generic type.
-    /// </summary>
+    /// <summary>PECS023: Tag nested in generic type.</summary>
     public static readonly DiagnosticDescriptor UnsupportedTagContainingType = new(
         id: "PECS023",
         title: "Tag nested in generic type",
@@ -242,9 +202,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Tag types cannot be nested inside generic types because the source generator cannot infer type parameters.");
 
-    /// <summary>
-    /// PECS024: Tag ID exceeds maximum limit.
-    /// </summary>
+    /// <summary>PECS024: Tag ID exceeds maximum limit.</summary>
     public static readonly DiagnosticDescriptor TagIdExceedsLimit = new(
         id: "PECS024",
         title: "Tag ID exceeds maximum",
@@ -254,9 +212,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Tag IDs must not exceed the maximum limit.");
 
-    /// <summary>
-    /// PECS025: Too many tags.
-    /// </summary>
+    /// <summary>PECS025: Too many tags.</summary>
     public static readonly DiagnosticDescriptor TooManyTags = new(
         id: "PECS025",
         title: "Too many tags",
@@ -266,9 +222,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "The total number of tags must not exceed the maximum tag ID limit.");
 
-    /// <summary>
-    /// PECS026: Duplicate manual Tag ID.
-    /// </summary>
+    /// <summary>PECS026: Duplicate manual Tag ID.</summary>
     public static readonly DiagnosticDescriptor DuplicateTagId = new(
         id: "PECS026",
         title: "Duplicate tag ID",
@@ -280,9 +234,7 @@ internal static class DiagnosticDescriptors
 
     // ===== System-related diagnostics =====
 
-    /// <summary>
-    /// PECS3001: System must be partial.
-    /// </summary>
+    /// <summary>PECS3001: System must be partial.</summary>
     public static readonly DiagnosticDescriptor SystemMustBePartial = new(
         id: "PECS3001",
         title: "System must be partial",
@@ -292,9 +244,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "System types must be partial so the generator can implement RunChunk and constructor.");
 
-    /// <summary>
-    /// PECS3002: System must be ref struct.
-    /// </summary>
+    /// <summary>PECS3002: System must be ref struct.</summary>
     public static readonly DiagnosticDescriptor SystemMustBeRefStruct = new(
         id: "PECS3002",
         title: "System must be ref struct",
@@ -304,9 +254,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "System types must be ref structs for safe component access via ref fields.");
 
-    /// <summary>
-    /// PECS3003: Cyclic dependency detected in system DAG.
-    /// </summary>
+    /// <summary>PECS3003: Cyclic dependency detected in system DAG.</summary>
     public static readonly DiagnosticDescriptor SystemCyclicDependency = new(
         id: "PECS3003",
         title: "Cyclic system dependency",
@@ -316,9 +264,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "System execution order contains a cycle from [After]/[Before] attributes. Remove the cycle to enable scheduling.");
 
-    /// <summary>
-    /// PECS3004: Invalid field type in system.
-    /// </summary>
+    /// <summary>PECS3004: Invalid field type in system.</summary>
     public static readonly DiagnosticDescriptor SystemInvalidFieldType = new(
         id: "PECS3004",
         title: "Invalid system field type",
@@ -328,9 +274,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "System fields must be component types, spans of components, or queryable data types.");
 
-    /// <summary>
-    /// PECS3005: Duplicate system ID.
-    /// </summary>
+    /// <summary>PECS3005: Duplicate system ID.</summary>
     public static readonly DiagnosticDescriptor DuplicateSystemId = new(
         id: "PECS3005",
         title: "Duplicate system ID",
@@ -340,9 +284,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each system must have a unique ID. Duplicate IDs prevent correct scheduling.");
 
-    /// <summary>
-    /// PECS3006: IChunkSystem has entity-mode fields.
-    /// </summary>
+    /// <summary>PECS3006: IChunkSystem has entity-mode fields.</summary>
     public static readonly DiagnosticDescriptor ChunkSystemHasEntityFields = new(
         id: "PECS3006",
         title: "IChunkSystem has entity-mode fields",
@@ -352,9 +294,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "IChunkSystem fields must use Span<T>/ReadOnlySpan<T> for inline mode or ChunkData for composition mode.");
 
-    /// <summary>
-    /// PECS3007: IEntitySystem has chunk-mode fields.
-    /// </summary>
+    /// <summary>PECS3007: IEntitySystem has chunk-mode fields.</summary>
     public static readonly DiagnosticDescriptor EntitySystemHasChunkFields = new(
         id: "PECS3007",
         title: "IEntitySystem has chunk-mode fields",
@@ -364,9 +304,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "IEntitySystem fields must use ref T/ref readonly T for inline mode or Data for composition mode.");
 
-    /// <summary>
-    /// PECS3009: IWorldSystem has invalid fields.
-    /// </summary>
+    /// <summary>PECS3009: IWorldSystem has invalid fields.</summary>
     public static readonly DiagnosticDescriptor WorldSystemInvalidField = new(
         id: "PECS3009",
         title: "Invalid world-system field",
@@ -376,9 +314,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "World systems access components through whole-query segment views, singletons, or arbitrary-entity accessors; per-entity refs, spans, Entity handles, and Data/ChunkData composition belong to IEntitySystem/IChunkSystem.");
 
-    /// <summary>
-    /// PECS3010: TQueryable.Singleton field on a queryable not marked Singleton = true.
-    /// </summary>
+    /// <summary>PECS3010: TQueryable.Singleton field on a queryable not marked Singleton = true.</summary>
     public static readonly DiagnosticDescriptor SingletonFieldOnNonSingletonQueryable = new(
         id: "PECS3010",
         title: "Queryable is not a singleton",
@@ -388,9 +324,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "A TQueryable.Singleton system field requires the queryable to opt in via [Queryable(Singleton = true)], which generates the Singleton composition type and enforces exactly-one-entity resolution.");
 
-    /// <summary>
-    /// PECS3011: [CurrentTick] on an unsupported field kind.
-    /// </summary>
+    /// <summary>PECS3011: [CurrentTick] on an unsupported field kind.</summary>
     public static readonly DiagnosticDescriptor CurrentTickInvalidField = new(
         id: "PECS3011",
         title: "Invalid [CurrentTick] field",
@@ -400,9 +334,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "[CurrentTick] marks a read-only field as a fresh (write-world) read under [assembly: SnapshotReadSystems]. It applies only to inline 'ref readonly T' component fields, EntityComponentReader<T> fields, and TQueryable.Singleton composition fields; writable fields already see fresh values and other injection kinds have no fresh-read binding.");
 
-    /// <summary>
-    /// PECS3012: Chunk or Segments claim of a tag-filtered queryable, without [IgnoreTags].
-    /// </summary>
+    /// <summary>PECS3012: Chunk or Segments claim of a tag-filtered queryable, without [IgnoreTags].</summary>
     public static readonly DiagnosticDescriptor TagFilterOnBatchClaim = new(
         id: "PECS3012",
         title: "Tag filter does not apply to Chunk or Segments",
@@ -412,9 +344,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "[WithTag]/[WithoutTag] are row filters. They run on query iteration, singleton resolve, entity-mode claims, and lookups unless the field is marked [IgnoreTags]. TQueryable.Chunk and TQueryable.Segments hand out positional spans; skipping a row would misalign them, so a tag-filtered queryable claimed that way is an error unless the field carries [IgnoreTags] — which acknowledges the filter will not run, and that the system must test EntityTags itself. Only queryables declared in the current compilation are diagnosed; a tag-filtered queryable from a referenced assembly is not.");
 
-    /// <summary>
-    /// PECS3013: [IgnoreTags] on a field that is not a queryable view.
-    /// </summary>
+    /// <summary>PECS3013: [IgnoreTags] on a field that is not a queryable view.</summary>
     public static readonly DiagnosticDescriptor IgnoreTagsInvalidField = new(
         id: "PECS3013",
         title: "Invalid [IgnoreTags] field",
@@ -424,9 +354,7 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "[IgnoreTags] skips the queryable's [WithTag]/[WithoutTag] filter on that field. On Chunk and Segments it also silences PECS3012, because those views cannot apply a row filter. On Entity, Singleton, ReadLookup and WriteLookup the filter otherwise runs. Other injection kinds have no tag filter to skip.");
 
-    /// <summary>
-    /// PECS3008: [SingleWriter] component is written by multiple systems.
-    /// </summary>
+    /// <summary>PECS3008: [SingleWriter] component is written by multiple systems.</summary>
     public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(
         id: "PECS3008",
         title: "Single-writer component is written by multiple systems",

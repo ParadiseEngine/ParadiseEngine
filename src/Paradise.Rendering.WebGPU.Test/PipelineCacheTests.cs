@@ -3,14 +3,9 @@ using Paradise.Rendering.WebGPU.Internal;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>The native-pipeline <see cref="PipelineCache"/> sits below the public handle layer
-/// (iteration 3 restructure): <c>GetOrCreateNative</c> returns a cached <c>WgRenderPipeline</c>
-/// reference; the public <see cref="PipelineHandle"/> minting happens in
-/// <see cref="WebGpuRenderer"/> via <c>WebGpuDevice.RegisterPipeline</c>. The cache type
-/// parameterizes on <c>WebGpuSharp.RenderPipeline</c> which has no public constructor — directly
-/// unit-testing the cache requires a live device. The handle-distinctness invariants the cache
-/// underpins are covered by <see cref="HandleDistinctnessTests"/> through the public renderer
-/// surface (skipped when no GPU available).</summary>
+/// <summary>Checks the native pipeline cache beneath public resource handles.</summary>
+/// <remarks>Creating native pipelines requires a GPU. HandleDistinctnessTests cover independent
+/// public handles sharing a cached native pipeline.</remarks>
 public class PipelineCacheTests
 {
     [Test]

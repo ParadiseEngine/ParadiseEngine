@@ -61,6 +61,29 @@ float3 incidentLight(float3 position, float3 rayDirection, float2 screen)
     }
     return result;
 }
+// The unnormalized local direction keeps intersection distances in world metres.
+float2 volumeInterval(FogVolume volume, float3 origin, float3 direction, float start, float end)
+{
+    float3 o = mul(volume.inverseTransform, float4(origin, 1)).xyz;
+    float3 d = mul(volume.inverseTransform, float4(direction, 0)).xyz;
+    float entry = start;
+    float exit = end;
+    for (int axis = 0; axis < 3; axis++)
+    {
+        if (d[axis] == 0)
+        {
+            if (abs(o[axis]) > 0.5) return float2(0);
+        }
+        else
+        {
+            float a = (-0.5 - o[axis]) / d[axis];
+            float b = (0.5 - o[axis]) / d[axis];
+            entry = max(entry, min(a, b));
+            exit = min(exit, max(a, b));
+        }
+    }
+    return float2(entry, max(entry, exit));
+}
 [shader("fragment")]
 float4 fragmentMain(Varyings input) : SV_Target
 {
@@ -68,17 +91,26 @@ float4 fragmentMain(Varyings input) : SV_Target
     float depth = captureDepthTexture.Load(int3(int2(input.position.xy), 0));
     float2 ndc = input.uv * float2(2, -2) + float2(-1, 1);
     float4 nearPoint = mul(frame.invViewProj, float4(ndc, 0, 1));
-    float4 farPoint = mul(frame.invViewProj, float4(ndc, min(depth, 0.999999), 1));
+    float4 farPoint = mul(frame.invViewProj, float4(ndc, 0.5, 1));
     nearPoint.xyz /= nearPoint.w;
     farPoint.xyz /= farPoint.w;
-    // Near-plane origins work for both perspective and orthographic cameras.
+    // A finite interior point also supports projections with an infinite far plane.
     float3 origin = fog.albedo.w > 0.5 ? frame.cameraPos.xyz : nearPoint.xyz;
     float3 ray = farPoint.xyz - origin;
     float rayLength = length(ray);
     if (rayLength <= 0.00001) return color;
     float3 direction = ray / rayLength;
-    float distance = depth >= 0.999999 ? fog.heightDistance.w : min(rayLength, fog.heightDistance.w);
+    float distance = fog.heightDistance.w;
+    if (depth < 1)
+    {
+        float4 surface = mul(frame.invViewProj, float4(ndc, depth, 1));
+        distance = min(length(surface.xyz / surface.w - origin), distance);
+    }
     float start = min(fog.heightDistance.z, distance);
+    if (distance <= start) return color;
+    float2 intervals[16];
+    for (int volume = 0; volume < (int)fog.scattering.w; volume++)
+        intervals[volume] = volumeInterval(fogVolumes[volume], origin, direction, start, distance);
     int steps = (int)fog.scattering.x;
     float stepLength = (distance - start) / steps;
     float transmission = 1;
@@ -91,12 +123,12 @@ float4 fragmentMain(Varyings input) : SV_Target
         for (int volume = 0; volume < (int)fog.scattering.w; volume++)
         {
             FogVolume local = fogVolumes[volume];
-            float3 p = mul(local.inverseTransform, float4(position, 1)).xyz;
-            if (all(abs(p) <= float3(0.5)))
-            {
-                density += local.albedoDensity.w;
-                albedoDensity += local.albedoDensity.rgb * local.albedoDensity.w;
-            }
+            float segmentStart = start + step * stepLength;
+            float overlap = max(0, min(segmentStart + stepLength, intervals[volume].y)
+                - max(segmentStart, intervals[volume].x));
+            float localDensity = local.albedoDensity.w * (overlap / stepLength);
+            density += localDensity;
+            albedoDensity += local.albedoDensity.rgb * localDensity;
         }
         float segmentTransmission = exp(-density * stepLength);
         float3 source = fog.colorDensity.rgb;

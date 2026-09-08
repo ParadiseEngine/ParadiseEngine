@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Concurrent.Test;
 
-/// <summary>
-/// Tests for World entity lifecycle operations.
-/// </summary>
+/// <summary>Tests for World entity lifecycle operations.</summary>
 public sealed class WorldEntityTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

@@ -43,7 +43,7 @@ internal sealed class AuthoredField
     /// <summary>The sibling value that reveals this field, already rendered as a JSON literal.</summary>
     public string? VisibleWhenValue;
 
-    // ---- CLR-facing half, used by the generated READER rather than by any editor. ----
+    // CLR-facing half, used by the generated READER rather than by any editor.
     // The schema deliberately collapses CLR widths (long and int are both "int"); the reader
     // cannot, because it assigns real properties.
 

@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="Entity"/>.
-/// </summary>
+/// <summary>Tests for <see cref="Entity"/>.</summary>
 public sealed class EntityTests
 {
     [Test]

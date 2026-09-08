@@ -6,20 +6,11 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation;
 
-/// <summary>
-/// Samples an <see cref="AnimationBlob"/> at a ratio of its duration into one local pose per
-/// track. A native blob holding the per-track cursor ozz's sampler keeps between calls: stepping
-/// forward in time from the last sample visits only the keys that passed, and a seek restarts
-/// from the nearest i-frame. Create one per playing instance with <see cref="Create"/> and keep
-/// using it for that instance; sampling allocates nothing.
-/// </summary>
-/// <remarks>
-/// A port of ozz-animation's <c>SamplingJob</c> (0.17), keeping its structure-of-arrays half:
-/// keys are decoded and interpolated four tracks at a time in <see cref="Vector128{T}"/> lanes,
-/// the cursor walk stays scalar. Where ozz uses estimated reciprocal and inverse square root
-/// instructions, this uses exact division and square root; the poses differ from native ozz at
-/// the fourth decimal and from the source clip by the quantization alone.
-/// </remarks>
+/// <summary>Samples animation clips using persistent per-track cursors in a native blob.</summary>
+/// <remarks>Reuse one context per playing instance. Sequential sampling visits changed keys;
+/// seeking resumes from the nearest i-frame. Sampling allocates nothing.
+/// The ozz 0.17 port decodes four tracks per Vector128 lane and walks cursors scalarly.
+/// Exact division and square roots replace ozz's estimates, producing small pose differences.</remarks>
 public struct SamplingContext
 {
     private const float Sqrt2 = 1.4142135623730951f;
@@ -240,7 +231,8 @@ public struct SamplingContext
         return numTracks * 2;
     }
 
-    /// <summary>The track whose cursor holds <paramref name="target"/>, scanned from the last hit onward then from the start. Keys arrive roughly round-robin, so the hit is usually the next entry or two: a plain loop beats a vectorized <c>IndexOf</c> here, whose setup costs more than the few compares it saves.</summary>
+    /// <summary>Finds the track whose cursor holds target, searching from the previous hit before wrapping.</summary>
+    /// <remarks>Keys arrive roughly round-robin; a scalar search usually needs one or two comparisons.</remarks>
     private static int TrackForward(ReadOnlySpan<uint> entries, uint target, int lastTrack)
     {
         for (var entry = lastTrack; entry < entries.Length; entry++)

@@ -36,12 +36,7 @@ public struct Data4
     private byte _element0;
 }
 
-/// <summary>
-/// The typed surface: <c>FixedBehaviorTree</c> is the one type holding a raw blob pointer
-/// (written only by <c>Initialize</c>, whose signature proves the tree matches), and the claims
-/// that need pinning are the capacity refusal, that it ticks like any other instance form, and
-/// that a struct assignment copies the tree mid-flight — what "can ride a snapshot memcpy" means.
-/// </summary>
+/// <summary>Verifies typed instance capacity, ticking and mid-run copying.</summary>
 public sealed class FixedBehaviorTreeTests
 {
     [Test]

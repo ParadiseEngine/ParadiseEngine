@@ -13,10 +13,8 @@ public static class QueryableSample
         Console.WriteLine("11. Queryable Types");
         Console.WriteLine("----------------------------");
 
-        // =========================================================================
         // Entity-level iteration using generated Movable queryable
         // Movable is defined as: [With<Position>] [With<Velocity>]
-        // =========================================================================
         Console.WriteLine("  Entity-level iteration (Movable.Query):");
 
         var movableQuery = world.Query(default(Movable));
@@ -34,10 +32,8 @@ public static class QueryableSample
         }
         Console.WriteLine();
 
-        // =========================================================================
         // Optional component access using Damageable queryable
         // Damageable is defined as: [With<Health>] [Optional<Position>(IsReadOnly = true)]
-        // =========================================================================
         Console.WriteLine("  Optional component access (Damageable.Query):");
 
         var damageableQuery = world.Query(default(Damageable));
@@ -47,7 +43,6 @@ public static class QueryableSample
         {
             ref readonly var health = ref data.Health;
 
-            // Check if optional Position component exists before accessing
             if (data.HasPosition)
             {
                 ref readonly var pos = ref data.GetPosition();
@@ -60,10 +55,8 @@ public static class QueryableSample
         }
         Console.WriteLine();
 
-        // =========================================================================
         // Chunk-level iteration for batch processing using Movable.ChunkQuery
         // Provides Span<T> access for cache-efficient bulk operations
-        // =========================================================================
         Console.WriteLine("  Chunk-level iteration (Movable.ChunkQuery):");
 
         var chunkQuery = world.ChunkQuery(default(Movable));

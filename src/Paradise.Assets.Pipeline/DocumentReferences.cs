@@ -3,16 +3,7 @@ using Paradise.Authoring;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// The one walk over every <see cref="AssetReference"/> a document holds, rewriting the ones a
-/// policy changes.
-/// </summary>
-/// <remarks>
-/// Two callers with the same walk and different policies: <c>mv</c> follows a file it just moved,
-/// and <c>verify --fix</c> catches a stale path up to where the guid says the asset now lives.
-/// They were one copied walk before, and a shape one of them learned to visit was a shape the
-/// other kept missing.
-/// </remarks>
+/// <summary>Walks and rewrites document asset references for move and repair policies.</summary>
 public static class DocumentReferences
 {
     /// <summary>Applies <paramref name="follow"/> to every reference; null when nothing changed, so a caller can skip the write.</summary>
@@ -93,10 +84,7 @@ public static class DocumentReferences
     }
 
     private static bool IsReferenceShaped(CanonicalInlineTable table)
-    {
-        var pairs = table.ToList();
-        return pairs.Count > 0 && AssetReferenceCodec.IsWrittenInline(pairs);
-    }
+        => table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table);
 
     private static AssetReference Follow(AssetReference reference, Func<AssetReference, AssetReference> follow, ref bool changed)
     {
