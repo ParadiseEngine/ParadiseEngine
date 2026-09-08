@@ -210,22 +210,14 @@ internal sealed class RendererShowcase : IDisposable
         _rig.Pose(_frame / 60f, Matrix4x4.Identity, _palette);
         Renderer.SetJointPalette(0, _palette);
         _room.SoftShadowsOverride = _soft;
-        var fallback = !Program.Features.IsEnabled(PbrFeatures.Scene.Id)
-            || !Program.Features.IsEnabled(PbrFeatures.Composite.Id)
-            || !Program.Features.IsEnabled(PbrFeatures.Presentation.Id);
-        var overlay = backend.OverlayPass;
-        if (fallback) backend.OverlayPass = null;
-        try { _room.RenderFrame(!_paused); }
-        finally { backend.OverlayPass = overlay; }
+        _room.RenderFrame(!_paused);
         if (!_paused) _frame++;
-        if (fallback) backend.Submit(new ClearFrame(new ColorRgba(0.04f, 0.05f, 0.07f, 1)).Record());
         _submitMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         _passMilliseconds.Clear();
         if (backend.PassTimingEnabled)
         {
             var values = backend.ReadPassTimings();
-            // The fallback submit belongs to the overlay, not the PBR graph.
-            if (!fallback && values.Length == Renderer.LastPassNames.Count)
+            if (values.Length == Renderer.LastPassNames.Count)
                 for (var i = 0; i < values.Length; i++)
                 {
                     var pass = Renderer.LastPassNames[i];
@@ -280,7 +272,10 @@ internal sealed class RendererShowcase : IDisposable
                 var e = input.Event;
                 var consumed = ui.Input.Handle(e);
                 if (e.Kind == WindowEventKind.Button && e.Source == EventSource.Mouse && e.Code == (byte)PointerButton.Left)
+                {
                     dragging = e.Pressed && !consumed;
+                    if (dragging) pointer = new Vector2(e.X, e.Y);
+                }
                 if (e.Kind == WindowEventKind.PointerMove)
                 {
                     var next = new Vector2(e.X, e.Y);
@@ -319,6 +314,30 @@ internal sealed class RendererShowcase : IDisposable
             var snapshot = ui.AcquireSnapshotForRender(pending, out _);
             backend.OverlayPass = (encoder, view) =>
             {
+                // Clear within the existing submission when the PBR chain cannot fill the
+                // backbuffer. The UI must remain usable without presenting a second frame.
+                if (!Program.Features.IsEnabled(PbrFeatures.Scene.Id)
+                    || !Program.Features.IsEnabled(PbrFeatures.Composite.Id)
+                    || !Program.Features.IsEnabled(PbrFeatures.Presentation.Id))
+                {
+                    var clear = new WebGpuSharp.RenderPassDescriptor
+                    {
+                        Label = "ShowcaseFallbackClear",
+                        ColorAttachments = new WebGpuSharp.RenderPassColorAttachment[]
+                        {
+                            new()
+                            {
+                                View = view,
+                                LoadOp = WebGpuSharp.LoadOp.Clear,
+                                StoreOp = WebGpuSharp.StoreOp.Store,
+                                ClearValue = new WebGpuSharp.Color(0.04, 0.05, 0.07, 1),
+                                DepthSlice = null,
+                            },
+                        },
+                    };
+                    var pass = encoder.BeginRenderPass(in clear);
+                    pass.End();
+                }
                 overlay.ApplyTextureOps(pending);
                 if (snapshot is not null) overlay.Render(encoder, view, window?.Width ?? width, window?.Height ?? height, snapshot);
             };
