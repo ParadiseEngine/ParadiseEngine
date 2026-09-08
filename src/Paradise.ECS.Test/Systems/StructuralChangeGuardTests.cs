@@ -1,11 +1,9 @@
 namespace Paradise.ECS.Test;
 
-// ============================================================================
 // Offending system: bypasses the ECB and mutates the world directly mid-run.
 // Hand-implements IWorldSystemRunner (instead of relying on codegen) so the
 // system body can reach the world — generated systems can only see components
 // and an EntityCommandBuffer by design.
-// ============================================================================
 
 /// <summary>Illegally spawns an entity directly on the world during wave execution.</summary>
 public struct DirectSpawnOffenderSystem : IWorldSystemRunner<SmallBitSet<uint>, DefaultConfig>
@@ -26,10 +24,8 @@ public struct DirectSpawnOffenderSystem : IWorldSystemRunner<SmallBitSet<uint>, 
         => world.Spawn();
 }
 
-// ============================================================================
 // Tests (DEBUG builds — the guard is [Conditional("DEBUG")] and the test
 // projects build Debug by default, matching CI)
-// ============================================================================
 
 /// <summary>
 /// Tests for the DEBUG-only structural-change guard: direct structural World mutations during a

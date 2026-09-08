@@ -208,9 +208,7 @@ public class SphereDynamicsTests
     [Test]
     public async Task cushion_bounce_uses_static_restitution_not_the_pairwise_value()
     {
-        // The wall (static) bounce is driven by settings.StaticRestitution, NOT the ball's own
-        // Restitution (which is the ball↔ball coefficient). An elastic ball (1.0) off a dead wall
-        // (0.2) rebounds SLOW — decoupling the two so they can't silently re-converge.
+        // StaticRestitution controls wall bounces; the sphere's Restitution controls sphere pairs.
         CollisionWorld statics = FloorAndWallAtX5();
         var settings = SphereDynamicsSettings.Default with { StaticRestitution = 0.2f, StaticFriction = 0f };
         DynamicSphere[] s = [Ball(new Vector3(0f, 0.5f, 0f), new Vector3(5f, 0f, 0f),

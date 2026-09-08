@@ -2,19 +2,9 @@ using Paradise.Features;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The engine's render features as the engine configuration sees them: one declaration
-/// each, naming the switch, the state it ships in, and what turning it off costs.
-///
-/// <para>These are the names a config file writes and a <c>--features</c> flag types. They are
-/// part of the contract — renaming one silently ignores everybody's config — so they change the
-/// way a serialized name changes, not the way a class does.</para>
-///
-/// <para><b>A switch and a scene setting are different questions.</b> The switch is the platform's
-/// answer ("this build does not do probe GI"), applied once from configuration; the scene's own
-/// <c>Enabled</c> (<see cref="PbrGi"/>, <see cref="PbrBloom"/>, …) is the CONTENT's answer ("this
-/// level uses it"), authored per scene and changed per frame. A feature runs when both say yes.
-/// Collapsing them would either make a level able to override a platform decision or make a
-/// platform decision have to be re-made in every level.</para></summary>
+/// <summary>Declares the stable feature names and defaults used by engine configuration.</summary>
+/// <remarks>Names are serialized contracts. Both the process switch and the scene's Enabled setting
+/// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
     public static FeatureDefinition FrustumCulling { get; } = new(
@@ -23,18 +13,27 @@ public static class PbrFeatures
     public static FeatureDefinition OcclusionCulling { get; } = new(
         "rendering.occlusionCulling", true, "Current-frame GPU occlusion and indirect draws when enabled by the scene.");
 
-    /// <summary>Shadow maps: one depth-only pass per shadow view. Off, every light lights
-    /// everything.</summary>
+    /// <summary>Camera, object and skinned-vertex motion for temporal effects.</summary>
+    public static FeatureDefinition MotionVectors { get; } = new(
+        "rendering.motionVectors", true,
+        "Screen-space motion for temporal effects. Off, temporal consumers must reject history.");
+
+    /// <summary>Directional cascades and local-light tiles in a shared depth atlas.</summary>
     public static FeatureDefinition Shadows { get; } = new(
         "rendering.shadows", true,
-        "Shadow maps for every shadow-casting light. Off, nothing casts a shadow.");
+        "Cascaded and local-light shadow maps in a shared atlas.");
+
+    /// <summary>Short direct-light shadow rays through the visible depth prepass.</summary>
+    public static FeatureDefinition ContactShadows { get; } = new(
+        "rendering.contactShadows", true,
+        "Short screen-space direct-light shadows from visible opaque geometry.");
 
     /// <summary>The depth + normal pre-pass every screen-space effect reads. Off, SSAO,
-    /// ray-traced AO and screen-space reflection have nothing to read and none of them
+    /// ray-traced AO, contact shadows and screen-space reflection have nothing to read and none of them
     /// run.</summary>
     public static FeatureDefinition Prepass { get; } = new(
         "rendering.depthNormalPrepass", true,
-        "The opaque depth + normal pre-pass. Off, SSAO, ray-traced AO and reflections all stop with it.");
+        "The opaque depth + normal pre-pass. Off, all effects that read it stop.");
 
     /// <summary>Ray-traced ambient occlusion in compute, against the scene's BVH.</summary>
     public static FeatureDefinition RayTracedAo { get; } = new(
@@ -70,6 +69,55 @@ public static class PbrFeatures
         "rendering.sceneColorCapture", false,
         "Copy the opaque scene so blend materials can refract it. Costs a blit and a reload per frame.");
 
+    /// <summary>GPU luminance metering and bounded automatic or manual exposure.</summary>
+    public static FeatureDefinition Exposure { get; } = new(
+        "rendering.exposure", true, "GPU luminance metering and bounded automatic or manual exposure.");
+
+    /// <summary>Thin-lens opaque depth of field.</summary>
+    public static FeatureDefinition DepthOfField { get; } = new(
+        "rendering.depthOfField", true, "Thin-lens opaque depth of field.");
+
+    /// <summary>Camera and per-object motion blur from motion vectors.</summary>
+    public static FeatureDefinition MotionBlur { get; } = new(
+        "rendering.motionBlur", true, "Camera and per-object motion blur from motion vectors.");
+
+    /// <summary>White balance, contrast, saturation, lift/gamma/gain and color LUT.</summary>
+    public static FeatureDefinition ColorGrading { get; } = new(
+        "rendering.colorGrading", true, "White balance, contrast, saturation, lift/gamma/gain and color LUT.");
+
+    /// <summary>Radial barrel and pincushion lens distortion.</summary>
+    public static FeatureDefinition LensDistortion { get; } = new(
+        "rendering.lensDistortion", true, "Radial barrel and pincushion lens distortion.");
+
+    /// <summary>Radial red and blue chromatic separation.</summary>
+    public static FeatureDefinition ChromaticAberration { get; } = new(
+        "rendering.chromaticAberration", true, "Radial red and blue chromatic separation.");
+
+    /// <summary>Soft colored vignette.</summary>
+    public static FeatureDefinition Vignette { get; } = new(
+        "rendering.vignette", true, "Soft colored vignette.");
+
+    /// <summary>Deterministic time-animated film grain.</summary>
+    public static FeatureDefinition FilmGrain { get; } = new(
+        "rendering.filmGrain", true, "Deterministic time-animated film grain.");
+
+    /// <summary>Neighborhood-limited sharpening.</summary>
+    public static FeatureDefinition Sharpening { get; } = new(
+        "rendering.sharpening", true, "Neighborhood-limited sharpening.");
+    /// <summary>Height fog and local participating media.</summary>
+    public static FeatureDefinition Fog { get; } = new(
+        "rendering.fog", true, "Height fog and shadowed participating-medium scattering.");
+
+    /// <summary>Jittered HDR temporal accumulation with motion and depth rejection.</summary>
+    public static FeatureDefinition TemporalAntiAliasing { get; } = new(
+        "rendering.temporalAntiAliasing", true,
+        "Temporal antialiasing. Off, the camera is unjittered and no color history accumulates.");
+
+    /// <summary>Spatial edge filtering after tonemapping and display effects.</summary>
+    public static FeatureDefinition Fxaa { get; } = new(
+        "rendering.fxaa", true,
+        "FXAA spatial antialiasing. Off, presentation preserves unfiltered display color.");
+
     /// <summary>The bloom mip chain.</summary>
     public static FeatureDefinition Bloom { get; } = new(
         "rendering.bloom", true,
@@ -80,6 +128,10 @@ public static class PbrFeatures
         "rendering.composite", true,
         "Tonemap the HDR scene onto the backbuffer. Off, the frame is never presented.");
 
+    /// <summary>Output transfer and presentation after optional display effects.</summary>
+    public static FeatureDefinition Presentation { get; } = new(
+        "rendering.presentation", true, "Present the processed display color with one sRGB transfer.");
+
     /// <summary>All of them, in frame order — what a <c>--list-features</c> flag or a config-file
     /// template prints WITHOUT constructing a renderer, which on a machine with no GPU adapter is
     /// the difference between a listing and a crash. A test pins this against what
@@ -87,8 +139,9 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        FrustumCulling, Shadows, Prepass, OcclusionCulling, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, Bloom, Composite,
+        FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
+        ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
 
     /// <summary>Declares every built-in into <paramref name="switches"/>. A renderer does this
@@ -115,13 +168,28 @@ public static class PbrFeatureOrder
     public const int FrustumCulling = 50;
     public const int Shadows = 100;
     public const int Prepass = 200;
-    public const int OcclusionCulling = 250;
+    public const int OcclusionCulling = 225;
+    public const int MotionVectors = 250;
+    public const int ContactShadows = 275;
     public const int RayTracedAo = 300;
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
     public const int LightCulling = 550;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
+    public const int Fog = 710;
+    public const int TemporalAntiAliasing = 720;
+    public const int Exposure = 730;
+    public const int DepthOfField = 740;
+    public const int MotionBlur = 750;
     public const int Bloom = 800;
     public const int Composite = 900;
+    public const int ColorGrading = 910;
+    public const int LensDistortion = 920;
+    public const int ChromaticAberration = 925;
+    public const int Vignette = 930;
+    public const int FilmGrain = 940;
+    public const int Sharpening = 950;
+    public const int AntiAliasing = 960;
+    public const int Presentation = 1000;
 }

@@ -3,9 +3,7 @@ using Paradise.ECS;
 
 namespace Paradise.ECS.Benchmarks;
 
-/// <summary>
-/// Direct comparison of raw pool execution strategies.
-/// </summary>
+/// <summary>Direct comparison of raw pool execution strategies.</summary>
 [MemoryDiagnoser]
 public class RawPoolBenchmarks
 {

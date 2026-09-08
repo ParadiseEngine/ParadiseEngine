@@ -18,9 +18,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
     private int _disposed; // 0 = not disposed, 1 = disposed
     private int _aliveCount; // Number of currently alive entities (atomic)
 
-    /// <summary>
-    /// Creates a new EntityManager.
-    /// </summary>
+    /// <summary>Creates a new EntityManager.</summary>
     /// <param name="initialCapacity">Initial capacity for entity storage.</param>
     /// <param name="maxEntityId">The maximum entity ID that can be allocated.</param>
     public EntityManager(int initialCapacity, int maxEntityId = int.MaxValue)
@@ -30,19 +28,13 @@ public sealed class EntityManager : IEntityManager, IDisposable
         _allocator = new EntityIdAllocator(maxEntityId);
     }
 
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     public int AliveCount => Volatile.Read(ref _aliveCount);
 
-    /// <summary>
-    /// Gets the current capacity of the entity storage.
-    /// </summary>
+    /// <summary>The current capacity of the entity storage.</summary>
     public int Capacity => Volatile.Read(ref _packedLocations).Length;
 
-    /// <summary>
-    /// Gets the thread-safe entity ID allocator used by this manager.
-    /// </summary>
+    /// <summary>The thread-safe entity ID allocator used by this manager.</summary>
     public EntityIdAllocator Allocator
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -80,9 +72,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         return entity;
     }
 
-    /// <summary>
-    /// Ensures capacity and writes the initial location for a reserved entity.
-    /// </summary>
+    /// <summary>Ensures capacity and writes the initial location for a reserved entity.</summary>
     private void WriteReservedLocation(Entity entity)
     {
         EnsureCapacity(entity.Id);
@@ -93,7 +83,6 @@ public sealed class EntityManager : IEntityManager, IDisposable
             var locations = Volatile.Read(ref _packedLocations);
             Volatile.Write(ref locations[entity.Id], new EntityLocation(entity.Version, -1, -1).Packed);
 
-            // Check if array was replaced while we were writing
             if (Volatile.Read(ref _packedLocations) == locations)
                 break;
         }
@@ -125,7 +114,6 @@ public sealed class EntityManager : IEntityManager, IDisposable
             ulong currentPacked = Volatile.Read(ref locations[entity.Id]);
             var current = EntityLocation.FromPacked(currentPacked);
 
-            // Check if already destroyed (stale handle)
             if (current.Version != entity.Version)
                 return;
 
@@ -152,9 +140,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         }
     }
 
-    /// <summary>
-    /// Checks if the entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if the entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive, false if destroyed or invalid.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -189,9 +175,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         return EntityLocation.FromPacked(Volatile.Read(ref locations[entity.Id]));
     }
 
-    /// <summary>
-    /// Gets the location for the specified entity ID.
-    /// </summary>
+    /// <summary>The location for the specified entity ID.</summary>
     /// <param name="entityId">The entity ID.</param>
     /// <returns>The entity location containing version and archetype info.</returns>
     /// <exception cref="ObjectDisposedException">Thrown if the manager is disposed.</exception>
@@ -218,9 +202,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         Volatile.Write(ref locations[entity.Id], location.Packed);
     }
 
-    /// <summary>
-    /// Gets the location data for the specified entity if it is alive.
-    /// </summary>
+    /// <summary>The location data for the specified entity if it is alive.</summary>
     /// <param name="entity">The entity to get location for.</param>
     /// <param name="location">The location data if the entity is alive.</param>
     /// <returns>True if the entity is alive and location was retrieved.</returns>
@@ -276,9 +258,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         Volatile.Write(ref _packedLocations, newLocations);
     }
 
-    /// <summary>
-    /// Releases all resources used by this instance.
-    /// </summary>
+    /// <summary>Releases all resources used by this instance.</summary>
     public void Dispose()
     {
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)

@@ -140,6 +140,44 @@ public class VisibilityTests
     }
 
     [Test]
+    public async Task jittered_temporal_frames_with_fog_and_shadows_match_unculled_frames()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var culled = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        using var reference = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(culled);
+        var expected = Scene(reference);
+        expected.Visibility.FrustumEnabled = false;
+        expected.Visibility.OcclusionEnabled = false;
+        foreach (var renderer in new[] { culled, reference })
+            renderer.Pipeline.Find<ShadowFeature>()!.MapSize = 512;
+        foreach (var item in new[] { scene, expected })
+        {
+            item.Taa = new PbrTaa { Enabled = true };
+            item.Fog = new PbrFog { Enabled = true, Density = 0.03f, MaxDistance = 12f };
+            item.Lights.Add(new PbrLight
+            {
+                Type = PbrLightType.Directional, Direction = Vector3.Normalize(new Vector3(1, -1, -1)),
+                Intensity = 1f, CastsShadows = true,
+            });
+        }
+        for (var frame = 0; frame < 8; frame++)
+        {
+            scene.Camera.View = expected.Camera.View = Matrix4x4.CreateTranslation(frame * 0.02f, 0, 0);
+            if (frame == 4)
+                scene.Instances[0].Model = expected.Instances[0].Model = Matrix4x4.CreateTranslation(-4, 0, -3);
+            reference.RenderFrame(expected);
+            var pixels = backend.ReadbackColor(out _, out _).ToArray();
+            culled.RenderFrame(scene);
+            SamePixels(pixels, backend.ReadbackColor(out _, out _));
+        }
+        await Assert.That(culled.LastPassNames).Contains("Taa.Resolve");
+        await Assert.That(culled.LastPassNames).Contains("Fog.Integrate");
+        await Assert.That(Arguments(backend, culled.Pipeline.Find<OcclusionCullingFeature>()!)[6]).IsEqualTo(1u);
+    }
+
+    [Test]
     public async Task moving_occluder_and_camera_reveals_geometry_in_the_same_frame()
     {
         using var backend = Backend();

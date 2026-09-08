@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--
-    Standalone console app that downloads + SHA-verifies + extracts the KTX-Software CLI for CI
-    and for the asset pipeline's texture step. A structural clone of tools/slang/SlangBootstrap
-    (see its csproj for why this is a real csproj rather than `dotnet run` over the file, and
-    why it stays out of ParadiseEngine.slnx and central package management).
-  -->
+  <!-- Standalone KTX installer, isolated from the solution and central package management like SlangBootstrap. -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>

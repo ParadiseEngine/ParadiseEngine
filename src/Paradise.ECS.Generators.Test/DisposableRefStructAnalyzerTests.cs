@@ -2,9 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Paradise.ECS.Generators.Test;
 
-/// <summary>
-/// Tests for the DisposableRefStructAnalyzer.
-/// </summary>
+/// <summary>Tests for the DisposableRefStructAnalyzer.</summary>
 public class DisposableRefStructAnalyzerTests
 {
     private const string DisposableRefStructDefinition = """

@@ -1,18 +1,8 @@
-// lightCull.slang — Forward+ froxel binning: one thread per froxel, testing every point/spot
-// light's bounding sphere against that froxel's view-space AABB and writing the two mask words
-// the fragment shader reads (see Common/uniforms.slang's clusterMasks and pbrCore.slang's light
-// loop). This is a GATHER — each thread owns its two words, so nothing here needs an atomic.
-//
-// It deliberately does NOT include Common/lighting.slang. slangc keeps every global an included
-// file declares, so including it would make the frame UBO, the shadow array and its comparison
-// sampler mandatory bindings of this program — three group-1 slots this pass never reads, which
-// the feature would then have to satisfy with stand-ins and a dependency on ShadowFeature. The
-// centres and radii are uploaded instead, in view space, as the only light data binning needs.
-//
-// Slice boundaries arrive in a buffer rather than being recomputed here. WGSL's pow is
-// exp2(y*log2(x)) to a few ULP and MathF.Pow is not, so a shader that derived its own boundaries
-// would disagree with the CPU twin by an ULP and flip a light that straddles one — which is
-// exactly the bit-exact agreement ClusterBinning exists to let the tests assert.
+// Forward+ binning: each thread tests light spheres against one view-space froxel and owns its two
+// mask words, requiring no atomics.
+// Upload only light centers/radii; including lighting.slang would add unused mandatory bindings.
+// Upload CPU slice boundaries too: WGSL pow rounding can differ from MathF.Pow and change boundary
+// masks.
 
 struct CullUniforms
 {

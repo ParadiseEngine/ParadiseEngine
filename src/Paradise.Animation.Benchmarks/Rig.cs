@@ -4,12 +4,9 @@ using Paradise.Assets.Pipeline;
 
 namespace Paradise.Animation.Benchmarks;
 
-/// <summary>
-/// The one source every implementation samples: a GLB from <c>PARADISE_BENCHMARK_GLB</c> when set
-/// (a real character, say), else a procedural rig of the given size — a branching tree, every joint
-/// animated on all three channels at 30 Hz, the shape a DCC export has. Cooked through the real
-/// pipeline (<see cref="GltfCook"/>) so the archives are what the build would write.
-/// </summary>
+/// <summary>Provides a GLB rig cooked through GltfCook for every benchmark implementation.</summary>
+/// <remarks>Uses PARADISE_BENCHMARK_GLB when set; otherwise builds a branching rig with
+/// translation, rotation and scale keys for every joint at 30 Hz.</remarks>
 internal sealed class Rig
 {
     public const string EnvironmentVariable = "PARADISE_BENCHMARK_GLB";

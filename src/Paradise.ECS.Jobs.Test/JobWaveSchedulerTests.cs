@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Jobs.Test;
 
-/// <summary>
-/// Tests for <see cref="JobWaveScheduler"/> — system scheduling with persistent worker pool.
-/// </summary>
+/// <summary>Tests for <see cref="JobWaveScheduler"/> — system scheduling with persistent worker pool.</summary>
 public sealed class JobWaveSchedulerTests : IDisposable
 {
     private readonly SharedWorld _sharedWorld;

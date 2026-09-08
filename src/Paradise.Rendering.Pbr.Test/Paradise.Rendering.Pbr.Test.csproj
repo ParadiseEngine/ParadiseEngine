@@ -12,14 +12,10 @@
   <Import Project="$(MSBuildThisFileDirectory)../Slang.targets" />
 
   <ItemGroup>
-    <!-- waterFixture.slang compiles the way a GAME extension shader does: the engine sources
-         arrive via the -I include dir, not by living beside the file. CI failing here means the
-         package-consumer story broke. -->
+    <!-- Compile fixtures through the include path used by game extension shaders. -->
     <SlangShader Include="Shaders/*.slang" />
     <SlangIncludeDir Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/" />
-    <!-- The engine includes are build INPUTS: without them an edit to uniforms.slang leaves the
-         fixtures compiled against the old layout, and the extension-compatibility check then
-         reports the fixture as the thing that changed. -->
+    <!-- Track shared includes so changes rebuild fixtures against the current layout. -->
     <SlangShaderInclude Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/Common/**/*.slang" />
   </ItemGroup>
 
@@ -29,11 +25,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
-    <!-- The configuration a host actually reads, so the test that proves a file reaches the
-         renderer starts from a real engine.toml rather than a hand-built layer. -->
+    <!-- Exercise configuration from a real engine.toml. -->
     <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
-    <!-- Explicit since Pbr stopped referencing a concrete backend: the GPU tests drive the real
-         thing through WebGpuRenderer.CreateHeadless, so they need a backend of their own. -->
+    <!-- GPU tests explicitly select the WebGPU backend. -->
     <ProjectReference Include="..\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
   </ItemGroup>
 </Project>

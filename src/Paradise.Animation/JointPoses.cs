@@ -18,17 +18,10 @@ public struct SoaQuaternion
     public Vector128<float> X, Y, Z, W;
 }
 
-/// <summary>
-/// A skeleton's worth of local poses as a native blob in ozz's structure-of-arrays layout: joints
-/// in groups of four, each component of a group one <see cref="Vector128{T}"/> with a joint per
-/// lane. The sampler writes it without a transpose, and a blend or a hierarchy walk handles four
-/// joints per instruction. The last group's spare lanes hold identity.
-/// </summary>
-/// <remarks>
-/// Reach it through a <c>ref</c>, never a copy (see the BLOB README). The indexer gathers or
-/// scatters one joint as a <see cref="JointPose"/> for code that thinks per joint — an attachment,
-/// a test; it is not the hot path.
-/// </remarks>
+/// <summary>Stores local poses in SIMD groups of four joints, one joint per Vector128 lane.</summary>
+/// <remarks>The sampler writes this layout directly; unused lanes hold identity.
+/// Access the blob by ref to preserve relative offsets. The per-joint indexer gathers or scatters
+/// JointPose values for attachments and tests, outside the sampling hot path.</remarks>
 public struct JointPoses
 {
     public int JointCount;

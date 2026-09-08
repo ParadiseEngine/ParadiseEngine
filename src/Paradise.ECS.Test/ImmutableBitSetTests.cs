@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="ImmutableBitSet{TBits}"/>.
-/// </summary>
+/// <summary>Tests for <see cref="ImmutableBitSet{TBits}"/>.</summary>
 public sealed class ImmutableBitSetTests
 {
     [Test]

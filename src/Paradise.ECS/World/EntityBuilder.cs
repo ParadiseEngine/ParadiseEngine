@@ -8,17 +8,13 @@ namespace Paradise.ECS;
 /// </summary>
 public interface IComponentsBuilder
 {
-    /// <summary>
-    /// Collects component type IDs into the component mask.
-    /// </summary>
+    /// <summary>Collects component type IDs into the component mask.</summary>
     /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
     /// <param name="mask">The mask to add component types to.</param>
     void CollectTypes<TMask>(ref TMask mask)
         where TMask : unmanaged, IBitSet<TMask>;
 
-    /// <summary>
-    /// Writes component data to the entity's chunk location.
-    /// </summary>
+    /// <summary>Writes component data to the entity's chunk location.</summary>
     /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <typeparam name="TChunkManager">The chunk manager type.</typeparam>
@@ -42,34 +38,24 @@ public interface IComponentsBuilder
 /// </summary>
 public readonly struct EntityBuilder : IComponentsBuilder
 {
-    /// <summary>
-    /// Creates a new empty entity builder.
-    /// </summary>
+    /// <summary>Creates a new empty entity builder.</summary>
     /// <returns>A new entity builder.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static EntityBuilder Create() => new();
 
     /// <inheritdoc cref="EnsureComponentSet{TComponentSet, TInnerBuilder}"/>
-    /// <summary>
-    /// Ensures every component of an <see cref="IComponentSet"/> — typically a queryable —
-    /// exists on the entity with its default value.
-    ///
-    /// This is how an entity is built from what the systems actually query for:
+    /// <summary>Ensures all components in a set, typically a queryable, exist with default values.</summary>
+    /// <remarks>
+    /// Chain sets to form their union; a later Add seeds a value without duplicating a component.
     /// <code>
     /// world.CreateEntity(EntityBuilder.Create()
     ///     .EnsureFrom&lt;PlayerPenguins&gt;()
     ///     .EnsureFrom&lt;SwimPenguins&gt;()
     ///     .Add(new Position { Value = spawn }));
     /// </code>
-    /// Chain one call per queryable to compose the union; the mask is a set, so a component two
-    /// queryables share costs nothing and a later <c>Add</c> just seeds a value over the default.
-    ///
-    /// NOTE: this lives on each builder struct rather than beside Add/Ensure in
-    /// <see cref="ComponentsBuilderExtensions"/> because an extension member whose type parameter
-    /// carries <c>allows ref struct</c> is not found by extension lookup — and queryables are ref
-    /// structs, so that anti-constraint is required. Moving it back into the extension block
-    /// compiles the declaration fine and then fails every call site with CS1061.
-    /// </summary>
+    /// This method lives on each builder because extension lookup skips type parameters with
+    /// <c>allows ref struct</c>, which queryables require; an extension declaration causes CS1061 at call sites.
+    /// </remarks>
     /// <typeparam name="TComponentSet">The component set to take types from.</typeparam>
     /// <returns>A new builder with the set's component types added.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -82,7 +68,6 @@ public readonly struct EntityBuilder : IComponentsBuilder
     public void CollectTypes<TMask>(ref TMask mask)
         where TMask : unmanaged, IBitSet<TMask>
     {
-        // No components to add
     }
 
     /// <inheritdoc/>
@@ -96,7 +81,6 @@ public readonly struct EntityBuilder : IComponentsBuilder
         where TConfig : IConfig, new()
         where TChunkManager : IChunkManager
     {
-        // No components to write
     }
 }
 
@@ -110,9 +94,7 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
     where TComponent : unmanaged, IComponent
     where TInnerBuilder : unmanaged, IComponentsBuilder
 {
-    /// <summary>
-    /// The component value to add.
-    /// </summary>
+    /// <summary>The component value to add.</summary>
     public TComponent Value
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -121,9 +103,7 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
         init;
     }
 
-    /// <summary>
-    /// The inner builder that this wraps.
-    /// </summary>
+    /// <summary>The inner builder that this wraps.</summary>
     public TInnerBuilder InnerBuilder
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -152,7 +132,6 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
         where TConfig : IConfig, new()
         where TChunkManager : IChunkManager
     {
-        // Write inner components first
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
 
         // Skip writes for zero-size tag components to avoid corrupting memory at offset 0.
@@ -161,7 +140,6 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
         if (TComponent.Size == 0)
             return;
 
-        // Write this component
         int offset = layout.GetBaseOffset(TComponent.TypeId) + indexInChunk * TComponent.Size;
         chunkManager.GetBytes(chunkHandle).GetRef<TComponent>(offset) = Value;
     }
@@ -184,9 +162,7 @@ public readonly struct EnsureComponent<TComponent, TInnerBuilder> : IComponentsB
     where TComponent : unmanaged, IComponent
     where TInnerBuilder : unmanaged, IComponentsBuilder
 {
-    /// <summary>
-    /// The inner builder that this wraps.
-    /// </summary>
+    /// <summary>The inner builder that this wraps.</summary>
     public TInnerBuilder InnerBuilder
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -215,7 +191,6 @@ public readonly struct EnsureComponent<TComponent, TInnerBuilder> : IComponentsB
         where TConfig : IConfig, new()
         where TChunkManager : IChunkManager
     {
-        // Write inner components first
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
         // No write needed - chunk memory is zero-initialized, so component has default value
     }
@@ -241,9 +216,7 @@ public readonly struct EnsureComponentSet<TComponentSet, TInnerBuilder> : ICompo
     where TComponentSet : IComponentSet, allows ref struct
     where TInnerBuilder : unmanaged, IComponentsBuilder
 {
-    /// <summary>
-    /// The inner builder that this wraps.
-    /// </summary>
+    /// <summary>The inner builder that this wraps.</summary>
     public TInnerBuilder InnerBuilder
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -274,7 +247,6 @@ public readonly struct EnsureComponentSet<TComponentSet, TInnerBuilder> : ICompo
         where TConfig : IConfig, new()
         where TChunkManager : IChunkManager
     {
-        // Write inner components first
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
         // No writes - chunk memory is zero-initialized, so every component of the set is default.
         // A component that needs a seeded value is written by chaining Add after this, which
@@ -288,17 +260,13 @@ public readonly struct EnsureComponentSet<TComponentSet, TInnerBuilder> : ICompo
         => new() { InnerBuilder = this };
 }
 
-/// <summary>
-/// Extension providing fluent Add and Ensure methods for component builders.
-/// </summary>
+/// <summary>Extension providing fluent Add and Ensure methods for component builders.</summary>
 public static class ComponentsBuilderExtensions
 {
     extension<TBuilder>(TBuilder builder)
         where TBuilder : unmanaged, IComponentsBuilder
     {
-        /// <summary>
-        /// Adds a component to the entity being built.
-        /// </summary>
+        /// <summary>Adds a component to the entity being built.</summary>
         /// <typeparam name="TComponent">The component type to add.</typeparam>
         /// <param name="value">The component value.</param>
         /// <returns>A new builder with the component added.</returns>

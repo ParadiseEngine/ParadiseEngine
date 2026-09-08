@@ -34,13 +34,7 @@ public enum ProbeRule : byte
     CountEven = 2,
 }
 
-/// <summary>
-/// The replacement for the delegate-backed action node: it counts its own ticks into a blackboard
-/// slot and returns a state chosen by a rule.
-///
-/// A struct with fields rather than a captured lambda, which is the whole point — every node type
-/// is unmanaged now, so a node's data can live in a blob as bytes.
-/// </summary>
+/// <summary>Counts ticks in blackboard storage and returns a configured state.</summary>
 [Guid("7C1B4E22-9A3D-4F51-8E60-1B2C3D4E5F60")]
 public struct ProbeNode : INode
 {
@@ -130,11 +124,7 @@ public struct Blackboard : IBlackboard
     public void SetData<T>(T value) where T : struct => Data[typeof(T)] = value;
 }
 
-/// <summary>
-/// Test-only pairing of a tree instance (layout + owned buffers) with the blackboard it ticks
-/// against. The library deliberately has no owned-blackboard instance — the blackboard is passed
-/// per call — but a test reads much better when the pair travels together.
-/// </summary>
+/// <summary>Pairs a test tree's layout and buffers with the blackboard passed to each tick.</summary>
 internal sealed class TestInstance<TBlackboard>
     where TBlackboard : struct, IBlackboard
 {

@@ -10,9 +10,7 @@ namespace Paradise.ECS;
 /// <param name="Version">Incrementing version for destroyed entity detection.</param>
 public readonly record struct Entity(int Id, uint Version)
 {
-    /// <summary>
-    /// The Invalid entity handle. Equal to <c>default(Entity)</c>.
-    /// </summary>
+    /// <summary>The Invalid entity handle. Equal to <c>default(Entity)</c>.</summary>
     public static readonly Entity Invalid = default;
 
     /// <summary>

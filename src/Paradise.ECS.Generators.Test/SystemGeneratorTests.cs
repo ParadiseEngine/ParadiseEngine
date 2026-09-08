@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Generators.Test;
 
-/// <summary>
-/// Tests for SystemGenerator access mask generation with optional queryable components.
-/// </summary>
+/// <summary>Tests for SystemGenerator access mask generation with optional queryable components.</summary>
 public sealed class SystemGeneratorOptionalComponentTests
 {
     [Test]
@@ -124,9 +122,7 @@ public sealed class SystemGeneratorOptionalComponentTests
     }
 }
 
-/// <summary>
-/// Tests for SystemGenerator constructor and code generation.
-/// </summary>
+/// <summary>Tests for SystemGenerator constructor and code generation.</summary>
 public sealed class SystemGeneratorConstructorTests
 {
     [Test]

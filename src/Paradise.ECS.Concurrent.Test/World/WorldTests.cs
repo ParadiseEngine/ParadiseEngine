@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Concurrent.Test;
 
-/// <summary>
-/// Tests for World lifecycle and basic operations.
-/// </summary>
+/// <summary>Tests for World lifecycle and basic operations.</summary>
 public sealed class WorldTests
 {
     [Test]
@@ -115,9 +113,7 @@ public sealed class WorldTests
     }
 }
 
-/// <summary>
-/// Tests for multi-world sharing with SharedArchetypeMetadata.
-/// </summary>
+/// <summary>Tests for multi-world sharing with SharedArchetypeMetadata.</summary>
 public sealed class WorldSharedMetadataTests
 {
     [Test]

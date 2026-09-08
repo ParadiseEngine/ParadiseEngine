@@ -6,16 +6,10 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The depth + normal pre-pass over the opaque bucket at <see cref="RenderPassEvent.Prepass"/>:
-/// a Depth32Float depth and an Rgba16Float world-normal target, and the SSAO uniforms the scene
-/// reads them with.
-///
-/// <para>The pass is declared every frame and runs only when something reads it: in frames SSAO is
-/// on or a feature requires <see cref="FrameRequirements.DepthNormalPrepass"/>, both targets are
-/// published as <see cref="PbrResults.PrepassNormal"/> and <see cref="PbrResults.PrepassDepth"/>
-/// and consumers bind them; otherwise they bind black and the graph culls the pass. The SSAO
-/// uniforms carry intensity 0 in exactly the frames SSAO is off, so the shader never samples an
-/// unwritten target for it.</para></summary>
+/// <summary>Produces opaque depth, world normals and SSAO uniforms for the scene.</summary>
+/// <remarks>Publish prepass targets when SSAO or DepthNormalPrepass is required; otherwise bind
+/// black and let the graph cull the pass. Set SSAO intensity to zero whenever SSAO is
+/// off.</remarks>
 public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;

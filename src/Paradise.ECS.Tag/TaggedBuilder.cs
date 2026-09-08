@@ -17,9 +17,7 @@ public readonly struct WithTagBuilder<TTag, TInnerBuilder, TEntityTags, TTagMask
     where TEntityTags : unmanaged, IComponent, IEntityTags<TTagMask>
     where TTagMask : unmanaged, IBitSet<TTagMask>
 {
-    /// <summary>
-    /// The inner builder that this wraps.
-    /// </summary>
+    /// <summary>The inner builder that this wraps.</summary>
     public TInnerBuilder InnerBuilder
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -47,7 +45,6 @@ public readonly struct WithTagBuilder<TTag, TInnerBuilder, TEntityTags, TTagMask
         where TConfig : IConfig, new()
         where TChunkManager : IChunkManager
     {
-        // Write inner components first
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
 
         // OR this tag bit into the EntityTags mask
@@ -58,9 +55,7 @@ public readonly struct WithTagBuilder<TTag, TInnerBuilder, TEntityTags, TTagMask
         entityTags.Mask = entityTags.Mask.Set(TTag.TagId);
     }
 
-    /// <summary>
-    /// Adds another tag to the entity being built.
-    /// </summary>
+    /// <summary>Adds another tag to the entity being built.</summary>
     /// <typeparam name="TNewTag">The new tag type to add.</typeparam>
     /// <param name="tag">A dummy value for type inference (use default).</param>
     /// <returns>A new WithTagBuilder that includes both tags.</returns>

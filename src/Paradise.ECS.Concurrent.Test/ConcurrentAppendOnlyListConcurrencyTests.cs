@@ -346,18 +346,8 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         yield return TimeSpan.FromSeconds(30);
     }
 
-    /// <summary>
-    /// Regression test for race condition in MarkSlotReady where bitmap array could be replaced
-    /// while a thread holds a reference to the old array.
-    ///
-    /// The race condition:
-    /// 1. Thread A reads _readyBitmap reference in MarkSlotReady
-    /// 2. Thread B in EnsureChunkSlow creates new bitmap, copies old data, replaces _readyBitmap
-    /// 3. Thread A writes to old bitmap array (now orphaned)
-    /// 4. The bit is never set in the new bitmap → slot appears not ready → infinite spin
-    ///
-    /// The fix: MarkSlotReady re-reads _readyBitmap after the atomic OR and retries if changed.
-    /// </summary>
+    /// <summary>Ready-bit writes survive concurrent bitmap replacement.</summary>
+    /// <remarks>Growth can orphan a writer's bitmap; MarkSlotReady must re-read and retry after its atomic OR.</remarks>
     [Test]
     [Repeat(10)] // Repeat to increase chance of hitting the race condition
     public async Task ConcurrentAdd_BitmapGrowthRace_NoInfiniteSpin()

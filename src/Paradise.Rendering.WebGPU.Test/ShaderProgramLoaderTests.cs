@@ -58,13 +58,8 @@ public class ShaderProgramLoaderTests
     [Test]
     public async Task two_loads_produce_modules_with_identical_wgsl_and_distinct_records()
     {
-        // Underpins the WebGpuDevice shader-module dedupe cache: two ShaderProgramLoader.Load()
-        // calls return distinct ShaderModuleDesc instances with byte-identical (Wgsl, EntryPoint,
-        // Stage) tuples. The device keys its cache on that tuple so the second
-        // CreatePipeline(ShaderProgramDesc, ...) on the same logical program hits the cache
-        // instead of compiling fresh modules (which was the primary OpenCara finding on PR #55).
-        // If a future loader change normalizes WGSL whitespace or mangles the entry point, this
-        // assertion breaks and the device cache starts missing → shader leak returns.
+        // Repeated loads must preserve the (WGSL, entry point, stage) content key so native shader
+        // caching can reuse modules.
         var assembly = typeof(ShaderProgramLoaderTests).Assembly;
         var p1 = ShaderProgramLoader.Load(assembly, "Shaders.triangle");
         var p2 = ShaderProgramLoader.Load(assembly, "Shaders.triangle");

@@ -3,9 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS.Concurrent;
 
-/// <summary>
-/// Extension methods for bitmap operations on ulong arrays.
-/// </summary>
+/// <summary>Extension methods for bitmap operations on ulong arrays.</summary>
 public static class BitmapExtensions
 {
     private const int BitsPerWord = 64;

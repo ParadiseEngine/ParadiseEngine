@@ -9,16 +9,8 @@ using Tomlyn.Model;
 
 namespace Paradise.Export.Serialization
 {
-    /// <summary>
-    /// The contract in TOML — the same documents <see cref="ExportJsonWriter"/> writes, in a form
-    /// you can read and diff against <c>assets/</c>.
-    /// </summary>
-    /// <remarks>
-    /// Serializes through <see cref="ExportJsonWriter"/>'s own options and converts the resulting
-    /// node tree, so every converter and the contract's shape apply by construction. See
-    /// <see cref="TomlJsonBridge"/> for why that indirection is the point rather than a shortcut,
-    /// and for the one place the two formats differ (null).
-    /// </remarks>
+    /// <summary>Writes exported documents as TOML through the JSON writer's metadata and converters.</summary>
+    /// <remarks><see cref="TomlJsonBridge"/> handles the node conversion and TOML's lack of null values.</remarks>
     public static class ExportTomlWriter
     {
         /// <summary>Serializes a document to TOML.</summary>

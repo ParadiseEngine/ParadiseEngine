@@ -1,18 +1,10 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// Codegen switch: systems generated in an assembly carrying
-/// <c>[assembly: SnapshotReadSystems]</c> bind their READ-ONLY fields
-/// (<c>ref readonly T</c>, <c>ReadOnlySpan&lt;T&gt;</c>, and composition data whose components
-/// are all read-only) to the READ world passed to
-/// <c>SystemSchedule.Run(readWorld)</c> — typically the immutable previous-tick snapshot the
-/// write world was <c>CopyFrom</c>'d. Writable fields (<c>ref T</c>, <c>Span&lt;T&gt;</c>, mixed
-/// composition data) bind to the write world as usual.
-///
-/// Reads then never alias in-flight writes, so together with <see cref="SingleWriterAttribute"/>
-/// (disjoint writes) every system can execute in one fully parallel wave — build the schedule
-/// with <c>SnapshotDagScheduler</c> and a parallel wave scheduler.
-/// </summary>
+/// <summary>Generates systems whose read-only component access binds to the supplied read world.</summary>
+/// <remarks>
+/// Use <c>SnapshotDagScheduler</c> with the snapshot <c>SystemSchedule.Run</c> overload.
+/// Ordinary reads observe the previous tick; writes and <c>[CurrentTick]</c> reads use the write world.
+/// </remarks>
 /// <remarks>
 /// Without this attribute, systems get the classic single-world binding and behave identically
 /// under <c>Run()</c> and <c>Run(readWorld)</c>. Semantics under snapshot reads: read-only

@@ -4,15 +4,11 @@ using Hexa.NET.ImGui;
 
 namespace Paradise.Ui.ImGui;
 
-/// <summary>A self-contained copy of one frame's <c>ImDrawData</c>, safe to hand across
-/// threads: ImGui invalidates its draw lists on the next <c>NewFrame()</c>, so the UI thread
-/// captures into one of these (buffers are reused and only grow) and the render thread draws
-/// from it with no reference back into ImGui state. All command lists are concatenated into
-/// single vertex/index streams; per-command vertex/index offsets are rebased accordingly
-/// (requires the <c>RendererHasVtxOffset</c> backend flag on the ImGui context).
-///
-/// Geometry only. The textures those commands sample travel the separate, non-droppable
-/// <see cref="ImGuiTextureOps"/> queue — see that type for why the two handoffs differ.</summary>
+/// <summary>Copies frame geometry into reusable buffers for transfer to the render
+/// thread.</summary>
+/// <remarks>ImGui invalidates draw lists at NewFrame. Commands address concatenated vertex/index
+/// streams and require RendererHasVtxOffset; textures travel separately through
+/// ImGuiTextureOps.</remarks>
 public sealed class ImGuiDrawSnapshot
 {
     /// <param name="ClipRect">Scissor rectangle in ImGui's display space.</param>
@@ -41,11 +37,9 @@ public sealed class ImGuiDrawSnapshot
     public Vector2 DisplaySize;
     public Vector2 FramebufferScale;
 
-    /// <summary>Capture the current <c>ImGui.GetDrawData()</c>. Call on the ImGui thread, after
-    /// <c>ImGui.Render()</c> and before the next <c>NewFrame()</c> — and after
-    /// <see cref="ImGuiTextureCapture.CaptureFrom"/> on the same draw data, which is what stamps
-    /// the <c>ImTextureID</c> the commands carry. Reading a command's id before that asserts
-    /// inside ImGui ("Backend must call ImTextureData::SetTexID()").</summary>
+    /// <summary>Captures draw data on the ImGui thread after Render and before NewFrame.</summary>
+    /// <remarks>Call ImGuiTextureCapture.CaptureFrom first to assign the texture IDs that command
+    /// access requires.</remarks>
     public unsafe void Capture(ImDrawDataPtr drawData)
     {
         DisplayPosition = drawData.DisplayPos;

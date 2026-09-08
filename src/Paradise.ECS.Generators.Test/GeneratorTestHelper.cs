@@ -7,30 +7,22 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Paradise.ECS.Generators.Test;
 
-/// <summary>
-/// Helper class for testing source generators.
-/// </summary>
+/// <summary>Helper class for testing source generators.</summary>
 public static class GeneratorTestHelper
 {
-    /// <summary>
-    /// Creates a compilation with the given source code and runs the ComponentGenerator and TagGenerator.
-    /// </summary>
+    /// <summary>Creates a compilation with the given source code and runs the ComponentGenerator and TagGenerator.</summary>
     public static GeneratorDriverRunResult RunGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
     {
         return RunGenerators(source, [new ComponentGenerator(), new TagGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
     }
 
-    /// <summary>
-    /// Creates a compilation with the given source code and runs the QueryableGenerator.
-    /// </summary>
+    /// <summary>Creates a compilation with the given source code and runs the QueryableGenerator.</summary>
     public static GeneratorDriverRunResult RunQueryableGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
     {
         return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
     }
 
-    /// <summary>
-    /// Creates a compilation with the given source code and runs specified generators.
-    /// </summary>
+    /// <summary>Creates a compilation with the given source code and runs specified generators.</summary>
     private static GeneratorDriverRunResult RunGenerators(string source, IIncrementalGenerator[] generators, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
@@ -140,9 +132,7 @@ public static class GeneratorTestHelper
         return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new SystemGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
     }
 
-    /// <summary>
-    /// Runs the system generator and returns the generated source for a specific hint name.
-    /// </summary>
+    /// <summary>Runs the system generator and returns the generated source for a specific hint name.</summary>
     public static string? GetSystemGeneratedSource(string source, string hintName)
     {
         var result = RunSystemGenerator(source);
@@ -153,9 +143,7 @@ public static class GeneratorTestHelper
         return sources.FirstOrDefault(s => s.HintName == hintName).Source;
     }
 
-    /// <summary>
-    /// Runs the generator and returns the generated source texts.
-    /// </summary>
+    /// <summary>Runs the generator and returns the generated source texts.</summary>
     public static ImmutableArray<(string HintName, string Source)> GetGeneratedSources(string source, bool includeTagReference = true)
     {
         var result = RunGenerator(source, includeTagReference: includeTagReference);
@@ -165,9 +153,7 @@ public static class GeneratorTestHelper
         ))];
     }
 
-    /// <summary>
-    /// Runs the queryable generator and returns the generated source texts.
-    /// </summary>
+    /// <summary>Runs the queryable generator and returns the generated source texts.</summary>
     public static ImmutableArray<(string HintName, string Source)> GetQueryableGeneratedSources(string source)
     {
         var result = RunQueryableGenerator(source);
@@ -177,36 +163,28 @@ public static class GeneratorTestHelper
         ))];
     }
 
-    /// <summary>
-    /// Runs the generator and returns diagnostics.
-    /// </summary>
+    /// <summary>Runs the generator and returns diagnostics.</summary>
     public static ImmutableArray<Diagnostic> GetDiagnostics(string source)
     {
         var result = RunGenerator(source);
         return result.Diagnostics;
     }
 
-    /// <summary>
-    /// Runs the queryable generator and returns diagnostics.
-    /// </summary>
+    /// <summary>Runs the queryable generator and returns diagnostics.</summary>
     public static ImmutableArray<Diagnostic> GetQueryableDiagnostics(string source)
     {
         var result = RunQueryableGenerator(source);
         return result.Diagnostics;
     }
 
-    /// <summary>
-    /// Gets the generated source for a specific hint name.
-    /// </summary>
+    /// <summary>The generated source for a specific hint name.</summary>
     public static string? GetGeneratedSource(string source, string hintName)
     {
         var sources = GetGeneratedSources(source);
         return sources.FirstOrDefault(s => s.HintName == hintName).Source;
     }
 
-    /// <summary>
-    /// Gets the generated source for a specific hint name with a custom root namespace.
-    /// </summary>
+    /// <summary>The generated source for a specific hint name with a custom root namespace.</summary>
     public static string? GetGeneratedSource(string source, string hintName, string rootNamespace)
     {
         var result = RunGenerator(source, rootNamespace: rootNamespace);
@@ -217,9 +195,7 @@ public static class GeneratorTestHelper
         return sources.FirstOrDefault(s => s.HintName == hintName).Source;
     }
 
-    /// <summary>
-    /// Creates a compilation with the given source code and runs the specified analyzer.
-    /// </summary>
+    /// <summary>Creates a compilation with the given source code and runs the specified analyzer.</summary>
     public static async Task<ImmutableArray<Diagnostic>> RunAnalyzerAsync<TAnalyzer>(string source, bool includeEcsReferences = true)
         where TAnalyzer : DiagnosticAnalyzer, new()
     {
@@ -264,9 +240,7 @@ public static class GeneratorTestHelper
         return diagnostics;
     }
 
-    /// <summary>
-    /// Gets analyzer diagnostics filtered by ID.
-    /// </summary>
+    /// <summary>Gets analyzer diagnostics filtered by ID.</summary>
     public static async Task<ImmutableArray<Diagnostic>> GetAnalyzerDiagnosticsAsync<TAnalyzer>(string source, string diagnosticId)
         where TAnalyzer : DiagnosticAnalyzer, new()
     {

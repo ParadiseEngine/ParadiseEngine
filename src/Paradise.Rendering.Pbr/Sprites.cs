@@ -248,17 +248,11 @@ public sealed class PbrSpriteBatch
     private int _lastCount;
 }
 
-/// <summary>
-/// A dynamic batch of solid axis-aligned cubes (voxel particles): one primitive, one draw,
-/// re-written from caller data every frame. Same zero-blanking contract as
-/// <see cref="PbrSpriteBatch"/>.
-///
-/// Voxels are OPAQUE, so they join the shadow-caster set — but a dynamic primitive's
-/// object-space AABB is fixed at upload time, and this batch uploads zeroed vertices (an
-/// "unknown" AABB that contributes only the instance origin to the shadow-frustum fit).
-/// Pass <c>boundsRadius</c> — the max distance voxels roam from the batch origin — when voxel
-/// shadows matter and no other opaque geometry spans the scene; 0 keeps the unknown AABB.
-/// </summary>
+/// <summary>Updates a single-draw batch of opaque voxel cubes using the sprite batch's
+/// zero-blanking contract.</summary>
+/// <remarks>The upload-time AABB is otherwise unknown because vertices start zeroed. Set
+/// boundsRadius to cover voxel movement when shadow fitting cannot rely on other scene
+/// geometry.</remarks>
 public sealed class PbrVoxelBatch
 {
     private readonly PbrPrimitive _primitive;

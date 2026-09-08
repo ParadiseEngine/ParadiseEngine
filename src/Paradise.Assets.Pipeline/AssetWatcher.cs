@@ -8,18 +8,12 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>
-/// Watches <c>assets/</c> and keeps the tree honest while you work: sidecars first, then a rebuild.
-/// </summary>
+/// <summary>Maintains sidecars and triggers incremental builds after asset changes.</summary>
 /// <remarks>
-/// The rules are <see cref="SidecarMaintainer"/>'s; this owns only what needs a clock, so every
-/// rule is testable without one. Sidecar Created/Changed/Renamed events are ignored because the
-/// watcher's own mints would otherwise wake it forever; a sidecar delete instead becomes an
-/// Ensure of the asset, so a spent identity is re-minted rather than left for verify. One logical
-/// save arrives as several events (temp-then-rename, editor bursts), hence the quiet window; a
-/// temp file that outlives it can carry a fresh identity over the real one (issue #196). The
-/// rebuild is a plain incremental <see cref="BuildRunner"/> run so there is no second notion of
-/// "stale" to keep in agreement with the index.
+/// <see cref="SidecarMaintainer"/> owns identity rules; this class adds event timing and debounce.
+/// Ignore sidecar create/change/rename events to avoid feedback; deletion re-ensures the asset.
+/// A temp file surviving debounce may replace an asset's identity (issue #196).
+/// Rebuilds use <see cref="BuildRunner"/> and its normal stale-input rules.
 /// </remarks>
 public sealed partial class AssetWatcher : IDisposable
 {

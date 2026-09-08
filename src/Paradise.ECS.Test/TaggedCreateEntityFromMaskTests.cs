@@ -1,18 +1,7 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// <c>TaggedWorld.CreateEntity(in TMask)</c> — the mask overload on the world that HAS tags.
-///
-/// The plain <c>World</c> overload is covered by <see cref="CreateEntityFromMaskTests"/>; what is
-/// unique here is one line: the override folds the tag storage into the mask before creating, so a
-/// mask-built entity's archetype reserves the tag bits. A tag can only be applied to an entity
-/// whose archetype already has room for it, and a caller assembling a mask at runtime has no more
-/// business remembering that than one spelling a builder does.
-///
-/// It is exactly the property a scene loader hits first, and it is the one thing that would break
-/// silently: without the fold, <c>CreateEntity(mask)</c> still returns a usable entity and the
-/// failure surfaces later, at the unrelated line that tries to tag it.
-/// </summary>
+/// <summary>Mask-created entities reserve tag storage before their first tag is added.</summary>
+/// <remarks>The plain-world overload is covered by <see cref="CreateEntityFromMaskTests"/>.</remarks>
 public sealed class TaggedCreateEntityFromMaskTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

@@ -180,14 +180,9 @@ public sealed partial class SceneFeature
         return bits * 2.3283064365386963e-10f;
     }
 
-    // GGX-prefilter the sky into the specular LUT (split-sum first term, N=V=R convention),
-    // split into two row halves:
-    //   rows 0..7  — the GRADIENT (azimuth-symmetric → depends only on reflection.y = u).
-    //   rows 8..15 — the SUN disk/halo, which is radially symmetric around the sun direction →
-    //                depends only on dot(reflection, sunDir) = u. Exact, no cubemap needed.
-    // The sun half is stored ÷SkySpecSunScale for HDR headroom in the 8-bit sRGB texel (the
-    // disk radiance is colour × energy, typically > 1); the shader multiplies it back.
-    // CPU cost ~64×16×64 evaluations, re-run only when the sky or sun changes.
+    // GGX sky LUT (N=V=R): rows 0..7 use reflection.y for the symmetric gradient; rows 8..15 use
+    // dot(reflection,sunDir) for the sun. Store the sun divided by SkySpecSunScale for 8-bit HDR
+    // headroom. Recompute only when sky or sun changes.
     private void EnsureSkySpecularLut(PbrScene scene)
     {
         var key = (scene.SkyTopColor, scene.SkyHorizonColor, scene.SkyGroundBottom, scene.SkyGroundHorizon,

@@ -10,9 +10,7 @@ namespace Paradise.ECS.Concurrent.ConcurrentTest;
 /// </summary>
 public static class Program
 {
-    /// <summary>
-    /// Main entry point.
-    /// </summary>
+    /// <summary>Main entry point.</summary>
     public static int Main(string[] args)
     {
         int iterations = 100;
@@ -101,9 +99,7 @@ public static class ConcurrentAppendOnlyListTests
 {
     #region Basic Concurrent Operations
 
-    /// <summary>
-    /// Tests concurrent Add from multiple threads without growth.
-    /// </summary>
+    /// <summary>Tests concurrent Add from multiple threads without growth.</summary>
     [Test]
     public static void ConcurrentAdd_MultipleThreads()
     {
@@ -132,9 +128,7 @@ public static class ConcurrentAppendOnlyListTests
             $"Expected {threadCount * itemsPerThread} items but got {list.Count}");
     }
 
-    /// <summary>
-    /// Tests high contention scenario with many threads adding simultaneously.
-    /// </summary>
+    /// <summary>Tests high contention scenario with many threads adding simultaneously.</summary>
     [Test]
     public static void ConcurrentAdd_HighContention()
     {
@@ -164,9 +158,7 @@ public static class ConcurrentAppendOnlyListTests
             $"Count mismatch: expected {threadCount * itemsPerThread}, got {list.Count}");
     }
 
-    /// <summary>
-    /// Tests concurrent reads while adds are happening.
-    /// </summary>
+    /// <summary>Tests concurrent reads while adds are happening.</summary>
     [Test]
     public static void ConcurrentRead_WhileAdding()
     {
@@ -219,9 +211,7 @@ public static class ConcurrentAppendOnlyListTests
         Task.WaitAll(tasks);
     }
 
-    /// <summary>
-    /// Tests multiple concurrent readers with no writers.
-    /// </summary>
+    /// <summary>Tests multiple concurrent readers with no writers.</summary>
     [Test]
     public static void ConcurrentRead_MultipleReaders()
     {
@@ -259,9 +249,7 @@ public static class ConcurrentAppendOnlyListTests
 
     #region Growth Scenarios
 
-    /// <summary>
-    /// Tests concurrent adds that force multiple chunk allocations.
-    /// </summary>
+    /// <summary>Tests concurrent adds that force multiple chunk allocations.</summary>
     [Test]
     public static void ConcurrentAdd_ForcesMultipleGrowths()
     {
@@ -296,9 +284,7 @@ public static class ConcurrentAppendOnlyListTests
             $"Capacity {list.Capacity} is less than count {expectedCount}");
     }
 
-    /// <summary>
-    /// Tests when multiple threads try to trigger chunk allocation simultaneously.
-    /// </summary>
+    /// <summary>Tests when multiple threads try to trigger chunk allocation simultaneously.</summary>
     [Test]
     public static void ConcurrentAdd_SimultaneousGrowthTrigger()
     {
@@ -330,9 +316,7 @@ public static class ConcurrentAppendOnlyListTests
             $"Expected {3 + threadCount} items but got {list.Count}");
     }
 
-    /// <summary>
-    /// Tests reading during chunk allocation.
-    /// </summary>
+    /// <summary>Tests reading during chunk allocation.</summary>
     [Test]
     public static void ConcurrentRead_DuringGrowth()
     {
@@ -375,9 +359,7 @@ public static class ConcurrentAppendOnlyListTests
 
     #region Data Integrity
 
-    /// <summary>
-    /// Verifies that all added values are preserved and readable.
-    /// </summary>
+    /// <summary>Verifies that all added values are preserved and readable.</summary>
     [Test]
     public static void DataIntegrity_AllValuesPreserved()
     {
@@ -427,9 +409,7 @@ public static class ConcurrentAppendOnlyListTests
         }
     }
 
-    /// <summary>
-    /// For a single-threaded add, verifies values match their indices.
-    /// </summary>
+    /// <summary>For a single-threaded add, verifies values match their indices.</summary>
     [Test]
     public static void DataIntegrity_ValuesMatchIndices()
     {
@@ -461,9 +441,7 @@ public static class ConcurrentAppendOnlyListTests
         }
     }
 
-    /// <summary>
-    /// Tests that large struct values are not torn during concurrent access.
-    /// </summary>
+    /// <summary>Tests that large struct values are not torn during concurrent access.</summary>
     [Test]
     public static void DataIntegrity_NoTornReads()
     {
@@ -503,9 +481,7 @@ public static class ConcurrentAppendOnlyListTests
 
     #region Ordering Guarantees
 
-    /// <summary>
-    /// Verifies that Count (committed count) only increases monotonically.
-    /// </summary>
+    /// <summary>Verifies that Count (committed count) only increases monotonically.</summary>
     [Test]
     public static void CommitOrdering_MonotonicallyIncreasing()
     {
@@ -550,9 +526,7 @@ public static class ConcurrentAppendOnlyListTests
 
     #region Stress Tests
 
-    /// <summary>
-    /// Stress test with many threads performing many operations.
-    /// </summary>
+    /// <summary>Stress test with many threads performing many operations.</summary>
     [Test]
     public static void StressTest_ManyThreadsManyOperations()
     {
@@ -596,9 +570,7 @@ public static class ConcurrentAppendOnlyListTests
         }
     }
 
-    /// <summary>
-    /// Stress test with rapid growth and concurrent reads.
-    /// </summary>
+    /// <summary>Stress test with rapid growth and concurrent reads.</summary>
     [Test]
     public static void StressTest_RapidGrowthAndRead()
     {
@@ -649,9 +621,7 @@ public static class ConcurrentAppendOnlyListTests
     #endregion
 }
 
-/// <summary>
-/// A larger struct to test for torn reads.
-/// </summary>
+/// <summary>A larger struct to test for torn reads.</summary>
 public readonly struct LargeStruct
 {
     public readonly long A;

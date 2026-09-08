@@ -10,7 +10,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>Writes a new asset project whose output must pass <see cref="ProjectVerifier"/> and <see cref="BuildRunner"/> with zero errors; the test asserts exactly that.</summary>
+/// <summary>Creates an asset project that verifies and builds without errors.</summary>
 public static class ProjectScaffold
 {
     public readonly record struct ScaffoldedFile(UPath Path, string Description);

@@ -1,10 +1,7 @@
 namespace Paradise.Rendering;
 
-// TODO(post-M0a): switch the array-typed properties below to ImmutableArray<T> (or
-// IReadOnlyList<T>) before the contract is published. Held off in M0a because (a) the
-// fixtures + System.Text.Json source-gen pipeline both target T[] today and (b) #45's
-// Slang regression suite will exercise the contract end-to-end with real slangc output,
-// which is the right time to lock down immutability.
+// TODO: make shader descriptor arrays immutable; coordinate with JSON source generation and
+// reflection fixtures.
 
 /// <summary>One shader module within a <see cref="ShaderProgramDesc"/>: WGSL source plus stage + entry point.</summary>
 public sealed record ShaderModuleDesc(
@@ -12,14 +9,9 @@ public sealed record ShaderModuleDesc(
     string EntryPoint,
     ShaderStage Stage);
 
-/// <summary>One binding entry in a bind group layout — maps a binding slot to a resource type and
-/// visibility. <paramref name="HasDynamicOffset"/> marks a uniform/storage buffer whose byte
-/// offset is supplied per SetBindGroup (the draw-UBO-ring pattern); it is a LAYOUT property, so
-/// consumers opting in must rebuild the layout, not just pass an offset.
-/// <paramref name="StorageFormat"/>/<paramref name="Access"/> apply only to
-/// <see cref="BindingResourceType.StorageTexture"/> entries, where WebGPU requires both in the
-/// layout; a storage-texture entry with <see cref="TextureFormat.Undefined"/> format is rejected
-/// at layout build.</summary>
+/// <summary>Describes a binding slot's resource type, visibility and layout requirements.</summary>
+/// <remarks>Dynamic offsets are layout properties and require layout rebuilding when enabled.
+/// Storage textures require a defined format and access mode.</remarks>
 public sealed record BindGroupLayoutEntryDesc(
     uint Binding,
     ShaderStage Visibility,
@@ -84,14 +76,9 @@ public sealed record ShaderProgramDesc(
     /// <see cref="Layout"/>. Empty for programs without uniforms.</summary>
     public UniformBlockDesc[] UniformBlocks { get; init; } = [];
 
-    /// <summary>Vertex layout per vertex entry point, for programs that author more than one.
-    /// <see cref="VertexBuffers"/> stays the FIRST entry point's layout, so every existing caller
-    /// keeps its behaviour.
-    ///
-    /// This exists because a vertex layout belongs to an entry point, not to a program: a skinned
-    /// variant reads joints and weights the rigid one does not. Selecting a vertex entry point
-    /// without also selecting its layout silently feeds one shader's stride to another — which
-    /// draws nothing rather than failing, so nothing tells you.</summary>
+    /// <summary>Maps vertex entry points to their reflected layouts.</summary>
+    /// <remarks>VertexBuffers remains the first entry's layout. Selecting another vertex entry must
+    /// select its layout too, or mismatched strides can silently drop geometry.</remarks>
     public IReadOnlyDictionary<string, VertexBufferLayoutDesc[]> VertexBuffersByEntryPoint { get; init; } =
         new Dictionary<string, VertexBufferLayoutDesc[]>(StringComparer.Ordinal);
 }

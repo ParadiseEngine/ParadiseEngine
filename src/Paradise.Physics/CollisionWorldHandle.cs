@@ -2,16 +2,9 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Unmanaged handle to a <see cref="CollisionWorld"/>'s native blob — usable inside ECS
-/// components and generated systems where the managed class cannot go. Carries the full query
-/// API; <c>default</c> is the invalid handle (all queries miss), which models "no collision
-/// world" without nullable references.
-///
-/// LIFETIME: borrowed — valid while the owning <see cref="CollisionWorld"/> is alive
-/// (typically the whole session; the simulation runner owns it). Never store a handle beyond
-/// the owner's lifetime.
-/// </summary>
+/// <summary>Provides unmanaged access to a CollisionWorld for ECS components and systems.</summary>
+/// <remarks>The handle borrows its owner's storage and must not outlive it.
+/// Default handles represent no collision world; all queries miss.</remarks>
 public readonly unsafe struct CollisionWorldHandle
 {
     private readonly nint _worldData;

@@ -40,5 +40,6 @@ reports CPU rejections.
 
 `Visibility` contains the CPU references. `VisibilityTests` tests homogeneous clipping,
 conservative fallbacks, actual GPU argument changes, current-frame disocclusion, partial
-edge tiles after resize, feature transitions, and byte-identical output with culling disabled.
+edge tiles after resize, feature transitions, and byte-identical output with culling disabled,
+including eight jittered TAA frames with moving geometry, fog and directional shadows.
 The indirect command is implemented by the native WebGPU and browser backends.

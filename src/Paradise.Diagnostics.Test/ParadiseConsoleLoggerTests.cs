@@ -2,14 +2,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Paradise.Diagnostics.Test;
 
-/// <summary>
-/// The console sink, and the value-rendering seam that is the point of it (issue #232).
-/// </summary>
-/// <remarks>
-/// A stand-in for <c>UPath</c> is used throughout rather than the real one: Zio would be a
-/// dependency this package deliberately does not have, and the seam is defined over
-/// <see cref="object"/> precisely so that the sink never learns what a path is.
-/// </remarks>
+/// <summary>Tests console routing and host argument rendering.</summary>
+/// <remarks>A path stub avoids adding Zio to the logging package.</remarks>
 public partial class ParadiseConsoleLoggerTests
 {
     /// <summary>Stands in for a Zio <c>UPath</c>: a value whose own ToString is not what a person wants to read.</summary>
@@ -40,9 +34,7 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task a_host_renderer_replaces_the_value_a_library_logged()
     {
-        // The whole issue in one test: the library logs the mounted path it was given, the host
-        // turns it into something a person can paste into Explorer, and the library never learns
-        // which filesystem it was handed.
+        // The host renders mounted paths without exposing its filesystem to the logging library.
         var (logger, output, _) = Sink(
             renderValue: value => value is MountedPath path ? $"C:\\proj{path.Value.Replace('/', '\\')}" : null);
 
@@ -55,10 +47,7 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task a_message_the_renderer_declines_is_formatted_by_its_own_caller()
     {
-        // The fast path, and the one that must stay exactly correct: when the host has no opinion
-        // about any argument, the sink does NOT re-render the template, it uses the formatter the
-        // logging call supplied. Anything else would be this class quietly reimplementing MEL's
-        // formatting for every message in the engine.
+        // When no argument is claimed, preserve the caller's formatter exactly.
         var (logger, output, _) = Sink(renderValue: _ => null);
 
         logger.LogInformation("swept {Count} file(s) from {Where}", 3, "build/");
@@ -82,9 +71,7 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task literal_text_after_the_last_hole_survives()
     {
-        // The substitution appends literal text in runs rather than character by character, so
-        // the run after the FINAL hole is flushed by its own tail case — a path no other test
-        // reaches, and one whose failure would silently truncate every message ending in prose.
+        // Flush the literal run after the final hole.
         var (logger, output, _) = Sink(
             renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
 
@@ -99,9 +86,7 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task a_renderer_is_asked_about_each_argument_exactly_once()
     {
-        // RenderValue is arbitrary host code — the CLI's calls ConvertPathToInternal — so asking
-        // twice is a duplicated path conversion, not just wasted cycles. The substitution used to
-        // ask once to decide whether to take over and again while building the string.
+        // Invoke the host renderer once per argument, including expensive path conversions.
         var asked = new List<object?>();
         var (logger, _, _) = Sink(renderValue: value =>
         {
@@ -119,16 +104,8 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task a_hole_with_no_argument_behind_it_appends_nothing_not_the_template()
     {
-        // The substitution is bounded by the ARGUMENTS, which end where the template entry
-        // begins. Bounded by the list's Count instead — the template is the last entry — a
-        // surplus hole would append the template string as though it were a value: wrong output,
-        // silently, which is worse than the nothing asserted here.
-        //
-        // The state is hand-rolled because MEL's own FormattedLogValues cannot reach this: its
-        // Count is holes + 1, so a surplus hole makes it throw while being READ, before any of
-        // this runs (and it throws through MEL's own formatter too — that is CA2017's job, not
-        // this sink's). A generated [LoggerMessage] state is a different implementation whose
-        // shape this class does not control, so the bound is asserted rather than assumed.
+        // Surplus holes must not consume OriginalFormat as an argument.
+        // Use custom state: FormattedLogValues throws while reading a missing argument.
         var (logger, output, _) = Sink(
             renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
 
@@ -158,14 +135,9 @@ public partial class ParadiseConsoleLoggerTests
         public override string ToString() => template;
     }
 
-    /// <summary>The state shape production actually logs through, which no other test here uses.</summary>
-    /// <remarks>
-    /// Every other test goes through <c>LogInformation</c>, which builds MEL's
-    /// <c>FormattedLogValues</c>. The engine logs through <c>[LoggerMessage]</c>, whose generated
-    /// state is a DIFFERENT implementation of the same interface — one entry per parameter rather
-    /// than one per hole. The substitution walks holes and entries in lockstep, so the two shapes
-    /// agreeing is an assumption worth holding down rather than inferring.
-    /// </remarks>
+    /// <summary>Verifies rendering with generated LoggerMessage state.</summary>
+    /// <remarks>Generated state indexes parameters; FormattedLogValues indexes holes. Both must
+    /// format correctly when a host renderer claims an argument.</remarks>
     private static partial class Generated
     {
         [LoggerMessage(EventId = 1, Level = LogLevel.Information, Message = "kept: {Destination} already holds {Guid}; dropped {Source}")]
@@ -230,8 +202,7 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task the_category_prefix_is_the_hosts_choice()
     {
-        // The CLI's pipeline lines were bare Console.WriteLine before the seam and must stay bare;
-        // engine diagnostics want the category, because it is the only thing a reader can filter.
+        // CLI progress can omit categories; engine diagnostics include them.
         var (bare, bareOut, _) = Sink(includeCategory: false, category: "Ignored");
         bare.LogInformation("minted: crate.png.meta");
         await Assert.That(bareOut.ToString().Trim()).IsEqualTo("minted: crate.png.meta");

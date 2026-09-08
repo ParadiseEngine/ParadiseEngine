@@ -53,19 +53,12 @@ public delegate void SystemRunWorldAction<TMask, TConfig>(
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new();
 
-/// <summary>
-/// Pre-built execution schedule for systems: a PURE program over systems, holding no world.
-/// Every run names the world it acts on, so one schedule can drive any world of the same
-/// registry — a pooled snapshot, a rewound copy, a headless replica — and nothing about the
-/// schedule changes with it. The scheduling strategy is determined at build time
-/// via the <see cref="IWaveScheduler"/> provided to the builder.
-/// ECB playback happens once after all waves complete, so structural changes from commands
-/// are NOT visible within the same run.
-/// Each work item receives its own <see cref="EntityCommandBuffer"/>, rented in schedule order
-/// and played back in that same order — so structural changes are deterministic: any
-/// <see cref="IWaveScheduler"/> (sequential or parallel, any thread count) produces an identical
-/// world, including entity IDs.
-/// </summary>
+/// <summary>A reusable execution schedule for worlds sharing a registry.</summary>
+/// <remarks>
+/// The builder selects the wave scheduler. Each work item owns a command buffer, rented and replayed
+/// in schedule order after all waves finish. Structural changes become visible after the run, and
+/// sequential or parallel execution produces identical worlds and entity IDs.
+/// </remarks>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
 public sealed class SystemSchedule<TMask, TConfig> : IDisposable
@@ -128,24 +121,13 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         RunInternal(world, readWorld: null);
     }
 
-    /// <summary>
-    /// Runs all systems in SNAPSHOT-READ mode: systems generated with
-    /// <c>[assembly: SnapshotReadSystems]</c> bind their read-only fields
-    /// (<c>ref readonly T</c> / <c>ReadOnlySpan&lt;T&gt;</c> / all-readonly composition data) to
-    /// <paramref name="readWorld"/>'s corresponding chunk — typically the immutable previous-tick
-    /// snapshot <paramref name="world"/> was <c>CopyFrom</c>'d from — while writable fields bind
-    /// to <paramref name="world"/>. Reads then never alias in-flight writes, so with
-    /// single-writer components every system can execute in one fully parallel wave (see
-    /// <c>SnapshotDagScheduler</c>).
-    ///
-    /// CONTRACT: <paramref name="readWorld"/> must be the structural twin of
-    /// <paramref name="world"/> (no structural changes since <c>CopyFrom</c> — structural ops go
-    /// through the ECB, which plays back after this call, or happen before the copy). Chunks are
-    /// paired by (archetype id, chunk index); a chunk with no read-world counterpart (entity
-    /// spawned after the copy) falls back to reading its own write chunk. Systems from assemblies
-    /// WITHOUT the codegen attribute keep classic single-world semantics regardless of this
-    /// overload.
-    /// </summary>
+    /// <summary>Runs generated snapshot systems against paired write and immutable read worlds.</summary>
+    /// <remarks>
+    /// The worlds must be structural twins from <c>CopyFrom</c>; defer structural changes through command
+    /// buffers. Chunks pair by archetype ID and chunk index, falling back to the write chunk when no read
+    /// counterpart exists. <c>[assembly: SnapshotReadSystems]</c> routes read-only fields to the read world;
+    /// writes and <c>[CurrentTick]</c> reads use the write world. Unmarked assemblies retain single-world behavior.
+    /// </remarks>
     /// <param name="world">The write world the systems mutate.</param>
     /// <param name="readWorld">The immutable world read-only fields bind to.</param>
     public void Run(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig> readWorld)
@@ -157,17 +139,10 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
     private void RunInternal(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)
     {
-        // DEBUG structural-change guard: while waves execute, direct structural World calls
-        // (Spawn/Despawn/Add-/RemoveComponent/…) throw — systems must use their injected
-        // EntityCommandBuffer. try/finally keeps the flag exception-safe (a throwing system
-        // must not wedge the world), and it is cleared BEFORE _ecbPool.PlaybackAll below so
-        // playback's Spawn/structural work is not blocked.
-        // ONE read per gated feature, before any wave is built. Read per system as the waves
-        // were walked, a switch flipped mid-run would run some of a feature's systems and skip
-        // the rest — a tick in which a gameplay feature half happened, and which half depended
-        // on another thread's timing.
+        // Freeze feature gates for the whole run so a concurrent toggle cannot split a feature's systems.
         TakeFeatureSnapshot();
 
+        // Structural mutations use command buffers while workers run; release the guard before playback.
         world.SetSystemRunInProgress(true);
         try
         {
@@ -181,18 +156,14 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         _ecbPool.PlaybackAll(world);
         _ecbPool.ClearAll();
 
-        // Merge this run's per-work-item event writers into the world's event store, in schedule
-        // order (deterministic). Always runs — with no writer this expires last frame's events.
+        // Commit even with no writers so last tick's events expire.
         _eventPool.CommitTo(world.Events);
         _eventPool.ClearAll();
     }
 
     private void RunWaves(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)
     {
-        // Work items are constructed on this thread in (wave, position-in-wave, chunk) order,
-        // and each rents its own ECB from the pool at construction time. Rent order therefore
-        // equals schedule order, and PlaybackAll replays in that same order — commands apply as
-        // if the schedule had run serially, independent of the wave scheduler's threading.
+        // Rent on the schedule thread in (wave, system, chunk) order for deterministic playback.
         foreach (var wave in _waves)
         {
             _workItems.Clear();

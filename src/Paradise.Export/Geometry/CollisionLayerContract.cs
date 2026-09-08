@@ -3,14 +3,8 @@ using System.Numerics;
 
 namespace Paradise.Export.Geometry
 {
-    /// <summary>
-    /// The engine-neutral collision-layer contract. Godot stores collision layers as a bitmask on
-    /// the owning body, but a game's collider-shape record carries a Unity-style single layer INDEX:
-    /// consumers reconstruct the membership mask as <c>1u &lt;&lt; Layer</c> (see
-    /// <c>Paradise.Sample.Runtime.SceneAssembler.AppendCollider</c>). A single int therefore cannot
-    /// represent multi-layer membership — this helper collapses a mask to the index of its lowest
-    /// set bit and exposes <see cref="IsMultiLayer"/> so the exporter can warn on the lossy case.
-    /// </summary>
+    /// <summary>Converts a collision-layer mask to its lowest set-bit index.</summary>
+    /// <remarks>Consumers reconstruct <c>1u &lt;&lt; Layer</c>; <see cref="IsMultiLayer"/> identifies masks that lose membership.</remarks>
     public static class CollisionLayerContract
     {
         /// <summary>Index of the lowest set bit of a Godot collision mask (mask 1 → 0, mask 2 → 1);

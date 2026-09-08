@@ -47,16 +47,10 @@ public struct TraceTriangleGpu
     private uint _pad;
 }
 
-/// <summary>The scene as the compute tracer sees it: every uploaded primitive's bounding volume
-/// hierarchy merged into one node buffer, its triangles and vertices into one each, and per frame
-/// an instance hierarchy over the opaque instances that participate.
-///
-/// <para>One buffer per kind, with per-mesh offsets folded in at upload, is the layout decision
-/// the plan fixed on day one: WebGPU has no bindless, so a mesh cannot be a buffer of its own. A
-/// mesh's nodes reference triangle slots and its triangles reference vertices by ABSOLUTE index
-/// into the merged buffers, rebased once here. The instance hierarchy is appended after the mesh
-/// nodes, so a frame that only moves instances rewrites its region alone, and the instance table
-/// is laid out in that hierarchy's leaf order so a leaf slot indexes it directly.</para></summary>
+/// <summary>Merges primitive BVHs and geometry into buffers used by the compute tracer.</summary>
+/// <remarks>WebGPU lacks bindless buffers, so upload rebases nodes, triangles and vertices to
+/// absolute merged indices. Each frame rewrites only the appended instance hierarchy, whose leaf
+/// order indexes the instance table.</remarks>
 internal sealed partial class TraceScene : IDisposable
 {
     private const int NodeSize = 96;

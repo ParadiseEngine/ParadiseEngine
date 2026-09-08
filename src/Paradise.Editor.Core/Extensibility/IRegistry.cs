@@ -10,13 +10,8 @@ public interface IRegistry<T>
     void RemoveOwner(OwnerToken owner);
 }
 
-/// <summary>The reference <see cref="IRegistry{T}"/>: insertion order, removal by owner.</summary>
-/// <remarks>The projection is cached and invalidated on change rather than rebuilt per read.
-/// <see cref="Entries"/> is on frame paths — one walk per inspector row, one per dispatch — and
-/// registration happens at startup or when an extension loads, so the allocation belongs there.
-/// Handing out a snapshot rather than a live view is also what makes an extension unloading
-/// itself mid-frame safe: an enumeration already in flight finishes over the array it started
-/// on.</remarks>
+/// <summary>An insertion-ordered registry with removal by owner.</summary>
+/// <remarks>Caches snapshots until registration changes; existing enumerations remain valid during removal.</remarks>
 public sealed class Registry<T> : IRegistry<T>
 {
     private readonly List<(OwnerToken Owner, T Entry)> _entries = [];

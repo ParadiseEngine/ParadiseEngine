@@ -4,11 +4,8 @@ using DotRecast.Detour.Io;
 
 namespace Paradise.Export
 {
-    /// <summary>
-    /// Small identity string logged when the editor plugin loads. Deliberately built without a JSON
-    /// serializer — invoking one at editor-load would warm serializer caches that hinder Godot's
-    /// C# assembly hot-reload (godotengine/godot#78513). Confirms the Core dependencies resolve.
-    /// </summary>
+    /// <summary>Identifies the export assembly when an editor plugin loads.</summary>
+    /// <remarks>Avoids serializer caches that can pin Godot's collectible assemblies (godotengine/godot#78513).</remarks>
     public static class ParadiseExportInfo
     {
         public const string Version = "0.1.0";

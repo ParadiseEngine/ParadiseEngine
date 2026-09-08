@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for ImmutableArchetypeLayout.
-/// </summary>
+/// <summary>Tests for ImmutableArchetypeLayout.</summary>
 public sealed class ImmutableArchetypeLayoutTests
 {
     [Test]

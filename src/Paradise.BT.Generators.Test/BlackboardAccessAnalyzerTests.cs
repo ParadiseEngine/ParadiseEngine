@@ -4,11 +4,7 @@ using Paradise.BT.Generators;
 
 namespace Paradise.BT.Generators.Test;
 
-/// <summary>
-/// The guard that makes <c>[Reads&lt;T&gt;]</c> / <c>[Writes&lt;T&gt;]</c> checked rather than
-/// merely conventional. Each test here was confirmed to FAIL with the analyzer's report suppressed
-/// — a diagnostic test that has never failed is a guard nobody has checked.
-/// </summary>
+/// <summary>Checks Reads/Writes declarations against node bodies.</summary>
 public class BlackboardAccessAnalyzerTests
 {
     /// <summary>
@@ -172,9 +168,7 @@ public class BlackboardAccessAnalyzerTests
             }
             """);
 
-        // Only PBT0010. DelegatingNode declares nothing, so its own body is the generator's
-        // source of truth and there is no declaration to contradict -- but the helper it calls is
-        // still out of view, which is the whole point of the warning.
+        // Only PBT0010 applies: the node has no declared contract, but its helper access is hidden.
         test.ExpectedDiagnostics.Add(
             CSharpAnalyzerVerifier<BlackboardAccessAnalyzer, DefaultVerifier>
                 .Diagnostic(BlackboardAccessAnalyzer.s_blackboardEscapes)

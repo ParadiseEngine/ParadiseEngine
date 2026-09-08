@@ -4,16 +4,10 @@ using Paradise.ECS;
 
 namespace Paradise.BT.Sample;
 
-// A deliberately busy tree, to exercise the GENERATED blackboard rather than to be a tidy example:
-// ten node types over five data types, with the overlaps a small tree cannot produce — a component
-// three nodes read, an extra four nodes write, a type both read and written, and a node touching
-// nothing at all.
-//
-// NOT ONE NODE BELOW DECLARES ITS ACCESS. The generator reads each Tick body instead. The
-// attributes still matter for a node in a REFERENCED assembly, where no body exists; the two are
-// unioned.
+// Exercises shared reads, shared writes, mixed access and nodes with no access.
+// Access is inferred from node bodies; referenced nodes publish metadata.
 
-// ===================== the world's vocabulary =====================
+// the world's vocabulary
 
 /// <summary>Where the forager is. Read by three different nodes, and must appear exactly ONCE in
 /// the generated blackboard.</summary>
@@ -40,7 +34,7 @@ public partial struct Senses
     public bool FoodVisible;
 }
 
-// ===================== what is not a component =====================
+// what is not a component
 
 /// <summary>
 /// The tree's conclusion. Not a component, so it lands in the generated Extras and the caller
@@ -68,7 +62,7 @@ public struct Decisions
     public int Count;
 }
 
-// ===================== conditions =====================
+// conditions
 
 /// <summary>Reads two things at once, which is the case a single-access node never covers.</summary>
 [Guid("A0000000-0000-4000-8000-000000000001")]
@@ -111,13 +105,7 @@ public struct ExhaustedNode(float restBelow) : INode
         => (bb.GetData<Stamina>().Value < RestBelow).ToNodeState();
 }
 
-/// <summary>
-/// Is the trip worth making? The only node here with more than one authored number, so it is what
-/// exercises a builder constructor carrying several: <c>ForageWorthIt(0.3f, 6f, true)</c>.
-///
-/// The three would otherwise be three separate conditions sequenced together, which reads worse
-/// and costs a node apiece in a component sized at compile time.
-/// </summary>
+/// <summary>Combines forage conditions and demonstrates a builder with several authored values.</summary>
 [Guid("A0000000-0000-4000-8000-00000000000A")]
 [Builder]
 public struct ForageWorthItNode(float minStamina, float maxDistance, bool requireVisible) : INode
@@ -162,7 +150,7 @@ public struct AlreadyDecidedNode : INode
         => bb.GetData<Intent>().HasGoal.ToNodeState();
 }
 
-// ===================== actions =====================
+// actions
 
 /// <summary>Runs away: reads the pose it is fleeing FROM and writes where to go.</summary>
 [Guid("A0000000-0000-4000-8000-000000000005")]

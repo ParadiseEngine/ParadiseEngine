@@ -23,33 +23,23 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
     private ThreadAffinity _threadAffinity;
     private bool _disposed;
 
-    /// <summary>
-    /// Gets the chunk manager shared across all worlds.
-    /// </summary>
+    /// <summary>The chunk manager shared across all worlds.</summary>
     public ChunkManager ChunkManager => _chunkManager;
 
-    /// <summary>
-    /// Gets the shared archetype metadata.
-    /// </summary>
+    /// <summary>The shared archetype metadata.</summary>
     public SharedArchetypeMetadata<TMask, TConfig> SharedMetadata => _sharedMetadata;
 
-    /// <summary>
-    /// Gets the configuration instance.
-    /// </summary>
+    /// <summary>The configuration instance.</summary>
     public TConfig Config => _config;
 
-    /// <summary>
-    /// Creates a new SharedTaggedWorld with the specified type information and default configuration.
-    /// </summary>
+    /// <summary>Creates a new SharedTaggedWorld with the specified type information and default configuration.</summary>
     /// <param name="typeInfos">The component type information array from IComponentRegistry.TypeInfos.</param>
     public SharedTaggedWorld(ImmutableArray<ComponentTypeInfo> typeInfos)
         : this(typeInfos, new TConfig())
     {
     }
 
-    /// <summary>
-    /// Creates a new SharedTaggedWorld with the specified type information and configuration.
-    /// </summary>
+    /// <summary>Creates a new SharedTaggedWorld with the specified type information and configuration.</summary>
     /// <param name="typeInfos">The component type information array from IComponentRegistry.TypeInfos.</param>
     /// <param name="config">The configuration instance.</param>
     public SharedTaggedWorld(ImmutableArray<ComponentTypeInfo> typeInfos, TConfig config)
@@ -76,9 +66,7 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
         return world;
     }
 
-    /// <summary>
-    /// Clears all created worlds and disposes all owned resources including the ChunkManager and SharedArchetypeMetadata.
-    /// </summary>
+    /// <summary>Clears all created worlds and disposes all owned resources including the ChunkManager and SharedArchetypeMetadata.</summary>
     public void Dispose()
     {
         _threadAffinity.Assert();

@@ -5,9 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Header portion of the archetype layout data.
-/// </summary>
+/// <summary>Header portion of the archetype layout data.</summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 [StructLayout(LayoutKind.Sequential)]
 public struct ArchetypeLayoutHeader<TMask> where TMask : unmanaged, IBitSet<TMask>
@@ -82,9 +80,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         get => (nint)_data;
     }
 
-    /// <summary>
-    /// Creates an archetype layout view from a data pointer.
-    /// </summary>
+    /// <summary>Creates an archetype layout view from a data pointer.</summary>
     /// <param name="data">Pointer to the layout data allocated by <see cref="Create"/>.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ImmutableArchetypeLayout(nint data)
@@ -92,9 +88,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         _data = (byte*)data;
     }
 
-    /// <summary>
-    /// Gets the maximum number of entities that fit in a single chunk.
-    /// </summary>
+    /// <summary>The maximum number of entities that fit in a single chunk.</summary>
     public int EntitiesPerChunk
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -127,21 +121,14 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         if (reserved == 0)
             return -1;
 
-        // Does the component being ASKED ABOUT reserve anything here? Both halves are needed and
-        // neither implies the other: a component can reserve globally while being absent from this
-        // archetype, and one present in this archetype may reserve nothing. Answering that first is
-        // what keeps the shortcut below honest — it is also O(1), so it costs the fast path nothing.
+        // A slot requires both archetype membership and a nonzero component reservation.
         if (!Header.ComponentMask.Get(componentId.Value)
             || typeInfos[componentId.Value].ChunkAggregateSize == 0)
         {
             return -1;
         }
 
-        // Past those guards the component reserves a slot in this archetype, so if it is the ONLY
-        // reserver here it owns the whole reservation and its slot starts exactly where the
-        // reservation does. That is the whole of today's usage, and worth the branch: this sits on
-        // the structural-change and despawn paths as well as on every chunk a tag-filtered query
-        // considers, while the general answer costs a mask walk.
+        // The sole aggregate owns the entire tail reservation; avoid a mask walk.
         if (Header.ChunkAggregateCount == 1)
             return TConfig.ChunkSize - reserved;
 
@@ -173,36 +160,28 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Gets the number of component types in this archetype.
-    /// </summary>
+    /// <summary>The number of component types in this archetype.</summary>
     public int ComponentCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Header.ComponentCount;
     }
 
-    /// <summary>
-    /// Gets the minimum component ID in this archetype.
-    /// </summary>
+    /// <summary>The minimum component ID in this archetype.</summary>
     public int MinComponentId
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Header.MinComponentId;
     }
 
-    /// <summary>
-    /// Gets the maximum component ID in this archetype.
-    /// </summary>
+    /// <summary>The maximum component ID in this archetype.</summary>
     public int MaxComponentId
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Header.MaxComponentId;
     }
 
-    /// <summary>
-    /// Gets the component mask for this archetype.
-    /// </summary>
+    /// <summary>The component mask for this archetype.</summary>
     public TMask ComponentMask
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -281,9 +260,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
             return;
         }
 
-        // Per-chunk aggregates live in the TAIL of the chunk, and everything below simply carves a
-        // smaller chunk. Placing them last is what keeps this change invisible: every column offset
-        // and every entity-id read is measured from offset 0 as before, so only the capacity moves.
+        // Tail reservations reduce capacity without changing column or entity-ID offsets.
         var aggregateAction = new SumChunkAggregatesAction { TypeInfos = typeInfos, TotalSize = 0, Count = 0 };
         componentMask.ForEach(ref aggregateAction);
         header.ChunkAggregateBytes = aggregateAction.TotalSize;
@@ -422,9 +399,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Gets the base offset for a component's array within the chunk.
-    /// </summary>
+    /// <summary>The base offset for a component's array within the chunk.</summary>
     /// <param name="componentId">The component ID.</param>
     /// <returns>The base offset, or -1 if the component is not in this archetype.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -440,9 +415,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         return offset; // -1 indicates not present, valid offsets return >= 0
     }
 
-    /// <summary>
-    /// Checks if this archetype contains the specified component.
-    /// </summary>
+    /// <summary>Checks if this archetype contains the specified component.</summary>
     /// <param name="componentId">The component ID.</param>
     /// <returns>True if the component is present.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -483,9 +456,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         };
     }
 
-    /// <summary>
-    /// Frees the memory allocated for an archetype layout.
-    /// </summary>
+    /// <summary>Frees the memory allocated for an archetype layout.</summary>
     /// <param name="allocator">The allocator that was used to create the layout.</param>
     /// <param name="data">The data pointer returned by <see cref="Create"/>.</param>
     public static void Free(IAllocator allocator, nint data)

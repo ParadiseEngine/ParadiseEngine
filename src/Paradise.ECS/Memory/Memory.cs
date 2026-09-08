@@ -3,14 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Provides utility methods for memory alignment operations.
-/// </summary>
+/// <summary>Provides utility methods for memory alignment operations.</summary>
 public static class Memory
 {
-    /// <summary>
-    /// Rounds a value up to the next multiple of alignment.
-    /// </summary>
+    /// <summary>Rounds a value up to the next multiple of alignment.</summary>
     /// <param name="value">The value to align.</param>
     /// <param name="alignment">The alignment boundary (must be a power of 2).</param>
     /// <returns>The aligned value.</returns>
@@ -20,9 +16,7 @@ public static class Memory
         return (value + alignment - 1) & ~(alignment - 1);
     }
 
-    /// <summary>
-    /// Gets the alignment of an unmanaged type in bytes.
-    /// </summary>
+    /// <summary>The alignment of an unmanaged type in bytes.</summary>
     /// <typeparam name="T">The unmanaged type to get alignment for.</typeparam>
     /// <returns>The alignment of the type in bytes.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -31,9 +25,7 @@ public static class Memory
         return AlignOfHelper<T>.Alignment;
     }
 
-    /// <summary>
-    /// Helper struct for calculating alignment of unmanaged types at runtime.
-    /// </summary>
+    /// <summary>Helper struct for calculating alignment of unmanaged types at runtime.</summary>
     /// <typeparam name="T">The unmanaged type to calculate alignment for.</typeparam>
     /// <remarks>
     /// The alignment of T equals the offset of Value in this struct,
@@ -45,9 +37,7 @@ public static class Memory
         private readonly byte _padding;
         private readonly T _value;
 
-        /// <summary>
-        /// Gets the alignment of type T in bytes.
-        /// </summary>
+        /// <summary>The alignment of type T in bytes.</summary>
         public static int Alignment { get; } = Unsafe.SizeOf<AlignOfHelper<T>>() - Unsafe.SizeOf<T>();
     }
 }

@@ -7,14 +7,10 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation.Benchmarks;
 
-/// <summary>
-/// One frame of one character: sample a clip and walk the hierarchy to model space, for every
-/// runtime that has played this engine's clips — the glTF reference sampler ShiningPie runs
-/// today, the managed-class port that replaced it (frozen copy), the blob runtime that ships,
-/// and ozz's own C++ when <c>PARADISE_OZZ_NATIVE</c> names the spike's shim. Two access
-/// patterns: <c>Advance</c> steps 1/100 of the clip per frame (playback, where the cursor cache
-/// pays), <c>Seek</c> jumps to a random ratio every frame (scrubbing, where i-frames pay).
-/// </summary>
+/// <summary>Benchmarks one character's sampling and model-space hierarchy update across runtimes.</summary>
+/// <remarks>Compares glTF, frozen managed, blob and optional native ozz implementations.
+/// Advance steps 1/100 of a clip; Seek chooses random ratios to exercise i-frames.
+/// Set PARADISE_OZZ_NATIVE to include the native shim.</remarks>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 5, iterationCount: 15)]
 public unsafe class AnimationBenchmarks

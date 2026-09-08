@@ -4,26 +4,11 @@ using Paradise.Features;
 
 namespace Paradise.Rendering.Graph;
 
-/// <summary>The ordered features that make up a frame, the switches that decide which of them
-/// run, and the driver that runs their setup.
-///
-/// <para><b>Order is a spaced integer, not a list position.</b> A feature that consumes another's
-/// blackboard result must set up after it, and expressing that as "call Add in the right
-/// sequence" works only while ONE piece of code does all the adding. A game adding a feature that
-/// must publish before the scene reads it would otherwise have no way to say so, and the engine
-/// adding a built-in between two others would have to be edited in the same place every time. The
-/// slots are spaced for the same reason <see cref="RenderPassEvent"/>'s are: write
-/// <c>PbrFeatureOrder.Scene - 1</c> and land there. Equal orders keep insertion order.</para>
-///
-/// <para><b>Whether a feature runs is configuration, not position.</b> Every feature declares
-/// itself into <see cref="Switches"/> when it is added, and the pipeline reads that switch each
-/// frame — so a built-in and a game's own feature are turned off the same way, from the same
-/// config file, at runtime. A feature that needs to KNOW it was switched off (because something
-/// else still reads state it owns) overrides
-/// <see cref="IRenderFeature.OnEnabledChanged"/>.</para>
-///
-/// <para>Not a GPU pipeline: the name is the pipeline of features a frame is, in the sense
-/// Unity's scriptable render pipeline uses the word.</para></summary>
+/// <summary>Orders render features and drives them using frame-scoped configuration
+/// switches.</summary>
+/// <remarks>Spaced integer orders express setup dependencies; equal orders preserve insertion
+/// order. Add declares each feature in the shared switchboard. Features with persistent state
+/// implement OnEnabledChanged.</remarks>
 public sealed class RenderPipeline : IDisposable
 {
     /// <summary>Where a feature lands when its composer names no slot: after every built-in, in
@@ -31,11 +16,10 @@ public sealed class RenderPipeline : IDisposable
     /// wants, and the only sensible answer for one that says nothing.</summary>
     public const int DefaultOrder = int.MaxValue;
 
-    private sealed class Entry(IRenderFeature feature, int order, long sequence)
+    private sealed class Entry(IRenderFeature feature, int order)
     {
         public IRenderFeature Feature { get; } = feature;
         public int Order { get; } = order;
-        public long Sequence { get; } = sequence;
 
         /// <summary>Whether this feature runs in the frame being built. Read from the switchboard
         /// ONCE per frame, by <see cref="BeginFrame"/>, and used by every phase after it.</summary>
@@ -64,7 +48,6 @@ public sealed class RenderPipeline : IDisposable
 
     private readonly List<Entry> _entries = [];
     private readonly FrameBlackboard _blackboard = new();
-    private long _added;
     private bool _snapshotFresh;
     private bool _disposed;
 
@@ -105,9 +88,9 @@ public sealed class RenderPipeline : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var definition = Switches.Declare(feature.Definition);
-        var entry = new Entry(feature, order, _added++);
+        var entry = new Entry(feature, order);
         var index = _entries.Count;
-        while (index > 0 && IsAfter(_entries[index - 1], entry)) index--;
+        while (index > 0 && _entries[index - 1].Order > order) index--;
         _entries.Insert(index, entry);
 
         feature.Resize(Width, Height);
@@ -121,9 +104,6 @@ public sealed class RenderPipeline : IDisposable
         if (enabled != definition.EnabledByDefault) feature.OnEnabledChanged(enabled);
         return this;
     }
-
-    private static bool IsAfter(Entry existing, Entry inserted) =>
-        existing.Order > inserted.Order || (existing.Order == inserted.Order && existing.Sequence > inserted.Sequence);
 
     /// <summary>The first feature of type <typeparamref name="T"/>, for a host that configures
     /// one it did not construct.</summary>
@@ -151,19 +131,10 @@ public sealed class RenderPipeline : IDisposable
         return false;
     }
 
-    /// <summary>Adopt every switch change since the last frame and fix which features run in the
-    /// next one. Called by <see cref="Setup"/>; call it yourself before that when something in
-    /// the frame depends on the answer — the renderer decides whether to build the trace
-    /// hierarchy before any feature sets up — or when you have flipped a switch and need the
-    /// feature's own state to have caught up before you touch it.
-    ///
-    /// <para><b>This is the ONE place a switch is read per frame, and the one place a transition
-    /// is announced.</b> Every phase after it — requirements, setup, recording, submit — reads
-    /// the answer this took, so a frame cannot be half-configured: a feature that set up is a
-    /// feature that gets its <see cref="IRenderFeature.BeforeSubmit"/>, whatever a debug panel on
-    /// another thread did in between. It is also why the pipeline does not subscribe to
-    /// <see cref="FeatureSwitches.Changed"/>: a handler on the flipping thread would release
-    /// targets and retract plans while this thread was recording with them.</para></summary>
+    /// <summary>Snapshots feature switches and applies transitions for the next frame.</summary>
+    /// <remarks>Setup calls this automatically; call earlier when frame preparation depends on
+    /// feature state. All later phases use that snapshot. Transitions stay on this thread so
+    /// configuration writers cannot release resources while rendering records them.</remarks>
     public void BeginFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -175,6 +146,15 @@ public sealed class RenderPipeline : IDisposable
             entry.Feature.OnEnabledChanged(entry.EnabledThisFrame);
         }
         _snapshotFresh = true;
+    }
+
+    /// <summary>Prepare enabled features in order using the same switch snapshot as setup.</summary>
+    public void PrepareFrame()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_snapshotFresh) BeginFrame();
+        foreach (var entry in _entries)
+            if (entry.EnabledThisFrame) entry.Feature.PrepareFrame();
     }
 
     /// <summary>The union of the requirements of the features running this frame.</summary>

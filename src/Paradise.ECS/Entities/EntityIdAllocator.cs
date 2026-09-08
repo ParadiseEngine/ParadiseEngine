@@ -14,9 +14,7 @@ public sealed class EntityIdAllocator
     private readonly ConcurrentStack<(int Id, uint Version)> _freeSlots = new();
     private readonly int _maxEntityId;
 
-    /// <summary>
-    /// Creates a new EntityIdAllocator with the specified maximum entity ID.
-    /// </summary>
+    /// <summary>Creates a new EntityIdAllocator with the specified maximum entity ID.</summary>
     /// <param name="maxEntityId">The maximum entity ID that can be allocated.
     /// Use <see cref="int.MaxValue"/> for no practical limit.</param>
     public EntityIdAllocator(int maxEntityId = int.MaxValue)
@@ -79,9 +77,7 @@ public sealed class EntityIdAllocator
         return Volatile.Read(ref _nextFreshId);
     }
 
-    /// <summary>
-    /// Resets the allocator to its initial state.
-    /// </summary>
+    /// <summary>Resets the allocator to its initial state.</summary>
     public void Clear()
     {
         _freeSlots.Clear();

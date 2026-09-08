@@ -18,9 +18,9 @@ public class AnyValueBuilder : IBuilder
         SetValue(value, Utilities.AlignOf<T>());
     }
 
-    public void SetValue<T>(T value, int alignment) where T : unmanaged
+    public unsafe void SetValue<T>(T value, int alignment) where T : unmanaged
     {
-        SetBytes(ToBytes(value), alignment);
+        SetBytes(new ReadOnlySpan<byte>(&value, sizeof(T)), alignment);
     }
 
     public void SetBytes(ReadOnlySpan<byte> data, int alignment)
@@ -40,15 +40,4 @@ public class AnyValueBuilder : IBuilder
         PatchSize = stream.PatchPosition - PatchPosition;
     }
 
-    private unsafe byte[] ToBytes<T>(T value) where T : unmanaged
-    {
-        var size = sizeof(T);
-        if (size == 0) return Array.Empty<byte>();
-        var bytes = new byte[size];
-        fixed (void* destPtr = &bytes[0])
-        {
-            Buffer.MemoryCopy(&value, destPtr, size, size);
-        }
-        return bytes;
-    }
 }

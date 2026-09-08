@@ -4,17 +4,10 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace Paradise.BT.Generators.Test;
 
-/// <summary>
-/// What the builder generator emits per cardinality. The composite case is the one with history:
-/// composite fields used to be silently dropped, so a weighted selector could not be configured
-/// through its builder at all — the constructor always wrote <c>new T()</c>.
-/// </summary>
+/// <summary>Checks builder emission for each cardinality, including exposed composite fields.</summary>
 public sealed class BTreeNodeGeneratorTests
 {
-    /// <summary>Stand-ins for Paradise.BT and Paradise.BT.Builder, mirroring
-    /// <see cref="BindingGeneratorTests"/>' approach: the generator resolves everything
-    /// symbolically, and compiling its output needs the base classes the emitted builders derive
-    /// from and the registry the emitted module initializer calls.</summary>
+    /// <summary>Stubs the BT base classes and registry needed to compile generated builders.</summary>
     private const string Prelude = """
         using System;
 
@@ -399,7 +392,7 @@ public sealed class BTreeNodeGeneratorTests
         await Assert.That(generated).DoesNotContain("elapsed");
     }
 
-    // ===================== harness =====================
+    // harness
 
     private static (ImmutableArray<string> Sources, ImmutableArray<Diagnostic> CompileErrors,
         ImmutableArray<Diagnostic> Diagnostics) Run(string source)
