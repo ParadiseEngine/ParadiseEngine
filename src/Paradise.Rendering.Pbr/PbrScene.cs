@@ -288,6 +288,8 @@ public sealed class PbrInstance
 /// state — mutate freely between frames.</summary>
 public sealed class PbrScene
 {
+    public PbrFog Fog = new();
+    public List<PbrFogVolume> FogVolumes { get; } = [];
     public PbrCamera Camera;
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();

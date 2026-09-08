@@ -59,6 +59,10 @@ public static class PbrFeatures
         "rendering.sceneColorCapture", false,
         "Copy the opaque scene so blend materials can refract it. Costs a blit and a reload per frame.");
 
+    /// <summary>Height fog and local participating media.</summary>
+    public static FeatureDefinition Fog { get; } = new(
+        "rendering.fog", true, "Height fog and shadowed participating-medium scattering.");
+
     /// <summary>Jittered HDR temporal accumulation with motion and depth rejection.</summary>
     public static FeatureDefinition TemporalAntiAliasing { get; } = new(
         "rendering.temporalAntiAliasing", true,
@@ -91,7 +95,7 @@ public static class PbrFeatures
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
         Shadows, Prepass, MotionVectors, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Scene, SceneColorCapture, TemporalAntiAliasing, Bloom, Composite, Fxaa, Presentation,
+        Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Bloom, Composite, Fxaa, Presentation,
     ];
 
     /// <summary>Declares every built-in into <paramref name="switches"/>. A renderer does this
@@ -124,6 +128,7 @@ public static class PbrFeatureOrder
     public const int LightCulling = 550;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
+    public const int Fog = 710;
     public const int TemporalAntiAliasing = 720;
     public const int Exposure = 730;
     public const int DepthOfField = 740;
