@@ -92,9 +92,7 @@ public sealed record Extraction(string? Directory, IReadOnlyList<ExtractedPart> 
     }
 }
 
-/// <summary>
-/// The <c>[extract]</c> sidecar domain: the one record every extractor's output is written to.
-/// </summary>
+/// <summary>The <c>[extract]</c> sidecar domain: the one record every extractor's output is written to.</summary>
 /// <remarks>
 /// A container could carry this itself — a GLB has <c>extras</c> — but an FBX or a USD cannot, and
 /// two mechanisms by format is the wrong place to end up. The sidecar is tooling-owned and

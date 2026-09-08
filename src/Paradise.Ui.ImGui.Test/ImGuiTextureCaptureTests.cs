@@ -6,17 +6,9 @@ using Hexa.NET.ImGui;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>The capture side driven against a HAND-BUILT <c>ImTextureData</c> rather than a real
-/// ImGui frame.
-///
-/// <c>ImGuiTextureProtocolTests</c> covers what a live context actually does, but it can only see
-/// the statuses ImGui chooses to raise — which is why <c>WantDestroy</c> had no coverage at all
-/// and shipped with a contract bug. When a texture is recycled is ImGui's scheduling decision,
-/// not a contract, so waiting for one is both slow and unreliable. Fabricating the struct tests
-/// OUR branch of the protocol deterministically: the accessors are plain cimgui calls on the
-/// pointer we hand them and need no context.
-///
-/// No <c>[NotInParallel]</c>: nothing here touches the process-global current context.</summary>
+/// <summary>Exercises texture statuses deterministically using hand-built ImTextureData.</summary>
+/// <remarks>No current context is touched, so these tests may run in parallel; live-context tests
+/// cannot control when WantDestroy occurs.</remarks>
 public class ImGuiTextureCaptureTests
 {
     /// <summary>One <c>ImTextureData</c> and the <c>ImDrawData</c> that points at it, in

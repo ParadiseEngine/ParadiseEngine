@@ -265,9 +265,7 @@ public class WideBvhTests
         await Assert.That(leaves).IsEqualTo(37);
     }
 
-    /// <summary>The shader walk has a fixed stack; the builder reports what a hierarchy needs, and
-    /// a large soup — and the degenerate case of coincident centroids the median split handles —
-    /// both fit. A hierarchy that did not would be refused at upload rather than traced wrong.</summary>
+    /// <summary>Verifies random and degenerate BVHs fit the shader's fixed traversal stack.</summary>
     [Test]
     public async Task large_and_degenerate_hierarchies_fit_the_traversal_stack()
     {

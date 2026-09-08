@@ -1,8 +1,6 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// Declares that a <c>[Queryable]</c> matches only entities carrying this tag.
-/// </summary>
+/// <summary>Declares that a <c>[Queryable]</c> matches only entities carrying this tag.</summary>
 /// <typeparam name="T">The tag type, declared with <see cref="TagAttribute"/>.</typeparam>
 /// <remarks>
 /// <para>
@@ -56,9 +54,7 @@ public sealed class WithTagAttribute<T> : Attribute
 {
 }
 
-/// <summary>
-/// Declares that a <c>[Queryable]</c> matches only entities that do NOT carry this tag.
-/// </summary>
+/// <summary>Declares that a <c>[Queryable]</c> matches only entities that do NOT carry this tag.</summary>
 /// <typeparam name="T">The tag type, declared with <see cref="TagAttribute"/>.</typeparam>
 /// <remarks>
 /// <para>

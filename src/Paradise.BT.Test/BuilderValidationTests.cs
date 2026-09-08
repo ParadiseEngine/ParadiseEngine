@@ -3,13 +3,7 @@ namespace Paradise.BT.Test;
 using Paradise.BT.Builder;
 using Paradise.BT.Nodes;
 
-/// <summary>
-/// The generated builders make a miswired tree hard to write; the raw generic wrappers
-/// (<see cref="LeafNode{T}"/> and friends) do not — nothing stops a leaf's data from being
-/// wrapped in a decorator builder — and traversal is index math that SILENTLY ignores an
-/// impossible child. Compilation is where the builder's arity gets checked against the claim
-/// the node's <c>[Builder]</c> attribute makes.
-/// </summary>
+/// <summary>Rejects raw builder wrappers whose child counts disagree with node cardinality.</summary>
 public sealed class BuilderValidationTests
 {
     [Test]

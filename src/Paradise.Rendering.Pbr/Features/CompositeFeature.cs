@@ -55,10 +55,6 @@ public sealed class CompositeFeature : IRenderFeature
             output = graph.Texture(PbrTargets.DisplayColor);
             frame.Blackboard.Publish(PbrResults.DisplayColor, output);
         }
-        else
-        {
-            _ctx.Targets.Release(PbrTargets.DisplayColor);
-        }
         var hasBloom = frame.Blackboard.TryGet(PbrResults.Bloom, out var bloom);
         var uniforms = new CompositeUniformsGpu
         {

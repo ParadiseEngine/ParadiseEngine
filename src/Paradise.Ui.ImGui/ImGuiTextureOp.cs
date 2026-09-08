@@ -20,14 +20,9 @@ public enum ImGuiTextureOpKind : byte
     Destroy = 2,
 }
 
-/// <summary>One self-contained instruction from Dear ImGui's 1.92 texture protocol, captured on
-/// the ImGui thread and applied on the render thread.
-///
-/// <b>Self-contained is the whole point.</b> ImGui hands out an <c>ImTextureData*</c> whose
-/// pixel buffer it owns and frees on its own schedule; the render thread must never see that
-/// pointer. So the pixels are COPIED here at capture time, and what crosses the thread boundary
-/// is a plain managed record with no reference back into ImGui state — the same discipline
-/// <see cref="ImGuiDrawSnapshot"/> applies to geometry.</summary>
+/// <summary>Carries a copied texture operation from the ImGui thread to the renderer.</summary>
+/// <remarks>Pixel bytes are copied before ImGui can free them; no ImGui pointer crosses the thread
+/// boundary.</remarks>
 /// <param name="Kind">Which operation this is; says which other fields mean anything.</param>
 /// <param name="TextureId">The <c>ImTextureID</c> the renderer keys this texture by. For an
 /// ImGui-owned texture this is its <c>ImTextureData.UniqueID</c> plus one (0 is ImGui's null

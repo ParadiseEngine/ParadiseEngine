@@ -5,24 +5,11 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Editor.ImGui;
 
-/// <summary>Transform handles for the Scene panel, and the one piece of setup ImGuizmo cannot do
-/// for itself.</summary>
+/// <summary>Sets up ImGuizmo and exposes transform manipulation.</summary>
 /// <remarks>
-/// <para>
-/// <b>ImGuizmo ships its own native.</b> <c>cimguizmo</c> statically links its own copy of Dear
-/// ImGui, so it has a <c>GImGui</c> of its own and cannot see the context <c>cimgui</c> created.
-/// <see cref="Attach"/> hands ours across. Forgetting it does not throw — it dereferences null
-/// inside native code, which surfaces as a process death with no managed stack, the same shape as
-/// the <c>GetID</c> failure recorded in <c>.claude/lessons.md</c>.
-/// </para>
-/// <para>
-/// The wrappers here exist for one reason each, not to hide the library: <see cref="Attach"/>
-/// because the contract above has to live somewhere it will be found, and
-/// <see cref="Manipulate"/> because ImGuizmo takes view and projection BEFORE the matrix it
-/// mutates, and a caller that swaps them gets a gizmo that renders and simply never grabs.
-/// Everything else — <c>DrawGrid</c>, <c>ViewManipulate</c>, <c>DecomposeMatrixToComponents</c> —
-/// is called directly off <see cref="ImGuizmo"/>.
-/// </para>
+/// ImGuizmo's native library has a separate ImGui context; call <see cref="Attach"/> to avoid a
+/// native null dereference. <see cref="Manipulate"/> fixes view/projection argument ordering;
+/// other ImGuizmo APIs are used directly.
 /// </remarks>
 public static class EditorGizmo
 {

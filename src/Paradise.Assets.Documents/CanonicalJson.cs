@@ -2,12 +2,8 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>The one canonical-model → JSON conversion, shared by the config compile and the prefab bake so the two cannot drift.</summary>
-/// <remarks>
-/// Not byte-exact by design: JSON has one number type, so an integral float (<c>1.0</c>) lands
-/// as <c>1</c>, which every typed reader accepts. <c>inf</c> and <c>nan</c> have no JSON spelling
-/// and are refused rather than emitted as strings a reader would take for text (issue #211).
-/// </remarks>
+/// <summary>Converts the canonical model to JSON for config compilation and prefab baking.</summary>
+/// <remarks>Integral floats become JSON integers; non-finite numbers are rejected.</remarks>
 public static class CanonicalJson
 {
     /// <param name="table">The model, a <see cref="CanonicalTomlTable"/> or <see cref="CanonicalInlineTable"/>.</param>
@@ -41,7 +37,7 @@ public static class CanonicalJson
     private static JsonNode? ToValue(object? value, string path, Func<CanonicalInlineTable, JsonNode?>? reference) => value switch
     {
         null => null,
-        CanonicalInlineTable inline when reference is not null && AssetReferenceCodec.IsWrittenInline(inline.ToList()) => reference(inline),
+        CanonicalInlineTable inline when reference is not null && AssetReferenceCodec.IsWrittenInline(inline) => reference(inline),
         CanonicalInlineTable inline => ToObject(inline, path, reference),
         CanonicalTomlTable nested => ToObject(nested, path, reference),
         string text => JsonValue.Create(text),

@@ -27,6 +27,8 @@ public class RenderPipelineTests
 
         public void Resize(uint width, uint height) => Resized++;
 
+        public void PrepareFrame() => Log.Add("prepare " + Definition.Name);
+
         public void BeforeSubmit() => Log.Add("submit " + Definition.Name);
 
         public void OnEnabledChanged(bool enabled)
@@ -62,6 +64,31 @@ public class RenderPipelineTests
     }
 
     private static FrameGraph GraphWithTextures() => new(new GraphTextureRegistry(new FakeTextureFactory()));
+
+    [Test]
+    public async Task preparation_runs_in_feature_order_and_keeps_the_setup_switch_snapshot()
+    {
+        var log = new List<string>();
+        var a = new Probe("a") { Log = log };
+        var b = new Probe("b") { Log = log };
+        var c = new Probe("c", enabledByDefault: false) { Log = log };
+        using var pipeline = new RenderPipeline(8, 8, new FeatureSwitches())
+            .Add(b, 200).Add(a, 100).Add(c, 300);
+        log.Clear();
+        pipeline.BeginFrame();
+        pipeline.Switches.Set(a.Definition.Id, false);
+        pipeline.Switches.Set(c.Definition.Id, true);
+        pipeline.PrepareFrame();
+        pipeline.Setup(GraphWithTextures());
+        await Assert.That(log).IsEquivalentTo(
+            ["prepare test.a", "prepare test.b", "test.a", "test.b"], CollectionOrdering.Matching);
+        log.Clear();
+        pipeline.PrepareFrame();
+        pipeline.Setup(GraphWithTextures());
+        await Assert.That(log).IsEquivalentTo(
+            ["off test.a", "on test.c", "prepare test.b", "prepare test.c", "test.b", "test.c"],
+            CollectionOrdering.Matching);
+    }
 
     [Test]
     public async Task features_set_up_in_list_order_and_skip_the_disabled()
@@ -122,14 +149,9 @@ public class RenderPipelineTests
             .IsEquivalentTo(["off test.b", "test.a", "test.c", "submit test.a", "submit test.c"], CollectionOrdering.Matching);
     }
 
-    /// <summary>A switch flipped WHILE the frame is being built does not take effect until the
-    /// next one. Every phase — requirements, setup, BeforeSubmit — reads the answer the frame
-    /// began with.
-    ///
-    /// <para>Read live at each phase instead, this is a half-configured frame: the shadow pass
-    /// sets up, stages its caster ring while the graph records, and then never gets the
-    /// BeforeSubmit that uploads it, so the submitted stream draws from a buffer nobody
-    /// filled.</para></summary>
+    /// <summary>A switch changed during a frame applies to the next frame.</summary>
+    /// <remarks>Requirements, setup and BeforeSubmit must share one snapshot, or recorded data may
+    /// never be uploaded.</remarks>
     [Test]
     public async Task a_switch_flipped_during_a_frame_lands_on_the_next_one()
     {

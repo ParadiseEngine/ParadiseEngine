@@ -3,34 +3,16 @@ using Paradise.Editor.Core.Extensibility;
 
 namespace Paradise.Editor.Core.Operators;
 
-/// <summary>The reference <see cref="IOperatorDispatcher"/>: resolve an id, refuse what is not
-/// available, run the rest, and report what happened.</summary>
-/// <remarks>
-/// <para>
-/// Reporting belongs here rather than in each operator because every menu click, keybind and
-/// palette entry passes through this one method. A panel that dispatches an id has nothing useful
-/// to say about the outcome, and an operator that reported its own would word it differently in
-/// every extension.
-/// </para>
-/// <para>
-/// An operator that throws is caught and reported as <see cref="OperatorResult.Failed"/>. The
-/// alternative is worse than it looks: an exception escaping here unwinds through the host's
-/// in-progress ImGui frame with <c>Begin</c>/<c>End</c> unbalanced, so a bad operator in one panel
-/// corrupts the NEXT frame rather than its own, and the editor dies somewhere that does not name
-/// it. The log line is what a game's stack sees when the same extension misbehaves in-game.
-/// </para>
-/// </remarks>
+/// <summary>Resolves, runs and reports operators for all editor entry points.</summary>
+/// <remarks>Catches operator failures so exceptions cannot unwind an unbalanced ImGui frame.</remarks>
 public sealed partial class OperatorDispatcher(
     IOperatorContext context, IRegistry<IOperator> operators, ILogger? logger = null)
     : IOperatorDispatcher
 {
-    // Read through the fields, never the parameters: a primary-constructor parameter used BOTH in
-    // a field initializer and in a method body is CS9124.
+    // Use the field to avoid primary-constructor double capture (CS9124).
     private readonly IOperatorContext _context = context;
 
-    // Falls back to the CONTEXT's logger rather than to silence. A host that installed a real one
-    // and constructed this with two arguments would otherwise lose exactly the reports it wanted
-    // — unknown id, unavailable, threw — while every operator's own lines kept arriving.
+    // Use the host's logger unless the caller overrides it.
     private readonly ILogger _logger = logger ?? context.Log;
 
     /// <summary>The LAST registration wins, so a game overrides a built-in operator by id — the

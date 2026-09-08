@@ -1,22 +1,7 @@
-// Flat C surface over the Wwise sound engine, for P/Invoke from Paradise.Audio.Wwise.
-//
-// WHY THIS EXISTS. Wwise ships C++ static libraries. Wwise 2026 does expose a partial flat-C API
-// (AK_SoundEngine_Init, AK_CommandBuffer_*, AK_Option_Set*), but three things a real integration
-// needs are C++-only and cannot be reached from C#:
-//
-//   - AK::SoundEngine::LoadBank      — no C alias, and no AkCommand for it either
-//   - AK::StreamMgr::IAkLowLevelIOHook — an interface; the engine cannot stream a soundbank
-//                                        without an instance, and instantiating one means C++
-//   - AK::Comm                       — profiler connection, options-driven but C++-declared
-//
-// So this library links Wwise, owns the one IO hook instance, and re-exports everything the
-// managed side needs as `extern "C"`. It deliberately stays a thin translation layer: no caching,
-// no state beyond the hook, no policy. Everything above (game objects, event ids, tick order)
-// belongs in managed code where it can be tested.
-//
-// THREAD AFFINITY. Wwise's API is thread-safe, but this library assumes a single caller thread
-// for the whole lifecycle — Paradise drives it from the sim thread, which is where the published
-// world state it reads already lives.
+// Flat C entry points for Paradise.Audio.Wwise. Wwise bank loading, streaming IO hooks and profiler
+// setup require C++; this shim owns the IO hook and exposes those operations for P/Invoke. Game
+// policy stays in managed code.
+// Use one caller thread throughout the lifecycle; Paradise calls from simulation.
 
 #ifndef PARADISE_WWISE_H_
 #define PARADISE_WWISE_H_
@@ -46,20 +31,10 @@ extern "C" {
 
 // ---- lifecycle ------------------------------------------------------------------------------
 
-/// Initialize the memory manager, stream manager, low-level I/O and sound engine.
-///
-/// in_soundBankPath is the directory soundbanks are resolved against (the generated Mac bank
-/// folder). in_enableProfiler opens the Wwise Authoring profiler ports; it is a no-op in a
-/// Release (AK_OPTIMIZED) build of this library, where Wwise strips comms entirely.
-///
-/// in_useSubfoldering selects the on-disk LAYOUT of that folder, and it is not cosmetic:
-///   0 — flat: every .bnk and .wem sits directly in the folder.
-///   1 — the layout Wwise emits for auto-defined SoundBanks: banks under Event/ and Bus/, loose
-///       media under Media/. Pass BARE file names for banks in this mode; the resolver supplies
-///       the subfolder itself.
-/// Choosing wrong is not a load failure — banks load either way — but every sound then reports
-/// "Media <id> was not loaded for this source" and nothing is audible.
-/// Returns AKRESULT.
+/// Initialize Wwise and its streaming hook; returns AKRESULT.
+/// in_soundBankPath is the bank directory. Profiler support is absent in AK_OPTIMIZED builds.
+/// in_useSubfoldering: 0 for flat .bnk/.wem files, 1 for Event/Bus banks and Media files.
+/// In subfolder mode pass bare bank names; the wrong layout loads banks but fails media playback.
 PDX_WWISE_API int32_t Pdx_Wwise_Init(
     const char* in_soundBankPath, int32_t in_enableProfiler, int32_t in_useSubfoldering);
 
@@ -86,9 +61,7 @@ PDX_WWISE_API int32_t Pdx_Wwise_RegisterGameObj(uint64_t in_gameObject, const ch
 
 PDX_WWISE_API int32_t Pdx_Wwise_UnregisterGameObj(uint64_t in_gameObject);
 
-/// Position an object. The orientation vectors must be unit length and orthogonal — Wwise
-/// rejects the call outright otherwise, which is a silent-audio bug that is hard to spot from
-/// the game side, so the managed wrapper normalizes before calling.
+/// Position an object; the shim orthonormalizes orientation vectors before calling Wwise.
 PDX_WWISE_API int32_t Pdx_Wwise_SetPosition(
     uint64_t in_gameObject,
     float in_posX, float in_posY, float in_posZ,
@@ -122,13 +95,8 @@ PDX_WWISE_API int32_t Pdx_Wwise_SetState(uint32_t in_stateGroup, uint32_t in_sta
 
 // ---- offline capture ---------------------------------------------------------------------------
 
-/// Start writing the master output to a .wav alongside playing it.
-///
-/// This is the only way to assert that something is actually AUDIBLE. Most of the ways a Wwise
-/// integration fails are silent: an unresolved switch, a missing bank, an unregistered codec and
-/// an event that plays a container with no children all return success and produce no sound. A
-/// captured file that is all zeroes distinguishes "played nothing" from "played something",
-/// which no return code does.
+/// Capture master output to WAV while playing. Captured samples expose silent playback
+/// failures (missing banks, codecs or content) that successful API results cannot detect.
 PDX_WWISE_API int32_t Pdx_Wwise_StartOutputCapture(const char* in_fileName);
 
 PDX_WWISE_API int32_t Pdx_Wwise_StopOutputCapture(void);

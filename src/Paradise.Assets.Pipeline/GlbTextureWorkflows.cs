@@ -13,12 +13,8 @@ public enum ConversionResult
     Failed,
 }
 
-/// <summary>
-/// The path-based texture workflows of the editor hosts (Godot's data/ converter): encode a
-/// standalone image, embed a GLB's textures as KTX2, or externalise them. Thin: tool resolution
-/// is <see cref="KtxTool"/>'s, the rewrite is <see cref="GlbTextureRewriter"/>'s, and every
-/// output lands by temp-then-rename so a killed run leaves the input GLB whole.
-/// </summary>
+/// <summary>Encodes standalone images and embeds or externalizes GLB textures for editor hosts.</summary>
+/// <remarks><see cref="KtxTool"/> resolves tools, <see cref="GlbTextureRewriter"/> rewrites bytes, and temp-then-rename preserves inputs on interruption.</remarks>
 public static partial class GlbTextureWorkflows
 {
     /// <summary>Encodes a standalone image to a KTX2 beside it; skipped by timestamp when the output is newer.</summary>

@@ -10,9 +10,7 @@ public sealed class WorkStealingWaveScheduler : IWaveScheduler
 {
     private readonly WorkStealingPool _pool;
 
-    /// <summary>
-    /// Initializes a new <see cref="WorkStealingWaveScheduler"/> backed by the specified pool.
-    /// </summary>
+    /// <summary>Initializes a new <see cref="WorkStealingWaveScheduler"/> backed by the specified pool.</summary>
     /// <param name="pool">The work-stealing pool to dispatch work items to. Must outlive this scheduler.</param>
     public WorkStealingWaveScheduler(WorkStealingPool pool)
     {

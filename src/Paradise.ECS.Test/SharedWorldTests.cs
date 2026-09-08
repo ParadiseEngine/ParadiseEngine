@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for SharedWorld and multiple worlds sharing resources.
-/// </summary>
+/// <summary>Tests for SharedWorld and multiple worlds sharing resources.</summary>
 public sealed class SharedWorldTests : IDisposable
 {
     private readonly SharedWorld<SmallBitSet<ulong>, DefaultConfig> _sharedWorld;

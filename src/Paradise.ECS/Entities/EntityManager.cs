@@ -15,9 +15,7 @@ public sealed class EntityManager : IEntityManager
     private readonly EntityIdAllocator _allocator;
     private int _aliveCount; // Number of currently alive entities
 
-    /// <summary>
-    /// Creates a new EntityManager.
-    /// </summary>
+    /// <summary>Creates a new EntityManager.</summary>
     /// <param name="initialCapacity">Initial capacity for entity storage.</param>
     /// <param name="maxEntityId">The maximum entity ID that can be allocated.</param>
     public EntityManager(int initialCapacity, int maxEntityId = int.MaxValue)
@@ -27,27 +25,21 @@ public sealed class EntityManager : IEntityManager
         _allocator = new EntityIdAllocator(maxEntityId);
     }
 
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     public int AliveCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _aliveCount;
     }
 
-    /// <summary>
-    /// Gets the current capacity of the entity storage.
-    /// </summary>
+    /// <summary>The current capacity of the entity storage.</summary>
     public int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _packedLocations.Count;
     }
 
-    /// <summary>
-    /// Gets the thread-safe entity ID allocator used by this manager.
-    /// </summary>
+    /// <summary>The thread-safe entity ID allocator used by this manager.</summary>
     public EntityIdAllocator Allocator
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -96,7 +88,6 @@ public sealed class EntityManager : IEntityManager
 
         var location = EntityLocation.FromPacked(_packedLocations[entity.Id]);
 
-        // Check if already destroyed (stale handle)
         if (location.Version != entity.Version)
             return;
 
@@ -109,9 +100,7 @@ public sealed class EntityManager : IEntityManager
         _aliveCount--;
     }
 
-    /// <summary>
-    /// Checks if the entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if the entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive, false if destroyed or invalid.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -127,9 +116,7 @@ public sealed class EntityManager : IEntityManager
         return EntityLocation.FromPacked(_packedLocations[entity.Id]).Version == entity.Version;
     }
 
-    /// <summary>
-    /// Gets the location for the specified entity ID.
-    /// </summary>
+    /// <summary>The location for the specified entity ID.</summary>
     /// <param name="entityId">The entity ID.</param>
     /// <returns>The entity location.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -138,9 +125,7 @@ public sealed class EntityManager : IEntityManager
         return EntityLocation.FromPacked(_packedLocations[entityId]);
     }
 
-    /// <summary>
-    /// Sets the location for the specified entity ID.
-    /// </summary>
+    /// <summary>Sets the location for the specified entity ID.</summary>
     /// <param name="entityId">The entity ID.</param>
     /// <param name="location">The new location.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -149,16 +134,13 @@ public sealed class EntityManager : IEntityManager
         _packedLocations[entityId] = location.Packed;
     }
 
-    /// <summary>
-    /// Ensures the list has enough elements for the given entity id.
-    /// </summary>
+    /// <summary>Ensures the list has enough elements for the given entity id.</summary>
     private void EnsureCapacity(int id)
     {
         int requiredCount = id + 1;
         if (requiredCount <= _packedLocations.Count)
             return;
 
-        // Ensure internal capacity, then add default elements
         _packedLocations.EnsureCapacity(requiredCount);
         for (int i = _packedLocations.Count; i < requiredCount; i++)
         {
@@ -166,9 +148,7 @@ public sealed class EntityManager : IEntityManager
         }
     }
 
-    /// <summary>
-    /// Releases all resources used by this instance.
-    /// </summary>
+    /// <summary>Releases all resources used by this instance.</summary>
     public void Clear()
     {
         _allocator.Clear();
@@ -176,22 +156,17 @@ public sealed class EntityManager : IEntityManager
         _aliveCount = 0;
     }
 
-    /// <summary>
-    /// Copies all entity state from the source manager to this manager.
-    /// </summary>
+    /// <summary>Copies all entity state from the source manager to this manager.</summary>
     /// <param name="source">The source EntityManager to copy from.</param>
     internal void CopyFrom(EntityManager source)
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        // Copy packed locations (direct memory copy)
         CollectionsMarshal.SetCount(_packedLocations, source._packedLocations.Count);
         CollectionsMarshal.AsSpan(source._packedLocations).CopyTo(CollectionsMarshal.AsSpan(_packedLocations));
 
-        // Copy allocator state
         _allocator.CopyFrom(source._allocator);
 
-        // Copy counter
         _aliveCount = source._aliveCount;
     }
 }

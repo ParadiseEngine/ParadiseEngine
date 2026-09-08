@@ -6,14 +6,9 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Shadow mapping: a Depth32Float 2D-array with one layer per shadow view, filled by
-/// per-layer depth-only caster passes at <see cref="RenderPassEvent.Shadows"/> and sampled as a
-/// depth array by the scene pass.
-///
-/// <para>Each frame plans one view per shadow-casting light face — directional and spot take one
-/// layer, point takes six — and grows the array to fit. The plan is what the scene's frame
-/// uniforms carry to the shader, so <see cref="SceneFeature"/> reads it after this feature's
-/// setup has run.</para></summary>
+/// <summary>Renders shadow-casting light views into a depth texture array.</summary>
+/// <remarks>Directional and spot lights use one layer; point lights use six. SceneFeature reads the
+/// plan after shadow setup.</remarks>
 public sealed class ShadowFeature : IRenderFeature
 {
     private const uint DefaultMapSize = 1024;
@@ -263,16 +258,9 @@ public sealed class ShadowFeature : IRenderFeature
         return _skinnedPipeline;
     }
 
-    // Light-space view-projection for one shadow face: directional = ortho fit to a camera-centred
-    // circle (falling back to the scene AABB for small scenes); spot = perspective down the cone;
-    // point = one of six 90°-FOV cube faces.
-    //
-    // texelWorld is the shadow texel's WORLD size, the quantity the shader scales its normal-offset
-    // bias by (SceneLight.sizeParams.y): a fixed world-space bias is only ever tuned for one texel
-    // size, and any coarser map (smaller texture, larger footprint) outgrows it and self-shadows in
-    // diagonal bands. Ortho (directional) texels have one world size; perspective (spot/point)
-    // texels grow with distance, so those report metres PER METRE of receiver distance and the
-    // shader multiplies by its own distance to the light.
+    // Shadow projection: directional uses a camera-centered orthographic fit, spot its cone, and
+    // point six 90-degree faces. texelWorld scales bias in meters for directional lights, or meters
+    // per meter of receiver distance for perspective lights.
     private Matrix4x4 ComputeLightMatrix(
         PbrLight light, int face, Vector3 center, Vector3 extent, Vector3 cameraPosition,
         out float texelWorld)
@@ -339,23 +327,10 @@ public sealed class ShadowFeature : IRenderFeature
         extent = (max - min) * 0.5f;
     }
 
-    // Directional light view-projection (RH, clip-Z [0,1]).
-    //
-    // The XY footprint is a SQUARE of side 2·min(shadowRadius, sceneRadius), centred on the
-    // camera (clamped into the scene AABB) — not the scene AABB itself. Fitting the whole scene
-    // is what made a growing world quietly destroy its own shadow quality: texel size scales with
-    // the AABB, blurring every shadow edge (the acne this once caused is gone — the bias now
-    // scales with texelWorld — but the resolution loss is inherent).
-    // A camera-centred fit keeps metres-per-texel constant forever. Two details carry it:
-    //
-    // * The centre is SNAPPED to whole shadow texels in the light's plane basis, so the box
-    //   translates in texel steps as the camera glides and shadow edges do not shimmer. The basis
-    //   is derived from the light direction alone, so it is stable frame to frame.
-    // * The DEPTH range still spans the scene AABB along the light, so a tall caster outside the
-    //   circle (a skyline tower, the highway deck) still lays its shadow across it.
-    //
-    // When the scene fits inside the radius anyway (or the radius is disabled with <= 0), the
-    // legacy whole-AABB fit applies — a small scene keeps its tighter, non-square box.
+    // Directional projection is right-handed with clip Z in [0,1]. Fit a camera-centered square
+    // limited by shadowRadius and snap its center to light-space texels to avoid shimmer. Depth
+    // still spans the scene so distant tall casters contribute. Small scenes or a disabled radius
+    // retain the tighter whole-AABB fit.
     private static Matrix4x4 ComputeDirectionalLightMatrix(
         Vector3 surfaceToLight, Vector3 center, Vector3 extent, Vector3 cameraPosition,
         float shadowRadius, uint shadowMapSize, out float texelWorld)

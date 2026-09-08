@@ -7,15 +7,8 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>Builds the logger the CLI hands to the asset pipeline, and the path renderer that goes with it.</summary>
-/// <remarks>
-/// This is the host half of issue #232's seam, and the whole of what the seam is for. The pipeline
-/// logs a <see cref="UPath"/> — <c>/</c>-separated, rooted at whatever it was mounted on — because
-/// it does not know what that is mounted over and must not guess: <c>ConvertPathToInternal</c>
-/// throws on a <c>MemoryFileSystem</c>, so a reader that translated its own paths would be a
-/// try/catch in every type whose point is not caring. The CLI mounted the filesystem, so the CLI
-/// is what can translate, and this is where it does it once for every message.
-/// </remarks>
+/// <summary>Creates the CLI's pipeline logger and mounted-path renderer.</summary>
+/// <remarks>Only the host translates <see cref="UPath"/> values; memory mounts may not have physical paths.</remarks>
 internal static class PipelineLog
 {
     /// <summary>The pipeline's logger: bare lines on the console, with paths rendered for a person.</summary>
@@ -31,9 +24,7 @@ internal static class PipelineLog
                 RenderValue = value => value is UPath path ? Render(fileSystem, layout, path) : null,
             });
 
-    /// <summary>
-    /// Project-relative under <c>assets/</c>, a host path anywhere else.
-    /// </summary>
+    /// <summary>Project-relative under <c>assets/</c>, a host path anywhere else.</summary>
     /// <remarks>
     /// Relative is what the watch log wants: <c>props/lamp.glb</c> is what the author typed into
     /// their DCC and is unambiguous inside a project. A path OUTSIDE the assets tree has no such

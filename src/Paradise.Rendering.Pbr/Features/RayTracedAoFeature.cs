@@ -6,14 +6,9 @@ using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Ray-traced ambient occlusion at <see cref="RenderPassEvent.AfterPrepass"/>: a
-/// compute pass that shoots a few hemisphere rays per pixel from the depth + normal pre-pass into
-/// the scene's BVH and writes the fraction that escape, which the scene pass multiplies its
-/// ambient by. The tracer's proving ground, and an alternative to SSAO in its own right.
-///
-/// <para>Runs while <see cref="PbrScene.RayTracedAo"/> is enabled and something opaque exists;
-/// it requires the pre-pass through <see cref="FrameRequirements.DepthNormalPrepass"/> and
-/// publishes <see cref="PbrResults.RayTracedAo"/>. Off, it declares nothing.</para></summary>
+/// <summary>Computes ambient occlusion from hemisphere rays against the scene BVH.</summary>
+/// <remarks>Requires opaque geometry and the depth/normal prepass, then publishes RayTracedAo;
+/// disabled frames declare no pass.</remarks>
 public sealed class RayTracedAoFeature : IRenderFeature
 {
     [StructLayout(LayoutKind.Sequential, Size = 96)]

@@ -44,9 +44,7 @@ namespace Paradise.ECS;
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
 public sealed class ComponentAttribute : Attribute
 {
-    /// <summary>
-    /// Gets or sets the manual component ID. When set, this ID is used instead of auto-assignment.
-    /// </summary>
+    /// <summary>Gets or sets the manual component ID. When set, this ID is used instead of auto-assignment.</summary>
     /// <remarks>
     /// Use this to ensure a component always has the same ID regardless of other components
     /// in the project. Auto-assigned IDs will skip over manually assigned values.

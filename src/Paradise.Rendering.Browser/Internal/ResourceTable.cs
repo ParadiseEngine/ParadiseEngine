@@ -3,14 +3,9 @@ using System.Collections.Generic;
 
 namespace Paradise.Rendering.Browser.Internal;
 
-/// <summary>Generation-tracked slot allocator for one resource kind. Unlike the Dawn backend's
-/// <c>SlotTable&lt;T&gt;</c> this stores no value: the GPU object lives in the JS table at the SAME
-/// index, so the slot number IS the JS index and only liveness plus the generation counter need a
-/// managed home. Generation 0 stays reserved as the invalid sentinel, matching the
-/// <c>IsValid</c> contract on <c>Paradise.Rendering</c>'s handle structs.</summary>
-/// <remarks>Freed slots are recycled through a LIFO free list, and each recycle bumps the slot's
-/// generation, so a handle to the previous occupant stops resolving instead of silently addressing
-/// the new one.</remarks>
+/// <summary>Tracks resource generations at matching managed and JavaScript slot indices.</summary>
+/// <remarks>Generation zero is invalid. Freed slots are reused with a new generation so stale
+/// handles cannot address replacement objects.</remarks>
 internal sealed class ResourceTable
 {
     private readonly List<uint> _generations = new();

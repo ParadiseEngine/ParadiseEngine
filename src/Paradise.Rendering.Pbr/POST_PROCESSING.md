@@ -66,7 +66,8 @@ The scene setting and engine switch must both allow the effect.
 
 | Stage | Setup order | GPU event |
 | --- | ---: | ---: |
-| Current HDR / optional temporal antialiasing | 720 | 1200 |
+| Fog | 710 | 1150 |
+| Temporal antialiasing (TAA) | 720 | 1200 |
 | Exposure | 730 | 1210 |
 | Depth of field | 740 | 1220 |
 | Motion blur | 750 | 1230 |
@@ -75,7 +76,7 @@ The scene setting and engine switch must both allow the effect.
 | Color grading | 910 | 1610 |
 | Lens distortion / chromatic aberration | 920 / 925 | 1620 / 1625 |
 | Vignette / film grain / sharpening | 930 / 940 / 950 | 1630 / 1640 / 1650 |
-| Optional display antialiasing | 960 | 1660 |
+| Display antialiasing (FXAA) | 960 | 1660 |
 | Presentation | 1000 | 1750 |
 | Host overlay | host-defined | 1800 |
 

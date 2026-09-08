@@ -1,4 +1,7 @@
-// Linear HDR bloom and tonemapping; OETF is used only for direct presentation.
+// Adds bloom to linear HDR, applies tone mapping once, and writes the swapchain. Use linear output
+// for sRGB formats; otherwise select the fragment entry that applies the sRGB OETF.
+
+#include "Common/tonemapping.slang"
 
 struct CompositeUniforms
 {
@@ -31,8 +34,6 @@ Varyings compositeVertex(uint vertexId : SV_VertexID)
     output.uv = float2(p.x, 1.0 - p.y);
     return output;
 }
-
-#include "Common/tonemapping.slang"
 
 float3 composite(float2 uv)
 {

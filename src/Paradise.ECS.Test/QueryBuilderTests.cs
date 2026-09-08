@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// Tests for <see cref="QueryBuilder{TBits}"/>.
-/// </summary>
+/// <summary>Tests for <see cref="QueryBuilder{TBits}"/>.</summary>
 public sealed class QueryBuilderTests
 {
     [Test]

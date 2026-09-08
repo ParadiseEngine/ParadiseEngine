@@ -1,12 +1,8 @@
 namespace Paradise.ECS.Sample;
 
-// ============================================================================
 // Component Definitions
-// ============================================================================
 
-/// <summary>
-/// Position component for 2D game entities.
-/// </summary>
+/// <summary>Position component for 2D game entities.</summary>
 [System.Runtime.InteropServices.Guid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890")]
 [Component]
 public partial struct Position
@@ -23,9 +19,7 @@ public partial struct Position
     public override readonly string ToString() => $"({X}, {Y})";
 }
 
-/// <summary>
-/// Velocity component for moving entities.
-/// </summary>
+/// <summary>Velocity component for moving entities.</summary>
 [System.Runtime.InteropServices.Guid("B2C3D4E5-F678-90AB-CDEF-123456789012")]
 [Component]
 public partial struct Velocity
@@ -42,9 +36,7 @@ public partial struct Velocity
     public override readonly string ToString() => $"({X}, {Y})";
 }
 
-/// <summary>
-/// Health component for damageable entities.
-/// </summary>
+/// <summary>Health component for damageable entities.</summary>
 [System.Runtime.InteropServices.Guid("C3D4E5F6-7890-ABCD-EF12-345678901234")]
 [Component]
 public partial struct Health
@@ -70,9 +62,7 @@ public partial struct PlayerTag;
 [Tag]
 public partial struct EnemyTag;
 
-/// <summary>
-/// Name component for named entities.
-/// </summary>
+/// <summary>Name component for named entities.</summary>
 [System.Runtime.InteropServices.Guid("F6789012-CDEF-1234-5678-901234567890")]
 [Component]
 public partial struct Name

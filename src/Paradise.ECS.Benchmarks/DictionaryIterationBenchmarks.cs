@@ -48,9 +48,7 @@ public class DictionaryIterationBenchmarks
         _frozenDictionary = _dictionary.ToFrozenDictionary();
     }
 
-    // ============================================================================
     // Iterate KeyValuePairs (foreach on entire collection)
-    // ============================================================================
 
     [Benchmark(Baseline = true)]
     public long Dictionary_IterateKeyValuePairs()
@@ -107,9 +105,7 @@ public class DictionaryIterationBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // Iterate Keys only
-    // ============================================================================
 
     [Benchmark]
     public long Dictionary_IterateKeys()
@@ -166,9 +162,7 @@ public class DictionaryIterationBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // Iterate Values only
-    // ============================================================================
 
     [Benchmark]
     public long Dictionary_IterateValues()
@@ -225,9 +219,7 @@ public class DictionaryIterationBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // Span-based iteration (where applicable)
-    // ============================================================================
 
     [Benchmark]
     public long ListAsSpan_IterateKeyValuePairs()
@@ -277,9 +269,7 @@ public class DictionaryIterationBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // Get/Lookup by key
-    // ============================================================================
 
     [Benchmark]
     public long Dictionary_Get()
@@ -336,9 +326,7 @@ public class DictionaryIterationBenchmarks
         return sum;
     }
 
-    // ============================================================================
     // TryGetValue
-    // ============================================================================
 
     [Benchmark]
     public long Dictionary_TryGetValue()

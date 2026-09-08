@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Sample.Samples;
 
-/// <summary>
-/// Demonstrates a simple game loop simulation with movement updates.
-/// </summary>
+/// <summary>Demonstrates a simple game loop simulation with movement updates.</summary>
 public static class GameLoopSample
 {
     public static void Run(World world, EntityQueryResult movableQuery)

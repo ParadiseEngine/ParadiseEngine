@@ -119,11 +119,8 @@ public class PipelineDescTests
     [Test]
     public async Task layout_is_compared_structurally_not_by_reference()
     {
-        // Regression: ShaderProgramLoader.BuildProgramDesc mints a fresh PipelineLayoutDesc per
-        // load, so two loads of the same shader produce distinct Layout references. Reference-
-        // equality Equals/ContentHash defeated the pipeline cache for that path — a cache miss
-        // retained a duplicate native pipeline for the renderer's lifetime. Structural equality
-        // (bind-group + push-constant deep walk) fixes the cache hit.
+        // Equivalent independently loaded layouts must share the pipeline cache by structural
+        // content, not object identity.
         var layoutA = new PipelineLayoutDesc(
             Groups: Array.Empty<BindGroupLayoutDesc>(),
             PushConstants: Array.Empty<PushConstantRangeDesc>());

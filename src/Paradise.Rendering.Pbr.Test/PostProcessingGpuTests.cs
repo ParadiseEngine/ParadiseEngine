@@ -51,7 +51,7 @@ public class PostProcessingGpuTests
         {
             frame.Textures.Ensure("PostTestPattern", PbrTargets.RenderTarget(frame.Width, frame.Height, PbrTargets.HdrFormat));
             var target = frame.Graph.Texture("PostTestPattern");
-            frame.Graph.AddRasterPass("Test.PostPattern", RenderPassEvent.AfterTransparent, 90)
+            frame.Graph.AddRasterPass("Test.PostPattern", RenderPassEvent.AfterTransparent, 40)
                 .Color(0, target, LoadOp.Clear).Record(this, Record);
             frame.Blackboard.Advance(PbrResults.SceneColor,
                 frame.Blackboard.GetOrDefault(PbrResults.SceneColor, default), target);
@@ -66,7 +66,7 @@ public class PostProcessingGpuTests
 
     private static PbrScene Pattern(PbrRenderer pbr, WebGpuRenderer backend)
     {
-        pbr.Pipeline.Add(new PatternFeature(backend), 710);
+        pbr.Pipeline.Add(new PatternFeature(backend), PbrFeatureOrder.Fog - 1);
         var scene = Flat(0.1f);
         float[] vertices =
         [
@@ -229,6 +229,9 @@ public class PostProcessingGpuTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = Pattern(pbr, backend);
         var baseline = Render(backend, pbr, scene);
+        scene.Fog = new PbrFog { Enabled = true, Density = 0.2f, HeightFalloff = 0, LightScattering = false };
+        scene.Taa = new PbrTaa { Enabled = true };
+        scene.Fxaa = new PbrFxaa { Enabled = true };
         scene.Exposure = new PbrExposure { Enabled = true, Automatic = true };
         scene.DepthOfField = new PbrDepthOfField { Enabled = true };
         scene.MotionBlur = new PbrMotionBlur { Enabled = true };
@@ -244,7 +247,19 @@ public class PostProcessingGpuTests
         var passes = pbr.LastPassNames.ToArray();
         await Assert.That(Array.IndexOf(passes, "Exposure.Apply")).IsLessThan(Array.IndexOf(passes, "Bloom.Bright"));
         await Assert.That(Array.IndexOf(passes, "Composite")).IsLessThan(Array.IndexOf(passes, "Post.ColorGrading"));
+        var ordered = new[] { "Test.PostPattern", "Fog.Integrate", "Taa.Resolve", "Exposure.Apply",
+            "Post.DepthOfField", "Post.MotionBlur", "Bloom.Bright", "Composite", "Post.ColorGrading",
+            "Post.LensDistortion", "Post.ChromaticAberration", "Post.Vignette", "Post.FilmGrain",
+            "Post.Sharpening", "Fxaa.Resolve", "Presentation" };
+        var previous = -1;
+        foreach (var name in ordered)
+        {
+            var index = Array.IndexOf(passes, name);
+            await Assert.That(index).IsGreaterThan(previous);
+            previous = index;
+        }
         await Assert.That(passes[^1]).IsEqualTo("Presentation");
+        scene.Fog = new(); scene.Taa = new(); scene.Fxaa = new();
         scene.Exposure = new(); scene.DepthOfField = new(); scene.MotionBlur = new(); scene.Bloom = new();
         scene.ColorGrading = new(); scene.LensDistortion = new(); scene.ChromaticAberration = new();
         scene.Vignette = new(); scene.FilmGrain = new(); scene.Sharpening = new();

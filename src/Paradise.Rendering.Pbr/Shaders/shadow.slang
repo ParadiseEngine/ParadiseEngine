@@ -1,8 +1,5 @@
-// shadow.slang — depth-only shadow caster. Renders scene geometry from a light's point of view
-// into the shadow atlas; the pipeline writes only depth (no fragment entry / no color target).
-// The caller pre-multiplies the light view-projection with each object's model matrix (lightMvp),
-// so this shader needs no separate model/frame data. The vertex layout matches pbr.slang's mesh
-// (position at location 0); the other interleaved attributes are ignored.
+// Depth-only shadow caster using precombined light-view/model matrices. Matches the full PBR vertex
+// stride while reading position only.
 
 struct ShadowDrawUniforms
 {

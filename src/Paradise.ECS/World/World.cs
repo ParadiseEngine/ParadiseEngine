@@ -33,18 +33,14 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// </summary>
     private bool _systemRunInProgress;
 
-    /// <summary>
-    /// Gets the number of currently alive entities.
-    /// </summary>
+    /// <summary>The number of currently alive entities.</summary>
     public int EntityCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _entityManager.AliveCount;
     }
 
-    /// <summary>
-    /// Gets all archetypes in this world.
-    /// </summary>
+    /// <summary>Gets all archetypes in this world.</summary>
     internal IReadOnlyList<Archetype<TMask, TConfig>?> Archetypes => _archetypeRegistry.Archetypes;
 
     /// <summary>
@@ -144,7 +140,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     {
         AssertStructuralChangesAllowed(nameof(CreateEntity));
 
-        // Collect component mask
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
 
@@ -184,7 +179,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         AssertStructuralChangesAllowed(nameof(OverwriteEntity));
         var location = GetValidatedLocation(entity);
 
-        // Collect component mask
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
 
@@ -207,18 +201,15 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         AssertStructuralChangesAllowed(nameof(AddComponents));
         var location = GetValidatedLocation(entity);
 
-        // Collect new component mask from builder
         var newMask = TMask.Empty;
         builder.CollectTypes(ref newMask);
 
         if (newMask.IsEmpty)
             return entity;
 
-        // Get current mask from entity's archetype
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
         var currentMask = sourceArchetype.Layout.ComponentMask;
 
-        // Merge masks and get target archetype
         var targetMask = currentMask.Or(newMask);
 
         // If all components already exist, just update values in place
@@ -232,10 +223,8 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
         var targetArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)targetMask);
 
-        // Allocate in target archetype
         int newGlobalIndex = targetArchetype.AllocateEntity(entity);
 
-        // Copy existing components from source
         var (srcChunkIndex, srcIndexInChunk) = sourceArchetype.GetChunkLocation(location.GlobalIndex);
         var srcChunkHandle = sourceArchetype.GetChunk(srcChunkIndex);
 
@@ -245,7 +234,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         CopySharedComponents(sourceArchetype, targetArchetype, srcChunkHandle, srcIndexInChunk, dstChunkHandle, dstIndexInChunk);
         RemoveFromCurrentArchetype(location);
 
-        // Update location
         var newLocation = new EntityLocation(entity.Version, targetArchetype.Id, newGlobalIndex);
         _entityManager.SetLocation(entity.Id, newLocation);
 
@@ -255,9 +243,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return entity;
     }
 
-    /// <summary>
-    /// Places an entity in the specified archetype and writes component data from the builder.
-    /// </summary>
+    /// <summary>Places an entity in the specified archetype and writes component data from the builder.</summary>
     private void PlaceEntityWithComponents<TBuilder>(
         Entity entity,
         Archetype<TMask, TConfig> archetype,
@@ -289,9 +275,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Destroys an entity and removes it from its archetype.
-    /// </summary>
+    /// <summary>Destroys an entity and removes it from its archetype.</summary>
     /// <param name="entity">The entity to destroy.</param>
     /// <returns>True if the entity was destroyed, false if it was already dead or invalid.</returns>
     public bool Despawn(Entity entity)
@@ -311,9 +295,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return true;
     }
 
-    /// <summary>
-    /// Checks if an entity is currently alive.
-    /// </summary>
+    /// <summary>Checks if an entity is currently alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -326,9 +308,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return _entityManager.IsAlive(entity);
     }
 
-    /// <summary>
-    /// Gets a reference to a component on an entity.
-    /// </summary>
+    /// <summary>A reference to a component on an entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <returns>A reference to the component.</returns>
@@ -372,9 +352,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return true;
     }
 
-    /// <summary>
-    /// Attempts to resolve an entity location to a component storage location.
-    /// </summary>
+    /// <summary>Attempts to resolve an entity location to a component storage location.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="location">The validated entity location.</param>
     /// <param name="handle">The chunk handle containing the component.</param>
@@ -407,9 +385,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return true;
     }
 
-    /// <summary>
-    /// Checks if an entity has a specific component.
-    /// </summary>
+    /// <summary>Checks if an entity has a specific component.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <returns>True if the entity has the component.</returns>
@@ -424,9 +400,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return archetype.Layout.HasComponent(T.TypeId);
     }
 
-    /// <summary>
-    /// Adds a component to an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <param name="value">The component value.</param>
@@ -437,14 +411,12 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         var location = GetValidatedLocation(entity);
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
-        // Check if already has component
         if (sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} already has component {typeof(T).Name}.");
 
         // Get target archetype using O(1) edge cache
         var targetArchetype = _archetypeRegistry.GetOrCreateWithAdd(sourceArchetype, T.TypeId);
 
-        // Move entity to target archetype
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
 
         // Skip writes for zero-size tag components (same guard as WithComponent.WriteComponents):
@@ -461,9 +433,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         _chunkManager.GetBytes(newChunkHandle).GetRef<T>(newOffset) = value;
     }
 
-    /// <summary>
-    /// Removes a component from an entity. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Removes a component from an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
@@ -473,14 +443,12 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         var location = GetValidatedLocation(entity);
         var sourceArchetype = _archetypeRegistry.GetById(location.ArchetypeId)!;
 
-        // Check if has component
         if (!sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
 
         // Get target archetype using O(1) edge cache (returns empty archetype if removing last component)
         var targetArchetype = _archetypeRegistry.GetOrCreateWithRemove(sourceArchetype, T.TypeId);
 
-        // Move entity to target archetype
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
     }
 
@@ -494,57 +462,42 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         get => _archetypeRegistry;
     }
 
-    /// <summary>
-    /// Gets the component type information array for this world.
-    /// </summary>
+    /// <summary>The component type information array for this world.</summary>
     public ImmutableArray<ComponentTypeInfo> TypeInfos
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _typeInfos;
     }
 
-    /// <summary>
-    /// Gets the chunk manager for this world.
-    /// Used by generated queryable types for direct component access.
-    /// </summary>
-    /// <summary>
-    /// The world's deferred event buffers. Holds each event
-    /// type's INCOMING events (produced last frame, read-many by systems this frame). Rides
-    /// <see cref="CopyFrom"/>, so events participate in the immutable snapshot.
-    /// </summary>
+    /// <summary>Last tick's events, preserved by <see cref="CopyFrom"/> snapshots.</summary>
     public WorldEventStore Events
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _events;
     }
 
+    /// <summary>The chunk manager used for direct component access.</summary>
     public ChunkManager ChunkManager
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _chunkManager;
     }
 
-    /// <summary>
-    /// Gets the entity manager for entity lifecycle and location tracking.
-    /// </summary>
+    /// <summary>The entity manager for entity lifecycle and location tracking.</summary>
     public IEntityManager EntityManager
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _entityManager;
     }
 
-    /// <summary>
-    /// Gets the thread-safe entity ID allocator backing this world's entity manager.
-    /// </summary>
+    /// <summary>The thread-safe entity ID allocator backing this world's entity manager.</summary>
     public EntityIdAllocator EntityIdAllocator
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _entityManager.Allocator;
     }
 
-    /// <summary>
-    /// Gets the Entity handle for a given entity ID.
-    /// </summary>
+    /// <summary>The Entity handle for a given entity ID.</summary>
     /// <param name="entityId">The entity ID.</param>
     /// <returns>The Entity handle with current version.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -560,20 +513,16 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         Archetype<TMask, TConfig> source,
         Archetype<TMask, TConfig> target)
     {
-        // Remember old location for swap-remove handling
         int oldGlobalIndex = location.GlobalIndex;
         var (oldChunkIndex, oldIndexInChunk) = source.GetChunkLocation(oldGlobalIndex);
         var oldChunkHandle = source.GetChunk(oldChunkIndex);
 
-        // Allocate in target archetype
         int newGlobalIndex = target.AllocateEntity(entity);
         var (newChunkIndex, newIndexInChunk) = target.GetChunkLocation(newGlobalIndex);
         var newChunkHandle = target.GetChunk(newChunkIndex);
 
-        // Copy shared component data
         CopySharedComponents(source, target, oldChunkHandle, oldIndexInChunk, newChunkHandle, newIndexInChunk);
 
-        // Remove from source archetype (swap-remove)
         int movedEntityId = source.RemoveEntity(oldGlobalIndex);
 
         // If an entity was moved during swap-remove, update its location
@@ -583,7 +532,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
             _entityManager.SetLocation(movedEntityId, new EntityLocation(movedLocation.Version, movedLocation.ArchetypeId, oldGlobalIndex));
         }
 
-        // Update the entity's location to the new archetype
         _entityManager.SetLocation(entity.Id, new EntityLocation(location.Version, target.Id, newGlobalIndex));
     }
 
@@ -652,9 +600,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Adds a component to an entity using raw bytes. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity using raw bytes. This is a structural change that may move the entity.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     /// <param name="data">The raw component data bytes. Must match the component's size exactly, or be empty for tag components.</param>
@@ -686,9 +632,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         }
     }
 
-    /// <summary>
-    /// Removes a component from an entity using a raw component ID. This is a structural change that may move the entity.
-    /// </summary>
+    /// <summary>Removes a component from an entity using a raw component ID. This is a structural change that may move the entity.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
@@ -705,9 +649,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
     }
 
-    /// <summary>
-    /// Sets a component value on an entity using raw bytes. This is NOT a structural change.
-    /// </summary>
+    /// <summary>Sets a component value on an entity using raw bytes. This is NOT a structural change.</summary>
     /// <param name="entity">The entity.</param>
     /// <param name="componentId">The component type ID.</param>
     /// <param name="data">The raw component data bytes. Must match the component's size exactly.</param>
@@ -747,9 +689,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         return _entityManager.GetLocation(entity.Id);
     }
 
-    /// <summary>
-    /// Gets the storage location of an entity.
-    /// </summary>
+    /// <summary>The storage location of an entity.</summary>
     /// <param name="entity">The entity to get the location of.</param>
     /// <returns>The entity's location containing archetype ID and global index.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the entity is invalid or not alive.</exception>

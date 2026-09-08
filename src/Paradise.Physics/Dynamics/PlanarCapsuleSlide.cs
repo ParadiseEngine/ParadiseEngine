@@ -2,12 +2,8 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>
-/// Horizontal cast-and-slide movement for a Y-aligned capsule against a static
-/// <see cref="CollisionWorld"/>: advance to a skin's clearance short of the first contact, then
-/// project the remainder onto the (horizontally flattened) wall plane and repeat.
-/// Planar contract: the returned position always keeps the input Y.
-/// </summary>
+/// <summary>Moves a Y-aligned capsule by horizontal casting and sliding, preserving its input Y.</summary>
+/// <remarks>Stops at skin clearance and projects remaining motion onto the horizontal wall plane.</remarks>
 public static class PlanarCapsuleSlide
 {
     private const int MaxSlideIterations = 4;

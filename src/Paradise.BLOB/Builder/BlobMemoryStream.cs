@@ -38,6 +38,6 @@ public class BlobMemoryStream : IBlobStream, IDisposable
 
     public void Dispose()
     {
-        _stream?.Dispose();
+        _stream.Dispose();
     }
 }

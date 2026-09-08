@@ -6,14 +6,8 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>The engine configuration reaching the renderer: a feature switched off is gone from
-/// the submitted frame, a feature switched back on returns to it, and the switch is honoured
-/// whether it was set before the renderer existed (a config file read at startup) or while it is
-/// running (a debug panel).
-///
-/// <para>Asserted on the passes that were actually submitted, and where the difference is
-/// visible, on the picture — a feature that ran and did nothing and a feature that was skipped
-/// look identical from inside.</para></summary>
+/// <summary>Checks feature switches against submitted passes and rendered output.</summary>
+/// <remarks>Covers startup overrides and runtime disable/re-enable transitions.</remarks>
 public class FeatureSwitchTests
 {
     private const uint Size = 96;
@@ -261,15 +255,9 @@ public class FeatureSwitchTests
         await Assert.That(switchedOff).IsEqualTo(withoutOcclusion).Within(0.01);
     }
 
-    /// <summary>Every built-in switched off ON ITS OWN, from before the renderer was built, and
-    /// then all of them at once — two frames each, and none of them may throw.
-    ///
-    /// <para>This is the general form of what the per-feature tests check one at a time, and it is
-    /// the case a running renderer never reaches: a feature switched off AFTER a frame has left
-    /// its state filled in, while one that was never on has not. The probe GI feature failed
-    /// exactly here — the scene binds the state buffer that feature's setup picks, and with the
-    /// probes configured off no setup ever picked one, so the frame died resolving a bind group
-    /// instead of rendering without indirect light.</para></summary>
+    /// <summary>Checks every built-in disabled at startup, separately and together.</summary>
+    /// <remarks>Render twice to catch state that was never initialized, including probe buffers the
+    /// scene still binds.</remarks>
     [Test]
     public async Task every_built_in_can_be_configured_off_before_the_first_frame()
     {

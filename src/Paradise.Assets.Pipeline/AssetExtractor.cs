@@ -795,9 +795,7 @@ public static partial class AssetExtractor
         /// <summary>A GLB float as the document's double: the float's shortest round-trip form, so <c>0.1f</c> is written <c>0.1</c> and not <c>0.10000000149011612</c>, and a hand-typed <c>0.1</c> fingerprints the same.</summary>
         private static double Widen(float value) => double.Parse(value.ToString("R", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
 
-        /// <summary>
-        /// Writes a starter prefab for a newly extracted model, and reports whether it wrote one.
-        /// </summary>
+        /// <summary>Writes a starter prefab for a newly extracted model, and reports whether it wrote one.</summary>
         /// <remarks>
         /// A SEED, not a projection: nothing records that this prefab came from this GLB, nothing
         /// updates it when the model changes, and nothing deletes it when the model goes (#256). It
@@ -912,11 +910,9 @@ public static partial class AssetExtractor
                 _warnings.Add($"project.toml names mesh component '{wanted}', which the schema does not have; choosing by name instead");
             }
 
-            var rigged = candidates.Where(c => c.Type.Contains("Skinned", StringComparison.OrdinalIgnoreCase)).ToList();
-            var chosen = skinned
-                ? rigged.FirstOrDefault(candidates[0])
-                : candidates.FirstOrDefault(c => !rigged.Contains(c), candidates[0]);
-            return chosen;
+            return candidates.FirstOrDefault(
+                c => c.Type.Contains("Skinned", StringComparison.OrdinalIgnoreCase) == skinned,
+                candidates[0]);
         }
 
         private void Write(AssetIndex index, UPath path, byte[] bytes)

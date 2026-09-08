@@ -5,11 +5,10 @@ using Paradise.Windowing;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>The promoted two-half core, driven the way a host drives it: events in on the sim
-/// half, snapshots and texture ops out on the render half.
-///
-/// <c>ImGuiUiCore</c> creates a context and leaves it current for the process, so these run
-/// serialized with every other ImGui test and each one starts from a context of its own.</summary>
+/// <summary>Drives the ImGui core from input events through snapshots and texture
+/// operations.</summary>
+/// <remarks>Tests use separate contexts and run serially because the current context is
+/// process-global.</remarks>
 [NotInParallel]
 public class ImGuiUiCoreTests
 {
@@ -19,11 +18,8 @@ public class ImGuiUiCoreTests
     private static ImGuiUiCore NewCore(Action draw)
     {
         var core = new ImGuiUiCore(Width, Height);
-        // The suite is a host, and this is the choice a host makes. Without it every test writes
-        // imgui.ini into the test binary's directory — ImGui saves on DestroyContext, not only on
-        // its timer — and the NEXT run restores those window positions, which beats a later
-        // ImGuiCond.FirstUseEver. Today's tests place windows unconditionally and survive it; that
-        // is luck, and this is the fix.
+        // Disable automatic layout persistence; DestroyContext also writes imgui.ini and could
+        // affect later tests.
         core.DisableIniFile();
         core.AddDraw(draw);
         return core;
@@ -173,13 +169,9 @@ public class ImGuiUiCoreTests
         await Assert.That(core.TryTakeClipboardCopy(out _)).IsFalse();
     }
 
-    /// <summary>The clipboard bridge driven through ImGui's OWN entry points, so the call crosses
-    /// the <c>[UnmanagedCallersOnly]</c> trampolines installed into <c>ImGuiPlatformIO</c>.
-    ///
-    /// The test above exercises only the managed cache — both halves of it are our own methods —
-    /// so it passes whether or not those function pointers ever reach cimgui. A field-offset
-    /// mismatch in Hexa's <c>ImGuiPlatformIO</c>, or a marshalling mistake in either trampoline,
-    /// would leave the UI unable to copy or paste and ship green.</summary>
+    /// <summary>Checks clipboard callbacks through ImGui native entry points.</summary>
+    /// <remarks>This covers the function-pointer ABI and unmanaged trampolines, which managed
+    /// clipboard-cache tests bypass.</remarks>
     [Test]
     public async Task the_clipboard_bridge_is_reached_through_native_imgui()
     {

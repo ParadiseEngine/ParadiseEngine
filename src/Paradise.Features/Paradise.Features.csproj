@@ -14,22 +14,13 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Features.Test" />
-    <!-- The reader builds FeatureSettings payloads; the constructor stays internal so no caller
-         can invent one whose "JSON" was never normalized from a document. -->
+    <!-- Only document readers construct normalized settings payloads. -->
     <InternalsVisibleTo Include="Paradise.Features.Toml" />
   </ItemGroup>
 
-  <!-- Named for what it holds rather than "Paradise.Configuration", which was the first choice
-       and is a trap: a namespace of that name is in scope for every file under Paradise.*, and
-       it then beats an IMPORTED type called Configuration. Every Coyote suite in this repo says
-       `Configuration.Create()` meaning Microsoft.Coyote's, and all six stopped compiling. -->
+  <!-- A Paradise.Configuration namespace would shadow Coyote's Configuration type. -->
 
-
-  <!-- NO package references, deliberately. Every subsystem that can be switched off references
-       this assembly — including Paradise.ECS, which has no other reference at all — so anything
-       added here is added to all of them at once. The JSON reader is in the BCL, and the one
-       diagnostic this assembly produces (an override naming no declared feature) is reported as
-       data through FeatureSwitches.Unknown rather than logged, so not even a logging abstraction
-       is needed to consume it. -->
+  <!-- Keep this dependency-free: ECS and rendering both consume it.
+       Readers live in separate packages; unknown features are reported as data. -->
 
 </Project>

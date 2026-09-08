@@ -1,8 +1,6 @@
 namespace Paradise.ECS.Benchmarks;
 
-/// <summary>
-/// Benchmark system: adds velocity to position per entity.
-/// </summary>
+/// <summary>Benchmark system: adds velocity to position per entity.</summary>
 public ref partial struct BenchMovementSystem : IEntitySystem
 {
     public ref BenchPosition Position;

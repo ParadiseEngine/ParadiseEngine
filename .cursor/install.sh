@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent Cloud Agent setup for the Paradise Engine .NET 10 monorepo.
-# Safe to run repeatedly: system packages, the SDK, and the wasm workload are
-# only installed when missing, and the restore/build steps are incremental.
+# Cloud Agent setup for the .NET 10 monorepo.
 set -euo pipefail
 
 DOTNET_CHANNEL="10.0"
@@ -21,8 +19,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl ca-certificates git
 
 # --- .NET SDK 10 -----------------------------------------------------------
-# global.json pins 10.0.200 with rollForward=latestMinor, so the latest 10.0
-# feature band satisfies it.
+# Install the current .NET 10 SDK; global.json permits newer feature bands.
 if [ ! -x "$DOTNET_DIR/dotnet" ]; then
     curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
     chmod +x /tmp/dotnet-install.sh

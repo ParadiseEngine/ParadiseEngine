@@ -3,47 +3,18 @@ using System.Numerics;
 
 namespace Paradise.Authoring;
 
-/// <summary>
-/// A KIND OF HOST OBJECT a value can be authored by — the typed spelling of
-/// <see cref="AuthoredBySources"/>' strings.
-/// </summary>
+/// <summary>A typed host-object kind for <see cref="AuthoredBySources"/> bindings.</summary>
 /// <remarks>
-/// <para>
-/// A type rather than a string, so the binding is CHECKABLE: <c>[AuthoredByHost&lt;THost&gt;]</c>
-/// constrains its argument to these structs (a typo cannot compile), and a kind that carries a
-/// value declares that value's type, letting the analyzer verify the authored field matches
-/// (PAUT010). The string never checked anything.
-/// </para>
-/// <para>
-/// Each kind still carries its <c>Kind</c> const — the string that reaches
-/// <c>authoring-schema.json</c>'s <c>authoredBy</c>, because the schema is what hosts that cannot
-/// link against these types (the pure-Python Blender addon) read.
-/// </para>
-/// <para>
-/// Three families.
-/// </para>
-/// <para>
-/// A MARKER kind (<see cref="HostTransform"/>) names a host object the whole record or field is
-/// authored by pointing at; it carries no value of its own and may sit on a type or a property.
-/// The exporter fills the record's own leaves by name.
-/// </para>
-/// <para>
-/// A VALUE kind (<see cref="HostId"/>, <see cref="HostParent"/>, <see cref="HostAsset"/>, …) is
-/// one concrete value the host supplies; it binds a single property — by attribute, or by typing
-/// the property as the kind itself — and declares the type that property must have.
-/// </para>
-/// <para>
-/// A COMPOSED kind (<see cref="HostShape"/>, <see cref="HostLight"/>, <see cref="HostCamera"/>) is
-/// a host-supplied record:
-/// several fields the host fills together. Typing a property as the kind nests those fields and
-/// marks the group <c>authoredBy</c> that kind. The same kind may still sit on a TYPE as a marker,
-/// so a game record with extra fields (layers, triggers) can be authored by pointing at one host
-/// object.
-/// </para>
+/// <c>AuthoredByHost&lt;THost&gt;</c> checks kinds at compile time; value-type mismatches produce PAUT010.
+/// Each kind publishes its <c>Kind</c> constant as the schema's <c>authoredBy</c> string.
+/// Marker kinds such as <see cref="HostTransform"/> bind a record or field without carrying a value.
+/// Value kinds such as <see cref="HostId"/> bind one property of the declared type.
+/// Composed kinds such as <see cref="HostShape"/> bind a nested group, or mark a game record whose
+/// fields the host fills together.
 /// </remarks>
 public interface IHostKind;
 
-// ---- marker kinds --------------------------------------------------------------------------
+// marker kinds
 
 /// <summary>An object whose WORLD POSE is the value, baked by field name at export.</summary>
 public readonly struct HostTransform : IHostKind
@@ -52,7 +23,7 @@ public readonly struct HostTransform : IHostKind
     public const string Kind = AuthoredBySources.Transform;
 }
 
-// ---- value kinds ---------------------------------------------------------------------------
+// value kinds
 
 /// <summary>A file on disk, authored through the host's file picker. The GUID of the picked
 /// asset, from its sidecar.</summary>
@@ -160,7 +131,7 @@ public readonly record struct HostLocalScale : IHostKind
     public Vector3 Value { get; init; }
 }
 
-// ---- composed kinds ------------------------------------------------------------------------
+// composed kinds
 
 /// <summary>Collision primitive kinds a host shape can bake. Member names match
 /// <c>Paradise.Export.Data.PhysicsShapeType</c>; a separate type so Authoring never references

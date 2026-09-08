@@ -5,6 +5,7 @@ namespace Paradise.Rendering.Pbr;
 /// the renderer.</summary>
 public static class PbrTargets
 {
+    public const string FogColor = "PbrFogColor";
     public const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
 
     /// <summary>Linear HDR scene color, the main pass's output and every post pass's input.</summary>

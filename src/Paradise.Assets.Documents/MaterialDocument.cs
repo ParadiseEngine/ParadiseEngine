@@ -4,20 +4,11 @@ using Zio;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>
-/// The authored <c>*.material</c> document: the contract's material fields as TOML, with the
-/// texture slots as <c>{ guid, path }</c> references rather than the baked paths the runtime
-/// reads. Schema-free like a config document — the contract owns the field list — except for
-/// the five texture keys, which this reads as references so the graph, <c>mv</c>, <c>rm</c> and
-/// <c>verify</c> can follow them, and the build can rebase them to the KTX2 it wrote.
-/// </summary>
+/// <summary>Reads authored <c>*.material</c> TOML with five texture slots encoded as asset references.</summary>
 /// <remarks>
-/// Its own kind, not a <c>.toml</c>, because a material references other assets and a config
-/// does not: the importer that claims it declares those references. Built, it KEEPS the
-/// <c>.material</c> name — a built prefab's slot list then says what kind of document it names,
-/// as <c>.mesh</c> and <c>.anim</c> do — and carries TOML or JSON by build profile. A host reads
-/// it with <c>ExportDocumentReader.ReadMaterial</c>, which tells the two apart by the first
-/// character, never by extension.
+/// The reference-aware importer lets build, verify, move and remove follow texture identities.
+/// Built materials retain their suffix and use the profile's TOML or JSON format;
+/// <c>ExportDocumentReader.ReadMaterial</c> detects the format from the contents.
 /// </remarks>
 public static class MaterialDocument
 {

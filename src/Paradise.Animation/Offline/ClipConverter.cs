@@ -2,12 +2,9 @@ using System.Numerics;
 
 namespace Paradise.Animation.Offline;
 
-/// <summary>
-/// Turns a <see cref="ClipData"/> into the <see cref="RawAnimation"/> the builder compresses:
-/// one track per skeleton joint, unanimated components holding the rest pose, STEP channels
-/// baked into held keys, and wide rotation arcs subdivided — ozz interpolates every key
-/// linearly (normalized lerp for rotations), where glTF means slerp.
-/// </summary>
+/// <summary>Converts ClipData into raw tracks with rest poses for unanimated components.</summary>
+/// <remarks>STEP channels become held keys. Wide rotation arcs are subdivided because glTF uses
+/// slerp while ozz uses normalized linear interpolation.</remarks>
 public static class ClipConverter
 {
     /// <summary>ozz refuses a zero duration; a pose exported as one key at t=0 gets this, and samples to the pose at any ratio.</summary>

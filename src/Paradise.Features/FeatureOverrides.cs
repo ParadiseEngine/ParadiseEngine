@@ -5,20 +5,13 @@ using System.Collections.Immutable;
 
 namespace Paradise.Features;
 
-/// <summary>What one configuration layer says about features: names mapped to on or off, and
-/// nothing else. Immutable, so a layer can be read once and merged into as many switchboards as
-/// a process has.
-///
-/// <para><b>Keyed by the raw name, not by <see cref="FeatureId"/>, on purpose.</b> A layer is
-/// read before the features exist — the config file is parsed at startup, the renderer declares
-/// its features when it is constructed — so a name here cannot be checked against a declaration
-/// yet, and a name that turns out to be malformed or stale must survive as far as
-/// <see cref="FeatureSwitches.Unknown"/> to be reported. Dropping it at parse time would make a
-/// typo in a config file look exactly like a feature that is off.</para></summary>
+/// <summary>Stores an immutable layer of feature names and enabled states.</summary>
+/// <remarks>Raw names are retained before features are declared, including malformed or stale
+/// names that <see cref="FeatureSwitches.Unknown"/> must report. Layers can be reused across
+/// switchboards.</remarks>
 public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, bool>>
 {
-    /// <summary>A layer that says nothing. Shared: a caller with no overrides iterates this
-    /// rather than branching on null.</summary>
+    /// <summary>Provides a shared empty layer for callers without overrides.</summary>
     public static FeatureOverrides None { get; } = new(ImmutableDictionary<string, bool>.Empty
         .WithComparers(StringComparer.OrdinalIgnoreCase));
 
@@ -26,8 +19,7 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
 
     private FeatureOverrides(ImmutableDictionary<string, bool> states) => _states = states;
 
-    /// <summary>A layer holding exactly <paramref name="states"/>. A name repeated with a
-    /// different value keeps the LAST, matching how a later layer wins over an earlier one.</summary>
+    /// <summary>Builds a layer from <paramref name="states"/>, keeping the last value for duplicate names.</summary>
     public static FeatureOverrides From(IEnumerable<KeyValuePair<string, bool>> states)
     {
         ArgumentNullException.ThrowIfNull(states);
@@ -46,21 +38,15 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
     /// <inheritdoc cref="With(string, bool)"/>
     public FeatureOverrides With(FeatureId id, bool enabled) => With(id.Value, enabled);
 
-    /// <summary>This layer with <paramref name="later"/> applied over it: every name
-    /// <paramref name="later"/> mentions takes its value, the rest keep this layer's.
-    ///
-    /// <para>The order the engine layers in is defaults (the declarations themselves), then the
-    /// config file, then the environment, then the command line — nearest to the person running
-    /// the build wins, which is what makes <c>--features -rendering.bloom</c> a thing you can
-    /// type without editing a file you will forget to change back.</para></summary>
+    /// <summary>Applies <paramref name="later"/> over this layer, preserving names it does not mention.</summary>
+    /// <remarks>Engine precedence is declarations, config file, environment, then command line;
+    /// for example, <c>--features -rendering.bloom</c> overrides the configured default.</remarks>
     public FeatureOverrides Merge(FeatureOverrides later)
     {
         ArgumentNullException.ThrowIfNull(later);
         if (later.Count == 0) return this;
         if (Count == 0) return later;
-        var builder = _states.ToBuilder();
-        foreach (var (name, enabled) in later._states) builder[name] = enabled;
-        return new FeatureOverrides(builder.ToImmutable());
+        return new FeatureOverrides(_states.SetItems(later._states));
     }
 
     /// <summary>Reads a list a person typed: <c>+rendering.ssr,-rendering.bloom</c>. A bare name

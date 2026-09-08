@@ -1,16 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>
-/// <c>TaggedWorld.CopyFrom</c> — the operation that lets a tagged world take part in snapshot
-/// execution, where a host publishes each step by copying the stepped world into a pooled twin.
-///
-/// Two halves, and they fail in opposite directions. Per-entity tags need nothing special (they
-/// live in the EntityTags component, which travels with the chunks) — so those tests would pass
-/// against a plain <c>World.CopyFrom</c> and exist to pin that it stays true. The CHUNK masks are
-/// the interesting half: they are keyed by chunk handle, the copy lands in different chunks, and
-/// the registry is SHARED by every world of one shared — which makes the obvious implementation
-/// (copy, then <c>RebuildChunkMasks</c>) quietly destructive to worlds that were not involved.
-/// </summary>
+/// <summary>Snapshot copies preserve entity tags and chunk masks without changing unrelated worlds.</summary>
 public sealed class TaggedWorldCopyTests : IDisposable
 {
     private static readonly DefaultConfig s_config = new();

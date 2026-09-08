@@ -21,7 +21,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
-    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="ppy.SDL3-CS" />
   </ItemGroup>

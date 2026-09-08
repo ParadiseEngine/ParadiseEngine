@@ -4,17 +4,9 @@ using Paradise.Rendering;
 
 namespace Paradise.Rendering.Pbr.Test.Baseline;
 
-/// <summary>An <see cref="IRenderer"/> that forwards everything to a real backend and keeps a copy
-/// of every <see cref="RenderCommandStream"/> submitted through it.
-///
-/// This exists because the pass table is what the frame-graph migration actually changes, and the
-/// pass table is not observable from pixels: a pass that renders the right thing into the wrong
-/// slot, or a load op that flips from Clear to Load, can leave a frame that looks identical on one
-/// scene and wrong on the next. Recording the stream makes the structure assertable directly, and
-/// unlike a pixel comparison the result does not depend on which GPU ran it.
-///
-/// A decorator rather than a hook on <c>PbrRenderer</c>: <c>PbrRenderer</c> already takes
-/// <see cref="IRenderer"/>, so the baseline needs no production change at all.</summary>
+/// <summary>Forwards rendering calls and records submitted command streams.</summary>
+/// <remarks>The decorator makes pass wiring and load operations testable independently of pixel
+/// output or backend.</remarks>
 internal sealed class RecordingRenderer : IRenderer
 {
     private readonly IRenderer _inner;

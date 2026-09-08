@@ -376,7 +376,7 @@ public static class ProjectVerifier
         {
             switch (value)
             {
-                case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table.ToList()):
+                case CanonicalInlineTable table when table.Count > 0 && AssetReferenceCodec.IsWrittenInline(table):
                     if (AssetReferenceCodec.TryRead(table, out _)) break;
 
                     var reported = Problem(table, where);

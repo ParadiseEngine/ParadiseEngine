@@ -7,12 +7,9 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>Everything one run of <c>extract</c> needs, so the seam survives a new option.</summary>
-/// <remarks>
-/// A record rather than a parameter list because this crosses a public extension point: an option
-/// added here reaches every extractor without breaking the ones a game already wrote.
-/// </remarks>
-/// <param name="Maintainer">The one minting authority — the watcher's when one is alive, so a document re-minted inside the quarantine window gets its held identity back.</param>
+/// <summary>Options and dependencies for one extraction.</summary>
+/// <remarks>A request record lets public extractor implementations accept new options without changing signatures.</remarks>
+/// <param name="Maintainer">Reuse the active watcher's minting authority to recover identities held in quarantine.</param>
 public sealed record ExtractRequest(
     IFileSystem FileSystem,
     AssetProjectLayout Layout,

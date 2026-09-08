@@ -3,21 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.ECS;
 
-/// <summary>
-/// Diagnostic information about stale bits in chunk tag masks.
-/// </summary>
+/// <summary>Diagnostic information about stale bits in chunk tag masks.</summary>
 /// <remarks>
-/// <para>
-/// Stale bits occur when tags are removed from entities but the chunk mask retains the bit
-/// (sticky mask optimization). This optimization avoids expensive O(n) scans on every tag
-/// removal, but can accumulate false-positive bits over time.
-/// </para>
-/// <para>
-/// <b>Query Performance Impact:</b> Each stale bit causes tag queries to potentially check
-/// chunks that no longer contain matching entities. For example, if a chunk mask has 3 stale
-/// bits for tag A, B, C but no entities actually have those tags, queries for A, B, or C will
-/// still examine this chunk before filtering at the entity level.
-/// </para>
+/// Tag removal leaves conservative chunk-mask bits to avoid rescanning every entity.
+/// Stale bits cause extra chunk scans, but row filtering still returns the correct entities.
 /// </remarks>
 /// <param name="TotalChunks">Total number of chunks analyzed.</param>
 /// <param name="ChunksWithStaleBits">Number of chunks that have at least one stale bit.</param>
@@ -29,40 +18,17 @@ public readonly record struct StaleBitStatistics(
     int TotalStaleBits,
     int TotalActualBits)
 {
-    /// <summary>
-    /// Gets the ratio of stale bits to total bits (stale + actual).
-    /// Returns 0 if there are no bits at all.
-    /// </summary>
-    /// <remarks>
-    /// A ratio above 0.5 indicates that more than half the chunk mask bits are stale,
-    /// which may warrant calling <c>RebuildChunkMasks()</c>.
-    /// </remarks>
+    /// <summary>Fraction of chunk-mask bits that are stale, or zero when no bits are set.</summary>
     public double StaleBitRatio => TotalStaleBits + TotalActualBits == 0
         ? 0
         : (double)TotalStaleBits / (TotalStaleBits + TotalActualBits);
 
-    /// <summary>
-    /// Gets the ratio of chunks with stale bits to total chunks.
-    /// Returns 0 if there are no chunks.
-    /// </summary>
+    /// <summary>Fraction of chunks with stale bits, or zero when there are no chunks.</summary>
     public double ChunksWithStaleBitsRatio => TotalChunks == 0
         ? 0
         : (double)ChunksWithStaleBits / TotalChunks;
 
-    /// <summary>
-    /// Gets whether the stale bit accumulation suggests rebuilding chunk masks.
-    /// Returns true when <see cref="StaleBitRatio"/> exceeds 0.5 or more than 25% of chunks have stale bits.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>When to Rebuild:</b> Consider calling <c>RebuildChunkMasks()</c> when:
-    /// <list type="bullet">
-    /// <item><description><see cref="StaleBitRatio"/> exceeds 0.5 (50% of bits are stale)</description></item>
-    /// <item><description><see cref="ChunksWithStaleBits"/> is significant relative to total chunks</description></item>
-    /// <item><description>Tag query performance degrades noticeably</description></item>
-    /// </list>
-    /// </para>
-    /// </remarks>
+    /// <summary>Suggests rebuilding when over half the bits or over a quarter of chunks are stale.</summary>
     public bool SuggestsRebuild => StaleBitRatio > 0.5 || ChunksWithStaleBitsRatio > 0.25;
 }
 
@@ -94,12 +60,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <param name="config">The configuration instance with runtime settings.</param>
     /// <param name="chunkManager">The chunk manager for memory allocation.</param>
     /// <param name="sharedMetadata">The shared archetype metadata.</param>
-    /// <remarks>
-    /// Per-chunk tag masks are not passed in and not owned: they live in a slot reserved at the end
-    /// of every chunk whose archetype carries <typeparamref name="TEntityTags"/>, which the layout
-    /// reserves automatically. That is what makes them travel with <c>World.CopyFrom</c> and what
-    /// removes the side table this used to take.
-    /// </remarks>
+    /// <remarks>Tag masks occupy each chunk's reserved tail, so <c>World.CopyFrom</c> carries them with entity data.</remarks>
     public TaggedWorld(
         TConfig config,
         ChunkManager chunkManager,
@@ -108,21 +69,15 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         _world = new World<TMask, TConfig>(config, sharedMetadata, chunkManager);
     }
 
-    /// <summary>
-    /// Gets the underlying World instance.
-    /// </summary>
+    /// <summary>The underlying World instance.</summary>
     public World<TMask, TConfig> World => _world;
 
     public IEntityManager EntityManager => _world.EntityManager;
 
-    /// <summary>
-    /// Gets the archetype registry for this world.
-    /// </summary>
+    /// <summary>The archetype registry for this world.</summary>
     public ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry => _world.ArchetypeRegistry;
 
-    /// <summary>
-    /// Gets the chunk manager for memory allocation and chunk access.
-    /// </summary>
+    /// <summary>The chunk manager for memory allocation and chunk access.</summary>
     public ChunkManager ChunkManager => _world.ChunkManager;
 
     /// <inheritdoc/>
@@ -131,14 +86,10 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <inheritdoc/>
     public EntityIdAllocator EntityIdAllocator => _world.EntityIdAllocator;
 
-    /// <summary>
-    /// Gets the current number of live entities.
-    /// </summary>
+    /// <summary>The current number of live entities.</summary>
     public int EntityCount => _world.EntityCount;
 
-    /// <summary>
-    /// Spawns a new entity with the EntityTags component automatically added.
-    /// </summary>
+    /// <summary>Spawns a new entity with the EntityTags component automatically added.</summary>
     /// <returns>The newly created entity.</returns>
     public Entity Spawn()
     {
@@ -147,9 +98,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return entity;
     }
 
-    /// <summary>
-    /// Despawns an entity, removing it from the world.
-    /// </summary>
+    /// <summary>Despawns an entity, removing it from the world.</summary>
     /// <param name="entity">The entity to despawn.</param>
     /// <returns>True if the entity was despawned; false if it was already dead.</returns>
     /// <remarks>
@@ -306,17 +255,13 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         }
     }
 
-    /// <summary>
-    /// Checks if an entity is still alive.
-    /// </summary>
+    /// <summary>Checks if an entity is still alive.</summary>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity is alive.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAlive(Entity entity) => _world.IsAlive(entity);
 
-    /// <summary>
-    /// Adds a tag to an entity.
-    /// </summary>
+    /// <summary>Adds a tag to an entity.</summary>
     /// <typeparam name="TTag">The tag type to add.</typeparam>
     /// <param name="entity">The entity to add the tag to.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -332,9 +277,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         chunkMask = chunkMask.Or(default(TTagMask).Set(tagId));
     }
 
-    /// <summary>
-    /// Removes a tag from an entity.
-    /// </summary>
+    /// <summary>Removes a tag from an entity.</summary>
     /// <typeparam name="TTag">The tag type to remove.</typeparam>
     /// <param name="entity">The entity to remove the tag from.</param>
     /// <remarks>
@@ -383,9 +326,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return MemoryMarshal.Read<int>(data);
     }
 
-    /// <summary>
-    /// Replaces this world's contents with a copy of <paramref name="source"/>, tags included.
-    /// </summary>
+    /// <summary>Replaces this world's contents with a copy of <paramref name="source"/>, tags included.</summary>
     /// <param name="source">The world to copy from. Must share this world's SharedArchetypeMetadata.</param>
     /// <remarks>
     /// <para>
@@ -442,9 +383,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         _world.CopyFrom(source._world);
     }
 
-    /// <summary>
-    /// Checks if an entity has a specific tag.
-    /// </summary>
+    /// <summary>Checks if an entity has a specific tag.</summary>
     /// <typeparam name="TTag">The tag type to check.</typeparam>
     /// <param name="entity">The entity to check.</param>
     /// <returns>True if the entity has the tag.</returns>
@@ -468,9 +407,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public TTagMask GetChunkMask(Entity entity) => ChunkMaskOf(entity);
 
-    /// <summary>
-    /// Gets the full tag mask for an entity.
-    /// </summary>
+    /// <summary>The full tag mask for an entity.</summary>
     /// <param name="entity">The entity to get tags from.</param>
     /// <returns>The tag mask.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -479,9 +416,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return _world.GetComponent<TEntityTags>(entity).Mask;
     }
 
-    /// <summary>
-    /// Sets the full tag mask for an entity.
-    /// </summary>
+    /// <summary>Sets the full tag mask for an entity.</summary>
     /// <param name="entity">The entity to set tags on.</param>
     /// <param name="tags">The tag mask to set.</param>
     /// <remarks>
@@ -505,9 +440,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         // Removed tags: chunk mask not recomputed (sticky) - may have stale bits
     }
 
-    /// <summary>
-    /// Gets a reference to a component on an entity.
-    /// </summary>
+    /// <summary>A reference to a component on an entity.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetComponent<T>(Entity entity) where T : unmanaged, IComponent
         => ref _world.GetComponent<T>(entity);
@@ -520,16 +453,12 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public bool TrySetComponent<T>(Entity entity, T value) where T : unmanaged, IComponent
         => _world.TrySetComponent(entity, value);
 
-    /// <summary>
-    /// Checks if an entity has a component.
-    /// </summary>
+    /// <summary>Checks if an entity has a component.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent<T>(Entity entity) where T : unmanaged, IComponent
         => _world.HasComponent<T>(entity);
 
-    /// <summary>
-    /// Adds a component to an entity.
-    /// </summary>
+    /// <summary>Adds a component to an entity.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent
     {
@@ -538,9 +467,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         CoverTags(entity);
     }
 
-    /// <summary>
-    /// Removes a component from an entity.
-    /// </summary>
+    /// <summary>Removes a component from an entity.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent
     {
@@ -582,14 +509,8 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity CreateEntity(in TMask mask)
     {
-        // The tag storage is added to the mask exactly as the builder overload wraps its builder in
-        // EnsureComponent<TEntityTags>: a tag can only be applied to an entity whose archetype
-        // already reserves the bits, and a caller assembling a mask at runtime has no more business
-        // remembering that than one spelling a builder does.
         var entity = _world.CreateEntity(mask.Set(TEntityTags.TypeId));
-        // No builder means no tag can arrive pre-set, so this cannot find anything to cover today.
-        // Kept for the same reason the builder path has it: what may seed a tag is the caller's
-        // business, and a new entity that is already tagged must reach its chunk mask.
+        // Reused entity slots may carry tags that must reach the chunk mask.
         CoverTags(entity);
         return entity;
     }
@@ -613,22 +534,8 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return result;
     }
 
-    /// <summary>
-    /// Make this entity's chunk admit to the tags the entity carries.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Called after anything that can move an entity between chunks. The entity's tags travel with
-    /// it — they live in its <typeparamref name="TEntityTags"/> component — but the chunk it lands
-    /// in has never heard of them, and a chunk mask that is missing bits is the one kind of wrong
-    /// that costs correctness: a consumer skipping a chunk on a clear bit steps straight over
-    /// entities that do carry the tag.
-    /// </para>
-    /// <para>
-    /// Only ever ORs, which is what makes it cheap to call defensively: the mask is a conservative
-    /// superset by design, so adding bits can never make an answer wrong, only make a scan longer.
-    /// </para>
-    /// </remarks>
+    /// <summary>Adds the entity's tags to its chunk's conservative mask after a structural move.</summary>
+    /// <remarks>Missing bits would skip matching entities; stale bits only cause extra scans.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void CoverTags(Entity entity)
     {
@@ -643,16 +550,8 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         chunkMask = chunkMask.Or(tags);
     }
 
-    /// <summary>
-    /// The chunk's tag mask: the union of the tag masks of the entities it holds, living in the
-    /// slot the layout reserved at the end of the chunk.
-    /// </summary>
-    /// <remarks>
-    /// A <c>ref</c> into chunk memory rather than a lookup, so OR-ing a bit in is a read-modify-
-    /// write on the bytes themselves. It also means the value is carried by any operation that
-    /// copies chunks — which is the whole reason it lives here rather than in a table beside the
-    /// world.
-    /// </remarks>
+    /// <summary>A reference to the chunk's tag-mask union in its reserved tail.</summary>
+    /// <remarks>Keeping the mask in chunk memory makes it travel with chunk copies.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref TTagMask ChunkMask(
         ChunkHandle chunk, scoped in ImmutableArchetypeLayout<TMask, TConfig> layout)
@@ -671,9 +570,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         return ref ChunkMask(archetype.GetChunk(chunkIndex), archetype.Layout);
     }
 
-    /// <summary>
-    /// Recomputes the chunk tag mask by OR-ing all entity tag masks in the chunk.
-    /// </summary>
+    /// <summary>Recomputes the chunk tag mask by OR-ing all entity tag masks in the chunk.</summary>
     /// <param name="chunkHandle">The chunk handle.</param>
     /// <param name="archetype">The archetype containing the chunk.</param>
     /// <param name="chunkIndex">The chunk index within the archetype.</param>
@@ -682,9 +579,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
         ChunkMask(chunkHandle, archetype.Layout) = ComputeActualChunkMask(archetype, chunkIndex);
     }
 
-    /// <summary>
-    /// Computes the actual tag mask for a chunk by OR-ing all entity tag masks.
-    /// </summary>
+    /// <summary>Computes the actual tag mask for a chunk by OR-ing all entity tag masks.</summary>
     /// <param name="archetype">The archetype containing the chunk.</param>
     /// <param name="chunkIndex">The chunk index within the archetype.</param>
     /// <returns>The computed tag mask representing the union of all entity tags in the chunk.</returns>
@@ -692,21 +587,8 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     {
         var mask = default(TTagMask);
 
-        // Calculate how many entities are in this specific chunk
         int entitiesPerChunk = archetype.Layout.EntitiesPerChunk;
-        int totalEntities = archetype.EntityCount;
-        int entityCountInChunk;
-
-        if ((chunkIndex + 1) * entitiesPerChunk <= totalEntities)
-        {
-            // Full chunk
-            entityCountInChunk = entitiesPerChunk;
-        }
-        else
-        {
-            // Last chunk (partially filled)
-            entityCountInChunk = totalEntities - chunkIndex * entitiesPerChunk;
-        }
+        int entityCountInChunk = Math.Min(entitiesPerChunk, archetype.EntityCount - chunkIndex * entitiesPerChunk);
 
         if (entityCountInChunk <= 0)
             return mask;

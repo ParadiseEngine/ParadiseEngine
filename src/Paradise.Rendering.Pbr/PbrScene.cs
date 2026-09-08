@@ -288,6 +288,8 @@ public sealed class PbrInstance
 /// state — mutate freely between frames.</summary>
 public sealed class PbrScene
 {
+    public PbrFog Fog = new();
+    public List<PbrFogVolume> FogVolumes { get; } = [];
     public PbrCamera Camera;
     public PbrAmbient Ambient = new();
     public PbrTonemap Tonemap = new();
@@ -301,6 +303,8 @@ public sealed class PbrScene
     public PbrVignette Vignette = new();
     public PbrFilmGrain FilmGrain = new();
     public PbrSharpening Sharpening = new();
+    public PbrTaa Taa = new();
+    public PbrFxaa Fxaa = new();
     /// <summary>Simulation seconds since the previous frame, clamped by temporal post effects.</summary>
     public float DeltaSeconds = 1f / 60f;
     /// <summary>Elapsed seconds driving time-animated procedural materials. Set each frame (pinned

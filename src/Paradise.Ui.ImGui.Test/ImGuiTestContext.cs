@@ -5,15 +5,9 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Ui.ImGui.Test;
 
-/// <summary>A private ImGui context for one test, torn down on dispose.
-///
-/// Per-test rather than shared-static, because the texture protocol is only observable from a
-/// context's FIRST frame: the font atlas reports <c>WantCreate</c> exactly once, and a suite
-/// sharing one context would hand that frame to whichever test happened to run first. Contexts
-/// are cheap and carry their own atlas, so each test gets a clean state machine.
-///
-/// Still <c>[NotInParallel]</c> at every call site: the current context lives in cimgui's
-/// process-global <c>GImGui</c>, so two tests running at once would fight over it.</summary>
+/// <summary>Owns a fresh ImGui context for one test.</summary>
+/// <remarks>Each context exposes its own first-frame atlas Create request. Callers remain
+/// NotInParallel because cimgui stores the current context globally.</remarks>
 public sealed class ImGuiTestContext : IDisposable
 {
     private ImGuiContextPtr _context;

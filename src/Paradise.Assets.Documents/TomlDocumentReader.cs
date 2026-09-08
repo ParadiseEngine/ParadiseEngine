@@ -3,7 +3,8 @@ using Tomlyn.Model;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>Shared plumbing of the strict readers. Untyped because payloads are open; strict about unknown keys because a typo a lenient reader ignored is dropped by the next machine rewrite, silently.</summary>
+/// <summary>Shared strict TOML reader for open payloads.</summary>
+/// <remarks>Rejects unknown structural keys so canonical rewriting cannot silently discard a typo.</remarks>
 internal static class TomlDocumentReader
 {
     public static TomlTable Parse(string toml, Func<string, Exception> fail)
