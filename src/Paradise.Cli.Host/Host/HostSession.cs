@@ -119,5 +119,22 @@ internal sealed class HostSession
         return _runner.Run(new ProcessSpec(_dotnet, runArguments, cwd), stop);
     }
 
-    private string Internal(UPath path) => _fileSystem.ConvertPathToInternal(path);
+    private string Internal(UPath path) => _fileSystem.ConvertPathToInternal(ResolveLinks(path));
+
+    private UPath ResolveLinks(UPath path)
+    {
+        if (path == UPath.Root) return path;
+
+        // MSBuild can treat an aliased project and its physical references as separate builds
+        // sharing one obj directory. The link is often a repository ancestor, not the csproj.
+        path = ResolveLinks(path.GetDirectory()) / path.GetName();
+        if ((_fileSystem.FileExists(path) || _fileSystem.DirectoryExists(path))
+            && (_fileSystem.GetAttributes(path) & FileAttributes.ReparsePoint) != 0
+            && _fileSystem.TryResolveLinkTarget(path, out var target))
+        {
+            return ResolveLinks(target);
+        }
+
+        return path;
+    }
 }
