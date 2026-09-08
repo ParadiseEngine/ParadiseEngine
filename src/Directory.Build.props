@@ -12,7 +12,7 @@
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- Local default for all Paradise packages; keep it current. Release tags override it with -p:Version. -->
-    <Version>0.45.0</Version>
+    <Version>0.45.1</Version>
   </PropertyGroup>
 
   <!-- Shared NuGet package metadata. Per-project csproj supplies Description and
