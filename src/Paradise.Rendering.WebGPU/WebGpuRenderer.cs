@@ -265,7 +265,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             encoder.CopyBufferToBuffer(native, offset, staging, 0, size);
             _device.Queue.Submit(encoder.Finish());
             _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
-            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, 5_000);
+            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, 5_000_000_000UL);
             var result = new byte[size];
             staging.GetConstMappedRange(0, (nuint)size, (ReadOnlySpan<byte> mapped) => mapped.CopyTo(result));
             return result;
@@ -302,12 +302,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 #else
         if (_timedPasses == 0 || _timingReadback is null) return [];
         var count = _timedPasses;
-        _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
         var bytes = (nuint)(count * 16);
-        _timingReadback.MapSync(WebGpuSharp.MapMode.Read, 0, bytes, 5_000);
         var result = new double[count];
         try
         {
+            ReadbackMapping.Map(_device.Instance, _timingReadback, bytes);
             _timingReadback.GetConstMappedRange(0, bytes, (ReadOnlySpan<byte> mapped) =>
             {
                 for (var i = 0; i < count; i++)
@@ -320,7 +319,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
         finally
         {
-            _timingReadback.Unmap();
+            if (_timingReadback.GetMapState() != WebGpuSharp.BufferMapState.Unmapped)
+                _timingReadback.Unmap();
         }
         return result;
 #endif
@@ -804,7 +804,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
             const ulong timeoutNs = 5_000_000_000; // 5s
             _device.Queue.OnSubmittedWorkSync(timeoutNs);
-            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000);
+            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000_000_000UL);
             readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
             {
                 for (var y = 0u; y < rows; y++)
@@ -947,7 +947,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             try
             {
                 var size = (nuint)((ulong)paddedRow * height);
-                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000);
+                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000_000_000UL);
                 var tight = width * 4u;
                 var pixels = new byte[tight * height];
                 staging.GetConstMappedRange(0, size, (ReadOnlySpan<byte> mapped) =>

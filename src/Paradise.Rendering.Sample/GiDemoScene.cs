@@ -272,12 +272,14 @@ internal sealed class GiDemoScene : IDisposable
         var sunAngle = AnimateLights ? 0.9f + 0.5f * MathF.Sin(time * 0.35f) : 0.9f;
         _scene.Lights[0] = _sunTemplate with
         {
+            SoftShadows = SoftShadowsOverride ?? _sunTemplate.SoftShadows,
             // From the surface toward the light: high and from the open front, sweeping left-right.
             Direction = Vector3.Normalize(new Vector3(MathF.Sin(sunAngle) * 0.8f, 0.9f, 0.8f)),
         };
         var lampAngle = AnimateLights ? time * 0.8f : 0.4f;
         _scene.Lights[1] = _lampTemplate with
         {
+            SoftShadows = SoftShadowsOverride ?? _lampTemplate.SoftShadows,
             Position = new Vector3(1.8f * MathF.Cos(lampAngle), 1.6f, 1.8f * MathF.Sin(lampAngle) + 0.5f),
         };
         var propAngle = AnimateLights ? time * 0.6f : 0f;
@@ -307,7 +309,8 @@ internal sealed class GiDemoScene : IDisposable
         Animate();
         if (SoftShadowsOverride is { } soft)
             for (var i = 0; i < _scene.Lights.Count; i++)
-                _scene.Lights[i] = _scene.Lights[i] with { SoftShadows = soft };
+                if (_scene.Lights[i].SoftShadows != soft)
+                    _scene.Lights[i] = _scene.Lights[i] with { SoftShadows = soft };
         _pbr.RenderFrame(_scene);
         if (advance) _frame++;
     }
