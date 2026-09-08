@@ -12,6 +12,8 @@ namespace Paradise.Rendering.Pbr;
 public sealed partial class SceneFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
+    private readonly FrustumCullingFeature _frustum;
+    private readonly OcclusionCullingFeature _occlusion;
     private readonly ShadowFeature _shadows;
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
@@ -23,9 +25,11 @@ public sealed partial class SceneFeature : IRenderFeature
     private float _specularAaClamp;
 
     internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
-        LightCullingFeature lightCulling, float specularAaVariance, float specularAaClamp)
+        LightCullingFeature lightCulling, FrustumCullingFeature frustum, OcclusionCullingFeature occlusion, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
+        _frustum = frustum;
+        _occlusion = occlusion;
         _shadows = shadows;
         _prepass = prepass;
         _gi = gi;
@@ -88,6 +92,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
+        _occlusion.DeclareRead(main);
         DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
         if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
@@ -193,8 +198,9 @@ public sealed partial class SceneFeature : IRenderFeature
 
         var ctx = _ctx;
         var materials = ctx.Materials;
-        foreach (var (instance, primitive, _) in bucket)
+        for (var bucketIndex = 0; bucketIndex < bucket.Count; bucketIndex++)
         {
+            var (instance, primitive, _) = bucket[bucketIndex];
             var skinned = primitive.Skinned && instance.JointOffset >= 0;
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
@@ -221,12 +227,17 @@ public sealed partial class SceneFeature : IRenderFeature
             var slot = ctx.DrawIndex;
             MemoryMarshal.Write(ctx.DrawStaging.AsSpan(slot * (int)ctx.DrawStride), in uniforms);
 
+            ctx.DrawIndex++;
+            if (!(blend == BlendMode.Opaque ? _frustum.OpaqueVisible(bucketIndex) : _frustum.BlendVisible(bucketIndex))) continue;
+
             encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(slot * ctx.DrawStride));
             encoder.SetBindGroup(2, materials.GetBindGroup(primitive.MaterialId));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
-            encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
-            ctx.DrawIndex++;
+            if (blend == BlendMode.Opaque && _occlusion.Active)
+                encoder.DrawIndexedIndirect(new DrawIndexedIndirectCommand(_occlusion.IndirectBuffer, (ulong)bucketIndex * OcclusionCullingFeature.IndirectStride));
+            else
+                encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
         }
     }
 

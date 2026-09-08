@@ -7,6 +7,12 @@ namespace Paradise.Rendering.Pbr;
 /// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
+    public static FeatureDefinition FrustumCulling { get; } = new(
+        "rendering.frustumCulling", true, "Conservative camera frustum culling. Off, all scene draws are submitted.");
+
+    public static FeatureDefinition OcclusionCulling { get; } = new(
+        "rendering.occlusionCulling", true, "Current-frame GPU occlusion and indirect draws when enabled by the scene.");
+
     /// <summary>Camera, object and skinned-vertex motion for temporal effects.</summary>
     public static FeatureDefinition MotionVectors { get; } = new(
         "rendering.motionVectors", true,
@@ -133,7 +139,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
@@ -159,8 +165,10 @@ public static class PbrFeatureOrder
     /// scene consumes.</summary>
     public const int First = 0;
 
+    public const int FrustumCulling = 50;
     public const int Shadows = 100;
     public const int Prepass = 200;
+    public const int OcclusionCulling = 225;
     public const int MotionVectors = 250;
     public const int ContactShadows = 275;
     public const int RayTracedAo = 300;

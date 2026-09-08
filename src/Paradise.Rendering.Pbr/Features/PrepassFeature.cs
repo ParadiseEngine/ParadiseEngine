@@ -13,15 +13,17 @@ namespace Paradise.Rendering.Pbr;
 public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
+    private readonly FrustumCullingFeature _frustum;
     private readonly ScreenSpaceReflectionFeature _ssr;
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal PrepassFeature(PbrContext ctx, ScreenSpaceReflectionFeature ssr)
+    internal PrepassFeature(PbrContext ctx, ScreenSpaceReflectionFeature ssr, FrustumCullingFeature frustum)
     {
         _ctx = ctx;
+        _frustum = frustum;
         _ssr = ssr;
         var renderer = ctx.Renderer;
 
@@ -120,6 +122,7 @@ public sealed class PrepassFeature : IRenderFeature
         var skinnedActive = (bool?)null;
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
+            if (!self._frustum.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
             var skinned = primitive.Skinned && ctx.Opaque[i].Instance.JointOffset >= 0;
             if (skinnedActive != skinned)

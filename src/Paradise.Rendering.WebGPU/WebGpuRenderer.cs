@@ -1096,6 +1096,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         pass.DrawIndexed(d.IndexCount, d.InstanceCount, d.FirstIndex, d.BaseVertex, d.FirstInstance);
                         break;
                     }
+                    case RenderCommandKind.DrawIndexedIndirect:
+                    {
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
+                        var d = cmd.DrawIndexedIndirect;
+                        pass.DrawIndexedIndirect(_device.ResolveBuffer(d.Buffer), d.Offset);
+                        break;
+                    }
                     case RenderCommandKind.SetViewport:
                     {
                         var pass = RequireActiveRenderPass(activePass, activeComputePass);

@@ -33,6 +33,7 @@ public class RenderCommandLayoutTests
             [RenderCommandKind.EndComputePass] = 10,
             [RenderCommandKind.SetComputePipeline] = 11,
             [RenderCommandKind.Dispatch] = 12,
+            [RenderCommandKind.DrawIndexedIndirect] = 13,
         };
         foreach (var (kind, opcode) in expected)
         {
@@ -46,6 +47,17 @@ public class RenderCommandLayoutTests
         await Assert.That(Unsafe.SizeOf<SetComputePipelinePayload>()).IsEqualTo(16);
         await Assert.That(Unsafe.SizeOf<DispatchCommand>()).IsEqualTo(12);
         await Assert.That(Unsafe.SizeOf<RenderCommand>()).IsEqualTo(48);
+    }
+
+    [Test]
+    public async Task indirect_draw_preserves_the_full_buffer_handle_and_offset()
+    {
+        var buffer = new BufferHandle(17, 9);
+        var draw = new DrawIndexedIndirectCommand(buffer, 1UL << 34);
+        var command = RenderCommand.FromDrawIndexedIndirect(draw);
+        await Assert.That(command.Kind).IsEqualTo(RenderCommandKind.DrawIndexedIndirect);
+        await Assert.That(command.DrawIndexedIndirect).IsEqualTo(draw);
+        await Assert.That(Unsafe.SizeOf<DrawIndexedIndirectCommand>()).IsEqualTo(24);
     }
 
     [Test]

@@ -186,6 +186,14 @@ public sealed partial class BrowserRenderer
                     WriteU32(op, 20, d.FirstInstance);
                     break;
                 }
+                case RenderCommandKind.DrawIndexedIndirect:
+                {
+                    RequireRenderPass(inPass);
+                    var d = cmd.DrawIndexedIndirect;
+                    WriteU32(op, 4, _buffers.Resolve(d.Buffer.Index, d.Buffer.Generation, "Buffer"));
+                    WriteF64(op, 32, d.Offset);
+                    break;
+                }
                 case RenderCommandKind.SetViewport:
                 {
                     RequireRenderPass(inPass);

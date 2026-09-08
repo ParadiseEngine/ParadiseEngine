@@ -430,6 +430,9 @@ export function submitFrame(frame, passCount, opCount) {
                 pass.dispatchWorkgroups(
                     dv.getUint32(o + 4, true), dv.getUint32(o + 8, true), dv.getUint32(o + 12, true));
                 break;
+            case 13: // DrawIndexedIndirect
+                pass.drawIndexedIndirect(G.buffers[dv.getUint32(o + 4, true)], dv.getFloat64(o + 32, true));
+                break;
             default:
                 throw new Error(`Unknown render command opcode ${dv.getUint8(o)}.`);
         }
