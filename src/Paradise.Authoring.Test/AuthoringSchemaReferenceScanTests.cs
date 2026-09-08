@@ -139,6 +139,17 @@ public class AuthoringSchemaReferenceScanTests
 
     private const string DeclaresNothing = "namespace Consumer; public static class Nothing { }";
 
+    [Test]
+    public async Task referenced_light_preview_semantics_reach_the_launcher_schema()
+    {
+        var library = Build("Preview", LightPreviewSchemaTests.Source);
+        var (json, diagnostics) = Consume(DeclaresNothing, scan: true, library);
+        await Assert.That(diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)).IsFalse();
+        var lamp = AuthoringSchemaReader.Read(json!).Components.Single(c => c.Type == "Preview.Lamp");
+        await Assert.That(lamp.PreviewLight).IsEqualTo("Spot");
+        await Assert.That(lamp.Fields.Single(f => f.Name == "Power").LightField).IsEqualTo("Intensity");
+    }
+
     /// <summary>The headline: a project that declares no components of its own publishes the
     /// schema of everything it references.</summary>
     [Test]

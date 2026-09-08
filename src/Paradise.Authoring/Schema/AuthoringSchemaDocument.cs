@@ -57,6 +57,9 @@ public sealed record AuthoredComponentSchema
     /// <summary>How to draw the component while it is being edited, or null for no gizmo.</summary>
     public AuthoredGizmoSchema? Gizmo { get; set; }
 
+    /// <summary>Optional light preview kind, named by <see cref="HostLightType"/>.</summary>
+    public string? PreviewLight { get; set; }
+
     /// <summary>Set when the WHOLE component is authored by pointing at one of the host's own
     /// objects — see <see cref="AuthoredBySources"/>. Its fields are then what gets baked out of
     /// that object, and an editor shows one picker instead of a form.</summary>
@@ -82,6 +85,9 @@ public sealed record AuthoredFieldSchema
 
     /// <summary>One line of help for a tooltip.</summary>
     public string? Doc { get; set; }
+
+    /// <summary>Optional preview meaning, named by <see cref="LightPreviewField"/>.</summary>
+    public string? LightField { get; set; }
 
     /// <summary>Advisory bounds. The runtime validator, not the editor, decides what is playable.</summary>
     public double? Minimum { get; set; }

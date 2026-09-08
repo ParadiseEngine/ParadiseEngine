@@ -15,6 +15,7 @@ internal sealed class AuthoredField
     /// <summary>Semantic unit (meters/radians/seconds/kilograms/unit01), or null.</summary>
     public string? Unit;
     public string? Doc;
+    public string? LightField;
     public double? Minimum;
     public double? Maximum;
     /// <summary>The record's own initializer, reused verbatim as the editor's default so the two
@@ -95,6 +96,7 @@ internal sealed class AuthoredType
     /// PAUT005 is reported and nothing is emitted for it.</summary>
     public bool IdUnusable => IdMissing || IdMalformed;
     public string DisplayName = "";
+    public string? PreviewLight;
     public List<AuthoredField> Fields = new();
     /// <summary>Optional wireframe box, as field names — see AuthorBoxGizmoAttribute.</summary>
     public string[]? BoxGizmo;
@@ -225,6 +227,13 @@ internal static class AuthoredModel
             Declaration = type.Locations.FirstOrDefault(),
             Constructible = HasParameterlessCtor(type),
         };
+
+        var preview = type.GetAttributes().FirstOrDefault(
+            a => a.AttributeClass?.ToDisplayString() == Namespace + ".AuthorLightPreviewAttribute");
+        if (preview is { ConstructorArguments.Length: 1 })
+        {
+            result.PreviewLight = DefaultLiteralOf(preview.ConstructorArguments[0]);
+        }
 
         // A value kind is one concrete value of one field; a whole record cannot be "a Guid".
         if (typeHost is not null && HostValueTypeOf(typeHost) is not null)
@@ -409,6 +418,9 @@ internal static class AuthoredModel
                         break;
                     case Namespace + ".AuthorDocAttribute" when a.ConstructorArguments.Length == 1:
                         field.Doc = a.ConstructorArguments[0].Value as string;
+                        break;
+                    case Namespace + ".AuthorLightFieldAttribute" when a.ConstructorArguments.Length == 1:
+                        field.LightField = DefaultLiteralOf(a.ConstructorArguments[0]);
                         break;
                     case Namespace + ".AuthorDefaultAttribute" when a.ConstructorArguments.Length == 1:
                         // Syntax wins when there is any; the attribute exists for metadata types.

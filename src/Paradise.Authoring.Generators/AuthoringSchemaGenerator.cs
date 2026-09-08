@@ -447,6 +447,10 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         // component the GUID above belongs to.
         json.Append(",\"type\":").Append(Quote(type.TypeName));
         json.Append(",\"displayName\":").Append(Quote(type.DisplayName));
+        if (type.PreviewLight is { } previewLight)
+        {
+            json.Append(",\"previewLight\":").Append(Quote(previewLight));
+        }
         if (type.AuthoredBy is { } componentSource)
         {
             json.Append(",\"authoredBy\":").Append(Quote(componentSource));
@@ -487,6 +491,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         json.Append(",\"type\":").Append(Quote(field.SchemaType));
         if (field.Unit is not null) json.Append(",\"unit\":").Append(Quote(field.Unit));
         if (field.Doc is not null) json.Append(",\"doc\":").Append(Quote(field.Doc));
+        if (field.LightField is not null) json.Append(",\"lightField\":").Append(Quote(field.LightField));
         if (field.Minimum is { } min) json.Append(",\"minimum\":").Append(Number(min));
         if (field.Maximum is { } max) json.Append(",\"maximum\":").Append(Number(max));
         if (DefaultAsJson(field.Default, field.SchemaType) is { } literal)
