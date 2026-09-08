@@ -64,7 +64,7 @@ public sealed partial class BrowserRenderer
     [JSImport("writeTexture", ModuleName)]
     private static partial void WriteTextureJs(
         int index, int mipLevel, [JSMarshalAs<JSType.MemoryView>] ArraySegment<byte> data,
-        int bytesPerRow, int rowsPerImage, int width, int height);
+        int bytesPerRow, int rowsPerImage, int width, int height, int depthOrArrayLayers);
 
     [JSImport("destroyTexture", ModuleName)]
     private static partial void DestroyTextureJs(int index);

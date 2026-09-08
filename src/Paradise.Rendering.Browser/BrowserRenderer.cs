@@ -219,7 +219,7 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
-    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1)
     {
         ThrowIfDisposed();
         var index = _textures.Resolve(handle.Index, handle.Generation, "Texture");
@@ -227,7 +227,7 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         // pitch, and padding the source would only mask a short payload.
         WriteTextureJs(
             (int)index, (int)mipLevel, Stage(data, pad: false),
-            (int)bytesPerRow, (int)rowsPerImage, (int)width, (int)height);
+            (int)bytesPerRow, (int)rowsPerImage, (int)width, (int)height, (int)depthOrArrayLayers);
     }
 
     /// <inheritdoc/>

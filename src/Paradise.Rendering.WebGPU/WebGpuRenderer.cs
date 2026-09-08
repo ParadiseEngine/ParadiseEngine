@@ -448,7 +448,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
     /// the mip's texel dimensions. Block-size math stays in the asset layer, as in the source
     /// material's texture cache.</summary>
-    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var entry = _device.ResolveTexture(handle);
@@ -456,7 +456,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             new WebGpuSharp.TexelCopyTextureInfo { Texture = entry.Texture, MipLevel = mipLevel },
             data,
             new WebGpuSharp.TexelCopyBufferLayout { Offset = 0, BytesPerRow = bytesPerRow, RowsPerImage = rowsPerImage },
-            new WgExtent3D(width, height, 1));
+            new WgExtent3D(width, height, depthOrArrayLayers));
     }
 
     public void DestroyTexture(TextureHandle handle)
@@ -996,7 +996,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     RowsPerImage = height,
                 },
             };
-            encoder.CopyTextureToBuffer(in source, in destination, new WgExtent3D(width, height, 1));
+            encoder.CopyTextureToBuffer(in source, in destination, new WgExtent3D(width, height, depthOrArrayLayers));
             (pending ??= []).Add((request, staging, width, height, paddedRow));
         }
 

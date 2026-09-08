@@ -81,8 +81,8 @@ internal sealed class RecordingRenderer : IRenderer
 
     public TextureHandle CreateTexture(in TextureDesc desc) => _inner.CreateTexture(in desc);
 
-    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height) =>
-        _inner.WriteTexture(handle, mipLevel, data, bytesPerRow, rowsPerImage, width, height);
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1) =>
+        _inner.WriteTexture(handle, mipLevel, data, bytesPerRow, rowsPerImage, width, height, depthOrArrayLayers);
 
     public void DestroyTexture(TextureHandle handle) => _inner.DestroyTexture(handle);
 

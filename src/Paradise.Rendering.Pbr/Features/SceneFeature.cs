@@ -21,6 +21,7 @@ public sealed partial class SceneFeature : IRenderFeature
     private readonly PrepassFeature _prepass;
     private readonly ProbeGiFeature _gi;
     private readonly LightCullingFeature _lightCulling;
+    private readonly DecalFeature _decals;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
     private readonly HashSet<int> _materialsSeen = [];
@@ -28,13 +29,14 @@ public sealed partial class SceneFeature : IRenderFeature
     private float _specularAaClamp;
 
     internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
-        LightCullingFeature lightCulling, float specularAaVariance, float specularAaClamp)
+        LightCullingFeature lightCulling, DecalFeature decals, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
         _shadows = shadows;
         _prepass = prepass;
         _gi = gi;
         _lightCulling = lightCulling;
+        _decals = decals;
         _specularAaVariance = specularAaVariance;
         _specularAaClamp = specularAaClamp;
 
@@ -142,6 +144,10 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Sampler(2, _shadows.Sampler),
             GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
             GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
+            GraphBinding.Buffer(5, _decals.UniformBuffer, 0, 16),
+            GraphBinding.Buffer(6, _decals.DecalBuffer, 0, DecalFeature.DecalBufferBytes),
+            GraphBinding.View(7, _decals.TextureView),
+            GraphBinding.Sampler(8, _decals.Sampler),
         ]);
         pass.BindGroup(3, "PbrLightingGroup", _lightingGroupLayout,
         [
@@ -220,7 +226,7 @@ public sealed partial class SceneFeature : IRenderFeature
                 // y carries the joint palette base for skinned draws; the lanes beside the
                 // highlight weight were already spare, so this needs no uniform layout change.
                 Highlight = new Vector4(instance.Highlight, skinned ? instance.JointOffset : 0f,
-                    instance.GiMode == PbrGiMode.Disabled ? 1f : 0f, 0f),
+                    instance.GiMode == PbrGiMode.Disabled ? 1f : 0f, instance.ReceivesDecals ? 0f : 1f),
             };
             var slot = ctx.DrawIndex;
             MemoryMarshal.Write(ctx.DrawStaging.AsSpan(slot * (int)ctx.DrawStride), in uniforms);

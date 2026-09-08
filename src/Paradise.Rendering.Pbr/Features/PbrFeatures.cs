@@ -52,6 +52,11 @@ public static class PbrFeatures
         "rendering.lightCulling", true,
         "Forward+ froxel light culling. Off, every light shades every pixel.");
 
+    /// <summary>Projected volume decals composited into surface materials before lighting.</summary>
+    public static FeatureDefinition Decals { get; } = new(
+        "rendering.decals", true,
+        "Projected material decals. Off, surfaces retain their original material.");
+
     /// <summary>The scene itself: sky, opaque and blended geometry into the HDR target. Off,
     /// there is no picture — which is what makes it a useful thing to switch while looking for
     /// the cost of everything else.</summary>
@@ -81,7 +86,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        Shadows, Prepass, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling, Decals,
         Scene, SceneColorCapture, Bloom, Composite,
     ];
 
@@ -112,6 +117,7 @@ public static class PbrFeatureOrder
     public const int ScreenSpaceReflection = 400;
     public const int GlobalIllumination = 500;
     public const int LightCulling = 550;
+    public const int Decals = 575;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
     public const int Bloom = 800;

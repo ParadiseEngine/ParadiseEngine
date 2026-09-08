@@ -44,7 +44,7 @@ internal sealed class FakeTextureFactory : ITextureFactory
 
     public List<(TextureHandle Texture, int Bytes)> Writes { get; } = [];
 
-    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height)
+    public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1)
     {
         if (!Textures.ContainsKey(handle)) throw new InvalidOperationException("Write to a texture that does not exist.");
         Writes.Add((handle, data.Length));

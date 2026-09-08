@@ -11,7 +11,7 @@ struct DrawUniforms
     float4x4 mvp;          // Model-View-Projection matrix
     float4x4 model;        // Model matrix (for world-space normals/positions)
     float4x4 normalMatrix; // Inverse-transpose model matrix (for world-space normals)
-    float4 highlight;      // x: highlight weight, y: joint palette base (skinned), z: probe GI disabled for this draw, w unused
+    float4 highlight;      // x: highlight weight, y: joint palette base (skinned), z: probe GI disabled for this draw, w: decals disabled for this draw
 };
 
 struct MaterialUniforms
@@ -23,7 +23,7 @@ struct MaterialUniforms
     float  occlusionStrength; // glTF occlusionTexture.strength
     float4 emissiveFactor;    // glTF emissiveFactor (rgb), w: KHR_materials_transmission factor
     float4 uvOffsetScale;     // KHR_texture_transform (baseColor): xy offset, zw scale
-    float4 uvRotation;        // x: rotation radians, yzw unused
+    float4 uvRotation;        // x: rotation radians, yzw: decals disabled for this draw
     // Procedural material (see the recipe library below): a noise-driven, time-animated surface
     // overriding albedo/roughness/metallic/emissive when kind >= 1. Object-space so the pattern
     // rides a rolling ball. procColorA/B tint the tintable recipes.

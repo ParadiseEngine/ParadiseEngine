@@ -268,6 +268,8 @@ public sealed class PbrInstance
     public required PbrMesh Mesh { get; init; }
     public Matrix4x4 Model = Matrix4x4.Identity;
     public float Highlight;
+    /// <summary>Whether projected scene decals may modify this instance’s PBR surface.</summary>
+    public bool ReceivesDecals = true;
     /// <summary>Index of this instance's first joint matrix in the renderer's palette buffer, or
     /// −1 for a rigid instance. Two instances of the same skinned mesh differ ONLY here — which is
     /// what lets five characters share one set of GPU buffers and still hold different poses.
@@ -319,6 +321,7 @@ public sealed class PbrScene
     public PbrRayTracedAo RayTracedAo = new();
     public PbrScreenSpaceReflection Ssr = new();
     public PbrGi Gi = new();
+    public PbrDecals Decals { get; } = new();
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
 }

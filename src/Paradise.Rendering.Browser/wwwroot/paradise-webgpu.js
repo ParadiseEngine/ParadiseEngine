@@ -171,12 +171,12 @@ export function createTexture(slot, descJson) {
     put(G.textures, slot, { texture, view: texture.createView() });
 }
 
-export function writeTexture(index, mipLevel, data, bytesPerRow, rowsPerImage, width, height) {
+export function writeTexture(index, mipLevel, data, bytesPerRow, rowsPerImage, width, height, depthOrArrayLayers) {
     G.device.queue.writeTexture(
         { texture: G.textures[index].texture, mipLevel },
         toBytes(data),
         { bytesPerRow, rowsPerImage },
-        { width, height, depthOrArrayLayers: 1 });
+        { width, height, depthOrArrayLayers });
 }
 
 export function destroyTexture(index) {
