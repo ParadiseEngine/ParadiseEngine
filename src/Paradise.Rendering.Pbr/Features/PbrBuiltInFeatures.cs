@@ -29,6 +29,7 @@ internal static class PbrBuiltInFeatures
         pipeline
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
+            .Add(new ContactShadowFeature(ctx), PbrFeatureOrder.ContactShadows)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
             .Add(gi, PbrFeatureOrder.GlobalIllumination)

@@ -137,6 +137,44 @@ float4 prepassWorldPosition(int2 pixel, float2 screenSize)
     return float4(world.xyz / world.w, 1.0);
 }
 
+// March a short world-space ray toward the light through the visible depth buffer. Occlusion
+// changes only direct light; missing/off-screen samples remain lit. The thin depth slab rejects
+// distant background surfaces, while the normal offset prevents a receiver shadowing itself.
+float sampleContactShadow(SceneLight light, float3 worldPos, float3 normal, float3 toLight, float2 fragCoord)
+{
+    float4 settings = frame.contactShadowSettings;
+    if (settings.w <= 0 || light.spotAngles.w <= 0 || dot(normal, toLight) <= 0) return 1;
+    float rayLength = settings.x;
+    if (light.positionAndType.w > 0.5) rayLength = min(rayLength, length(light.positionAndType.xyz - worldPos));
+    int steps = int(settings.z);
+    float stride = rayLength / float(steps);
+    float jitter = shadowDiskHash(fragCoord);
+    float3 start = worldPos + normal * max(settings.y * 0.1, 0.001);
+    for (int i = 0; i < steps; i++)
+    {
+        float3 ray = start + toLight * ((float(i) + 1 + jitter * 0.5) * stride);
+        float4 clip = mul(frame.viewProj, float4(ray, 1));
+        if (clip.w <= 0) break;
+        float3 ndc = clip.xyz / clip.w;
+        float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5;
+        if (any(uv <= 0) || any(uv >= 1) || ndc.z < 0 || ndc.z > 1) break;
+        int2 pixel = int2(uv * ssao.screen.zw);
+        // Ignore the originating pixel: its depth cannot describe a separate blocker.
+        if (all(pixel == int2(fragCoord))) continue;
+        float4 surface = prepassWorldPosition(pixel, ssao.screen.zw);
+        if (surface.w == 0) continue;
+        float delta = dot(ray - surface.xyz, frame.cameraForward.xyz);
+        if (delta > 0.001 && delta < settings.y)
+        {
+            // Fade where the ray leaves screen space and near its maximum length.
+            float edge = saturate(min(min(uv.x, 1-uv.x), min(uv.y, 1-uv.y)) * 20);
+            float fade = 1 - smoothstep(0.8, 1, float(i) / float(steps));
+            return 1 - settings.w * light.spotAngles.w * edge * fade;
+        }
+    }
+    return 1;
+}
+
 struct VertexInput
 {
     [[vk::location(0)]] float3 position : POSITION;

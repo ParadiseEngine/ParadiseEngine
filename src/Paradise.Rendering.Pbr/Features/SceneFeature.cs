@@ -69,7 +69,7 @@ public sealed partial class SceneFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         var scene = _ctx.Scene;
-        UploadFrameUniforms(scene);
+        UploadFrameUniforms(scene, frame.Blackboard.TryGet(ContactShadowFeature.Result, out _));
         if (scene.HasSkyBackground) UploadSky(scene);
 
         var graph = frame.Graph;

@@ -16,7 +16,7 @@ namespace Paradise.Rendering.Pbr;
 //   upload needs an explicit second transpose to cancel it: transpose(inverse(model)) — see
 //   PbrMath.NormalMatrix.
 
-/// <summary>Mirror of pbr.slang <c>SceneLight</c> (64 B, array stride 64).</summary>
+/// <summary>Mirror of pbr.slang <c>SceneLight</c> (96 B, array stride 96).</summary>
 [StructLayout(LayoutKind.Explicit, Size = 96)]
 public struct SceneLightGpu
 {
@@ -24,15 +24,15 @@ public struct SceneLightGpu
     [FieldOffset(16)] public Vector4 DirectionAndRange; // xyz surface→light dir (directional), w range
     [FieldOffset(32)] public Vector4 ColorAndIntensity; // rgb linear color, w intensity
     [FieldOffset(48)] public Vector4 SpotAngles;        // x outer°, y inner°, z base shadow tile (<0 none), w strength
-    [FieldOffset(64)] public Vector4 ShadowAtlas;       // x columns, y face count, z LIGHT_PARAM_SPECULAR, w soft flag
+    [FieldOffset(64)] public Vector4 ShadowAtlas;       // x attenuation decay, y view count, z LIGHT_PARAM_SPECULAR, w soft flag
     // x: LIGHT_PARAM_SIZE — directional carries 1−cos(angular°) precomputed (Godot light_storage
     // convention); point/spot carry the raw world radius (the shader derives the per-fragment
     // angular term). Softens specular highlights + NdotL like Godot's size_A. y: shadow texel
-    // world size (renderer-filled), z: indirect energy, w unused.
+    // world size (renderer-filled), z: indirect energy, w: PCSS emitter radius/tan(angular radius).
     [FieldOffset(80)] public Vector4 SizeParams;
 }
 
-/// <summary>Inline storage for the 8 scene lights (sequential — stride matches WGSL's 80).</summary>
+/// <summary>Inline storage for the scene lights (96-byte stride).</summary>
 [InlineArray(FrameUniformsGpu.MaxSceneLights)]
 public struct SceneLightArray
 {
@@ -40,7 +40,7 @@ public struct SceneLightArray
 }
 
 /// <summary>Inline storage for the shadow view-projection matrices, one per SHADOW VIEW and
-/// indexed by the view's own array layer — not by light. Stride matches WGSL's 64-byte mat4.
+/// indexed by the view, independently of the packed atlas tile. Stride matches WGSL's 64-byte mat4.
 ///
 /// <para>Sized by <see cref="FrameUniformsGpu.MaxShadowViews"/> rather than by the light budget,
 /// so raising the light cap does not multiply the shadow budget by six.</para></summary>
@@ -48,6 +48,12 @@ public struct SceneLightArray
 public struct ShadowMatrixArray
 {
     private Matrix4x4 _element0;
+}
+
+[InlineArray(FrameUniformsGpu.MaxShadowViews)]
+public struct ShadowVectorArray
+{
+    private Vector4 _element0;
 }
 
 /// <summary>Inline storage for the 9 L2 spherical-harmonic ambient coefficients
@@ -58,17 +64,14 @@ public struct AmbientShArray
     private Vector4 _element0;
 }
 
-/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (31088 B).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 31088)]
+/// <summary>Mirror of pbr.slang <c>FrameUniforms</c> (49600 B).</summary>
+[StructLayout(LayoutKind.Explicit, Size = 49600)]
 public struct FrameUniformsGpu
 {
     public const int MaxSceneLights = 64;
 
-    /// <summary>Shadow views the frame can carry: one per directional or spot light that casts,
-    /// six per point light. Deliberately its OWN budget rather than <see cref="MaxSceneLights"/>
-    /// × 6 — the two were one constant, which meant a larger light cap silently asked for a larger
-    /// shadow-map array, and WebGPU's default maxTextureArrayLayers is 256. A shadow view costs a
-    /// depth-only pass and a full array layer; a light that only shades costs neither.</summary>
+    /// <summary>Shadow metadata budget: up to four views per directional light, one per spot,
+    /// and six per point light, all packed into one independently sized depth atlas.</summary>
     public const int MaxShadowViews = 384;
 
     [FieldOffset(0)] public Vector4 CameraPos;       // xyz world camera, w unused
@@ -85,6 +88,11 @@ public struct FrameUniformsGpu
     [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
     [FieldOffset(30992)] public Vector4 Time;                  // x elapsed seconds (procedural animation)
     [FieldOffset(31008)] public Vector4 ShadowFilter;          // x soft-shadow PCF disk radius (texels)
+    [FieldOffset(31088)] public ShadowVectorArray ShadowViewRects;
+    [FieldOffset(37232)] public ShadowVectorArray ShadowViewData;
+    [FieldOffset(43376)] public ShadowVectorArray ShadowViewDepth;
+    [FieldOffset(49520)] public Matrix4x4 ViewProj;
+    [FieldOffset(49584)] public Vector4 ContactShadowSettings;
     [FieldOffset(31024)] public Matrix4x4 InvViewProj;         // depth → world for screen-space effects
 }
 
