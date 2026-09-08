@@ -35,6 +35,7 @@ internal static class PbrBuiltInFeatures
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
             .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
+            .Add(new FogFeature(ctx, shadows), PbrFeatureOrder.Fog)
             .Add(new BloomFeature(ctx), PbrFeatureOrder.Bloom)
             .Add(new CompositeFeature(ctx), PbrFeatureOrder.Composite);
     }

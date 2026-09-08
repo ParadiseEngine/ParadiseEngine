@@ -5,6 +5,7 @@ namespace Paradise.Rendering.Pbr;
 /// the renderer.</summary>
 public static class PbrTargets
 {
+    public const string FogColor = "PbrFogColor";
     public const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
 
     /// <summary>Linear HDR scene color, the main pass's output and every post pass's input.</summary>
@@ -57,6 +58,7 @@ public static class PbrTargets
 /// produces it did not run this frame; consumers bind the black fallback instead.</summary>
 public static class PbrResults
 {
+    public const string SceneColor = "Pbr.SceneColor";
     /// <summary>Bloom mip 0, published only in frames the chain runs.</summary>
     public const string Bloom = "Pbr.Bloom";
 

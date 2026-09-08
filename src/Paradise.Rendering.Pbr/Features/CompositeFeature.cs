@@ -58,7 +58,7 @@ public sealed class CompositeFeature : IRenderFeature
             .Color(0, FrameGraph.Backbuffer, LoadOp.Clear, clear: new ColorRgba(0f, 0f, 0f, 1f))
             .BindGroup(0, "PbrCompositeGroup", _groupLayout,
             [
-                GraphBinding.Texture(0, graph.Texture(PbrTargets.Hdr)),
+                GraphBinding.Texture(0, frame.Blackboard.GetOrDefault(PbrResults.SceneColor, graph.Texture(PbrTargets.Hdr))),
                 GraphBinding.Sampler(1, _ctx.LinearClampSampler),
                 GraphBinding.Texture(2, hasBloom ? bloom : frame.Black),
                 GraphBinding.Buffer(3, _uniformBuffer, 0, (ulong)Unsafe.SizeOf<CompositeUniformsGpu>()),
