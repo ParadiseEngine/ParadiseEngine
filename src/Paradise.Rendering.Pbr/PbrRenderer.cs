@@ -280,10 +280,7 @@ public sealed partial class PbrRenderer : IDisposable
         // RH view space looks down −Z: more negative Z = farther. Ascending Z sort = far first.
         blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
 
-        var totalDraws = opaque.Count + blend.Count;
-        if (totalDraws > PbrContext.MaxDrawsPerFrame)
-            throw new InvalidOperationException(
-                $"{totalDraws} draws exceed the {PbrContext.MaxDrawsPerFrame}-slot draw ring; split the scene or grow MaxDrawsPerFrame.");
+        _ctx.EnsureDrawCapacity(checked(opaque.Count + blend.Count));
 
         Materials.ResolveTargets();
         timings.Partition = Lap();

@@ -7,8 +7,8 @@ namespace Paradise.Rendering.Pbr;
 public sealed class FrustumCullingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private readonly bool[] _opaque = new bool[PbrContext.MaxDrawsPerFrame];
-    private readonly bool[] _blend = new bool[PbrContext.MaxDrawsPerFrame];
+    private bool[] _opaque = [];
+    private bool[] _blend = [];
     private bool _active;
 
     internal FrustumCullingFeature(PbrContext ctx) => _ctx = ctx;
@@ -28,6 +28,8 @@ public sealed class FrustumCullingFeature : IRenderFeature
         _active = _ctx.Scene.Visibility.FrustumEnabled;
         CulledDrawCount = 0;
         if (!_active) return;
+        if (_opaque.Length < _ctx.Opaque.Count) _opaque = new bool[DrawBufferCapacity.Grow(_opaque.Length, _ctx.Opaque.Count)];
+        if (_blend.Length < _ctx.Blend.Count) _blend = new bool[DrawBufferCapacity.Grow(_blend.Length, _ctx.Blend.Count)];
         Fill(_ctx.Opaque, _opaque);
         Fill(_ctx.Blend, _blend);
     }
