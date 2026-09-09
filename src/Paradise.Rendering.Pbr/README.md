@@ -77,3 +77,98 @@ replace its spacing/counts to change its density. Grid changes restart probe con
 `ProbeCount` report the effective grid. ParadiseSamples' renderer showcase exposes these
 controls in its **DDGI** panel. Migrating callers should replace `scene.Gi` assignments with
 `renderer.Pipeline.Find<ProbeGiFeature>()!.Settings` assignments.
+
+## Bounded, scrolling DDGI
+
+A dense volume spanning an entire town spends probes on places the player cannot use.
+Set `Scrolling = true` with an authored `Volume`, then move the requested origin around gameplay:
+
+```csharp
+var halfSpan = new Vector3(16, 4, 16);
+gi.Settings = new PbrGi
+{
+    Enabled = true,
+    Scrolling = true,
+    Volume = new PbrProbeVolume(playerPosition - halfSpan, new Vector3(2), 17, 5, 17),
+    MaxProbes = 2048,
+    RaysPerProbe = 128,
+    ProbesPerFrame = 128,
+    UpdateFocus = playerPosition,
+};
+
+// Before each frame, on the rendering thread:
+gi.Settings = gi.Settings with
+{
+    Volume = gi.Settings.Volume! with { Origin = playerPosition - halfSpan },
+    UpdateFocus = playerPosition,
+};
+```
+
+The resident grid moves only by whole cells; `ActiveVolume` reports its snapped origin. Interior
+probes retain their world positions, relocation, classification and atlas tiles. Only entering
+planes become invalid. Shape/spacing changes or a teleport beyond the overlap reset the whole
+grid. Invalid probes cannot sample stale lighting and their first blend replaces history.
+This follows the storage-reuse principle in NVIDIA's
+[infinite scrolling volume design](https://github.com/NVIDIAGameWorks/RTXGI-DDGI/blob/main/docs/DDGIVolume.md#infinite-scrolling-movement).
+
+New and explicitly invalidated probes get update priority. With `UpdateFocus`, half the remaining
+budget updates nearby probes and half maintains a background sweep; a one-probe budget alternates
+between the two. Without a focus, the background sweep is round-robin. `Invalidate(bounds)`
+resets history and classification within the bounds plus one probe cell. Supply the affected
+lighting region when lights change; an object's own bounds alone may not cover its distant
+indirect effect.
+
+Budgeted blending and classification dispatch only selected probes. `Gi.Carry` copies the previous
+selection's tiles and states only where the current selection will not overwrite them, preserving
+the prior bounce without full-atlas maintenance. A full-to-budgeted transition can still carry a
+large selection once. Inactive probes skip traversal but still occupy scheduled slots; GPU
+compaction and convergence-driven scheduling are future work. This remains one volume, with the
+existing sky fallback outside it; multiple volumes require a separate blending/coverage design.
+
+## GI hit-light culling
+
+GI ray hits use a conservative world-space light BVH, independent of camera froxels. Directional
+and unlimited-range lights remain global; zero indirect energy is discarded before shadow work.
+Candidate lights are evaluated in their original scene order, preserving shadow slots and
+floating-point accumulation. `LightCullingEnabled = false` provides an unculled comparison.
+The renderer's existing admission limit remains 64 lights.
+
+An Apple M3 Max fixture with 64 distributed point/spot lights, 405 probes, 128 rays per probe,
+and a 96×96 render measured median `Gi.Trace` at 0.590 ms unculled versus 0.262 ms culled.
+Synchronous render plus timing readback measured 2.720 versus 2.155 ms, while CPU setup rose from
+0.100 to 0.145 ms. These are 40-frame samples in alternating off/on/on/off runs after warmup;
+the synchronous measurement includes CPU/readback and is not an idle-to-idle GPU frame total.
+The GPU regression requires identical culled/unculled pixels. Measure representative gameplay
+before extrapolating this fixture to a larger world.
+
+## GI geometry for large scenes
+
+`PbrInstance.GiMesh` substitutes an uploaded, simplified mesh for that instance's probe tracing.
+The proxy uses the instance's transform and its own primitive materials. Instances sharing a
+proxy also share its uploaded mesh BVH. Rasterization, direct shadows and ray-traced AO keep
+using `Mesh`.
+
+`scene.GiGeometry.Instances` adds geometry used only by GI, including coarse distant walls that
+must continue to block sky rays after detailed geometry streams out. Set
+`scene.GiGeometry.IncludeSceneInstances = false` to supply the complete participating set
+explicitly. Only static, opaque or alpha-tested primitives participate, matching the existing
+tracer rules; alpha tests and material textures are still approximated by material factors.
+The automatic probe-volume fit uses this GI set's bounds.
+
+```csharp
+building.GiMesh = sharedBuildingProxy;
+scene.GiGeometry.Instances.Add(distantOccluder);
+
+// A host that manages the complete GI set can replace its membership each frame.
+scene.GiGeometry.IncludeSceneInstances = false;
+scene.GiGeometry.Instances.Clear();
+scene.GiGeometry.Instances.AddRange(residentGiInstances);
+gi.Invalidate(changedWorldBounds);
+```
+
+Change membership on the render thread before `RenderFrame`, and invalidate changed regions
+to reclassify probes previously inside removed geometry. Tracing membership updates next frame;
+uploaded mesh storage remains resident until renderer disposal. This API supplies participation
+and proxy selection; hosts own streaming, proxy creation and mesh residency budgets. GI and AO
+share mesh buffers and, when their participating sets match, their instance hierarchy too.
+Use an authored bounded probe volume when distant occluders should not enlarge probe coverage.

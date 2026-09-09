@@ -287,10 +287,10 @@ public sealed partial class PbrRenderer : IDisposable
         // The instance hierarchy is a per-frame CPU build; only frames that trace pay for it —
         // which means asking the switches too, or a build with the tracers configured off still
         // pays for a hierarchy nothing will walk.
-        var tracesThisFrame =
-            (scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
-            (Pipeline.Find<ProbeGiFeature>()!.Settings.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id));
-        if (tracesThisFrame) _ctx.Trace.BuildFrame(opaque, Materials);
+        var tracesAo = scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id);
+        var tracesGi = Pipeline.Find<ProbeGiFeature>()!.Settings.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id);
+        if (tracesAo || tracesGi)
+            _ctx.Trace.BuildFrame(opaque, Materials, scene, rayTracedAo: tracesAo, globalIllumination: tracesGi);
         timings.TraceBuild = Lap();
         _graph.Reset();
         Pipeline.Setup(_graph);
