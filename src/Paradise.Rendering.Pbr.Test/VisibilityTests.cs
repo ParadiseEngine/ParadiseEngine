@@ -88,7 +88,7 @@ public class VisibilityTests
             Camera = new PbrCamera { View = Matrix4x4.Identity, Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f) },
             Visibility = new PbrVisibility { FrustumEnabled = true, OcclusionEnabled = true },
             Bloom = new PbrBloom { Enabled = false },
-            Gi = new PbrGi { Enabled = false },
+
             Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Linear },
             ClearColor = new ColorRgba(0, 0, 0, 1),
         };

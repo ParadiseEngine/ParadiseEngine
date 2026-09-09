@@ -101,6 +101,9 @@ public sealed class ProbeGiFeature : IRenderFeature
         ShadingStateBuffer = _stateBuffers[_current];
     }
 
+    /// <summary>Runtime settings, replaced on the rendering thread before the next frame.</summary>
+    public PbrGi Settings { get; set; } = new();
+
     public FeatureDefinition Definition => PbrFeatures.GlobalIllumination;
     public FrameRequirements Requires => FrameRequirements.None;
 
@@ -140,7 +143,7 @@ public sealed class ProbeGiFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
-        var gi = _ctx.Scene.Gi;
+        var gi = Settings;
         ShadingStateBuffer = _stateBuffers[_current];
         var fit = gi.Enabled ? gi.Volume ?? Fit(_ctx.Trace.SceneBounds, gi) : null;
         if (gi.Volume is { } authored) ValidateAuthored(authored, gi);
@@ -272,7 +275,7 @@ public sealed class ProbeGiFeature : IRenderFeature
     }
 
     /// <summary>The group-3 (probe) bindings a program reflects, over the atlases it READS.</summary>
-    private GraphBinding[] ProbeGroupBindings(ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, BufferHandle states)
+    internal GraphBinding[] ProbeGroupBindings(ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, BufferHandle states)
     {
         var layout = ShaderPrograms.FindGroup(program, 3);
         var bindings = new GraphBinding[layout.Entries.Length];
@@ -303,7 +306,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         var maxProbes = Math.Max(gi.MaxProbes, 8);
 
         var spacing = MathF.Cbrt(extent.X * extent.Y * extent.Z / maxProbes);
-        spacing = MathF.Max(spacing, 0.01f);
+        spacing = MathF.Max(spacing, MathF.Max(gi.ProbeSpacing, 0.01f));
         // Widen the spacing until the grid fits the budget and the atlas. Terminates: every axis
         // bottoms out at two probes, and 2×2×2 fits any budget of eight or more. The cube-root
         // start is far off for a long corridor with a tight budget, which is why this is a loop

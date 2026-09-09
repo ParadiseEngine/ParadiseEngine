@@ -43,3 +43,37 @@ conservative fallbacks, actual GPU argument changes, current-frame disocclusion,
 edge tiles after resize, feature transitions, and byte-identical output with culling disabled,
 including eight jittered TAA frames with moving geometry, fog and directional shadows.
 The indirect command is implemented by the native WebGPU and browser backends.
+
+## DDGI debugging
+
+GI settings belong to `ProbeGiFeature`, not `PbrScene`. Replace them on the rendering thread
+before `RenderFrame` to tune DDGI live:
+
+```csharp
+var gi = renderer.Pipeline.Find<ProbeGiFeature>()!;
+gi.Settings = gi.Settings with
+{
+    Enabled = true,
+    ProbeSpacing = 1f,
+    RaysPerProbe = 128,
+    ProbesPerFrame = 256,
+};
+
+switches.Set(PbrFeatures.GiProbes.Id, true);
+renderer.Pipeline.Find<ProbeGiDebugFeature>()!.ProbeRadius = 0.08f;
+```
+
+`ProbeGiDebugFeature` owns the visualization pipeline and `Gi.DebugProbes` pass. Its
+`rendering.debug.giProbes` switch defaults off. Markers respect scene depth and show relocated
+positions (green active, red inactive), without adding traced geometry. `ProbeRadius` sets
+their size in metres. Turning off visualization leaves GI updates running. With GI disabled
+through its settings or `rendering.globalIllumination`, no markers are drawn.
+
+`ProbeSpacing` is a minimum spacing for the automatic grid; zero derives density from
+`MaxProbes`. The budget and atlas limits can widen it. An authored `Volume` overrides fitting;
+replace its spacing/counts to change its density. Grid changes restart probe convergence.
+`RaysPerProbe` (8–256), `ProbesPerFrame` (zero updates all probes), `Hysteresis`, `Intensity`,
+`NormalBias`, and `ViewBias` take effect on the next frame. The feature's `ActiveVolume` and
+`ProbeCount` report the effective grid. ParadiseSamples' renderer showcase exposes these
+controls in its **DDGI** panel. Migrating callers should replace `scene.Gi` assignments with
+`renderer.Pipeline.Find<ProbeGiFeature>()!.Settings` assignments.

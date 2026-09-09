@@ -3,7 +3,7 @@ using Paradise.Features;
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Declares the stable feature names and defaults used by engine configuration.</summary>
-/// <remarks>Names are serialized contracts. Both the process switch and the scene's Enabled setting
+/// <remarks>Names are serialized contracts. Both the process switch and the feature's runtime settings
 /// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
@@ -50,6 +50,10 @@ public static class PbrFeatures
     public static FeatureDefinition GlobalIllumination { get; } = new(
         "rendering.globalIllumination", true,
         "Probe global illumination. Off, indirect light is the sky ambient alone.");
+
+    /// <summary>World-space visualization of relocated GI probes.</summary>
+    public static FeatureDefinition GiProbes { get; } = new(
+        "rendering.debug.giProbes", false, "Draw active and inactive GI probes at their relocated positions.");
 
     /// <summary>Forward+ froxel binning in compute. Off, the froxel grid is retracted and every
     /// light is tested against every pixel — the same picture at more cost.</summary>
@@ -147,7 +151,7 @@ public static class PbrFeatures
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
         FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
-        Decals, Instancing, Scene, SceneColorCapture, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
+        Decals, Instancing, Scene, SceneColorCapture, GiProbes, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
 
@@ -186,6 +190,7 @@ public static class PbrFeatureOrder
     public const int Instancing = 575;
     public const int Scene = 600;
     public const int SceneColorCapture = 700;
+    public const int GiProbes = 705;
     public const int Fog = 710;
     public const int TemporalAntiAliasing = 720;
     public const int Exposure = 730;

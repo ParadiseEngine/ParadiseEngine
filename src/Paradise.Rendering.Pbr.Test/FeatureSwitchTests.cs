@@ -203,7 +203,7 @@ public class FeatureSwitchTests
 
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = BuildScene(pbr);
-        scene.Gi = new PbrGi { Enabled = true, RaysPerProbe = 32, Hysteresis = 0.5f, MaxProbes = 512 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi { Enabled = true, RaysPerProbe = 32, Hysteresis = 0.5f, MaxProbes = 512 };
         for (var i = 0; i < 4; i++) pbr.RenderFrame(scene);
         var withProbes = Brightness(backend);
 
@@ -283,7 +283,7 @@ public class FeatureSwitchTests
                 scene.Ssao = new PbrSsao { Enabled = true, Radius = 0.6f, Intensity = 2f };
                 scene.RayTracedAo = new PbrRayTracedAo { Enabled = true };
                 scene.Ssr = new PbrScreenSpaceReflection { Enabled = true };
-                scene.Gi = new PbrGi { Enabled = true, RaysPerProbe = 32, MaxProbes = 256 };
+                pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi { Enabled = true, RaysPerProbe = 32, MaxProbes = 256 };
                 pbr.RenderFrame(scene);
                 pbr.RenderFrame(scene); // the second frame reads what the first left behind
             }

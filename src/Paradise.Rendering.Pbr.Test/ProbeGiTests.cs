@@ -10,6 +10,64 @@ namespace Paradise.Rendering.Pbr.Test;
 /// which pins the irradiance convention the probes and the sky ambient share.</summary>
 public class ProbeGiTests
 {
+    [Test]
+    public async Task debug_probes_toggle_and_runtime_settings_rebuild_the_grid()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var lifetime = backend;
+        var switches = new FeatureSwitches();
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
+        var debug = pbr.Pipeline.Find<ProbeGiDebugFeature>()!;
+        debug.ProbeRadius = 0.25f;
+        var scene = Camera(new Vector3(0, 0, 5), Vector3.Zero);
+        gi.Settings = new PbrGi
+        {
+            Enabled = true, RaysPerProbe = 8,
+            Volume = new PbrProbeVolume(new Vector3(-1), new Vector3(2), 2, 2, 2),
+        };
+        var hidden = Render(backend, pbr, scene, 1);
+        switches.Set(PbrFeatures.GiProbes.Id, true);
+        var shown = Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsTrue();
+        await Assert.That(shown.SequenceEqual(hidden)).IsFalse();
+        gi.Settings = gi.Settings with
+        {
+            RaysPerProbe = 256, ProbesPerFrame = 3,
+            Volume = new PbrProbeVolume(new Vector3(-1), Vector3.One, 3, 3, 3),
+        };
+        Render(backend, pbr, scene, 2);
+        await Assert.That(gi.ProbeCount).IsEqualTo(27);
+        switches.Set(PbrFeatures.GiProbes.Id, false);
+        var hiddenAgain = Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsFalse();
+        await Assert.That(pbr.LastPassNames.Contains("Gi.Trace")).IsTrue();
+        await Assert.That(hiddenAgain.SequenceEqual(hidden)).IsTrue();
+        switches.Set(PbrFeatures.GiProbes.Id, true);
+        switches.Set(PbrFeatures.GlobalIllumination.Id, false);
+        Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsFalse();
+        switches.Set(PbrFeatures.GlobalIllumination.Id, true);
+        Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsTrue();
+        gi.Settings = gi.Settings with { Enabled = false };
+        Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsFalse();
+    }
+
+    [Test]
+    public async Task fitted_spacing_can_reduce_density_without_exceeding_budget()
+    {
+        var bounds = new Geometry.Aabb(Vector3.Zero, new Vector3(10));
+        var settings = new PbrGi { MaxProbes = 4096 };
+        var dense = ProbeGiFeature.Fit(bounds, settings)!;
+        var sparse = ProbeGiFeature.Fit(bounds, settings with { ProbeSpacing = 5 })!;
+        await Assert.That(sparse.Spacing.X).IsGreaterThanOrEqualTo(5);
+        await Assert.That(sparse.CountX * sparse.CountY * sparse.CountZ)
+            .IsLessThan(dense.CountX * dense.CountY * dense.CountZ);
+    }
+
     private const uint Size = 96;
 
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()
@@ -54,7 +112,7 @@ public class ProbeGiTests
         // Camera between the walls, looking at the white one; the glowing wall is behind it.
         var scene = Camera(new Vector3(0f, 1f, 0.5f), new Vector3(0f, 1f, -2f));
         scene.Ambient = new PbrAmbient { Sky = Vector3.Zero, Equator = Vector3.Zero, Ground = Vector3.Zero, Flat = true };
-        scene.Gi = new PbrGi { Enabled = gi, RaysPerProbe = 64, Hysteresis = 0.5f, MaxProbes = 512 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi { Enabled = gi, RaysPerProbe = 64, Hysteresis = 0.5f, MaxProbes = 512 };
         scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, -2f) });
         scene.Instances.Add(new PbrInstance { Mesh = glowMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 4f, 0.2f)) * Matrix4x4.CreateTranslation(0f, 1f, 2f) });
         scene.Instances.Add(new PbrInstance { Mesh = whiteMesh, Model = Matrix4x4.CreateScale(new Vector3(6f, 0.2f, 6f)) * Matrix4x4.CreateTranslation(0f, -1f, 0f) });
@@ -80,12 +138,12 @@ public class ProbeGiTests
         using var _ = backend;
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = EmissiveRoom(pbr, gi: true, thickBlock: true);
-        scene.Gi = scene.Gi with { MaxProbes = 512 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { MaxProbes = 512 };
         pbr.RenderFrame(scene);
         var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
         var probes = gi.ProbeCount;
         var lap = (probes + 2) / 3;
-        scene.Gi = scene.Gi with { ProbesPerFrame = lap };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { ProbesPerFrame = lap };
         for (var i = 0; i < 12; i++) pbr.RenderFrame(scene);
 
         var before = ReadInactive(backend, gi, probes);
@@ -129,7 +187,7 @@ public class ProbeGiTests
         var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.6f, 0.6f, 1f));
         var scene = Camera(new Vector3(0f, 2f, 3f), Vector3.Zero);
         scene.Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Equator = new Vector3(0.5f), Ground = new Vector3(0.5f), Flat = true, Exposure = exposure };
-        scene.Gi = new PbrGi { Enabled = gi, RaysPerProbe = 128, Hysteresis = 0.5f, MaxProbes = 256 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi { Enabled = gi, RaysPerProbe = 128, Hysteresis = 0.5f, MaxProbes = 256 };
         scene.Instances.Add(new PbrInstance
         {
             Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, white)]),
@@ -231,20 +289,20 @@ public class ProbeGiTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = OpenFloor(pbr, gi: true);
 
-        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(1f), 4, 1, 4) };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(1f), 4, 1, 4) };
         await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("4x1x4");
 
-        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 100, 100, 100), MaxProbes = 4096 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 100, 100, 100), MaxProbes = 4096 };
         await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("MaxProbes");
 
-        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 64, 64, 2), MaxProbes = 100000 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { Volume = new PbrProbeVolume(Vector3.Zero, new Vector3(0.1f), 64, 64, 2), MaxProbes = 100000 };
         await Assert.That(() => pbr.RenderFrame(scene)).Throws<ArgumentException>().WithMessageContaining("atlas");
 
         // ...and a valid authored volume is adopted as given.
-        scene.Gi = scene.Gi with { Volume = new PbrProbeVolume(new Vector3(-3f, 0f, -3f), new Vector3(1f), 7, 3, 7), MaxProbes = 4096 };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { Volume = new PbrProbeVolume(new Vector3(-3f, 0f, -3f), new Vector3(1f), 7, 3, 7), MaxProbes = 4096 };
         pbr.RenderFrame(scene);
         var active = pbr.Pipeline.Find<ProbeGiFeature>()!.ActiveVolume;
-        await Assert.That(active).IsEqualTo(scene.Gi.Volume);
+        await Assert.That(active).IsEqualTo(pbr.Pipeline.Find<ProbeGiFeature>()!.Settings.Volume);
     }
 
     /// <summary>An empty primitive instanced as static must not poison the fit: its inverted
@@ -293,7 +351,7 @@ public class ProbeGiTests
         using (var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size))
         {
             var scene = EmissiveRoom(pbr, gi: true);
-            scene.Gi = scene.Gi with { ProbesPerFrame = 16, Hysteresis = 0.3f };
+            pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { ProbesPerFrame = 16, Hysteresis = 0.3f };
             budgeted = Mean(Render(backend, pbr, scene, frames: 80));
         }
 
@@ -320,7 +378,7 @@ public class ProbeGiTests
         var dispatchesOff = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
         var volumeOff = gi.ActiveVolume;
 
-        scene.Gi = scene.Gi with { Enabled = true };
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = pbr.Pipeline.Find<ProbeGiFeature>()!.Settings with { Enabled = true };
         pbr.RenderFrame(scene);
         var computeOn = CountPasses(pbr, "Gi.");
         var dispatchesOn = Count(recorder.Frames[^1].Commands, RenderCommandKind.Dispatch);
