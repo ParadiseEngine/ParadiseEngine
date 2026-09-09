@@ -126,11 +126,28 @@
            Text="slangc not found at '$(SlangcPath)' after RestoreSlang. Check tools/slang/slang.manifest.json for RID '$(_SlangResolvedRid)'." />
   </Target>
 
+  <Target Name="_CollectSlangShaderInputs" Condition="@(SlangShader-&gt;Count()) &gt; 0">
+    <!-- Include search paths may be supplied by a package shim or source override imported after
+         this file. Collect them at execution time so engine layout changes invalidate game shaders. -->
+    <ItemGroup Condition="'@(SlangIncludeDir)' != ''">
+      <_SlangSearchPathInclude Include="%(SlangIncludeDir.FullPath)/**/*.slang" />
+    </ItemGroup>
+    <PropertyGroup>
+      <_SlangInputManifest>$(IntermediateOutputPath)shaders/inputs.cache</_SlangInputManifest>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)shaders" />
+    <!-- A package/source switch can select older files. Record input identities as well as checking
+         timestamps, so switching include roots or adding/removing an include cannot reuse old output. -->
+    <WriteLinesToFile File="$(_SlangInputManifest)"
+                      Lines="$(SlangcPath);@(SlangShader-&gt;'%(FullPath)');@(SlangShaderInclude-&gt;'%(FullPath)');@(SlangIncludeDir-&gt;'%(FullPath)');@(_SlangSearchPathInclude-&gt;'%(FullPath)')"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
   <Target Name="CompileSlangShaders"
-          DependsOnTargets="RestoreSlang"
+          DependsOnTargets="RestoreSlang;_CollectSlangShaderInputs"
           BeforeTargets="BeforeBuild;PrepareResources;PrepareResourceNames"
           Condition="@(SlangShader-&gt;Count()) &gt; 0"
-          Inputs="@(SlangShader);@(SlangShaderInclude);$(SlangManifestPath)"
+          Inputs="@(SlangShader);@(SlangShaderInclude);@(_SlangSearchPathInclude);$(_SlangInputManifest);$(SlangManifestPath);$(MSBuildAllProjects)"
           Outputs="@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).wgsl');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).reflection.json');@(SlangShader-&gt;'$(IntermediateOutputPath)shaders/%(Filename).raw-reflection.json')">
 
     <PropertyGroup>

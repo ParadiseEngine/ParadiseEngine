@@ -65,6 +65,9 @@ jobs:
       - name: Verify standalone Slang bootstrap under CI and publish settings
         run: python3 tools/slang/test_ci_bootstrap.py
 
+      - name: Verify incremental compilation of external shader includes
+        run: python3 tools/slang/test_incremental_shaders.py
+
       - name: Prepare CI solution
         run: |
           cp ParadiseEngine.slnx ParadiseEngine.ci.slnx
