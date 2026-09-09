@@ -11,7 +11,7 @@ namespace Paradise.Rendering.Pbr;
 /// <remarks>Each frame traces, blends irradiance and distance moments, then relocates/classifies
 /// probes. The volume fits static geometry unless authored. Ping-pong atlases and state preserve
 /// the previous bounce and avoid unsupported read/write storage.</remarks>
-public sealed partial class ProbeGiFeature : IRenderFeature
+public sealed class ProbeGiFeature : IRenderFeature
 {
     // Must match probeBlend.slang's IrradianceTexels / VisibilityTexels.
     private const int IrradianceTexels = 8;
@@ -101,6 +101,9 @@ public sealed partial class ProbeGiFeature : IRenderFeature
         ShadingStateBuffer = _stateBuffers[_current];
     }
 
+    /// <summary>Runtime settings, replaced on the rendering thread before the next frame.</summary>
+    public PbrGi Settings { get; set; } = new();
+
     public FeatureDefinition Definition => PbrFeatures.GlobalIllumination;
     public FrameRequirements Requires => FrameRequirements.None;
 
@@ -140,7 +143,7 @@ public sealed partial class ProbeGiFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
-        var gi = _ctx.Scene.Gi;
+        var gi = Settings;
         ShadingStateBuffer = _stateBuffers[_current];
         var fit = gi.Enabled ? gi.Volume ?? Fit(_ctx.Trace.SceneBounds, gi) : null;
         if (gi.Volume is { } authored) ValidateAuthored(authored, gi);
@@ -215,7 +218,6 @@ public sealed partial class ProbeGiFeature : IRenderFeature
 
         frame.Blackboard.Publish(PbrResults.GiIrradiance, writeIrradiance);
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
-        if (gi.ShowProbes) SetupDebug(frame, gi, writeIrradiance, writeVisibility);
         _current = next;
         _framesSinceReset++;
     }
@@ -273,7 +275,7 @@ public sealed partial class ProbeGiFeature : IRenderFeature
     }
 
     /// <summary>The group-3 (probe) bindings a program reflects, over the atlases it READS.</summary>
-    private GraphBinding[] ProbeGroupBindings(ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, BufferHandle states)
+    internal GraphBinding[] ProbeGroupBindings(ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, BufferHandle states)
     {
         var layout = ShaderPrograms.FindGroup(program, 3);
         var bindings = new GraphBinding[layout.Entries.Length];
@@ -472,7 +474,6 @@ public sealed partial class ProbeGiFeature : IRenderFeature
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
-        DisposeDebug();
         renderer.DestroyComputePipeline(_tracePipeline);
         renderer.DestroyComputePipeline(_blendIrradiancePipeline);
         renderer.DestroyComputePipeline(_blendVisibilityPipeline);

@@ -1,10 +1,12 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Paradise.Rendering.Graph;
+using Paradise.Features;
 
 namespace Paradise.Rendering.Pbr;
 
-public sealed partial class ProbeGiFeature
+/// <summary>Draws depth-tested markers for the current relocated GI probes.</summary>
+public sealed class ProbeGiDebugFeature : IRenderFeature
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct DebugUniforms
@@ -18,8 +20,28 @@ public sealed partial class ProbeGiFeature
     private BufferHandle _debugUniformBuffer;
     private ShaderProgramDesc? _debugProgram;
 
-    private void SetupDebug(in FrameContext frame, PbrGi gi, GraphTexture irradiance, GraphTexture visibility)
+    private readonly PbrContext _ctx;
+    private readonly ProbeGiFeature _gi;
+
+    internal ProbeGiDebugFeature(PbrContext ctx, ProbeGiFeature gi)
     {
+        _ctx = ctx;
+        _gi = gi;
+    }
+
+    public FeatureDefinition Definition => PbrFeatures.GiProbes;
+    public FrameRequirements Requires => FrameRequirements.None;
+
+    /// <summary>World-space radius of probe markers in metres.</summary>
+    public float ProbeRadius { get; set; } = 0.08f;
+
+    public void Resize(uint width, uint height) { }
+
+    public void Setup(in FrameContext frame)
+    {
+        if (_gi.ProbeCount == 0
+            || !frame.Blackboard.TryGet(PbrResults.GiIrradiance, out var irradiance)
+            || !frame.Blackboard.TryGet(PbrResults.GiVisibility, out var visibility)) return;
         if (!_debugPipeline.IsValid)
         {
             _debugProgram = ShaderPrograms.Load("Shaders.probeDebug");
@@ -31,7 +53,7 @@ public sealed partial class ProbeGiFeature
         }
 
         Matrix4x4.Invert(_ctx.View, out var camera);
-        var radius = Math.Clamp(gi.ProbeRadius, 0.001f, 10f);
+        var radius = Math.Clamp(ProbeRadius, 0.001f, 10f);
         var uniforms = new DebugUniforms
         {
             ViewProjection = _ctx.ViewProjection,
@@ -46,11 +68,11 @@ public sealed partial class ProbeGiFeature
             .BindGroup(0, "PbrProbeDebugCamera", ShaderPrograms.FindGroup(_debugProgram!, 0),
                 [GraphBinding.Buffer(0, _debugUniformBuffer, 0, 96)])
             .BindGroup(3, "PbrProbeDebugStates", ShaderPrograms.FindGroup(_debugProgram!, 3),
-                ProbeGroupBindings(_debugProgram!, irradiance, visibility, ShadingStateBuffer))
-            .Record(this, RecordDebug, _probeCount);
+                _gi.ProbeGroupBindings(_debugProgram!, irradiance, visibility, _gi.ShadingStateBuffer))
+            .Record(this, RecordDebug, _gi.ProbeCount);
     }
 
-    private static void RecordDebug(ProbeGiFeature self, ref PassRecording pass, int count)
+    private static void RecordDebug(ProbeGiDebugFeature self, ref PassRecording pass, int count)
     {
         pass.Encoder.SetPipeline(self._debugPipeline);
         pass.SetBindGroup(0);
@@ -58,7 +80,7 @@ public sealed partial class ProbeGiFeature
         pass.Encoder.Draw(new DrawCommand(6, (uint)count, 0, 0));
     }
 
-    private void DisposeDebug()
+    public void Dispose()
     {
         if (_debugPipeline.IsValid) _ctx.Renderer.DestroyPipeline(_debugPipeline);
         if (_debugUniformBuffer.IsValid) _ctx.Renderer.DestroyBuffer(_debugUniformBuffer);

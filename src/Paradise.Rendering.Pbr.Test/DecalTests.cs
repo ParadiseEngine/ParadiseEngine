@@ -81,7 +81,7 @@ public class DecalTests
             Camera = new PbrCamera { View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY), Position = eye,
                 Projection = PbrMath.Orthographic(4, 1, 0.1f, 20) },
             Ambient = new PbrAmbient { Sky = new Vector3(0.3f), Flat = true },
-            Bloom = new PbrBloom { Enabled = false }, Gi = new PbrGi { Enabled = false },
+            Bloom = new PbrBloom { Enabled = false },
             Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Linear },
         };
         scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(3, 3, 0.2f) });

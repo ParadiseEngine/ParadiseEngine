@@ -34,6 +34,7 @@ internal static class PbrBuiltInFeatures
             .Add(instancing, PbrFeatureOrder.Instancing)
             .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, frustum, occlusion, instancing, decals, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
+            .Add(new ProbeGiDebugFeature(ctx, gi), PbrFeatureOrder.GiProbes)
             .Add(new FogFeature(ctx, shadows), PbrFeatureOrder.Fog)
             .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
             .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)

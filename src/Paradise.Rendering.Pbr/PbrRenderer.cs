@@ -292,7 +292,7 @@ public sealed partial class PbrRenderer : IDisposable
         // pays for a hierarchy nothing will walk.
         var tracesThisFrame =
             (scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id)) ||
-            (scene.Gi.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id));
+            (Pipeline.Find<ProbeGiFeature>()!.Settings.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id));
         if (tracesThisFrame) _ctx.Trace.BuildFrame(opaque, Materials);
         timings.TraceBuild = Lap();
         _graph.Reset();
