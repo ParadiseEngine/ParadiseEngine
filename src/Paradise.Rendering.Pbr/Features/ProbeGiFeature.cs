@@ -11,7 +11,7 @@ namespace Paradise.Rendering.Pbr;
 /// <remarks>Each frame traces, blends irradiance and distance moments, then relocates/classifies
 /// probes. The volume fits static geometry unless authored. Ping-pong atlases and state preserve
 /// the previous bounce and avoid unsupported read/write storage.</remarks>
-public sealed class ProbeGiFeature : IRenderFeature
+public sealed partial class ProbeGiFeature : IRenderFeature
 {
     // Must match probeBlend.slang's IrradianceTexels / VisibilityTexels.
     private const int IrradianceTexels = 8;
@@ -215,6 +215,7 @@ public sealed class ProbeGiFeature : IRenderFeature
 
         frame.Blackboard.Publish(PbrResults.GiIrradiance, writeIrradiance);
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
+        if (gi.ShowProbes) SetupDebug(frame, gi, writeIrradiance, writeVisibility);
         _current = next;
         _framesSinceReset++;
     }
@@ -303,7 +304,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         var maxProbes = Math.Max(gi.MaxProbes, 8);
 
         var spacing = MathF.Cbrt(extent.X * extent.Y * extent.Z / maxProbes);
-        spacing = MathF.Max(spacing, 0.01f);
+        spacing = MathF.Max(spacing, MathF.Max(gi.ProbeSpacing, 0.01f));
         // Widen the spacing until the grid fits the budget and the atlas. Terminates: every axis
         // bottoms out at two probes, and 2×2×2 fits any budget of eight or more. The cube-root
         // start is far off for a long corridor with a tight budget, which is why this is a loop
@@ -471,6 +472,7 @@ public sealed class ProbeGiFeature : IRenderFeature
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
+        DisposeDebug();
         renderer.DestroyComputePipeline(_tracePipeline);
         renderer.DestroyComputePipeline(_blendIrradiancePipeline);
         renderer.DestroyComputePipeline(_blendVisibilityPipeline);

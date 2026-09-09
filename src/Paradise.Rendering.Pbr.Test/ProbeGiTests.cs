@@ -10,6 +10,52 @@ namespace Paradise.Rendering.Pbr.Test;
 /// which pins the irradiance convention the probes and the sky ambient share.</summary>
 public class ProbeGiTests
 {
+    [Test]
+    public async Task debug_probes_toggle_and_runtime_settings_rebuild_the_grid()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var lifetime = backend;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Camera(new Vector3(0, 0, 5), Vector3.Zero);
+        scene.Gi = new PbrGi
+        {
+            Enabled = true, RaysPerProbe = 8, ProbeRadius = 0.25f,
+            Volume = new PbrProbeVolume(new Vector3(-1), new Vector3(2), 2, 2, 2),
+        };
+        var hidden = Render(backend, pbr, scene, 1);
+        scene.Gi = scene.Gi with { ShowProbes = true };
+        var shown = Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsTrue();
+        await Assert.That(shown.SequenceEqual(hidden)).IsFalse();
+        scene.Gi = scene.Gi with
+        {
+            RaysPerProbe = 256, ProbesPerFrame = 3,
+            Volume = new PbrProbeVolume(new Vector3(-1), Vector3.One, 3, 3, 3),
+        };
+        Render(backend, pbr, scene, 2);
+        await Assert.That(pbr.Pipeline.Find<ProbeGiFeature>()!.ProbeCount).IsEqualTo(27);
+        scene.Gi = scene.Gi with { ShowProbes = false };
+        var hiddenAgain = Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsFalse();
+        await Assert.That(hiddenAgain.SequenceEqual(hidden)).IsTrue();
+        scene.Gi = scene.Gi with { ShowProbes = true, Enabled = false };
+        Render(backend, pbr, scene, 1);
+        await Assert.That(pbr.LastPassNames.Contains("Gi.DebugProbes")).IsFalse();
+    }
+
+    [Test]
+    public async Task fitted_spacing_can_reduce_density_without_exceeding_budget()
+    {
+        var bounds = new Geometry.Aabb(Vector3.Zero, new Vector3(10));
+        var settings = new PbrGi { MaxProbes = 4096 };
+        var dense = ProbeGiFeature.Fit(bounds, settings)!;
+        var sparse = ProbeGiFeature.Fit(bounds, settings with { ProbeSpacing = 5 })!;
+        await Assert.That(sparse.Spacing.X).IsGreaterThanOrEqualTo(5);
+        await Assert.That(sparse.CountX * sparse.CountY * sparse.CountZ)
+            .IsLessThan(dense.CountX * dense.CountY * dense.CountZ);
+    }
+
     private const uint Size = 96;
 
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()

@@ -168,7 +168,16 @@ public sealed record PbrGi
 {
     public bool Enabled { get; init; }
 
-    /// <summary>Rays traced per probe per update, 8 to 256; the quality knob a host sets once per platform.</summary>
+    /// <summary>Draw relocated probe markers in the world; inactive probes are red.</summary>
+    public bool ShowProbes { get; init; }
+
+    /// <summary>World-space radius of debug probe markers.</summary>
+    public float ProbeRadius { get; init; } = 0.08f;
+
+    /// <summary>Minimum fitted probe spacing in metres; 0 chooses spacing from MaxProbes.</summary>
+    public float ProbeSpacing { get; init; }
+
+    /// <summary>Rays traced per probe per update, 8 to 256; changes take effect on the next frame.</summary>
     public int RaysPerProbe { get; init; } = 128;
 
     /// <summary>How much of the previous frame's irradiance survives an update: 0.97 converges
