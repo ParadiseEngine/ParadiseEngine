@@ -46,7 +46,7 @@ internal sealed class DrawRing(IRenderer renderer, string name, BindGroupLayoutD
 
 internal static class DrawBufferCapacity
 {
-    public const int Initial = 256;
+    public const int Initial = 4096;
 
     public static int Grow(int current, int required)
     {
