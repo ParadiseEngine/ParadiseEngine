@@ -27,8 +27,8 @@ public sealed class ProbeGiFeature : IRenderFeature
         public int X, Y, Z, W;
     }
 
-    /// <summary>Mirror of probes.slang <c>ProbeVolume</c> (128 B).</summary>
-    [StructLayout(LayoutKind.Sequential, Size = 128)]
+    /// <summary>Mirror of probes.slang <c>ProbeVolume</c> (144 B).</summary>
+    [StructLayout(LayoutKind.Sequential, Size = 144)]
     private struct ProbeVolumeGpu
     {
         public Vector4 Origin;
@@ -39,6 +39,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         public Vector4 Params;
         public Vector4 Rotation;
         public Int4 Window;
+        public Int4 Scroll;
     }
 
     private readonly PbrContext _ctx;
@@ -47,22 +48,30 @@ public sealed class ProbeGiFeature : IRenderFeature
     private readonly ComputePipelineHandle _blendIrradiancePipeline;
     private readonly ComputePipelineHandle _blendVisibilityPipeline;
     private readonly ComputePipelineHandle _updatePipeline;
+    private readonly ComputePipelineHandle _carryIrradiancePipeline;
+    private readonly ComputePipelineHandle _carryVisibilityPipeline;
     private readonly ShaderProgramDesc _traceProgram;
     private readonly ShaderProgramDesc _blendProgram;
     private readonly ShaderProgramDesc _updateProgram;
+    private readonly ShaderProgramDesc _carryProgram;
+    private BufferHandle _carryBuffer;
+    private int[] _carryProbeIndices = [];
+    private int _carryCount;
     private readonly BufferHandle[] _stateBuffers = new BufferHandle[2];
+    private readonly GiLightHierarchy _lightHierarchy = new();
+    private readonly BufferHandle _lightTreeBuffer;
     private BufferHandle _rayBuffer;
     private int _rayCapacity;
     private int _stateCapacity;
     private int _current;
     private PbrProbeVolume? _fitted;
     private int _probeCount;
-    // Probes still to be traced for the first time since the volume was (re)built: while any
-    // remain the blend writes outright, so a budgeted volume fills in as the window sweeps it
-    // rather than fading each later window in from a zero atlas.
-    private int _resetSweepRemaining;
+    private readonly ProbeGrid _grid = new();
+    private readonly ProbeUpdateScheduler _scheduler = new();
+    private readonly List<Aabb> _invalidations = [];
+    private BufferHandle _updateBuffer;
+    private int _updateCapacity;
     private int _framesSinceReset;
-    private int _windowStart;
     private ProbeVolumeGpu _volume;
     private readonly Random _random = new(1234);
 
@@ -75,13 +84,18 @@ public sealed class ProbeGiFeature : IRenderFeature
         _traceProgram = ShaderPrograms.Load("Shaders.probeTrace");
         _blendProgram = ShaderPrograms.Load("Shaders.probeBlend");
         _updateProgram = ShaderPrograms.Load("Shaders.probeUpdate");
+        _carryProgram = ShaderPrograms.Load("Shaders.probeCarry");
         _tracePipeline = renderer.CreateComputePipeline(_traceProgram);
         _blendIrradiancePipeline = renderer.CreateComputePipeline(_blendProgram, "blendIrradiance");
         _blendVisibilityPipeline = renderer.CreateComputePipeline(_blendProgram, "blendVisibility");
         _updatePipeline = renderer.CreateComputePipeline(_updateProgram);
+        _carryIrradiancePipeline = renderer.CreateComputePipeline(_carryProgram, "carryIrradiance");
+        _carryVisibilityPipeline = renderer.CreateComputePipeline(_carryProgram, "carryVisibility");
 
         VolumeBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrProbeVolume", (ulong)Unsafe.SizeOf<ProbeVolumeGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
+        _lightTreeBuffer = renderer.CreateBuffer(new BufferDesc(
+            "PbrGiLightTree", (ulong)Unsafe.SizeOf<GiLightTreeGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
         Sampler = renderer.CreateSampler(new SamplerDesc(
             "PbrProbeSampler",
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
@@ -91,6 +105,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         // the probes off binds real objects and a disabled volume rather than nothing.
         EnsureStateBuffers(1);
         ResetStates();
+        EnsureUpdateBuffer(1);
         EnsureRayBuffer(1);
         EnsureAtlases(1, 1, 1);
         UploadVolume();
@@ -144,6 +159,10 @@ public sealed class ProbeGiFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         var gi = Settings;
+        if (gi.Scrolling && gi.Volume is null)
+            throw new InvalidOperationException("Scrolling requires an authored PbrGi.Volume.");
+        if (gi.UpdateFocus is { } focus && !Finite(focus))
+            throw new InvalidOperationException("PbrGi.UpdateFocus must be finite.");
         ShadingStateBuffer = _stateBuffers[_current];
         var fit = gi.Enabled ? gi.Volume ?? Fit(_ctx.Trace.SceneBounds, gi) : null;
         if (gi.Volume is { } authored) ValidateAuthored(authored, gi);
@@ -158,20 +177,22 @@ public sealed class ProbeGiFeature : IRenderFeature
         }
 
         EnsureVolume(fit, gi);
+        fit = _fitted!;
+        ApplyInvalidations();
+        _lightHierarchy.Build(_ctx.Scene.Lights, gi.LightCullingEnabled);
+        ref readonly var lightTree = ref _lightHierarchy.Data;
+        _ctx.Renderer.UpdateBuffer<GiLightTreeGpu>(_lightTreeBuffer, 0, MemoryMarshal.CreateReadOnlySpan(in lightTree, 1));
         // After EnsureVolume: a refit recreates the state buffers, and the scene must bind the
         // one this frame's atlases are blended against, not the handle that was just destroyed.
         ShadingStateBuffer = _stateBuffers[_current];
         var graph = frame.Graph;
         var rays = Math.Clamp(gi.RaysPerProbe, 8, MaxRaysPerProbe);
-        var windowCount = gi.ProbesPerFrame <= 0 ? _probeCount : Math.Min(_probeCount, gi.ProbesPerFrame);
-        var windowStart = _windowStart;
-        _windowStart = windowCount >= _probeCount ? 0 : (_windowStart + windowCount) % _probeCount;
-        var resetFrame = _resetSweepRemaining > 0;
-        _resetSweepRemaining = Math.Max(0, _resetSweepRemaining - windowCount);
+        var windowCount = _scheduler.Select(_grid, gi.ProbesPerFrame, gi.UpdateFocus);
+        _ctx.Renderer.UpdateBuffer<ProbeUpdateScheduler.Update>(_updateBuffer, 0, _scheduler.Updates);
         EnsureRayBuffer(windowCount * rays);
 
         var next = 1 - _current;
-        FillVolume(fit, gi, rays, windowStart, windowCount, resetFrame);
+        FillVolume(fit, gi, rays, windowCount);
         UploadVolume();
 
         var rayBuffer = graph.ImportBuffer(_rayBuffer, GraphResourceScope.GraphOnly);
@@ -180,12 +201,40 @@ public sealed class ProbeGiFeature : IRenderFeature
         var writeIrradiance = graph.Texture(PbrTargets.GiIrradiance[next]);
         var writeVisibility = graph.Texture(PbrTargets.GiVisibility[next]);
         var rayBytes = (ulong)_rayCapacity * 16;
+        var nextStates = graph.ImportBuffer(_stateBuffers[next], GraphResourceScope.GraphOnly);
+
+        // Current updates overwrite complete tiles and states, so only the difference between
+        // the previous and current selections needs carrying to the other atlas.
+        var carryCount = 0;
+        for (var slot = 0; slot < _carryCount; slot++)
+        {
+            var probe = _carryProbeIndices[slot];
+            if (_scheduler.Updates[probe].Slot < 0) _carryProbeIndices[carryCount++] = probe;
+        }
+        if (carryCount > 0)
+        {
+            _ctx.Renderer.UpdateBuffer<int>(_carryBuffer, 0, _carryProbeIndices.AsSpan(0, carryCount));
+            graph.AddComputePass("Gi.Carry", RenderPassEvent.GlobalIllumination, offset: -1)
+                .BindGroup(0, "PbrGiCarryGroup", ShaderPrograms.FindGroup(_carryProgram, 0),
+                [
+                    GraphBinding.Buffer(0, _carryBuffer, 0, (ulong)_carryProbeIndices.Length * sizeof(int)),
+                    GraphBinding.StorageTexture(1, writeIrradiance),
+                    GraphBinding.StorageTexture(2, writeVisibility),
+                    GraphBinding.TrackedBuffer(3, nextStates, 0, StateBufferBytes, write: true),
+                ])
+                .BindGroup(3, "PbrGiCarryProbeGroup", ShaderPrograms.FindGroup(_carryProgram, 3),
+                    ProbeGroupBindings(_carryProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
+                .Record(this, RecordCarry, carryCount);
+        }
 
         graph.AddComputePass("Gi.Trace", RenderPassEvent.GlobalIllumination)
             .BindGroup(0, "PbrGiTraceGroup", ShaderPrograms.FindGroup(_traceProgram, 0),
-                [GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes, write: true)])
+            [
+                GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes, write: true),
+                GraphBinding.Buffer(1, _lightTreeBuffer, 0, (ulong)Unsafe.SizeOf<GiLightTreeGpu>()),
+            ])
             .BindGroup(1, "PbrGiFrameGroup", ShaderPrograms.FindGroup(_traceProgram, 1), FrameGroupBindings(_traceProgram, graph))
-            .BindGroup(2, "PbrGiSceneGroup", ShaderPrograms.FindGroup(_traceProgram, 2), _ctx.Trace.Bindings())
+            .BindGroup(2, "PbrGiSceneGroup", ShaderPrograms.FindGroup(_traceProgram, 2), _ctx.Trace.Bindings(globalIllumination: true))
             .BindGroup(3, "PbrGiProbeGroup", ShaderPrograms.FindGroup(_traceProgram, 3),
                 ProbeGroupBindings(_traceProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
             .Record(this, RecordTrace, (windowCount * rays + TraceWorkgroup - 1) / TraceWorkgroup);
@@ -201,7 +250,7 @@ public sealed class ProbeGiFeature : IRenderFeature
             ])
             .BindGroup(3, "PbrGiBlendProbeGroup", ShaderPrograms.FindGroup(_blendProgram, 3),
                 ProbeGroupBindings(_blendProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
-            .Record(this, RecordBlend, _probeCount);
+            .Record(this, RecordBlend, windowCount);
 
         // Nothing in this frame reads the next frame's states, so the graph would cull the update;
         // its consumer is the next frame's trace.
@@ -209,15 +258,19 @@ public sealed class ProbeGiFeature : IRenderFeature
             .BindGroup(0, "PbrGiUpdateGroup", ShaderPrograms.FindGroup(_updateProgram, 0),
             [
                 GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes),
-                GraphBinding.Buffer(1, _stateBuffers[next], 0, StateBufferBytes),
+                GraphBinding.TrackedBuffer(1, nextStates, 0, StateBufferBytes, write: true),
             ])
             .BindGroup(3, "PbrGiUpdateProbeGroup", ShaderPrograms.FindGroup(_updateProgram, 3),
                 ProbeGroupBindings(_updateProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
             .NeverCull()
-            .Record(this, RecordUpdate, (_probeCount + TraceWorkgroup - 1) / TraceWorkgroup);
+            .Record(this, RecordUpdate, (windowCount + TraceWorkgroup - 1) / TraceWorkgroup);
 
         frame.Blackboard.Publish(PbrResults.GiIrradiance, writeIrradiance);
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
+        EnsureCarryBuffer(_probeCount);
+        for (var slot = 0; slot < windowCount; slot++)
+            _carryProbeIndices[slot] = _scheduler.Updates[slot].Probe;
+        _carryCount = windowCount;
         _current = next;
         _framesSinceReset++;
     }
@@ -239,6 +292,16 @@ public sealed class ProbeGiFeature : IRenderFeature
         pass.Encoder.SetComputePipeline(self._blendIrradiancePipeline);
         pass.Encoder.Dispatch(new DispatchCommand((uint)probes, 1, 1));
         pass.Encoder.SetComputePipeline(self._blendVisibilityPipeline);
+        pass.Encoder.Dispatch(new DispatchCommand((uint)probes, 1, 1));
+    }
+
+    private static void RecordCarry(ProbeGiFeature self, ref PassRecording pass, int probes)
+    {
+        pass.SetBindGroup(0);
+        pass.SetBindGroup(3);
+        pass.Encoder.SetComputePipeline(self._carryIrradiancePipeline);
+        pass.Encoder.Dispatch(new DispatchCommand((uint)probes, 1, 1));
+        pass.Encoder.SetComputePipeline(self._carryVisibilityPipeline);
         pass.Encoder.Dispatch(new DispatchCommand((uint)probes, 1, 1));
     }
 
@@ -288,6 +351,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                 9 => GraphBinding.Buffer(9, VolumeBuffer, 0, VolumeBufferBytes),
                 10 => GraphBinding.Buffer(10, states, 0, StateBufferBytes),
                 11 => GraphBinding.Sampler(11, Sampler),
+                12 => GraphBinding.Buffer(12, _updateBuffer, 0, (ulong)_updateCapacity * 8),
                 var other => throw new InvalidOperationException($"Probe program references probe binding {other}, which this feature does not supply."),
             };
         }
@@ -339,6 +403,9 @@ public sealed class ProbeGiFeature : IRenderFeature
         if (volume.CountX < 2 || volume.CountY < 2 || volume.CountZ < 2)
             throw new ArgumentException(
                 $"Probe volume counts {volume.CountX}x{volume.CountY}x{volume.CountZ}: every axis needs at least two probes.", nameof(gi));
+        // Divide the budget before multiplying all three axes: malformed int counts can overflow long.
+        if ((long)volume.CountX * volume.CountY > (long)gi.MaxProbes / volume.CountZ)
+            throw new ArgumentException($"Probe volume exceeds PbrGi.MaxProbes = {gi.MaxProbes}.", nameof(gi));
         var probes = (long)volume.CountX * volume.CountY * volume.CountZ;
         if (probes > gi.MaxProbes)
             throw new ArgumentException(
@@ -347,36 +414,71 @@ public sealed class ProbeGiFeature : IRenderFeature
         if ((long)volume.CountX * volume.CountY * tile > MaxAtlasSize || (long)volume.CountZ * tile > MaxAtlasSize)
             throw new ArgumentException(
                 $"Probe volume {volume.CountX}x{volume.CountY}x{volume.CountZ} needs a {volume.CountX * volume.CountY * tile}x{volume.CountZ * tile} visibility atlas, above the {MaxAtlasSize} texture limit.", nameof(gi));
+        if (!Finite(volume.Origin) || !Finite(volume.Spacing))
+            throw new ArgumentException("Probe volume origin and spacing must be finite.", nameof(gi));
         if (volume.Spacing.X <= 0f || volume.Spacing.Y <= 0f || volume.Spacing.Z <= 0f)
             throw new ArgumentException($"Probe volume spacing {volume.Spacing} must be positive on every axis.", nameof(gi));
     }
 
-    /// <summary>Adopt <paramref name="fit"/> unless the current volume is the same to within a
-    /// fraction of a probe, so a scene whose bounds jitter does not reallocate every frame.</summary>
     private void EnsureVolume(PbrProbeVolume fit, PbrGi gi)
     {
-        if (_fitted is { } current && SameVolume(current, fit)) return;
-        // A refit to the same counts keeps the atlases (Ensure is idempotent on an equal
-        // descriptor), so tiles hold the OLD volume's light for probes that moved until the reset
-        // sweep — which writes outright — reaches them: a transient of at most one window lap.
-        _fitted = fit;
-        _probeCount = fit.CountX * fit.CountY * fit.CountZ;
-        EnsureAtlases(fit.CountX, fit.CountY, fit.CountZ);
-        EnsureStateBuffers(_probeCount);
-        ResetStates();
-        _windowStart = 0;
-        _resetSweepRemaining = _probeCount;
-        _framesSinceReset = 0;
+        var reset = _grid.SetVolume(fit, gi.Scrolling);
+        _fitted = _grid.Volume;
+        _probeCount = _grid.Count;
+        if (reset)
+        {
+            EnsureAtlases(fit.CountX, fit.CountY, fit.CountZ);
+            EnsureStateBuffers(_probeCount);
+            EnsureUpdateBuffer(_probeCount);
+            _scheduler.Reset(_probeCount);
+            ResetStates();
+            _carryCount = 0;
+            _framesSinceReset = 0;
+        }
+        else
+        {
+            foreach (var probe in _grid.ResetIndices) ResetProbe(probe);
+        }
     }
 
-    private static bool SameVolume(PbrProbeVolume a, PbrProbeVolume b)
+    /// <summary>Invalidates resident probe history and classification around changed world-space bounds.</summary>
+    /// <remarks>Call on the rendering thread when streaming or replacing geometry or changing lighting;
+    /// bounds are expanded by one probe cell to include neighboring interpolation samples.</remarks>
+    public void Invalidate(Aabb bounds)
     {
-        if (a.CountX != b.CountX || a.CountY != b.CountY || a.CountZ != b.CountZ) return false;
-        var tolerance = 0.1f * MathF.Min(a.Spacing.X, MathF.Min(a.Spacing.Y, a.Spacing.Z));
-        return (a.Origin - b.Origin).Length() <= tolerance && (a.Spacing - b.Spacing).Length() <= 0.01f * a.Spacing.Length();
+        if (bounds.IsEmpty) return;
+        if (!Finite(bounds.Min) || !Finite(bounds.Max))
+            throw new ArgumentException("Probe invalidation bounds must be finite.", nameof(bounds));
+        _invalidations.Add(bounds);
     }
 
-    private void FillVolume(PbrProbeVolume fit, PbrGi gi, int rays, int windowStart, int windowCount, bool resetFrame)
+    private void ApplyInvalidations()
+    {
+        foreach (var bounds in _invalidations)
+        {
+            var min = bounds.Min - _fitted!.Spacing;
+            var max = bounds.Max + _fitted.Spacing;
+            for (var probe = 0; probe < _probeCount; probe++)
+            {
+                var position = _grid.Position(probe);
+                if (position.X >= min.X && position.Y >= min.Y && position.Z >= min.Z
+                    && position.X <= max.X && position.Y <= max.Y && position.Z <= max.Z) ResetProbe(probe);
+            }
+        }
+        _invalidations.Clear();
+    }
+
+    private void ResetProbe(int probe)
+    {
+        _scheduler.Invalidate(probe);
+        var state = new Vector4(0f, 0f, 0f, -1f);
+        foreach (var buffer in _stateBuffers)
+            _ctx.Renderer.UpdateBuffer<Vector4>(buffer, (ulong)probe * 16, MemoryMarshal.CreateReadOnlySpan(ref state, 1));
+    }
+
+    private static bool Finite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private void FillVolume(PbrProbeVolume fit, PbrGi gi, int rays, int windowCount)
     {
         var irradianceWidth = fit.CountX * fit.CountY * (IrradianceTexels + 2);
         var irradianceHeight = fit.CountZ * (IrradianceTexels + 2);
@@ -392,9 +494,10 @@ public sealed class ProbeGiFeature : IRenderFeature
             Counts = new Int4 { X = fit.CountX, Y = fit.CountY, Z = fit.CountZ, W = _probeCount },
             Atlas = new Vector4(IrradianceTexels, VisibilityTexels, 1f / irradianceWidth, 1f / irradianceHeight),
             Atlas2 = new Vector4(1f / visibilityWidth, 1f / visibilityHeight, MathF.Max(gi.NormalBias, 0f), MathF.Max(gi.ViewBias, 0f)),
-            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, resetFrame ? 0f : WarmUpHysteresis(gi.Hysteresis), 0f),
+            Params = new Vector4(MathF.Max(gi.Intensity, 0f), rays, WarmUpHysteresis(gi.Hysteresis), 0f),
             Rotation = RandomRotation(),
-            Window = new Int4 { X = windowStart, Y = windowCount },
+            Window = new Int4 { Y = windowCount },
+            Scroll = new Int4 { X = _grid.Scroll.X, Y = _grid.Scroll.Y, Z = _grid.Scroll.Z },
         };
     }
 
@@ -453,12 +556,21 @@ public sealed class ProbeGiFeature : IRenderFeature
         _stateCapacity = needed;
     }
 
-    /// <summary>Every probe active, on its grid point, in both buffers.</summary>
+    /// <summary>Every probe awaiting its first trace, on its grid point, in both buffers.</summary>
     private void ResetStates()
     {
         var states = new Vector4[_stateCapacity];
-        Array.Fill(states, new Vector4(0f, 0f, 0f, 1f));
+        Array.Fill(states, new Vector4(0f, 0f, 0f, -1f));
         for (var i = 0; i < 2; i++) _ctx.Renderer.UpdateBuffer<Vector4>(_stateBuffers[i], 0, states);
+    }
+
+    private void EnsureUpdateBuffer(int count)
+    {
+        if (_updateBuffer.IsValid && count <= _updateCapacity) return;
+        if (_updateBuffer.IsValid) _ctx.Renderer.DestroyBuffer(_updateBuffer);
+        _updateCapacity = count;
+        _updateBuffer = _ctx.Renderer.CreateBuffer(new BufferDesc(
+            "PbrProbeUpdates", (ulong)count * 8, BufferUsage.Storage | BufferUsage.CopyDst));
     }
 
     private void EnsureRayBuffer(int rays)
@@ -471,6 +583,15 @@ public sealed class ProbeGiFeature : IRenderFeature
             "PbrProbeRays", (ulong)_rayCapacity * 16, BufferUsage.Storage | BufferUsage.CopyDst));
     }
 
+    private void EnsureCarryBuffer(int probes)
+    {
+        if (probes <= _carryProbeIndices.Length) return;
+        if (_carryBuffer.IsValid) _ctx.Renderer.DestroyBuffer(_carryBuffer);
+        _carryProbeIndices = new int[probes];
+        _carryBuffer = _ctx.Renderer.CreateBuffer(new BufferDesc(
+            "PbrProbeCarryIndices", (ulong)probes * sizeof(int), BufferUsage.Storage | BufferUsage.CopyDst));
+    }
+
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
@@ -478,7 +599,12 @@ public sealed class ProbeGiFeature : IRenderFeature
         renderer.DestroyComputePipeline(_blendIrradiancePipeline);
         renderer.DestroyComputePipeline(_blendVisibilityPipeline);
         renderer.DestroyComputePipeline(_updatePipeline);
+        renderer.DestroyComputePipeline(_carryIrradiancePipeline);
+        renderer.DestroyComputePipeline(_carryVisibilityPipeline);
+        if (_carryBuffer.IsValid) renderer.DestroyBuffer(_carryBuffer);
         renderer.DestroyBuffer(VolumeBuffer);
+        renderer.DestroyBuffer(_lightTreeBuffer);
+        renderer.DestroyBuffer(_updateBuffer);
         if (_rayBuffer.IsValid) renderer.DestroyBuffer(_rayBuffer);
         foreach (var buffer in _stateBuffers)
             if (buffer.IsValid) renderer.DestroyBuffer(buffer);

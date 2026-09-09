@@ -13,6 +13,9 @@ public sealed record PbrGi
 {
     public bool Enabled { get; init; }
 
+    /// <summary>Uses world-space light bounds at ray hits; disable to compare unculled lighting and timings.</summary>
+    public bool LightCullingEnabled { get; init; } = true;
+
     /// <summary>Minimum fitted probe spacing in metres; 0 chooses spacing from MaxProbes.</summary>
     public float ProbeSpacing { get; init; }
 
@@ -29,6 +32,14 @@ public sealed record PbrGi
     /// <summary>Probes traced per frame; 0 traces the whole volume every frame.</summary>
     public int ProbesPerFrame { get; init; }
 
+    /// <summary>Preserves overlapping probes when an authored volume moves by whole grid cells.</summary>
+    /// <remarks>Requires Volume; sub-cell movement is accumulated against the resident grid.</remarks>
+    public bool Scrolling { get; init; }
+
+    /// <summary>Optional world position receiving half the update budget after invalidated probes.</summary>
+    /// <remarks>The remaining budget sweeps the volume so distant probes cannot starve.</remarks>
+    public Vector3? UpdateFocus { get; init; }
+
     /// <summary>Scales the indirect light the probes contribute.</summary>
     public float Intensity { get; init; } = 1f;
 
@@ -44,4 +55,3 @@ public sealed record PbrGi
     /// <summary>An authored volume, or null to fit the static scene's bounds.</summary>
     public PbrProbeVolume? Volume { get; init; }
 }
-

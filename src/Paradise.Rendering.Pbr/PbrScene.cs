@@ -242,6 +242,10 @@ public sealed record PbrMesh(PbrPrimitive[] Primitives);
 public sealed class PbrInstance
 {
     public required PbrMesh Mesh { get; init; }
+    /// <summary>Optional rigid proxy used by probe GI in place of <see cref="Mesh"/>.</summary>
+    /// <remarks>The proxy uses this instance's model transform and its own primitive materials.
+    /// Rasterization, direct shadows and ray-traced AO continue to use the rendered mesh.</remarks>
+    public PbrMesh? GiMesh;
     public Matrix4x4 Model = Matrix4x4.Identity;
     public float Highlight;
     /// <summary>Whether projected scene decals may modify this instance’s PBR surface.</summary>
@@ -260,6 +264,19 @@ public sealed class PbrInstance
 public sealed record PbrInstancing
 {
     public bool Enabled { get; init; } = true;
+}
+
+/// <summary>The geometry participating in probe GI, independently of the rendered instance set.</summary>
+public sealed class PbrGiGeometry
+{
+    /// <summary>Include static scene instances, using their GI proxies when supplied.</summary>
+    public bool IncludeSceneInstances = true;
+
+    /// <summary>Additional GI-only instances, such as streamed geometry or coarse distant occluders.</summary>
+    /// <remarks>Only opaque or alpha-tested static instances participate. Entries are not drawn or
+    /// used by direct shadows or ray-traced AO. Removing an entry removes it from tracing next frame;
+    /// uploaded mesh storage remains owned by the renderer until disposal.</remarks>
+    public List<PbrInstance> Instances { get; } = [];
 }
 
 /// <summary>The mutable CPU state consumed by one frame.</summary>
@@ -325,6 +342,7 @@ public sealed class PbrScene
     public ulong TemporalHistoryVersion;
     public List<PbrLight> Lights { get; } = [];
     public List<PbrInstance> Instances { get; } = [];
+    public PbrGiGeometry GiGeometry { get; } = new();
 }
 
 /// <summary>Conservative scene visibility; GPU occlusion uses the current frame and costs an additional depth pass.</summary>

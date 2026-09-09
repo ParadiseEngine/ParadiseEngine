@@ -11,6 +11,36 @@ namespace Paradise.Rendering.Pbr.Test;
 public class ProbeGiTests
 {
     [Test]
+    public async Task scrolling_invalidates_only_entering_planes_and_a_changed_region_can_reactivate_probes()
+    {
+        var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var lifetime = backend;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var gi = pbr.Pipeline.Find<ProbeGiFeature>()!;
+        var volume = new PbrProbeVolume(Vector3.Zero, Vector3.One, 3, 3, 3);
+        gi.Settings = new PbrGi { Enabled = true, RaysPerProbe = 8, Scrolling = true, Volume = volume };
+        var scene = Camera(new Vector3(0, 0, 5), Vector3.Zero);
+        Render(backend, pbr, scene, 3);
+        gi.Settings = gi.Settings with { ProbesPerFrame = 1, Volume = volume with { Origin = new Vector3(1.1f, 0, 0) } };
+        pbr.RenderFrame(scene);
+        await Assert.That(gi.ActiveVolume!.Origin).IsEqualTo(Vector3.UnitX);
+        var states = backend.ReadbackBuffer(gi.ShadingStateBuffer, 0, 27 * 16);
+        for (var probe = 0; probe < 27; probe++)
+            await Assert.That(BitConverter.ToSingle(states, probe * 16 + 12)).IsEqualTo(probe % 3 == 0 ? -1f : 1f);
+
+        // Trace all the entering slots, then invalidate an old, retained probe at x=1.
+        Render(backend, pbr, scene, 12);
+        gi.Invalidate(new Geometry.Aabb(new Vector3(1, 0, 0), new Vector3(1, 0, 0)));
+        pbr.RenderFrame(scene);
+        states = backend.ReadbackBuffer(gi.ShadingStateBuffer, 0, 27 * 16);
+        await Assert.That(BitConverter.ToSingle(states, 1 * 16 + 12)).IsEqualTo(-1f);
+        Render(backend, pbr, scene, 12);
+        states = backend.ReadbackBuffer(gi.ShadingStateBuffer, 0, 27 * 16);
+        await Assert.That(BitConverter.ToSingle(states, 1 * 16 + 12)).IsEqualTo(1f);
+    }
+
+    [Test]
     public async Task debug_probes_toggle_and_runtime_settings_rebuild_the_grid()
     {
         var backend = TryCreateHeadlessOrSkip();

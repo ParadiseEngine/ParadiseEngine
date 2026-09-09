@@ -13,7 +13,8 @@ struct ProbeVolume
     float4 atlas2;   // xy: 1/visibility atlas size, z: normal bias (fraction of spacing), w: view bias
     float4 params;   // x: intensity, y: rays per probe, z: hysteresis, w unused
     float4 rotation; // unit quaternion rotating this frame's ray directions
-    int4 window;     // x: first probe traced this frame, y: probes traced this frame, zw unused
+    int4 window;     // y: probes traced this frame, xzw unused
+    int4 scroll;     // xyz: ring offsets mapping logical coordinates to physical storage
 };
 
 [[vk::binding(7, 3)]]
@@ -25,7 +26,7 @@ Texture2D<float4> probeVisibilityAtlas; // r: mean distance, g: mean squared dis
 [[vk::binding(9, 3)]]
 ConstantBuffer<ProbeVolume> probeVolume;
 
-// Per probe: xyz world offset from its grid position (relocation), w: 1 active, 0 inactive.
+// Per physical probe: xyz relocation, w: 1 active, 0 inactive, -1 awaiting its first trace.
 [[vk::binding(10, 3)]]
 StructuredBuffer<float4> probeStates;
 
@@ -57,13 +58,15 @@ float3 octDecode(float2 uv)
 int3 probeCoords(int index)
 {
     int3 c = probeVolume.counts.xyz;
-    return int3(index % c.x, (index / c.x) % c.y, index / (c.x * c.y));
+    int3 physical = int3(index % c.x, (index / c.x) % c.y, index / (c.x * c.y));
+    return (physical - probeVolume.scroll.xyz + c) % c;
 }
 
 int probeIndex(int3 coords)
 {
     int3 c = probeVolume.counts.xyz;
-    return coords.x + c.x * (coords.y + c.y * coords.z);
+    int3 physical = (coords + probeVolume.scroll.xyz) % c;
+    return physical.x + c.x * (physical.y + c.y * physical.z);
 }
 
 /// The probe's world position: its grid point plus its relocation offset.
@@ -77,6 +80,7 @@ float3 probePosition(int index)
 /// are laid out x-fastest then y along the atlas width, z along its height.
 int2 probeTileOrigin(int3 coords, int interior)
 {
+    coords = (coords + probeVolume.scroll.xyz) % probeVolume.counts.xyz;
     int tile = interior + 2;
     return int2((coords.x + probeVolume.counts.x * coords.y) * tile + 1, coords.z * tile + 1);
 }

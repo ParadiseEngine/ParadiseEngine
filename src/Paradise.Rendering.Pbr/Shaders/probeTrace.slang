@@ -4,7 +4,9 @@
 #define PARADISE_TRACE_GROUP 2
 #include "Common/lighting.slang"
 #include "Common/probes.slang"
+#include "Common/probeUpdateWindow.slang"
 #include "Common/bvh.slang"
+#include "Common/giLights.slang"
 
 // xyz: radiance along the ray, w: hit distance — negative for a back-face hit (the probe is
 // inside something, which the relocation reads), MissDistance for a miss.
@@ -46,11 +48,25 @@ float3 skyRadiance(float3 d)
 /// light energy is the radiance multiplier), shadowed by the same maps the scene pass samples.
 float3 directLight(float3 worldPos, float3 N, float2 noiseCoord)
 {
-    int count = min((int)frame.ambientEquator.w, MaxSceneLights);
+    uint2 mask = giLightMask(worldPos);
     float3 sum = float3(0.0, 0.0, 0.0);
-    for (int i = 0; i < count; i++)
+    // Visit admitted lights in scene order, preserving floating-point accumulation and the
+    // light slot used by shadow maps. Tree order is spatial and must not reorder the sum.
+    while (any(mask != uint2(0, 0)))
     {
+        int i;
+        if (mask.x != 0)
+        {
+            i = firstbitlow(mask.x);
+            mask.x &= mask.x - 1;
+        }
+        else
+        {
+            i = 32 + firstbitlow(mask.y);
+            mask.y &= mask.y - 1;
+        }
         SceneLight light = frame.sceneLights[i];
+        if (light.sizeParams.z <= 0.0) continue;
         float3 L;
         float attenuation = 1.0;
         if (light.positionAndType.w < 0.5)
@@ -82,11 +98,10 @@ void traceMain(uint3 id: SV_DispatchThreadID)
     int windowProbe = (int)id.x / rays;
     int ray = (int)id.x % rays;
     if (windowProbe >= probeVolume.window.y) return;
-    // The window wraps: a budget that does not divide the volume still visits every probe.
-    int probe = (probeVolume.window.x + windowProbe) % probeVolume.counts.w;
+    int probe = probeUpdateIndex(windowProbe);
     uint slot = (uint)(windowProbe * rays + ray);
 
-    if (probeStates[probe].w < 0.5)
+    if (probeStates[probe].w == 0.0)
     {
         probeRays[slot] = float4(0.0, 0.0, 0.0, MissDistance);
         return;

@@ -1,6 +1,7 @@
 // Relocate/classify probes with excessive back-face hits, disabling those trapped inside geometry.
-// Write the full next-state buffer and copy untraced probes so this frame uses consistent state.
+// Update selected probes; Gi.Carry preserves every other probe's state.
 #include "Common/probes.slang"
+#include "Common/probeUpdateWindow.slang"
 
 [[vk::binding(0, 0)]]
 StructuredBuffer<float4> probeRays;
@@ -16,14 +17,13 @@ static const float MinFrontDistanceFraction = 0.05; // of the spacing: closer th
 [numthreads(64, 1, 1)]
 void updateMain(uint3 id: SV_DispatchThreadID)
 {
-    int probe = (int)id.x;
-    if (probe >= probeVolume.counts.w) return;
+    int windowProbe = (int)id.x;
+    if (windowProbe >= probeVolume.window.y) return;
+    int probe = probeUpdateIndex(windowProbe);
     float4 state = probeStates[probe];
-    int windowProbe = probe - probeVolume.window.x;
-    if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
     // Inactive probes have placeholder misses, not evidence of open space. Keep them inactive until
     // a refit resets state; otherwise they repeatedly reactivate inside walls.
-    if (windowProbe >= probeVolume.window.y || state.w < 0.5)
+    if (state.w == 0.0)
     {
         probeStatesOut[probe] = state;
         return;

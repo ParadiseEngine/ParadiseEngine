@@ -1,7 +1,8 @@
 // One workgroup integrates and blends rays per probe, then copies wrapped borders for bilinear
 // filtering. Irradiance uses an 8-texel interior; visibility uses 14 and stores distance moments.
-// Untraced probes retain prior texels.
+// Dispatch selected probes only; Gi.Carry preserves unchanged tiles in the other atlas.
 #include "Common/probes.slang"
+#include "Common/probeUpdateWindow.slang"
 
 [[vk::binding(0, 0)]]
 StructuredBuffer<float4> probeRays;
@@ -50,50 +51,38 @@ int2 borderSource(int2 t, int n)
     return int2(n + 1 - t.x, n);
 }
 
-bool probeTracedThisFrame(int probe, out int windowProbe)
-{
-    windowProbe = probe - probeVolume.window.x;
-    if (windowProbe < 0) windowProbe += probeVolume.counts.w; // the window wraps past the last probe
-    return windowProbe < probeVolume.window.y;
-}
-
 [shader("compute")]
 [numthreads(IrradianceTexels + 2, IrradianceTexels + 2, 1)]
 void blendIrradiance(uint3 groupId: SV_GroupID, uint3 threadId: SV_GroupThreadID)
 {
-    int probe = (int)groupId.x;
+    int windowProbe = (int)groupId.x;
+    int probe = probeUpdateIndex(windowProbe);
     int2 t = int2(threadId.xy);
     int3 coords = probeCoords(probe);
     int2 tileOrigin = probeTileOrigin(coords, IrradianceTexels) - 1;
     bool interior = t.x >= 1 && t.x <= IrradianceTexels && t.y >= 1 && t.y <= IrradianceTexels;
 
-    int windowProbe;
-    bool traced = probeTracedThisFrame(probe, windowProbe);
     int rays = (int)probeVolume.params.y;
-    if (traced) stageRays(windowProbe, rays, t.y * (IrradianceTexels + 2) + t.x, (IrradianceTexels + 2) * (IrradianceTexels + 2));
+    stageRays(windowProbe, rays, t.y * (IrradianceTexels + 2) + t.x, (IrradianceTexels + 2) * (IrradianceTexels + 2));
     GroupMemoryBarrierWithGroupSync();
     if (interior)
     {
         float4 previous = probeIrradianceAtlas.Load(int3(tileOrigin + t, 0));
-        float4 result = previous;
-        if (traced)
+        float2 oct = (float2(t - 1) + 0.5) / (float)IrradianceTexels * 2.0 - 1.0;
+        float3 texelDir = octDecode(oct);
+        float3 sum = float3(0.0, 0.0, 0.0);
+        float weightSum = 0.0;
+        for (int ray = 0; ray < rays; ray++)
         {
-            float2 oct = (float2(t - 1) + 0.5) / (float)IrradianceTexels * 2.0 - 1.0;
-            float3 texelDir = octDecode(oct);
-            float3 sum = float3(0.0, 0.0, 0.0);
-            float weightSum = 0.0;
-            for (int ray = 0; ray < rays; ray++)
-            {
-                float4 sample = s_rays[ray];
-                if (sample.w < 0.0) continue; // back-face hits carry no light
-                float weight = max(0.0, dot(texelDir, s_rayDirs[ray]));
-                sum += sample.rgb * weight;
-                weightSum += weight;
-            }
-            float3 irradiance = weightSum > 1e-4 ? sum / weightSum : float3(0.0, 0.0, 0.0);
-            float hysteresis = probeVolume.params.z;
-            result = float4(lerp(irradiance, previous.rgb, hysteresis), 1.0);
+            float4 sample = s_rays[ray];
+            if (sample.w < 0.0) continue; // back-face hits carry no light
+            float weight = max(0.0, dot(texelDir, s_rayDirs[ray]));
+            sum += sample.rgb * weight;
+            weightSum += weight;
         }
+        float3 irradiance = weightSum > 1e-4 ? sum / weightSum : float3(0.0, 0.0, 0.0);
+        float hysteresis = probeStates[probe].w < 0.0 ? 0.0 : probeVolume.params.z;
+        float4 result = float4(lerp(irradiance, previous.rgb, hysteresis), 1.0);
         s_irradiance[t.y][t.x] = result;
     }
     GroupMemoryBarrierWithGroupSync();
@@ -105,45 +94,40 @@ void blendIrradiance(uint3 groupId: SV_GroupID, uint3 threadId: SV_GroupThreadID
 [numthreads(VisibilityTexels + 2, VisibilityTexels + 2, 1)]
 void blendVisibility(uint3 groupId: SV_GroupID, uint3 threadId: SV_GroupThreadID)
 {
-    int probe = (int)groupId.x;
+    int windowProbe = (int)groupId.x;
+    int probe = probeUpdateIndex(windowProbe);
     int2 t = int2(threadId.xy);
     int3 coords = probeCoords(probe);
     int2 tileOrigin = probeTileOrigin(coords, VisibilityTexels) - 1;
     bool interior = t.x >= 1 && t.x <= VisibilityTexels && t.y >= 1 && t.y <= VisibilityTexels;
 
-    int windowProbe;
-    bool traced = probeTracedThisFrame(probe, windowProbe);
     int rays = (int)probeVolume.params.y;
-    if (traced) stageRays(windowProbe, rays, t.y * (VisibilityTexels + 2) + t.x, (VisibilityTexels + 2) * (VisibilityTexels + 2));
+    stageRays(windowProbe, rays, t.y * (VisibilityTexels + 2) + t.x, (VisibilityTexels + 2) * (VisibilityTexels + 2));
     GroupMemoryBarrierWithGroupSync();
     if (interior)
     {
         float4 previous = probeVisibilityAtlas.Load(int3(tileOrigin + t, 0));
-        float4 result = previous;
-        if (traced)
+        float maxDistance = probeVolume.spacing.w;
+        float2 oct = (float2(t - 1) + 0.5) / (float)VisibilityTexels * 2.0 - 1.0;
+        float3 texelDir = octDecode(oct);
+        float2 sum = float2(0.0, 0.0);
+        float weightSum = 0.0;
+        for (int ray = 0; ray < rays; ray++)
         {
-            float maxDistance = probeVolume.spacing.w;
-            float2 oct = (float2(t - 1) + 0.5) / (float)VisibilityTexels * 2.0 - 1.0;
-            float3 texelDir = octDecode(oct);
-            float2 sum = float2(0.0, 0.0);
-            float weightSum = 0.0;
-            for (int ray = 0; ray < rays; ray++)
-            {
-                float4 sample = s_rays[ray];
-                // A back face is a wall the probe is inside of: shortened, so the probe reads as
-                // occluded there without its variance exploding.
-                float distance = sample.w < 0.0 ? -sample.w * 0.2 : sample.w;
-                distance = min(distance, maxDistance);
-                // Sharpened so each texel sees only rays near its direction; the wider
-                // irradiance lobe would blur depth edges into leaks.
-                float weight = pow(max(0.0, dot(texelDir, s_rayDirs[ray])), 50.0);
-                sum += float2(distance, distance * distance) * weight;
-                weightSum += weight;
-            }
-            float2 moments = weightSum > 1e-6 ? sum / weightSum : float2(maxDistance, maxDistance * maxDistance);
-            float hysteresis = probeVolume.params.z;
-            result = float4(lerp(moments, previous.rg, hysteresis), 0.0, 1.0);
+            float4 sample = s_rays[ray];
+            // A back face is a wall the probe is inside of: shortened, so the probe reads as
+            // occluded there without its variance exploding.
+            float distance = sample.w < 0.0 ? -sample.w * 0.2 : sample.w;
+            distance = min(distance, maxDistance);
+            // Sharpened so each texel sees only rays near its direction; the wider
+            // irradiance lobe would blur depth edges into leaks.
+            float weight = pow(max(0.0, dot(texelDir, s_rayDirs[ray])), 50.0);
+            sum += float2(distance, distance * distance) * weight;
+            weightSum += weight;
         }
+        float2 moments = weightSum > 1e-6 ? sum / weightSum : float2(maxDistance, maxDistance * maxDistance);
+        float hysteresis = probeStates[probe].w < 0.0 ? 0.0 : probeVolume.params.z;
+        float4 result = float4(lerp(moments, previous.rg, hysteresis), 0.0, 1.0);
         s_visibility[t.y][t.x] = result;
     }
     GroupMemoryBarrierWithGroupSync();
