@@ -68,8 +68,9 @@ Identity follows scene light indices; reordering the scene can cause repacking.
 
 Every tile has a cleared one-texel border. Rasterization uses its inset viewport, and every raw
 blocker-search or comparison tap clamps to that viewport's texel centers. This prevents hardware
-bilinear comparisons from sampling neighboring lights. The existing fixed 384-view metadata
-budget and shadow draw-ring limit remain; exceeding the draw ring throws before recording.
+bilinear comparisons from sampling neighboring lights. The fixed 384-view metadata
+budget remains. The shadow draw ring grows geometrically before recording to fit admitted views
+multiplied by opaque casters, independently of the main draw ring, and retains its capacity.
 
 ## Filtering and contact shadows
 

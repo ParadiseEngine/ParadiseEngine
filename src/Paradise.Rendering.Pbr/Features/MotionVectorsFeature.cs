@@ -27,11 +27,9 @@ public sealed class MotionVectorsFeature : IRenderFeature
     private ShaderProgramDesc? _program;
     private PipelineHandle _rigidPipeline;
     private PipelineHandle _skinnedPipeline;
-    private BufferHandle _drawBuffer;
+    private DrawRing? _drawRing;
     private BufferHandle _previousJoints;
-    private BindGroupHandle _drawGroup;
     private BindGroupHandle _jointGroup;
-    private byte[] _staging = [];
     private Matrix4x4[] _jointSnapshot = [];
     private int _jointCount;
     private int _drawCount;
@@ -79,6 +77,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
         }
 
         EnsureResources();
+        _drawRing!.EnsureCapacity(_ctx.DrawCapacity);
         _ctx.Targets.Ensure(PbrTargets.MotionVectors, _ctx.FrameTarget(TextureFormat.Rgba16Float));
         _ctx.Targets.Ensure(PbrTargets.MotionDepth, _ctx.FrameTarget(TextureFormat.Depth32Float));
         // View is public, so its producer and store must survive even without an in-graph consumer.
@@ -101,14 +100,11 @@ public sealed class MotionVectorsFeature : IRenderFeature
         UniformLayoutValidator.ValidateBlock(_program, "motion", (uint)Unsafe.SizeOf<MotionDrawGpu>(),
             [("currentMvp", 0, 64), ("previousMvp", 64, 64), ("params", 128, 16)]);
         _rigidPipeline = CreatePipeline("vertexMain");
-        _staging = new byte[_ctx.DrawStride * PbrContext.MaxDrawsPerFrame];
-        _drawBuffer = renderer.CreateBuffer(new BufferDesc("PbrMotionDrawRing", (ulong)_staging.Length,
-            BufferUsage.Uniform | BufferUsage.CopyDst));
+        _drawRing = new DrawRing(renderer, "PbrMotionDrawRing", ShaderPrograms.FindGroup(_program, 0),
+            (uint)Unsafe.SizeOf<MotionDrawGpu>());
         _previousJoints = renderer.CreateBuffer(new BufferDesc("PbrMotionPreviousJoints", _ctx.JointBufferBytes,
             BufferUsage.Storage | BufferUsage.CopyDst));
         _jointSnapshot = new Matrix4x4[_ctx.JointCapacity];
-        _drawGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrMotionDrawGroup", ShaderPrograms.FindGroup(_program, 0),
-            new[] { BindGroupEntryDesc.ForBuffer(0, _drawBuffer, 0, (ulong)Unsafe.SizeOf<MotionDrawGpu>()) }));
         _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrMotionJoints", ShaderPrograms.FindGroup(_program, 1),
         new[] {
             BindGroupEntryDesc.ForBuffer(0, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
@@ -156,8 +152,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
                 Params = new Vector4(Math.Max(instance.JointOffset, 0), Math.Max(previous.JointOffset, 0), valid ? 1f : 0f, 0f),
             };
             var offset = self._drawCount++ * (int)ctx.DrawStride;
-            MemoryMarshal.Write(self._staging.AsSpan(offset), in draw);
-            encoder.SetBindGroup(0, self._drawGroup, dynamicOffset: (uint)offset);
+            MemoryMarshal.Write(self._drawRing!.Staging.AsSpan(offset), in draw);
+            encoder.SetBindGroup(0, self._drawRing!.Group, dynamicOffset: (uint)offset);
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
@@ -168,7 +164,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
     {
         if (!_recorded) return;
         if (_drawCount > 0)
-            _ctx.Renderer.UpdateBuffer<byte>(_drawBuffer, 0, _staging.AsSpan(0, _drawCount * (int)_ctx.DrawStride));
+            _ctx.Renderer.UpdateBuffer<byte>(_drawRing!.Buffer, 0, _drawRing!.Staging.AsSpan(0, _drawCount * (int)_ctx.DrawStride));
         // Upload the old CPU snapshot before overwriting it. Copying JointBuffer at frame start
         // would copy the newly staged pose and erase all deformation velocity.
         if (_jointCount > 0)
@@ -186,9 +182,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
         if (_program is null) return;
         if (_skinnedPipeline.IsValid) _ctx.Renderer.DestroyPipeline(_skinnedPipeline);
         _ctx.Renderer.DestroyPipeline(_rigidPipeline);
-        _ctx.Renderer.DestroyBindGroup(_drawGroup);
+        _drawRing?.Dispose();
         _ctx.Renderer.DestroyBindGroup(_jointGroup);
-        _ctx.Renderer.DestroyBuffer(_drawBuffer);
         _ctx.Renderer.DestroyBuffer(_previousJoints);
     }
 }

@@ -35,8 +35,8 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     private readonly BindGroupLayoutDesc _reduceGroup;
     private readonly BindGroupLayoutDesc _cullGroup;
     private readonly BufferHandle _uniforms;
-    private readonly BufferHandle _boundsBuffer;
-    private readonly DrawBoundsGpu[] _bounds = new DrawBoundsGpu[PbrContext.MaxDrawsPerFrame];
+    private BufferHandle _boundsBuffer;
+    private DrawBoundsGpu[] _bounds = [];
     private BufferHandle _depthTiles;
     private int _tilesX;
     private int _tilesY;
@@ -55,9 +55,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
         _cullPipeline = ctx.Renderer.CreateComputePipeline(cull);
         _cullGroup = ShaderPrograms.FindGroup(cull, 0);
         _uniforms = ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionUniforms", 32, BufferUsage.Uniform | BufferUsage.CopyDst));
-        _boundsBuffer = ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionBounds", BoundsBytes, BufferUsage.Storage | BufferUsage.CopyDst));
-        IndirectBuffer = ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionArguments", IndirectBufferBytes,
-            BufferUsage.Storage | BufferUsage.Indirect | BufferUsage.CopySrc));
+        EnsureDrawCapacity(DrawBufferCapacity.Initial);
         EnsureTargets();
     }
 
@@ -68,10 +66,10 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     public bool Active { get; private set; }
 
     /// <summary>One indexed-indirect record per opaque draw: index count, instance count, first index, signed base vertex and first instance.</summary>
-    public BufferHandle IndirectBuffer { get; }
-    public ulong IndirectBufferBytes => PbrContext.MaxDrawsPerFrame * IndirectStride;
+    public BufferHandle IndirectBuffer { get; private set; }
+    public ulong IndirectBufferBytes => (ulong)_bounds.Length * IndirectStride;
     public int DrawCount { get; private set; }
-    private static ulong BoundsBytes => (ulong)(PbrContext.MaxDrawsPerFrame * Unsafe.SizeOf<DrawBoundsGpu>());
+    private ulong BoundsBytes => (ulong)_bounds.Length * (ulong)Unsafe.SizeOf<DrawBoundsGpu>();
     internal ReadOnlySpan<DrawBoundsGpu> Bounds => _bounds.AsSpan(0, DrawCount);
     internal BufferHandle DepthTiles => _depthTiles;
     internal int TilesX => _tilesX;
@@ -84,6 +82,30 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     }
 
     public void Resize(uint width, uint height) => EnsureTargets();
+
+    private void EnsureDrawCapacity(int required)
+    {
+        if (_bounds.Length >= required) return;
+        var bounds = new DrawBoundsGpu[DrawBufferCapacity.Grow(_bounds.Length, required)];
+        var buffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionBounds",
+            (ulong)bounds.Length * (ulong)Unsafe.SizeOf<DrawBoundsGpu>(), BufferUsage.Storage | BufferUsage.CopyDst));
+        BufferHandle arguments;
+        try
+        {
+            arguments = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionArguments",
+                (ulong)bounds.Length * IndirectStride, BufferUsage.Storage | BufferUsage.Indirect | BufferUsage.CopySrc));
+        }
+        catch
+        {
+            _ctx.Renderer.DestroyBuffer(buffer);
+            throw;
+        }
+        if (_boundsBuffer.IsValid) _ctx.Renderer.DestroyBuffer(_boundsBuffer);
+        if (IndirectBuffer.IsValid) _ctx.Renderer.DestroyBuffer(IndirectBuffer);
+        _bounds = bounds;
+        _boundsBuffer = buffer;
+        IndirectBuffer = arguments;
+    }
 
     private void EnsureTargets()
     {
@@ -103,6 +125,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
         Active = _ctx.Scene.Visibility.OcclusionEnabled && _ctx.Opaque.Count > 0;
         DrawCount = Active ? _ctx.Opaque.Count : 0;
         if (!Active) return;
+        EnsureDrawCapacity(DrawCount);
         for (var i = 0; i < DrawCount; i++)
         {
             var (instance, primitive, _) = _ctx.Opaque[i];

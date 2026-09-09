@@ -11,7 +11,7 @@ namespace Paradise.Rendering.Pbr;
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private readonly DrawUniformsGpu[] _staging = new DrawUniformsGpu[PbrContext.MaxDrawsPerFrame];
+    private DrawUniformsGpu[] _staging = [];
     private readonly Dictionary<(bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
     private BufferHandle _buffer;
     private BindGroupHandle _group;
@@ -102,17 +102,36 @@ public sealed class InstancingFeature : IRenderFeature
 
     private void EnsureResources()
     {
-        if (_buffer.IsValid) return;
-        _program = ShaderPrograms.Load("Shaders.pbrInstanced");
-        UniformLayoutValidator.Validate(_program);
-        _buffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrInstances",
-            (ulong)(_staging.Length * Unsafe.SizeOf<DrawUniformsGpu>()), BufferUsage.Storage | BufferUsage.CopyDst));
-        _group = _ctx.Renderer.CreateBindGroup(new BindGroupDesc("PbrInstances", ShaderPrograms.FindGroup(_program, 0),
-        new[]
+        if (_buffer.IsValid && _staging.Length >= _ctx.DrawCapacity) return;
+        if (_program is null)
         {
-            BindGroupEntryDesc.ForBuffer(0, _ctx.DrawUniformRing, 0, (ulong)Unsafe.SizeOf<DrawUniformsGpu>()),
-            BindGroupEntryDesc.ForBuffer(1, _buffer, 0, (ulong)(_staging.Length * Unsafe.SizeOf<DrawUniformsGpu>())),
-        }));
+            _program = ShaderPrograms.Load("Shaders.pbrInstanced");
+            UniformLayoutValidator.Validate(_program);
+        }
+        var staging = new DrawUniformsGpu[_ctx.DrawCapacity];
+        var bytes = (ulong)staging.Length * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();
+        var buffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrInstances", bytes,
+            BufferUsage.Storage | BufferUsage.CopyDst));
+        BindGroupHandle group;
+        try
+        {
+            group = _ctx.Renderer.CreateBindGroup(new BindGroupDesc("PbrInstances", ShaderPrograms.FindGroup(_program, 0),
+            new[]
+            {
+                BindGroupEntryDesc.ForBuffer(0, _ctx.DrawUniformRing, 0, (ulong)Unsafe.SizeOf<DrawUniformsGpu>()),
+                BindGroupEntryDesc.ForBuffer(1, buffer, 0, bytes),
+            }));
+        }
+        catch
+        {
+            _ctx.Renderer.DestroyBuffer(buffer);
+            throw;
+        }
+        if (_group.IsValid) _ctx.Renderer.DestroyBindGroup(_group);
+        if (_buffer.IsValid) _ctx.Renderer.DestroyBuffer(_buffer);
+        _staging = staging;
+        _buffer = buffer;
+        _group = group;
     }
 
     public void BeforeSubmit()

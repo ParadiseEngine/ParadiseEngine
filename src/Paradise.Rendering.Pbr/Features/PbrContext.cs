@@ -10,7 +10,7 @@ namespace Paradise.Rendering.Pbr;
 /// keeping the context free of feature-to-feature access.</remarks>
 internal sealed class PbrContext : IDisposable
 {
-    public const int MaxDrawsPerFrame = 4096;
+    private readonly DrawRing _drawRing;
 
     public PbrContext(IRenderer renderer, ILogger log, MaterialPrograms programs, uint width, uint height)
     {
@@ -23,14 +23,8 @@ internal sealed class PbrContext : IDisposable
         BindGroups = new BindGroupCache(renderer);
 
         DrawStride = renderer.UniformBufferOffsetAlignment;
-        DrawStaging = new byte[DrawStride * MaxDrawsPerFrame];
-        var ringDesc = new BufferDesc("PbrDrawRing", (ulong)DrawStride * MaxDrawsPerFrame, BufferUsage.Uniform | BufferUsage.CopyDst);
-        DrawUniformRing = renderer.CreateBuffer(in ringDesc);
-        var drawGroupDesc = new BindGroupDesc("PbrDrawGroup", programs.Group(0), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, DrawUniformRing, 0, (ulong)Unsafe.SizeOf<DrawUniformsGpu>()),
-        });
-        DrawGroup = renderer.CreateBindGroup(in drawGroupDesc);
+        _drawRing = new DrawRing(renderer, "PbrDrawRing", programs.Group(0), (uint)Unsafe.SizeOf<DrawUniformsGpu>());
+        _drawRing.EnsureCapacity(DrawBufferCapacity.Initial);
 
         // Joint palettes are resolution independent, so this is allocated once and never resized.
         JointCapacity = PbrRenderer.MaxSkinnedJoints;
@@ -63,9 +57,12 @@ internal sealed class PbrContext : IDisposable
     /// <summary>The per-draw uniform ring shared by the main pass and the SSAO pre-pass, which
     /// re-reads the slot the main pass filled for the same instance.</summary>
     public uint DrawStride { get; }
-    public BufferHandle DrawUniformRing { get; }
-    public BindGroupHandle DrawGroup { get; }
-    public byte[] DrawStaging { get; }
+    public BufferHandle DrawUniformRing => _drawRing.Buffer;
+    public BindGroupHandle DrawGroup => _drawRing.Group;
+    public byte[] DrawStaging => _drawRing.Staging;
+    public int DrawCapacity => _drawRing.Capacity;
+
+    public void EnsureDrawCapacity(int required) => _drawRing.EnsureCapacity(required);
 
     /// <summary>Next free draw-ring slot this frame. The blend bucket continues where the opaque
     /// bucket stopped: the ring does not care which pass consumes a slot, only that no two draws
@@ -133,8 +130,7 @@ internal sealed class PbrContext : IDisposable
 
     public void Dispose()
     {
-        Renderer.DestroyBindGroup(DrawGroup);
-        Renderer.DestroyBuffer(DrawUniformRing);
+        _drawRing.Dispose();
         Renderer.DestroyBuffer(JointBuffer);
         Renderer.DestroySampler(LinearClampSampler);
         Renderer.DestroyBuffer(FrameUniformBuffer);

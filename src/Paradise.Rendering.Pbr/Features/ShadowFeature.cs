@@ -19,10 +19,8 @@ public sealed class ShadowFeature : IRenderFeature
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
-    private readonly BufferHandle _drawRing;
-    private readonly BindGroupHandle _drawGroup;
+    private readonly DrawRing _drawUniforms;
     private readonly BindGroupHandle _jointGroup;
-    private readonly byte[] _staging;
     private uint _mapSize = DefaultMapSize;
     private float _blurTexels = 3f;
     private uint _allocatedAtlasSize;
@@ -63,13 +61,8 @@ public sealed class ShadowFeature : IRenderFeature
         _pipeline = renderer.CreateDepthOnlyPipeline(_program, TextureFormat.Depth32Float,
             ShaderPrograms.PositionOnlyLayout(ctx.Programs.MeshStride));
 
-        var ringDesc = new BufferDesc("PbrShadowDrawRing", (ulong)ctx.DrawStride * PbrContext.MaxDrawsPerFrame, BufferUsage.Uniform | BufferUsage.CopyDst);
-        _drawRing = renderer.CreateBuffer(in ringDesc);
-        _staging = new byte[ctx.DrawStride * PbrContext.MaxDrawsPerFrame];
-        _drawGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrShadowDrawGroup", ShaderPrograms.FindGroup(_program, 0), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, _drawRing, 0, (ulong)Unsafe.SizeOf<ShadowDrawUniformsGpu>()),
-        }));
+        _drawUniforms = new DrawRing(renderer, "PbrShadowDrawRing", ShaderPrograms.FindGroup(_program, 0),
+            (uint)Unsafe.SizeOf<ShadowDrawUniformsGpu>());
         _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrShadowJointGroup", ShaderPrograms.FindGroup(_program, 1), new[]
         {
             BindGroupEntryDesc.ForBuffer(0, ctx.JointBuffer, 0, ctx.JointBufferBytes),
@@ -158,12 +151,7 @@ public sealed class ShadowFeature : IRenderFeature
         Plan(_ctx.Scene, _ctx.View);
         EnsureAtlas();
 
-        // Ring budget: views × casters. Hard-fail up front — like the main-pass check — so a
-        // partial fill (silently missing shadows) cannot ship.
-        var total = _views.Count * _ctx.Opaque.Count;
-        if (total > PbrContext.MaxDrawsPerFrame)
-            throw new InvalidOperationException(
-                $"{total} shadow-caster draws ({_views.Count} views × {_ctx.Opaque.Count} casters) exceed the {PbrContext.MaxDrawsPerFrame}-slot shadow ring.");
+        _drawUniforms.EnsureCapacity(checked(_views.Count * _ctx.Opaque.Count));
 
         _stagedDraws = 0;
         var array = frame.Graph.Texture(PbrTargets.ShadowArray);
@@ -179,7 +167,7 @@ public sealed class ShadowFeature : IRenderFeature
     public void BeforeSubmit()
     {
         if (_stagedDraws > 0)
-            _ctx.Renderer.UpdateBuffer<byte>(_drawRing, 0, _staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));
+            _ctx.Renderer.UpdateBuffer<byte>(_drawUniforms.Buffer, 0, _drawUniforms.Staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));
     }
 
     // Matrix indices remain compact regardless of where the allocator places the tiles.
@@ -289,8 +277,8 @@ public sealed class ShadowFeature : IRenderFeature
                 Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
             };
             var slot = self._stagedDraws;
-            MemoryMarshal.Write(self._staging.AsSpan(slot * (int)self._ctx.DrawStride), in uniforms);
-            encoder.SetBindGroup(0, self._drawGroup, dynamicOffset: (uint)(slot * self._ctx.DrawStride));
+            MemoryMarshal.Write(self._drawUniforms.Staging.AsSpan(slot * (int)self._ctx.DrawStride), in uniforms);
+            encoder.SetBindGroup(0, self._drawUniforms.Group, dynamicOffset: (uint)(slot * self._ctx.DrawStride));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
@@ -378,9 +366,8 @@ public sealed class ShadowFeature : IRenderFeature
         var renderer = _ctx.Renderer;
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
-        renderer.DestroyBindGroup(_drawGroup);
+        _drawUniforms.Dispose();
         renderer.DestroyBindGroup(_jointGroup);
-        renderer.DestroyBuffer(_drawRing);
         renderer.DestroySampler(Sampler);
     }
 }

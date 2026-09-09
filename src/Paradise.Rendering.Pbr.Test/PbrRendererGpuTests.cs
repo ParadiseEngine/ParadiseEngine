@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -107,6 +109,80 @@ public class PbrRendererGpuTests
         {
             renderer.Dispose();
         }
+    }
+
+    [Test]
+    public async Task draw_ring_grows_geometrically_and_retains_capacity()
+    {
+        using var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        var program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.shadow"));
+        using var ring = new DrawRing(renderer, "TestDrawRing", ShaderPrograms.FindGroup(program, 0),
+            (uint)Unsafe.SizeOf<ShadowDrawUniformsGpu>());
+        ring.EnsureCapacity(2);
+        var initial = ring.Capacity;
+        var buffer = ring.Buffer;
+        var group = ring.Group;
+        ring.EnsureCapacity(initial + 1);
+        await Assert.That(ring.Capacity).IsEqualTo(initial * 2);
+        await Assert.That(ring.Buffer == buffer).IsFalse();
+        await Assert.That(ring.Group == group).IsFalse();
+        buffer = ring.Buffer;
+        group = ring.Group;
+        var staging = ring.Staging;
+        ring.EnsureCapacity(1);
+        await Assert.That(ring.Capacity).IsEqualTo(initial * 2);
+        await Assert.That(ring.Buffer == buffer).IsTrue();
+        await Assert.That(ring.Group == group).IsTrue();
+        await Assert.That(ReferenceEquals(ring.Staging, staging)).IsTrue();
+    }
+
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    public async Task draw_storage_grows_between_frames(bool instancing, bool occlusion)
+    {
+        using var renderer = TryCreateHeadlessOrSkip();
+        if (renderer is null) return;
+        using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
+        var scene = BuildCubeScene(pbr);
+        scene.Lights[0] = scene.Lights[0] with { CastsShadows = true };
+        scene.Ssao = new PbrSsao { Enabled = true };
+        var shadows = pbr.Pipeline.Find<ShadowFeature>()!;
+        shadows.MapSize = 256;
+        shadows.AtlasSize = 512;
+        var mesh = scene.Instances[0].Mesh;
+        var (vertices, indices) = Procedural.UnitCube();
+        var material = pbr.Materials.AddMaterial(new GltfMaterialData(
+            "glass", new Vector4(0.6f, 0.8f, 0.4f, 0.4f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
+            0f, GltfAlphaMode.Blend, 0.5f, true, -1, -1, -1, -1, -1, GltfUvTransform.Identity), []);
+        var blendMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, material)]);
+        // Growth crosses both former fixed limits. Features skip one growth frame, then
+        // must replace their old bindings when enabled again. No readback stalls between frames.
+        foreach (var count in new[] { 2, 300, 4234, 17000, 2 })
+        {
+            scene.Instances.Clear();
+            for (var i = 0; i < count; i++) scene.Instances.Add(new PbrInstance { Mesh = mesh });
+            for (var i = 0; i < count / 2; i++)
+                scene.Instances.Add(new PbrInstance { Mesh = blendMesh, Model = Matrix4x4.CreateTranslation(0, 0, -1) });
+            scene.Instancing = new PbrInstancing { Enabled = instancing && count != 300 };
+            scene.Visibility = new PbrVisibility { FrustumEnabled = true, OcclusionEnabled = occlusion && count != 300 };
+            scene.MotionVectors = new PbrMotionVectors { Enabled = count != 300 };
+            pbr.RenderFrame(scene);
+        }
+        await Assert.That(shadows.Views.Count).IsEqualTo(4);
+        await Assert.That(pbr.Pipeline.Find<MotionVectorsFeature>()!.HistoryReady).IsTrue();
+        if (occlusion)
+        {
+            var visibility = pbr.Pipeline.Find<OcclusionCullingFeature>()!;
+            await Assert.That(visibility.DrawCount).IsEqualTo(2);
+            await Assert.That(visibility.IndirectBufferBytes).IsGreaterThanOrEqualTo(17000ul * OcclusionCullingFeature.IndirectStride);
+        }
+        var pixels = renderer.ReadbackColor(out var width, out var height);
+        await Assert.That(width).IsEqualTo(64u);
+        await Assert.That(height).IsEqualTo(64u);
+        await Assert.That(pixels.Where((_, i) => i % 4 != 3).Count(v => v > 20)).IsGreaterThan(100);
     }
 
     private static PbrScene BuildCubeScene(PbrRenderer pbr, float transmission = 0f)
