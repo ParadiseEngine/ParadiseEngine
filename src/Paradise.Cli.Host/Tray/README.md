@@ -20,8 +20,10 @@ automatic work, not active or explicitly requested work. The final compiled sour
 the backend's responsibility; an extension must declare all authoring roots it wants watched.
 
 Callbacks run serially on the task worker, never in native menu callbacks. Source additions,
-removals, both sides of renames and directory changes are observed. Outputs and `.editor`,
-`.git`, `bin`, `obj` do not trigger their own compilation. A fatal watcher error disables
+removals, both sides of renames and directory changes are observed. Outputs may be files or
+directories: their exact paths and descendants are excluded, even before creation or after
+deletion. Separator-aware matching keeps similarly named source siblings observable. Outputs
+and `.editor`, `.git`, `bin`, `obj` do not trigger their own compilation. A fatal watcher error disables
 Auto-watch but keeps manual tasks usable. Native menus refresh status when opened.
 
 `ITrayExtensionContext.RunProcessAsync` uses the existing argument-array process runner and

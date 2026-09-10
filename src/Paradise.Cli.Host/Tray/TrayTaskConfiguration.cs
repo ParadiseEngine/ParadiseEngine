@@ -92,7 +92,10 @@ internal static class TrayTaskInputs
         var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (relative.Split('/').Any(part => part is ".git" or ".editor" or "bin" or "obj")) return false;
-        if (group.Outputs.Any(output => string.Equals(output, relative, comparison))) return false;
+        // Outputs may be directories that do not exist yet or have just been deleted.
+        // Match path boundaries, not the filesystem or a raw prefix that also hides siblings.
+        if (group.Outputs.Any(output => string.Equals(output, relative, comparison)
+            || relative.StartsWith(output + "/", comparison))) return false;
         return group.Inputs.Any(input => Observes(input, relative, structural, comparison));
     }
 

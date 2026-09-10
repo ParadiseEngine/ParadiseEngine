@@ -16,6 +16,12 @@ assemblies = [".editor/extensions/dialogue/MyDialogueExtension.dll"]
 All menu labels, task callbacks, watched inputs, output exclusions and initial watch state
 are C#. The manifest only locates the DLL. No `authoring/tray-tasks.json` is read.
 
+`Outputs` may name files or directories. A declared output excludes its exact path and all
+separator-delimited descendants, including create/delete/rename events when it does not exist.
+For example, `authoring/dialogue/generated` excludes `generated/nested/result.story`, but not
+`authoring/dialogue/generated-other/result.story`. Input and output matching use the same
+platform case rules; no filesystem existence check is needed.
+
 ```csharp
 using Paradise.Cli;
 

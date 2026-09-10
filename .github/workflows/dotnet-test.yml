@@ -24,6 +24,10 @@ jobs:
         run: dotnet build src/Paradise.Hosting.CoyoteTest -c Release
       - name: Explore host and snapshot interleavings
         run: dotnet run --project src/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
+      - name: Build and rewrite CLI tray concurrency tests
+        run: dotnet build src/Paradise.Cli.CoyoteTest -c Release
+      - name: Explore CLI tray task interleavings
+        run: dotnet run --project src/Paradise.Cli.CoyoteTest -c Release --no-build -- 200
 
   test:
     runs-on: ubuntu-latest

@@ -52,6 +52,38 @@ public class TrayTaskTests
     }
 
     [Test]
+    [Arguments("authoring/story/generated", false)]
+    [Arguments("authoring/story/generated", true)]
+    [Arguments("authoring/story/generated/output.story", false)]
+    [Arguments("authoring/story/generated/output.story", true)]
+    [Arguments("authoring/story/generated/nested/output.project", false)]
+    [Arguments("authoring/story/generated/nested", true)]
+    public async Task output_directories_exclude_descendants_without_requiring_them_to_exist(string path, bool structural)
+    {
+        var group = new TrayTaskConfiguration([Group() with { Outputs = ["authoring/story/generated"] }]).Groups[0];
+        await Assert.That(group.Observes(path, structural)).IsFalse();
+    }
+
+    [Test]
+    [Arguments("authoring/story/generated-other/output.story", false)]
+    [Arguments("authoring/story/generated-other", true)]
+    [Arguments("authoring/story/generated.story", false)]
+    [Arguments("authoring/story", true)]
+    public async Task output_exclusions_preserve_siblings_and_source_ancestor_events(string path, bool structural)
+    {
+        var group = Group() with { Outputs = ["authoring/story/generated"] };
+        await Assert.That(group.Observes(path, structural)).IsTrue();
+    }
+
+    [Test]
+    public async Task output_subtrees_use_the_same_platform_case_rules_as_inputs()
+    {
+        var group = Group() with { Outputs = ["authoring/story/Generated"] };
+        var ignoresCase = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
+        await Assert.That(group.Observes("authoring/story/generated/output.story")).IsEqualTo(!ignoresCase);
+    }
+
+    [Test]
     public async Task directory_renames_and_deletes_cover_old_and_new_source_roots()
     {
         var group = Group();

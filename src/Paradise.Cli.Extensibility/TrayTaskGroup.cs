@@ -11,6 +11,8 @@ public sealed record TrayTaskGroup
     public required string AutoTask { get; init; }
     public int DebounceMilliseconds { get; init; } = 300;
     public IReadOnlyList<TrayTaskInput> Inputs { get; init; } = [];
+    /// <summary>Output files or directories excluded from automatic task triggers, including all descendants.</summary>
+    /// <remarks>Exclusions use path boundaries and apply even when the output does not exist.</remarks>
     public IReadOnlyList<string> Outputs { get; init; } = [];
     public required IReadOnlyList<TrayTaskDefinition> Tasks { get; init; }
     public string? OpenDirectory { get; init; }
